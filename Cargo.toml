@@ -27,16 +27,16 @@ version = "0.1.0"
 ceno_crypto_primitives = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_crypto_primitives", branch = "main" }
 ceno_syscall = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_syscall", branch = "main" }
 
-ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
-mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
-p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
-poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
-sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
-sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
-transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
-whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
-witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", rev = "e9cfa5b9f0ce83bd843807d45056a3c7480d203c" }
+ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
+mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
+p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
+poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
+sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
+sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
+transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
+whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
+witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", rev = "8ce1577d61af241606d30aefe9ac896e7502809a" }
 
 anyhow = { version = "1.0", default-features = false }
 bincode = "1"
