@@ -30,7 +30,7 @@ fn test_opcode_and() {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::AND, 2, 3, 4, 0);
-    let (raw_witin, lkm) = AndInstruction::assign_instances(
+    let (raw_witin, lkm) = AndInstruction::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
@@ -73,7 +73,7 @@ fn test_opcode_or() {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::OR, 2, 3, 4, 0);
-    let (raw_witin, lkm) = OrInstruction::assign_instances(
+    let (raw_witin, lkm) = OrInstruction::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
@@ -116,7 +116,7 @@ fn test_opcode_xor() {
         .unwrap();
 
     let insn_code = encode_rv32(InsnKind::XOR, 2, 3, 4, 0);
-    let (raw_witin, lkm) = XorInstruction::assign_instances(
+    let (raw_witin, lkm) = XorInstruction::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,

@@ -2,7 +2,7 @@ use crate::{
     circuit_builder::CircuitBuilder, e2e::ShardContext, error::ZKVMError, structs::ProgramParams,
     tables::RMMCollections, witness::LkMultiplicity,
 };
-use ceno_emul::StepRecord;
+use ceno_emul::{StepIndex, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
     chip::Chip,
@@ -101,7 +101,8 @@ pub trait Instruction<E: ExtensionField> {
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: &[StepRecord],
+        shard_steps: &[StepRecord],
+        step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         // TODO: selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
@@ -110,17 +111,21 @@ pub trait Instruction<E: ExtensionField> {
         let num_structural_witin = num_structural_witin.max(1);
 
         let nthreads = max_usable_threads();
-        let num_instance_per_batch = if steps.len() > 256 {
-            steps.len().div_ceil(nthreads)
+        let total_instances = step_indices.len();
+        let num_instance_per_batch = if total_instances > 256 {
+            total_instances.div_ceil(nthreads)
         } else {
-            steps.len()
+            total_instances
         }
         .max(1);
         let lk_multiplicity = LkMultiplicity::default();
-        let mut raw_witin =
-            RowMajorMatrix::<E::BaseField>::new(steps.len(), num_witin, Self::padding_strategy());
+        let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+            total_instances,
+            num_witin,
+            Self::padding_strategy(),
+        );
         let mut raw_structual_witin = RowMajorMatrix::<E::BaseField>::new(
-            steps.len(),
+            total_instances,
             num_structural_witin,
             Self::padding_strategy(),
         );
@@ -131,23 +136,23 @@ pub trait Instruction<E: ExtensionField> {
 
         raw_witin_iter
             .zip_eq(raw_structual_witin_iter)
-            .zip_eq(steps.par_chunks(num_instance_per_batch))
+            .zip_eq(step_indices.par_chunks(num_instance_per_batch))
             .zip(shard_ctx_vec)
             .flat_map(
-                |(((instances, structural_instance), steps), mut shard_ctx)| {
+                |(((instances, structural_instance), indices), mut shard_ctx)| {
                     let mut lk_multiplicity = lk_multiplicity.clone();
                     instances
                         .chunks_mut(num_witin)
                         .zip_eq(structural_instance.chunks_mut(num_structural_witin))
-                        .zip_eq(steps)
-                        .map(|((instance, structural_instance), step)| {
+                        .zip_eq(indices.iter().copied())
+                        .map(|((instance, structural_instance), step_idx)| {
                             *structural_instance.last_mut().unwrap() = E::BaseField::ONE;
                             Self::assign_instance(
                                 config,
                                 &mut shard_ctx,
                                 instance,
                                 &mut lk_multiplicity,
-                                step,
+                                &shard_steps[step_idx],
                             )
                         })
                         .collect::<Vec<_>>()
@@ -162,4 +167,26 @@ pub trait Instruction<E: ExtensionField> {
             lk_multiplicity.into_finalize_result(),
         ))
     }
+
+    fn assign_instances_from_steps(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        steps: &[StepRecord],
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        let indices = full_step_indices(steps);
+        Self::assign_instances(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            steps,
+            &indices,
+        )
+    }
+}
+
+pub fn full_step_indices(steps: &[StepRecord]) -> Vec<StepIndex> {
+    (0..steps.len()).collect()
 }
