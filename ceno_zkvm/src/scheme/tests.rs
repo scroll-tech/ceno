@@ -18,7 +18,7 @@ use crate::{
 use ceno_emul::{
     CENO_PLATFORM, InsnKind,
     InsnKind::{ADD, ECALL},
-    Platform, Program, StepRecord, VMState, encode_rv32,
+    Platform, Program, StepIndex, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use gkr_iop::cpu::default_backend_config;
@@ -147,12 +147,14 @@ fn test_rw_lk_expression_combination() {
         let num_instances = 1 << 8;
         let mut zkvm_witness = ZKVMWitnesses::default();
         let steps = vec![StepRecord::default(); num_instances];
+        let step_indices: Vec<StepIndex> = (0..steps.len()).collect();
         zkvm_witness
             .assign_opcode_circuit::<TestCircuit<E, RW, L>>(
                 &zkvm_cs,
                 &mut shard_ctx,
                 &config,
                 &steps,
+                &step_indices,
             )
             .unwrap();
 
@@ -327,12 +329,10 @@ fn test_single_add_instance_e2e() {
 
     // single instance
     let mut vm = VMState::new(CENO_PLATFORM.clone(), program.clone().into());
-    let all_records = vm
-        .iter_until_halt()
-        .collect::<Result<Vec<StepRecord>, _>>()
-        .expect("vm exec failed")
-        .into_iter()
-        .collect::<Vec<_>>();
+    vm.iter_until_halt()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("vm exec failed");
+    let all_records = vm.tracer().recorded_steps().to_vec();
     let mut add_records = vec![];
     let mut halt_records = vec![];
     all_records.into_iter().for_each(|record| {
@@ -358,12 +358,15 @@ fn test_single_add_instance_e2e() {
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
+    let add_indices: Vec<StepIndex> = (0..add_records.len()).collect();
+    let halt_indices: Vec<StepIndex> = (0..halt_records.len()).collect();
     zkvm_witness
         .assign_opcode_circuit::<AddInstruction<E>>(
             &zkvm_cs,
             &mut shard_ctx,
             &add_config,
             &add_records,
+            &add_indices,
         )
         .unwrap();
     zkvm_witness
@@ -372,6 +375,7 @@ fn test_single_add_instance_e2e() {
             &mut shard_ctx,
             &halt_config,
             &halt_records,
+            &halt_indices,
         )
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();

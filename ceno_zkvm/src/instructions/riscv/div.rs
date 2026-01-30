@@ -180,7 +180,7 @@ mod test {
             .expect("instruction must declare at least one InsnKind");
         let insn_code = encode_rv32(insn_kind, 2, 3, 4, 0);
         // values assignment
-        let ([raw_witin, _], lkm) = Insn::assign_instances(
+        let ([raw_witin, _], lkm) = Insn::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,

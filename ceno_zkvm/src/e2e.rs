@@ -23,9 +23,10 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, NextCycleAccess,
-    Platform, PreflightTracer, PreflightTracerConfig, Program, StepCellExtractor, StepRecord,
-    Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, IterAddresses,
+    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, StepCellExtractor,
+    StepIndex, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
+    host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -119,6 +120,7 @@ pub struct EmulationResult<'a> {
     pub shard_ctx_builder: ShardContextBuilder,
     pub shard_cycle_boundaries: Arc<Vec<Cycle>>,
     pub executed_steps: usize,
+    pub max_step_shard: usize,
     pub phantom: PhantomData<&'a ()>,
     // pub shard_ctxs: Vec<ShardContext<'a>>,
 }
@@ -655,23 +657,28 @@ impl ShardContextBuilder {
         self.shard_cycle_boundaries.len().saturating_sub(1)
     }
 
-    pub fn position_next_shard<'a>(
+    pub fn position_next_shard<'a, S>(
         &mut self,
-        steps_iter: &mut impl Iterator<Item = StepRecord>,
-        mut on_step: impl FnMut(StepRecord),
-    ) -> Option<(ShardContext<'a>, ShardStepSummary)> {
+        steps_iter: &mut S,
+        mut on_step: impl FnMut(StepIndex, &StepRecord),
+    ) -> Option<(ShardContext<'a>, ShardStepSummary)>
+    where
+        S: StepSource,
+    {
         if self.cur_shard_id >= self.total_shards() {
             return None;
         }
+        steps_iter.start_new_shard();
         let expected_end_cycle = self
             .shard_cycle_boundaries
             .get(self.cur_shard_id + 1)
             .copied()
             .expect("missing shard boundary for shard");
         let mut summary = ShardStepSummary::default();
-        for step in steps_iter.by_ref() {
-            summary.update(&step);
-            on_step(step);
+        while let Some(step_idx) = steps_iter.next() {
+            let record = steps_iter.step_record(step_idx);
+            summary.update(record);
+            on_step(step_idx, record);
             if summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN == expected_end_cycle {
                 break;
             }
@@ -739,11 +746,17 @@ impl ShardContextBuilder {
     }
 }
 
+pub trait StepSource: Iterator<Item = StepIndex> {
+    fn start_new_shard(&mut self);
+    fn shard_steps(&self) -> &[StepRecord];
+    fn step_record(&self, idx: StepIndex) -> &StepRecord;
+}
+
 /// Lazily replays `StepRecord`s by re-running the VM up to the number of steps
 /// recorded during the preflight execution. This keeps shard generation memory
 /// usage bounded without storing the entire trace.
 struct StepReplay {
-    vm: VMState,
+    vm: VMState<FullTracer>,
     remaining_steps: usize,
 }
 
@@ -753,8 +766,10 @@ impl StepReplay {
         program: Arc<Program>,
         init_mem_state: &InitMemState,
         remaining_steps: usize,
+        max_step_shard: usize,
     ) -> Self {
-        let mut vm = VMState::new(platform, program);
+        let mut vm =
+            VMState::new_with_tracer_config(platform, program, FullTracerConfig { max_step_shard });
         for record in chain!(init_mem_state.hints.iter(), init_mem_state.io.iter()) {
             vm.init_memory(record.addr.into(), record.value);
         }
@@ -763,10 +778,18 @@ impl StepReplay {
             remaining_steps,
         }
     }
+
+    fn reset_current_shard(&mut self) {
+        self.vm.tracer_mut().reset_step_buffer();
+    }
+
+    fn current_shard_steps(&self) -> &[StepRecord] {
+        self.vm.tracer().recorded_steps()
+    }
 }
 
 impl Iterator for StepReplay {
-    type Item = StepRecord;
+    type Item = StepIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining_steps == 0 {
@@ -783,6 +806,21 @@ impl Iterator for StepReplay {
             }
             Err(err) => panic!("vm exec failed during witness replay: {err:?}"),
         }
+    }
+}
+
+impl StepSource for StepReplay {
+    fn start_new_shard(&mut self) {
+        self.reset_current_shard();
+    }
+
+    fn shard_steps(&self) -> &[StepRecord] {
+        self.current_shard_steps()
+    }
+
+    #[inline(always)]
+    fn step_record(&self, idx: StepIndex) -> &StepRecord {
+        self.vm.tracer().step_record(idx)
     }
 }
 
@@ -810,7 +848,7 @@ pub fn emulate_program<'a>(
     )
     .with_step_cell_extractor(step_cell_extractor);
     let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
-        .in_scope(|| {
+        .in_scope(move || {
             VMState::new_with_tracer_config(platform.clone(), program.clone(), tracer_config)
         });
 
@@ -1002,6 +1040,7 @@ pub fn emulate_program<'a>(
 
     let tracer = vm.take_tracer();
     let (plan_builder, next_accesses) = tracer.into_shard_plan();
+    let max_step_shard = plan_builder.max_step_shard();
     let shard_cycle_boundaries = Arc::new(plan_builder.into_cycle_boundaries());
     let shard_ctx_builder = ShardContextBuilder::from_plan(
         multi_prover,
@@ -1023,6 +1062,7 @@ pub fn emulate_program<'a>(
         shard_ctx_builder,
         shard_cycle_boundaries: shard_cycle_boundaries.clone(),
         executed_steps: insts,
+        max_step_shard,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,
@@ -1222,6 +1262,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
         program.clone(),
         init_mem_state,
         emul_result.executed_steps,
+        emul_result.max_step_shard,
     );
     std::iter::from_fn(move || {
         info_span!(
@@ -1229,14 +1270,18 @@ pub fn generate_witness<'a, E: ExtensionField>(
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
+            let time = std::time::Instant::now();
             instrunction_dispatch_ctx.begin_shard();
-            let (mut shard_ctx, shard_summary) = match shard_ctx_builder.position_next_shard(
-                &mut step_iter,
-                |step| instrunction_dispatch_ctx.ingest_step(step),
-            ) {
-                Some(result) => result,
-                None => return None,
-            };
+            let (mut shard_ctx, shard_summary) =
+                match shard_ctx_builder.position_next_shard(
+                    &mut step_iter,
+                    |idx, record| instrunction_dispatch_ctx.ingest_step(idx, record),
+                ) {
+                    Some(result) => result,
+                    None => return None,
+                };
+            tracing::debug!("position_next_shard finish in {:?}", time.elapsed());
+            let shard_steps = step_iter.shard_steps();
 
             let mut zkvm_witness = ZKVMWitnesses::default();
             let mut pi = pi_template.clone();
@@ -1292,6 +1337,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     &system_config.zkvm_cs,
                     &mut shard_ctx,
                     &mut instrunction_dispatch_ctx,
+                    shard_steps,
                     &mut zkvm_witness,
                 )
                 .unwrap();
@@ -1303,6 +1349,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     &system_config.zkvm_cs,
                     &mut shard_ctx,
                     &instrunction_dispatch_ctx,
+                    shard_steps,
                     &mut zkvm_witness,
                 )
                 .unwrap();
@@ -2075,7 +2122,7 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 #[cfg(test)]
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder};
-    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepRecord};
+    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepIndex, StepRecord};
     use itertools::Itertools;
     use std::sync::Arc;
 
@@ -2136,10 +2183,53 @@ mod tests {
             max_cycle,
             NextCycleAccess::default(),
         );
-        let mut steps_iter = steps.into_iter();
+        struct TestReplay {
+            steps: Vec<StepRecord>,
+            cursor: usize,
+            shard_start: usize,
+        }
+
+        impl TestReplay {
+            fn new(steps: Vec<StepRecord>) -> Self {
+                Self {
+                    steps,
+                    cursor: 0,
+                    shard_start: 0,
+                }
+            }
+        }
+
+        impl Iterator for TestReplay {
+            type Item = StepIndex;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.cursor >= self.steps.len() {
+                    return None;
+                }
+                let local_idx = self.cursor - self.shard_start;
+                self.cursor += 1;
+                Some(local_idx)
+            }
+        }
+
+        impl super::StepSource for TestReplay {
+            fn start_new_shard(&mut self) {
+                self.shard_start = self.cursor;
+            }
+
+            fn shard_steps(&self) -> &[StepRecord] {
+                &self.steps[self.shard_start..self.cursor]
+            }
+
+            fn step_record(&self, idx: StepIndex) -> &StepRecord {
+                &self.steps[self.shard_start + idx]
+            }
+        }
+
+        let mut steps_iter = TestReplay::new(steps);
         let shard_ctx = std::iter::from_fn(|| {
             shard_ctx_builder
-                .position_next_shard(&mut steps_iter, |_| {})
+                .position_next_shard(&mut steps_iter, |_, _| {})
                 .map(|(ctx, _)| ctx)
         })
         .collect_vec();

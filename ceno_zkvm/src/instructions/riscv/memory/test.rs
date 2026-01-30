@@ -101,7 +101,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
         InsnKind::SW => sw(prev_mem_value, rs2_word),
         x => unreachable!("{:?} is not store instruction", x),
     };
-    let (raw_witin, lkm) = Inst::assign_instances(
+    let (raw_witin, lkm) = Inst::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
@@ -163,7 +163,7 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
         before: prev_rd_word,
         after: new_rd_word,
     };
-    let (raw_witin, lkm) = Inst::assign_instances(
+    let (raw_witin, lkm) = Inst::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,

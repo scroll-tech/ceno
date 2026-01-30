@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use ceno_emul::{
     BLS12381_DOUBLE, BN254_DOUBLE, ByteAddr, Change, Cycle, InsnKind, Platform, SECP256K1_DOUBLE,
-    SECP256R1_DOUBLE, StepRecord, WORD_SIZE, WriteOp,
+    SECP256R1_DOUBLE, StepIndex, StepRecord, WORD_SIZE, WriteOp,
 };
 use ff_ext::ExtensionField;
 use generic_array::{GenericArray, typenum::Unsigned};
@@ -199,6 +199,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
         num_witin: usize,
         num_structural_witin: usize,
         steps: &[StepRecord],
+        step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let syscall_code = match EC::CURVE_TYPE {
             CurveType::Secp256k1 => SECP256K1_DOUBLE,
@@ -211,7 +212,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
         };
 
         let mut lk_multiplicity = LkMultiplicity::default();
-        if steps.is_empty() {
+        if step_indices.is_empty() {
             return Ok((
                 [
                     RowMajorMatrix::new(0, num_witin, InstancePaddingStrategy::Default),
@@ -221,15 +222,15 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             ));
         }
         let nthreads = max_usable_threads();
-        let num_instance_per_batch = steps.len().div_ceil(nthreads).max(1);
+        let num_instance_per_batch = step_indices.len().div_ceil(nthreads).max(1);
 
         let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
-            steps.len(),
+            step_indices.len(),
             num_witin,
             InstancePaddingStrategy::Default,
         );
         let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
-            steps.len(),
+            step_indices.len(),
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
@@ -239,15 +240,16 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
 
         // 1st pass: assign witness outside of gkr-iop scope
         raw_witin_iter
-            .zip_eq(steps.par_chunks(num_instance_per_batch))
+            .zip_eq(step_indices.par_chunks(num_instance_per_batch))
             .zip(shard_ctx_vec)
-            .flat_map(|((instances, steps), mut shard_ctx)| {
+            .flat_map(|((instances, indices), mut shard_ctx)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
 
                 instances
                     .chunks_mut(num_witin)
-                    .zip_eq(steps)
-                    .map(|(instance, step)| {
+                    .zip_eq(indices.iter().copied())
+                    .map(|(instance, idx)| {
+                        let step = &steps[idx];
                         let ops = &step.syscall().expect("syscall step");
 
                         // vm_state
@@ -297,9 +299,10 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             .collect::<Result<(), ZKVMError>>()?;
 
         // second pass
-        let instances: Vec<EllipticCurveDoubleInstance<EC::BaseField>> = steps
+        let instances: Vec<EllipticCurveDoubleInstance<EC::BaseField>> = step_indices
             .par_iter()
-            .map(|step| {
+            .map(|&idx| {
+                let step = &steps[idx];
                 let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
                     .syscall()
                     .unwrap()

@@ -806,7 +806,8 @@ fn messages_to_strings(messages: &[Vec<u8>]) -> Vec<String> {
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
-    let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
+    state.iter_until_halt().collect::<Result<Vec<_>>>()?;
+    let steps = state.tracer().recorded_steps().to_vec();
     eprintln!("Emulator ran for {} steps.", steps.len());
     Ok(steps)
 }

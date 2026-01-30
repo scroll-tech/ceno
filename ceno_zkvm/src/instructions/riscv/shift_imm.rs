@@ -169,7 +169,7 @@ mod test {
             )
             .unwrap();
 
-        let (raw_witin, lkm) = ShiftImmInstruction::<E, I>::assign_instances(
+        let (raw_witin, lkm) = ShiftImmInstruction::<E, I>::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,
