@@ -7,8 +7,7 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use generic_array::typenum::Unsigned;
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -250,7 +249,7 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
         0.into(),
     ))?;
 
-    let mut layout = <FpOpLayout<E, P> as ProtocolBuilder<E>>::build_layer_logic(cb, ())?;
+    let layout = <FpOpLayout<E, P> as ProtocolBuilder<E>>::build_layer_logic(cb, ())?;
 
     let mut mem_rw = izip!(&layout.input32_exprs[0], &layout.output32_exprs)
         .enumerate()
@@ -287,10 +286,7 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
             .collect::<Result<Vec<WriteMEM>, _>>()?,
     );
 
-    let (out_evals, mut chip) = layout.finalize(cb);
-    let layer =
-        Layer::from_circuit_builder(cb, layer_name.to_string(), layout.n_challenges, out_evals);
-    chip.add_layer(layer);
+    let chip = layout.finalize(layer_name.to_string(), cb);
 
     Ok((
         EcallFpOpConfig {

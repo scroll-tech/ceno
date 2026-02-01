@@ -136,7 +136,7 @@ fn impl_opcode_store<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruct
     )
     .unwrap();
 
-    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], 1, None, Some(lkm));
 }
 
 fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instruction<E>>(imm: i32) {
@@ -184,7 +184,7 @@ fn impl_opcode_load<E: ExtensionField + Hash, I: RIVInstruction, Inst: Instructi
     )
     .unwrap();
 
-    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], 1, None, Some(lkm));
 }
 
 fn impl_opcode_sb(imm: i32) {

@@ -13,11 +13,11 @@ use ceno_emul::{Addr, Cycle, GetAddr, WORD_SIZE, Word};
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::{
     chip::Chip,
+    default_out_eval_groups,
     error::CircuitBuilderError,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
 };
-use itertools::Itertools;
 use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
 use std::{collections::HashMap, marker::PhantomData, ops::Range};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
@@ -339,28 +339,13 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
         param: &ProgramParams,
     ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
         let config = Self::construct_circuit(cb, param)?;
-        let r_table_len = cb.cs.r_table_expressions.len();
 
         let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(selector.expr());
+        cb.cs.set_default_read_selector(selector_type.clone());
 
-        // all shared the same selector
-        let (out_evals, mut chip) = (
-            [
-                // r_record
-                (0..r_table_len).collect_vec(),
-                // w_record
-                vec![],
-                // lk_record
-                vec![],
-                // zero_record
-                vec![],
-            ],
-            Chip::new_from_cb(cb, 0),
-        );
-
-        // register selector to legacy constrain system
-        cb.cs.r_selector = Some(selector_type.clone());
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb, 0);
 
         let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
         chip.add_layer(layer);

@@ -1,10 +1,11 @@
 use ceno_emul::{ByteAddr, Cycle, MemOp, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     circuit_builder::{CircuitBuilder, ConstraintSystem, expansion_expr, rotation_split},
     cpu::{CpuBackend, CpuProver},
+    default_out_eval_groups,
     error::{BackendError, CircuitBuilderError},
     gkr::{
         GKRCircuit, GKRProof, GKRProverOutput,
@@ -26,9 +27,9 @@ use ndarray::{ArrayView, Ix2, Ix3, s};
 use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    slice::{ParallelSlice, ParallelSliceMut},
+    slice::ParallelSlice,
 };
-use std::{array, mem::transmute, sync::Arc};
+use std::{array, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
     util::optimal_sumcheck_threads,
@@ -41,9 +42,8 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
-    precompiles::{
-        SelectorTypeLayout,
-        utils::{Mask, MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance},
+    precompiles::utils::{
+        Mask, MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance,
     },
     scheme::utils::gkr_witness,
 };
@@ -101,10 +101,6 @@ const LOOKUP_FELTS_PER_ROUND: usize =
 pub const AND_LOOKUPS: usize = AND_LOOKUPS_PER_ROUND;
 pub const XOR_LOOKUPS: usize = XOR_LOOKUPS_PER_ROUND;
 pub const RANGE_LOOKUPS: usize = RANGE_LOOKUPS_PER_ROUND;
-pub const STRUCTURAL_WITIN: usize = 6;
-
-#[derive(Clone, Debug)]
-pub struct KeccakParams;
 
 #[derive(Clone, Debug)]
 #[repr(C)]
@@ -149,15 +145,17 @@ pub struct KeccakLayer<WitT, EqT> {
 
 #[derive(Clone, Debug)]
 pub struct KeccakLayout<E: ExtensionField> {
-    pub params: KeccakParams,
     pub layer_exprs: KeccakLayer<WitIn, StructuralWitIn>,
     pub selector_type_layout: SelectorTypeLayout<E>,
     pub input32_exprs: [MemoryExpr<E>; KECCAK_INPUT32_SIZE],
     pub output32_exprs: [MemoryExpr<E>; KECCAK_OUTPUT32_SIZE],
-    pub n_fixed: usize,
-    pub n_committed: usize,
-    pub n_structural_witin: usize,
-    pub n_challenges: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct SelectorTypeLayout<E: ExtensionField> {
+    pub sel_first: SelectorType<E>,
+    pub sel_last: SelectorType<E>,
+    pub sel_all: SelectorType<E>,
 }
 
 const ROTATION_WITNESS_LEN: usize = 196;
@@ -184,32 +182,44 @@ fn split_mask_to_array<const N: usize>(value: u64, sizes: &[usize; N]) -> [u64; 
 }
 
 impl<E: ExtensionField> KeccakLayout<E> {
-    fn new(cb: &mut CircuitBuilder<E>, params: KeccakParams) -> Self {
+    fn new(cb: &mut CircuitBuilder<E>) -> Self {
         // allocate witnesses, fixed, and eqs
-        let (
-            wits,
-            // fixed,
-            [
-                sel_first,
-                sel_last,
-                eq_zero,
-                eq_rotation_left,
-                eq_rotation_right,
-                eq_rotation,
-            ],
-        ): (KeccakWitCols<WitIn>, [StructuralWitIn; STRUCTURAL_WITIN]) = unsafe {
-            (
-                transmute::<[WitIn; size_of::<KeccakWitCols<u8>>()], KeccakWitCols<WitIn>>(
-                    array::from_fn(|id| cb.create_witin(|| format!("keccak_witin_{}", id))),
-                ),
-                // transmute::<[Fixed; 8], KeccakFixedCols<Fixed>>(array::from_fn(|id| {
-                //     cb.create_fixed(|| format!("keccak_fixed_{}", id))
-                // })),
-                array::from_fn(|id| {
-                    cb.create_placeholder_structural_witin(|| format!("keccak_eq_{}", id))
-                }),
-            )
+        let wits = KeccakWitCols {
+            input8: array::from_fn(|id| cb.create_witin(|| format!("keccak_input8_{id}"))),
+            c_aux: array::from_fn(|id| cb.create_witin(|| format!("keccak_c_aux_{id}"))),
+            c_temp: array::from_fn(|id| cb.create_witin(|| format!("keccak_c_temp_{id}"))),
+            c_rot: array::from_fn(|id| cb.create_witin(|| format!("keccak_c_rot_{id}"))),
+            d: array::from_fn(|id| cb.create_witin(|| format!("keccak_d_{id}"))),
+            theta_output: array::from_fn(|id| {
+                cb.create_witin(|| format!("keccak_theta_output_{id}"))
+            }),
+            rotation_witness: array::from_fn(|id| {
+                cb.create_witin(|| format!("keccak_rotation_witness_{id}"))
+            }),
+            rhopi_output: array::from_fn(|id| cb.create_witin(|| format!("keccak_rhopi_{id}"))),
+            nonlinear: array::from_fn(|id| cb.create_witin(|| format!("keccak_nonlinear_{id}"))),
+            chi_output: array::from_fn(|id| cb.create_witin(|| format!("keccak_chi_{id}"))),
+            iota_output: array::from_fn(|id| cb.create_witin(|| format!("keccak_iota_{id}"))),
+            rc: array::from_fn(|id| cb.create_witin(|| format!("keccak_rc_{id}"))),
         };
+
+        // let fixed = KeccakFixedCols {
+        //     rc: array::from_fn(|id| cb.create_fixed(|| format!("keccak_fixed_{id}"))),
+        // };
+
+        // The order matters because our prover implementation assumes that the
+        // selectors are assigned before the rotation witnesses.
+
+        let [
+            sel_first,
+            sel_last,
+            sel_all,
+            eq_rotation_left,
+            eq_rotation_right,
+            eq_rotation,
+        ] = array::from_fn(|id| {
+            cb.create_placeholder_structural_witin(|| format!("keccak_eq_{}", id))
+        });
 
         // indices to activate zero/lookup constraints
         let checked_indices = CYCLIC_POW2_5
@@ -220,7 +230,6 @@ impl<E: ExtensionField> KeccakLayout<E> {
             .map(|v| v as usize)
             .collect_vec();
         Self {
-            params,
             layer_exprs: KeccakLayer {
                 wits,
                 // fixed,
@@ -229,40 +238,36 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation,
             },
             selector_type_layout: SelectorTypeLayout {
-                sel_first: Some(SelectorType::OrderedSparse {
+                sel_first: SelectorType::OrderedSparse {
                     num_vars: 5,
                     indices: vec![CYCLIC_POW2_5[0] as usize],
                     expression: sel_first.expr(),
-                }),
-                sel_last: Some(SelectorType::OrderedSparse {
+                },
+                sel_last: SelectorType::OrderedSparse {
                     num_vars: 5,
                     indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
                     expression: sel_last.expr(),
-                }),
+                },
                 sel_all: SelectorType::OrderedSparse {
                     num_vars: 5,
                     indices: checked_indices.clone(),
-                    expression: eq_zero.expr(),
+                    expression: sel_all.expr(),
                 },
             },
             input32_exprs: array::from_fn(|_| array::from_fn(|_| Expression::WitIn(0))),
             output32_exprs: array::from_fn(|_| array::from_fn(|_| Expression::WitIn(0))),
-            n_fixed: 0,
-            n_committed: 0,
-            n_structural_witin: STRUCTURAL_WITIN,
-            n_challenges: 0,
         }
     }
 }
 
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
-    type Params = KeccakParams;
+    type Params = ();
 
     fn build_layer_logic(
         cb: &mut CircuitBuilder<E>,
-        params: Self::Params,
+        _params: Self::Params,
     ) -> Result<Self, CircuitBuilderError> {
-        let mut layout = Self::new(cb, params);
+        let mut layout = Self::new(cb);
         let system = cb;
 
         let KeccakWitCols {
@@ -514,55 +519,21 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
-        self.n_fixed = cb.cs.num_fixed;
-        self.n_committed = cb.cs.num_witin as usize;
-        self.n_challenges = 0;
+    fn finalize(&self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {
+        cb.cs
+            .set_default_read_selector(self.selector_type_layout.sel_first.clone());
+        cb.cs
+            .set_default_write_selector(self.selector_type_layout.sel_last.clone());
+        cb.cs
+            .set_default_lookup_selector(self.selector_type_layout.sel_all.clone());
+        cb.cs
+            .set_default_zero_selector(self.selector_type_layout.sel_all.clone());
 
-        // register selector to legacy constrain system
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_first.clone().unwrap());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_last.clone().unwrap());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
-
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-        (
-            [
-                // r_record
-                (0..r_len).collect_vec(),
-                // w_record
-                (r_len..r_len + w_len).collect_vec(),
-                // lk_record
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                // zero_record
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, self.n_challenges),
-        )
-    }
-
-    fn n_committed(&self) -> usize {
-        unimplemented!("retrieve from constrain system")
-    }
-
-    fn n_fixed(&self) -> usize {
-        unimplemented!("retrieve from constrain system")
-    }
-
-    fn n_challenges(&self) -> usize {
-        0
-    }
-
-    fn n_evaluations(&self) -> usize {
-        unimplemented!()
-    }
-
-    fn n_layers(&self) -> usize {
-        1
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb, 0);
+        let layer = Layer::from_circuit_builder(cb, name, 0, out_evals);
+        chip.add_layer(layer);
+        chip
     }
 }
 
@@ -657,292 +628,305 @@ where
         } = self.layer_exprs;
 
         let num_instances = phase1.instances.len();
+        let (layout_start, num_layout_wit_cols) =
+            (input8_witin[0].id as usize, size_of::<KeccakWitCols<u8>>());
 
-        // keccak instance full rounds (24 rounds + 8 round padding) as chunk size
-        // we need to do assignment on respective 31 cyclic group index
-        wits.values
-            .par_chunks_mut(self.n_committed * ROUNDS.next_power_of_two())
-            .take(num_instances)
-            .zip_eq(
-                structural_wits
-                    .values
-                    .par_chunks_mut(self.n_structural_witin * ROUNDS.next_power_of_two())
-                    .take(num_instances),
-            )
-            .zip(&phase1.instances)
-            .for_each(|((wits, structural_wits), KeccakInstance { witin, .. })| {
+        let wits_width = wits.width;
+        let structural_wits_width = structural_wits.width;
+
+        let num_rotation = ROUNDS.next_power_of_two();
+        let num_instance_per_batch = num_instances.div_ceil(max_usable_threads()).max(1);
+        let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
+        let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
+        raw_witin_iter
+            .zip_eq(raw_structural_wits_iter)
+            .zip_eq(phase1.instances.par_chunks(num_instance_per_batch))
+            .for_each(|((rows, eqs), phase1_instances)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
-                let state_32_iter = witin.instance.iter().map(|e| *e as u64);
-                let mut state64 = [[0u64; 5]; 5];
-                zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
-                    .map(|((x, y), (lo, hi))| {
-                        state64[x][y] = lo | (hi << 32);
-                    })
-                    .count();
+                rows.chunks_mut(wits_width * num_rotation)
+                    .zip_eq(eqs.chunks_mut(structural_wits_width * num_rotation))
+                    .zip_eq(phase1_instances)
+                    .for_each(|((wits, structural_wits), KeccakInstance { witin, .. })| {
+                        let state_32_iter = witin.instance.iter().map(|e| *e as u64);
+                        let mut state64 = [[0u64; 5]; 5];
+                        zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
+                            .map(|((x, y), (lo, hi))| {
+                                state64[x][y] = lo | (hi << 32);
+                            })
+                            .count();
 
-                let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
-                let mut cyclic_group = bh.into_iter();
+                        let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
+                        let mut cyclic_group = bh.into_iter();
 
-                let Some(sel_first) = self.selector_type_layout.sel_first.as_ref() else {
-                    panic!("sel_first must be Some");
-                };
-                let (mut sel_first_iter, sel_first_structural_witin) = (
-                    sel_first.sparse_indices().iter(),
-                    sel_first.selector_expr().id(),
-                );
+                        let (mut sel_first_iter, sel_first_structural_witin) = (
+                            self.selector_type_layout.sel_first.sparse_indices().iter(),
+                            self.selector_type_layout.sel_first.selector_expr().id(),
+                        );
 
-                let Some(sel_last) = self.selector_type_layout.sel_last.as_ref() else {
-                    panic!("sel_last must be Some");
-                };
-                let (mut sel_last_iter, sel_last_structural_witin) = (
-                    sel_last.sparse_indices().iter(),
-                    sel_last.selector_expr().id(),
-                );
+                        let (mut sel_last_iter, sel_last_structural_witin) = (
+                            self.selector_type_layout.sel_last.sparse_indices().iter(),
+                            self.selector_type_layout.sel_last.selector_expr().id(),
+                        );
 
-                let (mut sel_all_iter, sel_all_structural_witin) = (
-                    self.selector_type_layout.sel_all.sparse_indices().iter(),
-                    self.selector_type_layout.sel_all.selector_expr().id(),
-                );
+                        let (mut sel_all_iter, sel_all_structural_witin) = (
+                            self.selector_type_layout.sel_all.sparse_indices().iter(),
+                            self.selector_type_layout.sel_all.selector_expr().id(),
+                        );
 
-                #[allow(clippy::needless_range_loop)]
-                for round in 0..ROUNDS {
-                    let round_index = cyclic_group.next().unwrap();
-                    let wits =
-                        &mut wits[round_index as usize * self.n_committed..][..self.n_committed];
+                        #[allow(clippy::needless_range_loop)]
+                        for round in 0..ROUNDS {
+                            let round_index = cyclic_group.next().unwrap();
+                            let wits = &mut wits[round_index as usize * wits_width..]
+                                [layout_start..][..num_layout_wit_cols];
 
-                    // set selector
-                    if let Some(index) = sel_first_iter.next() {
-                        structural_wits
-                            [index * self.n_structural_witin + sel_first_structural_witin] =
-                            E::BaseField::ONE;
-                    }
-                    if let Some(index) = sel_last_iter.next() {
-                        structural_wits
-                            [index * self.n_structural_witin + sel_last_structural_witin] =
-                            E::BaseField::ONE;
-                    }
-                    if let Some(index) = sel_all_iter.next() {
-                        structural_wits
-                            [index * self.n_structural_witin + sel_all_structural_witin] =
-                            E::BaseField::ONE;
-                    }
-
-                    let mut state8 = [[[0u64; 8]; 5]; 5];
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            state8[x][y] = split_mask_to_array(state64[x][y], &BYTE_SPLIT_SIZES);
-                        }
-                    }
-
-                    push_instance::<E, _>(
-                        wits,
-                        input8_witin[0].id.into(),
-                        state8.into_iter().flatten().flatten(),
-                    );
-
-                    let mut c_aux64 = [[0u64; 5]; 5];
-                    let mut c_aux8 = [[[0u64; 8]; 5]; 5];
-
-                    for i in 0..5 {
-                        c_aux64[i][0] = state64[0][i];
-                        c_aux8[i][0] = split_mask_to_array(c_aux64[i][0], &BYTE_SPLIT_SIZES);
-                        for j in 1..5 {
-                            c_aux64[i][j] = state64[j][i] ^ c_aux64[i][j - 1];
-                            for k in 0..8 {
-                                lk_multiplicity
-                                    .lookup_xor_byte(c_aux8[i][j - 1][k], state8[j][i][k]);
+                            // set selector
+                            if let Some(index) = sel_first_iter.next() {
+                                structural_wits
+                                    [index * structural_wits_width + sel_first_structural_witin] =
+                                    E::BaseField::ONE;
                             }
-                            c_aux8[i][j] = split_mask_to_array(c_aux64[i][j], &BYTE_SPLIT_SIZES);
-                        }
-                    }
+                            if let Some(index) = sel_last_iter.next() {
+                                structural_wits
+                                    [index * structural_wits_width + sel_last_structural_witin] =
+                                    E::BaseField::ONE;
+                            }
+                            if let Some(index) = sel_all_iter.next() {
+                                structural_wits
+                                    [index * structural_wits_width + sel_all_structural_witin] =
+                                    E::BaseField::ONE;
+                            }
 
-                    let mut c64 = [0u64; 5];
-                    let mut c8 = [[0u64; 8]; 5];
+                            let mut state8 = [[[0u64; 8]; 5]; 5];
+                            for x in 0..5 {
+                                for y in 0..5 {
+                                    state8[x][y] =
+                                        split_mask_to_array(state64[x][y], &BYTE_SPLIT_SIZES);
+                                }
+                            }
 
-                    for x in 0..5 {
-                        c64[x] = c_aux64[x][4];
-                        c8[x] = split_mask_to_array(c64[x], &BYTE_SPLIT_SIZES);
-                    }
-
-                    let mut c_temp = [[0u64; 8]; 5];
-                    for i in 0..5 {
-                        let chunks = split_mask_to_array(c64[i], &C_TEMP_SPLIT_SIZES);
-                        for (chunk, size) in chunks.iter().zip(C_TEMP_SPLIT_SIZES.iter()) {
-                            lk_multiplicity.assert_const_range(*chunk, *size);
-                        }
-                        c_temp[i] = chunks;
-                    }
-
-                    let mut crot64 = [0u64; 5];
-                    let mut crot8 = [[0u64; 8]; 5];
-                    for i in 0..5 {
-                        crot64[i] = c64[i].rotate_left(1);
-                        crot8[i] = split_mask_to_array(crot64[i], &BYTE_SPLIT_SIZES);
-                    }
-
-                    let mut d64 = [0u64; 5];
-                    let mut d8 = [[0u64; 8]; 5];
-                    for x in 0..5 {
-                        d64[x] = c64[(x + 4) % 5] ^ c64[(x + 1) % 5].rotate_left(1);
-                        for k in 0..8 {
-                            lk_multiplicity.lookup_xor_byte(
-                                c_aux8[(x + 5 - 1) % 5][4][k],
-                                crot8[(x + 1) % 5][k],
+                            push_instance::<E, _>(
+                                wits,
+                                input8_witin[0].id.into(),
+                                state8.into_iter().flatten().flatten(),
                             );
-                        }
-                        d8[x] = split_mask_to_array(d64[x], &BYTE_SPLIT_SIZES);
-                    }
 
-                    let mut theta_state64 = state64;
-                    let mut theta_state8 = [[[0u64; 8]; 5]; 5];
-                    let mut rotation_witness = Vec::with_capacity(ROTATION_WITNESS_LEN);
+                            let mut c_aux64 = [[0u64; 5]; 5];
+                            let mut c_aux8 = [[[0u64; 8]; 5]; 5];
 
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            theta_state64[y][x] ^= d64[x];
-                            for k in 0..8 {
-                                lk_multiplicity.lookup_xor_byte(state8[y][x][k], d8[x][k])
+                            for i in 0..5 {
+                                c_aux64[i][0] = state64[0][i];
+                                c_aux8[i][0] =
+                                    split_mask_to_array(c_aux64[i][0], &BYTE_SPLIT_SIZES);
+                                for j in 1..5 {
+                                    c_aux64[i][j] = state64[j][i] ^ c_aux64[i][j - 1];
+                                    for k in 0..8 {
+                                        lk_multiplicity
+                                            .lookup_xor_byte(c_aux8[i][j - 1][k], state8[j][i][k]);
+                                    }
+                                    c_aux8[i][j] =
+                                        split_mask_to_array(c_aux64[i][j], &BYTE_SPLIT_SIZES);
+                                }
                             }
-                            theta_state8[y][x] =
-                                split_mask_to_array(theta_state64[y][x], &BYTE_SPLIT_SIZES);
 
-                            let (sizes, _) = rotation_split(ROTATION_CONSTANTS[y][x]);
-                            let rotation_chunks =
-                                MaskRepresentation::from_mask(Mask::new(64, theta_state64[y][x]))
+                            let mut c64 = [0u64; 5];
+                            let mut c8 = [[0u64; 8]; 5];
+
+                            for x in 0..5 {
+                                c64[x] = c_aux64[x][4];
+                                c8[x] = split_mask_to_array(c64[x], &BYTE_SPLIT_SIZES);
+                            }
+
+                            let mut c_temp = [[0u64; 8]; 5];
+                            for i in 0..5 {
+                                let chunks = split_mask_to_array(c64[i], &C_TEMP_SPLIT_SIZES);
+                                for (chunk, size) in chunks.iter().zip(C_TEMP_SPLIT_SIZES.iter()) {
+                                    lk_multiplicity.assert_const_range(*chunk, *size);
+                                }
+                                c_temp[i] = chunks;
+                            }
+
+                            let mut crot64 = [0u64; 5];
+                            let mut crot8 = [[0u64; 8]; 5];
+                            for i in 0..5 {
+                                crot64[i] = c64[i].rotate_left(1);
+                                crot8[i] = split_mask_to_array(crot64[i], &BYTE_SPLIT_SIZES);
+                            }
+
+                            let mut d64 = [0u64; 5];
+                            let mut d8 = [[0u64; 8]; 5];
+                            for x in 0..5 {
+                                d64[x] = c64[(x + 4) % 5] ^ c64[(x + 1) % 5].rotate_left(1);
+                                for k in 0..8 {
+                                    lk_multiplicity.lookup_xor_byte(
+                                        c_aux8[(x + 5 - 1) % 5][4][k],
+                                        crot8[(x + 1) % 5][k],
+                                    );
+                                }
+                                d8[x] = split_mask_to_array(d64[x], &BYTE_SPLIT_SIZES);
+                            }
+
+                            let mut theta_state64 = state64;
+                            let mut theta_state8 = [[[0u64; 8]; 5]; 5];
+                            let mut rotation_witness = Vec::with_capacity(ROTATION_WITNESS_LEN);
+
+                            for x in 0..5 {
+                                for y in 0..5 {
+                                    theta_state64[y][x] ^= d64[x];
+                                    for k in 0..8 {
+                                        lk_multiplicity.lookup_xor_byte(state8[y][x][k], d8[x][k])
+                                    }
+                                    theta_state8[y][x] =
+                                        split_mask_to_array(theta_state64[y][x], &BYTE_SPLIT_SIZES);
+
+                                    let (sizes, _) = rotation_split(ROTATION_CONSTANTS[y][x]);
+                                    let rotation_chunks = MaskRepresentation::from_mask(Mask::new(
+                                        64,
+                                        theta_state64[y][x],
+                                    ))
                                     .convert(&sizes)
                                     .values();
-                            for (chunk, size) in rotation_chunks.iter().zip(sizes.iter()) {
-                                lk_multiplicity.assert_const_range(*chunk, *size);
+                                    for (chunk, size) in rotation_chunks.iter().zip(sizes.iter()) {
+                                        lk_multiplicity.assert_const_range(*chunk, *size);
+                                    }
+                                    rotation_witness.extend(rotation_chunks);
+                                }
                             }
-                            rotation_witness.extend(rotation_chunks);
-                        }
-                    }
-                    assert_eq!(rotation_witness.len(), rotation_witness_witin.len());
+                            assert_eq!(rotation_witness.len(), rotation_witness_witin.len());
 
-                    // Rho and Pi steps
-                    let mut rhopi_output64 = [[0u64; 5]; 5];
-                    let mut rhopi_output8 = [[[0u64; 8]; 5]; 5];
+                            // Rho and Pi steps
+                            let mut rhopi_output64 = [[0u64; 5]; 5];
+                            let mut rhopi_output8 = [[[0u64; 8]; 5]; 5];
 
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            rhopi_output64[(2 * x + 3 * y) % 5][y % 5] =
-                                theta_state64[y][x].rotate_left(ROTATION_CONSTANTS[y][x] as u32);
-                        }
-                    }
+                            for x in 0..5 {
+                                for y in 0..5 {
+                                    rhopi_output64[(2 * x + 3 * y) % 5][y % 5] = theta_state64[y]
+                                        [x]
+                                        .rotate_left(ROTATION_CONSTANTS[y][x] as u32);
+                                }
+                            }
 
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            rhopi_output8[x][y] =
-                                split_mask_to_array(rhopi_output64[x][y], &BYTE_SPLIT_SIZES);
-                        }
-                    }
+                            for x in 0..5 {
+                                for y in 0..5 {
+                                    rhopi_output8[x][y] = split_mask_to_array(
+                                        rhopi_output64[x][y],
+                                        &BYTE_SPLIT_SIZES,
+                                    );
+                                }
+                            }
 
-                    // Chi step
-                    let mut nonlinear64 = [[0u64; 5]; 5];
-                    let mut nonlinear8 = [[[0u64; 8]; 5]; 5];
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            nonlinear64[y][x] =
-                                !rhopi_output64[y][(x + 1) % 5] & rhopi_output64[y][(x + 2) % 5];
+                            // Chi step
+                            let mut nonlinear64 = [[0u64; 5]; 5];
+                            let mut nonlinear8 = [[[0u64; 8]; 5]; 5];
+                            for x in 0..5 {
+                                for y in 0..5 {
+                                    nonlinear64[y][x] = !rhopi_output64[y][(x + 1) % 5]
+                                        & rhopi_output64[y][(x + 2) % 5];
+                                    for k in 0..8 {
+                                        lk_multiplicity.lookup_and_byte(
+                                            0xFF - rhopi_output8[y][(x + 1) % 5][k],
+                                            rhopi_output8[y][(x + 2) % 5][k],
+                                        );
+                                    }
+                                    nonlinear8[y][x] =
+                                        split_mask_to_array(nonlinear64[y][x], &BYTE_SPLIT_SIZES);
+                                }
+                            }
+
+                            let mut chi_output64 = [[0u64; 5]; 5];
+                            let mut chi_output8 = [[[0u64; 8]; 5]; 5];
+                            for x in 0..5 {
+                                for y in 0..5 {
+                                    chi_output64[y][x] = nonlinear64[y][x] ^ rhopi_output64[y][x];
+                                    for k in 0..8 {
+                                        lk_multiplicity.lookup_xor_byte(
+                                            rhopi_output8[y][x][k],
+                                            nonlinear8[y][x][k],
+                                        );
+                                    }
+                                    chi_output8[y][x] =
+                                        split_mask_to_array(chi_output64[y][x], &BYTE_SPLIT_SIZES);
+                                }
+                            }
+
+                            // Iota step
+                            let mut iota_output64 = chi_output64;
+                            let mut iota_output8 = [[[0u64; 8]; 5]; 5];
+                            // TODO figure out how to deal with RC, since it's not a constant in rotation
+                            iota_output64[0][0] ^= RC[round];
+
                             for k in 0..8 {
-                                lk_multiplicity.lookup_and_byte(
-                                    0xFF - rhopi_output8[y][(x + 1) % 5][k],
-                                    rhopi_output8[y][(x + 2) % 5][k],
-                                );
+                                let rc8 = split_mask_to_array(RC[round], &BYTE_SPLIT_SIZES);
+                                lk_multiplicity.lookup_xor_byte(chi_output8[0][0][k], rc8[k]);
                             }
-                            nonlinear8[y][x] =
-                                split_mask_to_array(nonlinear64[y][x], &BYTE_SPLIT_SIZES);
-                        }
-                    }
 
-                    let mut chi_output64 = [[0u64; 5]; 5];
-                    let mut chi_output8 = [[[0u64; 8]; 5]; 5];
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            chi_output64[y][x] = nonlinear64[y][x] ^ rhopi_output64[y][x];
-                            for k in 0..8 {
-                                lk_multiplicity
-                                    .lookup_xor_byte(rhopi_output8[y][x][k], nonlinear8[y][x][k]);
+                            for x in 0..5 {
+                                for y in 0..5 {
+                                    iota_output8[x][y] =
+                                        split_mask_to_array(iota_output64[x][y], &BYTE_SPLIT_SIZES);
+                                }
                             }
-                            chi_output8[y][x] =
-                                split_mask_to_array(chi_output64[y][x], &BYTE_SPLIT_SIZES);
+
+                            // set witness
+                            push_instance::<E, _>(
+                                wits,
+                                c_aux_witin[0].id.into(),
+                                c_aux8.into_iter().flatten().flatten(),
+                            );
+                            push_instance::<E, _>(
+                                wits,
+                                c_temp_witin[0].id.into(),
+                                c_temp.into_iter().flatten(),
+                            );
+                            push_instance::<E, _>(
+                                wits,
+                                c_rot_witin[0].id.into(),
+                                crot8.into_iter().flatten(),
+                            );
+                            push_instance::<E, _>(
+                                wits,
+                                d_witin[0].id.into(),
+                                d8.into_iter().flatten(),
+                            );
+                            push_instance::<E, _>(
+                                wits,
+                                theta_output_witin[0].id.into(),
+                                theta_state8.into_iter().flatten().flatten(),
+                            );
+                            push_instance::<E, _>(
+                                wits,
+                                rotation_witness_witin[0].id.into(),
+                                rotation_witness.into_iter(),
+                            );
+                            push_instance::<E, _>(
+                                wits,
+                                rhopi_output_witin[0].id.into(),
+                                rhopi_output8.into_iter().flatten().flatten(),
+                            );
+                            push_instance::<E, _>(
+                                wits,
+                                nonlinear_witin[0].id.into(),
+                                nonlinear8.into_iter().flatten().flatten(),
+                            );
+                            push_instance::<E, _>(
+                                wits,
+                                chi_output_witin[0].id.into(),
+                                chi_output8[0][0].iter().copied(),
+                            );
+                            push_instance::<E, _>(
+                                wits,
+                                iota_output_witin[0].id.into(),
+                                iota_output8.into_iter().flatten().flatten(),
+                            );
+                            // TODO temporarily move RC to witness
+                            push_instance::<E, _>(
+                                wits,
+                                rc_witin[0].id.into(),
+                                (0..8).map(|i| (RC[round] >> (i << 3)) & 0xFF),
+                            );
+
+                            state64 = iota_output64;
                         }
-                    }
-
-                    // Iota step
-                    let mut iota_output64 = chi_output64;
-                    let mut iota_output8 = [[[0u64; 8]; 5]; 5];
-                    // TODO figure out how to deal with RC, since it's not a constant in rotation
-                    iota_output64[0][0] ^= RC[round];
-
-                    for k in 0..8 {
-                        let rc8 = split_mask_to_array(RC[round], &BYTE_SPLIT_SIZES);
-                        lk_multiplicity.lookup_xor_byte(chi_output8[0][0][k], rc8[k]);
-                    }
-
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            iota_output8[x][y] =
-                                split_mask_to_array(iota_output64[x][y], &BYTE_SPLIT_SIZES);
-                        }
-                    }
-
-                    // set witness
-                    push_instance::<E, _>(
-                        wits,
-                        c_aux_witin[0].id.into(),
-                        c_aux8.into_iter().flatten().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        c_temp_witin[0].id.into(),
-                        c_temp.into_iter().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        c_rot_witin[0].id.into(),
-                        crot8.into_iter().flatten(),
-                    );
-                    push_instance::<E, _>(wits, d_witin[0].id.into(), d8.into_iter().flatten());
-                    push_instance::<E, _>(
-                        wits,
-                        theta_output_witin[0].id.into(),
-                        theta_state8.into_iter().flatten().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        rotation_witness_witin[0].id.into(),
-                        rotation_witness.into_iter(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        rhopi_output_witin[0].id.into(),
-                        rhopi_output8.into_iter().flatten().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        nonlinear_witin[0].id.into(),
-                        nonlinear8.into_iter().flatten().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        chi_output_witin[0].id.into(),
-                        chi_output8[0][0].iter().copied(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        iota_output_witin[0].id.into(),
-                        iota_output8.into_iter().flatten().flatten(),
-                    );
-                    // TODO temporarily move RC to witness
-                    push_instance::<E, _>(
-                        wits,
-                        rc_witin[0].id.into(),
-                        (0..8).map(|i| (RC[round] >> (i << 3)) & 0xFF),
-                    );
-
-                    state64 = iota_output64;
-                }
+                    });
             });
     }
 }
@@ -959,13 +943,12 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
 -> Result<(TestKeccakLayout<E>, GKRCircuit<E>, u16, u16), ZKVMError> {
     let mut cs = ConstraintSystem::new(|| "lookup_keccak");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
+    let layout = KeccakLayout::build_layer_logic(&mut cb, ())?;
 
     // constrain vmstate
     let vm_state = StateInOut::construct_circuit(&mut cb, false)?;
 
     let state_ptr = cb.create_witin(|| "state_ptr");
-
-    let mut layout = KeccakLayout::build_layer_logic(&mut cb, KeccakParams {})?;
 
     let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
         .enumerate()
@@ -981,16 +964,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
         })
         .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-    let (out_evals, mut chip) = layout.finalize(&mut cb);
-
-    let layer = Layer::from_circuit_builder(
-        &cb,
-        "lookup_keccak".to_string(),
-        layout.n_challenges,
-        out_evals,
-    );
-    chip.add_layer(layer);
-
+    let chip = layout.finalize("lookup_keccak".to_string(), &mut cb);
     Ok((
         TestKeccakLayout {
             layout,
@@ -1208,11 +1182,9 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             .0
             .par_iter()
             .map(|wit| {
-                let point = point[point.len() - wit.num_vars()..point.len()].to_vec();
-                PointAndEval {
-                    point: point.clone(),
-                    eval: wit.evaluate(&point),
-                }
+                let point = point[point.len() - wit.num_vars()..].to_vec();
+                let eval = wit.evaluate(&point);
+                PointAndEval { point, eval }
             })
             .collect::<Vec<_>>()
     };
@@ -1226,7 +1198,9 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
-    let selector_ctxs = vec![SelectorContext::new(0, num_instances, log2_num_instance_rounds); 3];
+    let selector_ctxs_len = gkr_circuit.layers[0].selector_ctxs_len();
+    let selector_ctxs =
+        vec![SelectorContext::new(0, num_instances, log2_num_instance_rounds); selector_ctxs_len];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -1285,9 +1259,12 @@ mod tests {
 
     #[test]
     fn test_keccakf() {
-        for num_instances in 1..32 {
-            test_keccakf_helper(num_instances)
-        }
+        test_keccakf_helper(8)
+    }
+
+    #[test]
+    fn test_keccakf_non_pow2() {
+        test_keccakf_helper(7)
     }
 
     fn test_keccakf_helper(num_instances: usize) {

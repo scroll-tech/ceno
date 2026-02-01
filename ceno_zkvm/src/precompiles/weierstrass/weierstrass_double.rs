@@ -30,10 +30,11 @@ use derive::AlignedBorrow;
 use ff_ext::{ExtensionField, SmallField};
 use generic_array::{GenericArray, sequence::GenericSequence, typenum::Unsigned};
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
+    default_out_eval_groups,
     error::{BackendError, CircuitBuilderError},
     gkr::{GKRCircuit, GKRProof, GKRProverOutput, layer::Layer, mock::MockProver},
     selector::{SelectorContext, SelectorType},
@@ -41,7 +42,7 @@ use gkr_iop::{
 use itertools::{Itertools, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, ToExpr, WitIn,
+    Expression, StructuralWitIn, ToExpr, WitIn,
     util::{ceil_log2, max_usable_threads},
 };
 use num::BigUint;
@@ -69,7 +70,7 @@ use crate::{
     gadgets::{FieldOperation, field_op::FieldOpCols},
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
-        SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
+        utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
         weierstrass::EllipticCurveDoubleInstance,
     },
     scheme::utils::gkr_witness,
@@ -105,13 +106,9 @@ pub struct WeierstrassDoubleAssignLayer<WitT, P: FieldParameters + NumWords> {
 #[derive(Clone, Debug)]
 pub struct WeierstrassDoubleAssignLayout<E: ExtensionField, EC: EllipticCurve> {
     pub layer_exprs: WeierstrassDoubleAssignLayer<WitIn, EC::BaseField>,
-    pub selector_type_layout: SelectorTypeLayout<E>,
+    pub sel: StructuralWitIn,
     pub input32_exprs: GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsCurvePoint>,
     pub output32_exprs: GenericArray<MemoryExpr<E>, <EC::BaseField as NumWords>::WordsCurvePoint>,
-    pub n_fixed: usize,
-    pub n_committed: usize,
-    pub n_structural_witin: usize,
-    pub n_challenges: usize,
 }
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
@@ -134,14 +131,6 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
             slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
         };
 
-        let eq = cb.create_placeholder_structural_witin(|| "weierstrass_double_eq");
-        let sel = SelectorType::Prefix(eq.expr());
-        let selector_type_layout = SelectorTypeLayout {
-            sel_first: None,
-            sel_last: None,
-            sel_all: sel.clone(),
-        };
-
         let input32_exprs: GenericArray<
             MemoryExpr<E>,
             <EC::BaseField as NumWords>::WordsCurvePoint,
@@ -153,13 +142,9 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
 
         Self {
             layer_exprs: WeierstrassDoubleAssignLayer { wits },
-            selector_type_layout,
+            sel: cb.create_placeholder_structural_witin(|| "weierstrass_double_sel"),
             input32_exprs,
             output32_exprs,
-            n_fixed: 0,
-            n_committed: 0,
-            n_challenges: 0,
-            n_structural_witin: 0,
         }
     }
 
@@ -354,56 +339,15 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
-        self.n_fixed = cb.cs.num_fixed;
-        self.n_committed = cb.cs.num_witin as usize;
-        self.n_structural_witin = cb.cs.num_structural_witin as usize;
-        self.n_challenges = 0;
+    fn finalize(&self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {
+        let sel = SelectorType::Prefix(self.sel.expr());
+        cb.cs.set_all_default_selectors(sel);
 
-        // register selector to legacy constrain system
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
-
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-        (
-            [
-                // r_record
-                (0..r_len).collect_vec(),
-                // w_record
-                (r_len..r_len + w_len).collect_vec(),
-                // lk_record
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                // zero_record
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, self.n_challenges),
-        )
-    }
-
-    fn n_committed(&self) -> usize {
-        todo!()
-    }
-
-    fn n_fixed(&self) -> usize {
-        todo!()
-    }
-
-    fn n_challenges(&self) -> usize {
-        todo!()
-    }
-
-    fn n_evaluations(&self) -> usize {
-        todo!()
-    }
-
-    fn n_layers(&self) -> usize {
-        todo!()
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb, 0);
+        let layer = Layer::from_circuit_builder(cb, name, 0, out_evals);
+        chip.add_layer(layer);
+        chip
     }
 }
 
@@ -430,9 +374,14 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
         let num_instances = wits[0].num_instances();
         let nthreads = max_usable_threads();
         let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
-        let num_wit_cols = size_of::<WeierstrassDoubleAssignWitCols<u8, EC::BaseField>>();
+        let (layout_start, num_layout_wit_cols) = (
+            self.layer_exprs.wits.p_x.0[0].id as usize,
+            size_of::<WeierstrassDoubleAssignWitCols<u8, EC::BaseField>>(),
+        );
 
         let [wits, structural_wits] = wits;
+        let wits_width = wits.width;
+        let structural_wits_width = structural_wits.width;
         let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
         let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
         raw_witin_iter
@@ -440,17 +389,15 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
             .zip_eq(phase1.instances.par_chunks(num_instance_per_batch))
             .for_each(|((rows, eqs), phase1_instances)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
-                rows.chunks_mut(self.n_committed)
-                    .zip_eq(eqs.chunks_mut(self.n_structural_witin))
+                rows.chunks_mut(wits_width)
+                    .zip_eq(eqs.chunks_mut(structural_wits_width))
                     .zip_eq(phase1_instances)
                     .for_each(|((row, eqs), phase1_instance)| {
                         let cols: &mut WeierstrassDoubleAssignWitCols<E::BaseField, EC::BaseField> =
-                            row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
+                            row[layout_start..][..num_layout_wit_cols] // TODO: Find a better way to write it.
                                 .borrow_mut(); // We should construct the circuit to guarantee this part occurs first.
                         Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
-                        for x in eqs.iter_mut() {
-                            *x = E::BaseField::ONE;
-                        }
+                        eqs[self.sel.id as usize] = E::BaseField::ONE;
                     });
             });
     }
@@ -496,7 +443,7 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParam
 
     let point_ptr_0 = cb.create_witin(|| "state_ptr_0");
 
-    let mut layout = WeierstrassDoubleAssignLayout::build_layer_logic(&mut cb, ())?;
+    let layout = WeierstrassDoubleAssignLayout::build_layer_logic(&mut cb, ())?;
 
     // Write the result to the same address of the first input point.
     let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
@@ -513,15 +460,7 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParam
         })
         .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-    let (out_evals, mut chip) = layout.finalize(&mut cb);
-
-    let layer = Layer::from_circuit_builder(
-        &cb,
-        "weierstrass_double".to_string(),
-        layout.n_challenges,
-        out_evals,
-    );
-    chip.add_layer(layer);
+    let chip = layout.finalize("weierstrass_double".to_string(), &mut cb);
 
     Ok((
         TestWeierstrassDoubleLayout {
@@ -720,10 +659,15 @@ pub fn run_weierstrass_double<
             .0
             .par_iter()
             .map(|wit| {
-                let point = point[point.len() - wit.num_vars()..point.len()].to_vec();
+                let full_point = point.clone();
+                let eval_point = if wit.num_vars() == 0 {
+                    Vec::new()
+                } else {
+                    full_point[full_point.len() - wit.num_vars()..].to_vec()
+                };
                 PointAndEval {
-                    point: point.clone(),
-                    eval: wit.evaluate(&point),
+                    point: full_point,
+                    eval: wit.evaluate(&eval_point),
                 }
             })
             .collect::<Vec<_>>();
@@ -747,7 +691,9 @@ pub fn run_weierstrass_double<
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
-    let selector_ctxs = vec![SelectorContext::new(0, num_instances, log2_num_instance); 1];
+    let selector_ctxs_len = gkr_circuit.layers[0].selector_ctxs_len();
+    let selector_ctxs =
+        vec![SelectorContext::new(0, num_instances, log2_num_instance); selector_ctxs_len];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -826,7 +772,7 @@ mod tests {
 
     #[test]
     fn test_weierstrass_double_bn254() {
-        test_weierstrass_double_helper::<Bn254>();
+        test_weierstrass_double_helper::<Bn254>()
     }
 
     #[test]
@@ -841,7 +787,7 @@ mod tests {
 
     #[test]
     fn test_weierstrass_double_secp256r1() {
-        test_weierstrass_double_helper::<Secp256r1>();
+        test_weierstrass_double_helper::<Secp256r1>()
     }
 
     fn test_weierstrass_double_nonpow2_helper<WP: WeierstrassParameters>() {

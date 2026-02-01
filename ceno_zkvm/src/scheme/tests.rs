@@ -1,5 +1,5 @@
 use crate::{
-    circuit_builder::CircuitBuilder,
+    circuit_builder::{CircuitBuilder, ConstraintSystem},
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -9,9 +9,12 @@ use crate::{
         constants::DYNAMIC_RANGE_MAX_BITS,
         cpu::CpuTowerProver,
         create_backend, create_prover,
-        hal::{ProofInput, TowerProverSpec},
+        hal::{ProofInput, TowerProver, TowerProverSpec},
     },
-    structs::{ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    structs::{
+        ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
+        ZKVMWitnesses,
+    },
     tables::ProgramTableCircuit,
     witness::{LkMultiplicity, set_val},
 };
@@ -22,12 +25,14 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use gkr_iop::cpu::default_backend_config;
+use gkr_iop::selector::SelectorType;
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::{MultilinearExtensionGpu, gpu_prover::*};
-use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
-use std::marker::PhantomData;
-#[cfg(feature = "gpu")]
-use std::sync::Arc;
+use multilinear_extensions::{
+    ToExpr, WitIn,
+    mle::{ArcMultilinearExtension, MultilinearExtension},
+};
+use std::{marker::PhantomData, rc::Rc, sync::Arc};
 
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
@@ -87,9 +92,9 @@ impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for Test
             cb.assert_ux::<_, _, 16>(|| "regid_in_range", reg_id.expr())?;
             Result::<(), ZKVMError>::Ok(())
         })?;
-        assert_eq!(cb.cs.lk_expressions.len(), L);
-        assert_eq!(cb.cs.r_expressions.len(), RW);
-        assert_eq!(cb.cs.w_expressions.len(), RW);
+        assert_eq!(cb.cs.lk_expressions_len(), L);
+        assert_eq!(cb.cs.r_expressions_len(), RW);
+        assert_eq!(cb.cs.w_expressions_len(), RW);
 
         Ok(TestConfig { reg_id })
     }
@@ -266,6 +271,85 @@ fn test_rw_lk_expression_combination() {
     test_rw_lk_expression_combination_inner::<19, 17, E, Pcs>();
     test_rw_lk_expression_combination_inner::<61, 17, E, Pcs>();
     test_rw_lk_expression_combination_inner::<17, 61, E, Pcs>();
+}
+
+#[test]
+fn test_tower_record_order_multi_selector() {
+    type E = GoldilocksExt2;
+    type Pcs = WhirDefault<E>;
+
+    let mut cs = ConstraintSystem::<E>::new(|| "test");
+    let mut cb = CircuitBuilder::new(&mut cs);
+    let reg_id = cb.create_witin(|| "reg_id");
+    let record = vec![1.into(), reg_id.expr()];
+
+    cb.with_selector(SelectorType::None, |cb| {
+        cb.read_record(|| "read_a", RAMType::Register, record.clone())?;
+        cb.write_record(|| "write_a", RAMType::Register, record.clone())?;
+        Ok(())
+    })
+    .unwrap();
+
+    let sel_b = cb.create_placeholder_structural_witin(|| "sel_b");
+    let sel_b = SelectorType::Prefix(sel_b.expr());
+    cb.with_selector(sel_b, |cb| {
+        cb.read_record(|| "read_b", RAMType::Register, record.clone())?;
+        cb.write_record(|| "write_b", RAMType::Register, record)?;
+        Ok(())
+    })
+    .unwrap();
+
+    assert_eq!(cs.expression_groups.len(), 2);
+
+    let composed_cs = ComposedConstrainSystem {
+        zkvm_v1_css: cs,
+        gkr_circuit: None,
+    };
+
+    let (max_num_variables, security_level) = default_backend_config();
+    let backend = Rc::new(gkr_iop::cpu::CpuBackend::<E, Pcs>::new(
+        max_num_variables,
+        security_level,
+    ));
+    let prover = gkr_iop::cpu::CpuProver::new(backend);
+
+    let input = ProofInput::<gkr_iop::cpu::CpuBackend<E, Pcs>> {
+        witness: vec![],
+        structural_witness: vec![],
+        fixed: vec![],
+        public_input: vec![],
+        pub_io_evals: vec![],
+        num_instances: vec![2],
+        has_ecc_ops: false,
+    };
+
+    let to_e = |v: u64| E::from(<E as ExtensionField>::BaseField::from_canonical_u64(v));
+    let make_record = |a: u64, b: u64| -> ArcMultilinearExtension<E> {
+        Arc::new(vec![to_e(a), to_e(b)].into_mle())
+    };
+    let records = vec![
+        make_record(1, 2), // group A read
+        make_record(3, 4), // group A write
+        make_record(5, 6), // group B read
+        make_record(7, 8), // group B write
+    ];
+
+    let (out_evals, _prod_specs, _logup_specs) =
+        prover.build_tower_witness(&composed_cs, &input, &records);
+
+    assert_eq!(out_evals.len(), 3);
+    let r_out_evals = &out_evals[0];
+    let w_out_evals = &out_evals[1];
+    let lk_out_evals = &out_evals[2];
+
+    assert!(lk_out_evals.is_empty());
+    assert_eq!(r_out_evals.len(), 2);
+    assert_eq!(w_out_evals.len(), 2);
+
+    assert_eq!(r_out_evals[0], vec![to_e(1), to_e(2)]);
+    assert_eq!(w_out_evals[0], vec![to_e(3), to_e(4)]);
+    assert_eq!(r_out_evals[1], vec![to_e(5), to_e(6)]);
+    assert_eq!(w_out_evals[1], vec![to_e(7), to_e(8)]);
 }
 
 const PROGRAM_CODE: [ceno_emul::Instruction; 4] = [

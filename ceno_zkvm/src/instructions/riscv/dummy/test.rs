@@ -28,5 +28,5 @@ fn test_large_ecall_dummy_keccak() {
     )
     .unwrap();
 
-    MockProver::assert_satisfied_raw(&cb, raw_witin, &program, None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &program, 1, None, Some(lkm));
 }

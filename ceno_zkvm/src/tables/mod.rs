@@ -2,10 +2,10 @@ use crate::{circuit_builder::CircuitBuilder, error::ZKVMError, structs::ProgramP
 use ff_ext::ExtensionField;
 use gkr_iop::{
     chip::Chip,
+    default_out_eval_groups,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
 };
-use itertools::Itertools;
 use multilinear_extensions::ToExpr;
 use std::collections::HashMap;
 use witness::RowMajorMatrix;
@@ -45,38 +45,15 @@ pub trait TableCircuit<E: ExtensionField> {
         param: &ProgramParams,
     ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
         let config = Self::construct_circuit(cb, param)?;
-        let r_table_len = cb.cs.r_table_expressions.len();
-        let w_table_len = cb.cs.w_table_expressions.len();
-        let lk_table_len = cb.cs.lk_table_expressions.len() * 2;
 
         let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(selector.expr());
+        cb.cs.set_default_read_selector(selector_type.clone());
+        cb.cs.set_default_write_selector(selector_type.clone());
+        cb.cs.set_default_lookup_selector(selector_type.clone());
 
-        // all shared the same selector
-        let (out_evals, mut chip) = (
-            [
-                // r_record
-                (0..r_table_len).collect_vec(),
-                // w_record
-                (r_table_len..r_table_len + w_table_len).collect_vec(),
-                // lk_record
-                (r_table_len + w_table_len..r_table_len + w_table_len + lk_table_len).collect_vec(),
-                // zero_record
-                vec![],
-            ],
-            Chip::new_from_cb(cb, 0),
-        );
-
-        // register selector to legacy constrain system
-        if r_table_len > 0 {
-            cb.cs.r_selector = Some(selector_type.clone());
-        }
-        if w_table_len > 0 {
-            cb.cs.w_selector = Some(selector_type.clone());
-        }
-        if lk_table_len > 0 {
-            cb.cs.lk_selector = Some(selector_type.clone());
-        }
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb, 0);
 
         let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
         chip.add_layer(layer);

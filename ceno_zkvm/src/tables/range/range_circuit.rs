@@ -14,11 +14,11 @@ use crate::{
 use ff_ext::ExtensionField;
 use gkr_iop::{
     chip::Chip,
+    default_out_eval_groups,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
     tables::LookupTable,
 };
-use itertools::Itertools;
 use multilinear_extensions::ToExpr;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
@@ -108,28 +108,13 @@ impl<E: ExtensionField, const MAX_BITS_1: usize, const MAX_BITS_2: usize, R: Ran
         param: &ProgramParams,
     ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
         let config = Self::construct_circuit(cb, param)?;
-        let lk_table_len = cb.cs.lk_table_expressions.len() * 2;
 
         let selector = cb.create_placeholder_structural_witin(|| "selector");
-        let selector_type = SelectorType::Whole(selector.expr());
+        cb.cs
+            .set_default_lookup_selector(SelectorType::Whole(selector.expr()));
 
-        // all shared the same selector
-        let (out_evals, mut chip) = (
-            [
-                // r_record
-                vec![],
-                // w_record
-                vec![],
-                // lk_record
-                (0..lk_table_len).collect_vec(),
-                // zero_record
-                vec![],
-            ],
-            Chip::new_from_cb(cb, 0),
-        );
-
-        // register selector to legacy constrain system
-        cb.cs.lk_selector = Some(selector_type.clone());
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb, 0);
 
         let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
         chip.add_layer(layer);

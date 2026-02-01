@@ -1,5 +1,5 @@
 use ff_ext::ExtensionField;
-use gkr_iop::{error::CircuitBuilderError, gadgets::AssertLtConfig};
+use gkr_iop::{error::CircuitBuilderError, gadgets::AssertLtConfig, selector::SelectorType};
 
 use crate::instructions::riscv::constants::UINT_LIMBS;
 use multilinear_extensions::{Expression, ToExpr};
@@ -72,5 +72,17 @@ pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() 
         ts: Expression<E>,
         prev_values: MemoryExpr<E>,
         value: MemoryExpr<E>,
+    ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError>;
+
+    fn memory_write_with_rw_selectors(
+        &mut self,
+        name_fn: N,
+        memory_addr: &AddressExpr<E>,
+        prev_ts: Expression<E>,
+        ts: Expression<E>,
+        prev_values: MemoryExpr<E>,
+        value: MemoryExpr<E>,
+        r_selector: &SelectorType<E>,
+        w_selector: &SelectorType<E>,
     ) -> Result<(Expression<E>, AssertLtConfig), CircuitBuilderError>;
 }

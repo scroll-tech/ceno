@@ -90,5 +90,5 @@ fn verify<I: LogicOp>(name: &'static str, rs1_read: u32, imm: u32, expected_rd_w
     cb.require_equal(|| "assert_rd_written", rd_written_expr, expected.value())
         .unwrap();
 
-    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], 1, None, Some(lkm));
 }

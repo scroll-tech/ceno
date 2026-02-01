@@ -59,10 +59,7 @@ use util::{
 pub struct GpuTowerProver;
 
 use crate::{
-    scheme::{
-        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
-        septic_curve::SepticPoint,
-    },
+    scheme::{constants::NUM_FANIN, cpu::CpuEccProver, utils::global_selector_ctxs},
     structs::EccQuarkProof,
 };
 use gkr_iop::{
@@ -70,17 +67,29 @@ use gkr_iop::{
     selector::{SelectorContext, SelectorType},
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProdKind {
+    Read,
+    Write,
+}
+
 // Extract out_evals from GPU-built tower witnesses
 #[allow(clippy::type_complexity)]
 fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     prod_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built product towers
     logup_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built logup towers
-    r_set_len: usize,
+    prod_kinds: &[ProdKind],
 ) -> (Vec<Vec<E>>, Vec<Vec<E>>, Vec<Vec<E>>) {
+    assert_eq!(
+        prod_gpu.len(),
+        prod_kinds.len(),
+        "prod_gpu_specs and prod_kinds length mismatch"
+    );
+
     // Extract product out_evals from GPU towers
     let mut r_out_evals = Vec::new();
     let mut w_out_evals = Vec::new();
-    for (i, gpu_spec) in prod_gpu.iter().enumerate() {
+    for (gpu_spec, kind) in prod_gpu.iter().zip(prod_kinds.iter()) {
         let first_layer_evals: Vec<E> = gpu_spec
             .get_output_evals()
             .expect("Failed to extract final evals from GPU product tower");
@@ -92,11 +101,10 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
             "Product tower first layer should have 2 MLEs"
         );
 
-        // Split into r_out_evals and w_out_evals based on r_set_len
-        if i < r_set_len {
-            r_out_evals.push(first_layer_evals);
-        } else {
-            w_out_evals.push(first_layer_evals);
+        // Split into r_out_evals and w_out_evals based on prod_kinds order
+        match kind {
+            ProdKind::Read => r_out_evals.push(first_layer_evals),
+            ProdKind::Write => w_out_evals.push(first_layer_evals),
         }
     }
 
@@ -257,6 +265,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     (
         Vec<ceno_gpu::GpuProverSpec<'buf>>,
         Vec<ceno_gpu::GpuProverSpec<'buf>>,
+        Vec<ProdKind>,
     ),
     String,
 > {
@@ -279,31 +288,91 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         >(records)
     };
 
-    // Parse records into different categories (same as build_tower_witness)
-    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
-    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
     let mut offset = 0;
-    let r_set_wit = &records[offset..][..num_reads];
-    offset += num_reads;
-    let w_set_wit = &records[offset..][..num_writes];
-    offset += num_writes;
-    let lk_n_wit = &records[offset..][..cs.lk_table_expressions.len()];
-    offset += cs.lk_table_expressions.len();
-    let lk_d_wit = if !cs.lk_table_expressions.is_empty() {
-        &records[offset..][..cs.lk_table_expressions.len()]
-    } else {
-        &records[offset..][..cs.lk_expressions.len()]
-    };
+    let mut prod_last_layers = Vec::new();
+    let mut logup_last_layers = Vec::new();
+    let mut prod_kinds = Vec::new();
+
+    // Parse records into different categories (same as build_tower_witness)
+    for (_, group) in cs.expression_groups.iter() {
+        let num_reads = group.r_expressions.len() + group.r_table_expressions.len();
+        let num_writes = group.w_expressions.len() + group.w_table_expressions.len();
+        let r_set_wit = &records[offset..][..num_reads];
+        offset += num_reads;
+        let w_set_wit = &records[offset..][..num_writes];
+        offset += num_writes;
+        let lk_table_len = group.lk_table_expressions.len();
+        let lk_n_wit = &records[offset..][..lk_table_len];
+        offset += lk_table_len;
+        let lk_d_wit = if lk_table_len > 0 {
+            &records[offset..][..lk_table_len]
+        } else {
+            &records[offset..][..group.lk_expressions.len()]
+        };
+
+        // prod: last layers
+        for wit in r_set_wit.iter() {
+            prod_last_layers.push(wit.as_view_chunks(NUM_FANIN));
+            prod_kinds.push(ProdKind::Read);
+        }
+        for wit in w_set_wit.iter() {
+            prod_last_layers.push(wit.as_view_chunks(NUM_FANIN));
+            prod_kinds.push(ProdKind::Write);
+        }
+
+        // logup: last layers
+        let lk_numerator_last_layer = lk_n_wit
+            .iter()
+            .map(|wit| wit.as_view_chunks(NUM_FANIN_LOGUP))
+            .collect::<Vec<_>>();
+        let lk_denominator_last_layer = lk_d_wit
+            .iter()
+            .map(|wit| wit.as_view_chunks(NUM_FANIN_LOGUP))
+            .collect::<Vec<_>>();
+        if !lk_numerator_last_layer.is_empty() {
+            // Case when we have both numerator and denominator
+            // Combine [p1, p2] from numerator and [q1, q2] from denominator
+            for (lk_n_chunks, lk_d_chunks) in lk_numerator_last_layer
+                .into_iter()
+                .zip(lk_denominator_last_layer)
+            {
+                let mut last_layer = lk_n_chunks;
+                last_layer.extend(lk_d_chunks);
+                logup_last_layers.push(last_layer);
+            }
+        } else if !lk_denominator_last_layer.is_empty() {
+            // Case when numerator is empty - create shared ones_buffer and use views
+            let nv = lk_denominator_last_layer[0][0].num_vars();
+
+            let ones_poly = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
+                .map_err(|e| format!("Failed to create shared ones_buffer: {:?}", e))?;
+            let ones_poly_static: GpuPolynomialExt<'static> =
+                unsafe { std::mem::transmute(ones_poly) };
+            ones_buffer.push(ones_poly_static);
+
+            // Get reference from storage to ensure proper lifetime
+            let ones_poly_ref = ones_buffer.last().unwrap();
+            let mle_len_bytes = ones_poly_ref.evaluations().len() * std::mem::size_of::<BB31Ext>();
+
+            // Create views referencing the shared ones_buffer for each tower's p1, p2
+            for lk_d_chunks in lk_denominator_last_layer {
+                let p1_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
+                let p2_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
+                let p1_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p1_view), nv);
+                let p2_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p2_view), nv);
+                let p1_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p1_gpu) };
+                let p2_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p2_gpu) };
+                let mut last_layer = vec![p1_gpu, p2_gpu];
+                last_layer.extend(lk_d_chunks);
+                logup_last_layers.push(last_layer);
+            }
+        }
+    }
 
     assert_eq!(big_buffers.len(), 0, "expect no big buffers");
 
     // prod: last layes & buffer
     let mut is_prod_buffer_exists = false;
-    let prod_last_layers = r_set_wit
-        .iter()
-        .chain(w_set_wit.iter())
-        .map(|wit| wit.as_view_chunks(NUM_FANIN))
-        .collect::<Vec<_>>();
     if !prod_last_layers.is_empty() {
         let first_layer = &prod_last_layers[0];
         assert_eq!(first_layer.len(), 2, "prod last_layer must have 2 MLEs");
@@ -325,66 +394,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         is_prod_buffer_exists = true;
     }
 
-    // logup: last layes
     let mut is_logup_buffer_exists = false;
-    let lk_numerator_last_layer = lk_n_wit
-        .iter()
-        .map(|wit| wit.as_view_chunks(NUM_FANIN_LOGUP))
-        .collect::<Vec<_>>();
-    let lk_denominator_last_layer = lk_d_wit
-        .iter()
-        .map(|wit| wit.as_view_chunks(NUM_FANIN_LOGUP))
-        .collect::<Vec<_>>();
-    let logup_last_layers = if !lk_numerator_last_layer.is_empty() {
-        // Case when we have both numerator and denominator
-        // Combine [p1, p2] from numerator and [q1, q2] from denominator
-        lk_numerator_last_layer
-            .into_iter()
-            .zip(lk_denominator_last_layer)
-            .map(|(lk_n_chunks, lk_d_chunks)| {
-                let mut last_layer = lk_n_chunks;
-                last_layer.extend(lk_d_chunks);
-                last_layer
-            })
-            .collect::<Vec<_>>()
-    } else if lk_denominator_last_layer.is_empty() {
-        vec![]
-    } else {
-        // Case when numerator is empty - create shared ones_buffer and use views
-        // This saves memory by having all p1, p2 polynomials reference the same buffer
-        let nv = lk_denominator_last_layer[0][0].num_vars();
-
-        // Create one shared ones_buffer as Owned (can be 'static)
-        let ones_poly = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE)
-            .map_err(|e| format!("Failed to create shared ones_buffer: {:?}", e))
-            .unwrap();
-        // SAFETY: Owned buffer can be safely treated as 'static
-        let ones_poly_static: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(ones_poly) };
-        ones_buffer.push(ones_poly_static);
-
-        // Get reference from storage to ensure proper lifetime
-        let ones_poly_ref = ones_buffer.last().unwrap();
-        let mle_len_bytes = ones_poly_ref.evaluations().len() * std::mem::size_of::<BB31Ext>();
-
-        // Create views referencing the shared ones_buffer for each tower's p1, p2
-        lk_denominator_last_layer
-            .into_iter()
-            .map(|lk_d_chunks| {
-                // Create views of ones_buffer for p1 and p2
-                let p1_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
-                let p2_view = ones_poly_ref.evaluations().as_slice_range(0..mle_len_bytes);
-                let p1_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p1_view), nv);
-                let p2_gpu = GpuPolynomialExt::new(BufferImpl::new_from_view(p2_view), nv);
-                // SAFETY: views from 'static buffer can be 'static
-                let p1_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p1_gpu) };
-                let p2_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p2_gpu) };
-                // Use [p1, p2, q1, q2] format for the last layer
-                let mut last_layer = vec![p1_gpu, p2_gpu];
-                last_layer.extend(lk_d_chunks);
-                last_layer
-            })
-            .collect::<Vec<_>>()
-    };
     if !logup_last_layers.is_empty() {
         let first_layer = &logup_last_layers[0];
         assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
@@ -492,7 +502,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         logup_gpu_specs.extend(gpu_specs);
         exit_span!(span_logup);
     }
-    Ok((prod_gpu_specs, logup_gpu_specs))
+    Ok((prod_gpu_specs, logup_gpu_specs, prod_kinds))
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBackend<E, PCS>>
@@ -545,12 +555,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             panic!("GPU backend only supports BabyBear base field");
         }
 
-        // Calculate r_set_len directly from constraint system
-        let ComposedConstrainSystem {
-            zkvm_v1_css: cs, ..
-        } = composed_cs;
-        let r_set_len = cs.r_expressions.len() + cs.r_table_expressions.len();
-
         let cuda_hal = get_cuda_hal().unwrap();
         let (point, proof, lk_out_evals, w_out_evals, r_out_evals) = {
             // build_tower_witness_gpu will allocate buffers and build GPU specs
@@ -558,8 +562,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             let mut _big_buffers: Vec<BufferImpl<BB31Ext>> = Vec::new();
             let mut _ones_buffer: Vec<GpuPolynomialExt<'static>> = Vec::new();
             let mut _view_last_layers: Vec<Vec<Vec<GpuPolynomialExt<'static>>>> = Vec::new();
-            let (prod_gpu, logup_gpu) =
-                info_span!("[ceno] build_tower_witness_gpu").in_scope(|| {
+            let (prod_gpu, logup_gpu, prod_kinds) = info_span!("[ceno] build_tower_witness_gpu")
+                .in_scope(|| {
                     build_tower_witness_gpu(
                         composed_cs,
                         input,
@@ -579,7 +583,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             // This is the true optimization - using GPU tower results instead of CPU inference
             let span = entered_span!("extract_out_evals_from_gpu_towers", profiling_2 = true);
             let (r_out_evals, w_out_evals, lk_out_evals) =
-                extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
+                extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, &prod_kinds);
             exit_span!(span);
 
             // transcript >>> BasicTranscript<E>
@@ -662,28 +666,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
                 gkr_circuit
                     .layers
                     .first()
-                    .map(|layer| layer.out_sel_and_eval_exprs.len())
+                    .map(|layer| layer.selector_ctxs_len())
                     .unwrap_or(0)
             ]
         } else {
             // it's global chip
-            vec![
-                SelectorContext {
-                    offset: 0,
-                    num_instances: input.num_instances[0],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: input.num_instances[0],
-                    num_instances: input.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: 0,
-                    num_instances,
-                    num_vars: num_var_with_rotation,
-                },
-            ]
+            global_selector_ctxs(cs, gkr_circuit, &input.num_instances, num_var_with_rotation)
         };
         let pub_io_mles = cs
             .instance_openings

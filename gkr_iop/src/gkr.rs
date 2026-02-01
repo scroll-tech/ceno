@@ -1,4 +1,5 @@
 use core::fmt;
+use std::fmt::Debug;
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
@@ -29,13 +30,29 @@ pub struct GKRCircuit<E: ExtensionField> {
     pub n_evaluations: usize,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct GKRCircuitWitness<'a, PB: ProverBackend> {
     pub layers: Vec<LayerWitness<'a, PB>>,
 }
 
-#[derive(Clone, Debug)]
+impl<PB: ProverBackend> Debug for GKRCircuitWitness<'_, PB> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GKRCircuitWitness")
+            .field("layers", &self.layers)
+            .finish()
+    }
+}
+
+#[derive(Clone)]
 pub struct GKRCircuitOutput<'a, PB: ProverBackend>(pub LayerWitness<'a, PB>);
+
+impl<PB: ProverBackend> Debug for GKRCircuitOutput<'_, PB> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GKRCircuitOutput")
+            .field("layer", &self.0)
+            .finish()
+    }
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(

@@ -8,7 +8,7 @@ use crate::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         hal::{DeviceProvingKey, EccQuarkProver, ProofInput, TowerProverSpec},
         septic_curve::{SepticExtension, SepticPoint, SymbolicSepticExtension},
-        utils::{infer_tower_logup_witness, infer_tower_product_witness},
+        utils::{global_selector_ctxs, infer_tower_logup_witness, infer_tower_product_witness},
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
@@ -604,163 +604,176 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let num_var_with_rotation =
             input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
 
-        let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
-        let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+        let mut read_evals = vec![];
+        let mut write_evals = vec![];
+        let mut logup_evals = vec![];
+        let mut prod_specs = vec![];
+        let mut logup_specs = vec![];
+
         let mut offset = 0;
-        let r_set_wit = &records[offset..][..num_reads];
-        assert_eq!(r_set_wit.len(), num_reads);
-        offset += num_reads;
-        let w_set_wit = &records[offset..][..num_writes];
-        assert_eq!(w_set_wit.len(), num_writes);
-        offset += num_writes;
-        let lk_n_wit = &records[offset..][..cs.lk_table_expressions.len()];
-        offset += cs.lk_table_expressions.len();
-        let lk_d_wit = if !cs.lk_table_expressions.is_empty() {
-            &records[offset..][..cs.lk_table_expressions.len()]
-        } else {
-            &records[offset..][..cs.lk_expressions.len()]
-        };
+        cs.expression_groups.iter().for_each(|(_, group)| {
+            let num_reads = group.r_expressions.len() + group.r_table_expressions.len();
+            let num_writes = group.w_expressions.len() + group.w_table_expressions.len();
+            let r_set_wit = &records[offset..][..num_reads];
+            offset += num_reads;
+            let w_set_wit = &records[offset..][..num_writes];
+            offset += num_writes;
+            let lk_table_len = group.lk_table_expressions.len();
+            let lk_n_wit = &records[offset..][..lk_table_len];
+            offset += lk_table_len;
+            let lk_d_wit = if lk_table_len > 0 {
+                &records[offset..][..lk_table_len]
+            } else {
+                &records[offset..][..group.lk_expressions.len()]
+            };
 
-        // infer all tower witness after last layer
-        let span = entered_span!("tower_witness_last_layer");
-        let mut r_set_last_layer = r_set_wit
-            .iter()
-            .chain(w_set_wit.iter())
-            .map(|wit| wit.as_view_chunks(NUM_FANIN))
-            .collect::<Vec<_>>();
-        let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
+            // infer all tower witness after last layer
+            let span = entered_span!("tower_witness_last_layer");
+            let mut r_set_last_layer = r_set_wit
+                .iter()
+                .chain(w_set_wit.iter())
+                .map(|wit| wit.as_view_chunks(NUM_FANIN))
+                .collect::<Vec<_>>();
+            let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
 
-        let mut lk_numerator_last_layer = lk_n_wit
-            .iter()
-            .chain(lk_d_wit.iter())
-            .map(|wit| wit.as_view_chunks(NUM_FANIN))
-            .collect::<Vec<_>>();
-        let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
-        exit_span!(span);
+            let mut lk_numerator_last_layer = lk_n_wit
+                .iter()
+                .chain(lk_d_wit.iter())
+                .map(|wit| wit.as_view_chunks(NUM_FANIN))
+                .collect::<Vec<_>>();
+            let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
+            exit_span!(span);
 
-        let span = entered_span!("tower_tower_witness");
-        let r_wit_layers = r_set_last_layer
-            .into_iter()
-            .map(|last_layer| {
-                infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
-            })
-            .collect_vec();
-        let w_wit_layers = w_set_last_layer
-            .into_iter()
-            .map(|last_layer| {
-                infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
-            })
-            .collect_vec();
-        let lk_wit_layers = if !lk_numerator_last_layer.is_empty() {
-            lk_numerator_last_layer
+            let span = entered_span!("tower_tower_witness");
+            let r_wit_layers = r_set_last_layer
                 .into_iter()
-                .zip(lk_denominator_last_layer)
-                .map(|(lk_n, lk_d)| infer_tower_logup_witness(Some(lk_n), lk_d))
-                .collect_vec()
-        } else {
-            lk_denominator_last_layer
+                .map(|last_layer| {
+                    infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
+                })
+                .collect_vec();
+            let w_wit_layers = w_set_last_layer
                 .into_iter()
-                .map(|lk_d| infer_tower_logup_witness(None, lk_d))
-                .collect_vec()
-        };
-        exit_span!(span);
-
-        if cfg!(test) {
-            // sanity check
-            assert_eq!(r_wit_layers.len(), num_reads);
-            assert!(
-                r_wit_layers
-                    .iter()
-                    .zip(r_set_wit.iter()) // depth equals to num_vars
-                    .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
-            );
-            assert!(r_wit_layers.iter().all(|layers| {
-                layers.iter().enumerate().all(|(i, w)| {
-                    let expected_size = 1 << i;
-                    w[0].evaluations().len() == expected_size
-                        && w[1].evaluations().len() == expected_size
+                .map(|last_layer| {
+                    infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
                 })
-            }));
+                .collect_vec();
+            let lk_wit_layers = if !lk_numerator_last_layer.is_empty() {
+                lk_numerator_last_layer
+                    .into_iter()
+                    .zip(lk_denominator_last_layer)
+                    .map(|(lk_n, lk_d)| infer_tower_logup_witness(Some(lk_n), lk_d))
+                    .collect_vec()
+            } else {
+                lk_denominator_last_layer
+                    .into_iter()
+                    .map(|lk_d| infer_tower_logup_witness(None, lk_d))
+                    .collect_vec()
+            };
+            exit_span!(span);
 
-            assert_eq!(w_wit_layers.len(), num_writes);
-            assert!(
-                w_wit_layers
-                    .iter()
-                    .zip(w_set_wit.iter()) // depth equals to num_vars
-                    .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
-            );
-            assert!(w_wit_layers.iter().all(|layers| {
-                layers.iter().enumerate().all(|(i, w)| {
-                    let expected_size = 1 << i;
-                    w[0].evaluations().len() == expected_size
-                        && w[1].evaluations().len() == expected_size
+            if cfg!(test) {
+                // sanity check
+                assert_eq!(r_wit_layers.len(), num_reads);
+                assert!(
+                    r_wit_layers
+                        .iter()
+                        .zip(r_set_wit.iter()) // depth equals to num_vars
+                        .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
+                );
+                assert!(r_wit_layers.iter().all(|layers| {
+                    layers.iter().enumerate().all(|(i, w)| {
+                        let expected_size = 1 << i;
+                        w[0].evaluations().len() == expected_size
+                            && w[1].evaluations().len() == expected_size
+                    })
+                }));
+
+                assert_eq!(w_wit_layers.len(), num_writes);
+                assert!(
+                    w_wit_layers
+                        .iter()
+                        .zip(w_set_wit.iter()) // depth equals to num_vars
+                        .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
+                );
+                assert!(w_wit_layers.iter().all(|layers| {
+                    layers.iter().enumerate().all(|(i, w)| {
+                        let expected_size = 1 << i;
+                        w[0].evaluations().len() == expected_size
+                            && w[1].evaluations().len() == expected_size
+                    })
+                }));
+
+                assert_eq!(
+                    lk_wit_layers.len(),
+                    group.lk_table_expressions.len() + group.lk_expressions.len()
+                );
+                assert!(
+                    lk_wit_layers
+                        .iter()
+                        .zip(lk_n_wit.iter()) // depth equals to num_vars
+                        .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
+                );
+                assert!(lk_wit_layers.iter().all(|layers| {
+                    layers.iter().enumerate().all(|(i, w)| {
+                        let expected_size = 1 << i;
+                        let (p1, p2, q1, q2) = (&w[0], &w[1], &w[2], &w[3]);
+                        p1.evaluations().len() == expected_size
+                            && p2.evaluations().len() == expected_size
+                            && q1.evaluations().len() == expected_size
+                            && q2.evaluations().len() == expected_size
+                    })
+                }));
+            }
+
+            // final evals for verifier
+            let r_out_evals = r_wit_layers
+                .iter()
+                .map(|r_wit_layers| {
+                    r_wit_layers[0]
+                        .iter()
+                        .map(|mle| mle.get_ext_field_vec()[0])
+                        .collect_vec()
                 })
-            }));
-
-            assert_eq!(
-                lk_wit_layers.len(),
-                cs.lk_table_expressions.len() + cs.lk_expressions.len()
-            );
-            assert!(
-                lk_wit_layers
-                    .iter()
-                    .zip(lk_n_wit.iter()) // depth equals to num_vars
-                    .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
-            );
-            assert!(lk_wit_layers.iter().all(|layers| {
-                layers.iter().enumerate().all(|(i, w)| {
-                    let expected_size = 1 << i;
-                    let (p1, p2, q1, q2) = (&w[0], &w[1], &w[2], &w[3]);
-                    p1.evaluations().len() == expected_size
-                        && p2.evaluations().len() == expected_size
-                        && q1.evaluations().len() == expected_size
-                        && q2.evaluations().len() == expected_size
+                .collect_vec();
+            let w_out_evals = w_wit_layers
+                .iter()
+                .map(|w_wit_layers| {
+                    w_wit_layers[0]
+                        .iter()
+                        .map(|mle| mle.get_ext_field_vec()[0])
+                        .collect_vec()
                 })
-            }));
-        }
+                .collect_vec();
+            let lk_out_evals = lk_wit_layers
+                .iter()
+                .map(|lk_wit_layers| {
+                    lk_wit_layers[0]
+                        .iter()
+                        .map(|mle| mle.get_ext_field_vec()[0])
+                        .collect_vec()
+                })
+                .collect_vec();
 
-        // final evals for verifier
-        let r_out_evals = r_wit_layers
-            .iter()
-            .map(|r_wit_layers| {
-                r_wit_layers[0]
-                    .iter()
-                    .map(|mle| mle.get_ext_field_vec()[0])
-                    .collect_vec()
-            })
-            .collect_vec();
-        let w_out_evals = w_wit_layers
-            .iter()
-            .map(|w_wit_layers| {
-                w_wit_layers[0]
-                    .iter()
-                    .map(|mle| mle.get_ext_field_vec()[0])
-                    .collect_vec()
-            })
-            .collect_vec();
-        let lk_out_evals = lk_wit_layers
-            .iter()
-            .map(|lk_wit_layers| {
-                lk_wit_layers[0]
-                    .iter()
-                    .map(|mle| mle.get_ext_field_vec()[0])
-                    .collect_vec()
-            })
-            .collect_vec();
+            let prods = r_wit_layers
+                .into_iter()
+                .chain(w_wit_layers)
+                .map(|witness| TowerProverSpec::<CpuBackend<E, PCS>> { witness })
+                .collect_vec();
+            let logups = lk_wit_layers
+                .into_iter()
+                .map(|witness| TowerProverSpec::<CpuBackend<E, PCS>> { witness })
+                .collect_vec();
 
-        let prod_specs = r_wit_layers
-            .into_iter()
-            .chain(w_wit_layers)
-            .map(|witness| TowerProverSpec { witness })
-            .collect_vec();
-        let lookup_specs = lk_wit_layers
-            .into_iter()
-            .map(|witness| TowerProverSpec { witness })
-            .collect_vec();
+            read_evals.extend(r_out_evals);
+            write_evals.extend(w_out_evals);
+            logup_evals.extend(lk_out_evals);
+            prod_specs.extend(prods);
+            logup_specs.extend(logups);
+        });
 
-        let out_evals = vec![r_out_evals, w_out_evals, lk_out_evals];
+        let out_evals = vec![read_evals, write_evals, logup_evals];
 
-        (out_evals, prod_specs, lookup_specs)
+        (out_evals, prod_specs, logup_specs)
     }
 
     #[tracing::instrument(
@@ -854,28 +867,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 gkr_circuit
                     .layers
                     .first()
-                    .map(|layer| layer.out_sel_and_eval_exprs.len())
+                    .map(|layer| layer.selector_ctxs_len())
                     .unwrap_or(0)
             ]
         } else {
             // it's global chip
-            vec![
-                SelectorContext {
-                    offset: 0,
-                    num_instances: input.num_instances[0],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: input.num_instances[0],
-                    num_instances: input.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: 0,
-                    num_instances,
-                    num_vars: num_var_with_rotation,
-                },
-            ]
+            global_selector_ctxs(cs, gkr_circuit, &input.num_instances, num_var_with_rotation)
         };
         let GKRProverOutput {
             gkr_proof,

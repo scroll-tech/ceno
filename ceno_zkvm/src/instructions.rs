@@ -6,6 +6,7 @@ use ceno_emul::StepRecord;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     chip::Chip,
+    default_out_eval_groups,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
     utils::lk_multiplicity::Multiplicity,
@@ -44,35 +45,16 @@ pub trait Instruction<E: ExtensionField> {
         param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
         let config = Self::construct_circuit(cb, param)?;
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
         let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(selector.expr());
+        cb.cs.set_default_read_selector(selector_type.clone());
+        cb.cs.set_default_write_selector(selector_type.clone());
+        cb.cs.set_default_lookup_selector(selector_type.clone());
+        cb.cs.set_default_zero_selector(selector_type.clone());
 
-        // all shared the same selector
-        let (out_evals, mut chip) = (
-            [
-                // r_record
-                (0..r_len).collect_vec(),
-                // w_record
-                (r_len..r_len + w_len).collect_vec(),
-                // lk_record
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                // zero_record
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, 0),
-        );
-
-        // register selector to legacy constrain system
-        cb.cs.r_selector = Some(selector_type.clone());
-        cb.cs.w_selector = Some(selector_type.clone());
-        cb.cs.lk_selector = Some(selector_type.clone());
-        cb.cs.zero_selector = Some(selector_type.clone());
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb, 0);
 
         let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
         chip.add_layer(layer);

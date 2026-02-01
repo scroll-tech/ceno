@@ -4,7 +4,12 @@ use multilinear_extensions::{
     rlc_chip_record,
 };
 use serde::de::DeserializeOwned;
-use std::{collections::HashMap, iter::once, marker::PhantomData};
+use std::{
+    collections::{BTreeMap, HashMap},
+    iter::once,
+    marker::PhantomData,
+    mem,
+};
 
 use ff_ext::ExtensionField;
 
@@ -68,6 +73,8 @@ pub struct LogupTableExpression<E: ExtensionField> {
     pub multiplicity: Expression<E>,
     pub values: Expression<E>,
     pub table_spec: SetTableSpec,
+    pub expression_namespace_map: String,
+    pub meta: (LookupTable, Vec<Expression<E>>),
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -85,8 +92,30 @@ pub struct SetTableExpression<E: ExtensionField> {
     // TODO make decision to have enum/struct
     // for which option is more friendly to be processed by ConstrainSystem + recursive verifier
     pub table_spec: SetTableSpec,
+
+    pub expression_namespace_map: String,
+    pub meta: (Expression<E>, Vec<Expression<E>>),
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "E: ExtensionField + DeserializeOwned, M: serde::Serialize + DeserializeOwned")]
+pub struct RecordExpression<E: ExtensionField, M: Clone> {
+    pub expression: Expression<E>,
+    pub expression_namespace_map: String,
+    pub meta: M,
+}
+
+impl<E: ExtensionField, M: Clone> RecordExpression<E, M> {
+    pub fn new(expression: Expression<E>, expression_namespace_map: String, meta: M) -> Self {
+        Self {
+            expression,
+            expression_namespace_map,
+            meta,
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct ConstraintSystem<E: ExtensionField> {
@@ -108,44 +137,16 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub ec_slope_exprs: Vec<Expression<E>>,
     pub ec_final_sum: Vec<Expression<E>>,
 
-    pub r_selector: Option<SelectorType<E>>,
-    pub r_expressions: Vec<Expression<E>>,
-    pub r_expressions_namespace_map: Vec<String>,
-    // for each read expression we store its ram type and original value before doing RLC
-    // the original value will be used for debugging
-    pub r_ram_types: Vec<(Expression<E>, Vec<Expression<E>>)>,
+    pub expression_groups: BTreeMap<Option<SelectorType<E>>, ExpressionGroup<E>>,
 
-    pub w_selector: Option<SelectorType<E>>,
-    pub w_expressions: Vec<Expression<E>>,
-    pub w_expressions_namespace_map: Vec<String>,
-    // for each write expression we store its ram type and original value before doing RLC
-    // the original value will be used for debugging
-    pub w_ram_types: Vec<(Expression<E>, Vec<Expression<E>>)>,
-
-    /// init/final ram expression
-    pub r_table_expressions: Vec<SetTableExpression<E>>,
-    pub r_table_expressions_namespace_map: Vec<String>,
-    pub w_table_expressions: Vec<SetTableExpression<E>>,
-    pub w_table_expressions_namespace_map: Vec<String>,
     // specify whether constrains system cover only init_w
     // as it imply w/r set and final_w might happen ACROSS shards
     pub with_omc_init_only: bool,
 
-    pub lk_selector: Option<SelectorType<E>>,
-    /// lookup expression
-    pub lk_expressions: Vec<Expression<E>>,
-    pub lk_table_expressions: Vec<LogupTableExpression<E>>,
-    pub lk_expressions_namespace_map: Vec<String>,
-    pub lk_expressions_items_map: Vec<(LookupTable, Vec<Expression<E>>)>,
-
-    pub zero_selector: Option<SelectorType<E>>,
-    /// main constraints zero expression
-    pub assert_zero_expressions: Vec<Expression<E>>,
-    pub assert_zero_expressions_namespace_map: Vec<String>,
-
-    /// main constraints zero expression for expression degree > 1, which require sumcheck to prove
-    pub assert_zero_sumcheck_expressions: Vec<Expression<E>>,
-    pub assert_zero_sumcheck_expressions_namespace_map: Vec<String>,
+    pub default_read_selector: Option<SelectorType<E>>,
+    pub default_write_selector: Option<SelectorType<E>>,
+    pub default_lookup_selector: Option<SelectorType<E>>,
+    pub default_zero_selector: Option<SelectorType<E>>,
 
     /// max zero sumcheck degree
     pub max_non_lc_degree: usize,
@@ -161,6 +162,36 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
 
     pub(crate) phantom: PhantomData<E>,
+}
+
+#[allow(clippy::type_complexity)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: serde::Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct ExpressionGroup<E: ExtensionField> {
+    pub r_expressions: Vec<RecordExpression<E, (Expression<E>, Vec<Expression<E>>)>>, /* RLC records */
+    pub w_expressions: Vec<RecordExpression<E, (Expression<E>, Vec<Expression<E>>)>>, /* RLC records */
+    pub r_table_expressions: Vec<SetTableExpression<E>>,
+    pub w_table_expressions: Vec<SetTableExpression<E>>,
+    pub lk_expressions: Vec<RecordExpression<E, (LookupTable, Vec<Expression<E>>)>>, // RLC records
+    pub lk_table_expressions: Vec<LogupTableExpression<E>>,
+    pub assert_zero_expressions: Vec<RecordExpression<E, ()>>,
+    pub assert_zero_sumcheck_expressions: Vec<RecordExpression<E, ()>>,
+}
+
+impl<E: ExtensionField> ExpressionGroup<E> {
+    pub fn is_empty(&self) -> bool {
+        self.r_expressions.is_empty()
+            && self.w_expressions.is_empty()
+            && self.r_table_expressions.is_empty()
+            && self.w_table_expressions.is_empty()
+            && self.lk_expressions.is_empty()
+            && self.lk_table_expressions.is_empty()
+            && self.assert_zero_expressions.is_empty()
+            && self.assert_zero_sumcheck_expressions.is_empty()
+    }
 }
 
 impl<E: ExtensionField> ConstraintSystem<E> {
@@ -179,29 +210,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             ec_final_sum: vec![],
             ec_slope_exprs: vec![],
             ec_point_exprs: vec![],
-            r_selector: None,
-            r_expressions: vec![],
-            r_expressions_namespace_map: vec![],
-            r_ram_types: vec![],
-            w_selector: None,
-            w_expressions: vec![],
-            w_expressions_namespace_map: vec![],
-            w_ram_types: vec![],
-            r_table_expressions: vec![],
-            r_table_expressions_namespace_map: vec![],
-            w_table_expressions: vec![],
-            w_table_expressions_namespace_map: vec![],
             with_omc_init_only: false,
-            lk_selector: None,
-            lk_expressions: vec![],
-            lk_table_expressions: vec![],
-            lk_expressions_namespace_map: vec![],
-            lk_expressions_items_map: vec![],
-            zero_selector: None,
-            assert_zero_expressions: vec![],
-            assert_zero_expressions_namespace_map: vec![],
-            assert_zero_sumcheck_expressions: vec![],
-            assert_zero_sumcheck_expressions_namespace_map: vec![],
+            expression_groups: BTreeMap::new(),
+            default_read_selector: None,
+            default_write_selector: None,
+            default_lookup_selector: None,
+            default_zero_selector: None,
             max_non_lc_degree: 0,
             rotations: vec![],
             rotation_params: None,
@@ -299,12 +313,12 @@ impl<E: ExtensionField> ConstraintSystem<E> {
                 .chain(record.clone())
                 .collect(),
         );
-        self.lk_expressions.push(rlc_record);
         let path = self.ns.compute_path(name_fn().into());
-        self.lk_expressions_namespace_map.push(path);
         // Since lk_expression is RLC(record) and when we're debugging
         // it's helpful to recover the value of record itself.
-        self.lk_expressions_items_map.push((rom_type, record));
+        self.group_mut(self.default_lookup_selector.clone())
+            .lk_expressions
+            .push(RecordExpression::new(rlc_record, path, (rom_type, record)));
         Ok(())
     }
 
@@ -332,16 +346,16 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             "rlc lk_table_record degree ({})",
             name_fn().into()
         );
-        self.lk_table_expressions.push(LogupTableExpression {
-            values: rlc_record,
-            multiplicity,
-            table_spec,
-        });
         let path = self.ns.compute_path(name_fn().into());
-        self.lk_expressions_namespace_map.push(path);
-        // Since lk_expression is RLC(record) and when we're debugging
-        // it's helpful to recover the value of record itself.
-        self.lk_expressions_items_map.push((rom_type, record));
+        self.group_mut(self.default_lookup_selector.clone())
+            .lk_table_expressions
+            .push(LogupTableExpression {
+                values: rlc_record,
+                multiplicity,
+                table_spec,
+                expression_namespace_map: path,
+                meta: (rom_type, record),
+            });
 
         Ok(())
     }
@@ -379,14 +393,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.r_table_expressions.push(SetTableExpression {
-            expr: rlc_record,
-            table_spec,
-        });
         let path = self.ns.compute_path(name_fn().into());
-        self.r_table_expressions_namespace_map.push(path);
-        self.r_ram_types.push((ram_type, record));
-
+        self.group_mut(self.default_read_selector.clone())
+            .r_table_expressions
+            .push(SetTableExpression {
+                expr: rlc_record,
+                table_spec,
+                expression_namespace_map: path,
+                meta: (ram_type, record),
+            });
         Ok(())
     }
 
@@ -423,13 +438,15 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         NR: Into<String>,
         N: FnOnce() -> NR,
     {
-        self.w_table_expressions.push(SetTableExpression {
-            expr: rlc_record,
-            table_spec,
-        });
         let path = self.ns.compute_path(name_fn().into());
-        self.w_table_expressions_namespace_map.push(path);
-        self.w_ram_types.push((ram_type, record));
+        self.group_mut(self.default_write_selector.clone())
+            .w_table_expressions
+            .push(SetTableExpression {
+                expr: rlc_record,
+                table_spec,
+                expression_namespace_map: path,
+                meta: (ram_type, record),
+            });
 
         Ok(())
     }
@@ -451,12 +468,46 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
         rlc_record: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
-        self.r_expressions.push(rlc_record);
+        self.read_rlc_record_with_selector(
+            self.default_read_selector.clone(),
+            name_fn,
+            ram_type,
+            record,
+            rlc_record,
+        )
+    }
+
+    pub fn read_record_with_selector<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        selector: Option<SelectorType<E>>,
+        name_fn: N,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
+    ) -> Result<(), CircuitBuilderError> {
+        let rlc_record = self.rlc_chip_record(record.clone());
+        self.read_rlc_record_with_selector(
+            selector,
+            name_fn,
+            (ram_type as u64).into(),
+            record,
+            rlc_record,
+        )
+    }
+
+    pub fn read_rlc_record_with_selector<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        selector: Option<SelectorType<E>>,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError> {
         let path = self.ns.compute_path(name_fn().into());
-        self.r_expressions_namespace_map.push(path);
         // Since r_expression is RLC(record) and when we're debugging
         // it's helpful to recover the value of record itself.
-        self.r_ram_types.push((ram_type, record));
+        self.group_mut(selector)
+            .r_expressions
+            .push(RecordExpression::new(rlc_record, path, (ram_type, record)));
         Ok(())
     }
 
@@ -477,12 +528,46 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
         rlc_record: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
-        self.w_expressions.push(rlc_record);
+        self.write_rlc_record_with_selector(
+            self.default_write_selector.clone(),
+            name_fn,
+            ram_type,
+            record,
+            rlc_record,
+        )
+    }
+
+    pub fn write_record_with_selector<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        selector: Option<SelectorType<E>>,
+        name_fn: N,
+        ram_type: RAMType,
+        record: Vec<Expression<E>>,
+    ) -> Result<(), CircuitBuilderError> {
+        let rlc_record = self.rlc_chip_record(record.clone());
+        self.write_rlc_record_with_selector(
+            selector,
+            name_fn,
+            (ram_type as u64).into(),
+            record,
+            rlc_record,
+        )
+    }
+
+    pub fn write_rlc_record_with_selector<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        selector: Option<SelectorType<E>>,
+        name_fn: N,
+        ram_type: Expression<E>,
+        record: Vec<Expression<E>>,
+        rlc_record: Expression<E>,
+    ) -> Result<(), CircuitBuilderError> {
         let path = self.ns.compute_path(name_fn().into());
-        self.w_expressions_namespace_map.push(path);
         // Since w_expression is RLC(record) and when we're debugging
         // it's helpful to recover the value of record itself.
-        self.w_ram_types.push((ram_type, record));
+        self.group_mut(selector)
+            .w_expressions
+            .push(RecordExpression::new(rlc_record, path, (ram_type, record)));
         Ok(())
     }
 
@@ -511,14 +596,28 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         name_fn: N,
         assert_zero_expr: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
+        self.require_zero_with_selector(
+            self.default_zero_selector.clone(),
+            name_fn,
+            assert_zero_expr,
+        )
+    }
+
+    pub fn require_zero_with_selector<NR: Into<String>, N: FnOnce() -> NR>(
+        &mut self,
+        selector: Option<SelectorType<E>>,
+        name_fn: N,
+        assert_zero_expr: Expression<E>,
+    ) -> Result<(), CircuitBuilderError> {
         assert!(
             assert_zero_expr.degree() > 0,
             "constant expression assert to zero ?"
         );
         if assert_zero_expr.degree() == 1 {
-            self.assert_zero_expressions.push(assert_zero_expr);
             let path = self.ns.compute_path(name_fn().into());
-            self.assert_zero_expressions_namespace_map.push(path);
+            self.group_mut(selector)
+                .assert_zero_expressions
+                .push(RecordExpression::new(assert_zero_expr, path, ()));
         } else {
             let assert_zero_expr = if assert_zero_expr.is_monomial_form() {
                 assert_zero_expr
@@ -528,10 +627,10 @@ impl<E: ExtensionField> ConstraintSystem<E> {
                 e
             };
             self.max_non_lc_degree = self.max_non_lc_degree.max(assert_zero_expr.degree());
-            self.assert_zero_sumcheck_expressions.push(assert_zero_expr);
             let path = self.ns.compute_path(name_fn().into());
-            self.assert_zero_sumcheck_expressions_namespace_map
-                .push(path);
+            self.group_mut(selector)
+                .assert_zero_sumcheck_expressions
+                .push(RecordExpression::new(assert_zero_expr, path, ()));
         }
         Ok(())
     }
@@ -549,6 +648,188 @@ impl<E: ExtensionField> ConstraintSystem<E> {
 
     pub fn set_omc_init_only(&mut self) {
         self.with_omc_init_only = true;
+    }
+
+    pub fn set_default_read_selector(&mut self, selector: SelectorType<E>) {
+        self.default_read_selector = Some(selector);
+        let read_expressions = mem::take(&mut self.group_mut(None).r_expressions);
+        let read_table_expressions = mem::take(&mut self.group_mut(None).r_table_expressions);
+        let group = self.group_mut(self.default_read_selector.clone());
+        group.r_expressions.extend(read_expressions);
+        group.r_table_expressions.extend(read_table_expressions);
+    }
+
+    pub fn set_default_write_selector(&mut self, selector: SelectorType<E>) {
+        self.default_write_selector = Some(selector);
+        let write_expressions = mem::take(&mut self.group_mut(None).w_expressions);
+        let write_table_expressions = mem::take(&mut self.group_mut(None).w_table_expressions);
+        let group = self.group_mut(self.default_write_selector.clone());
+        group.w_expressions.extend(write_expressions);
+        group.w_table_expressions.extend(write_table_expressions);
+    }
+
+    pub fn set_default_lookup_selector(&mut self, selector: SelectorType<E>) {
+        self.default_lookup_selector = Some(selector);
+        let lk_expressions = mem::take(&mut self.group_mut(None).lk_expressions);
+        let lk_table_expressions = mem::take(&mut self.group_mut(None).lk_table_expressions);
+        let group = self.group_mut(self.default_lookup_selector.clone());
+        group.lk_expressions.extend(lk_expressions);
+        group.lk_table_expressions.extend(lk_table_expressions);
+    }
+
+    pub fn set_default_zero_selector(&mut self, selector: SelectorType<E>) {
+        self.default_zero_selector = Some(selector);
+        let assert_zero_expressions = mem::take(&mut self.group_mut(None).assert_zero_expressions);
+        let assert_zero_sumcheck_expressions =
+            mem::take(&mut self.group_mut(None).assert_zero_sumcheck_expressions);
+        let group = self.group_mut(self.default_zero_selector.clone());
+        group
+            .assert_zero_expressions
+            .extend(assert_zero_expressions);
+        group
+            .assert_zero_sumcheck_expressions
+            .extend(assert_zero_sumcheck_expressions);
+    }
+
+    pub fn set_all_default_selectors(&mut self, selector: SelectorType<E>) {
+        self.set_default_read_selector(selector.clone());
+        self.set_default_write_selector(selector.clone());
+        self.set_default_lookup_selector(selector.clone());
+        self.set_default_zero_selector(selector);
+        self.expression_groups.remove(&None);
+    }
+}
+
+#[allow(clippy::type_complexity)]
+impl<E: ExtensionField> ConstraintSystem<E> {
+    fn group_mut(&mut self, selector: Option<SelectorType<E>>) -> &mut ExpressionGroup<E> {
+        self.expression_groups.entry(selector).or_default()
+    }
+
+    pub fn group(&self, selector: &Option<SelectorType<E>>) -> Option<&ExpressionGroup<E>> {
+        self.expression_groups.get(selector)
+    }
+
+    pub fn selector_len(&self) -> usize {
+        self.expression_groups.keys().len()
+    }
+
+    pub fn expressions_len(&self) -> usize {
+        self.non_zero_expressions_len() + self.zero_expressions_len()
+    }
+
+    pub fn non_zero_expressions_len(&self) -> usize {
+        self.expression_groups
+            .values()
+            .map(|g| {
+                g.r_expressions.len()
+                    + g.w_expressions.len()
+                    + g.r_table_expressions.len()
+                    + g.w_table_expressions.len()
+                    + g.lk_expressions.len()
+                    + g.lk_table_expressions.len() * 2
+            })
+            .sum()
+    }
+
+    pub fn zero_expressions_len(&self) -> usize {
+        self.expression_groups
+            .values()
+            .map(|g| g.assert_zero_expressions.len() + g.assert_zero_sumcheck_expressions.len())
+            .sum()
+    }
+
+    pub fn input_evaluations_len(&self) -> usize {
+        self.non_zero_expressions_len()
+            + self.num_fixed
+            + self.num_witin as usize
+            + self.instance_openings.len()
+    }
+
+    pub fn output_evaluations_len(&self) -> usize {
+        self.expression_groups
+            .values()
+            .map(|g| {
+                g.r_expressions.len()
+                    + g.w_expressions.len()
+                    + g.r_table_expressions.len()
+                    + g.w_table_expressions.len()
+                    + g.lk_expressions.len()
+                    + g.lk_table_expressions.len() * 2
+            })
+            .sum::<usize>()
+    }
+
+    pub fn r_expressions_len(&self) -> usize {
+        self.expression_groups
+            .values()
+            .map(|g| g.r_expressions.len())
+            .sum()
+    }
+
+    pub fn r_table_expressions_len(&self) -> usize {
+        self.expression_groups
+            .values()
+            .map(|g| g.r_table_expressions.len())
+            .sum()
+    }
+
+    pub fn r_table_expressions_all(&self) -> impl Iterator<Item = &SetTableExpression<E>> + '_ {
+        self.expression_groups
+            .values()
+            .flat_map(|g| g.r_table_expressions.iter())
+    }
+
+    pub fn w_expressions_len(&self) -> usize {
+        self.expression_groups
+            .values()
+            .map(|g| g.w_expressions.len())
+            .sum()
+    }
+
+    pub fn w_table_expressions_len(&self) -> usize {
+        self.expression_groups
+            .values()
+            .map(|g| g.w_table_expressions.len())
+            .sum()
+    }
+
+    pub fn w_table_expressions_all(&self) -> impl Iterator<Item = &SetTableExpression<E>> + '_ {
+        self.expression_groups
+            .values()
+            .flat_map(|g| g.w_table_expressions.iter())
+    }
+
+    pub fn lk_expressions_len(&self) -> usize {
+        self.expression_groups
+            .values()
+            .map(|g| g.lk_expressions.len())
+            .sum()
+    }
+
+    pub fn lk_table_expressions_len(&self) -> usize {
+        self.expression_groups
+            .values()
+            .map(|g| g.lk_table_expressions.len())
+            .sum()
+    }
+
+    pub fn lk_table_expressions_all(&self) -> impl Iterator<Item = &LogupTableExpression<E>> + '_ {
+        self.expression_groups
+            .values()
+            .flat_map(|g| g.lk_table_expressions.iter())
+    }
+
+    pub fn unique_expr_group(&self) -> &ExpressionGroup<E> {
+        assert_eq!(
+            self.expression_groups.len(),
+            1,
+            "only support single selector for unique_expr_group retrieval"
+        );
+        self.expression_groups
+            .values()
+            .next()
+            .expect("at least one expression group")
     }
 }
 
@@ -592,7 +873,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         cb: impl for<'b> FnOnce(&mut CircuitBuilder<'b, E>) -> Result<T, CircuitBuilderError>,
     ) -> Result<T, CircuitBuilderError> {
         self.cs.namespace(name_fn, |cs| {
-            let mut inner_circuit_builder = CircuitBuilder::<'_, E>::new(cs);
+            let mut inner_circuit_builder = CircuitBuilder::<'_, E> { cs };
             cb(&mut inner_circuit_builder)
         })
     }
@@ -646,6 +927,23 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
         N: FnOnce() -> NR,
     {
         self.cs.create_fixed(name_fn)
+    }
+
+    pub fn with_selector(
+        &mut self,
+        selector: SelectorType<E>,
+        action: impl FnOnce(&mut Self) -> Result<(), CircuitBuilderError>,
+    ) -> Result<(), CircuitBuilderError> {
+        let previous_read_selector = self.cs.default_read_selector.replace(selector.clone());
+        let previous_write_selector = self.cs.default_write_selector.replace(selector.clone());
+        let previous_lookup_selector = self.cs.default_lookup_selector.replace(selector.clone());
+        let previous_zero_selector = self.cs.default_zero_selector.replace(selector.clone());
+        let result = action(self);
+        self.cs.default_read_selector = previous_read_selector;
+        self.cs.default_write_selector = previous_write_selector;
+        self.cs.default_lookup_selector = previous_lookup_selector;
+        self.cs.default_zero_selector = previous_zero_selector;
+        result
     }
 
     pub fn lk_record<NR, N>(

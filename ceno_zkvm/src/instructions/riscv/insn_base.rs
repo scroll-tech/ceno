@@ -1,5 +1,6 @@
 use ceno_emul::{Cycle, StepRecord, Word, WriteOp};
 use ff_ext::{ExtensionField, FieldInto, SmallField};
+use gkr_iop::selector::SelectorType;
 use itertools::Itertools;
 use p3::field::{Field, FieldAlgebra};
 
@@ -391,6 +392,31 @@ impl WriteMEM {
         Ok(WriteMEM { prev_ts, lt_cfg })
     }
 
+    pub fn construct_circuit_with_rw_selectors<E: ExtensionField>(
+        circuit_builder: &mut CircuitBuilder<E>,
+        mem_addr: AddressExpr<E>,
+        prev_value: MemoryExpr<E>,
+        new_value: MemoryExpr<E>,
+        cur_ts: WitIn,
+        r_selector: &SelectorType<E>,
+        w_selector: &SelectorType<E>,
+    ) -> Result<Self, ZKVMError> {
+        let prev_ts = circuit_builder.create_witin(|| "prev_ts");
+
+        let (_, lt_cfg) = circuit_builder.memory_write_with_rw_selectors(
+            || "write_memory",
+            &mem_addr,
+            prev_ts.expr(),
+            cur_ts.expr() + Tracer::SUBCYCLE_MEM,
+            prev_value,
+            new_value,
+            r_selector,
+            w_selector,
+        )?;
+
+        Ok(WriteMEM { prev_ts, lt_cfg })
+    }
+
     pub fn assign_instance<E: ExtensionField>(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
@@ -683,6 +709,7 @@ mod test {
             &[],
             &[],
             if is_ok { &[] } else { &["mid_u14"] },
+            num_rows,
             None,
             None,
         );

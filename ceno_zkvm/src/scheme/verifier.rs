@@ -1,29 +1,10 @@
-use either::Either;
-use ff_ext::ExtensionField;
 use std::{
     iter::{self, once, repeat_n},
     marker::PhantomData,
 };
 
-#[cfg(debug_assertions)]
-use ff_ext::{Instrumented, PoseidonField};
-
-use super::{ZKVMChipProof, ZKVMProof};
-use crate::{
-    error::ZKVMError,
-    instructions::riscv::constants::{
-        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX,
-    },
-    scheme::{
-        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
-        septic_curve::{SepticExtension, SepticPoint},
-    },
-    structs::{
-        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
-        ZKVMVerifyingKey,
-    },
-};
 use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
+use ff_ext::ExtensionField;
 use gkr_iop::{
     self,
     selector::{SelectorContext, SelectorType},
@@ -45,6 +26,26 @@ use sumcheck::{
 };
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
+
+use super::{ZKVMChipProof, ZKVMProof};
+use crate::{
+    error::ZKVMError,
+    instructions::riscv::constants::{
+        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX,
+    },
+    scheme::{
+        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        septic_curve::{SepticExtension, SepticPoint},
+        utils::global_selector_ctxs,
+    },
+    structs::{
+        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
+        ZKVMVerifyingKey,
+    },
+};
+
+#[cfg(debug_assertions)]
+use ff_ext::{Instrumented, PoseidonField};
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vk: ZKVMVerifyingKey<E, PCS>,
@@ -478,9 +479,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         } = &composed_cs;
         let num_instances = proof.num_instances.iter().sum();
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
-            cs.r_expressions.len() + cs.r_table_expressions.len(),
-            cs.w_expressions.len() + cs.w_table_expressions.len(),
-            cs.lk_expressions.len() + cs.lk_table_expressions.len(),
+            composed_cs.num_reads(),
+            composed_cs.num_writes(),
+            composed_cs.num_lks(),
         );
         let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
 
@@ -494,9 +495,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         // constrain log2_num_instances within max length
-        cs.r_table_expressions
-            .iter()
-            .chain(&cs.w_table_expressions)
+        cs.r_table_expressions_all()
+            .chain(cs.w_table_expressions_all())
             .for_each(|set_table_expr| {
                 // iterate through structural witins and collect max round.
                 let num_vars = set_table_expr
@@ -518,7 +518,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     });
                 assert_eq!(num_vars, log2_num_instances);
             });
-        cs.lk_table_expressions.iter().for_each(|l| {
+        cs.lk_table_expressions_all().for_each(|l| {
             // iterate through structural witins and collect max round.
             let num_vars = l.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
                 l.table_spec
@@ -566,7 +566,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript,
         )?;
 
-        if cs.lk_table_expressions.is_empty() {
+        if cs.lk_table_expressions_len() == 0 {
             // verify LogUp witness nominator p(x) ?= constant vector 1
             logup_p_evals
                 .iter()
@@ -593,17 +593,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         debug_assert_eq!(logup_p_evals.len(), lk_counts_per_instance);
         debug_assert_eq!(logup_q_evals.len(), lk_counts_per_instance);
 
-        let evals = record_evals
-            .iter()
-            // append p_evals if there got lk table expressions
-            .chain(if cs.lk_table_expressions.is_empty() {
-                Either::Left(iter::empty())
+        let (r_record_evals, w_record_evals) = record_evals.split_at(r_counts_per_instance);
+        let mut r_iter = r_record_evals.iter();
+        let mut w_iter = w_record_evals.iter();
+        let mut p_iter = logup_p_evals.iter();
+        let mut q_iter = logup_q_evals.iter();
+
+        let mut evals = Vec::with_capacity(cs.output_evaluations_len());
+        for (_, group) in cs.expression_groups.iter() {
+            for _ in 0..(group.r_expressions.len() + group.r_table_expressions.len()) {
+                evals.push(r_iter.next().expect("missing r eval").clone());
+            }
+            for _ in 0..(group.w_expressions.len() + group.w_table_expressions.len()) {
+                evals.push(w_iter.next().expect("missing w eval").clone());
+            }
+            if group.lk_table_expressions.is_empty() {
+                for _ in 0..group.lk_expressions.len() {
+                    evals.push(q_iter.next().expect("missing lk q eval").clone());
+                }
             } else {
-                Either::Right(logup_p_evals.iter())
-            })
-            .chain(&logup_q_evals)
-            .cloned()
-            .collect_vec();
+                for _ in 0..group.lk_table_expressions.len() {
+                    evals.push(p_iter.next().expect("missing lk p eval").clone());
+                }
+                for _ in 0..group.lk_table_expressions.len() {
+                    evals.push(q_iter.next().expect("missing lk q eval").clone());
+                }
+            }
+        }
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
@@ -614,7 +630,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 gkr_circuit
                     .layers
                     .first()
-                    .map(|layer| layer.out_sel_and_eval_exprs.len())
+                    .map(|layer| layer.selector_ctxs_len())
                     .unwrap_or(0)
             ]
         } else {
@@ -626,23 +642,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 proof.num_instances[1],
                 proof.num_instances[0] + proof.num_instances[1],
             );
-            vec![
-                SelectorContext {
-                    offset: 0,
-                    num_instances: proof.num_instances[0],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: proof.num_instances[0],
-                    num_instances: proof.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: 0,
-                    num_instances: proof.num_instances[0] + proof.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                },
-            ]
+            global_selector_ctxs(cs, gkr_circuit, &proof.num_instances, num_var_with_rotation)
         };
         let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,

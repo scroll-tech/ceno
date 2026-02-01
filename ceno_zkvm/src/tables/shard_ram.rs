@@ -17,12 +17,15 @@ use ff_ext::{ExtensionField, FieldInto, PoseidonField, SmallField};
 use gkr_iop::{
     chip::Chip,
     circuit_builder::CircuitBuilder,
+    default_out_eval_groups,
     error::CircuitBuilderError,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
 };
 use itertools::{Itertools, chain};
-use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
+use multilinear_extensions::{
+    Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitIn, util::max_usable_threads,
+};
 use p3::{
     field::{Field, FieldAlgebra},
     matrix::{Matrix, dense::RowMajorMatrix},
@@ -419,14 +422,6 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         let selector_w = cb.create_placeholder_structural_witin(|| "selector_w");
         let selector_zero = cb.create_placeholder_structural_witin(|| "selector_zero");
 
-        let config = Self::construct_circuit(cb, param)?;
-
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-
         let selector_r = SelectorType::Prefix(selector_r.expr());
         // note that the actual offset should be set by prover
         // depending on the number of local read instances
@@ -435,25 +430,17 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         //      when selector_w = 1 => selector_zero = 1
         let selector_zero = SelectorType::Prefix(selector_zero.expr());
 
-        cb.cs.r_selector = Some(selector_r);
-        cb.cs.w_selector = Some(selector_w);
-        cb.cs.zero_selector = Some(selector_zero.clone());
-        cb.cs.lk_selector = Some(selector_zero);
+        cb.cs.set_default_read_selector(selector_r.clone());
+        cb.cs.set_default_write_selector(selector_w.clone());
+        cb.cs.set_default_lookup_selector(selector_zero.clone());
+        cb.cs.set_default_zero_selector(selector_zero.clone());
+        let config = Self::construct_circuit(cb, param)?;
 
-        // all shared the same selector
-        let (out_evals, mut chip) = (
-            [
-                // r_record
-                (0..r_len).collect_vec(),
-                // w_record
-                (r_len..r_len + w_len).collect_vec(),
-                // lk_record
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                // zero_record
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, 0),
-        );
+        let out_evals = default_out_eval_groups(cb);
+
+        // note that the actual offset should be set by prover
+        // depending on the number of local read instances
+        let mut chip = Chip::new_from_cb(cb, 0);
 
         let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
         chip.add_layer(layer);
@@ -488,9 +475,18 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
 
         assert_eq!(num_structural_witin, 3);
-        let selector_r_witin = WitIn { id: 0 };
-        let selector_w_witin = WitIn { id: 1 };
-        let selector_zero_witin = WitIn { id: 2 };
+        let selector_r_witin = StructuralWitIn {
+            id: 0,
+            witin_type: StructuralWitInType::Empty,
+        };
+        let selector_w_witin = StructuralWitIn {
+            id: 1,
+            witin_type: StructuralWitInType::Empty,
+        };
+        let selector_zero_witin = StructuralWitIn {
+            id: 2,
+            witin_type: StructuralWitInType::Empty,
+        };
 
         let nthreads = max_usable_threads();
 

@@ -6,7 +6,7 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube, layer::Layer},
+    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube},
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -32,8 +32,8 @@ use crate::{
         },
     },
     precompiles::{
-        KECCAK_ROUNDS, KECCAK_ROUNDS_CEIL_LOG2, KeccakInstance, KeccakLayout, KeccakParams,
-        KeccakStateInstance, KeccakTrace, KeccakWitInstance,
+        KECCAK_ROUNDS, KECCAK_ROUNDS_CEIL_LOG2, KeccakInstance, KeccakLayout, KeccakStateInstance,
+        KeccakTrace, KeccakWitInstance,
     },
     structs::ProgramParams,
     tables::{InsnRecord, RMMCollections},
@@ -75,6 +75,10 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         cb: &mut CircuitBuilder<E>,
         _param: &ProgramParams,
     ) -> Result<(Self::InstructionConfig, GKRCircuit<E>), ZKVMError> {
+        // We should create the layout first to set the default selectors.
+        // TODO: find a better way to handle this.
+        let layout = KeccakLayout::build_layer_logic(cb, ())?;
+
         // constrain vmstate
         let vm_state = StateInOut::construct_circuit(cb, false)?;
 
@@ -108,11 +112,6 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             0.into(),
         ))?;
 
-        let mut layout = <KeccakLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(
-            cb,
-            KeccakParams {},
-        )?;
-
         // memory rw, for we in-place update
         let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
             .enumerate()
@@ -131,10 +130,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(cb, Self::name(), layout.n_challenges, out_evals);
-        chip.add_layer(layer);
+        let chip = layout.finalize(Self::name(), cb);
 
         let circuit = chip.gkr_circuit();
 

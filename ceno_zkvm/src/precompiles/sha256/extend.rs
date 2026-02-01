@@ -27,11 +27,13 @@ use std::{array, borrow::BorrowMut, mem::size_of};
 use derive::AlignedBorrow;
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator, chip::Chip,
-    circuit_builder::CircuitBuilder, error::CircuitBuilderError, selector::SelectorType,
+    ProtocolBuilder, ProtocolWitnessGenerator, chip::Chip, circuit_builder::CircuitBuilder,
+    default_out_eval_groups, error::CircuitBuilderError, gkr::layer::Layer, selector::SelectorType,
 };
 use itertools::Itertools;
-use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
+use multilinear_extensions::{
+    Expression, StructuralWitIn, ToExpr, WitIn, util::max_usable_threads,
+};
 use p3::field::{FieldAlgebra, TwoAdicField};
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
@@ -44,7 +46,7 @@ use crate::{
     gadgets::{
         Add4Operation, FixedRotateRightOperation, FixedShiftRightOperation, Word, XorOperation,
     },
-    precompiles::{SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend},
+    precompiles::utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
     witness::LkMultiplicity,
 };
 
@@ -126,13 +128,9 @@ pub struct ShaExtendLayer<WitT> {
 #[derive(Clone, Debug)]
 pub struct ShaExtendLayout<E: ExtensionField> {
     pub layer_exprs: ShaExtendLayer<WitIn>,
-    pub selector_type_layout: SelectorTypeLayout<E>,
+    pub sel: StructuralWitIn,
     pub input32_exprs: [MemoryExpr<E>; 4],
     pub output32_expr: MemoryExpr<E>,
-    pub n_fixed: usize,
-    pub n_committed: usize,
-    pub n_structural_witin: usize,
-    pub n_challenges: usize,
 }
 
 impl<E: ExtensionField> ShaExtendLayout<E> {
@@ -173,27 +171,15 @@ impl<E: ExtensionField> ShaExtendLayout<E> {
             s2: Add4Operation::create(cb, || "ShaExtendLayer::s2"),
         };
 
-        let sel_all = cb.create_placeholder_structural_witin(|| "sha_extend_sel_all");
-
-        let selector_type_layout = SelectorTypeLayout {
-            sel_first: None,
-            sel_last: None,
-            sel_all: SelectorType::<E>::Prefix(sel_all.expr()),
-        };
-
         let input32_exprs: [MemoryExpr<E>; 4] =
             array::from_fn(|_| array::from_fn(|_| Expression::WitIn(0)));
         let output32_expr: MemoryExpr<E> = array::from_fn(|_| Expression::WitIn(0));
 
         Self {
             layer_exprs: ShaExtendLayer { wits },
-            selector_type_layout,
+            sel: cb.create_placeholder_structural_witin(|| "sha_extend_sel"),
             input32_exprs,
             output32_expr,
-            n_fixed: 0,
-            n_committed: 0,
-            n_structural_witin: 6,
-            n_challenges: 0,
         }
     }
 }
@@ -268,31 +254,15 @@ impl<E: ExtensionField> ProtocolBuilder<E> for ShaExtendLayout<E> {
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
-        self.n_fixed = cb.cs.num_fixed;
-        self.n_committed = cb.cs.num_witin as usize;
-        self.n_structural_witin = cb.cs.num_structural_witin as usize;
-        self.n_challenges = 0;
+    fn finalize(&self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {
+        let sel = SelectorType::Prefix(self.sel.expr());
+        cb.cs.set_all_default_selectors(sel);
 
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
-
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-        (
-            [
-                (0..r_len).collect_vec(),
-                (r_len..r_len + w_len).collect_vec(),
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, self.n_challenges),
-        )
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb, 0);
+        let layer = Layer::from_circuit_builder(cb, name, 0, out_evals);
+        chip.add_layer(layer);
+        chip
     }
 }
 
@@ -327,7 +297,7 @@ impl<E: ExtensionField> ProtocolWitnessGenerator<E> for ShaExtendLayout<E> {
         wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         lk_multiplicity: &mut LkMultiplicity,
     ) {
-        let (wits_start, num_wit_cols) = (
+        let (layout_start, num_layout_wit_cols) = (
             self.layer_exprs.wits.w_i_minus_15.0[0].id as usize,
             size_of::<ShaExtendWitCols<u8>>(),
         );
@@ -335,6 +305,8 @@ impl<E: ExtensionField> ProtocolWitnessGenerator<E> for ShaExtendLayout<E> {
         let num_instances = wits.num_instances();
         let nthreads = max_usable_threads();
         let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
+        let wits_width = wits.width;
+        let structural_wits_width = structural_wits.width;
         let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
         let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
         raw_witin_iter
@@ -342,17 +314,14 @@ impl<E: ExtensionField> ProtocolWitnessGenerator<E> for ShaExtendLayout<E> {
             .zip_eq(phase1.instances.par_chunks(num_instance_per_batch))
             .for_each(|((rows, eqs), instances)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
-                rows.chunks_mut(self.n_committed)
-                    .zip_eq(eqs.chunks_mut(self.n_structural_witin))
+                rows.chunks_mut(wits_width)
+                    .zip_eq(eqs.chunks_mut(structural_wits_width))
                     .zip_eq(instances.iter())
                     .for_each(|((rows, eqs), phase1_instance)| {
-                        let sel_all_structural_witin =
-                            self.selector_type_layout.sel_all.selector_expr().id();
-                        eqs[sel_all_structural_witin] = E::BaseField::ONE;
-
                         let cols: &mut ShaExtendWitCols<E::BaseField> =
-                            rows[wits_start..][..num_wit_cols].borrow_mut();
+                            rows[layout_start..][..num_layout_wit_cols].borrow_mut();
                         cols.populate(&phase1_instance.witin, &mut lk_multiplicity);
+                        eqs[self.sel.id as usize] = E::BaseField::ONE;
                     });
             });
     }
@@ -370,7 +339,7 @@ mod tests {
     use ff_ext::BabyBearExt4;
     use gkr_iop::{
         cpu::{CpuBackend, CpuProver},
-        gkr::{GKRProverOutput, layer::Layer},
+        gkr::GKRProverOutput,
         selector::SelectorContext,
     };
     use itertools::Itertools;
@@ -389,16 +358,9 @@ mod tests {
 
         let mut cs = ConstraintSystem::<E>::new(|| "sha_extend_test");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let mut layout =
+        let layout =
             ShaExtendLayout::<E>::build_layer_logic(&mut cb, ()).expect("build_layer_logic failed");
-        let (out_evals, mut chip) = layout.finalize(&mut cb);
-        let layer = Layer::from_circuit_builder(
-            &cb,
-            "sha_extend".to_string(),
-            layout.n_challenges,
-            out_evals,
-        );
-        chip.add_layer(layer);
+        let chip = layout.finalize("sha_extend".to_string(), &mut cb);
         let gkr_circuit = chip.gkr_circuit();
 
         let mut rng = StdRng::seed_from_u64(1);
@@ -427,12 +389,12 @@ mod tests {
         let num_instances = num_instances * SHA_EXTEND_ROUNDS;
         let mut phase1 = RowMajorMatrix::new(
             num_instances,
-            layout.n_committed,
+            cb.cs.num_witin as usize,
             InstancePaddingStrategy::Default,
         );
         let mut structural = RowMajorMatrix::new(
             num_instances,
-            layout.n_structural_witin,
+            cb.cs.num_structural_witin as usize,
             InstancePaddingStrategy::Default,
         );
         let mut lk_multiplicity = LkMultiplicity::default();
@@ -463,8 +425,8 @@ mod tests {
         }
 
         let num_instances_rounds = next_pow2_instance_padding(num_instances);
-        let log2_num_instance_rounds = ceil_log2(num_instances_rounds);
-        let num_threads = optimal_sumcheck_threads(log2_num_instance_rounds);
+        let log2_num_instance = ceil_log2(num_instances_rounds);
+        let num_threads = optimal_sumcheck_threads(log2_num_instance);
         let mut prover_transcript = BasicTranscript::<E>::new(b"protocol");
         let challenges = [
             prover_transcript.read_challenge().elements,
@@ -492,28 +454,22 @@ mod tests {
             );
 
         let out_evals = {
-            let mut point = Vec::with_capacity(log2_num_instance_rounds);
-            point.extend(
-                prover_transcript
-                    .sample_vec(log2_num_instance_rounds)
-                    .to_vec(),
-            );
+            let mut point = Vec::with_capacity(log2_num_instance);
+            point.extend(prover_transcript.sample_vec(log2_num_instance).to_vec());
 
             let out_evals = gkr_output
                 .0
                 .par_iter()
                 .map(|wit| {
-                    let point = point[point.len() - wit.num_vars()..point.len()].to_vec();
-                    PointAndEval {
-                        point: point.clone(),
-                        eval: wit.evaluate(&point),
-                    }
+                    let point = point[point.len() - log2_num_instance..point.len()].to_vec();
+                    let eval = wit.evaluate(&point);
+                    PointAndEval { point, eval }
                 })
                 .collect::<Vec<_>>();
 
             if out_evals.is_empty() {
                 vec![PointAndEval {
-                    point: point[point.len() - log2_num_instance_rounds..point.len()].to_vec(),
+                    point: point[point.len() - log2_num_instance..point.len()].to_vec(),
                     eval: E::ZERO,
                 }]
             } else {
@@ -521,12 +477,13 @@ mod tests {
             }
         };
 
+        let selector_ctxs_len = gkr_circuit.layers[0].selector_ctxs_len();
         let selector_ctxs =
-            vec![SelectorContext::new(0, num_instances, log2_num_instance_rounds); 1];
+            vec![SelectorContext::new(0, num_instances, log2_num_instance); selector_ctxs_len];
         let GKRProverOutput { gkr_proof, .. } = gkr_circuit
             .prove::<CpuBackend<E, Pcs>, CpuProver<_>>(
                 num_threads,
-                log2_num_instance_rounds,
+                log2_num_instance,
                 gkr_witness,
                 &out_evals,
                 &[],
@@ -541,16 +498,12 @@ mod tests {
             verifier_transcript.read_challenge().elements,
             verifier_transcript.read_challenge().elements,
         ];
-        let mut point = Vec::with_capacity(log2_num_instance_rounds);
-        point.extend(
-            verifier_transcript
-                .sample_vec(log2_num_instance_rounds)
-                .to_vec(),
-        );
+        let mut point = Vec::with_capacity(log2_num_instance);
+        point.extend(verifier_transcript.sample_vec(log2_num_instance).to_vec());
 
         gkr_circuit
             .verify(
-                log2_num_instance_rounds,
+                log2_num_instance,
                 gkr_proof,
                 &out_evals,
                 &[],

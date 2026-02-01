@@ -502,6 +502,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         fixed: &[ArcMultilinearExtension<'a, E>],
         wits_in: &[ArcMultilinearExtension<'a, E>],
         structural_witin: &[ArcMultilinearExtension<'a, E>],
+        num_instances: usize,
         challenge: [E; 2],
         lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
@@ -513,6 +514,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             &[],
             &[],
             &[],
+            num_instances,
             Some(challenge),
             lkm,
         )
@@ -521,10 +523,23 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
     pub fn run(
         cb: &CircuitBuilder<E>,
         wits_in: &[ArcMultilinearExtension<'a, E>],
+        structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
+        num_instances: usize,
         lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
-        Self::run_maybe_challenge(cb, &[], wits_in, &[], program, &[], &[], None, lkm)
+        Self::run_maybe_challenge(
+            cb,
+            &[],
+            wits_in,
+            structural_witin,
+            program,
+            &[],
+            &[],
+            num_instances,
+            None,
+            lkm,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -536,6 +551,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         program: &[ceno_emul::Instruction],
         pi_mles: &[ArcMultilinearExtension<'a, E>],
         pub_io_evals: &[Either<E::BaseField, E>],
+        num_instances: usize,
         challenge: Option<[E; 2]>,
         lkm: Option<Multiplicity<u64>>,
     ) -> Result<(), Vec<MockProverError<E, u64>>> {
@@ -550,7 +566,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
             structural_witin,
             pi_mles,
             pub_io_evals,
-            1,
+            num_instances,
             challenge,
             lkm,
         )
@@ -573,102 +589,132 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let mut shared_lkm = LkMultiplicityRaw::<E>::default();
         let mut errors = vec![];
 
-        let num_instance_padded = wits_in
-            .first()
-            .or_else(|| fixed.first())
-            .or_else(|| pi_mles.first())
-            .or_else(|| structural_witin.first())
-            .map(|mle| mle.evaluations().len())
-            .unwrap_or_else(|| next_pow2_instance_padding(num_instances));
+        let default_structural_witin = Self::default_structural_witin_from_wits(cs, num_instances);
+        let structural_witin = if structural_witin.is_empty() {
+            default_structural_witin.as_slice()
+        } else {
+            structural_witin
+        };
 
-        // Assert zero expressions
-        for (expr, name) in cs
-            .assert_zero_expressions
-            .iter()
-            .chain(&cs.assert_zero_sumcheck_expressions)
-            .zip_eq(
-                cs.assert_zero_expressions_namespace_map
-                    .iter()
-                    .chain(&cs.assert_zero_sumcheck_expressions_namespace_map),
-            )
-        {
-            if expr.degree() > MAX_CONSTRAINT_DEGREE {
-                errors.push(MockProverError::DegreeTooHigh {
-                    expression: expr.clone(),
-                    degree: expr.degree(),
-                    name: name.clone(),
-                });
-            }
-
-            let zero_selector: ArcMultilinearExtension<_> =
-                if let Some(zero_selector) = &cs.zero_selector {
-                    structural_witin[zero_selector.selector_expr().id()].clone()
-                } else {
-                    let mut selector = vec![E::BaseField::ONE; num_instances];
-                    selector.resize(num_instance_padded, E::BaseField::ZERO);
-                    MultilinearExtension::from_evaluation_vec_smart(
-                        ceil_log2(num_instance_padded),
-                        selector,
-                    )
-                    .into()
-                };
-
-            // require_equal does not always have the form of Expr::Sum as
-            // the sum of witness and constant is expressed as scaled sum
-            if let Expression::Sum(left, right) = expr
-                && name.contains("require_equal")
+        // Assert zero expressions grouped by selector
+        for (selector, group) in &cs.expression_groups {
+            let zero_selector = if let Some(selector) = selector {
+                &structural_witin[selector.selector_expr().id()]
+            } else {
+                &structural_witin[0]
+            };
+            for r in group
+                .assert_zero_expressions
+                .iter()
+                .chain(group.assert_zero_sumcheck_expressions.iter())
             {
-                let right = -right.as_ref();
+                let expr = &r.expression;
+                let name = &r.expression_namespace_map;
+                if expr.degree() > MAX_CONSTRAINT_DEGREE {
+                    errors.push(MockProverError::DegreeTooHigh {
+                        expression: expr.clone(),
+                        degree: expr.degree(),
+                        name: name.clone(),
+                    });
+                }
 
-                let left_evaluated = wit_infer_by_expr(
-                    left,
-                    cs.num_witin,
-                    cs.num_fixed as WitnessId,
-                    cs.instance_openings.len(),
-                    fixed,
-                    wits_in,
-                    structural_witin,
-                    pi_mles,
-                    pub_io_evals,
-                    &challenge,
-                );
-                let left_evaluated =
-                    filter_mle_by_selector_mle(left_evaluated, zero_selector.clone());
-
-                let right_evaluated = wit_infer_by_expr(
-                    &right,
-                    cs.num_witin,
-                    cs.num_fixed as WitnessId,
-                    cs.instance_openings.len(),
-                    fixed,
-                    wits_in,
-                    structural_witin,
-                    pi_mles,
-                    pub_io_evals,
-                    &challenge,
-                );
-                let right_evaluated =
-                    filter_mle_by_selector_mle(right_evaluated, zero_selector.clone());
-
-                // left_evaluated.len() ?= right_evaluated.len() due to padding instance
-                for (inst_id, (left_element, right_element)) in
-                    izip!(left_evaluated, right_evaluated).enumerate()
+                // require_equal does not always have the form of Expr::Sum as
+                // the sum of witness and constant is expressed as scaled sum
+                if let Expression::Sum(left, right) = expr
+                    && name.contains("require_equal")
                 {
-                    if left_element != right_element {
-                        errors.push(MockProverError::AssertEqualError {
-                            left_expression: *left.clone(),
-                            right_expression: right.clone(),
-                            left: Either::Right(left_element),
-                            right: Either::Right(right_element),
-                            name: name.clone(),
-                            inst_id,
-                        });
+                    let right = -right.as_ref();
+
+                    let left_evaluated = wit_infer_by_expr(
+                        left,
+                        cs.num_witin,
+                        cs.num_fixed as WitnessId,
+                        cs.instance_openings.len(),
+                        fixed,
+                        wits_in,
+                        structural_witin,
+                        pi_mles,
+                        pub_io_evals,
+                        &challenge,
+                    );
+                    let left_evaluated =
+                        filter_mle_by_selector_mle(left_evaluated, zero_selector.clone());
+
+                    let right_evaluated = wit_infer_by_expr(
+                        &right,
+                        cs.num_witin,
+                        cs.num_fixed as WitnessId,
+                        cs.instance_openings.len(),
+                        fixed,
+                        wits_in,
+                        structural_witin,
+                        pi_mles,
+                        pub_io_evals,
+                        &challenge,
+                    );
+                    let right_evaluated =
+                        filter_mle_by_selector_mle(right_evaluated, zero_selector.clone());
+
+                    // left_evaluated.len() ?= right_evaluated.len() due to padding instance
+                    for (inst_id, (left_element, right_element)) in
+                        izip!(left_evaluated, right_evaluated).enumerate()
+                    {
+                        if left_element != right_element {
+                            errors.push(MockProverError::AssertEqualError {
+                                left_expression: *left.clone(),
+                                right_expression: right.clone(),
+                                left: Either::Right(left_element),
+                                right: Either::Right(right_element),
+                                name: name.clone(),
+                                inst_id,
+                            });
+                        }
+                    }
+                } else {
+                    // contains require_zero
+                    let expr_evaluated = wit_infer_by_expr(
+                        expr,
+                        cs.num_witin,
+                        cs.num_fixed as WitnessId,
+                        cs.instance_openings.len(),
+                        fixed,
+                        wits_in,
+                        structural_witin,
+                        pi_mles,
+                        pub_io_evals,
+                        &challenge,
+                    );
+                    let expr_evaluated =
+                        filter_mle_by_selector_mle(expr_evaluated, zero_selector.clone());
+
+                    for (inst_id, element) in enumerate(expr_evaluated) {
+                        if element != E::ZERO {
+                            errors.push(MockProverError::AssertZeroError {
+                                expression: expr.clone(),
+                                evaluated: Either::Right(element),
+                                name: name.clone(),
+                                inst_id,
+                            });
+                        }
                     }
                 }
+            }
+        }
+
+        // Lookup expressions
+        for (selector, group) in &cs.expression_groups {
+            let expressions = &group.lk_expressions;
+            if expressions.is_empty() {
+                continue;
+            }
+            let lk_selector = if let Some(selector) = selector {
+                &structural_witin[selector.selector_expr().id()]
             } else {
-                // contains require_zero
+                &structural_witin[0]
+            };
+            for r in expressions.iter() {
                 let expr_evaluated = wit_infer_by_expr(
-                    expr,
+                    &r.expression,
                     cs.num_witin,
                     cs.num_fixed as WitnessId,
                     cs.instance_openings.len(),
@@ -680,131 +726,103 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     &challenge,
                 );
                 let expr_evaluated =
-                    filter_mle_by_selector_mle(expr_evaluated, zero_selector.clone());
+                    filter_mle_by_selector_mle(expr_evaluated, lk_selector.clone());
 
-                for (inst_id, element) in enumerate(expr_evaluated) {
-                    if element != E::ZERO {
-                        errors.push(MockProverError::AssertZeroError {
-                            expression: expr.clone(),
-                            evaluated: Either::Right(element),
-                            name: name.clone(),
+                // Check each lookup expr exists in t vec
+                for (inst_id, element) in enumerate(&expr_evaluated) {
+                    if !table.contains(&element.to_canonical_u64_vec()) {
+                        errors.push(MockProverError::LookupError {
+                            rom_type: r.meta.0,
+                            expression: r.expression.clone(),
+                            evaluated: *element,
+                            name: r.expression_namespace_map.clone(),
                             inst_id,
                         });
                     }
                 }
-            }
-        }
 
-        let lk_selector: ArcMultilinearExtension<_> = if let Some(lk_selector) = &cs.lk_selector {
-            structural_witin[lk_selector.selector_expr().id()].clone()
-        } else {
-            let mut selector = vec![E::BaseField::ONE; num_instances];
-            selector.resize(num_instance_padded, E::BaseField::ZERO);
-            MultilinearExtension::from_evaluation_vec_smart(
-                ceil_log2(num_instance_padded),
-                selector,
-            )
-            .into()
-        };
-
-        // Lookup expressions
-        for (expr, (name, (rom_type, _))) in cs.lk_expressions.iter().zip(
-            cs.lk_expressions_namespace_map
-                .iter()
-                .zip_eq(cs.lk_expressions_items_map.iter()),
-        ) {
-            let expr_evaluated = wit_infer_by_expr(
-                expr,
-                cs.num_witin,
-                cs.num_fixed as WitnessId,
-                cs.instance_openings.len(),
-                fixed,
-                wits_in,
-                structural_witin,
-                pi_mles,
-                pub_io_evals,
-                &challenge,
-            );
-            let expr_evaluated = filter_mle_by_selector_mle(expr_evaluated, lk_selector.clone());
-
-            // Check each lookup expr exists in t vec
-            for (inst_id, element) in enumerate(&expr_evaluated) {
-                if !table.contains(&element.to_canonical_u64_vec()) {
-                    errors.push(MockProverError::LookupError {
-                        rom_type: *rom_type,
-                        expression: expr.clone(),
-                        evaluated: *element,
-                        name: name.clone(),
-                        inst_id,
-                    });
+                // Increment shared LK Multiplicity
+                for element in expr_evaluated {
+                    shared_lkm.increment(r.meta.0, element);
                 }
-            }
-
-            // Increment shared LK Multiplicity
-            for element in expr_evaluated {
-                shared_lkm.increment(*rom_type, element);
             }
         }
 
         // LK Multiplicity check
         if let Some(lkm_from_assignment) = expected_lkm {
-            let selected_count = lk_selector
-                .get_base_field_vec()
-                .iter()
-                .filter(|sel| **sel == E::BaseField::ONE)
-                .count();
             // Infer LK Multiplicity from constraint system.
             let mut lkm_from_cs = LkMultiplicity::default();
-            for (rom_type, args) in &cs.lk_expressions_items_map {
-                let args_eval: Vec<_> = args
+            for (selector, group) in &cs.expression_groups {
+                let expressions = &group.lk_expressions;
+                if expressions.is_empty() {
+                    continue;
+                }
+                let lk_selector = if let Some(selector) = selector {
+                    &structural_witin[selector.selector_expr().id()]
+                } else {
+                    &structural_witin[0]
+                };
+                let selected_count = lk_selector
+                    .get_base_field_vec()
                     .iter()
-                    .map(|arg_expr| {
-                        let arg_eval = wit_infer_by_expr(
-                            arg_expr,
-                            cs.num_witin,
-                            cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
-                            fixed,
-                            wits_in,
-                            structural_witin,
-                            pi_mles,
-                            pub_io_evals,
-                            &challenge,
-                        );
-                        if arg_expr.is_constant() && arg_eval.evaluations.len() == 1 {
-                            vec![arg_eval.get_ext_field_vec()[0].to_canonical_u64(); selected_count]
-                        } else {
-                            filter_mle_by_selector_mle(arg_eval, lk_selector.clone())
-                                .iter()
-                                .map(E::to_canonical_u64)
-                                .collect_vec()
-                        }
-                    })
-                    .collect();
+                    .filter(|sel| **sel == E::BaseField::ONE)
+                    .count();
 
-                // Count lookups infered from ConstraintSystem from all instances into lkm_from_cs.
-                for (arg0, arg1) in args_eval[0]
-                    .iter()
-                    .zip(args_eval[1].iter())
-                    .take(selected_count)
-                {
-                    match rom_type {
-                        ROMType::Dynamic => {
-                            lkm_from_cs.assert_dynamic_range(*arg0, *arg1);
-                        }
-                        ROMType::DoubleU8 => {
-                            lkm_from_cs.assert_double_u8(*arg0, *arg1);
-                        }
-                        ROMType::And => lkm_from_cs.lookup_and_byte(*arg0, *arg1),
-                        ROMType::Or => lkm_from_cs.lookup_or_byte(*arg0, *arg1),
-                        ROMType::Xor => lkm_from_cs.lookup_xor_byte(*arg0, *arg1),
-                        ROMType::Ltu => lkm_from_cs.lookup_ltu_byte(*arg0, *arg1),
-                        ROMType::Pow => {
-                            assert_eq!(*arg0, 2);
-                            lkm_from_cs.lookup_pow2(*arg1)
-                        }
-                        ROMType::Instruction => lkm_from_cs.fetch(*arg0 as u32),
-                    };
+                for r in expressions.iter() {
+                    let (rom_type, args) = &r.meta;
+                    let args_eval: Vec<_> = args
+                        .iter()
+                        .map(|arg_expr| {
+                            let arg_eval = wit_infer_by_expr(
+                                arg_expr,
+                                cs.num_witin,
+                                cs.num_fixed as WitnessId,
+                                cs.instance_openings.len(),
+                                fixed,
+                                wits_in,
+                                structural_witin,
+                                pi_mles,
+                                pub_io_evals,
+                                &challenge,
+                            );
+                            if arg_expr.is_constant() && arg_eval.evaluations.len() == 1 {
+                                vec![
+                                    arg_eval.get_ext_field_vec()[0].to_canonical_u64();
+                                    selected_count
+                                ]
+                            } else {
+                                filter_mle_by_selector_mle(arg_eval, lk_selector.clone())
+                                    .iter()
+                                    .map(E::to_canonical_u64)
+                                    .collect_vec()
+                            }
+                        })
+                        .collect();
+
+                    // Count lookups infered from ConstraintSystem from all instances into lkm_from_cs.
+                    for (arg0, arg1) in args_eval[0]
+                        .iter()
+                        .zip(args_eval[1].iter())
+                        .take(selected_count)
+                    {
+                        match rom_type {
+                            ROMType::Dynamic => {
+                                lkm_from_cs.assert_dynamic_range(*arg0, *arg1);
+                            }
+                            ROMType::DoubleU8 => {
+                                lkm_from_cs.assert_double_u8(*arg0, *arg1);
+                            }
+                            ROMType::And => lkm_from_cs.lookup_and_byte(*arg0, *arg1),
+                            ROMType::Or => lkm_from_cs.lookup_or_byte(*arg0, *arg1),
+                            ROMType::Xor => lkm_from_cs.lookup_xor_byte(*arg0, *arg1),
+                            ROMType::Ltu => lkm_from_cs.lookup_ltu_byte(*arg0, *arg1),
+                            ROMType::Pow => {
+                                assert_eq!(*arg0, 2);
+                                lkm_from_cs.lookup_pow2(*arg1)
+                            }
+                            ROMType::Instruction => lkm_from_cs.fetch(*arg0 as u32),
+                        };
+                    }
                 }
             }
 
@@ -850,7 +868,8 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         let mut cb = CircuitBuilder::new(&mut cs);
         let config = ProgramTableCircuit::<_>::construct_circuit(&mut cb, &params).unwrap();
         let fixed = ProgramTableCircuit::<E>::generate_fixed_traces(&config, cs.num_fixed, program);
-        for table_expr in &cs.lk_table_expressions {
+
+        for table_expr in cs.lk_table_expressions_all() {
             for row in fixed.iter_rows() {
                 // TODO: Find a better way to obtain the row content.
                 let row: Vec<E> = row.iter().map(|v| (*v).into()).collect();
@@ -874,13 +893,22 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
         structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
         constraint_names: &[&str],
+        num_instances: usize,
         challenge: Option<[E; 2]>,
         lkm: Option<Multiplicity<u64>>,
     ) {
         let error_groups = if let Some(challenge) = challenge {
-            Self::run_with_challenge(cb, fixed, wits_in, structural_witin, challenge, lkm)
+            Self::run_with_challenge(
+                cb,
+                fixed,
+                wits_in,
+                structural_witin,
+                num_instances,
+                challenge,
+                lkm,
+            )
         } else {
-            Self::run(cb, wits_in, program, lkm)
+            Self::run(cb, wits_in, structural_witin, program, num_instances, lkm)
         }
         .err()
         .into_iter()
@@ -917,6 +945,7 @@ Hints:
         cb: &CircuitBuilder<E>,
         [raw_witin, raw_structural_witin]: RMMCollections<E::BaseField>,
         program: &[ceno_emul::Instruction],
+        num_instances: usize,
         challenge: Option<[E; 2]>,
         lkm: Option<Multiplicity<u64>>,
     ) {
@@ -930,7 +959,15 @@ Hints:
             .into_iter()
             .map(|v| v.into())
             .collect_vec();
-        Self::assert_satisfied(cb, &wits_in, &structural_witin, program, challenge, lkm);
+        Self::assert_satisfied(
+            cb,
+            &wits_in,
+            &structural_witin,
+            program,
+            num_instances,
+            challenge,
+            lkm,
+        );
     }
 
     pub fn assert_satisfied(
@@ -938,6 +975,7 @@ Hints:
         wits_in: &[ArcMultilinearExtension<'a, E>],
         structural_witin: &[ArcMultilinearExtension<'a, E>],
         program: &[ceno_emul::Instruction],
+        num_instances: usize,
         challenge: Option<[E; 2]>,
         lkm: Option<Multiplicity<u64>>,
     ) {
@@ -949,6 +987,7 @@ Hints:
             structural_witin,
             program,
             &[],
+            num_instances,
             challenge,
             lkm,
         );
@@ -1045,7 +1084,7 @@ Hints:
                     fixed.to_mles().into_iter().map(|f| f.into()).collect_vec()
                 });
             // not lookup table
-            if cs.lk_table_expressions.is_empty() {
+            if cs.lk_table_expressions_len() == 0 {
                 tracing::info!(
                     "Mock proving opcode {} with {} entries",
                     circuit_name,
@@ -1082,9 +1121,8 @@ Hints:
                     num_rows
                 );
                 // gather lookup tables
-                for (expr, (rom_type, _)) in
-                    izip!(&cs.lk_table_expressions, &cs.lk_expressions_items_map)
-                {
+                for expr in cs.lk_table_expressions_all() {
+                    let rom_type = expr.meta.0;
                     let lk_table = wit_infer_by_expr(
                         &expr.values,
                         cs.num_witin,
@@ -1117,7 +1155,7 @@ Hints:
 
                     for (key, multiplicity) in izip!(lk_table, multiplicity) {
                         lkm_tables.set_count(
-                            *rom_type,
+                            rom_type,
                             key,
                             multiplicity.to_canonical_u64() as usize,
                         );
@@ -1162,6 +1200,7 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
+
                     let pi_mles = cs
                         .instance_openings
                         .iter()
@@ -1172,87 +1211,86 @@ Hints:
                     if *num_rows == 0 {
                         continue;
                     }
-                    let w_selector: ArcMultilinearExtension<_> =
-                        if let Some(w_selector) = &cs.w_selector {
-                            structural_witness[w_selector.selector_expr().id()].clone()
-                        } else {
-                            let mut selector = vec![E::BaseField::ONE; *num_rows];
-                            selector.resize(next_pow2_instance_padding(*num_rows), E::BaseField::ZERO);
-                            MultilinearExtension::from_evaluation_vec_smart(
-                                ceil_log2(next_pow2_instance_padding(*num_rows)),
-                                selector,
-                            )
-                            .into()
+                    for (selector, group) in &cs.expression_groups {
+                        let Some(selector) = selector else {
+                            assert!(group.is_empty(), "all expressions must have a selector");
+                            continue;
                         };
-
-                    for ((w_rlc_expr, annotation), (ram_type_expr, _)) in (cs
-                        .w_expressions
-                        .iter()
-                        .chain(cs.w_table_expressions.iter().map(|expr| &expr.expr)))
-                    .zip_eq(
-                        cs.w_expressions_namespace_map
-                            .iter()
-                            .chain(cs.w_table_expressions_namespace_map.iter()),
-                    )
-                    .zip_eq(cs.w_ram_types.iter())
-                    {
-                        let ram_type_mle = wit_infer_by_expr(
-                            ram_type_expr,
-                            cs.num_witin,
-                            cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
-                            fixed,
-                            witness,
-                            structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
-                            &challenges,
-                        );
-                        let ram_type_vec = ram_type_mle.get_ext_field_vec();
-                        let write_rlc_records = wit_infer_by_expr(
-                            w_rlc_expr,
-                            cs.num_witin,
-                            cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
-                            fixed,
-                            witness,
-                            structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
-                            &challenges,
-                        );
-                        let w_selector_vec = w_selector.get_base_field_vec();
-                        let write_rlc_records =
-                            filter_mle_by_predicate(write_rlc_records, |i, _v| {
-                                ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
-                                    && w_selector_vec[i] == E::BaseField::ONE
-                            });
-                        if write_rlc_records.is_empty() {
+                        let w_expressions = &group.w_expressions;
+                        if w_expressions.is_empty() && group.w_table_expressions.is_empty() {
                             continue;
                         }
+                        let w_selector = structural_witness[selector.selector_expr().id()].clone();
 
-                        let mut records = vec![];
-                        let mut writes_within_expr_dedup = HashSet::new();
-                        for (row, record_rlc) in enumerate(write_rlc_records) {
-                            // TODO: report error
-                            assert_eq!(
-                                writes_within_expr_dedup.insert(record_rlc),
-                                true,
-                                "circuit name {circuit_name} within expression write duplicated on RAMType {:?} annotation {:?} on row {row}",
-                                $ram_type,
-                                annotation
+                        for (w_rlc_expr, annotation, (ram_type_expr, _)) in w_expressions
+                            .iter()
+                            .map(|r| (&r.expression, &r.expression_namespace_map, &r.meta))
+                            .chain(
+                                group
+                                    .w_table_expressions
+                                    .iter()
+                                    .map(|t| (&t.expr, &t.expression_namespace_map, &t.meta)),
+                            )
+                        {
+                            let ram_type_mle = wit_infer_by_expr(
+                                ram_type_expr,
+                                cs.num_witin,
+                                cs.num_fixed as WitnessId,
+                                cs.instance_openings.len(),
+                                fixed,
+                                witness,
+                                structural_witness,
+                                &pi_mles,
+                                &pub_io_evals,
+                                &challenges,
                             );
-                            assert_eq!(
-                                writes.insert(record_rlc),
-                                true,
-                                "circuit name {circuit_name} crossing-chip write duplicated on RAMType {:?} annotation {:?} on row {row}",
-                                $ram_type,
-                                annotation
+                            let ram_type_vec = ram_type_mle.get_ext_field_vec();
+                            let write_rlc_records = wit_infer_by_expr(
+                                w_rlc_expr,
+                                cs.num_witin,
+                                cs.num_fixed as WitnessId,
+                                cs.instance_openings.len(),
+                                fixed,
+                                witness,
+                                structural_witness,
+                                &pi_mles,
+                                &pub_io_evals,
+                                &challenges,
                             );
-                            records.push((record_rlc, row));
+                            let w_selector_vec = w_selector.get_base_field_vec();
+                            let write_rlc_records =
+                                filter_mle_by_predicate(write_rlc_records, |i, _v| {
+                                    ram_type_vec[i]
+                                        == E::from_canonical_u32($ram_type as u32)
+                                        && w_selector_vec[i] == E::BaseField::ONE
+                                });
+                            if write_rlc_records.is_empty() {
+                                continue;
+                            }
+
+                            let mut records = vec![];
+                            let mut writes_within_expr_dedup = HashSet::new();
+                            for (row, record_rlc) in enumerate(write_rlc_records) {
+                                // TODO: report error
+                                assert_eq!(
+                                    writes_within_expr_dedup.insert(record_rlc),
+                                    true,
+                                    "circuit name {circuit_name} within expression write duplicated on RAMType {:?} annotation {:?} on row {row}",
+                                    $ram_type,
+                                    annotation
+                                );
+                                assert_eq!(
+                                    writes.insert(record_rlc),
+                                    true,
+                                    "circuit name {circuit_name} crossing-chip write duplicated on RAMType {:?} annotation {:?} on row {row}",
+                                    $ram_type,
+                                    annotation
+                                );
+                                records.push((record_rlc, row));
+                            }
+                            writes_grp_by_annotations
+                                .insert(annotation.clone(), (records, circuit_name.clone()));
                         }
-                        writes_grp_by_annotations
-                            .insert(annotation.clone(), (records, circuit_name.clone()));
                     }
                 }
 
@@ -1268,6 +1306,7 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
+
                     let pi_mles = cs
                         .instance_openings
                         .iter()
@@ -1277,119 +1316,117 @@ Hints:
                     if *num_rows == 0 {
                         continue;
                     }
-                    let r_selector: ArcMultilinearExtension<_> =
-                        if let Some(r_selector) = &cs.r_selector {
-                            structural_witness[r_selector.selector_expr().id()].clone()
-                        } else {
-                            let mut selector = vec![E::BaseField::ONE; *num_rows];
-                            selector.resize(next_pow2_instance_padding(*num_rows), E::BaseField::ZERO);
-                            MultilinearExtension::from_evaluation_vec_smart(
-                                ceil_log2(next_pow2_instance_padding(*num_rows)),
-                                selector,
-                            )
-                            .into()
+                    for (selector, group) in &cs.expression_groups {
+                        let Some(selector) = selector else {
+                            assert!(group.is_empty(), "all expressions must have a selector");
+                            continue;
                         };
-                    for ((r_rlc_expr, annotation), (ram_type_expr, r_exprs)) in (cs
-                        .r_expressions
-                        .iter()
-                        .chain(cs.r_table_expressions.iter().map(|expr| &expr.expr)))
-                    .zip_eq(
-                        cs.r_expressions_namespace_map
-                            .iter()
-                            .chain(cs.r_table_expressions_namespace_map.iter()),
-                    )
-                    .zip_eq(cs.r_ram_types.iter())
-                    {
-                        let ram_type_mle = wit_infer_by_expr(
-                            ram_type_expr,
-                            cs.num_witin,
-                            cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
-                            fixed,
-                            witness,
-                            structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
-                            &challenges,
-                        );
-                        let ram_type_vec = ram_type_mle.get_ext_field_vec();
-                        let read_records = wit_infer_by_expr(
-                            r_rlc_expr,
-                            cs.num_witin,
-                            cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
-                            fixed,
-                            witness,
-                            structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
-                            &challenges,
-                        );
-                        let r_selector_vec = r_selector.get_base_field_vec();
-                        let read_records = filter_mle_by_predicate(read_records, |i, _v| {
-                            ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
-                                && r_selector_vec[i] == E::BaseField::ONE
-                        });
-                        if read_records.is_empty() {
+                        let r_expressions = &group.r_expressions;
+                        if r_expressions.is_empty() && group.r_table_expressions.is_empty() {
                             continue;
                         }
+                        let r_selector = structural_witness[selector.selector_expr().id()].clone();
 
-                        if $ram_type == RAMType::GlobalState {
-                            // r_exprs = [GlobalState, pc, timestamp]
-                            assert_eq!(r_exprs.len(), 3);
-                            let r = r_exprs
-                                .into_iter()
-                                .skip(1)
-                                .map(|expr| {
-                                    let v = wit_infer_by_expr(
-                                        expr,
-                                        cs.num_witin,
-                                        cs.num_fixed as WitnessId,
-                                        cs.instance_openings.len(),
-                                        fixed,
-                                        witness,
-                                        structural_witness,
-                                        &pi_mles,
-                                        &pub_io_evals,
-                                        &challenges,
-                                    );
-                                    filter_mle_by_selector_mle(v, r_selector.clone())
-                                })
-                                .collect_vec();
-                            // convert [[pc], [timestamp]] into [[pc, timestamp]]
-                            let r = (0..r[0].len())
-                                // TODO: use transpose
-                                .map(|row| r.iter().map(|r| r[row]).collect_vec())
-                                .collect_vec();
-
-                            assert!(gs.insert(circuit_name.clone(), r).is_none());
-                        };
-
-                        let mut records = vec![];
-                        let mut reads_within_expr_dedup = HashSet::new();
-                        for (row, record) in enumerate(read_records) {
-                            // TODO: return error
-                            assert_eq!(
-                                reads_within_expr_dedup.insert(record),
-                                true,
-                                "circuit name {circuit_name} within expression read duplicated on RAMType {:?} annotation {:?} on row {row}",
-                                $ram_type,
-                                annotation,
+                        for (r_rlc_expr, annotation, (ram_type_expr, r_exprs)) in r_expressions
+                            .iter()
+                            .map(|r| (&r.expression, &r.expression_namespace_map, &r.meta))
+                            .chain(
+                                group
+                                    .r_table_expressions
+                                    .iter()
+                                    .map(|t| (&t.expr, &t.expression_namespace_map, &t.meta)),
+                            )
+                        {
+                            let ram_type_mle = wit_infer_by_expr(
+                                ram_type_expr,
+                                cs.num_witin,
+                                cs.num_fixed as WitnessId,
+                                cs.instance_openings.len(),
+                                fixed,
+                                witness,
+                                structural_witness,
+                                &pi_mles,
+                                &pub_io_evals,
+                                &challenges,
                             );
-                            assert_eq!(
-                                reads.insert(record),
-                                true,
-                                "circuit name {circuit_name} crossing-chip read duplicated on RAMType {:?} annotation {:?} on row {row}",
-                                $ram_type,
-                                annotation,
+                            let ram_type_vec = ram_type_mle.get_ext_field_vec();
+                            let read_records = wit_infer_by_expr(
+                                r_rlc_expr,
+                                cs.num_witin,
+                                cs.num_fixed as WitnessId,
+                                cs.instance_openings.len(),
+                                fixed,
+                                witness,
+                                structural_witness,
+                                &pi_mles,
+                                &pub_io_evals,
+                                &challenges,
                             );
-                            records.push((record, row));
+                            let r_selector_vec = r_selector.get_base_field_vec();
+                            let read_records = filter_mle_by_predicate(read_records, |i, _v| {
+                                ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
+                                    && r_selector_vec[i] == E::BaseField::ONE
+                            });
+                            if read_records.is_empty() {
+                                continue;
+                            }
+
+                            if $ram_type == RAMType::GlobalState {
+                                // r_exprs = [GlobalState, pc, timestamp]
+                                assert_eq!(r_exprs.len(), 3);
+                                let r = r_exprs
+                                    .into_iter()
+                                    .skip(1)
+                                    .map(|expr| {
+                                        let v = wit_infer_by_expr(
+                                            expr,
+                                            cs.num_witin,
+                                            cs.num_fixed as WitnessId,
+                                            cs.instance_openings.len(),
+                                            fixed,
+                                            witness,
+                                            structural_witness,
+                                            &pi_mles,
+                                            &pub_io_evals,
+                                            &challenges,
+                                        );
+                                        filter_mle_by_selector_mle(v, r_selector.clone())
+                                    })
+                                    .collect_vec();
+                                // convert [[pc], [timestamp]] into [[pc, timestamp]]
+                                let r = (0..r[0].len())
+                                    // TODO: use transpose
+                                    .map(|row| r.iter().map(|r| r[row]).collect_vec())
+                                    .collect_vec();
+
+                                assert!(gs.insert(circuit_name.clone(), r).is_none());
+                            };
+
+                            let mut records = vec![];
+                            let mut reads_within_expr_dedup = HashSet::new();
+                            for (row, record) in enumerate(read_records) {
+                                // TODO: return error
+                                assert_eq!(
+                                    reads_within_expr_dedup.insert(record),
+                                    true,
+                                    "circuit name {circuit_name} within expression read duplicated on RAMType {:?} annotation {:?} on row {row}",
+                                    $ram_type,
+                                    annotation,
+                                );
+                                assert_eq!(
+                                    reads.insert(record),
+                                    true,
+                                    "circuit name {circuit_name} crossing-chip read duplicated on RAMType {:?} annotation {:?} on row {row}",
+                                    $ram_type,
+                                    annotation,
+                                );
+                                records.push((record, row));
+                            }
+                            reads_grp_by_annotations
+                                .insert(annotation.clone(), (records, circuit_name.clone()));
                         }
-                        reads_grp_by_annotations
-                            .insert(annotation.clone(), (records, circuit_name.clone()));
                     }
                 }
-
                 (
                     reads,
                     reads_grp_by_annotations,
@@ -1552,6 +1589,18 @@ Hints:
             panic!("found {} r/w mismatch errors", num_rw_mismatch_errors);
         }
     }
+
+    fn default_structural_witin_from_wits(
+        _cs: &ConstraintSystem<E>,
+        eval_len: usize,
+    ) -> Vec<ArcMultilinearExtension<'a, E>> {
+        let mut selector_eval = vec![E::BaseField::ONE; eval_len];
+        selector_eval.resize(eval_len.next_power_of_two(), E::BaseField::ZERO);
+        let selector =
+            MultilinearExtension::from_evaluation_vec_smart(ceil_log2(eval_len), selector_eval)
+                .into();
+        vec![selector; 1]
+    }
 }
 
 fn compare_lkm<E, K>(lkm_a: Multiplicity<K>, lkm_b: Multiplicity<K>) -> Vec<MockProverError<E, K>>
@@ -1631,6 +1680,7 @@ fn filter_mle_by_selector_mle<E: ExtensionField>(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{
         ROMType,
@@ -1693,7 +1743,7 @@ mod tests {
         .map(|f| f.into_mle().into())
         .collect_vec();
 
-        MockProver::assert_satisfied(&builder, &wits_in, &[], &[], None, None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], &[], 2, None, None);
     }
 
     #[derive(Debug)]
@@ -1729,7 +1779,7 @@ mod tests {
         ];
 
         let challenge = [1.into_f(), 1000.into_f()];
-        MockProver::assert_satisfied(&builder, &wits_in, &[], &[], Some(challenge), None);
+        MockProver::assert_satisfied(&builder, &wits_in, &[], &[], 2, Some(challenge), None);
     }
 
     #[test]
@@ -1743,7 +1793,8 @@ mod tests {
         let wits_in = vec![(vec![123u64.into_f()] as Vec<Goldilocks>).into_mle().into()];
 
         let challenge = [2.into_f(), 1000.into_f()];
-        let result = MockProver::run_with_challenge(&builder, &[], &wits_in, &[], challenge, None);
+        let result =
+            MockProver::run_with_challenge(&builder, &[], &wits_in, &[], 1, challenge, None);
         assert!(result.is_err(), "Expected error");
         let err = result.unwrap_err();
         assert_eq!(
@@ -1800,10 +1851,14 @@ mod tests {
     }
 
     impl AssertLtCircuit {
-        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
+        fn construct_circuit(
+            cb: &mut CircuitBuilder<GoldilocksExt2>,
+            max_bits: usize,
+        ) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a");
             let b = cb.create_witin(|| "b");
-            let lt_wtns = AssertLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
+            let lt_wtns =
+                AssertLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), max_bits)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -1849,7 +1904,7 @@ mod tests {
         let mut cs = ConstraintSystem::new(|| "test_assert_lt_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+        let circuit = AssertLtCircuit::construct_circuit(&mut builder, 2).unwrap();
 
         let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
@@ -1867,6 +1922,7 @@ mod tests {
             &builder,
             [raw_witin, RowMajorMatrix::empty()],
             &[],
+            2,
             Some([1.into_f(), 1000.into_f()]),
             None,
         );
@@ -1877,7 +1933,7 @@ mod tests {
         let mut cs = ConstraintSystem::new(|| "test_assert_lt_u32");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let circuit = AssertLtCircuit::construct_circuit(&mut builder).unwrap();
+        let circuit = AssertLtCircuit::construct_circuit(&mut builder, 2).unwrap();
         let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
             .assign_instances::<GoldilocksExt2>(
@@ -1900,6 +1956,7 @@ mod tests {
             &builder,
             [raw_witin, RowMajorMatrix::empty()],
             &[],
+            2,
             Some([1.into_f(), 1000.into_f()]),
             None,
         );
@@ -1918,10 +1975,13 @@ mod tests {
     }
 
     impl LtCircuit {
-        fn construct_circuit(cb: &mut CircuitBuilder<GoldilocksExt2>) -> Result<Self, ZKVMError> {
+        fn construct_circuit(
+            cb: &mut CircuitBuilder<GoldilocksExt2>,
+            max_bits: usize,
+        ) -> Result<Self, ZKVMError> {
             let a = cb.create_witin(|| "a");
             let b = cb.create_witin(|| "b");
-            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), 1)?;
+            let lt_wtns = IsLtConfig::construct_circuit(cb, || "lt", a.expr(), b.expr(), max_bits)?;
             Ok(Self { a, b, lt_wtns })
         }
 
@@ -1967,7 +2027,7 @@ mod tests {
         let mut cs = ConstraintSystem::new(|| "test_lt_1");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();
+        let circuit = LtCircuit::construct_circuit(&mut builder, 2).unwrap();
 
         let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
@@ -1985,6 +2045,7 @@ mod tests {
             &builder,
             [raw_witin, RowMajorMatrix::empty()],
             &[],
+            2,
             Some([1.into_f(), 1000.into_f()]),
             None,
         );
@@ -1995,7 +2056,7 @@ mod tests {
         let mut cs = ConstraintSystem::new(|| "test_lt_u32");
         let mut builder = CircuitBuilder::<GoldilocksExt2>::new(&mut cs);
 
-        let circuit = LtCircuit::construct_circuit(&mut builder).unwrap();
+        let circuit = LtCircuit::construct_circuit(&mut builder, 2).unwrap();
 
         let mut lk_multiplicity = LkMultiplicity::default();
         let raw_witin = circuit
@@ -2019,6 +2080,7 @@ mod tests {
             &builder,
             [raw_witin, RowMajorMatrix::empty()],
             &[],
+            2,
             Some([1.into_f(), 1000.into_f()]),
             None,
         );

@@ -148,11 +148,11 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     }
 
     pub fn num_reads(&self) -> usize {
-        self.zkvm_v1_css.r_expressions.len() + self.zkvm_v1_css.r_table_expressions.len()
+        self.zkvm_v1_css.r_expressions_len() + self.zkvm_v1_css.r_table_expressions_len()
     }
 
     pub fn num_writes(&self) -> usize {
-        self.zkvm_v1_css.w_expressions.len() + self.zkvm_v1_css.w_table_expressions.len()
+        self.zkvm_v1_css.w_expressions_len() + self.zkvm_v1_css.w_table_expressions_len()
     }
 
     pub fn instance_openings(&self) -> &[Instance] {
@@ -163,12 +163,12 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     }
 
     pub fn is_with_lk_table(&self) -> bool {
-        !self.zkvm_v1_css.lk_table_expressions.is_empty()
+        self.zkvm_v1_css.lk_table_expressions_len() > 0
     }
 
     /// return number of lookup operation
     pub fn num_lks(&self) -> usize {
-        self.zkvm_v1_css.lk_expressions.len() + self.zkvm_v1_css.lk_table_expressions.len()
+        self.zkvm_v1_css.lk_expressions_len() + self.zkvm_v1_css.lk_table_expressions_len()
     }
 
     /// return num_vars belongs to rotation
@@ -222,7 +222,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
-        let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
+        let mut cs =
+            ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let (config, gkr_iop_circuit) =
             OC::build_gkr_iop_circuit(&mut circuit_builder, &self.params).unwrap();
@@ -234,9 +235,9 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
             "opcode circuit {} has {} witnesses, {} reads, {} writes, {} lookups",
             OC::name(),
             cs.num_witin(),
-            cs.zkvm_v1_css.r_expressions.len(),
-            cs.zkvm_v1_css.w_expressions.len(),
-            cs.zkvm_v1_css.lk_expressions.len(),
+            cs.zkvm_v1_css.r_expressions_len(),
+            cs.zkvm_v1_css.w_expressions_len(),
+            cs.zkvm_v1_css.lk_expressions_len(),
         );
         assert!(
             self.circuit_css.insert(OC::name(), cs).is_none(),
@@ -247,7 +248,8 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
-        let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
+        let mut cs =
+            ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let (config, gkr_iop_circuit) =
             TC::build_gkr_iop_circuit(&mut circuit_builder, &self.params).unwrap();

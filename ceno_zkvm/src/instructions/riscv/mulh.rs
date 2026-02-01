@@ -166,7 +166,7 @@ mod test {
         )
         .unwrap();
 
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], 1, None, Some(lkm));
     }
 
     #[test]
@@ -248,7 +248,7 @@ mod test {
         )
         .unwrap();
 
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], 1, None, Some(lkm));
     }
 
     #[test]
@@ -332,6 +332,6 @@ mod test {
         )
         .unwrap();
 
-        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+        MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], 1, None, Some(lkm));
     }
 }

@@ -11,6 +11,7 @@ use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness},
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend},
+    selector::SelectorContext,
 };
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
@@ -332,13 +333,7 @@ pub fn build_main_witness<
 
     // circuit must have at least one read/write/lookup
     assert!(
-        cs.r_expressions.len()
-            + cs.w_expressions.len()
-            + cs.lk_expressions.len()
-            + cs.r_table_expressions.len()
-            + cs.w_table_expressions.len()
-            + cs.lk_table_expressions.len()
-            > 0,
+        composed_cs.num_reads() + composed_cs.num_writes() + composed_cs.num_lks() > 0,
         "assert circuit"
     );
 
@@ -520,6 +515,33 @@ pub fn gkr_witness<
         GKRCircuitWitness { layers: layer_wits },
         GKRCircuitOutput(LayerWitness(gkr_out_well_order)),
     )
+}
+
+/// This assumes the order is always zero, read, write, lookup
+/// TODO: make it more general if needed
+pub fn global_selector_ctxs<E: ExtensionField>(
+    _cs: &gkr_iop::circuit_builder::ConstraintSystem<E>,
+    _gkr_circuit: &gkr_iop::gkr::GKRCircuit<E>,
+    num_instances: &[usize],
+    num_var_with_rotation: usize,
+) -> Vec<SelectorContext> {
+    vec![
+        SelectorContext {
+            offset: 0,
+            num_instances: num_instances[0],
+            num_vars: num_var_with_rotation,
+        },
+        SelectorContext {
+            offset: num_instances[0],
+            num_instances: num_instances[1],
+            num_vars: num_var_with_rotation,
+        },
+        SelectorContext {
+            offset: 0,
+            num_instances: num_instances[0] + num_instances[1],
+            num_vars: num_var_with_rotation,
+        },
+    ]
 }
 
 #[cfg(test)]
