@@ -8,10 +8,6 @@ use openvm_native_recursion::{
     hints::{Hintable, VecAutoHintable},
     vars::HintSlice,
 };
-use openvm_native_recursion::{
-    hints::{Hintable, VecAutoHintable},
-    vars::HintSlice,
-};
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, 4>;
 pub type InnerConfig = AsmConfig<F, E>;
@@ -118,8 +114,8 @@ pub struct IOPProverMessage {
     pub evaluations: Vec<E>,
 }
 
-use sumcheck::structs::IOPProverMessage as InnerIOPProverMessage;
 use crate::basefold_verifier::utils::read_hint_slice;
+use sumcheck::structs::IOPProverMessage as InnerIOPProverMessage;
 impl From<InnerIOPProverMessage<E>> for IOPProverMessage {
     fn from(value: InnerIOPProverMessage<E>) -> Self {
         IOPProverMessage {
@@ -270,7 +266,7 @@ impl Hintable<InnerConfig> for ThreeDimensionalVector {
         let data = read_hint_slice(builder);
         builder.assert_eq::<Var<F>>(
             data.length.clone(),
-            inner_inner_length * inner_length * length
+            inner_inner_length * inner_length * length,
         );
 
         ThreeDimensionalVecVariable {
