@@ -14,15 +14,13 @@ use p3::{
 use serde::Deserialize;
 
 use super::{basefold::*, extension_mmcs::*, mmcs::*, rs::*, utils::*};
-use crate::{
-    arithmetics::eq_eval_with_index,
-    tower_verifier::{binding::*, program::interpolate_uni_poly},
-};
+use crate::{arithmetics::eq_eval_with_index, tower_verifier::binding::*};
 
 pub type F = BabyBear;
 pub type E = BabyBearExt4;
 pub type InnerConfig = AsmConfig<F, E>;
 
+use crate::arithmetics::UniPolyExtrapolator;
 use p3::fri::{
     BatchOpening as InnerBatchOpening, CommitPhaseProofStep as InnerCommitPhaseProofStep,
 };
@@ -318,6 +316,7 @@ pub struct RoundContextVariable<C: Config> {
 pub(crate) fn batch_verifier_query_phase<C: Config>(
     builder: &mut Builder<C>,
     input: QueryPhaseVerifierInputVariable<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) {
     let inv_2 = builder.constant(C::F::from_canonical_u32(0x3c000001));
     let two_adic_generators_inverses: Array<C, Felt<C::F>> = builder.dyn_array(28);
@@ -667,7 +666,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
     );
     // 1. check initial claim match with first round sumcheck value
     let batch_coeffs_offset: Var<C::N> = builder.constant(C::N::ZERO);
-    let expected_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    let expected_claim: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     iter_zip!(builder, input.rounds).for_each(|ptr_vec, builder| {
         let round = builder.iter_ptr_get(&input.rounds, ptr_vec[0]);
         iter_zip!(builder, round.openings).for_each(|ptr_vec, builder| {
@@ -680,45 +679,27 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 let eval = builder.iter_ptr_get(&opening.point_and_evals.evals, ptr_vec[0]);
                 let coeff = builder.get(&input.batch_coeffs, batch_coeffs_offset);
                 let val: Ext<C::F, C::EF> = builder.eval(eval * coeff * scalar);
-                builder.assign(&expected_sum, expected_sum + val);
+                builder.assign(&expected_claim, expected_claim + val);
                 builder.assign(&batch_coeffs_offset, batch_coeffs_offset + Usize::from(1));
             });
         });
     });
-    let sum: Ext<C::F, C::EF> = {
-        let sumcheck_evals = builder.get(&input.proof.sumcheck_proof, 0).evaluations;
-        let eval0 = builder.get(&sumcheck_evals, 0);
-        let eval1 = builder.get(&sumcheck_evals, 1);
-        builder.eval(eval0 + eval1)
-    };
-    builder.assert_eq::<Ext<C::F, C::EF>>(expected_sum, sum);
-
-    // 2. check every round of sumcheck match with prev claims
-    let fold_len_minus_one: Var<C::N> = builder.eval(input.fold_challenges.len() - Usize::from(1));
+    // check every round of sumcheck match with prev claims
     builder
-        .range(0, fold_len_minus_one)
+        .range(0, input.fold_challenges.len())
         .for_each(|i_vec, builder| {
             let i = i_vec[0];
             let evals = builder.get(&input.proof.sumcheck_proof, i).evaluations;
+            let eval1 = builder.get(&evals, 0);
+            let eval0 = builder.eval(expected_claim - eval1);
             let challenge = builder.get(&input.fold_challenges, i);
-            let left = interpolate_uni_poly(builder, &evals, challenge);
-            let i_plus_one = builder.eval_expr(i + Usize::from(1));
-            let next_evals = builder
-                .get(&input.proof.sumcheck_proof, i_plus_one)
-                .evaluations;
-            let eval0 = builder.get(&next_evals, 0);
-            let eval1 = builder.get(&next_evals, 1);
-            let right: Ext<C::F, C::EF> = builder.eval(eval0 + eval1);
-            builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
+            let next_claim =
+                unipoly_extrapolator.extrapolate_uni_poly(builder, eval0, &evals, challenge);
+            builder.assign(&expected_claim, next_claim);
         });
 
-    // 3. check final evaluation are correct
-    let final_evals = builder
-        .get(&input.proof.sumcheck_proof, fold_len_minus_one)
-        .evaluations;
-    let final_challenge = builder.get(&input.fold_challenges, fold_len_minus_one);
-    let left = interpolate_uni_poly(builder, &final_evals, final_challenge);
-    let right: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    // check final evaluation are correct
+    let eval_claims: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let one: Var<C::N> = builder.constant(C::N::ONE);
     let j: Var<C::N> = builder.constant(C::N::ZERO);
     // \sum_i eq(p, [r,i]) * f(r,i)
@@ -752,13 +733,13 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
             builder.assert_eq::<Var<C::N>>(final_message.len(), one);
             let final_message = builder.get(&final_message, 0);
             let dot_prod: Ext<C::F, C::EF> = builder.eval(final_message * coeff);
-            builder.assign(&right, right + dot_prod);
+            builder.assign(&eval_claims, eval_claims + dot_prod);
 
             builder.assign(&j, j + Usize::from(1));
         });
     });
     builder.assert_eq::<Var<C::N>>(j, input.proof.final_message.len());
-    builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
+    builder.assert_eq::<Ext<C::F, C::EF>>(expected_claim, eval_claims);
 }
 
 #[cfg(test)]
@@ -792,7 +773,9 @@ pub mod tests {
     type E = BabyBearExt4;
     type Pcs = BasefoldDefault<E>;
 
+    use super::{QueryPhaseVerifierInput, batch_verifier_query_phase};
     use crate::{
+        arithmetics::UniPolyExtrapolator,
         basefold_verifier::{
             basefold::{Round, RoundOpening},
             mmcs::MmcsCommitment,
@@ -801,15 +784,14 @@ pub mod tests {
         tower_verifier::binding::Point,
     };
 
-    use super::{QueryPhaseVerifierInput, batch_verifier_query_phase};
-
     pub fn build_batch_verifier_query_phase(
         input: QueryPhaseVerifierInput,
     ) -> (Program<BabyBear>, Vec<Vec<BabyBear>>) {
         // build test program
         let mut builder = AsmBuilder::<F, E>::default();
+        let unipoly_extrapolator = UniPolyExtrapolator::new(&mut builder);
         let query_phase_input = QueryPhaseVerifierInput::read(&mut builder);
-        batch_verifier_query_phase(&mut builder, query_phase_input);
+        batch_verifier_query_phase(&mut builder, query_phase_input, &unipoly_extrapolator);
         builder.halt();
         let program = builder.compile_isa();
 
