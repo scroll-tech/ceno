@@ -24,8 +24,8 @@ use ceno_emul::{
     Platform, Program, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
-use gkr_iop::cpu::default_backend_config;
-use gkr_iop::selector::SelectorType;
+use gkr_iop::{cpu::default_backend_config, selector::SelectorType};
+
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 use multilinear_extensions::{

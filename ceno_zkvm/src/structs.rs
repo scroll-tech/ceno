@@ -222,8 +222,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 
     pub fn register_opcode_circuit<OC: Instruction<E>>(&mut self) -> OC::InstructionConfig {
-        let mut cs =
-            ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
+        let mut cs = ConstraintSystem::new(|| format!("riscv_opcode/{}", OC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let (config, gkr_iop_circuit) =
             OC::build_gkr_iop_circuit(&mut circuit_builder, &self.params).unwrap();
@@ -248,8 +247,7 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
     }
 
     pub fn register_table_circuit<TC: TableCircuit<E>>(&mut self) -> TC::TableConfig {
-        let mut cs =
-            ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
+        let mut cs = ConstraintSystem::new(|| format!("riscv_table/{}", TC::name()));
         let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
         let (config, gkr_iop_circuit) =
             TC::build_gkr_iop_circuit(&mut circuit_builder, &self.params).unwrap();

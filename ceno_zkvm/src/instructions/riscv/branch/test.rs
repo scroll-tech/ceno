@@ -138,7 +138,14 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     )
     .unwrap();
 
-    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], 1, None, Some(lkm));
+    MockProver::assert_satisfied_raw(
+        &circuit_builder,
+        raw_witin,
+        &[insn_code],
+        1,
+        None,
+        Some(lkm),
+    );
     Ok(())
 }
 
@@ -183,7 +190,14 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     )
     .unwrap();
 
-    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], 1, None, Some(lkm));
+    MockProver::assert_satisfied_raw(
+        &circuit_builder,
+        raw_witin,
+        &[insn_code],
+        1,
+        None,
+        Some(lkm),
+    );
     Ok(())
 }
 
@@ -235,7 +249,14 @@ fn impl_blt_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
     )
     .unwrap();
 
-    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], 1, None, Some(lkm));
+    MockProver::assert_satisfied_raw(
+        &circuit_builder,
+        raw_witin,
+        &[insn_code],
+        1,
+        None,
+        Some(lkm),
+    );
     Ok(())
 }
 
@@ -287,6 +308,13 @@ fn impl_bge_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
     )
     .unwrap();
 
-    MockProver::assert_satisfied_raw(&circuit_builder, raw_witin, &[insn_code], 1, None, Some(lkm));
+    MockProver::assert_satisfied_raw(
+        &circuit_builder,
+        raw_witin,
+        &[insn_code],
+        1,
+        None,
+        Some(lkm),
+    );
     Ok(())
 }
