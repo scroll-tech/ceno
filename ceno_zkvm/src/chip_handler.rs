@@ -53,6 +53,7 @@ pub type AddressExpr<E> = Expression<E>;
 /// Format: `[u16; UINT_LIMBS]`, least-significant-first.
 pub type MemoryExpr<E> = [Expression<E>; UINT_LIMBS];
 
+#[allow(clippy::type_complexity)]
 pub trait MemoryChipOperations<E: ExtensionField, NR: Into<String>, N: FnOnce() -> NR> {
     fn memory_read(
         &mut self,
