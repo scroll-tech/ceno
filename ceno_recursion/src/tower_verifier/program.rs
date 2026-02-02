@@ -93,7 +93,7 @@ pub fn iop_verifier_state_verify<C: Config>(
     prover_messages: &IOPProverMessageVecVariable<C>,
     max_num_variables: Felt<C::F>,
     max_degree: Felt<C::F>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) -> (
     Array<C, Ext<<C as Config>::F, <C as Config>::EF>>,
     Ext<<C as Config>::F, <C as Config>::EF>,
@@ -132,12 +132,9 @@ pub fn iop_verifier_state_verify<C: Config>(
             let challenge = challenger.sample_ext(builder);
 
             let e1 = builder.get(&prover_msg, 0);
-            let e2 = builder.get(&prover_msg, 1);
-            let target: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(e1 + e2);
-
-            builder.assert_ext_eq(expected, target);
-
-            let p_r = unipoly_extrapolator.extrapolate_uni_poly(builder, &prover_msg, challenge);
+            let e0 = builder.eval(expected - e1);
+            let p_r =
+                unipoly_extrapolator.extrapolate_uni_poly(builder, e0, &prover_msg, challenge);
 
             builder.assign(&expected, p_r + zero);
             builder.set_value(&challenges, i, challenge);
@@ -161,7 +158,7 @@ pub fn verify_tower_proof<C: Config>(
     max_num_variables: Usize<C::N>,
 
     proof: &TowerProofInputVariable<C>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) -> (
     PointVariable<C>,
     Array<C, PointAndEvalVariable<C>>,

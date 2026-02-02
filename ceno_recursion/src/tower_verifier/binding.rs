@@ -8,6 +8,10 @@ use openvm_native_recursion::{
     hints::{Hintable, VecAutoHintable},
     vars::HintSlice,
 };
+use openvm_native_recursion::{
+    hints::{Hintable, VecAutoHintable},
+    vars::HintSlice,
+};
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, 4>;
 pub type InnerConfig = AsmConfig<F, E>;

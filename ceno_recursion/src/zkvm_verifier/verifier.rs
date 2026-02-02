@@ -212,7 +212,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         .filter(|c| c.get_cs().num_fixed() > 0)
         .count();
 
-    let mut unipoly_extrapolator = UniPolyExtrapolator::new(builder);
+    let unipoly_extrapolator = UniPolyExtrapolator::new(builder);
     let mut poly_evaluator = PolyEvaluator::new(builder);
 
     let dummy_table_item = alpha;
@@ -353,7 +353,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     &zkvm_proof_input.raw_pi_num_variables,
                     &challenges,
                     chip_vk,
-                    &mut unipoly_extrapolator,
+                    &unipoly_extrapolator,
                     &mut poly_evaluator,
                 );
                 builder.cycle_tracker_end("Verify chip proof");
@@ -485,6 +485,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         zkvm_proof_input.max_width,
         rounds,
         zkvm_proof_input.pcs_proof,
+        &unipoly_extrapolator,
         &mut challenger,
     );
 
@@ -531,7 +532,7 @@ pub fn verify_chip_proof<C: Config>(
     raw_pi_num_variables: &Array<C, Var<C::N>>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     vk: &VerifyingKey<E>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
     poly_evaluator: &mut PolyEvaluator<C>,
 ) -> (Array<C, Ext<C::F, C::EF>>, SepticPointVariable<C>) {
     let composed_cs = vk.get_cs();
@@ -791,7 +792,7 @@ pub fn verify_gkr_circuit<C: Config>(
     claims: &Array<C, PointAndEvalVariable<C>>,
     _chip_proof: &ZKVMChipProofInputVariable<C>,
     selector_ctxs: Vec<SelectorContextVariable<C>>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
     poly_evaluator: &mut PolyEvaluator<C>,
 ) -> PointVariable<C> {
     let rt = PointVariable {
@@ -1171,7 +1172,7 @@ pub fn verify_rotation<C: Config>(
     rotation_cyclic_group_log2: usize,
     rt: Array<C, Ext<C::F, C::EF>>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) -> RotationClaim<C> {
     builder.cycle_tracker_start("Verify rotation");
     let SumcheckLayerProofVariable {
@@ -1715,7 +1716,7 @@ pub fn verify_ecc_proof<C: Config>(
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
     proof: &EccQuarkProofVariable<C>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) {
     let num_vars = proof.num_vars.clone();
 
