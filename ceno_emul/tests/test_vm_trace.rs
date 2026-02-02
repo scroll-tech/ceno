@@ -4,8 +4,8 @@ use rustc_hash::FxHashMap;
 use std::{collections::BTreeMap, sync::Arc};
 
 use ceno_emul::{
-    CENO_PLATFORM, Cycle, EmuContext, FullTracer as Tracer, InsnKind, Instruction, Platform,
-    Program, StepRecord, VMState, WordAddr, encode_rv32,
+    CENO_PLATFORM, Cycle, EmuContext, FullTracer as Tracer, FullTracerConfig, InsnKind,
+    Instruction, Platform, Program, StepRecord, VMState, WordAddr, encode_rv32,
 };
 
 #[test]
@@ -17,7 +17,13 @@ fn test_vm_trace() -> Result<()> {
         program_fibonacci_20(),
         Default::default(),
     );
-    let mut ctx = VMState::new(CENO_PLATFORM.clone(), Arc::new(program));
+    let mut ctx = VMState::new_with_tracer_config(
+        CENO_PLATFORM.clone(),
+        Arc::new(program),
+        FullTracerConfig {
+            max_step_shard: 1 << 20,
+        },
+    );
 
     let steps = run(&mut ctx)?;
 
