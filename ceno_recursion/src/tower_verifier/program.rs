@@ -13,7 +13,7 @@ use openvm_native_recursion::challenger::{
     CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
-const NATIVE_SUMCHECK_CTX_LEN: usize = 9;
+const NATIVE_SUMCHECK_CTX_LEN: usize = 12;
 
 pub(crate) fn interpolate_uni_poly<C: Config>(
     builder: &mut Builder<C>,
