@@ -114,8 +114,9 @@ pub struct IOPProverMessage {
     pub evaluations: Vec<E>,
 }
 
-use crate::basefold_verifier::utils::read_hint_slice;
 use sumcheck::structs::IOPProverMessage as InnerIOPProverMessage;
+
+use crate::basefold_verifier::utils::read_hint_slice;
 impl From<InnerIOPProverMessage<E>> for IOPProverMessage {
     fn from(value: InnerIOPProverMessage<E>) -> Self {
         IOPProverMessage {

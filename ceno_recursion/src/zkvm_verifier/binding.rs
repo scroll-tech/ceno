@@ -545,9 +545,11 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let w_out_evals_len = Usize::Var(usize::read(builder));
         let lk_out_evals_len = Usize::Var(usize::read(builder));
 
+        builder.cycle_tracker_start("read omc out evals");
         let r_out_evals = Vec::<E>::read(builder);
         let w_out_evals = Vec::<E>::read(builder);
         let lk_out_evals = Vec::<E>::read(builder);
+        builder.cycle_tracker_end("read omc out evals");
 
         builder.cycle_tracker_start("read tower proofs");
         let tower_proof = TowerProofInput::read(builder);
@@ -614,15 +616,29 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let log2_num_instances = ceil_log2(next_pow2_instance);
         stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
 
-        stream.extend(<usize as Hintable<InnerConfig>>::write(
-            &self.r_out_evals_len,
-        ));
-        stream.extend(<usize as Hintable<InnerConfig>>::write(
-            &self.w_out_evals_len,
-        ));
-        stream.extend(<usize as Hintable<InnerConfig>>::write(
-            &self.lk_out_evals_len,
-        ));
+        let r_out_evals_len = self.r_out_evals.len();
+        let w_out_evals_len = self.w_out_evals.len();
+        let lk_out_evals_len = self.lk_out_evals.len();
+        tracing::debug!(
+            "circuit {} r_len: {}, w: {}, lk: {}, n_prods: {}, n_logups: {}, n_layers: {}, n_prod_evals: {}, n_logup_evals: {}",
+            self.idx,
+            r_out_evals_len,
+            w_out_evals_len,
+            lk_out_evals_len,
+            self.tower_proof.num_prod_specs,
+            self.tower_proof.num_logup_specs,
+            self.tower_proof.proofs.len(),
+            self.tower_proof.prod_specs_eval.inner_inner_length
+                * self.tower_proof.prod_specs_eval.inner_length
+                * self.tower_proof.prod_specs_eval.outer_length,
+            self.tower_proof.logup_specs_eval.inner_inner_length
+                * self.tower_proof.logup_specs_eval.inner_length
+                * self.tower_proof.logup_specs_eval.outer_length,
+        );
+
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&r_out_evals_len));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&w_out_evals_len));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&lk_out_evals_len));
 
         stream.extend(self.r_out_evals.write());
         stream.extend(self.w_out_evals.write());

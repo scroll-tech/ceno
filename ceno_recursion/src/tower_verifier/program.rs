@@ -1,14 +1,11 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
-    arithmetics::{
-        UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts, reverse,
-    },
+    arithmetics::{UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts},
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::transcript_observe_label,
     zkvm_verifier::binding::TowerProofInputVariable,
 };
 use openvm_native_compiler::prelude::*;
-use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{
     CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
 };
@@ -122,7 +119,6 @@ pub fn verify_tower_proof<C: Config>(
     // out_j[rt] := (logup_p{j}[rt])
     // out_j[rt] := (logup_q{j}[rt])
     let log2_num_fanin = 1usize;
-
     builder.cycle_tracker_start("initial sum");
     let initial_rt: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(log2_num_fanin);
     transcript_observe_label(builder, challenger, b"product_sum");
@@ -345,6 +341,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.assign(&curr_pt, rt_prime.clone());
         builder.assign(&curr_eval, output_eval);
         builder.assign(&round, round + C::F::ONE);
+
         builder.cycle_tracker_end("derive next layer's expected sum");
 
         builder.assign(

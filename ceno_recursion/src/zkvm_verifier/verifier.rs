@@ -953,6 +953,7 @@ pub fn verify_gkr_circuit<C: Config>(
             max_degree,
             unipoly_extrapolator,
         );
+
         let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
 
         // check selector evaluations
@@ -1123,6 +1124,7 @@ pub fn verify_gkr_circuit<C: Config>(
             &main_sumcheck_challenges,
             layer.main_sumcheck_expression.as_ref().unwrap(),
         );
+
         builder.assert_ext_eq(got_claim, expected_evaluation);
 
         // Update claim
@@ -1158,6 +1160,7 @@ pub fn verify_gkr_circuit<C: Config>(
             }
         })
         .collect_vec();
+
     rt
 }
 
