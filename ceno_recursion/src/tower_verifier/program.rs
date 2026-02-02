@@ -1,7 +1,7 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
     arithmetics::{
-        UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts, reverse,
+        _print_ext_arr, UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts, reverse
     },
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::transcript_observe_label,
@@ -239,10 +239,6 @@ pub fn verify_tower_proof<C: Config>(
     );
     let initial_claim = builder.get(&sumcheck_out, 0);
 
-    // _debug
-    builder.print_debug(800);
-    builder.print_e(initial_claim);
-
     let prod_spec_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_prod_spec.clone());
     let logup_spec_p_point_n_eval: Array<C, PointAndEvalVariable<C>> =
@@ -344,13 +340,10 @@ pub fn verify_tower_proof<C: Config>(
         proof.logup_specs_eval.data.id.get_var(),
     );
 
-    let prod_specs_eval: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(proof.prod_specs_eval.length);
-    let logup_specs_eval: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(proof.logup_specs_eval.length);
+    let prod_specs_eval: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(proof.prod_specs_eval.data.length.clone());
+    let logup_specs_eval: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(proof.logup_specs_eval.data.length.clone());
 
     builder.range(0, op_range).for_each(|i_vec, builder| {
-        // _debug
-        builder.print_debug(777);
-
         let round_var = i_vec[0];
         let out_rt = &curr_pt;
         let out_claim = &curr_eval;
@@ -392,10 +385,6 @@ pub fn verify_tower_proof<C: Config>(
             &next_layer_evals,
         );
         let expected_evaluation = builder.get(&next_layer_evals, 0);
-
-        // _debug
-        builder.print_debug(770);
-        builder.print_e(expected_evaluation);
 
         builder.assign(&expected_evaluation, expected_evaluation * eq_e);
         builder.assert_ext_eq(expected_evaluation, sub_e);
@@ -440,11 +429,6 @@ pub fn verify_tower_proof<C: Config>(
         builder.assign(&curr_pt, rt_prime.clone());
         builder.assign(&curr_eval, output_eval);
         builder.assign(&round, round + C::F::ONE);
-
-        // _debug
-        builder.print_debug(771);
-        builder.print_e(output_eval);
-
         builder.cycle_tracker_end("derive next layer's expected sum");
 
         builder.assign(

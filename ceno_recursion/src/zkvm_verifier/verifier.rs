@@ -479,15 +479,14 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             },
         );
 
-    // _debug
-    // batch_verify(
-    //     builder,
-    //     zkvm_proof_input.max_num_var,
-    //     zkvm_proof_input.max_width,
-    //     rounds,
-    //     zkvm_proof_input.pcs_proof,
-    //     &mut challenger,
-    // );
+    batch_verify(
+        builder,
+        zkvm_proof_input.max_num_var,
+        zkvm_proof_input.max_width,
+        rounds,
+        zkvm_proof_input.pcs_proof,
+        &mut challenger,
+    );
 
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     let initial_global_state = eval_ceno_expr_with_instance(
@@ -615,10 +614,6 @@ pub fn verify_chip_proof<C: Config>(
     );
     builder.cycle_tracker_end(format!("verify tower proof for opcode {circuit_name}",).as_str());
 
-
-    // _debug
-    builder.print_debug(900);
-
     if cs.lk_table_expressions.is_empty() {
         builder
             .range(0, logup_p_evals.len())
@@ -632,9 +627,6 @@ pub fn verify_chip_proof<C: Config>(
     builder.assert_usize_eq(record_evals.len(), num_rw_records.clone());
     builder.assert_usize_eq(logup_p_evals.len(), lk_counts_per_instance.clone());
     builder.assert_usize_eq(logup_q_evals.len(), lk_counts_per_instance.clone());
-
-    // _debug
-    builder.print_debug(901);
 
     // GKR circuit
     let out_evals_len: Usize<C::N> = if cs.lk_table_expressions.is_empty() {
@@ -665,9 +657,6 @@ pub fn verify_chip_proof<C: Config>(
     } else {
         builder.assign(&end, record_evals.len());
     }
-
-    // _debug
-    builder.print_debug(902);
 
     let q_slice = out_evals.slice(builder, end, out_evals_len);
     builder
@@ -767,9 +756,6 @@ pub fn verify_chip_proof<C: Config>(
         ]
     };
 
-    // _debug
-    builder.print_debug(903);
-
     builder.cycle_tracker_start("Verify GKR Circuit");
     let rt = verify_gkr_circuit(
         builder,
@@ -788,9 +774,6 @@ pub fn verify_chip_proof<C: Config>(
         poly_evaluator,
     );
     builder.cycle_tracker_end("Verify GKR Circuit");
-
-    // _debug
-    builder.print_debug(904);
 
     (rt.fs, shard_ec_sum)
 }
@@ -814,9 +797,6 @@ pub fn verify_gkr_circuit<C: Config>(
     let rt = PointVariable {
         fs: builder.dyn_array(0),
     };
-
-    // _debug
-    builder.print_debug(9030);
 
     for (i, layer) in gkr_circuit.layers.iter().enumerate() {
         let layer_proof = builder.get(&gkr_proof.layer_proofs, i);
@@ -842,9 +822,6 @@ pub fn verify_gkr_circuit<C: Config>(
             );
         }
 
-        // _debug
-        builder.print_debug(90310);
-
         // ZeroCheckLayer verification (might include other layer types in the future)
         let LayerProofVariable {
             main:
@@ -861,9 +838,6 @@ pub fn verify_gkr_circuit<C: Config>(
             layer.n_witin + layer.n_fixed + layer.n_instance + layer.n_structural_witin,
         );
         builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
-
-        // _debug
-        builder.print_debug(90311);
 
         if layer.rotation_sumcheck_expression.is_some() {
             builder.if_eq(has_rotation, Usize::from(1)).then(|builder| {
@@ -934,9 +908,6 @@ pub fn verify_gkr_circuit<C: Config>(
             });
         }
 
-        // _debug
-        builder.print_debug(90312);
-
         let rotation_exprs_len = layer.rotation_exprs.1.len();
         transcript_observe_label(builder, challenger, b"combine subset evals");
         let alpha_pows = gen_alpha_pows(
@@ -948,9 +919,6 @@ pub fn verify_gkr_circuit<C: Config>(
         let sigma: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
         let alpha_idx: Usize<C::N> = Usize::Var(Var::uninit(builder));
         builder.assign(&alpha_idx, C::N::from_canonical_usize(0));
-
-        // _debug
-        builder.print_debug(90313);
 
         // sigma = \sum_i alpha^i * evals_i
         builder
@@ -970,9 +938,6 @@ pub fn verify_gkr_circuit<C: Config>(
                 builder.assign(&alpha_idx, end_idx);
             });
 
-        // _debug
-        builder.print_debug(90314);
-
         // sigma = \sum_b sel(b) * zero_expr(b)
         let max_degree = builder.constant(C::F::from_canonical_usize(layer.max_expr_degree + 1));
 
@@ -987,11 +952,7 @@ pub fn verify_gkr_circuit<C: Config>(
             max_degree,
             unipoly_extrapolator,
         );
-
         let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
-
-        // _debug
-        builder.print_debug(90315);
 
         // check selector evaluations
         layer
@@ -1121,9 +1082,6 @@ pub fn verify_gkr_circuit<C: Config>(
             builder.assert_ext_eq(expected_eval, main_wit_eval);
         }
 
-        // _debug
-        builder.print_debug(90316);
-
         let pubio_offset = layer.n_witin + layer.n_fixed;
         for (index, instance) in layer.instance_openings.iter().enumerate() {
             let index: usize = pubio_offset + index;
@@ -1164,11 +1122,7 @@ pub fn verify_gkr_circuit<C: Config>(
             &main_sumcheck_challenges,
             layer.main_sumcheck_expression.as_ref().unwrap(),
         );
-
         builder.assert_ext_eq(got_claim, expected_evaluation);
-
-        // _debug
-        builder.print_debug(90317);
 
         // Update claim
         layer
@@ -1186,13 +1140,7 @@ pub fn verify_gkr_circuit<C: Config>(
             });
 
         builder.assign(&rt.fs, in_point);
-
-        // _debug
-        builder.print_debug(90318);
     }
-
-    // _debug
-    builder.print_debug(9032);
 
     // GKR Claim
     let input_layer = gkr_circuit.layers.last().unwrap();
@@ -1209,10 +1157,6 @@ pub fn verify_gkr_circuit<C: Config>(
             }
         })
         .collect_vec();
-
-    // _debug
-    builder.print_debug(9033);
-
     rt
 }
 
