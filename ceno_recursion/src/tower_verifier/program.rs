@@ -239,6 +239,10 @@ pub fn verify_tower_proof<C: Config>(
     );
     let initial_claim = builder.get(&sumcheck_out, 0);
 
+    // _debug
+    builder.print_debug(800);
+    builder.print_e(initial_claim);
+
     let prod_spec_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_prod_spec.clone());
     let logup_spec_p_point_n_eval: Array<C, PointAndEvalVariable<C>> =
