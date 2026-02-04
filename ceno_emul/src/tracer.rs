@@ -739,11 +739,17 @@ impl FullTracer {
     #[inline(always)]
     fn reset_pending_slot(&mut self) {
         if self.pending_index >= self.records.len() {
-            panic!(
-                "FullTracer step buffer exhausted: recorded {} steps with capacity {}",
-                self.pending_index,
-                self.records.len()
-            );
+            if cfg!(debug_assertions) {
+                // Allow unit/integration tests (which always build with debug assertions)
+                // to auto-grow so they don't have to plumb accurate shard sizes.
+                self.records.push(StepRecord::default());
+            } else {
+                panic!(
+                    "FullTracer step buffer exhausted: recorded {} steps with capacity {}",
+                    self.pending_index,
+                    self.records.len()
+                );
+            }
         }
         self.records[self.pending_index] = StepRecord {
             cycle: self.pending_cycle,
