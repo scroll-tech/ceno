@@ -647,7 +647,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
-            &evals,
+            evals,
             pi,
             raw_pi,
             challenges,

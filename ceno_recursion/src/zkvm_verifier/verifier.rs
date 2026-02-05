@@ -340,7 +340,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     builder.assign(&logup_sum, logup_sum + chip_logup_sum);
                 }
 
-                builder.cycle_tracker_start("Verify chip proof");
+                builder
+                    .cycle_tracker_start(format!("Verify chip proof: {}", circuit_name).as_str());
                 let (input_opening_point, chip_shard_ec_sum) = verify_chip_proof(
                     circuit_name,
                     builder,
@@ -354,7 +355,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     &unipoly_extrapolator,
                     &mut poly_evaluator,
                 );
-                builder.cycle_tracker_end("Verify chip proof");
+                builder.cycle_tracker_end(format!("Verify chip proof: {}", circuit_name).as_str());
 
                 let point_clone: Array<C, Ext<C::F, C::EF>> =
                     builder.eval(input_opening_point.clone());
@@ -540,15 +541,14 @@ pub fn verify_chip_proof<C: Config>(
     } = &composed_cs;
     let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
 
+    builder
+        .cycle_tracker_start(format!("Pre-verify tower proof for opcode {circuit_name}",).as_str());
     let r_len = cs.r_expressions.len() + cs.r_table_expressions.len();
     let w_len = cs.w_expressions.len() + cs.w_table_expressions.len();
     let lk_len = cs.lk_expressions.len() + cs.lk_table_expressions.len();
-    let num_batched = r_len + w_len + lk_len;
+    let num_batched_usize = r_len + w_len + lk_len;
 
-    let r_counts_per_instance: Usize<C::N> = Usize::from(r_len);
-    let w_counts_per_instance: Usize<C::N> = Usize::from(w_len);
     let lk_counts_per_instance: Usize<C::N> = Usize::from(lk_len);
-    let num_batched: Usize<C::N> = Usize::from(num_batched);
 
     let log2_num_instances = chip_proof.log2_num_instances.clone();
     if composed_cs.has_ecc_ops() {
@@ -584,16 +584,22 @@ pub fn verify_chip_proof<C: Config>(
     }
 
     let tower_proof = &chip_proof.tower_proof;
-    let num_variables: Array<C, Usize<C::N>> = builder.dyn_array(num_batched);
-    builder
-        .range(0, num_variables.len())
-        .for_each(|idx_vec, builder| {
-            builder.set(&num_variables, idx_vec[0], num_var_with_rotation.clone());
-        });
+    let num_variables: Array<C, Usize<C::N>> = builder.uninit_fixed_array(num_batched_usize);
+    // Every entry of `num_variables` is identical, so emit straight-line assignments
+    // with a compile-time bound driven by the verifying key.
+    for idx in 0..num_batched_usize {
+        builder.set(
+            &num_variables,
+            Usize::from(idx),
+            num_var_with_rotation.clone(),
+        );
+    }
 
     let prod_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>> =
         concat(builder, &chip_proof.r_out_evals, &chip_proof.w_out_evals);
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
+    builder
+        .cycle_tracker_end(format!("Pre-verify tower proof for opcode {circuit_name}",).as_str());
 
     builder.cycle_tracker_start(format!("verify tower proof for opcode {circuit_name}",).as_str());
     let (_, record_evals, logup_p_evals, logup_q_evals) = verify_tower_proof(
@@ -609,63 +615,71 @@ pub fn verify_chip_proof<C: Config>(
     );
     builder.cycle_tracker_end(format!("verify tower proof for opcode {circuit_name}",).as_str());
 
+    builder.cycle_tracker_start(
+        format!("post-verify tower proof for opcode {circuit_name}",).as_str(),
+    );
     if cs.lk_table_expressions.is_empty() {
-        builder
-            .range(0, logup_p_evals.len())
-            .for_each(|idx_vec, builder| {
-                let eval = builder.get(&logup_p_evals, idx_vec[0]).eval;
-                builder.assert_ext_eq(eval, one);
-            });
+        builder.cycle_tracker_start(format!("check tower proof p {circuit_name}",).as_str());
+        for idx in 0..lk_len {
+            let eval = builder.get(&logup_p_evals, Usize::from(idx)).eval;
+            builder.assert_ext_eq(eval, one);
+        }
+        builder.cycle_tracker_end(format!("check tower proof p {circuit_name}",).as_str());
     }
 
-    let num_rw_records: Usize<C::N> = builder.eval(r_counts_per_instance + w_counts_per_instance);
+    let num_rw_records_usize = r_len + w_len;
+    let num_rw_records: Usize<C::N> = Usize::from(num_rw_records_usize);
     builder.assert_usize_eq(record_evals.len(), num_rw_records.clone());
     builder.assert_usize_eq(logup_p_evals.len(), lk_counts_per_instance.clone());
     builder.assert_usize_eq(logup_q_evals.len(), lk_counts_per_instance.clone());
-
-    // GKR circuit
-    let out_evals_len: Usize<C::N> = if cs.lk_table_expressions.is_empty() {
-        builder.eval(record_evals.len() + logup_q_evals.len())
-    } else {
-        builder.eval(record_evals.len() + logup_p_evals.len() + logup_q_evals.len())
-    };
-    let out_evals: Array<C, PointAndEvalVariable<C>> = builder.dyn_array(out_evals_len.clone());
-
     builder
-        .range(0, record_evals.len())
-        .for_each(|idx_vec, builder| {
-            let cpt = builder.get(&record_evals, idx_vec[0]);
-            builder.set(&out_evals, idx_vec[0], cpt);
-        });
+        .cycle_tracker_end(format!("post-verify tower proof for opcode {circuit_name}",).as_str());
 
-    let end: Usize<C::N> = Usize::uninit(builder);
-    if !cs.lk_table_expressions.is_empty() {
-        builder.assign(&end, record_evals.len() + logup_p_evals.len());
-        let p_slice = out_evals.slice(builder, record_evals.len(), end.clone());
-
-        builder
-            .range(0, logup_p_evals.len())
-            .for_each(|idx_vec, builder| {
-                let cpt = builder.get(&logup_p_evals, idx_vec[0]);
-                builder.set(&p_slice, idx_vec[0], cpt);
-            });
+    builder.cycle_tracker_start(format!("pre-Verify GKR Circuit {circuit_name}",).as_str());
+    // GKR circuit
+    // The number of outputs the GKR verifier needs to check is fully determined by
+    // the constraint system metadata: record evaluations (r/w) plus one or two
+    // lookup vectors depending on whether a lookup table is present.
+    let out_evals_capacity = if cs.lk_table_expressions.is_empty() {
+        num_rw_records_usize + lk_len
     } else {
-        builder.assign(&end, record_evals.len());
+        num_rw_records_usize + 2 * lk_len
+    };
+    let out_evals: Array<C, PointAndEvalVariable<C>> = builder.dyn_array(out_evals_capacity);
+
+    for idx in 0..num_rw_records_usize {
+        let record_idx = Usize::from(idx);
+        let cpt = builder.get(&record_evals, record_idx.clone());
+        builder.set(&out_evals, record_idx, cpt);
     }
 
-    let q_slice = out_evals.slice(builder, end, out_evals_len);
-    builder
-        .range(0, logup_q_evals.len())
-        .for_each(|idx_vec, builder| {
-            let cpt = builder.get(&logup_q_evals, idx_vec[0]);
-            builder.set(&q_slice, idx_vec[0], cpt);
-        });
-    let gkr_circuit = gkr_circuit.clone().unwrap();
+    let mut end = num_rw_records_usize;
+    if !cs.lk_table_expressions.is_empty() {
+        let next_end = end + lk_len;
+        let p_slice = out_evals.slice(builder, end, next_end);
+        for idx in 0..lk_len {
+            let lk_idx = Usize::from(idx);
+            let cpt = builder.get(&logup_p_evals, lk_idx.clone());
+            builder.set(&p_slice, lk_idx, cpt);
+        }
+        end = next_end;
+    }
 
-    let zero_bit_decomps: Array<C, Felt<C::F>> = builder.dyn_array(32);
+    let q_slice = out_evals.slice(builder, end, out_evals_capacity);
+    for idx in 0..lk_len {
+        let lk_idx = Usize::from(idx);
+        let cpt = builder.get(&logup_q_evals, lk_idx.clone());
+        builder.set(&q_slice, lk_idx, cpt);
+    }
+    let gkr_circuit = gkr_circuit.as_ref().unwrap();
+
+    let zero_bit_decomps: Array<C, Felt<C::F>> = builder.uninit_fixed_array(32);
+    builder.cycle_tracker_end(format!("pre-Verify GKR Circuit {circuit_name}",).as_str());
+    builder.cycle_tracker_start("Eval Selector");
     let selector_ctxs: Vec<SelectorContextVariable<C>> = if cs.ec_final_sum.is_empty() {
         builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(1));
-        let num_instances_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
+        let num_instances_bit_decomps: Array<C, Array<C, Felt<C::F>>> =
+            builder.uninit_fixed_array(1);
         builder.set(
             &num_instances_bit_decomps,
             0,
@@ -678,7 +692,7 @@ pub fn verify_chip_proof<C: Config>(
                 offset: Usize::from(0),
                 offset_bit_decomps: zero_bit_decomps,
                 num_instances: chip_proof.sum_num_instances.clone(),
-                num_instances_layered_ns: builder.dyn_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
+                num_instances_layered_ns: builder.uninit_fixed_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
                 num_instances_bit_decomps,
                 offset_instance_sum_bit_decomps: chip_proof
                     .sum_num_instances_minus_one_bit_decomposition
@@ -694,9 +708,10 @@ pub fn verify_chip_proof<C: Config>(
     } else {
         builder.assert_usize_eq(chip_proof.num_instances.len(), Usize::from(2));
 
-        let num_inst_0_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
-        let num_inst_1_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
-        let num_inst_sum_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.dyn_array(1);
+        let num_inst_0_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.uninit_fixed_array(1);
+        let num_inst_1_bit_decomps: Array<C, Array<C, Felt<C::F>>> = builder.uninit_fixed_array(1);
+        let num_inst_sum_bit_decomps: Array<C, Array<C, Felt<C::F>>> =
+            builder.uninit_fixed_array(1);
 
         builder.set(
             &num_inst_0_bit_decomps,
@@ -721,7 +736,7 @@ pub fn verify_chip_proof<C: Config>(
                 offset: Usize::from(0),
                 offset_bit_decomps: zero_bit_decomps.clone(),
                 num_instances: Usize::Var(builder.get(&chip_proof.num_instances, 0)),
-                num_instances_layered_ns: builder.dyn_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
+                num_instances_layered_ns: builder.uninit_fixed_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
                 num_instances_bit_decomps: num_inst_0_bit_decomps,
                 offset_instance_sum_bit_decomps: chip_proof.n_inst_0_bit_decomps.clone(),
                 num_vars: num_var_with_rotation.clone(),
@@ -730,7 +745,7 @@ pub fn verify_chip_proof<C: Config>(
                 offset: Usize::Var(builder.get(&chip_proof.num_instances, 0)),
                 offset_bit_decomps: chip_proof.n_inst_0_bit_decomps.clone(),
                 num_instances: Usize::Var(builder.get(&chip_proof.num_instances, 1)),
-                num_instances_layered_ns: builder.dyn_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
+                num_instances_layered_ns: builder.uninit_fixed_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
                 num_instances_bit_decomps: num_inst_1_bit_decomps,
                 offset_instance_sum_bit_decomps: chip_proof
                     .sum_num_instances_minus_one_bit_decomposition
@@ -741,7 +756,7 @@ pub fn verify_chip_proof<C: Config>(
                 offset: Usize::from(0),
                 offset_bit_decomps: zero_bit_decomps,
                 num_instances: chip_proof.sum_num_instances.clone(),
-                num_instances_layered_ns: builder.dyn_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
+                num_instances_layered_ns: builder.uninit_fixed_array(0), /* Only used in QuarkBinaryTreeLessThan(Expression<E>) */
                 num_instances_bit_decomps: num_inst_sum_bit_decomps,
                 offset_instance_sum_bit_decomps: chip_proof
                     .sum_num_instances_minus_one_bit_decomposition
@@ -750,6 +765,7 @@ pub fn verify_chip_proof<C: Config>(
             },
         ]
     };
+    builder.cycle_tracker_end("Eval Selector");
 
     builder.cycle_tracker_start("Verify GKR Circuit");
     let rt = verify_gkr_circuit(
@@ -777,7 +793,7 @@ pub fn verify_gkr_circuit<C: Config>(
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
     max_num_variables: Usize<C::N>,
-    gkr_circuit: GKRCircuit<E>,
+    gkr_circuit: &GKRCircuit<E>,
     gkr_proof: &GKRProofVariable<C>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     pub_io_evals: &Array<C, Ext<C::F, C::EF>>,
