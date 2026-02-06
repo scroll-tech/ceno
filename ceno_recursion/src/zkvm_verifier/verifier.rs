@@ -584,6 +584,7 @@ pub fn verify_chip_proof<C: Config>(
     }
 
     let tower_proof = &chip_proof.tower_proof;
+    let num_rw_records_usize = r_len + w_len;
     let num_variables: Array<C, Usize<C::N>> = builder.uninit_fixed_array(num_batched_usize);
     // Every entry of `num_variables` is identical, so emit straight-line assignments
     // with a compile-time bound driven by the verifying key.
@@ -612,6 +613,8 @@ pub fn verify_chip_proof<C: Config>(
         num_var_with_rotation.clone(),
         tower_proof,
         unipoly_extrapolator,
+        num_rw_records_usize,
+        lk_len,
     );
     builder.cycle_tracker_end(format!("verify tower proof for opcode {circuit_name}",).as_str());
 
@@ -627,7 +630,6 @@ pub fn verify_chip_proof<C: Config>(
         builder.cycle_tracker_end(format!("check tower proof p {circuit_name}",).as_str());
     }
 
-    let num_rw_records_usize = r_len + w_len;
     let num_rw_records: Usize<C::N> = Usize::from(num_rw_records_usize);
     builder.assert_usize_eq(record_evals.len(), num_rw_records.clone());
     builder.assert_usize_eq(logup_p_evals.len(), lk_counts_per_instance.clone());
