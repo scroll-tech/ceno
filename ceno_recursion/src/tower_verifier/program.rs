@@ -10,7 +10,7 @@ use openvm_native_recursion::challenger::{
     CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
-const NATIVE_SUMCHECK_CTX_LEN: usize = 12;
+const NATIVE_SUMCHECK_CTX_LEN: usize = 10;
 
 pub fn iop_verifier_state_verify<C: Config>(
     builder: &mut Builder<C>,
@@ -157,6 +157,8 @@ pub fn verify_tower_proof<C: Config>(
         &challenges,
         prod_out_evals,
         logup_out_evals,
+        proof.prod_specs_eval.data.id.get_var(),
+        proof.logup_specs_eval.data.id.get_var(),
         &sumcheck_out,
     );
     let initial_claim = builder.get(&sumcheck_out, 0);
@@ -249,8 +251,6 @@ pub fn verify_tower_proof<C: Config>(
         Usize::from(proof.logup_specs_eval.inner_inner_length),
     );
     builder.set(&input_ctx, 9, Usize::from(1));
-    builder.set(&input_ctx, 10, proof.prod_specs_eval.data.id.clone());
-    builder.set(&input_ctx, 11, proof.logup_specs_eval.data.id.clone());
 
     let prod_specs_eval: Array<C, Ext<C::F, C::EF>> =
         builder.dyn_array(proof.prod_specs_eval.data.length.clone());
@@ -296,6 +296,8 @@ pub fn verify_tower_proof<C: Config>(
             &challenges,
             &prod_specs_eval,
             &logup_specs_eval,
+            proof.prod_specs_eval.data.id.get_var(),
+            proof.logup_specs_eval.data.id.get_var(),
             &next_layer_evals,
         );
         let expected_evaluation = builder.get(&next_layer_evals, 0);
@@ -335,6 +337,8 @@ pub fn verify_tower_proof<C: Config>(
             &challenges,
             &prod_specs_eval,
             &logup_specs_eval,
+            proof.prod_specs_eval.data.id.get_var(),
+            proof.logup_specs_eval.data.id.get_var(),
             &next_layer_evals,
         );
 
