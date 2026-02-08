@@ -356,6 +356,10 @@ impl Hintable<InnerConfig> for TowerProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(
             &self.num_prod_specs,
         ));
+
+        // _debug
+        // println!("=> write prod_specs_eval: {:?}", self.prod_specs_eval);
+
         stream.extend(self.prod_specs_eval.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(
             &self.num_logup_specs,
@@ -616,9 +620,9 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let log2_num_instances = ceil_log2(next_pow2_instance);
         stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
 
-        let r_out_evals_len = self.r_out_evals.len();
-        let w_out_evals_len = self.w_out_evals.len();
-        let lk_out_evals_len = self.lk_out_evals.len();
+        let r_out_evals_len = self.r_out_evals_len;
+        let w_out_evals_len = self.w_out_evals_len;
+        let lk_out_evals_len = self.lk_out_evals_len;
         tracing::debug!(
             "circuit {} r_len: {}, w: {}, lk: {}, n_prods: {}, n_logups: {}, n_layers: {}, n_prod_evals: {}, n_logup_evals: {}",
             self.idx,

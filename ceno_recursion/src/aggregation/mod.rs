@@ -799,7 +799,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_single() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
@@ -812,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_single_rust_verifier() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 

@@ -326,11 +326,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 ));
             }
 
+
+            println!("=> === calculate chip_logup_sum");
+            println!("=> proof.lk_out_evals.len(): {:?}", proof.lk_out_evals.len());
             let chip_logup_sum = proof
                 .lk_out_evals
                 .iter()
                 .map(|evals| {
                     let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
+
+                    // _debug
+                    println!("======");
+                    println!("=> chip_logup_sum - p1: {:?}", p1);
+                    println!("=> chip_logup_sum - p2: {:?}", p2);
+                    println!("=> chip_logup_sum - q1: {:?}", q1);
+                    println!("=> chip_logup_sum - q2: {:?}", q2);
+
+
                     p1 * q1.inverse() + p2 * q2.inverse()
                 })
                 .sum::<E>();
@@ -770,6 +782,11 @@ impl TowerVerify {
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
                 let eq = eq_eval(out_rt, &rt);
+
+                // _debug
+                // println!("=> prod_specs_eval: {:?}", tower_proofs.prod_specs_eval);
+
+
                 let expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())

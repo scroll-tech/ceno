@@ -226,6 +226,8 @@ pub fn verify_tower_proof<C: Config>(
         eval: initial_claim,
     };
     let next_layer_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len);
+    builder.set(&input_ctx, 1, proof.prod_specs_eval.length.clone());
+    builder.set(&input_ctx, 2, proof.logup_specs_eval.length.clone());
     builder.set(
         &input_ctx,
         3,
@@ -247,8 +249,8 @@ pub fn verify_tower_proof<C: Config>(
         Usize::from(proof.logup_specs_eval.inner_inner_length),
     );
     builder.set(&input_ctx, 9, Usize::from(1));
-    builder.set(&input_ctx, 10, proof.prod_specs_eval.data.id.get_var());
-    builder.set(&input_ctx, 11, proof.logup_specs_eval.data.id.get_var());
+    builder.set(&input_ctx, 10, proof.prod_specs_eval.data.id.clone());
+    builder.set(&input_ctx, 11, proof.logup_specs_eval.data.id.clone());
 
     let prod_specs_eval: Array<C, Ext<C::F, C::EF>> =
         builder.dyn_array(proof.prod_specs_eval.data.length.clone());
