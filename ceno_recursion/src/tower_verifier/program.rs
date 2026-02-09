@@ -228,8 +228,8 @@ pub fn verify_tower_proof<C: Config>(
         eval: initial_claim,
     };
     let next_layer_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len);
-    builder.set(&input_ctx, 1, proof.prod_specs_eval.length.clone());
-    builder.set(&input_ctx, 2, proof.logup_specs_eval.length.clone());
+    builder.set(&input_ctx, 1, proof.prod_specs_eval.length);
+    builder.set(&input_ctx, 2, proof.logup_specs_eval.length);
     builder.set(
         &input_ctx,
         3,

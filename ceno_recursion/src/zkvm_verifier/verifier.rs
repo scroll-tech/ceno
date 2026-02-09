@@ -146,7 +146,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             }
         });
 
-    
     builder
         .if_ne(zkvm_proof_input.shard_id.clone(), Usize::from(0))
         .then(|builder| {
@@ -358,7 +357,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     &mut poly_evaluator,
                 );
                 builder.cycle_tracker_end("Verify chip proof");
-                
+
                 let point_clone: Array<C, Ext<C::F, C::EF>> =
                     builder.eval(input_opening_point.clone());
 
