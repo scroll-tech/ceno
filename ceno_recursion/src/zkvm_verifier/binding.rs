@@ -356,10 +356,6 @@ impl Hintable<InnerConfig> for TowerProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(
             &self.num_prod_specs,
         ));
-
-        // _debug
-        // println!("=> write prod_specs_eval: {:?}", self.prod_specs_eval);
-
         stream.extend(self.prod_specs_eval.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(
             &self.num_logup_specs,
