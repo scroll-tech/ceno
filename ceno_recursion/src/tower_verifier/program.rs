@@ -150,7 +150,7 @@ pub fn verify_tower_proof<C: Config>(
 
     let sumcheck_out_len: Usize<C::N> = builder
         .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
-    let sumcheck_out: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len.clone());
+    let next_layer_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len);
 
     builder.sumcheck_layer_eval(
         &input_ctx,
@@ -159,9 +159,9 @@ pub fn verify_tower_proof<C: Config>(
         logup_out_evals,
         proof.prod_specs_eval.data.id.get_var(),
         proof.logup_specs_eval.data.id.get_var(),
-        &sumcheck_out,
+        &next_layer_evals,
     );
-    let initial_claim = builder.get(&sumcheck_out, 0);
+    let initial_claim = builder.get(&next_layer_evals, 0);
 
     let prod_spec_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_prod_spec.clone());
@@ -174,7 +174,7 @@ pub fn verify_tower_proof<C: Config>(
     builder
         .range(0, num_prod_spec.clone())
         .for_each(|idx_vec, builder| {
-            let e = builder.get(&sumcheck_out, idx.clone());
+            let e = builder.get(&next_layer_evals, idx.clone());
             builder.set(
                 &prod_spec_point_n_eval,
                 idx_vec[0],
@@ -191,8 +191,8 @@ pub fn verify_tower_proof<C: Config>(
     builder
         .range(0, num_logup_spec.clone())
         .for_each(|idx_vec, builder| {
-            let e1 = builder.get(&sumcheck_out, idx.clone());
-            let e2 = builder.get(&sumcheck_out, q_idx.clone());
+            let e1 = builder.get(&next_layer_evals, idx.clone());
+            let e2 = builder.get(&next_layer_evals, q_idx.clone());
             builder.set(
                 &logup_spec_p_point_n_eval,
                 idx_vec[0],
@@ -227,7 +227,6 @@ pub fn verify_tower_proof<C: Config>(
         point: PointVariable { fs: initial_rt },
         eval: initial_claim,
     };
-    let next_layer_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len);
     builder.set(&input_ctx, 1, proof.prod_specs_eval.length);
     builder.set(&input_ctx, 2, proof.logup_specs_eval.length);
     builder.set(
@@ -237,18 +236,8 @@ pub fn verify_tower_proof<C: Config>(
     );
     builder.set(
         &input_ctx,
-        4,
-        Usize::from(proof.prod_specs_eval.inner_inner_length),
-    );
-    builder.set(
-        &input_ctx,
         5,
         Usize::from(proof.logup_specs_eval.inner_length),
-    );
-    builder.set(
-        &input_ctx,
-        6,
-        Usize::from(proof.logup_specs_eval.inner_inner_length),
     );
     builder.set(&input_ctx, 9, Usize::from(1));
 
