@@ -1000,7 +1000,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
                 .verify(
                     log2_num_instances,
                     gkr_proof,
-                    &out_evals,
+                    out_evals,
                     &[],
                     &[],
                     &[],

@@ -756,7 +756,7 @@ pub fn run_weierstrass_decompress<
                 .verify(
                     log2_num_instance,
                     gkr_proof.clone(),
-                    &out_evals,
+                    out_evals,
                     &[],
                     &[],
                     &challenges,

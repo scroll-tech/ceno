@@ -942,7 +942,7 @@ pub fn run_uint256_mul<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + '
                 .verify(
                     log2_num_instance,
                     gkr_proof.clone(),
-                    &out_evals,
+                    out_evals,
                     &[],
                     &[],
                     &challenges,

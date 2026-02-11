@@ -1261,7 +1261,7 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                 .verify(
                     log2_num_instance_rounds,
                     gkr_proof.clone(),
-                    &out_evals,
+                    out_evals,
                     &[],
                     &[],
                     &challenges,

@@ -121,7 +121,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         &self,
         max_num_variables: usize,
         gkr_proof: GKRProof<E>,
-        out_evals: &[PointAndEval<E>],
+        mut evaluations: Vec<PointAndEval<E>>,
         pub_io_evals: &[E],
         raw_pi: &[Vec<E::BaseField>],
         challenges: &[E],
@@ -134,7 +134,6 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let GKRProof(sumcheck_proofs) = gkr_proof;
 
         let mut challenges = challenges.to_vec();
-        let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         let rt = izip!(&self.layers, sumcheck_proofs).enumerate().try_fold(
             vec![],

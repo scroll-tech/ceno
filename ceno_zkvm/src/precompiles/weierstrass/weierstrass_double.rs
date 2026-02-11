@@ -778,7 +778,7 @@ pub fn run_weierstrass_double<
                 .verify(
                     log2_num_instance,
                     gkr_proof.clone(),
-                    &out_evals,
+                    out_evals,
                     &[],
                     &[],
                     &challenges,
