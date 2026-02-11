@@ -8,7 +8,7 @@ use crate::{
             zerocheck_layer::RotationPoints,
         },
     },
-    gpu::{GpuBackend, GpuProver},
+    gpu::{CudaStream, GpuBackend, GpuProver},
 };
 use either::Either;
 use ff_ext::ExtensionField;
@@ -55,16 +55,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Gp
         wit: LayerWitness<GpuBackend<E, PCS>>,
         out_point: &multilinear_extensions::mle::Point<E>,
         transcript: &mut impl transcript::Transcript<E>,
+        option_stream: Option<&Arc<CudaStream>>,
     ) -> crate::gkr::layer::sumcheck_layer::LayerProof<E> {
+        panic!("LinearLayerProver is not implemented for GPU");
         let span = entered_span!("LinearLayerProver", profiling_2 = true);
         let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit
             .0
             .into_iter()
-            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
+            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle(option_stream)))
             .collect();
         let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
         let res = <CpuProver<CpuBackend<E, PCS>> as LinearLayerProver<CpuBackend<E, PCS>>>::prove(
-            layer, cpu_wit, out_point, transcript,
+            layer, cpu_wit, out_point, transcript, option_stream,
         );
         exit_span!(span);
         res
@@ -81,12 +83,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
         wit: LayerWitness<'_, GpuBackend<E, PCS>>,
         challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
+        option_stream: Option<&Arc<CudaStream>>,
     ) -> LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E> {
+        panic!("SumcheckLayerProver is not implemented for GPU");
         let span = entered_span!("SumcheckLayerProver", profiling_2 = true);
         let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit
             .0
             .into_iter()
-            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
+            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle(option_stream)))
             .collect();
         let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
         let res = <CpuProver<CpuBackend<E, PCS>> as SumcheckLayerProver<CpuBackend<E, PCS>>>::prove(
@@ -96,6 +100,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
             cpu_wit,
             challenges,
             transcript,
+            option_stream,
         );
         exit_span!(span);
         res
@@ -115,6 +120,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
         selector_ctxs: &[SelectorContext],
+        option_stream: Option<&Arc<CudaStream>>,
     ) -> (
         LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<GpuBackend<E, PCS> as ProverBackend>::E>,
@@ -156,6 +162,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     rt,
                     challenges,
                     transcript,
+                    option_stream,
                 );
                 (Some(proof), Some(left), Some(right), Some(origin))
             } else {
@@ -180,25 +187,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .zip(out_points.iter())
             .zip(selector_ctxs.iter())
             .map(|(((sel_type, _), point), selector_ctx)| {
-                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type)
+                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type, option_stream)
             })
             // for rotation left point
             .chain(
                 rotation_left
                     .iter()
-                    .map(|rotation_left| build_eq_x_r_gpu(&cuda_hal, rotation_left)),
+                    .map(|rotation_left| build_eq_x_r_gpu(&cuda_hal, rotation_left, option_stream)),
             )
             // for rotation right point
             .chain(
                 rotation_right
                     .iter()
-                    .map(|rotation_right| build_eq_x_r_gpu(&cuda_hal, rotation_right)),
+                    .map(|rotation_right| build_eq_x_r_gpu(&cuda_hal, rotation_right, option_stream)),
             )
             // for rotation point
             .chain(
                 rotation_point
                     .iter()
-                    .map(|rotation_point| build_eq_x_r_gpu(&cuda_hal, rotation_point)),
+                    .map(|rotation_point| build_eq_x_r_gpu(&cuda_hal, rotation_point, option_stream)),
             )
             .collect::<Vec<_>>();
         // `wit` := witin ++ fixed ++ pubio
@@ -319,6 +326,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 max_degree,
                 common_term_plan_host.as_ref(),
                 basic_tr,
+                option_stream,
             )
             .unwrap();
         let evals_gpu = evals_gpu.into_iter().flatten().collect();
@@ -365,6 +373,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     rt: &Point<E>,
     global_challenges: &[E],
     transcript: &mut impl Transcript<E>,
+    option_stream: Option<&Arc<CudaStream>>,
 ) -> (SumcheckLayerProof<E>, RotationPoints<E>) {
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
     let cuda_hal = get_cuda_hal().unwrap();
@@ -378,6 +387,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
         wit,
         &bh,
         rotation_cyclic_group_log2,
+        option_stream,
     );
     let selector_gpu = build_rotation_selector_gpu(
         &cuda_hal,
@@ -386,6 +396,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
         &bh,
         rotation_cyclic_subgroup_size,
         rotation_cyclic_group_log2,
+        option_stream,
     );
     let rotation_challenges = chain!(
         global_challenges.iter().copied(),
@@ -440,6 +451,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
             max_degree,
             None,
             basic_tr,
+            option_stream,
         )
         .unwrap();
     let evals_gpu = evals_gpu.into_iter().flatten().collect();
@@ -464,7 +476,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
             };
             let left_eval = match rotated_expr {
                 Expression::WitIn(source_wit_id) => {
-                    wit[*source_wit_id as usize].evaluate(&left_point)
+                    wit[*source_wit_id as usize].evaluate(&left_point, option_stream)
                 }
                 _ => unreachable!(),
             };
@@ -476,7 +488,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
 
                 let expected_right_eval = match rotated_expr {
                     Expression::WitIn(source_wit_id) => {
-                        wit[*source_wit_id as usize].evaluate(&right_point)
+                        wit[*source_wit_id as usize].evaluate(&right_point, option_stream)
                     }
                     _ => unreachable!(),
                 };

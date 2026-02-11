@@ -1,4 +1,5 @@
 use core::fmt;
+use std::sync::Arc;
 
 use ff_ext::ExtensionField;
 use itertools::{Itertools, izip};
@@ -10,6 +11,7 @@ use transcript::Transcript;
 
 use crate::{
     error::BackendError,
+    gpu::CudaStream,
     hal::{ProverBackend, ProverDevice},
     selector::SelectorContext,
 };
@@ -80,6 +82,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         selector_ctxs: &[SelectorContext],
+        option_stream: Option<&Arc<CudaStream>>,
     ) -> Result<GKRProverOutput<E, Evaluation<E>>, BackendError> {
         let mut running_evals = out_evals.to_vec();
         // running evals is a global referable within chip
@@ -100,6 +103,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                     &mut challenges,
                     transcript,
                     selector_ctxs,
+                    option_stream,
                 );
                 exit_span!(span);
                 res

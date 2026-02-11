@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use multilinear_extensions::{mle::Point, utils::eval_by_expr_with_instance};
@@ -7,6 +9,7 @@ use transcript::Transcript;
 use crate::{
     error::BackendError,
     gkr::layer::{hal::LinearLayerProver, sumcheck_layer::SumcheckLayerProof},
+    gpu::CudaStream,
     hal::{ProverBackend, ProverDevice},
 };
 
@@ -22,6 +25,7 @@ pub trait LinearLayer<E: ExtensionField> {
         wit: LayerWitness<PB>,
         out_point: &Point<PB::E>,
         transcript: &mut impl Transcript<PB::E>,
+        option_stream: Option<&Arc<CudaStream>>,
     ) -> LayerProof<PB::E>;
 
     fn verify(
@@ -40,8 +44,9 @@ impl<E: ExtensionField> LinearLayer<E> for Layer<E> {
         wit: LayerWitness<PB>,
         out_point: &Point<PB::E>,
         transcript: &mut impl Transcript<PB::E>,
+        option_stream: Option<&Arc<CudaStream>>,
     ) -> LayerProof<PB::E> {
-        <PD as LinearLayerProver<PB>>::prove(self, wit, out_point, transcript)
+        <PD as LinearLayerProver<PB>>::prove(self, wit, out_point, transcript, option_stream)
     }
 
     fn verify(
