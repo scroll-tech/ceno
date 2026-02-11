@@ -4105,6 +4105,7 @@ source = "git+https://github.com/scroll-tech/openvm.git?branch=feat%2Fv1.4.1-scr
 dependencies = [
  "backtrace",
  "itertools 0.14.0",
+ "metrics",
  "num-bigint 0.4.6",
  "num-integer",
  "openvm-circuit",
@@ -4137,6 +4138,7 @@ dependencies = [
  "cfg-if",
  "itertools 0.14.0",
  "lazy_static",
+ "metrics",
  "openvm-circuit",
  "openvm-native-circuit",
  "openvm-native-compiler",
@@ -4506,6 +4508,7 @@ dependencies = [
  "openvm-platform",
  "openvm-stark-backend",
  "rrs-lib",
+ "rustc-demangle",
  "thiserror 1.0.69",
 ]
 
