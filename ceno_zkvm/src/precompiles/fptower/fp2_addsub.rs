@@ -467,7 +467,6 @@ mod tests {
                 &[],
                 &[],
                 &challenges,
-                None,
             );
 
         let out_evals = {
@@ -507,7 +506,6 @@ mod tests {
                 &challenges,
                 &mut prover_transcript,
                 &selector_ctxs,
-                None,
             )
             .expect("fp2_addsub prove failed");
 

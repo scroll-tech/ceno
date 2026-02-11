@@ -11,7 +11,6 @@ use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness},
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend},
-    gpu::CudaStream,
 };
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
@@ -322,7 +321,6 @@ pub fn build_main_witness<
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'a, PB>,
     challenges: &[E; 2],
-    option_stream: Option<&Arc<CudaStream>>,
 ) -> Vec<Arc<PB::MultilinearPoly<'a>>> {
     let ComposedConstrainSystem {
         zkvm_v1_css: cs,
@@ -382,7 +380,6 @@ pub fn build_main_witness<
         &pub_io_mles,
         &input.pub_io_evals,
         challenges,
-        option_stream,
     );
     gkr_circuit_out.0.0
 }
@@ -401,7 +398,6 @@ pub fn gkr_witness<
     pub_io_mles: &[Arc<PB::MultilinearPoly<'b>>],
     pub_io_evals: &[Either<E::BaseField, E>],
     challenges: &[E],
-    option_stream: Option<&Arc<CudaStream>>,
 ) -> (GKRCircuitWitness<'b, PB>, GKRCircuitOutput<'b, PB>) {
     // layer order from output to input
     let mut layer_wits = Vec::<LayerWitness<PB>>::with_capacity(circuit.layers.len() + 1);
@@ -505,7 +501,6 @@ pub fn gkr_witness<
                 &current_layer_wits,
                 pub_io_evals,
                 challenges,
-                option_stream,
             );
         layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 

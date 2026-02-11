@@ -20,7 +20,6 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem, RotationParams},
     error::BackendError,
     evaluation::EvalExpression,
-    gpu::CudaStream,
     hal::{MultilinearPolynomial, ProverBackend, ProverDevice},
     selector::{SelectorContext, SelectorType},
 };
@@ -214,7 +213,6 @@ impl<E: ExtensionField> Layer<E> {
         challenges: &mut Vec<E>,
         transcript: &mut T,
         selector_ctxs: &[SelectorContext],
-        option_stream: Option<&Arc<CudaStream>>,
     ) -> (LayerProof<E>, Point<E>) {
         self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
@@ -235,7 +233,6 @@ impl<E: ExtensionField> Layer<E> {
                     challenges,
                     transcript,
                     selector_ctxs,
-                    option_stream,
                 )
             }
             LayerType::Linear => {
@@ -243,7 +240,7 @@ impl<E: ExtensionField> Layer<E> {
                 let (_, point) = eval_and_dedup_points.remove(0);
                 let point = point.clone().unwrap();
                 (
-                    <Layer<E> as LinearLayer<E>>::prove::<PB, PD>(self, wit, &point, transcript, option_stream),
+                    <Layer<E> as LinearLayer<E>>::prove::<PB, PD>(self, wit, &point, transcript),
                     point,
                 )
             }
@@ -312,14 +309,14 @@ impl<E: ExtensionField> Layer<E> {
                 let evals = out_evals
                     .iter()
                     .map(|out_eval| {
-                        let PointAndEval { eval, .. } = out_eval.evaluate(claims, challenges, None);
+                        let PointAndEval { eval, .. } = out_eval.evaluate(claims, challenges);
                         eval
                     })
                     .collect_vec();
                 // within same group, all the point should be the same
                 // so we assume only take first point as representative
                 let point = out_evals.first().map(|out_eval| {
-                    let PointAndEval { point, .. } = out_eval.evaluate(claims, challenges, None);
+                    let PointAndEval { point, .. } = out_eval.evaluate(claims, challenges);
                     point
                 });
                 (evals, point)
