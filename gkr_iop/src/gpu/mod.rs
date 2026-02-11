@@ -97,8 +97,16 @@ thread_local! {
 }
 
 /// Bind a CUDA stream to the current thread for use by all GPU operations.
+/// Also ensures the CUDA context is active on this thread, which is necessary
+/// for Rayon workers that receive a propagated stream from a parent thread.
 /// Returns a guard that clears the thread-local on drop.
 pub fn bind_thread_stream(stream: Arc<CudaStream>) -> ThreadStreamGuard {
+    // Ensure CUDA context is bound to this thread.
+    // Without this, threads that receive a propagated stream (e.g. Rayon workers)
+    // would have a stream but no active CUDA context, causing CUDA_ERROR_INVALID_CONTEXT.
+    let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
+    cuda_hal.inner.ensure_context();
+
     THREAD_CUDA_STREAM.with(|cell| {
         *cell.borrow_mut() = Some(stream);
     });
