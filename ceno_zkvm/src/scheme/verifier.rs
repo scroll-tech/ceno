@@ -259,6 +259,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut shard_ec_sum = SepticPoint::<E::BaseField>::default();
 
         // check num proofs
+        let mut num_proofs = 0;
         for (index, proofs) in &vm_proof.chip_proofs {
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
@@ -274,12 +275,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .into(),
                 ));
             }
+            num_proofs += proofs.len();
         }
 
-        for (index, proof) in vm_proof
+        // fork transcript to support chip concurrently proved
+        let mut forked_transcripts = transcript.fork(num_proofs);
+        for ((index, proof), transcript) in vm_proof
             .chip_proofs
             .iter()
             .flat_map(|(index, proofs)| iter::repeat_n(index, proofs.len()).zip(proofs))
+            .zip_eq(forked_transcripts.iter_mut())
         {
             let num_instance: usize = proof.num_instances.iter().sum();
             assert!(num_instance > 0);
@@ -359,7 +364,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 proof,
                 pi_evals,
                 &vm_proof.raw_pi,
-                &mut transcript,
+                transcript,
                 NUM_FANIN,
                 &point_eval,
                 &challenges,
@@ -394,6 +399,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
                 "tower_verify+main-sumcheck",
             );
+        }
+
+        // merge forked transcript into transcript
+        let forked_samples = forked_transcripts
+            .into_iter()
+            .map(|mut fork_transcript| fork_transcript.sample_vec(1)[0])
+            .collect_vec();
+        for sample in forked_samples {
+            transcript.append_field_element_ext(&sample);
         }
 
         // verify mpcs
