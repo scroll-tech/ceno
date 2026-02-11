@@ -116,9 +116,26 @@ impl Drop for ThreadStreamGuard {
     }
 }
 
-/// Get the current thread's CUDA stream (None → default stream).
+/// Get the current thread's CUDA stream.
+///
+/// Returns the stream bound via `bind_thread_stream` for worker threads.
+/// For sub-threads (e.g., Rayon workers) without a bound stream, binds the
+/// CUDA context and returns the HAL default stream so GPU operations succeed.
 pub fn get_thread_stream() -> Option<Arc<CudaStream>> {
-    THREAD_CUDA_STREAM.with(|cell| cell.borrow().clone())
+    THREAD_CUDA_STREAM.with(|cell| {
+        let stream = cell.borrow().clone();
+        if stream.is_some() {
+            return stream;
+        }
+        // Sub-thread (Rayon etc.): bind CUDA context and use the default stream.
+        // HalInner::default_stream() calls ctx.bind_to_thread() internally.
+        if let Ok(hal) = get_cuda_hal() {
+            tracing::debug!("get_thread_stream: no bound stream, using default");
+            Some(hal.inner.default_stream().clone())
+        } else {
+            None
+        }
+    })
 }
 
 /// Stores a multilinear polynomial in dense evaluation form.

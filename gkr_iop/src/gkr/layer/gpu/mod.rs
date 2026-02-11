@@ -461,10 +461,17 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     let span = entered_span!("rotation derived left/right eval", profiling_3 = true);
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
     let (left_point, right_point) = bh.get_rotation_points(&row_challenges_e);
+    // Capture parent thread's CUDA stream so Rayon workers can reuse it.
+    // TODO: GPU batch evaluation and its batch version
+    let parent_stream = crate::gpu::get_thread_stream();
     let evals = evals_gpu_e
         .par_chunks_exact(2)
         .zip_eq(raw_rotation_exprs.par_iter())
         .flat_map(|(evals, (rotated_expr, _))| {
+            // Propagate parent thread's CUDA stream to Rayon worker
+            let _guard = parent_stream
+                .as_ref()
+                .map(|s| crate::gpu::bind_thread_stream(s.clone()));
             let [rotated_eval, target_eval] = evals else {
                 unreachable!()
             };
