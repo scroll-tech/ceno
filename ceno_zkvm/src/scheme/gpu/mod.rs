@@ -18,7 +18,7 @@ use gkr_iop::{
         self, Evaluation, GKRProof, GKRProverOutput,
         layer::{LayerWitness, gpu::utils::extract_mle_relationships_from_monomial_terms},
     },
-    gpu::{CudaStream, GpuBackend, GpuProver, gpu_prover::BB31Ext},
+    gpu::{GpuBackend, GpuProver, gpu_prover::BB31Ext},
     hal::ProverBackend,
 };
 use itertools::{Itertools, chain};
@@ -85,8 +85,8 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
     challenges: &[E; 2],
     transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
     cuda_hal: &Arc<CudaHalBB31>,
-    option_stream: Option<&Arc<CudaStream>>,
 ) -> TowerRelationOutput<E> {
+    let stream = gkr_iop::gpu::get_thread_stream();
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
         panic!("GPU backend only supports Goldilocks base field");
     }
@@ -113,7 +113,6 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
                 &mut _big_buffers,
                 &mut _ones_buffer,
                 &mut _view_last_layers,
-                option_stream,
             )
             .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
             .unwrap()
@@ -124,7 +123,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
         // This is the true optimization - using GPU tower results instead of CPU inference
         let span = entered_span!("extract_out_evals_from_gpu_towers", profiling_2 = true);
         let (r_out_evals, w_out_evals, lk_out_evals) =
-            extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len, option_stream);
+            extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
         exit_span!(span);
 
         // transcript >>> BasicTranscript<E>
@@ -140,7 +139,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
         let (point_gl, proof_gpu) = info_span!("[ceno] prove_tower_relation_gpu").in_scope(|| {
             cuda_hal
                 .tower
-                .create_proof(cuda_hal, &tower_input, NUM_FANIN, basic_tr, option_stream)
+                .create_proof(cuda_hal, &tower_input, NUM_FANIN, basic_tr, stream.as_ref())
                 .expect("gpu tower create_proof failed")
         });
         exit_span!(span);
@@ -160,14 +159,14 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     prod_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built product towers
     logup_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built logup towers
     r_set_len: usize,
-    option_stream: Option<&Arc<CudaStream>>,
 ) -> (Vec<Vec<E>>, Vec<Vec<E>>, Vec<Vec<E>>) {
+    let stream = gkr_iop::gpu::get_thread_stream();
     // Extract product out_evals from GPU towers
     let mut r_out_evals = Vec::new();
     let mut w_out_evals = Vec::new();
     for (i, gpu_spec) in prod_gpu.iter().enumerate() {
         let first_layer_evals: Vec<E> = gpu_spec
-            .get_output_evals(option_stream)
+            .get_output_evals(stream.as_ref())
             .expect("Failed to extract final evals from GPU product tower");
 
         // Product tower first layer should have 2 MLEs
@@ -189,7 +188,7 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     let mut lk_out_evals = Vec::new();
     for gpu_spec in logup_gpu.iter() {
         let first_layer_evals: Vec<E> = gpu_spec
-            .get_output_evals(option_stream)
+            .get_output_evals(stream.as_ref())
             .expect("Failed to extract final evals from GPU logup tower");
 
         // Logup tower first layer should have 4 MLEs
@@ -219,7 +218,6 @@ pub fn prove_main_constraints_impl<E: ExtensionField, PCS: PolynomialCommitmentS
     composed_cs: &ComposedConstrainSystem<E>,
     challenges: &[E; 2],
     transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
-    option_stream: Option<&Arc<CudaStream>>,
 ) -> Result<
     (
         Point<E>,
@@ -310,7 +308,6 @@ pub fn prove_main_constraints_impl<E: ExtensionField, PCS: PolynomialCommitmentS
         challenges,
         transcript,
         &selector_ctxs,
-        option_stream,
     )?;
     assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
     Ok((
@@ -349,8 +346,8 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
     ys: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
     invs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
     transcript: &mut impl Transcript<E>,
-    option_stream: Option<&Arc<CudaStream>>,
 ) -> Result<EccQuarkProof<E>, ZKVMError> {
+    let stream = gkr_iop::gpu::get_thread_stream();
     assert_eq!(xs.len(), SEPTIC_EXTENSION_DEGREE);
     assert_eq!(ys.len(), SEPTIC_EXTENSION_DEGREE);
 
@@ -406,13 +403,12 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
     let sel_bypass_mle = sel_bypass_mle.into_mle();
 
     let cuda_hal = get_cuda_hal().map_err(hal_to_backend_error)?;
-    let sel_add_gpu = mle_host_to_gpu(&cuda_hal, &sel_add_mle, option_stream);
-    let sel_bypass_gpu = mle_host_to_gpu(&cuda_hal, &sel_bypass_mle, option_stream);
-    let sel_export_gpu = mle_host_to_gpu(&cuda_hal, &sel_export_mle, option_stream);
+    let sel_add_gpu = mle_host_to_gpu(&cuda_hal, &sel_add_mle);
+    let sel_bypass_gpu = mle_host_to_gpu(&cuda_hal, &sel_bypass_mle);
+    let sel_export_gpu = mle_host_to_gpu(&cuda_hal, &sel_export_mle);
     let split_batches = mle_filter_even_odd_batch::<E>(
         &cuda_hal,
         &[(&xs, false), (&xs, true), (&ys, false), (&ys, true)],
-        option_stream,
     )?;
     let mut split_iter = split_batches.into_iter();
     let x0_gpu = split_iter.next().unwrap_or_default();
@@ -421,9 +417,9 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
     let y1_gpu = split_iter.next().unwrap_or_default();
 
     // build x[1,b], y[1,b], s[1,b]
-    let x3_gpu = batch_mles_take_half::<E>(&xs, 1, option_stream)?;
-    let y3_gpu = batch_mles_take_half::<E>(&ys, 1, option_stream)?;
-    let s_gpu = batch_mles_take_half::<E>(&invs, 1, option_stream)?;
+    let x3_gpu = batch_mles_take_half::<E>(&xs, 1)?;
+    let y3_gpu = batch_mles_take_half::<E>(&ys, 1)?;
+    let s_gpu = batch_mles_take_half::<E>(&invs, 1)?;
 
     let mut registry: WitnessRegistry<'a, E> = WitnessRegistry::default();
     let sel_add_expr = registry.register(sel_add_gpu);
@@ -488,10 +484,10 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
     );
 
     // export x[1,...,1,0], y[1,...,1,0] for final result (using big-endian notation)
-    let xp_gpu = batch_mles_take_half::<E>(&xs, 1, option_stream)?;
-    let yp_gpu = batch_mles_take_half::<E>(&ys, 1, option_stream)?;
-    let final_sum_x = read_septic_value_from_gpu(&xp_gpu, last_evaluation_index, option_stream)?;
-    let final_sum_y = read_septic_value_from_gpu(&yp_gpu, last_evaluation_index, option_stream)?;
+    let xp_gpu = batch_mles_take_half::<E>(&xs, 1)?;
+    let yp_gpu = batch_mles_take_half::<E>(&ys, 1)?;
+    let final_sum_x = read_septic_value_from_gpu(&xp_gpu, last_evaluation_index)?;
+    let final_sum_y = read_septic_value_from_gpu(&yp_gpu, last_evaluation_index)?;
     // 0 = sel_export * (x[1,b] - final_sum.x)
     // 0 = sel_export * (y[1,b] - final_sum.y)
     let export_expr =
@@ -534,7 +530,7 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
             max_degree,
             None,
             basic_transcript,
-            option_stream,
+            stream.as_ref(),
         )
         .map_err(|e| hal_to_backend_error(format!("GPU sumcheck failed: {e:?}")))?;
 
@@ -696,7 +692,6 @@ pub fn extract_witness_mles_for_trace<'a, E, PCS>(
     pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
     trace_idx: usize,
     expected_num: usize,
-    option_stream: Option<&Arc<CudaStream>>,
 ) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
 where
     E: ExtensionField,
@@ -710,10 +705,11 @@ where
         GpuPolynomial<'static>,
     > = unsafe { std::mem::transmute(pcs_data) };
 
+    let stream = gkr_iop::gpu::get_thread_stream();
     let cuda_hal = get_cuda_hal().unwrap();
     let poly_group = cuda_hal
         .basefold
-        .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, option_stream)
+        .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, stream.as_ref())
         .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
     drop(cuda_hal);
 
@@ -739,7 +735,6 @@ where
 /// just-in-time GPU upload inside parallel task closures.
 pub fn transport_structural_witness_to_gpu<'a, E>(
     structural_rmm: witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
-    option_stream: Option<&Arc<CudaStream>>,
 ) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
 where
     E: ExtensionField,
@@ -748,7 +743,7 @@ where
     let cuda_hal = get_cuda_hal().unwrap();
     let result = structural_mles
         .iter()
-        .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle, option_stream)))
+        .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
         .collect();
     drop(cuda_hal);
     result
@@ -765,7 +760,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     big_buffers: &'buf mut Vec<BufferImpl<BB31Ext>>,
     ones_buffer: &mut Vec<GpuPolynomialExt<'static>>,
     view_last_layers: &mut Vec<Vec<Vec<GpuPolynomialExt<'static>>>>,
-    option_stream: Option<&Arc<CudaStream>>,
 ) -> Result<
     (
         Vec<ceno_gpu::GpuProverSpec<'buf>>,
@@ -774,6 +768,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     String,
 > {
     // let _mem = cuda_hal.inner().mem_trace_guard("build_tower_witness_gpu");
+    let stream = gkr_iop::gpu::get_thread_stream();
     use crate::scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP};
     use ceno_gpu::{CudaHal as _, bb31::GpuPolynomialExt};
     use p3::field::FieldAlgebra;
@@ -833,7 +828,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             (total_buffer_size * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0)
         );
         let big_buffer = cuda_hal
-            .alloc_ext_elems_on_device(total_buffer_size, false, option_stream)
+            .alloc_ext_elems_on_device(total_buffer_size, false, stream.as_ref())
             .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))?;
         big_buffers.push(big_buffer);
         is_prod_buffer_exists = true;
@@ -869,7 +864,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         let nv = lk_denominator_last_layer[0][0].num_vars();
 
         // Create one shared ones_buffer as Owned (can be 'static)
-        let ones_poly = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE, option_stream)
+        let ones_poly = GpuPolynomialExt::new_with_scalar(&cuda_hal.inner, nv, BB31Ext::ONE, stream.as_ref())
             .map_err(|e| format!("Failed to create shared ones_buffer: {:?}", e))
             .unwrap();
         // SAFETY: Owned buffer can be safely treated as 'static
@@ -914,7 +909,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
             (total_buffer_size * std::mem::size_of::<BB31Ext>()) as f64 / (1024.0 * 1024.0)
         );
         let big_buffer = cuda_hal
-            .alloc_ext_elems_on_device(total_buffer_size, false, option_stream)
+            .alloc_ext_elems_on_device(total_buffer_size, false, stream.as_ref())
             .unwrap();
         big_buffers.push(big_buffer);
         is_logup_buffer_exists = true;
@@ -966,7 +961,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
                 &last_layers_refs,
                 num_vars,
                 num_towers,
-                option_stream,
+                stream.as_ref(),
             )
         }
         .map_err(|e| format!("build_prod_tower_from_gpu_polys_batch failed: {:?}", e))?;
@@ -1001,7 +996,7 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
                 &last_layers_refs,
                 num_vars,
                 num_towers,
-                option_stream,
+                stream.as_ref(),
             )
             .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
 
@@ -1065,7 +1060,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             challenges,
             transcript,
             &cuda_hal,
-            None,
         )
     }
 }
@@ -1097,7 +1091,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         ),
         ZKVMError,
     > {
-        prove_main_constraints_impl::<E, PCS>(rt_tower, input, composed_cs, challenges, transcript, None)
+        prove_main_constraints_impl::<E, PCS>(rt_tower, input, composed_cs, challenges, transcript)
     }
 }
 
@@ -1112,7 +1106,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBa
         invs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<EccQuarkProof<E>, ZKVMError> {
-        prove_ec_sum_quark_impl::<E, PCS>(num_instances, xs, ys, invs, transcript, None)
+        prove_ec_sum_quark_impl::<E, PCS>(num_instances, xs, ys, invs, transcript)
     }
 }
 
@@ -1256,7 +1250,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         let fixed_mles = PCS::get_arc_mle_witness_from_commitment(pcs_data_original.as_ref());
         let fixed_mles = fixed_mles
             .iter()
-            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle, None)))
+            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
             .collect_vec();
 
         DeviceProvingKey {
@@ -1271,7 +1265,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
     ) -> Vec<ArcMultilinearExtensionGpu<'a, E>> {
         let cuda_hal = get_cuda_hal().unwrap();
         mles.iter()
-            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle, None)))
+            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
             .collect_vec()
     }
 }

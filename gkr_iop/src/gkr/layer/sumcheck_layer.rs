@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::marker::PhantomData;
 
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -10,7 +10,6 @@ use transcript::Transcript;
 use crate::{
     error::BackendError,
     gkr::layer::hal::SumcheckLayerProver,
-    gpu::CudaStream,
     hal::{ProverBackend, ProverDevice},
 };
 
@@ -45,7 +44,6 @@ pub trait SumcheckLayer<E: ExtensionField> {
         wit: LayerWitness<PB>,
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
-        option_stream: Option<&Arc<CudaStream>>,
     ) -> LayerProof<PB::E>;
 
     fn verify(
@@ -66,7 +64,6 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
         wit: LayerWitness<PB>,
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
-        option_stream: Option<&Arc<CudaStream>>,
     ) -> LayerProof<PB::E> {
         <PD as SumcheckLayerProver<PB>>::prove(
             self,
@@ -75,7 +72,6 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
             wit,
             challenges,
             transcript,
-            option_stream,
         )
     }
 

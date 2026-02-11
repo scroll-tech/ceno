@@ -706,7 +706,6 @@ pub fn run_weierstrass_add<
         &[],
         &[],
         &challenges,
-        None,
     );
     exit_span!(span);
 
@@ -757,7 +756,6 @@ pub fn run_weierstrass_add<
             &challenges,
             &mut prover_transcript,
             &selector_ctxs,
-            None,
         )
         .expect("Failed to prove phase");
     exit_span!(span);

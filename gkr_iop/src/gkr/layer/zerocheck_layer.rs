@@ -11,7 +11,7 @@ use multilinear_extensions::{
 };
 use p3::field::{FieldAlgebra, dot_product};
 use smallvec::SmallVec;
-use std::{cmp::Ordering, collections::BTreeMap, marker::PhantomData, ops::Neg, sync::Arc};
+use std::{cmp::Ordering, collections::BTreeMap, marker::PhantomData, ops::Neg};
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState, SumCheckSubClaim, VerifierError},
     util::get_challenge_pows,
@@ -31,7 +31,6 @@ use crate::{
             ROTATION_OPENING_COUNT, hal::ZerocheckLayerProver, sumcheck_layer::SumcheckLayerProof,
         },
     },
-    gpu::CudaStream,
     hal::{ProverBackend, ProverDevice},
     selector::{SelectorContext, SelectorType},
     utils::{
@@ -69,7 +68,6 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
         selector_ctxs: &[SelectorContext],
-        option_stream: Option<&Arc<CudaStream>>,
     ) -> (LayerProof<PB::E>, Point<PB::E>);
 
     #[allow(clippy::too_many_arguments)]
@@ -210,7 +208,6 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         challenges: &[PB::E],
         transcript: &mut impl Transcript<PB::E>,
         selector_ctxs: &[SelectorContext],
-        option_stream: Option<&Arc<CudaStream>>,
     ) -> (LayerProof<PB::E>, Point<PB::E>) {
         <PD as ZerocheckLayerProver<PB>>::prove(
             self,
@@ -222,7 +219,6 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             challenges,
             transcript,
             selector_ctxs,
-            option_stream,
         )
     }
 

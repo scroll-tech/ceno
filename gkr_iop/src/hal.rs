@@ -8,8 +8,6 @@ use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::mle::Point;
 use std::{fmt::Debug, sync::Arc};
 
-use crate::gpu::CudaStream;
-
 pub trait MultilinearPolynomial<E: ExtensionField> {
     fn num_vars(&self) -> usize;
     fn eval(&self, point: Point<E>) -> E;
@@ -55,6 +53,5 @@ pub trait ProtocolWitnessGeneratorProver<PB: ProverBackend> {
         layer_wits: &[Arc<PB::MultilinearPoly<'a>>],
         pub_io_evals: &[Either<<PB::E as ExtensionField>::BaseField, PB::E>],
         challenges: &[PB::E],
-        option_stream: Option<&Arc<CudaStream>>,
     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }

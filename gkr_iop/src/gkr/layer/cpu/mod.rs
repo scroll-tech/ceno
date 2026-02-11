@@ -8,7 +8,6 @@ use crate::{
             zerocheck_layer::RotationPoints,
         },
     },
-    gpu::CudaStream,
     selector::SelectorContext,
     utils::{rotation_next_base_mle, rotation_selector},
 };
@@ -45,8 +44,6 @@ use crate::{
     hal::ProverBackend,
 };
 
-use std::sync::Arc;
-
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
@@ -55,7 +52,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Cp
         wit: LayerWitness<CpuBackend<E, PCS>>,
         out_point: &multilinear_extensions::mle::Point<E>,
         transcript: &mut impl transcript::Transcript<E>,
-        _option_stream: Option<&Arc<CudaStream>>,
     ) -> crate::gkr::layer::sumcheck_layer::LayerProof<E> {
         let evals: Vec<_> = wit
             .into_par_iter()
@@ -84,7 +80,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
         wit: LayerWitness<'_, CpuBackend<E, PCS>>,
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
-        _option_stream: Option<&Arc<CudaStream>>,
     ) -> LayerProof<<CpuBackend<E, PCS> as ProverBackend>::E> {
         let builder = VirtualPolynomialsBuilder::new_with_mles(
             num_threads,
@@ -120,7 +115,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         challenges: &[<CpuBackend<E, PCS> as ProverBackend>::E],
         transcript: &mut impl Transcript<<CpuBackend<E, PCS> as ProverBackend>::E>,
         selector_ctxs: &[SelectorContext],
-        option_stream: Option<&Arc<CudaStream>>,
     ) -> (
         LayerProof<<CpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<CpuBackend<E, PCS> as ProverBackend>::E>,
@@ -165,7 +159,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     rt,
                     challenges,
                     transcript,
-                    option_stream,
                 );
                 (Some(proof), Some(left), Some(right), Some(origin))
             } else {
@@ -299,7 +292,6 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
     rt: &Point<E>,
     global_challenges: &[E],
     transcript: &mut impl Transcript<E>,
-    _option_stream: Option<&Arc<CudaStream>>,
 ) -> (SumcheckLayerProof<E>, RotationPoints<E>) {
     let span = entered_span!("rotate_witin_selector", profiling_4 = true);
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);

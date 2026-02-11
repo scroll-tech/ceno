@@ -613,7 +613,7 @@ impl<
 
         // build main witness
         let records = info_span!("[ceno] build_main_witness")
-            .in_scope(|| build_main_witness::<E, PCS, PB, PD>(cs, &input, challenges, None));
+            .in_scope(|| build_main_witness::<E, PCS, PB, PD>(cs, &input, challenges));
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
@@ -715,18 +715,19 @@ where
 
     let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
     let _stream = cuda_hal.inner.get_pool_stream().expect("should acquire stream");
+    let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(_stream.clone());
 
     // Deferred witness extraction: extract from committed pcs_data just-in-time
     if let Some(trace_idx) = witness_trace_idx {
         input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
-            extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin, Some(&_stream))
+            extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin)
         });
     }
 
     // Deferred structural witness transport: CPU -> GPU just-in-time
     if let Some(rmm) = structural_rmm {
         input.structural_witness = info_span!("[ceno] transport_structural_witness").in_scope(|| {
-            transport_structural_witness_to_gpu::<E>(rmm, Some(&_stream))
+            transport_structural_witness_to_gpu::<E>(rmm)
         });
     }
 
@@ -758,7 +759,7 @@ where
             })
             .collect_vec();
         let ecc_proof = Some(info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
-            prove_ec_sum_quark_impl::<E, PCS>(input.num_instances(), xs, ys, slopes, transcript, Some(&_stream))
+            prove_ec_sum_quark_impl::<E, PCS>(input.num_instances(), xs, ys, slopes, transcript)
         })?);
         exit_span!(span);
         ecc_proof
@@ -769,7 +770,7 @@ where
     // build main witness
     let records = info_span!("[ceno] build_main_witness").in_scope(|| {
         build_main_witness::<E, PCS, GpuBackend<E, PCS>, gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>>(
-            cs, &input, challenges, Some(&_stream)
+            cs, &input, challenges
         )
     });
 
@@ -777,7 +778,7 @@ where
     // prove the product and logup sum relation between layers in tower using _impl function
     let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
         info_span!("[ceno] prove_tower_relation").in_scope(|| {
-            prove_tower_relation_impl::<E, PCS>(cs, &input, &records, challenges, transcript, &cuda_hal, Some(&_stream))
+            prove_tower_relation_impl::<E, PCS>(cs, &input, &records, challenges, transcript, &cuda_hal)
         });
     exit_span!(span);
 
@@ -790,7 +791,7 @@ where
     let span = entered_span!("prove_main_constraints", profiling_2 = true);
     let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
         info_span!("[ceno] prove_main_constraints").in_scope(|| {
-            prove_main_constraints_impl::<E, PCS>(rt_tower, &input, cs, challenges, transcript, Some(&_stream))
+            prove_main_constraints_impl::<E, PCS>(rt_tower, &input, cs, challenges, transcript)
         })?;
     let MainSumcheckEvals {
         wits_in_evals,

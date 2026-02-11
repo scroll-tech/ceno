@@ -1154,7 +1154,6 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         &[],
         &[],
         &challenges,
-        None,
     );
     exit_span!(span);
 
@@ -1238,7 +1237,6 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             &challenges,
             &mut prover_transcript,
             &selector_ctxs,
-            None,
         )
         .expect("Failed to prove phase");
     exit_span!(span);

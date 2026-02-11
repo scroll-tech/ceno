@@ -906,7 +906,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             challenges,
             transcript,
             &selector_ctxs,
-            None,
         )?;
         assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
         Ok((

@@ -3,7 +3,6 @@ use crate::{
     gkr::layer::Layer,
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
-use crate::gpu::CudaStream;
 use either::Either;
 use ff_ext::ExtensionField;
 use itertools::izip;
@@ -113,7 +112,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         layer_wits: &[Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
         pub_io_evals: &[Either<E::BaseField, E>],
         challenges: &[E],
-        option_stream: Option<&Arc<CudaStream>>,
     ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let span = entered_span!("witness_infer", profiling_2 = true);
         let out_evals: Vec<_> = layer
