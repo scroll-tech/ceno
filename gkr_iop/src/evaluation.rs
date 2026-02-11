@@ -38,8 +38,11 @@ fn evaluate<E: ExtensionField>(expr: &Expression<E>, challenges: &[E]) -> E {
     eval_by_expr_with_fixed(&[], &[], &[], challenges, expr)
 }
 
+use std::sync::Arc;
+use crate::gpu::CudaStream;
+
 impl<E: ExtensionField> EvalExpression<E> {
-    pub fn evaluate(&self, evals: &[PointAndEval<E>], challenges: &[E]) -> PointAndEval<E> {
+    pub fn evaluate(&self, evals: &[PointAndEval<E>], challenges: &[E], option_stream: Option<&Arc<CudaStream>>) -> PointAndEval<E> {
         match self {
             // assume all point in evals are derived in random, thus pick arbirary one is ok
             // here we pick first point as representative.
@@ -62,7 +65,7 @@ impl<E: ExtensionField> EvalExpression<E> {
 
                 let parts = parts
                     .iter()
-                    .map(|part| part.evaluate(evals, &vars))
+                    .map(|part| part.evaluate(evals, &vars, option_stream))
                     .collect_vec();
                 assert_eq!(parts.len(), 1 << indices.len());
                 assert!(parts.iter().all(|part| part.point == parts[0].point));

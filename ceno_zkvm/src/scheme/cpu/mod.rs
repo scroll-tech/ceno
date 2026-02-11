@@ -43,7 +43,8 @@ use sumcheck::{
     structs::{IOPProverMessage, IOPProverState},
     util::{get_challenge_pows, optimal_sumcheck_threads},
 };
-use transcript::Transcript;
+use p3::field::FieldAlgebra;
+use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
 pub type TowerRelationOutput<E> = (
@@ -905,6 +906,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             challenges,
             transcript,
             &selector_ctxs,
+            None,
         )?;
         assert_eq!(rt.len(), 1, "TODO support multi-layer gkr iop");
         Ok((

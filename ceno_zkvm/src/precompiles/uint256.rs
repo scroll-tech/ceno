@@ -872,6 +872,7 @@ pub fn run_uint256_mul<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + '
         &[],
         &[],
         &challenges,
+        None,
     );
     exit_span!(span);
 
@@ -922,6 +923,7 @@ pub fn run_uint256_mul<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + '
             &challenges,
             &mut prover_transcript,
             &selector_ctxs,
+            None,
         )
         .expect("Failed to prove phase");
     exit_span!(span);

@@ -11,6 +11,7 @@ use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness},
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend},
+    gpu::CudaStream,
 };
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
@@ -28,6 +29,19 @@ use rayon::{
 };
 use std::{iter, sync::Arc};
 use witness::next_pow2_instance_padding;
+
+/// Wrapper that asserts a shared reference is safe to send across threads.
+///
+/// # Safety
+/// The caller must guarantee that the referenced data is only **read** (never
+/// mutated) while the `SyncRef` is alive. This is typically the case when the
+/// reference points to data that is immutable for the duration of a
+/// `std::thread::scope` block.
+pub(crate) struct SyncRef<'a, T>(pub(crate) &'a T);
+
+// SAFETY: T is only accessed via a shared reference which is read-only.
+unsafe impl<T> Send for SyncRef<'_, T> {}
+unsafe impl<T> Sync for SyncRef<'_, T> {}
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
@@ -308,6 +322,7 @@ pub fn build_main_witness<
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'a, PB>,
     challenges: &[E; 2],
+    option_stream: Option<&Arc<CudaStream>>,
 ) -> Vec<Arc<PB::MultilinearPoly<'a>>> {
     let ComposedConstrainSystem {
         zkvm_v1_css: cs,
@@ -367,6 +382,7 @@ pub fn build_main_witness<
         &pub_io_mles,
         &input.pub_io_evals,
         challenges,
+        option_stream,
     );
     gkr_circuit_out.0.0
 }
@@ -385,6 +401,7 @@ pub fn gkr_witness<
     pub_io_mles: &[Arc<PB::MultilinearPoly<'b>>],
     pub_io_evals: &[Either<E::BaseField, E>],
     challenges: &[E],
+    option_stream: Option<&Arc<CudaStream>>,
 ) -> (GKRCircuitWitness<'b, PB>, GKRCircuitOutput<'b, PB>) {
     // layer order from output to input
     let mut layer_wits = Vec::<LayerWitness<PB>>::with_capacity(circuit.layers.len() + 1);
@@ -488,6 +505,7 @@ pub fn gkr_witness<
                 &current_layer_wits,
                 pub_io_evals,
                 challenges,
+                option_stream,
             );
         layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 

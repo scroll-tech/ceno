@@ -8,7 +8,7 @@ use ceno_gpu::{
 use ff_ext::ExtensionField;
 use gkr_iop::{
     error::BackendError,
-    gpu::{BB31Base, MultilinearExtensionGpu},
+    gpu::{BB31Base, CudaStream, MultilinearExtensionGpu},
 };
 use multilinear_extensions::{Expression, WitnessId, mle::MultilinearExtension};
 use p3::field::{FieldAlgebra, PrimeField32};
@@ -36,10 +36,11 @@ pub fn expect_basic_transcript<E: ExtensionField, T: Transcript<E>>(
 pub fn read_septic_value_from_gpu<'a, E: ExtensionField>(
     polys: &[Arc<MultilinearExtensionGpu<'a, E>>],
     index: usize,
+    option_stream: Option<&Arc<CudaStream>>,
 ) -> Result<SepticExtension<E::BaseField>, ZKVMError> {
     let coords = polys
         .iter()
-        .map(|poly| read_base_value_from_gpu(poly, index))
+        .map(|poly| read_base_value_from_gpu(poly, index, option_stream))
         .collect::<Result<Vec<_>, _>>()?;
     Ok(coords.into())
 }
@@ -47,12 +48,13 @@ pub fn read_septic_value_from_gpu<'a, E: ExtensionField>(
 fn read_base_value_from_gpu<'a, E: ExtensionField>(
     poly: &Arc<MultilinearExtensionGpu<'a, E>>,
     index: usize,
+    option_stream: Option<&Arc<CudaStream>>,
 ) -> Result<E::BaseField, ZKVMError> {
     match &poly.mle {
         GpuFieldType::Base(base_poly) => {
             let buffer = base_poly.evaluations();
             let raw = buffer
-                .get(index)
+                .get(index, option_stream)
                 .map_err(|e| hal_to_backend_error(format!("failed to read GPU buffer: {e:?}")))?;
             let canonical = raw.as_canonical_u32();
             Ok(E::BaseField::from_canonical_u32(canonical))
@@ -69,6 +71,7 @@ fn read_base_value_from_gpu<'a, E: ExtensionField>(
 pub fn batch_mles_take_half<'a, E: ExtensionField>(
     polynomials: &[Arc<MultilinearExtensionGpu<'a, E>>],
     chunk_index: usize,
+    option_stream: Option<&Arc<CudaStream>>,
 ) -> Result<Vec<Arc<MultilinearExtensionGpu<'a, E>>>, ZKVMError> {
     if polynomials.is_empty() {
         return Ok(Vec::new());
@@ -146,11 +149,12 @@ pub fn hal_to_backend_error(message: impl Into<String>) -> ZKVMError {
 pub fn mle_host_to_gpu<'a, E: ExtensionField>(
     cuda_hal: &CudaHalBB31,
     mle: &MultilinearExtension<'a, E>,
+    option_stream: Option<&Arc<CudaStream>>,
 ) -> Arc<MultilinearExtensionGpu<'static, E>> {
     if TypeId::of::<E::BaseField>() != TypeId::of::<BB31Base>() {
         panic!("GPU backend only supports BabyBear base field");
     }
-    let gpu = MultilinearExtensionGpu::from_ceno(cuda_hal, mle);
+    let gpu = MultilinearExtensionGpu::from_ceno(cuda_hal, mle, option_stream);
     Arc::new(unsafe {
         std::mem::transmute::<MultilinearExtensionGpu<'_, E>, MultilinearExtensionGpu<'static, E>>(
             gpu,
@@ -161,6 +165,7 @@ pub fn mle_host_to_gpu<'a, E: ExtensionField>(
 pub fn mle_filter_even_odd_batch<'a, E: ExtensionField>(
     cuda_hal: &CudaHalBB31,
     requests: &[(&[Arc<MultilinearExtensionGpu<'a, E>>], bool)],
+    option_stream: Option<&Arc<CudaStream>>,
 ) -> Result<Vec<Vec<Arc<MultilinearExtensionGpu<'static, E>>>>, ZKVMError> {
     if requests.iter().all(|(polys, _)| polys.is_empty()) {
         return Ok(vec![Vec::new(); requests.len()]);
@@ -217,7 +222,7 @@ pub fn mle_filter_even_odd_batch<'a, E: ExtensionField>(
         .iter()
         .map(|_| {
             cuda_hal
-                .alloc_elems_on_device(stride, false)
+                .alloc_elems_on_device(stride, false, option_stream)
                 .map_err(|e| hal_to_backend_error(format!("failed to allocate GPU buffer: {e:?}")))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -231,7 +236,7 @@ pub fn mle_filter_even_odd_batch<'a, E: ExtensionField>(
         BB31Base,
         GpuFieldType<'static>,
         GpuPolynomial<'static>,
-    >(cuda_hal, flattened_refs, &flags, &mut output_buffers)
+    >(cuda_hal, flattened_refs, &flags, &mut output_buffers, option_stream)
     .map_err(|e| hal_to_backend_error(format!("GPU filter kernel failed: {e:?}")))?;
 
     let mut outputs = Vec::with_capacity(requests.len());
