@@ -169,53 +169,6 @@ pub fn verify_tower_proof<C: Config>(
         builder.dyn_array(num_logup_spec.clone());
     let logup_spec_q_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_logup_spec.clone());
-
-    let idx: Usize<C::N> = builder.eval(C::N::ONE);
-    builder
-        .range(0, num_prod_spec.clone())
-        .for_each(|idx_vec, builder| {
-            let e = builder.get(&next_layer_evals, idx.clone());
-            builder.set(
-                &prod_spec_point_n_eval,
-                idx_vec[0],
-                PointAndEvalVariable {
-                    point: PointVariable {
-                        fs: initial_rt.clone(),
-                    },
-                    eval: e,
-                },
-            );
-            builder.assign(&idx, idx.clone() + C::N::ONE);
-        });
-    let q_idx: Usize<C::N> = builder.eval(idx.clone() + num_logup_spec.clone());
-    builder
-        .range(0, num_logup_spec.clone())
-        .for_each(|idx_vec, builder| {
-            let e1 = builder.get(&next_layer_evals, idx.clone());
-            let e2 = builder.get(&next_layer_evals, q_idx.clone());
-            builder.set(
-                &logup_spec_p_point_n_eval,
-                idx_vec[0],
-                PointAndEvalVariable {
-                    point: PointVariable {
-                        fs: initial_rt.clone(),
-                    },
-                    eval: e1,
-                },
-            );
-            builder.set(
-                &logup_spec_q_point_n_eval,
-                idx_vec[0],
-                PointAndEvalVariable {
-                    point: PointVariable {
-                        fs: initial_rt.clone(),
-                    },
-                    eval: e2,
-                },
-            );
-            builder.assign(&idx, idx.clone() + C::N::ONE);
-            builder.assign(&q_idx, q_idx.clone() + C::N::ONE);
-        });
     builder.cycle_tracker_end("initial sum");
 
     let curr_pt = initial_rt.clone();
@@ -350,52 +303,50 @@ pub fn verify_tower_proof<C: Config>(
         );
     });
 
-    builder.if_ne(op_range, Usize::from(0)).then(|builder| {
-        // update prod_spec and logup_spec evaluations at next_rt
-        let product_evals = {
-            let start: Var<C::N> = builder.eval(Usize::from(1));
-            let end: Var<C::N> = builder.eval(start + num_prod_spec.clone());
-            next_layer_evals.slice(builder, start, end)
-        };
-        let logup_evals = {
-            let start: Var<C::N> = builder.eval(Usize::from(1) + num_prod_spec.clone());
-            let end: Var<C::N> = builder.eval(start + Usize::from(2) * num_logup_spec.clone());
-            next_layer_evals.slice(builder, start, end)
-        };
+    // update prod_spec and logup_spec evaluations at next_rt
+    let product_evals = {
+        let start: Var<C::N> = builder.eval(Usize::from(1));
+        let end: Var<C::N> = builder.eval(start + num_prod_spec.clone());
+        next_layer_evals.slice(builder, start, end)
+    };
+    let logup_evals = {
+        let start: Var<C::N> = builder.eval(Usize::from(1) + num_prod_spec.clone());
+        let end: Var<C::N> = builder.eval(start + Usize::from(2) * num_logup_spec.clone());
+        next_layer_evals.slice(builder, start, end)
+    };
 
-        builder
-            .range(0, num_prod_spec.clone())
-            .for_each(|i_vec, builder| {
-                let i = i_vec[0];
-                let eval = builder.get(&product_evals, i);
+    builder
+        .range(0, num_prod_spec.clone())
+        .for_each(|i_vec, builder| {
+            let i = i_vec[0];
+            let eval = builder.get(&product_evals, i);
 
-                let point_and_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                    point: next_rt.point.clone(),
-                    eval,
-                });
-                builder.set_value(&prod_spec_point_n_eval, i, point_and_eval);
+            let point_and_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: next_rt.point.clone(),
+                eval,
             });
-        builder
-            .range(0, num_logup_spec.clone())
-            .for_each(|i_vec, builder| {
-                let i = i_vec[0];
-                let p_idx = i;
-                let q_idx: Var<C::N> = builder.eval(num_logup_spec.clone() + i);
-                let p_eval = builder.get(&logup_evals, p_idx);
-                let q_eval = builder.get(&logup_evals, q_idx);
+            builder.set_value(&prod_spec_point_n_eval, i, point_and_eval);
+        });
+    builder
+        .range(0, num_logup_spec.clone())
+        .for_each(|i_vec, builder| {
+            let i = i_vec[0];
+            let p_idx = i;
+            let q_idx: Var<C::N> = builder.eval(num_logup_spec.clone() + i);
+            let p_eval = builder.get(&logup_evals, p_idx);
+            let q_eval = builder.get(&logup_evals, q_idx);
 
-                let p_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                    point: next_rt.point.clone(),
-                    eval: p_eval,
-                });
-                let q_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                    point: next_rt.point.clone(),
-                    eval: q_eval,
-                });
-                builder.set_value(&logup_spec_p_point_n_eval, i, p_eval);
-                builder.set_value(&logup_spec_q_point_n_eval, i, q_eval);
+            let p_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: next_rt.point.clone(),
+                eval: p_eval,
             });
-    });
+            let q_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: next_rt.point.clone(),
+                eval: q_eval,
+            });
+            builder.set_value(&logup_spec_p_point_n_eval, i, p_eval);
+            builder.set_value(&logup_spec_q_point_n_eval, i, q_eval);
+        });
 
     (
         next_rt.point,
