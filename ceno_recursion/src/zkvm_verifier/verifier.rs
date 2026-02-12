@@ -953,8 +953,6 @@ pub fn verify_gkr_circuit<C: Config>(
             });
 
         // sigma = \sum_b sel(b) * zero_expr(b)
-        let max_degree = builder.constant(C::F::from_canonical_usize(layer.max_expr_degree + 1));
-
         let max_num_variables_f = builder.unsafe_cast_var_to_felt(max_num_variables.get_var());
 
         let (in_point, expected_evaluation) = iop_verifier_state_verify(
@@ -963,7 +961,7 @@ pub fn verify_gkr_circuit<C: Config>(
             &sigma,
             &proof,
             max_num_variables_f,
-            max_degree,
+            layer.max_expr_degree + 1,
             unipoly_extrapolator,
         );
 
@@ -1204,7 +1202,6 @@ pub fn verify_rotation<C: Config>(
     let sigma: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
 
     let max_num_variables = builder.unsafe_cast_var_to_felt(max_num_variables.get_var());
-    let max_degree: Felt<C::F> = builder.constant(C::F::TWO);
 
     let (origin_point, expected_evaluation) = iop_verifier_state_verify(
         builder,
@@ -1212,7 +1209,7 @@ pub fn verify_rotation<C: Config>(
         &sigma,
         proof,
         max_num_variables,
-        max_degree,
+        2,
         unipoly_extrapolator,
     );
 
@@ -1756,7 +1753,6 @@ pub fn verify_ecc_proof<C: Config>(
 
     let one_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let zero_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-    let three_f: Felt<C::F> = builder.constant(C::F::from_canonical_u32(3));
     let num_vars_f = builder.unsafe_cast_var_to_felt(num_vars.get_var());
     let (rt, sumcheck_expected_evaluation) = iop_verifier_state_verify(
         builder,
@@ -1764,7 +1760,7 @@ pub fn verify_ecc_proof<C: Config>(
         &zero_ext,
         &proof.zerocheck_proof,
         num_vars_f,
-        three_f,
+        3,
         unipoly_extrapolator,
     );
 

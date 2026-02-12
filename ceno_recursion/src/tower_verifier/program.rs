@@ -5,14 +5,14 @@ use crate::{
         exts_to_felts,
     },
     tower_verifier::binding::IOPProverMessageVecVariable,
-    transcript::transcript_observe_label,
+    transcript::{
+        transcript_label_as_array, transcript_observe_label, transcript_observe_label_felts,
+    },
     zkvm_verifier::binding::TowerProofInputVariable,
 };
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::challenger::{
-    CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
-};
+use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
 use openvm_stark_backend::p3_field::FieldAlgebra;
 const NATIVE_SUMCHECK_CTX_LEN: usize = 9;
 
@@ -22,51 +22,84 @@ pub fn iop_verifier_state_verify<C: Config>(
     out_claim: &Ext<C::F, C::EF>,
     prover_messages: &IOPProverMessageVecVariable<C>,
     max_num_variables: Felt<C::F>,
-    max_degree: Felt<C::F>,
+    max_degree: usize,
     unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) -> (
     Array<C, Ext<<C as Config>::F, <C as Config>::EF>>,
     Ext<<C as Config>::F, <C as Config>::EF>,
 ) {
-    // TODO: either store it in a global cache or pass them as parameters
-    let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-    let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
-
+    let max_degree_felt: Felt<C::F> = builder.constant(C::F::from_canonical_usize(max_degree));
     let max_num_variables_usize: Usize<C::N> =
         Usize::from(builder.cast_felt_to_var(max_num_variables));
-    challenger.observe(builder, max_num_variables);
-    challenger.observe(builder, zero_f);
-    challenger.observe(builder, max_degree);
-    challenger.observe(builder, zero_f);
+    let pre_verified_integrity_data: Array<C, Felt<C::F>> = builder.dyn_array(4);
+    // Prover and verifier currently agree on how `usize` values are serialized.
+    // On a 64-bit platform, a `usize` spans 64 bits, so it is represented
+    // as two ordered `u32` Felts.
+    //
+    // `max_num_variables` occupies the first Felt,
+    // with the second Felt padded with 0. The same layout applies to `max_degree`.
+    //
+    // TODO fix to single u32
+    builder.set_value(&pre_verified_integrity_data, 0, max_num_variables);
+    builder.set_value(&pre_verified_integrity_data, 2, max_degree_felt);
+    challenger_multi_observe(builder, challenger, &pre_verified_integrity_data);
 
     builder.assert_var_eq(max_num_variables_usize.get_var(), prover_messages.len());
 
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(max_num_variables_usize.clone());
-    let expected: Ext<C::F, C::EF> = builder.eval(*out_claim + zero);
+    let expected: Ext<C::F, C::EF> = builder.eval(*out_claim);
+    let internal_round_label = transcript_label_as_array(builder, b"Internal round");
 
     builder.cycle_tracker_start("IOPVerifierState::verify_round_and_update_state");
+    let curr_offset: Var<C::N> = builder.eval(C::N::ZERO);
     builder
         .range(0, max_num_variables_usize.clone())
         .for_each(|i_vec, builder| {
             let i = i_vec[0];
 
-            // TODO: this takes 7 cycles, can we optimize it?
-            let prover_msg = prover_messages.get(builder, i.variable());
+            let next_offset: Var<C::N> =
+                builder.eval(curr_offset + prover_messages.prover_message_size);
+            let prover_msg = prover_messages
+                .evaluations
+                .slice(builder, curr_offset, next_offset);
+            builder.assign(&curr_offset, next_offset);
 
             unsafe {
                 let prover_msg_felts = exts_to_felts(builder, &prover_msg);
                 challenger_multi_observe(builder, challenger, &prover_msg_felts);
             }
 
-            transcript_observe_label(builder, challenger, b"Internal round");
+            transcript_observe_label_felts(builder, challenger, &internal_round_label);
             let challenge = challenger.sample_ext(builder);
 
             let e1 = builder.get(&prover_msg, 0);
             let e0 = builder.eval(expected - e1);
-            let p_r =
-                unipoly_extrapolator.extrapolate_uni_poly(builder, e0, &prover_msg, challenge);
+            let p_r = match max_degree {
+                1 => unipoly_extrapolator.extrapolate_uni_poly_deg_1(builder, e0, e1, challenge),
+                2 => {
+                    let p1 = e1;
+                    let p2 = builder.get(&prover_msg, 1);
+                    unipoly_extrapolator.extrapolate_uni_poly_deg_2(builder, e0, p1, p2, challenge)
+                }
+                3 => {
+                    let p1 = e1;
+                    let p2 = builder.get(&prover_msg, 1);
+                    let p3 = builder.get(&prover_msg, 2);
+                    unipoly_extrapolator
+                        .extrapolate_uni_poly_deg_3(builder, e0, p1, p2, p3, challenge)
+                }
+                4 => {
+                    let p1 = e1;
+                    let p2 = builder.get(&prover_msg, 1);
+                    let p3 = builder.get(&prover_msg, 2);
+                    let p4 = builder.get(&prover_msg, 3);
+                    unipoly_extrapolator
+                        .extrapolate_uni_poly_deg_4(builder, e0, p1, p2, p3, p4, challenge)
+                }
+                _ => panic!("unsupported max_degree {max_degree}"),
+            };
 
-            builder.assign(&expected, p_r + zero);
+            builder.assign(&expected, p_r);
             builder.set_value(&challenges, i, challenge);
         });
     builder.cycle_tracker_end("IOPVerifierState::verify_round_and_update_state");
@@ -258,8 +291,6 @@ pub fn verify_tower_proof<C: Config>(
         let max_num_variables: Felt<C::F> = builder.constant(C::F::ONE);
         builder.assign(&max_num_variables, max_num_variables + round);
 
-        let max_degree = builder.constant(C::F::from_canonical_usize(3));
-
         builder.cycle_tracker_start("sumcheck verify");
         let (sub_rt, sub_e) = iop_verifier_state_verify(
             builder,
@@ -267,7 +298,7 @@ pub fn verify_tower_proof<C: Config>(
             out_claim,
             &prover_messages,
             max_num_variables,
-            max_degree,
+            3,
             unipoly_extrapolator,
         );
         builder.cycle_tracker_end("sumcheck verify");
