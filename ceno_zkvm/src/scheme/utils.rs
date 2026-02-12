@@ -372,16 +372,11 @@ pub fn build_main_witness<
             .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
     );
 
-    // GPU memory estimation: pre-compute expected bytes before actual allocation
+    // GPU memory estimation
     #[cfg(feature = "gpu")]
     let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
     #[cfg(feature = "gpu")]
-    let (gpu_mem_tracker, gpu_estimated_bytes) = {
-        let gpu_mem_tracker = cuda_hal.inner.mem_tracker("build_main_witness");
-        let gpu_estimated_bytes =
-            crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
-        (gpu_mem_tracker, gpu_estimated_bytes)
-    };
+    let gpu_mem_tracker = crate::scheme::gpu::start_gpu_mem_tracking(&cuda_hal, "build_main_witness");
 
     let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
         gkr_circuit,
@@ -396,12 +391,10 @@ pub fn build_main_witness<
     // GPU memory check: validate estimation against actual usage
     #[cfg(feature = "gpu")]
     {
-        let mem_stats = gpu_mem_tracker.end();
-        let actual_bytes = mem_stats.mem_occupancy as usize;
-        crate::scheme::gpu::check_mem_estimation(
-            "build_main_witness",
-            gpu_estimated_bytes,
-            actual_bytes,
+        let estimated_bytes = crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
+        crate::scheme::gpu::check_gpu_mem_estimation(
+            gpu_mem_tracker,
+            estimated_bytes,
         );
     }
 

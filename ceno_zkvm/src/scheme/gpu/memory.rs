@@ -9,43 +9,62 @@ use ceno_gpu::{
     estimate_build_tower_memory, estimate_prove_tower_memory, estimate_sumcheck_memory,
 };
 use ff_ext::ExtensionField;
-use gkr_iop::gpu::{BB31Base, GpuBackend, gpu_prover::BB31Ext};
+use gkr_iop::gpu::{BB31Base, GpuBackend, gpu_prover::{BB31Ext, CudaHalBB31, MemTracker}};
 use mpcs::PolynomialCommitmentScheme;
+
+use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
 const ESTIMATION_TOLERANCE_BYTES: usize = 1024 * 1024; // max estimation error: 1 MB
 const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 5 * 1024 * 1024; // reserved headroom: 5 MB, 1MB for each sub-stage
 
+#[cfg(feature = "gpu")]
+pub fn start_gpu_mem_tracking<'a>(cuda_hal: &'a CudaHalBB31, label: &'static str) -> Option<MemTracker<'a>> {
+    if get_chip_proving_mode() == ChipProvingMode::Sequential {
+        Some(cuda_hal.inner.mem_tracker(label))
+    } else {
+        None
+    }
+}
+
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
 /// - Over-estimate (estimated > actual): diff must be <= `ESTIMATION_SAFETY_MARGIN_BYTES`
-pub fn check_mem_estimation(label: &str, estimated_bytes: usize, actual_bytes: usize) {
-    const ONE_MB: usize = 1024 * 1024;
-    let diff = estimated_bytes as isize - actual_bytes as isize;
-    let to_mb = |b: usize| b as f64 / ONE_MB as f64;
-    let diff_mb = diff as f64 / ONE_MB as f64;
-    tracing::info!("[memcheck] {label}: estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB", to_mb(estimated_bytes), to_mb(actual_bytes), diff_mb);
-    if diff < 0 {
-        // Under-estimate: actual exceeds estimated
-        assert!(
-            (-diff) as usize <= ESTIMATION_TOLERANCE_BYTES,
-            "[memcheck] {label}: under-estimate! estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, tolerance={:.2}MB",
-            to_mb(estimated_bytes),
-            to_mb(actual_bytes),
-            diff_mb,
-            to_mb(ESTIMATION_TOLERANCE_BYTES),
-        );
-    } else {
-        // Over-estimate: estimated exceeds actual
-        assert!(
-            diff as usize <= ESTIMATION_SAFETY_MARGIN_BYTES,
-            "[memcheck] {label}: over-estimate! estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, margin={:.2}MB",
-            to_mb(estimated_bytes),
-            to_mb(actual_bytes),
-            diff_mb,
-            to_mb(ESTIMATION_SAFETY_MARGIN_BYTES),
-        );
+#[cfg(feature = "gpu")]
+pub fn check_gpu_mem_estimation(mem_tracker: Option<MemTracker>, estimated_bytes: usize) {
+    // `mem_tracker will` be Some only in sequential mode, so if it's None, do nothing
+    if let Some(mem_tracker) = mem_tracker {
+        const ONE_MB: usize = 1024 * 1024;
+        let label = mem_tracker.name();
+        let mem_stats = mem_tracker.end();
+        let actual_bytes = mem_stats.mem_occupancy as usize;
+        let diff = estimated_bytes as isize - actual_bytes as isize;
+        let to_mb = |b: usize| b as f64 / ONE_MB as f64;
+        let diff_mb = diff as f64 / ONE_MB as f64;
+        tracing::info!("[memcheck] {label}: estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB", to_mb(estimated_bytes), to_mb(actual_bytes), diff_mb);
+        if diff < 0 {
+            // Under-estimate: actual exceeds estimated
+            assert!(
+                (-diff) as usize <= ESTIMATION_TOLERANCE_BYTES,
+                "[memcheck] {label}: under-estimate! estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, tolerance={:.2}MB",
+                to_mb(estimated_bytes),
+                to_mb(actual_bytes),
+                diff_mb,
+                to_mb(ESTIMATION_TOLERANCE_BYTES),
+            );
+        } else {
+            // Over-estimate: estimated exceeds actual
+            assert!(
+                diff as usize <= ESTIMATION_SAFETY_MARGIN_BYTES,
+                "[memcheck] {label}: over-estimate! estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, margin={:.2}MB",
+                to_mb(estimated_bytes),
+                to_mb(actual_bytes),
+                diff_mb,
+                to_mb(ESTIMATION_SAFETY_MARGIN_BYTES),
+            );
+        }
     }
 }
+
 
 /// Pre-estimate GPU memory usage for a chip proof before actual execution.
 /// Used by the concurrent proving scheduler to reserve VRAM from the GPU memory pool,
