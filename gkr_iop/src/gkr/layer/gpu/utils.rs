@@ -162,8 +162,12 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
         eq_buf
     } else {
         let point_gl64: &Point<BB31Ext> = unsafe { std::mem::transmute(point) };
-        let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len, false, stream.as_ref()).unwrap();
-        let gpu_points = hal.alloc_ext_elems_from_host(point_gl64, stream.as_ref()).unwrap();
+        let mut gpu_output = hal
+            .alloc_ext_elems_on_device(eq_len, false, stream.as_ref())
+            .unwrap();
+        let gpu_points = hal
+            .alloc_ext_elems_from_host(point_gl64, stream.as_ref())
+            .unwrap();
         build_mle_as_ceno::<CudaHalBB31, BB31Ext, BB31Base>(
             &hal.inner,
             &gpu_points,
@@ -197,8 +201,12 @@ pub fn build_eq_x_r_gpu<E: ExtensionField>(
     // type eq
     let point_gl64: &Point<BB31Ext> = unsafe { std::mem::transmute(point) };
     let eq_mle = {
-        let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len, false, stream.as_ref()).unwrap();
-        let gpu_points = hal.alloc_ext_elems_from_host(point_gl64, stream.as_ref()).unwrap();
+        let mut gpu_output = hal
+            .alloc_ext_elems_on_device(eq_len, false, stream.as_ref())
+            .unwrap();
+        let gpu_points = hal
+            .alloc_ext_elems_from_host(point_gl64, stream.as_ref())
+            .unwrap();
         build_mle_as_ceno::<CudaHalBB31, BB31Ext, BB31Base>(
             &hal.inner,
             &gpu_points,

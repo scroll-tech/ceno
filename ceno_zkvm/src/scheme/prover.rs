@@ -9,13 +9,13 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "gpu")]
+use crate::scheme::gpu::estimate_chip_proof_memory;
 use crate::scheme::{
     constants::SEPTIC_EXTENSION_DEGREE,
     hal::MainSumcheckEvals,
     scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
 };
-#[cfg(feature = "gpu")]
-use crate::scheme::gpu::estimate_chip_proof_memory;
 use either::Either;
 use gkr_iop::hal::MultilinearPolynomial;
 use itertools::Itertools;
@@ -373,9 +373,9 @@ impl<
 
                 return scheduler.execute(tasks, transcript, |task, transcript| {
                     // Append circuit_idx to per-task forked transcript (matching verifier)
-                    transcript.append_field_element(
-                        &E::BaseField::from_canonical_u64(task.circuit_idx as u64),
-                    );
+                    transcript.append_field_element(&E::BaseField::from_canonical_u64(
+                        task.circuit_idx as u64,
+                    ));
 
                     // SAFETY: When feature = "gpu", PB = GpuBackend<E, PCS> and the types are compatible.
                     let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
@@ -410,9 +410,8 @@ impl<
         // Uses execute_sequentially directly to avoid Send+Sync requirement on the closure.
         scheduler.execute_sequentially(tasks, transcript, |mut task, transcript| {
             // Append circuit_idx to per-task forked transcript (matching verifier)
-            transcript.append_field_element(
-                &E::BaseField::from_canonical_u64(task.circuit_idx as u64),
-            );
+            transcript
+                .append_field_element(&E::BaseField::from_canonical_u64(task.circuit_idx as u64));
 
             // Prepare: deferred extraction for GPU, no-op for CPU
             self.device.prepare_chip_input(&mut task, witness_data);
@@ -765,13 +764,16 @@ where
     use gkr_iop::gpu::{GpuBackend, get_cuda_hal};
 
     let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-    let _stream = cuda_hal.inner.get_pool_stream().expect("should acquire stream");
+    let _stream = cuda_hal
+        .inner
+        .get_pool_stream()
+        .expect("should acquire stream");
     let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(_stream.clone());
 
     // Deferred witness extraction: extract from committed pcs_data just-in-time
     if let Some(trace_idx) = witness_trace_idx {
-        let num_vars = input.log2_num_instances()
-            + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
+        let num_vars =
+            input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
         input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
             extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin, num_vars)
         });
@@ -784,9 +786,14 @@ where
     // Deferred structural witness transport: CPU -> GPU just-in-time
     if let Some(rmm) = structural_rmm {
         let num_structural_witin = cs.zkvm_v1_css.num_structural_witin as usize;
-        input.structural_witness = info_span!("[ceno] transport_structural_witness").in_scope(|| {
-            transport_structural_witness_to_gpu::<E>(rmm, num_structural_witin, num_var_with_rotation)
-        });
+        input.structural_witness =
+            info_span!("[ceno] transport_structural_witness").in_scope(|| {
+                transport_structural_witness_to_gpu::<E>(
+                    rmm,
+                    num_structural_witin,
+                    num_var_with_rotation,
+                )
+            });
     }
 
     // run ecc quark prover using _impl function
@@ -822,24 +829,27 @@ where
     };
 
     // build main witness
-    let records = info_span!("[ceno] build_main_witness").in_scope(|| {
-        build_main_witness::<E, PCS, GpuBackend<E, PCS>, gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>>(
-            cs, &input, challenges
-        )
-    });
+    let records =
+        info_span!("[ceno] build_main_witness").in_scope(|| {
+            build_main_witness::<
+                E,
+                PCS,
+                GpuBackend<E, PCS>,
+                gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>,
+            >(cs, &input, challenges)
+        });
 
     let span = entered_span!("prove_tower_relation", profiling_2 = true);
     // prove the product and logup sum relation between layers in tower using _impl function
     let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
         info_span!("[ceno] prove_tower_relation").in_scope(|| {
-            prove_tower_relation_impl::<E, PCS>(cs, &input, &records, challenges, transcript, &cuda_hal)
+            prove_tower_relation_impl::<E, PCS>(
+                cs, &input, &records, challenges, transcript, &cuda_hal,
+            )
         });
     exit_span!(span);
 
-    assert_eq!(
-        rt_tower.len(),
-        num_var_with_rotation,
-    );
+    assert_eq!(rt_tower.len(), num_var_with_rotation,);
 
     // prove main constraints using _impl function
     let span = entered_span!("prove_main_constraints", profiling_2 = true);

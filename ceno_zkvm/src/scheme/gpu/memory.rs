@@ -9,7 +9,10 @@ use ceno_gpu::{
     estimate_build_tower_memory, estimate_prove_tower_memory, estimate_sumcheck_memory,
 };
 use ff_ext::ExtensionField;
-use gkr_iop::gpu::{BB31Base, GpuBackend, gpu_prover::{BB31Ext, CudaHalBB31, MemTracker}};
+use gkr_iop::gpu::{
+    BB31Base, GpuBackend,
+    gpu_prover::{BB31Ext, CudaHalBB31, MemTracker},
+};
 use mpcs::PolynomialCommitmentScheme;
 
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
@@ -18,7 +21,10 @@ const ESTIMATION_TOLERANCE_BYTES: usize = 1024 * 1024; // max estimation error: 
 const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 5 * 1024 * 1024; // reserved headroom: 5 MB, 1MB for each sub-stage
 
 #[cfg(feature = "gpu")]
-pub fn start_gpu_mem_tracking<'a>(cuda_hal: &'a CudaHalBB31, label: &'static str) -> Option<MemTracker<'a>> {
+pub fn start_gpu_mem_tracking<'a>(
+    cuda_hal: &'a CudaHalBB31,
+    label: &'static str,
+) -> Option<MemTracker<'a>> {
     if get_chip_proving_mode() == ChipProvingMode::Sequential {
         Some(cuda_hal.inner.mem_tracker(label))
     } else {
@@ -40,7 +46,12 @@ pub fn check_gpu_mem_estimation(mem_tracker: Option<MemTracker>, estimated_bytes
         let diff = estimated_bytes as isize - actual_bytes as isize;
         let to_mb = |b: usize| b as f64 / ONE_MB as f64;
         let diff_mb = diff as f64 / ONE_MB as f64;
-        tracing::info!("[memcheck] {label}: estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB", to_mb(estimated_bytes), to_mb(actual_bytes), diff_mb);
+        tracing::info!(
+            "[memcheck] {label}: estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB",
+            to_mb(estimated_bytes),
+            to_mb(actual_bytes),
+            diff_mb
+        );
         if diff < 0 {
             // Under-estimate: actual exceeds estimated
             assert!(
@@ -64,7 +75,6 @@ pub fn check_gpu_mem_estimation(mem_tracker: Option<MemTracker>, estimated_bytes
         }
     }
 }
-
 
 /// Pre-estimate GPU memory usage for a chip proof before actual execution.
 /// Used by the concurrent proving scheduler to reserve VRAM from the GPU memory pool,
@@ -100,8 +110,11 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         .max(tower_temporary_bytes)
         .max(ecc_quark_temporary_bytes)
         .max(main_constraints_temporary_bytes);
-    
-    let total_usage_bytes = trace_est.trace_resident_bytes + main_witness_bytes + stage_peak_usage_bytes + ESTIMATION_SAFETY_MARGIN_BYTES;
+
+    let total_usage_bytes = trace_est.trace_resident_bytes
+        + main_witness_bytes
+        + stage_peak_usage_bytes
+        + ESTIMATION_SAFETY_MARGIN_BYTES;
 
     let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
     // Resident memory (always occupied during chip proof)
@@ -185,16 +198,18 @@ pub fn estimate_main_witness_bytes<E: ExtensionField>(
     num_records * record_len * elem_size
 }
 
-
-pub(crate) fn estimate_main_constraints_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub(crate) fn estimate_main_constraints_bytes<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
 ) -> usize {
     let Some(gkr_circuit) = composed_cs.gkr_circuit.as_ref() else {
         return 0;
     };
-    let num_var_with_rotation = input.log2_num_instances()
-        + composed_cs.rotation_vars().unwrap_or(0);
+    let num_var_with_rotation =
+        input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
     let elem_size = std::mem::size_of::<BB31Ext>();
     let eq_len = 1usize << num_var_with_rotation;
 
@@ -305,8 +320,7 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 /// - `temporary`: temp_buffer allocation (2x), freed after extraction
 /// Returns `(0, 0)` when trace is cached (default), because get_trace creates views without allocation.
 pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize) -> (usize, usize) {
-    let cache_level =
-        std::env::var("CENO_GPU_CACHE_LEVEL").unwrap_or_else(|_| "full".to_string());
+    let cache_level = std::env::var("CENO_GPU_CACHE_LEVEL").unwrap_or_else(|_| "full".to_string());
     let has_trace_cached = matches!(cache_level.as_str(), "2" | "full" | "1" | "trace");
 
     if has_trace_cached {

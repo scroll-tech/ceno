@@ -2,6 +2,7 @@ use crate::{
     gkr::layer::gpu::utils::extract_mle_relationships_from_monomial_terms,
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend, ProverDevice},
 };
+use core::panic;
 use ff_ext::ExtensionField;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::{
@@ -9,7 +10,6 @@ use multilinear_extensions::{
     mle::{FieldType, MultilinearExtension, Point},
 };
 use p3::field::TwoAdicField;
-use core::panic;
 use std::sync::Arc;
 use witness::RowMajorMatrix;
 
@@ -29,11 +29,11 @@ pub mod gpu_prover {
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
             get_ceno_gpu_device_id,
+            mem_pool::MemTracker,
             mle::{
                 build_mle_as_ceno, ordered_sparse_selector_gpu, rotation_next_base_mle_gpu,
                 rotation_selector_gpu,
             },
-            mem_pool::MemTracker,
             utils::HasUtils,
         },
     };
@@ -58,15 +58,13 @@ pub mod gpu_prover {
     //         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     // });
     #[allow(clippy::type_complexity)]
-    pub static CUDA_HAL: Lazy<
-        Result<Arc<CudaHalBB31>, Box<dyn std::error::Error + Send + Sync>>,
-    > = Lazy::new(|| {
-        let device_id: usize = get_ceno_gpu_device_id(0);
-        CudaHalBB31::new(device_id)
-            .map(|hal| Arc::new(hal))
-            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    });
-
+    pub static CUDA_HAL: Lazy<Result<Arc<CudaHalBB31>, Box<dyn std::error::Error + Send + Sync>>> =
+        Lazy::new(|| {
+            let device_id: usize = get_ceno_gpu_device_id(0);
+            CudaHalBB31::new(device_id)
+                .map(|hal| Arc::new(hal))
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        });
 
     // pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalBB31>, String> {
     //     let hal_arc = CUDA_HAL
@@ -277,9 +275,13 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
             FieldType::Base(_) => {
                 let mle_vec_ref = mle.get_base_field_vec();
                 let mle_vec_ref_gl64: &[BB31Base] = unsafe { std::mem::transmute(mle_vec_ref) };
-                let mle_gpu =
-                    GpuPolynomial::from_ceno_vec(cuda_hal, mle_vec_ref_gl64, mle.num_vars(), stream.as_ref())
-                        .unwrap();
+                let mle_gpu = GpuPolynomial::from_ceno_vec(
+                    cuda_hal,
+                    mle_vec_ref_gl64,
+                    mle.num_vars(),
+                    stream.as_ref(),
+                )
+                .unwrap();
                 Self {
                     mle: GpuFieldType::Base(mle_gpu),
                     _phantom: PhantomData,
@@ -288,9 +290,13 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
             FieldType::Ext(_) => {
                 let mle_vec_ref = mle.get_ext_field_vec();
                 let mle_vec_ref_gl64_ext: &[BB31Ext] = unsafe { std::mem::transmute(mle_vec_ref) };
-                let mle_gpu =
-                    GpuPolynomialExt::from_ceno_vec(cuda_hal, mle_vec_ref_gl64_ext, mle.num_vars(), stream.as_ref())
-                        .unwrap();
+                let mle_gpu = GpuPolynomialExt::from_ceno_vec(
+                    cuda_hal,
+                    mle_vec_ref_gl64_ext,
+                    mle.num_vars(),
+                    stream.as_ref(),
+                )
+                .unwrap();
                 Self {
                     mle: GpuFieldType::Ext(mle_gpu),
                     _phantom: PhantomData,
@@ -513,7 +519,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 &term_coefficients,
                 &mle_indices_per_term,
                 &mut next_witness_buf,
-                stream.as_ref()
+                stream.as_ref(),
             )
             .unwrap();
         exit_span!(span);

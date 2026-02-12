@@ -12,19 +12,17 @@
 
 use crate::{
     error::ZKVMError,
-    scheme::{
-        ZKVMChipProof,
-        hal::ProofInput,
-    },
+    scheme::{ZKVMChipProof, hal::ProofInput},
     structs::ProvingKey,
 };
 use ff_ext::ExtensionField;
-use gkr_iop::hal::ProverBackend;
-use gkr_iop::error::BackendError;
+use gkr_iop::{error::BackendError, hal::ProverBackend};
 use mpcs::Point;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
 use p3::field::FieldAlgebra;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, OnceLock, mpsc},
+};
 use transcript::Transcript;
 
 const CONCURRENT_PROVING_WORKERS: usize = 8;
@@ -141,8 +139,7 @@ impl ChipScheduler {
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError>
-            + Send + Sync,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError> + Send + Sync,
     {
         #[cfg(feature = "gpu")]
         {
@@ -201,9 +198,9 @@ impl ChipScheduler {
             // Fork: clone parent + append task_id
             // (identical to ForkableTranscript::fork default impl)
             let mut forked = parent_transcript.clone();
-            forked.append_field_element(
-                &<PB::E as ExtensionField>::BaseField::from_canonical_u64(task_id as u64),
-            );
+            forked.append_field_element(&<PB::E as ExtensionField>::BaseField::from_canonical_u64(
+                task_id as u64,
+            ));
 
             let result = execute_task(task, &mut forked)?;
             results.push(result);
@@ -243,8 +240,7 @@ impl ChipScheduler {
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError>
-            + Send + Sync,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError> + Send + Sync,
     {
         if tasks.is_empty() {
             return Ok((vec![], vec![]));
@@ -254,9 +250,9 @@ impl ChipScheduler {
         if tasks.len() == 1 {
             let task = tasks.remove(0);
             let mut fork = transcript.clone();
-            fork.append_field_element(
-                &<PB::E as ExtensionField>::BaseField::from_canonical_u64(0u64),
-            );
+            fork.append_field_element(&<PB::E as ExtensionField>::BaseField::from_canonical_u64(
+                0u64,
+            ));
             let result = execute_task(task, &mut fork)?;
             let sample = fork.sample_vec(1)[0];
             return Ok((vec![result], vec![sample]));
@@ -388,7 +384,10 @@ impl ChipScheduler {
                 let mut launched_idx = None;
                 if tasks_inflight < CONCURRENT_PROVING_WORKERS {
                     for (vec_idx, task) in pending.iter().enumerate() {
-                        if pool.try_book_capacity(task.estimated_memory_bytes).is_some() {
+                        if pool
+                            .try_book_capacity(task.estimated_memory_bytes)
+                            .is_some()
+                        {
                             tracing::info!(
                                 "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
                                 task.circuit_name,
@@ -413,7 +412,9 @@ impl ChipScheduler {
                         tasks_inflight
                     );
                     if let Ok(msg) = done_rx.recv() {
-                        if let Err(e) = handle_completion(msg, pool, &mut tasks_inflight, " (blocked)") {
+                        if let Err(e) =
+                            handle_completion(msg, pool, &mut tasks_inflight, " (blocked)")
+                        {
                             drop(task_tx);
                             return Err(e);
                         }
