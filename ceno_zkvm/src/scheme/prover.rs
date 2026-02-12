@@ -770,21 +770,24 @@ where
 
     // Deferred witness extraction: extract from committed pcs_data just-in-time
     if let Some(trace_idx) = witness_trace_idx {
+        let num_vars = input.log2_num_instances()
+            + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
         input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
-            extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin)
-        });
-    }
-
-    // Deferred structural witness transport: CPU -> GPU just-in-time
-    if let Some(rmm) = structural_rmm {
-        input.structural_witness = info_span!("[ceno] transport_structural_witness").in_scope(|| {
-            transport_structural_witness_to_gpu::<E>(rmm)
+            extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin, num_vars)
         });
     }
 
     let cs = circuit_pk.get_cs();
     let log2_num_instances = input.log2_num_instances();
     let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
+
+    // Deferred structural witness transport: CPU -> GPU just-in-time
+    if let Some(rmm) = structural_rmm {
+        let num_structural_witin = cs.zkvm_v1_css.num_structural_witin as usize;
+        input.structural_witness = info_span!("[ceno] transport_structural_witness").in_scope(|| {
+            transport_structural_witness_to_gpu::<E>(rmm, num_structural_witin, num_var_with_rotation)
+        });
+    }
 
     // run ecc quark prover using _impl function
     let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
