@@ -897,7 +897,7 @@ impl<C: Config> UniPolyExtrapolator<C> {
         res
     }
 
-    fn extrapolate_uni_poly_deg_1(
+    pub fn extrapolate_uni_poly_deg_1(
         &self,
         builder: &mut Builder<C>,
         p_i_0: Ext<C::F, C::EF>,
@@ -916,7 +916,7 @@ impl<C: Config> UniPolyExtrapolator<C> {
         builder.eval(l * (t0 + t1))
     }
 
-    fn extrapolate_uni_poly_deg_2(
+    pub fn extrapolate_uni_poly_deg_2(
         &self,
         builder: &mut Builder<C>,
         p_i_0: Ext<C::F, C::EF>,
@@ -940,7 +940,7 @@ impl<C: Config> UniPolyExtrapolator<C> {
         builder.eval(l * (t0 + t1 + t2))
     }
 
-    fn extrapolate_uni_poly_deg_3(
+    pub fn extrapolate_uni_poly_deg_3(
         &self,
         builder: &mut Builder<C>,
         p_i_0: Ext<C::F, C::EF>,
@@ -968,7 +968,7 @@ impl<C: Config> UniPolyExtrapolator<C> {
         builder.eval(l * (t0 + t1 + t2 + t3))
     }
 
-    fn extrapolate_uni_poly_deg_4(
+    pub fn extrapolate_uni_poly_deg_4(
         &self,
         builder: &mut Builder<C>,
         p_i_0: Ext<C::F, C::EF>,

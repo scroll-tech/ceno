@@ -25,7 +25,7 @@ use sumcheck::{
     structs::IOPProverMessage,
 };
 use tracing::info_span;
-use transcript::Transcript;
+use transcript::{ForkableTranscript, Transcript};
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 use crate::{
@@ -128,7 +128,7 @@ impl<
         shard_ctx: &ShardContext,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
-        mut transcript: impl Transcript<E> + 'static,
+        mut transcript: impl ForkableTranscript<E> + 'static,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
         info_span!(
             "[ceno] create_proof_of_shard",
@@ -253,6 +253,21 @@ impl<
             let mut witness_iter = self
                 .device
                 .extract_witness_mles(&mut witness_mles, &witness_data);
+
+            let num_proofs = name_and_instances
+                .iter()
+                .filter(|(circuit_name, num_instances)| {
+                    let pk = self.pk.circuit_pks.get(circuit_name).unwrap();
+                    let cs = pk.get_cs();
+                    let has_instances = !num_instances.is_empty();
+                    let skip_omc_init = !shard_ctx.is_first_shard() && cs.with_omc_init_only();
+                    has_instances && !skip_omc_init
+                })
+                .count();
+
+            // fork transcript to support chip concurrently proved
+            let mut forked_transcripts = transcript.fork(num_proofs);
+            let mut proof_index = 0;
             for ((circuit_name, num_instances), structural_rmm) in name_and_instances
                 .into_iter()
                 .zip_eq(structural_rmms.into_iter())
@@ -277,6 +292,8 @@ impl<
                     }
                     continue;
                 }
+                let transcript = &mut forked_transcripts[proof_index];
+                proof_index += 1;
                 transcript
                     .append_field_element(&E::BaseField::from_canonical_u64(circuit_idx as u64));
 
@@ -320,7 +337,7 @@ impl<
                                 circuit_name.as_str(),
                                 pk,
                                 input,
-                                &mut transcript,
+                                transcript,
                                 &challenges,
                             )
                         },
@@ -351,6 +368,15 @@ impl<
             }
             drop(witness_iter);
             exit_span!(main_proofs_span);
+
+            // merge forked transcript into transcript
+            let forked_sampling = forked_transcripts
+                .into_iter()
+                .map(|mut fork_transcript| fork_transcript.sample_vec(1)[0])
+                .collect_vec();
+            for sample in forked_sampling {
+                transcript.append_field_element_ext(&sample);
+            }
 
             // batch opening pcs
             // generate static info from prover key for expected num variable
