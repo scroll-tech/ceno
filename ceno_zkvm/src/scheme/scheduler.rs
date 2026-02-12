@@ -34,13 +34,13 @@ static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
 
 #[cfg(feature = "gpu")]
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum ChipProvingMode {
+pub enum ChipProvingMode {
     Sequential,
     Concurrent,
 }
 
 #[cfg(feature = "gpu")]
-fn get_chip_proving_mode() -> ChipProvingMode {
+pub fn get_chip_proving_mode() -> ChipProvingMode {
     *CHIP_PROVING_MODE.get_or_init(|| {
         match std::env::var("CENO_CONCURRENT_CHIP_PROVING").as_deref() {
             Ok("0") => ChipProvingMode::Sequential,

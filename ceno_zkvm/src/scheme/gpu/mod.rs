@@ -53,7 +53,7 @@ use gkr_iop::gpu::gpu_prover::*;
 
 mod memory;
 mod util;
-pub use memory::{check_mem_estimation, estimate_chip_proof_memory, estimate_main_witness_bytes};
+pub use memory::{check_gpu_mem_estimation, start_gpu_mem_tracking, estimate_chip_proof_memory, estimate_main_witness_bytes};
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
     estimate_structural_mle_bytes, estimate_tower_bytes, estimate_trace_extraction_bytes,
@@ -668,12 +668,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 }
 
                 let cuda_hal = get_cuda_hal().unwrap();
-                let mem_tracker = cuda_hal.inner().mem_tracker("extract_witness_mles");
+                let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "extract_witness_mles");
+                
                 let poly_group = cuda_hal
                     .basefold
                     .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, None)
                     .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
-                let mem_stats = mem_tracker.end();
 
                 // Post-hoc estimation: derive num_witin and num_vars from extracted result
                 let num_witin = poly_group.len();
@@ -682,12 +682,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 } else {
                     0
                 };
+
                 let (resident, temporary) = estimate_trace_extraction_bytes(num_witin, num_vars);
-                let actual_bytes = mem_stats.mem_occupancy as usize;
-                check_mem_estimation(
-                    &format!("extract_witness_mles[{trace_idx}]"),
+                check_gpu_mem_estimation(
+                    gpu_mem_tracker,
                     resident + temporary,
-                    actual_bytes,
                 );
 
                 trace_idx += 1;
@@ -733,20 +732,14 @@ where
 
     let stream = gkr_iop::gpu::get_thread_stream();
     let cuda_hal = get_cuda_hal().unwrap();
-    let mem_tracker = cuda_hal.inner().mem_tracker("extract_witness_mles_for_trace");
+    let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "extract_witness_mles_for_trace");
+    
     let poly_group = cuda_hal
         .basefold
         .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, stream.as_ref())
         .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
-    let mem_stats = mem_tracker.end();
-    drop(cuda_hal);
 
-    let actual_bytes = mem_stats.mem_occupancy as usize;
-    check_mem_estimation(
-        &format!("extract_witness_mles_for_trace[{trace_idx}]"),
-        estimated_bytes,
-        actual_bytes,
-    );
+    check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
 
     let mles: Vec<Arc<MultilinearExtensionGpu<'a, E>>> = poly_group
         .into_iter()
@@ -778,23 +771,20 @@ pub fn transport_structural_witness_to_gpu<'a, E>(
 where
     E: ExtensionField,
 {
-    let estimated_bytes = estimate_structural_mle_bytes(num_structural_witin, num_vars);
-
-    let structural_mles = structural_rmm.to_mles();
     let cuda_hal = get_cuda_hal().unwrap();
-    let mem_tracker = cuda_hal.inner().mem_tracker("transport_structural_witness_to_gpu");
+    let structural_mles = structural_rmm.to_mles();
+
+    let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "transport_structural_witness_to_gpu");
+    
     let result = structural_mles
         .iter()
         .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
         .collect();
-    let mem_stats = mem_tracker.end();
-    drop(cuda_hal);
 
-    let actual_bytes = mem_stats.mem_occupancy as usize;
-    check_mem_estimation(
-        "transport_structural_witness_to_gpu",
+    let estimated_bytes = estimate_structural_mle_bytes(num_structural_witin, num_vars);
+    check_gpu_mem_estimation(
+        gpu_mem_tracker,
         estimated_bytes,
-        actual_bytes,
     );
 
     result
@@ -1102,10 +1092,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         'a: 'b,
         'b: 'c,
     {
-        let estimated_bytes = estimate_tower_bytes::<E, PCS>(composed_cs, input);
-
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-        let mem_tracker = cuda_hal.inner().mem_tracker("prove_tower_relation");
+        let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "prove_tower_relation");
+        
         let res = prove_tower_relation_impl::<E, PCS>(
             composed_cs,
             input,
@@ -1114,10 +1103,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             transcript,
             &cuda_hal,
         );
-        let mem_stats = mem_tracker.end();
 
-        let actual_bytes = mem_stats.mem_occupancy as usize;
-        check_mem_estimation("prove_tower_relation", estimated_bytes, actual_bytes);
+        let estimated_bytes = estimate_tower_bytes::<E, PCS>(composed_cs, input);
+        check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
 
         res
     }
@@ -1150,17 +1138,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         ),
         ZKVMError,
     > {
-        let estimated_bytes = estimate_main_constraints_bytes::<E, PCS>(composed_cs, input);
-
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-        let mem_tracker = cuda_hal.inner().mem_tracker("prove_main_constraints");
+        let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "prove_main_constraints");
+        
         let res = prove_main_constraints_impl::<E, PCS>(
             rt_tower, input, composed_cs, challenges, transcript,
         );
-        let mem_stats = mem_tracker.end();
 
-        let actual_bytes = mem_stats.mem_occupancy as usize;
-        check_mem_estimation("prove_main_constraints", estimated_bytes, actual_bytes);
+        let estimated_bytes = estimate_main_constraints_bytes::<E, PCS>(composed_cs, input);
+        check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
 
         res
     }
@@ -1179,15 +1165,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBa
     ) -> Result<EccQuarkProof<E>, ZKVMError> {
         // n = num_vars of the ecc quark sumcheck (xs[0].num_vars - 1)
         let n = xs[0].mle.num_vars() - 1;
-        let estimated_bytes = estimate_ecc_quark_bytes_from_num_vars(n);
-
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-        let mem_tracker = cuda_hal.inner().mem_tracker("prove_ec_sum_quark");
+        let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "prove_ec_sum_quark");
+        
         let res = prove_ec_sum_quark_impl::<E, PCS>(num_instances, xs, ys, invs, transcript);
-        let mem_stats = mem_tracker.end();
 
-        let actual_bytes = mem_stats.mem_occupancy as usize;
-        check_mem_estimation("prove_ec_sum_quark", estimated_bytes, actual_bytes);
+        let estimated_bytes = estimate_ecc_quark_bytes_from_num_vars(n);
+        check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
 
         res
     }
