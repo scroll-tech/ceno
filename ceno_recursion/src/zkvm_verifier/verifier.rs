@@ -29,6 +29,7 @@ use crate::{
 use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
 
+use crate::transcript::{challenger_add_forked_index, clone_challenger_state};
 use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{
@@ -229,7 +230,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // not each chip has witness or fixed opening
     // therefore we need to truncate these two opening arrays
     let witin_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len.clone());
-    let fixed_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len);
+    let fixed_openings: Array<C, RoundOpeningVariable<C>> = builder.dyn_array(proofs_len.clone());
 
     let shard_ec_sum = SepticPointVariable {
         x: SepticExtensionVariable {
@@ -255,6 +256,10 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             builder.set(&chip_indices, i, chip_idx);
         });
 
+    // collect fork sampling result
+    let forked_samples: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(proofs_len.get_var());
+    let forked_sample_index: Usize<C::N> = builder.eval(C::N::ZERO);
+
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
@@ -265,6 +270,9 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
             iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
                 let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
+                // fork transcript to support chip concurrently proved
+                let mut chip_challenger = clone_challenger_state(builder, &challenger);
+                challenger_add_forked_index(builder, &mut chip_challenger, &forked_sample_index);
                 builder.assert_usize_eq(
                     chip_proof.wits_in_evals.len(),
                     Usize::from(circuit_vk.get_cs().num_witin()),
@@ -346,7 +354,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 let (input_opening_point, chip_shard_ec_sum) = verify_chip_proof(
                     circuit_name,
                     builder,
-                    &mut challenger,
+                    &mut chip_challenger,
                     &chip_proof,
                     &zkvm_proof_input.pi_evals,
                     &zkvm_proof_input.raw_pi,
@@ -398,6 +406,10 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     .then(|builder| {
                         add_septic_points_in_place(builder, &shard_ec_sum, &chip_shard_ec_sum);
                     });
+
+                let chip_sample = chip_challenger.sample_ext(builder);
+                builder.set(&forked_samples, forked_sample_index.get_var(), chip_sample);
+                builder.inc(&forked_sample_index);
             });
             builder.inc(&num_chips_verified);
         });
@@ -416,6 +428,13 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         &logup_sum,
         logup_sum - dummy_table_item_multiplicity * dummy_table_item.inverse(),
     );
+
+    // merge forked transcripts into transcript
+    iter_zip!(builder, forked_samples).for_each(|ptr_vec, builder| {
+        let sample = builder.iter_ptr_get(&forked_samples, ptr_vec[0]);
+        let sample_felts = builder.ext2felt(sample);
+        challenger.observe_slice(builder, sample_felts);
+    });
 
     let rounds: Array<C, RoundVariable<C>> = if num_fixed_opening > 0 {
         builder.dyn_array(2)
