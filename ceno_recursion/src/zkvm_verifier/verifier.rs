@@ -283,7 +283,9 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
                 builder.assert_usize_eq(
                     chip_proof.rw_out_evals.len(),
-                    Usize::from((circuit_vk.get_cs().num_reads() + circuit_vk.get_cs().num_writes()) * 2),
+                    Usize::from(
+                        (circuit_vk.get_cs().num_reads() + circuit_vk.get_cs().num_writes()) * 2,
+                    ),
                 );
                 builder.assert_usize_eq(
                     chip_proof.lk_out_evals.len(),
@@ -391,15 +393,20 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     builder.inc(&num_fixed_openings);
                 }
 
-                let r_out_evals_end: Usize<C::N> = builder.eval(chip_proof.r_out_evals_len * Usize::from(2));
-                builder.range(0, r_out_evals_end.clone()).for_each(|idx_vec, builder| {
-                    let e = builder.get(&chip_proof.rw_out_evals, idx_vec[0]);
-                    builder.assign(&prod_r, prod_r * e);
-                });
-                builder.range(r_out_evals_end, chip_proof.rw_out_evals.len()).for_each(|idx_vec, builder| {
-                    let e =  builder.get(&chip_proof.rw_out_evals, idx_vec[0]);
-                    builder.assign(&prod_w, prod_w * e);
-                });
+                let r_out_evals_end: Usize<C::N> =
+                    builder.eval(chip_proof.r_out_evals_len * Usize::from(2));
+                builder
+                    .range(0, r_out_evals_end.clone())
+                    .for_each(|idx_vec, builder| {
+                        let e = builder.get(&chip_proof.rw_out_evals, idx_vec[0]);
+                        builder.assign(&prod_r, prod_r * e);
+                    });
+                builder
+                    .range(r_out_evals_end, chip_proof.rw_out_evals.len())
+                    .for_each(|idx_vec, builder| {
+                        let e = builder.get(&chip_proof.rw_out_evals, idx_vec[0]);
+                        builder.assign(&prod_w, prod_w * e);
+                    });
 
                 builder
                     .if_ne(chip_shard_ec_sum.is_infinity.clone(), Usize::from(1))

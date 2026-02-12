@@ -637,10 +637,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&w_out_evals_len));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&lk_out_evals_len));
 
-        let rw_out_evals = [
-            self.r_out_evals.clone(),
-            self.w_out_evals.clone(),
-        ].concat();
+        let rw_out_evals = [self.r_out_evals.clone(), self.w_out_evals.clone()].concat();
         stream.extend(rw_out_evals.write());
         stream.extend(self.lk_out_evals.write());
 
