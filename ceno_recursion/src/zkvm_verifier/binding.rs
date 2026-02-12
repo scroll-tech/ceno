@@ -512,8 +512,7 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub w_out_evals_len: Usize<C::N>,
     pub lk_out_evals_len: Usize<C::N>,
 
-    pub r_out_evals: Array<C, Ext<C::F, C::EF>>,
-    pub w_out_evals: Array<C, Ext<C::F, C::EF>>,
+    pub rw_out_evals: Array<C, Ext<C::F, C::EF>>,
     pub lk_out_evals: Array<C, Ext<C::F, C::EF>>,
 
     pub has_main_sumcheck_proofs: Usize<C::N>,
@@ -546,8 +545,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let lk_out_evals_len = Usize::Var(usize::read(builder));
 
         builder.cycle_tracker_start("read omc out evals");
-        let r_out_evals = Vec::<E>::read(builder);
-        let w_out_evals = Vec::<E>::read(builder);
+        let rw_out_evals = Vec::<E>::read(builder);
         let lk_out_evals = Vec::<E>::read(builder);
         builder.cycle_tracker_end("read omc out evals");
 
@@ -581,8 +579,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             r_out_evals_len,
             w_out_evals_len,
             lk_out_evals_len,
-            r_out_evals,
-            w_out_evals,
+            rw_out_evals,
             lk_out_evals,
             has_main_sumcheck_proofs,
             main_sumcheck_proofs,
@@ -640,8 +637,11 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&w_out_evals_len));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&lk_out_evals_len));
 
-        stream.extend(self.r_out_evals.write());
-        stream.extend(self.w_out_evals.write());
+        let rw_out_evals = [
+            self.r_out_evals.clone(),
+            self.w_out_evals.clone(),
+        ].concat();
+        stream.extend(rw_out_evals.write());
         stream.extend(self.lk_out_evals.write());
 
         stream.extend(self.tower_proof.write());
