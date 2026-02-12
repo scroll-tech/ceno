@@ -293,30 +293,9 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     chip_proof.lk_out_evals.len(),
                     Usize::from(circuit_vk.get_cs().num_lks() * 4),
                 );
-
-                let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-                builder
-                    .range(0, chip_proof.lk_out_evals_len.clone())
-                    .for_each(|idx_vec, builder| {
-                        let start: Usize<C::N> =
-                            builder.eval(idx_vec[0] * C::N::from_canonical_usize(4));
-                        let end: Usize<C::N> =
-                            builder.eval(start.clone() + C::N::from_canonical_usize(4));
-
-                        let evals = chip_proof.lk_out_evals.slice(builder, start, end);
-                        let p1 = builder.get(&evals, 0);
-                        let p2 = builder.get(&evals, 1);
-                        let q1 = builder.get(&evals, 2);
-                        let q2 = builder.get(&evals, 3);
-
-                    builder.assign(&chip_logup_sum, chip_logup_sum + p1 * q1.inverse());
-                    builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
-                });
                 chip_challenger.observe(builder, chip_proof.idx_felt);
 
-                if circuit_vk.get_cs().is_with_lk_table() {
-                    builder.assign(&logup_sum, logup_sum - chip_logup_sum);
-                } else {
+                if !circuit_vk.get_cs().is_with_lk_table() {
                     // getting the number of dummy padding item that we used in this opcode circuit
                     let num_lks: Var<C::N> =
                         builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
@@ -346,8 +325,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         &dummy_table_item_multiplicity,
                         dummy_table_item_multiplicity + new_multiplicity,
                     );
-
-                    builder.assign(&logup_sum, logup_sum + chip_logup_sum);
                 }
 
                 builder.cycle_tracker_start("Verify chip proof");
@@ -365,6 +342,31 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     &mut poly_evaluator,
                 );
                 builder.cycle_tracker_end("Verify chip proof");
+
+                let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+                builder
+                    .range(0, chip_proof.lk_out_evals_len.clone())
+                    .for_each(|idx_vec, builder| {
+                        let start: Usize<C::N> =
+                            builder.eval(idx_vec[0] * C::N::from_canonical_usize(4));
+                        let end: Usize<C::N> =
+                            builder.eval(start.clone() + C::N::from_canonical_usize(4));
+
+                        let evals = chip_proof.lk_out_evals.slice(builder, start, end);
+                        let p1 = builder.get(&evals, 0);
+                        let p2 = builder.get(&evals, 1);
+                        let q1 = builder.get(&evals, 2);
+                        let q2 = builder.get(&evals, 3);
+
+                    builder.assign(&chip_logup_sum, chip_logup_sum + p1 * q1.inverse());
+                    builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
+                });
+
+                if circuit_vk.get_cs().is_with_lk_table() {
+                    builder.assign(&logup_sum, logup_sum - chip_logup_sum);
+                } else {
+                    builder.assign(&logup_sum, logup_sum + chip_logup_sum);
+                }
 
                 let point_clone: Array<C, Ext<C::F, C::EF>> =
                     builder.eval(input_opening_point.clone());
