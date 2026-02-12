@@ -43,7 +43,6 @@ use sumcheck::{
     structs::{IOPProof, IOPProverMessage},
     util::optimal_sumcheck_threads,
 };
-use p3::field::FieldAlgebra;
 use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
@@ -55,7 +54,6 @@ use gkr_iop::gpu::gpu_prover::*;
 mod memory;
 mod util;
 pub use memory::estimate_chip_proof_memory;
-pub use memory::TowerMemoryEstimate;
 use util::{
     WitnessRegistry, batch_mles_take_half, expect_basic_transcript, hal_to_backend_error,
     mle_filter_even_odd_batch, mle_host_to_gpu, read_septic_value_from_gpu, symbolic_from_mle,
@@ -767,7 +765,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     ),
     String,
 > {
-    // let _mem = cuda_hal.inner().mem_trace_guard("build_tower_witness_gpu");
     let stream = gkr_iop::gpu::get_thread_stream();
     use crate::scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP};
     use ceno_gpu::{CudaHal as _, bb31::GpuPolynomialExt};
@@ -1053,14 +1050,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         'b: 'c,
     {
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-        prove_tower_relation_impl::<E, PCS>(
+
+        let mem_tracker = cuda_hal.inner().mem_tracker("prove_tower_relation");
+        let res = prove_tower_relation_impl::<E, PCS>(
             composed_cs,
             input,
             records,
             challenges,
             transcript,
             &cuda_hal,
-        )
+        );
+        let mem_stats = mem_tracker.end();
+
+        println!(
+            "[mem tracker] prove_tower_relation: occupancy={:.2}MB, start_used={:.2}MB, scope_peak={:.2}MB, end_used={:.2}MB",
+            mem_stats.mem_occupancy as f64 / (1024.0 * 1024.0),
+            mem_stats.start_used as f64 / (1024.0 * 1024.0),
+            mem_stats.scope_peak as f64 / (1024.0 * 1024.0),
+            mem_stats.end_used as f64 / (1024.0 * 1024.0),
+        );
+
+        res
     }
 }
 
