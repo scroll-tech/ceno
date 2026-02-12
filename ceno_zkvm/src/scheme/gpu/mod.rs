@@ -53,7 +53,11 @@ use gkr_iop::gpu::gpu_prover::*;
 
 mod memory;
 mod util;
-pub use memory::estimate_chip_proof_memory;
+pub use memory::{check_mem_estimation, estimate_chip_proof_memory, estimate_main_witness_bytes};
+use memory::{
+    estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
+    estimate_structural_mle_bytes, estimate_tower_bytes, estimate_trace_extraction_bytes,
+};
 use util::{
     WitnessRegistry, batch_mles_take_half, expect_basic_transcript, hal_to_backend_error,
     mle_filter_even_odd_batch, mle_host_to_gpu, read_septic_value_from_gpu, symbolic_from_mle,
@@ -664,10 +668,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 }
 
                 let cuda_hal = get_cuda_hal().unwrap();
+                let mem_tracker = cuda_hal.inner().mem_tracker("extract_witness_mles");
                 let poly_group = cuda_hal
                     .basefold
                     .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, None)
                     .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
+                let mem_stats = mem_tracker.end();
+
+                // Post-hoc estimation: derive num_witin and num_vars from extracted result
+                let num_witin = poly_group.len();
+                let num_vars = if num_witin > 0 {
+                    poly_group[0].num_vars()
+                } else {
+                    0
+                };
+                let (resident, temporary) = estimate_trace_extraction_bytes(num_witin, num_vars);
+                let actual_bytes = mem_stats.mem_occupancy as usize;
+                check_mem_estimation(
+                    &format!("extract_witness_mles[{trace_idx}]"),
+                    resident + temporary,
+                    actual_bytes,
+                );
+
                 trace_idx += 1;
                 drop(cuda_hal);
 
@@ -686,15 +708,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
 /// Extract witness MLEs for a single trace from pcs_data by trace index.
 /// This is the deferred-extraction counterpart of `extract_witness_mles` — it extracts
 /// one circuit's witnesses just-in-time rather than all circuits eagerly.
+///
+/// `num_vars` is log2(num_instances) + rotation_vars, used for memory estimation validation.
 pub fn extract_witness_mles_for_trace<'a, E, PCS>(
     pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
     trace_idx: usize,
     expected_num: usize,
+    num_vars: usize,
 ) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
 where
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
 {
+    let (resident, temporary) = estimate_trace_extraction_bytes(expected_num, num_vars);
+    let estimated_bytes = resident + temporary;
+
     let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
         BB31Base,
         BufferImpl<BB31Base>,
@@ -705,11 +733,20 @@ where
 
     let stream = gkr_iop::gpu::get_thread_stream();
     let cuda_hal = get_cuda_hal().unwrap();
+    let mem_tracker = cuda_hal.inner().mem_tracker("extract_witness_mles_for_trace");
     let poly_group = cuda_hal
         .basefold
         .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, stream.as_ref())
         .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
+    let mem_stats = mem_tracker.end();
     drop(cuda_hal);
+
+    let actual_bytes = mem_stats.mem_occupancy as usize;
+    check_mem_estimation(
+        &format!("extract_witness_mles_for_trace[{trace_idx}]"),
+        estimated_bytes,
+        actual_bytes,
+    );
 
     let mles: Vec<Arc<MultilinearExtensionGpu<'a, E>>> = poly_group
         .into_iter()
@@ -731,19 +768,35 @@ where
 /// Transport a CPU-side structural witness RowMajorMatrix to GPU MLEs.
 /// Standalone version that doesn't require `&self` on GpuProver, enabling
 /// just-in-time GPU upload inside parallel task closures.
+///
+/// `num_structural_witin` and `num_vars` are used for memory estimation validation.
 pub fn transport_structural_witness_to_gpu<'a, E>(
     structural_rmm: witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    num_structural_witin: usize,
+    num_vars: usize,
 ) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
 where
     E: ExtensionField,
 {
+    let estimated_bytes = estimate_structural_mle_bytes(num_structural_witin, num_vars);
+
     let structural_mles = structural_rmm.to_mles();
     let cuda_hal = get_cuda_hal().unwrap();
+    let mem_tracker = cuda_hal.inner().mem_tracker("transport_structural_witness_to_gpu");
     let result = structural_mles
         .iter()
         .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
         .collect();
+    let mem_stats = mem_tracker.end();
     drop(cuda_hal);
+
+    let actual_bytes = mem_stats.mem_occupancy as usize;
+    check_mem_estimation(
+        "transport_structural_witness_to_gpu",
+        estimated_bytes,
+        actual_bytes,
+    );
+
     result
 }
 
@@ -1049,8 +1102,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         'a: 'b,
         'b: 'c,
     {
-        let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
+        let estimated_bytes = estimate_tower_bytes::<E, PCS>(composed_cs, input);
 
+        let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
         let mem_tracker = cuda_hal.inner().mem_tracker("prove_tower_relation");
         let res = prove_tower_relation_impl::<E, PCS>(
             composed_cs,
@@ -1062,13 +1116,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         );
         let mem_stats = mem_tracker.end();
 
-        println!(
-            "[mem tracker] prove_tower_relation: occupancy={:.2}MB, start_used={:.2}MB, scope_peak={:.2}MB, end_used={:.2}MB",
-            mem_stats.mem_occupancy as f64 / (1024.0 * 1024.0),
-            mem_stats.start_used as f64 / (1024.0 * 1024.0),
-            mem_stats.scope_peak as f64 / (1024.0 * 1024.0),
-            mem_stats.end_used as f64 / (1024.0 * 1024.0),
-        );
+        let actual_bytes = mem_stats.mem_occupancy as usize;
+        check_mem_estimation("prove_tower_relation", estimated_bytes, actual_bytes);
 
         res
     }
@@ -1101,7 +1150,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         ),
         ZKVMError,
     > {
-        prove_main_constraints_impl::<E, PCS>(rt_tower, input, composed_cs, challenges, transcript)
+        let estimated_bytes = estimate_main_constraints_bytes::<E, PCS>(composed_cs, input);
+
+        let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
+        let mem_tracker = cuda_hal.inner().mem_tracker("prove_main_constraints");
+        let res = prove_main_constraints_impl::<E, PCS>(
+            rt_tower, input, composed_cs, challenges, transcript,
+        );
+        let mem_stats = mem_tracker.end();
+
+        let actual_bytes = mem_stats.mem_occupancy as usize;
+        check_mem_estimation("prove_main_constraints", estimated_bytes, actual_bytes);
+
+        res
     }
 }
 
@@ -1116,7 +1177,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBa
         invs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
         transcript: &mut impl Transcript<E>,
     ) -> Result<EccQuarkProof<E>, ZKVMError> {
-        prove_ec_sum_quark_impl::<E, PCS>(num_instances, xs, ys, invs, transcript)
+        // n = num_vars of the ecc quark sumcheck (xs[0].num_vars - 1)
+        let n = xs[0].mle.num_vars() - 1;
+        let estimated_bytes = estimate_ecc_quark_bytes_from_num_vars(n);
+
+        let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
+        let mem_tracker = cuda_hal.inner().mem_tracker("prove_ec_sum_quark");
+        let res = prove_ec_sum_quark_impl::<E, PCS>(num_instances, xs, ys, invs, transcript);
+        let mem_stats = mem_tracker.end();
+
+        let actual_bytes = mem_stats.mem_occupancy as usize;
+        check_mem_estimation("prove_ec_sum_quark", estimated_bytes, actual_bytes);
+
+        res
     }
 }
 
@@ -1288,18 +1361,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         task: &mut crate::scheme::scheduler::ChipTask<'_, GpuBackend<E, PCS>>,
         pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     ) {
+        let num_vars = task.input.log2_num_instances()
+            + task.pk.get_cs().rotation_vars().unwrap_or(0);
+
         // Deferred witness extraction: extract from committed pcs_data just-in-time
         if let Some(trace_idx) = task.witness_trace_idx {
             task.input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
-                extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, task.num_witin)
+                extract_witness_mles_for_trace::<E, PCS>(
+                    pcs_data,
+                    trace_idx,
+                    task.num_witin,
+                    num_vars,
+                )
             });
         }
 
         // Deferred structural witness transport: CPU -> GPU just-in-time
         if let Some(rmm) = task.structural_rmm.take() {
+            let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
             task.input.structural_witness =
                 info_span!("[ceno] transport_structural_witness").in_scope(|| {
-                    transport_structural_witness_to_gpu::<E>(rmm)
+                    transport_structural_witness_to_gpu::<E>(rmm, num_structural_witin, num_vars)
                 });
         }
     }
