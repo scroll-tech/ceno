@@ -1280,6 +1280,31 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
     }
 }
 
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
+    super::hal::ChipInputPreparer<GpuBackend<E, PCS>> for GpuProver<GpuBackend<E, PCS>>
+{
+    fn prepare_chip_input(
+        &self,
+        task: &mut crate::scheme::scheduler::ChipTask<'_, GpuBackend<E, PCS>>,
+        pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
+    ) {
+        // Deferred witness extraction: extract from committed pcs_data just-in-time
+        if let Some(trace_idx) = task.witness_trace_idx {
+            task.input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
+                extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, task.num_witin)
+            });
+        }
+
+        // Deferred structural witness transport: CPU -> GPU just-in-time
+        if let Some(rmm) = task.structural_rmm.take() {
+            task.input.structural_witness =
+                info_span!("[ceno] transport_structural_witness").in_scope(|| {
+                    transport_structural_witness_to_gpu::<E>(rmm)
+                });
+        }
+    }
+}
+
 impl<E, PCS> ProverDevice<GpuBackend<E, PCS>> for GpuProver<GpuBackend<E, PCS>>
 where
     E: ExtensionField,
