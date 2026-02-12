@@ -344,7 +344,10 @@ pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     max_num_variables: usize,
     security_level: mpcs::SecurityLevel,
 ) -> Arc<gkr_iop::cpu::CpuBackend<E, PCS>> {
-    Arc::new(gkr_iop::cpu::CpuBackend::<E, PCS>::new(max_num_variables, security_level))
+    Arc::new(gkr_iop::cpu::CpuBackend::<E, PCS>::new(
+        max_num_variables,
+        security_level,
+    ))
 }
 
 #[cfg(not(feature = "gpu"))]
@@ -359,7 +362,10 @@ pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     max_num_variables: usize,
     security_level: mpcs::SecurityLevel,
 ) -> Arc<gkr_iop::gpu::GpuBackend<E, PCS>> {
-    Arc::new(gkr_iop::gpu::GpuBackend::<E, PCS>::new(max_num_variables, security_level))
+    Arc::new(gkr_iop::gpu::GpuBackend::<E, PCS>::new(
+        max_num_variables,
+        security_level,
+    ))
 }
 
 #[cfg(feature = "gpu")]

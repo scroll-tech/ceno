@@ -23,12 +23,12 @@ use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
 };
+use std::sync::Arc;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProof,
     util::get_challenge_pows,
 };
-use std::sync::Arc;
 use transcript::{BasicTranscript, Transcript};
 
 use crate::{

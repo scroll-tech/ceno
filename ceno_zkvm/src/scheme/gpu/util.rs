@@ -233,7 +233,13 @@ pub fn mle_filter_even_odd_batch<'a, E: ExtensionField>(
         BB31Base,
         GpuFieldType<'static>,
         GpuPolynomial<'static>,
-    >(cuda_hal, flattened_refs, &flags, &mut output_buffers, stream.as_ref())
+    >(
+        cuda_hal,
+        flattened_refs,
+        &flags,
+        &mut output_buffers,
+        stream.as_ref(),
+    )
     .map_err(|e| hal_to_backend_error(format!("GPU filter kernel failed: {e:?}")))?;
 
     let mut outputs = Vec::with_capacity(requests.len());

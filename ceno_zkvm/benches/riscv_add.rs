@@ -103,7 +103,7 @@ fn bench_add(c: &mut Criterion) {
                         #[cfg(feature = "gpu")]
                         let polys = polys
                             .iter()
-                            .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v, None)))
+                            .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
                             .collect_vec();
 
                         let input = ProofInput {

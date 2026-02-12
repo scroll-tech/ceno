@@ -376,7 +376,8 @@ pub fn build_main_witness<
     #[cfg(feature = "gpu")]
     let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
     #[cfg(feature = "gpu")]
-    let gpu_mem_tracker = crate::scheme::gpu::start_gpu_mem_tracking(&cuda_hal, "build_main_witness");
+    let gpu_mem_tracker =
+        crate::scheme::gpu::start_gpu_mem_tracking(&cuda_hal, "build_main_witness");
 
     let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
         gkr_circuit,
@@ -391,11 +392,9 @@ pub fn build_main_witness<
     // GPU memory check: validate estimation against actual usage
     #[cfg(feature = "gpu")]
     {
-        let estimated_bytes = crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
-        crate::scheme::gpu::check_gpu_mem_estimation(
-            gpu_mem_tracker,
-            estimated_bytes,
-        );
+        let estimated_bytes =
+            crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
+        crate::scheme::gpu::check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
     }
 
     gkr_circuit_out.0.0
