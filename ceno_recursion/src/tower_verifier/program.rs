@@ -6,8 +6,11 @@ use crate::{
     zkvm_verifier::binding::TowerProofInputVariable,
 };
 use openvm_native_compiler::prelude::*;
-use openvm_native_recursion::challenger::{
-    CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
+use openvm_native_recursion::{
+    vars::HintSlice,
+    challenger::{
+        CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
+    }
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
 const NATIVE_SUMCHECK_CTX_LEN: usize = 10;
@@ -75,8 +78,8 @@ pub fn verify_tower_proof<C: Config>(
     challenger: &mut DuplexChallengerVariable<C>,
     num_prod_spec: Usize<C::N>,
     num_logup_spec: Usize<C::N>,
-    prod_out_evals: &Array<C, Ext<C::F, C::EF>>,
-    logup_out_evals: &Array<C, Ext<C::F, C::EF>>,
+    prod_outs: &HintSlice<C>,
+    logup_outs: &HintSlice<C>,
     num_variables: Array<C, Usize<C::N>>,
     _num_fanin: Usize<C::N>,
 
@@ -152,13 +155,15 @@ pub fn verify_tower_proof<C: Config>(
         .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
     let next_layer_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len);
 
+    let prod_out_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(prod_outs.length.clone());
+    let logup_out_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(logup_outs.length.clone());
     builder.sumcheck_layer_eval(
         &input_ctx,
         &challenges,
-        prod_out_evals,
-        logup_out_evals,
-        proof.prod_specs_eval.data.id.get_var(),
-        proof.logup_specs_eval.data.id.get_var(),
+        &prod_out_evals,
+        &logup_out_evals,
+        prod_outs.id.get_var(),
+        logup_outs.id.get_var(),
         &next_layer_evals,
     );
     let initial_claim = builder.get(&next_layer_evals, 0);
