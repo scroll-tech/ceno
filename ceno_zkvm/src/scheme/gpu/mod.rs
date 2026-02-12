@@ -720,9 +720,6 @@ where
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
 {
-    let (resident, temporary) = estimate_trace_extraction_bytes(expected_num, num_vars);
-    let estimated_bytes = resident + temporary;
-
     let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
         BB31Base,
         BufferImpl<BB31Base>,
@@ -740,7 +737,8 @@ where
         .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, stream.as_ref())
         .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
 
-    check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
+    let (resident, temporary) = estimate_trace_extraction_bytes(expected_num, num_vars);
+    check_gpu_mem_estimation(gpu_mem_tracker, resident + temporary);
 
     let mles: Vec<Arc<MultilinearExtensionGpu<'a, E>>> = poly_group
         .into_iter()
