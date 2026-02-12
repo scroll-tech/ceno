@@ -823,14 +823,21 @@ mod tests {
         };
         let mut rng = thread_rng();
         let challenges = [E::random(&mut rng), E::random(&mut rng)];
+        let task = crate::scheme::scheduler::ChipTask {
+            task_id: 0,
+            circuit_name: ShardRamCircuit::<E>::name(),
+            circuit_idx: 0,
+            pk: &pk,
+            input: proof_input,
+            estimated_memory_bytes: 0,
+            has_witness_or_fixed: true,
+            challenges,
+            witness_trace_idx: None,
+            num_witin: 0,
+            structural_rmm: None,
+        };
         let (proof, _, point) = zkvm_prover
-            .create_chip_proof(
-                ShardRamCircuit::<E>::name().as_str(),
-                &pk,
-                proof_input,
-                &mut transcript,
-                &challenges,
-            )
+            .create_chip_proof(&task, &mut transcript)
             .unwrap();
 
         let mut transcript = BasicTranscript::new(b"global chip test");

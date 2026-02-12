@@ -103,6 +103,17 @@ struct CompletionMessage<E: ExtensionField> {
     forked_sample: E,
 }
 
+/// Get a CUDA memory pool from the global CUDA HAL singleton.
+#[cfg(feature = "gpu")]
+fn get_cuda_pool() -> std::sync::Arc<ceno_gpu::common::mem_pool::CudaMemPool> {
+    use gkr_iop::gpu::gpu_prover::CudaHal;
+    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+    let p = cuda_hal.inner().mem_pool().clone();
+    p.init_booking_baseline()
+        .expect("Failed to init booking baseline");
+    p
+}
+
 /// Memory-aware parallel chip proof scheduler
 pub struct ChipScheduler;
 
@@ -120,12 +131,10 @@ impl ChipScheduler {
     ///
     /// Handles transcript forking internally. Returns `(results, forked_samples)`
     /// both sorted by task_id.
-    #[cfg(feature = "gpu")]
     pub fn execute<'a, PB, T, F>(
         &self,
         tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
-        pool: &ceno_gpu::common::mem_pool::CudaMemPool,
         execute_task: F,
     ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
     where
@@ -135,34 +144,23 @@ impl ChipScheduler {
         F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError>
             + Send + Sync,
     {
-        if get_chip_proving_mode() == ChipProvingMode::Sequential {
+        #[cfg(feature = "gpu")]
+        {
+            if get_chip_proving_mode() == ChipProvingMode::Concurrent {
+                let pool = get_cuda_pool();
+                return self.execute_concurrently(tasks, transcript, &pool, execute_task);
+            }
             tracing::info!(
                 "[scheduler] CENO_CONCURRENT_CHIP_PROVING=0, using sequential execution"
             );
-            self.execute_sequentially(tasks, transcript, execute_task)
-        } else {
-            self.execute_concurrently(tasks, transcript, pool, execute_task)
         }
+        self.execute_sequentially(tasks, transcript, execute_task)
     }
 
-    /// Unified entry point for chip proof execution (CPU path, always sequential).
-    ///
-    /// Handles transcript forking internally. Returns `(results, forked_samples)`
-    /// both sorted by task_id.
-    #[cfg(not(feature = "gpu"))]
-    pub fn execute<'a, PB, T, F>(
-        &self,
-        tasks: Vec<ChipTask<'a, PB>>,
-        transcript: &T,
-        execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
-    where
-        PB: ProverBackend + 'static,
-        PB::E: Send + 'static,
-        T: Transcript<PB::E> + Clone,
-        F: FnMut(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError>,
-    {
-        self.execute_sequentially(tasks, transcript, execute_task)
+    /// Check if concurrent mode is enabled (GPU only).
+    #[cfg(feature = "gpu")]
+    pub(crate) fn is_concurrent_mode() -> bool {
+        get_chip_proving_mode() == ChipProvingMode::Concurrent
     }
 
     /// Execute tasks sequentially with automatic transcript forking and sampling.
@@ -170,17 +168,17 @@ impl ChipScheduler {
     /// Each task gets a transcript cloned from `parent_transcript` with `task_id`
     /// appended (identical to `ForkableTranscript::fork` default impl).
     /// Returns `(results, forked_samples)` both sorted by task_id.
-    fn execute_sequentially<'a, PB, T, F>(
+    pub(crate) fn execute_sequentially<'a, PB, T, F>(
         &self,
         tasks: Vec<ChipTask<'a, PB>>,
         parent_transcript: &T,
-        mut execute_task: F,
+        execute_task: F,
     ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: FnMut(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError>,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError>,
     {
         if tasks.is_empty() {
             return Ok((vec![], vec![]));

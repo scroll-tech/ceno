@@ -1052,6 +1052,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
 //     }
 // }
 
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
+    super::hal::ChipInputPreparer<CpuBackend<E, PCS>> for CpuProver<CpuBackend<E, PCS>>
+{
+    fn prepare_chip_input(
+        &self,
+        _task: &mut crate::scheme::scheduler::ChipTask<'_, CpuBackend<E, PCS>>,
+        _pcs_data: &<CpuBackend<E, PCS> as ProverBackend>::PcsData,
+    ) {
+        // No-op: CPU tasks are eagerly populated during build_chip_tasks
+    }
+}
+
 impl<E, PCS> ProverDevice<CpuBackend<E, PCS>> for CpuProver<CpuBackend<E, PCS>>
 where
     E: ExtensionField,
