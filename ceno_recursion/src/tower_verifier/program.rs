@@ -1,9 +1,6 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
-    arithmetics::{
-        UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend,
-        exts_to_felts,
-    },
+    arithmetics::{UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts},
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::{
         transcript_label_as_array, transcript_observe_label, transcript_observe_label_felts,
