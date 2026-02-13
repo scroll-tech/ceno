@@ -693,7 +693,7 @@ pub fn verify_proofs(
 
         let fri_params = standard_fri_params_with_100_bits_conjectured_security(1);
         let vb = NativeBuilder::default();
-        
+
         air_test_impl::<BabyBearPoseidon2Engine, _>(
             fri_params,
             vb,
@@ -807,7 +807,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_single() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 

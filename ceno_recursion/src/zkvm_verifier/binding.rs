@@ -2,9 +2,12 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::{
     arithmetics::{ceil_log2, next_pow2_instance_padding},
-    basefold_verifier::{basefold::{
-        BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
-    }, utils::read_hint_slice},
+    basefold_verifier::{
+        basefold::{
+            BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
+        },
+        utils::read_hint_slice,
+    },
     tower_verifier::binding::{
         IOPProverMessage, IOPProverMessageVec, IOPProverMessageVecVariable, PointVariable,
         ThreeDimensionalVecVariable, ThreeDimensionalVector,
@@ -25,8 +28,8 @@ use openvm_native_compiler::{
 };
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::{
+    hints::{Hintable, VecAutoHintable},
     vars::HintSlice,
-    hints::{Hintable, VecAutoHintable}
 };
 use openvm_stark_backend::p3_field::{FieldAlgebra, extension::BinomialExtensionField};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
@@ -640,10 +643,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&w_out_evals_len));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&lk_out_evals_len));
 
-        let rw_out_evals = [
-            self.r_out_evals.clone(),
-            self.w_out_evals.clone(),
-        ].concat();
+        let rw_out_evals = [self.r_out_evals.clone(), self.w_out_evals.clone()].concat();
         stream.extend(rw_out_evals.write());
         stream.extend(self.lk_out_evals.write());
 

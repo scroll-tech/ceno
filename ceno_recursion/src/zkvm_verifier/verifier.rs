@@ -4,7 +4,10 @@ use super::binding::{
 };
 use crate::{
     arithmetics::{
-       PolyEvaluator, UniPolyExtrapolator, arr_product, assert_ext_arr_eq, build_eq_x_r_vec_sequential, challenger_multi_observe, concat, dot_product as ext_dot_product, eq_eval, eq_eval_less_or_equal_than, eval_ceno_expr_with_instance, eval_wellform_address_vec, gen_alpha_pows, mask_arr, reverse
+        PolyEvaluator, UniPolyExtrapolator, arr_product, assert_ext_arr_eq,
+        build_eq_x_r_vec_sequential, challenger_multi_observe, concat,
+        dot_product as ext_dot_product, eq_eval, eq_eval_less_or_equal_than,
+        eval_ceno_expr_with_instance, eval_wellform_address_vec, gen_alpha_pows, mask_arr, reverse,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -259,7 +262,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     // _debug
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
-    // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(1) {
+        // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(1) {
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
 
@@ -282,7 +285,9 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
                 builder.assert_usize_eq(
                     chip_proof.rw_out_evals.length.clone(),
-                    Usize::from((circuit_vk.get_cs().num_reads() + circuit_vk.get_cs().num_writes()) * 2),
+                    Usize::from(
+                        (circuit_vk.get_cs().num_reads() + circuit_vk.get_cs().num_writes()) * 2,
+                    ),
                 );
                 builder.assert_usize_eq(
                     chip_proof.lk_out_evals.length.clone(),
@@ -323,7 +328,12 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 }
 
                 builder.cycle_tracker_start("Verify chip proof");
-                let (input_opening_point, chip_shard_ec_sum, chip_prod_out_evals, chip_logup_out_evals) = verify_chip_proof(
+                let (
+                    input_opening_point,
+                    chip_shard_ec_sum,
+                    chip_prod_out_evals,
+                    chip_logup_out_evals,
+                ) = verify_chip_proof(
                     circuit_name,
                     builder,
                     &mut chip_challenger,
@@ -353,9 +363,9 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         let q1 = builder.get(&evals, 2);
                         let q2 = builder.get(&evals, 3);
 
-                    builder.assign(&chip_logup_sum, chip_logup_sum + p1 * q1.inverse());
-                    builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
-                });
+                        builder.assign(&chip_logup_sum, chip_logup_sum + p1 * q1.inverse());
+                        builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
+                    });
 
                 if circuit_vk.get_cs().is_with_lk_table() {
                     builder.assign(&logup_sum, logup_sum - chip_logup_sum);
@@ -392,15 +402,20 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     builder.inc(&num_fixed_openings);
                 }
 
-                let r_out_evals_end: Usize<C::N> = builder.eval(chip_proof.r_out_evals_len * Usize::from(2));
-                builder.range(0, r_out_evals_end.clone()).for_each(|idx_vec, builder| {
-                    let e = builder.get(&chip_prod_out_evals, idx_vec[0]);
-                    builder.assign(&prod_r, prod_r * e);
-                });
-                builder.range(r_out_evals_end, chip_prod_out_evals.len()).for_each(|idx_vec, builder| {
-                    let e =  builder.get(&chip_prod_out_evals, idx_vec[0]);
-                    builder.assign(&prod_w, prod_w * e);
-                });
+                let r_out_evals_end: Usize<C::N> =
+                    builder.eval(chip_proof.r_out_evals_len * Usize::from(2));
+                builder
+                    .range(0, r_out_evals_end.clone())
+                    .for_each(|idx_vec, builder| {
+                        let e = builder.get(&chip_prod_out_evals, idx_vec[0]);
+                        builder.assign(&prod_r, prod_r * e);
+                    });
+                builder
+                    .range(r_out_evals_end, chip_prod_out_evals.len())
+                    .for_each(|idx_vec, builder| {
+                        let e = builder.get(&chip_prod_out_evals, idx_vec[0]);
+                        builder.assign(&prod_w, prod_w * e);
+                    });
 
                 builder
                     .if_ne(chip_shard_ec_sum.is_infinity.clone(), Usize::from(1))
@@ -500,16 +515,15 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             },
         );
 
-    // _debug
-    // batch_verify(
-    //     builder,
-    //     zkvm_proof_input.max_num_var,
-    //     zkvm_proof_input.max_width,
-    //     rounds,
-    //     zkvm_proof_input.pcs_proof,
-    //     &unipoly_extrapolator,
-    //     &mut challenger,
-    // );
+    batch_verify(
+        builder,
+        zkvm_proof_input.max_num_var,
+        zkvm_proof_input.max_width,
+        rounds,
+        zkvm_proof_input.pcs_proof,
+        &unipoly_extrapolator,
+        &mut challenger,
+    );
 
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     let initial_global_state = eval_ceno_expr_with_instance(
@@ -542,20 +556,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     builder.assert_ext_eq(logup_sum, zero);
 
     shard_ec_sum
-
-    // /* _debug
-    // */
-
-    // // _debug
-    // SepticPointVariable {
-    //     x: SepticExtensionVariable {
-    //         vs: builder.dyn_array(7),
-    //     },
-    //     y: SepticExtensionVariable {
-    //         vs: builder.dyn_array(7),
-    //     },
-    //     is_infinity: Usize::uninit(builder),
-    // }
 }
 
 pub fn verify_chip_proof<C: Config>(
@@ -639,19 +639,20 @@ pub fn verify_chip_proof<C: Config>(
         builder.eval(chip_proof.r_out_evals_len.clone() + chip_proof.w_out_evals_len.clone());
 
     builder.cycle_tracker_start(format!("verify tower proof for opcode {circuit_name}",).as_str());
-    let (_, record_evals, logup_p_evals, logup_q_evals, prod_out_evals, logup_out_evals) = verify_tower_proof(
-        builder,
-        challenger,
-        num_prod_spec,
-        chip_proof.lk_out_evals_len.clone(),
-        &chip_proof.rw_out_evals,
-        &chip_proof.lk_out_evals,
-        num_variables,
-        num_fanin,
-        num_var_with_rotation.clone(),
-        tower_proof,
-        unipoly_extrapolator,
-    );
+    let (_, record_evals, logup_p_evals, logup_q_evals, prod_out_evals, logup_out_evals) =
+        verify_tower_proof(
+            builder,
+            challenger,
+            num_prod_spec,
+            chip_proof.lk_out_evals_len.clone(),
+            &chip_proof.rw_out_evals,
+            &chip_proof.lk_out_evals,
+            num_variables,
+            num_fanin,
+            num_var_with_rotation.clone(),
+            tower_proof,
+            unipoly_extrapolator,
+        );
     builder.cycle_tracker_end(format!("verify tower proof for opcode {circuit_name}",).as_str());
 
     if cs.lk_table_expressions.is_empty() {

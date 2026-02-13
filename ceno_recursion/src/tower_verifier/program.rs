@@ -1,6 +1,9 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
-    arithmetics::{_print_ext_arr, UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts},
+    arithmetics::{
+        UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend,
+        exts_to_felts,
+    },
     tower_verifier::binding::IOPProverMessageVecVariable,
     transcript::{
         transcript_label_as_array, transcript_observe_label, transcript_observe_label_felts,
@@ -9,10 +12,8 @@ use crate::{
 };
 use openvm_native_compiler::prelude::*;
 use openvm_native_recursion::{
+    challenger::{FeltChallenger, duplex::DuplexChallengerVariable},
     vars::HintSlice,
-    challenger::{
-        CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
-    }
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
 const NATIVE_SUMCHECK_CTX_LEN: usize = 10;
@@ -193,8 +194,10 @@ pub fn verify_tower_proof<C: Config>(
         .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
     let next_layer_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len);
 
-    let prod_out_evals_vals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(prod_out_evals.length.clone());
-    let logup_out_evals_vals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(logup_out_evals.length.clone());
+    let prod_out_evals_vals: Array<C, Ext<C::F, C::EF>> =
+        builder.dyn_array(prod_out_evals.length.clone());
+    let logup_out_evals_vals: Array<C, Ext<C::F, C::EF>> =
+        builder.dyn_array(logup_out_evals.length.clone());
     builder.sumcheck_layer_eval(
         &input_ctx,
         &challenges,
