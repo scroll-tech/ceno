@@ -793,7 +793,7 @@ mod tests {
                 .require_equal(|| "assert_g", &mut cb, &uint_e)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], 1, None, None);
         }
 
         #[test]
@@ -843,7 +843,7 @@ mod tests {
                 .require_equal(|| "assert_g", &mut cb, &uint_g)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], 1, None, None);
         }
 
         #[test]
@@ -882,7 +882,7 @@ mod tests {
                 .require_equal(|| "assert_e", &mut cb, &uint_e)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], 1, None, None);
         }
 
         #[test]
@@ -921,7 +921,7 @@ mod tests {
                 .require_equal(|| "assert_e", &mut cb, &uint_e)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], 1, None, None);
         }
 
         #[test]
@@ -958,7 +958,7 @@ mod tests {
                 .require_equal(|| "assert_g", &mut cb, &uint_c)
                 .unwrap();
 
-            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], None, None);
+            MockProver::assert_satisfied(&cb, &witness_values, &[], &[], 1, None, None);
         }
     }
 }

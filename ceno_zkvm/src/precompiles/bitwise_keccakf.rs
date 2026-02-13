@@ -1,5 +1,6 @@
 use crate::scheme::utils::gkr_witness;
 use ff_ext::ExtensionField;
+use gkr_iop::gkr::layer::Layer;
 use itertools::{Itertools, iproduct, izip};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
@@ -18,7 +19,7 @@ use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
@@ -27,7 +28,6 @@ use gkr_iop::{
     gkr::{
         GKRCircuit, GKRProverOutput,
         booleanhypercube::CYCLIC_POW2_5,
-        layer::Layer,
         layer_constraint_system::{LayerConstraintSystem, expansion_expr},
     },
     selector::{SelectorContext, SelectorType},
@@ -228,6 +228,7 @@ pub struct KeccakRoundEval<T> {
 #[derive(Clone, Debug)]
 pub struct KeccakLayers<WitT, EqT> {
     pub output32: Output32Layer<WitT, EqT>,
+    pub sel: EqT,
     pub inner_rounds: [KeccakRound<WitT, EqT, ()>; 23],
     pub first_round: KeccakRound<WitT, EqT, EqT>,
 }
@@ -340,6 +341,7 @@ impl<E: ExtensionField> Default for KeccakLayout<E> {
             });
             KeccakLayers {
                 output32,
+                sel,
                 inner_rounds,
                 first_round,
             }
@@ -664,6 +666,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
         let mut chip = Chip {
             n_fixed: 0,
             n_committed: STATE_SIZE,
+            n_structural_witin: 0,
             n_challenges: 0,
             n_evaluations: KECCAK_ALL_IN_EVAL_SIZE + KECCAK_OUT_EVAL_SIZE,
             layers: vec![],
@@ -783,10 +786,6 @@ impl<E: ExtensionField> KeccakLayout<E> {
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     type Params = KeccakParams;
 
-    fn finalize(&mut self, _cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
-        unimplemented!()
-    }
-
     fn build_layer_logic(
         _cb: &mut CircuitBuilder<E>,
         _params: Self::Params,
@@ -794,24 +793,8 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         unimplemented!()
     }
 
-    fn n_committed(&self) -> usize {
-        STATE_SIZE
-    }
-
-    fn n_fixed(&self) -> usize {
-        0
-    }
-
-    fn n_challenges(&self) -> usize {
-        0
-    }
-
-    fn n_layers(&self) -> usize {
-        5 * ROUNDS + 1
-    }
-
-    fn n_evaluations(&self) -> usize {
-        KECCAK_ALL_IN_EVAL_SIZE + KECCAK_OUT_EVAL_SIZE
+    fn finalize(&self, _name: String, _cb: &mut CircuitBuilder<E>) -> Chip<E> {
+        unimplemented!()
     }
 }
 
@@ -971,7 +954,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
         gkr_circuit
             .layers
             .first()
-            .map(|layer| layer.out_sel_and_eval_exprs.len())
+            .map(|layer| layer.selector_ctxs_len())
             .unwrap()
     ];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit

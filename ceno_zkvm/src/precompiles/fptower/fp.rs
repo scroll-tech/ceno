@@ -28,11 +28,13 @@ use derive::AlignedBorrow;
 use ff_ext::ExtensionField;
 use generic_array::{GenericArray, sequence::GenericSequence};
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator, chip::Chip,
-    circuit_builder::CircuitBuilder, error::CircuitBuilderError, selector::SelectorType,
+    ProtocolBuilder, ProtocolWitnessGenerator, chip::Chip, circuit_builder::CircuitBuilder,
+    default_out_eval_groups, error::CircuitBuilderError, gkr::layer::Layer, selector::SelectorType,
 };
 use itertools::Itertools;
-use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
+use multilinear_extensions::{
+    Expression, StructuralWitIn, ToExpr, WitIn, util::max_usable_threads,
+};
 use num::BigUint;
 use p3::field::FieldAlgebra;
 use rayon::{
@@ -50,7 +52,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     chip_handler::MemoryExpr,
     gadgets::{FieldOperation, field_op::FieldOpCols, range::FieldLtCols},
-    precompiles::{SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend},
+    precompiles::utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
     witness::LkMultiplicity,
 };
 
@@ -102,13 +104,9 @@ pub struct FpOpLayer<WitT, P: FpOpField> {
 #[derive(Clone, Debug)]
 pub struct FpOpLayout<E: ExtensionField, P: FpOpField> {
     pub layer_exprs: FpOpLayer<WitIn, P>,
-    pub selector_type_layout: SelectorTypeLayout<E>,
+    pub sel: StructuralWitIn,
     pub input32_exprs: [GenericArray<MemoryExpr<E>, <P as NumWords>::WordsFieldElement>; 2],
     pub output32_exprs: GenericArray<MemoryExpr<E>, <P as NumWords>::WordsFieldElement>,
-    pub n_fixed: usize,
-    pub n_committed: usize,
-    pub n_structural_witin: usize,
-    pub n_challenges: usize,
 }
 
 impl<E: ExtensionField, P: FpOpField> FpOpLayout<E, P> {
@@ -123,14 +121,6 @@ impl<E: ExtensionField, P: FpOpField> FpOpLayout<E, P> {
             output_range_check: FieldLtCols::create(cb, || "fp_op_output_range"),
         };
 
-        let eq = cb.create_placeholder_structural_witin(|| "fp_op_structural_witin");
-        let sel = SelectorType::Prefix(eq.expr());
-        let selector_type_layout = SelectorTypeLayout {
-            sel_first: None,
-            sel_last: None,
-            sel_all: sel.clone(),
-        };
-
         let input32_exprs: [GenericArray<MemoryExpr<E>, <P as NumWords>::WordsFieldElement>; 2] =
             array::from_fn(|_| {
                 GenericArray::generate(|_| array::from_fn(|_| Expression::WitIn(0)))
@@ -140,13 +130,9 @@ impl<E: ExtensionField, P: FpOpField> FpOpLayout<E, P> {
 
         Self {
             layer_exprs: FpOpLayer { wits },
-            selector_type_layout,
+            sel: cb.create_placeholder_structural_witin(|| "fp_op_sel"),
             input32_exprs,
             output32_exprs,
-            n_fixed: 0,
-            n_committed: 0,
-            n_structural_witin: 0,
-            n_challenges: 0,
         }
     }
 
@@ -226,31 +212,15 @@ impl<E: ExtensionField, P: FpOpField> ProtocolBuilder<E> for FpOpLayout<E, P> {
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
-        self.n_fixed = cb.cs.num_fixed;
-        self.n_committed = cb.cs.num_witin as usize;
-        self.n_structural_witin = cb.cs.num_structural_witin as usize;
-        self.n_challenges = 0;
+    fn finalize(&self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {
+        let sel = SelectorType::Prefix(self.sel.expr());
+        cb.cs.set_all_default_selectors(sel);
 
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
-
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-        (
-            [
-                (0..r_len).collect_vec(),
-                (r_len..r_len + w_len).collect_vec(),
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, self.n_challenges),
-        )
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb, 0);
+        let layer = Layer::from_circuit_builder(cb, name, 0, out_evals);
+        chip.add_layer(layer);
+        chip
     }
 }
 
@@ -267,12 +237,14 @@ impl<E: ExtensionField, P: FpOpField> ProtocolWitnessGenerator<E> for FpOpLayout
         wits: [&mut RowMajorMatrix<E::BaseField>; 2],
         lk_multiplicity: &mut LkMultiplicity,
     ) {
-        let (wits_start, num_wit_cols) =
+        let (layout_start, num_layout_wit_cols) =
             (self.layer_exprs.wits.is_add.id as usize, num_fp_cols::<P>());
         let [wits, structural_wits] = wits;
         let num_instances = wits.num_instances();
         let nthreads = max_usable_threads();
         let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
+        let wits_width = wits.width;
+        let structural_wits_width = structural_wits.width;
         let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
         let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
         raw_witin_iter
@@ -280,16 +252,14 @@ impl<E: ExtensionField, P: FpOpField> ProtocolWitnessGenerator<E> for FpOpLayout
             .zip_eq(phase1.instances.par_chunks(num_instance_per_batch))
             .for_each(|((rows, eqs), phase1_instances)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
-                rows.chunks_mut(self.n_committed)
-                    .zip_eq(eqs.chunks_mut(self.n_structural_witin))
+                rows.chunks_mut(wits_width)
+                    .zip_eq(eqs.chunks_mut(structural_wits_width))
                     .zip_eq(phase1_instances)
                     .for_each(|((row, eqs), phase1_instance)| {
                         let cols: &mut FpOpWitCols<E::BaseField, P> =
-                            row[wits_start..][..num_wit_cols].borrow_mut();
+                            row[layout_start..][..num_layout_wit_cols].borrow_mut();
                         Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
-                        for x in eqs.iter_mut() {
-                            *x = E::BaseField::ONE;
-                        }
+                        eqs[self.sel.id as usize] = E::BaseField::ONE;
                     });
             });
     }
@@ -302,7 +272,7 @@ mod tests {
     use gkr_iop::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         cpu::{CpuBackend, CpuProver},
-        gkr::{GKRProverOutput, layer::Layer},
+        gkr::GKRProverOutput,
         selector::SelectorContext,
     };
     use itertools::Itertools;
@@ -331,12 +301,10 @@ mod tests {
 
         let mut cs = ConstraintSystem::<E>::new(|| "fp_op_test");
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
-        let mut layout =
+        let layout =
             FpOpLayout::<E, P>::build_layer_logic(&mut cb, ()).expect("build_layer_logic failed");
-        let (out_evals, mut chip) = layout.finalize(&mut cb);
-        let layer =
-            Layer::from_circuit_builder(&cb, "fp_op".to_string(), layout.n_challenges, out_evals);
-        chip.add_layer(layer);
+
+        let chip = layout.finalize("fp_op".to_string(), &mut cb);
         let gkr_circuit = chip.gkr_circuit();
 
         let instances = (0..count)
@@ -354,12 +322,12 @@ mod tests {
 
         let mut phase1 = RowMajorMatrix::new(
             instances.len(),
-            layout.n_committed,
+            chip.n_committed,
             InstancePaddingStrategy::Default,
         );
         let mut structural = RowMajorMatrix::new(
             instances.len(),
-            layout.n_structural_witin,
+            chip.n_structural_witin,
             InstancePaddingStrategy::Default,
         );
         let mut lk_multiplicity = LkMultiplicity::default();
@@ -432,11 +400,9 @@ mod tests {
                 .0
                 .par_iter()
                 .map(|wit| {
-                    let point = point[point.len() - wit.num_vars()..point.len()].to_vec();
-                    PointAndEval {
-                        point: point.clone(),
-                        eval: wit.evaluate(&point),
-                    }
+                    let point = point[point.len() - log2_num_instance..point.len()].to_vec();
+                    let eval = wit.evaluate(&point);
+                    PointAndEval { point, eval }
                 })
                 .collect::<Vec<_>>();
 
@@ -450,7 +416,9 @@ mod tests {
             }
         };
 
-        let selector_ctxs = vec![SelectorContext::new(0, num_instances, log2_num_instance); 1];
+        let selector_ctxs_len = gkr_circuit.layers[0].selector_ctxs_len();
+        let selector_ctxs =
+            vec![SelectorContext::new(0, num_instances, log2_num_instance); selector_ctxs_len];
         let GKRProverOutput { gkr_proof, .. } = gkr_circuit
             .prove::<CpuBackend<E, Pcs>, CpuProver<_>>(
                 num_threads,
@@ -488,41 +456,21 @@ mod tests {
 
     #[test]
     fn test_bls12381_fp_ops() {
-        std::thread::Builder::new()
-            .stack_size(32 * 1024 * 1024)
-            .spawn(|| test_fp_ops_helper::<Bls12381BaseField>(8))
-            .expect("spawn fp_ops test thread failed")
-            .join()
-            .expect("fp_ops test thread panicked");
+        test_fp_ops_helper::<Bls12381BaseField>(8)
     }
 
     #[test]
     fn test_bls12381_fp_ops_nonpow2() {
-        std::thread::Builder::new()
-            .stack_size(32 * 1024 * 1024)
-            .spawn(|| test_fp_ops_helper::<Bls12381BaseField>(7))
-            .expect("spawn fp_ops test thread failed")
-            .join()
-            .expect("fp_ops test thread panicked");
+        test_fp_ops_helper::<Bls12381BaseField>(7)
     }
 
     #[test]
     fn test_bn254_fp_ops() {
-        std::thread::Builder::new()
-            .stack_size(32 * 1024 * 1024)
-            .spawn(|| test_fp_ops_helper::<Bn254BaseField>(8))
-            .expect("spawn fp_ops test thread failed")
-            .join()
-            .expect("fp_ops test thread panicked");
+        test_fp_ops_helper::<Bn254BaseField>(8)
     }
 
     #[test]
     fn test_bn254_fp_ops_nonpow2() {
-        std::thread::Builder::new()
-            .stack_size(32 * 1024 * 1024)
-            .spawn(|| test_fp_ops_helper::<Bn254BaseField>(7))
-            .expect("spawn fp_ops test thread failed")
-            .join()
-            .expect("fp_ops test thread panicked");
+        test_fp_ops_helper::<Bn254BaseField>(7)
     }
 }

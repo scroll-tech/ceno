@@ -559,9 +559,9 @@ pub fn verify_chip_proof<C: Config>(
     } = &composed_cs;
     let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
 
-    let r_len = cs.r_expressions.len() + cs.r_table_expressions.len();
-    let w_len = cs.w_expressions.len() + cs.w_table_expressions.len();
-    let lk_len = cs.lk_expressions.len() + cs.lk_table_expressions.len();
+    let r_len = cs.r_expressions_len() + cs.r_table_expressions_len();
+    let w_len = cs.w_expressions_len() + cs.w_table_expressions_len();
+    let lk_len = cs.lk_expressions_len() + cs.lk_table_expressions_len();
     let num_batched = r_len + w_len + lk_len;
 
     let r_counts_per_instance: Usize<C::N> = Usize::from(r_len);
@@ -628,7 +628,7 @@ pub fn verify_chip_proof<C: Config>(
     );
     builder.cycle_tracker_end(format!("verify tower proof for opcode {circuit_name}",).as_str());
 
-    if cs.lk_table_expressions.is_empty() {
+    if cs.lk_table_expressions_len() == 0 {
         builder
             .range(0, logup_p_evals.len())
             .for_each(|idx_vec, builder| {
@@ -643,7 +643,7 @@ pub fn verify_chip_proof<C: Config>(
     builder.assert_usize_eq(logup_q_evals.len(), lk_counts_per_instance.clone());
 
     // GKR circuit
-    let out_evals_len: Usize<C::N> = if cs.lk_table_expressions.is_empty() {
+    let out_evals_len: Usize<C::N> = if cs.lk_table_expressions_len() == 0 {
         builder.eval(record_evals.len() + logup_q_evals.len())
     } else {
         builder.eval(record_evals.len() + logup_p_evals.len() + logup_q_evals.len())
@@ -658,7 +658,7 @@ pub fn verify_chip_proof<C: Config>(
         });
 
     let end: Usize<C::N> = Usize::uninit(builder);
-    if !cs.lk_table_expressions.is_empty() {
+    if cs.lk_table_expressions_len() > 0 {
         builder.assign(&end, record_evals.len() + logup_p_evals.len());
         let p_slice = out_evals.slice(builder, record_evals.len(), end.clone());
 
@@ -707,7 +707,7 @@ pub fn verify_chip_proof<C: Config>(
             gkr_circuit
                 .layers
                 .first()
-                .map(|layer| layer.out_sel_and_eval_exprs.len())
+                .map(|layer| layer.selector_ctxs_len())
                 .unwrap_or(0)
         ]
     } else {

@@ -1,4 +1,4 @@
-use std::iter::repeat_n;
+use std::{cmp::Ordering, iter::repeat_n};
 
 use rayon::iter::IndexedParallelIterator;
 
@@ -37,7 +37,7 @@ impl SelectorContext {
 }
 
 /// Selector selects part of the witnesses in the sumcheck protocol.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "E::BaseField: Serialize",
     deserialize = "E::BaseField: DeserializeOwned"
@@ -379,6 +379,31 @@ impl<E: ExtensionField> SelectorType<E> {
         }
     }
 }
+
+impl<E: ExtensionField> Ord for SelectorType<E> {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (SelectorType::None, SelectorType::None) => Ordering::Equal,
+            (SelectorType::None, _) => Ordering::Less,
+            (_, SelectorType::None) => Ordering::Greater,
+            _ => self.selector_expr().cmp(other.selector_expr()),
+        }
+    }
+}
+
+impl<E: ExtensionField> PartialOrd for SelectorType<E> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<E: ExtensionField> PartialEq for SelectorType<E> {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl<E: ExtensionField> Eq for SelectorType<E> {}
 
 #[cfg(test)]
 mod tests {

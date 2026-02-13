@@ -130,6 +130,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             layer.out_sel_and_eval_exprs.len(),
             out_points.len(),
         );
+        assert_eq!(
+            layer.out_sel_and_eval_exprs.len(),
+            selector_ctxs.len(),
+            "selector_ctxs length {}",
+            selector_ctxs.len()
+        );
 
         let (_, raw_rotation_exprs) = &layer.rotation_exprs;
         let (rotation_proof, rotation_left, rotation_right, rotation_point) =
@@ -174,34 +180,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 
         let span_eq = entered_span!("build eqs", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
-        let eqs_gpu = layer
+        let eqs = layer
             .out_sel_and_eval_exprs
             .iter()
             .zip(out_points.iter())
             .zip(selector_ctxs.iter())
-            .map(|(((sel_type, _), point), selector_ctx)| {
-                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type)
+            .filter_map(|(((sel_type, _), point), selector_ctx)| {
+                Some(build_eq_x_r_with_sel_gpu(
+                    &cuda_hal,
+                    point,
+                    selector_ctx,
+                    sel_type,
+                ))
             })
-            // for rotation left point
             .chain(
                 rotation_left
                     .iter()
                     .map(|rotation_left| build_eq_x_r_gpu(&cuda_hal, rotation_left)),
             )
-            // for rotation right point
             .chain(
                 rotation_right
                     .iter()
                     .map(|rotation_right| build_eq_x_r_gpu(&cuda_hal, rotation_right)),
             )
-            // for rotation point
             .chain(
                 rotation_point
                     .iter()
                     .map(|rotation_point| build_eq_x_r_gpu(&cuda_hal, rotation_point)),
             )
             .collect::<Vec<_>>();
-        // `wit` := witin ++ fixed ++ pubio
+
         let all_witins_gpu = wit
             .iter()
             .take(layer.n_witin + layer.n_fixed + layer.n_instance)
@@ -222,7 +230,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     )
                     .map(|mle| mle.as_ref()),
             )
-            .chain(eqs_gpu.iter())
+            .chain(eqs.iter())
             .collect_vec();
         assert_eq!(
             all_witins_gpu.len(),

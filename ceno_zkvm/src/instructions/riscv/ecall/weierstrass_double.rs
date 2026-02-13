@@ -7,8 +7,7 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use generic_array::{GenericArray, typenum::Unsigned};
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -125,12 +124,11 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             0.into(),
         ))?;
 
-        let mut layout =
+        let layout =
             <WeierstrassDoubleAssignLayout<E, EC> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(
                 cb,
                 (),
             )?;
-
         // Write the result to the same address of the first input point.
         let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
             .enumerate()
@@ -150,15 +148,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(
-            cb,
-            "weierstrass_double".to_string(),
-            layout.n_challenges,
-            out_evals,
-        );
-        chip.add_layer(layer);
+        let chip = layout.finalize("weierstrass_double".to_string(), cb);
 
         let circuit = chip.gkr_circuit();
 

@@ -7,8 +7,7 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use generic_array::typenum::Unsigned;
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, chain, izip};
@@ -131,7 +130,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
             0.into(),
         ))?;
 
-        let mut layout =
+        let layout =
             <Uint256MulLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(cb, ())?;
 
         // Write the result to the same address of the first input point.
@@ -177,15 +176,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
             .collect::<Result<Vec<WriteMEM>, _>>()?,
         );
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(
-            cb,
-            "uint256_mul".to_string(),
-            layout.n_challenges,
-            out_evals,
-        );
-        chip.add_layer(layer);
+        let chip = layout.finalize("uint256_mul".to_string(), cb);
 
         let circuit = chip.gkr_circuit();
 
@@ -478,8 +469,7 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
             0.into(),
         ))?;
 
-        let mut layout =
-            <Uint256InvLayout<E, Spec> as ProtocolBuilder<E>>::build_layer_logic(cb, ())?;
+        let layout = <Uint256InvLayout<E, Spec> as ProtocolBuilder<E>>::build_layer_logic(cb, ())?;
 
         // Write the result to the same address of the first input point.
         let mem_rw = layout
@@ -503,10 +493,7 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(cb, Spec::name(), layout.n_challenges, out_evals);
-        chip.add_layer(layer);
+        let chip = layout.finalize(Spec::name(), cb);
 
         let circuit = chip.gkr_circuit();
 

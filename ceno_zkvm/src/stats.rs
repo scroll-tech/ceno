@@ -4,8 +4,8 @@ use crate::{
     utils,
 };
 use ff_ext::ExtensionField;
+use gkr_iop::circuit_builder::RecordExpression;
 use itertools::Itertools;
-use multilinear_extensions::Expression;
 use prettytable::{Table, row};
 use serde_json::json;
 use std::{
@@ -82,35 +82,47 @@ impl std::ops::Add for CircuitStats {
 
 impl CircuitStats {
     pub fn new<E: ExtensionField>(system: &ConstraintSystem<E>) -> Self {
-        let just_degrees_grouped = |exprs: &Vec<Expression<E>>| {
+        let just_degrees_grouped = |expressions: Vec<&RecordExpression<E, _>>| {
             let mut counter = HashMap::new();
-            for expr in exprs {
+            for expr in expressions.into_iter().map(|r| &r.expression) {
                 *counter.entry(expr.degree()).or_insert(0) += 1;
             }
             counter
         };
-        let is_opcode = system.lk_table_expressions.is_empty()
-            && system.r_table_expressions.is_empty()
-            && system.w_table_expressions.is_empty();
+        let is_opcode = system.lk_table_expressions_len() == 0
+            && system.r_table_expressions_len() == 0
+            && system.w_table_expressions_len() == 0;
         // distinguishing opcodes from tables as done in ZKVMProver::create_proof
         if is_opcode {
             CircuitStats::OpCode(OpCodeStats {
                 namespace: system.ns.clone(),
                 witnesses: system.num_witin as usize,
-                reads: system.r_expressions.len(),
-                writes: system.w_expressions.len(),
-                lookups: system.lk_expressions.len(),
-                assert_zero_expr_degrees: just_degrees_grouped(&system.assert_zero_expressions),
-                assert_zero_sumcheck_expr_degrees: just_degrees_grouped(
-                    &system.assert_zero_sumcheck_expressions,
-                ),
+                reads: system.r_expressions_len(),
+                writes: system.w_expressions_len(),
+                lookups: system.lk_expressions_len(),
+                assert_zero_expr_degrees: {
+                    let exprs = system
+                        .expression_groups
+                        .values()
+                        .flat_map(|g| g.assert_zero_expressions.iter())
+                        .collect::<Vec<_>>();
+                    just_degrees_grouped(exprs)
+                },
+                assert_zero_sumcheck_expr_degrees: {
+                    let exprs = system
+                        .expression_groups
+                        .values()
+                        .flat_map(|g| g.assert_zero_sumcheck_expressions.iter())
+                        .collect::<Vec<_>>();
+                    just_degrees_grouped(exprs)
+                },
             })
         } else {
-            let table_len = if !system.lk_table_expressions.is_empty() {
-                system.lk_table_expressions[0].table_spec.len.unwrap_or(0)
-            } else {
-                0
-            };
+            let table_len = system
+                .lk_table_expressions_all()
+                .next()
+                .map(|t| t.table_spec.len.unwrap_or(0))
+                .unwrap_or(0);
             CircuitStats::Table(TableStats { table_len })
         }
     }

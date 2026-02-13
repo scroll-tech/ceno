@@ -70,7 +70,7 @@ fn verify_test_opcode_jal<E: ExtensionField>(pc_offset: i32) {
     )
     .unwrap();
 
-    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], 1, None, Some(lkm));
 }
 
 #[test]
@@ -132,5 +132,5 @@ fn verify_test_opcode_jalr<E: ExtensionField>(rs1_read: Word, imm: i32) {
         )],
     )
     .unwrap();
-    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
+    MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], 1, None, Some(lkm));
 }

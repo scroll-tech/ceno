@@ -3,8 +3,7 @@ use std::{array, marker::PhantomData};
 use ceno_emul::{Change, InsnKind, Platform, SHA_EXTEND, StepRecord, WORD_SIZE, WriteOp};
 use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -102,7 +101,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
             0.into(),
         ))?;
 
-        let mut layout =
+        let layout =
             <ShaExtendLayout<E> as gkr_iop::ProtocolBuilder<E>>::build_layer_logic(cb, ())?;
 
         let old_value =
@@ -128,10 +127,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
             vm_state.ts,
         )?);
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(cb, Self::name(), layout.n_challenges, out_evals);
-        chip.add_layer(layer);
+        let chip = layout.finalize(Self::name(), cb);
 
         let circuit = chip.gkr_circuit();
 
@@ -175,7 +171,6 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
         steps: &[StepRecord],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
-        let num_structural_witin = config.layout.n_structural_witin.max(num_structural_witin);
         if steps.is_empty() {
             return Ok((
                 [
