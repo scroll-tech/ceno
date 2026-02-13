@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::{
     arithmetics::{ceil_log2, next_pow2_instance_padding},
-    basefold_verifier::basefold::{
+    basefold_verifier::{basefold::{
         BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
-    },
+    }, utils::read_hint_slice},
     tower_verifier::binding::{
         IOPProverMessage, IOPProverMessageVec, IOPProverMessageVecVariable, PointVariable,
         ThreeDimensionalVecVariable, ThreeDimensionalVector,
@@ -24,7 +24,10 @@ use openvm_native_compiler::{
     prelude::*,
 };
 use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::hints::{Hintable, VecAutoHintable};
+use openvm_native_recursion::{
+    vars::HintSlice,
+    hints::{Hintable, VecAutoHintable}
+};
 use openvm_stark_backend::p3_field::{FieldAlgebra, extension::BinomialExtensionField};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldExtensionAlgebra;
@@ -512,8 +515,8 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub w_out_evals_len: Usize<C::N>,
     pub lk_out_evals_len: Usize<C::N>,
 
-    pub rw_out_evals: Array<C, Ext<C::F, C::EF>>,
-    pub lk_out_evals: Array<C, Ext<C::F, C::EF>>,
+    pub rw_out_evals: HintSlice<C>,
+    pub lk_out_evals: HintSlice<C>,
 
     pub has_main_sumcheck_proofs: Usize<C::N>,
     pub main_sumcheck_proofs: IOPProverMessageVecVariable<C>,
@@ -545,8 +548,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let lk_out_evals_len = Usize::Var(usize::read(builder));
 
         builder.cycle_tracker_start("read omc out evals");
-        let rw_out_evals = Vec::<E>::read(builder);
-        let lk_out_evals = Vec::<E>::read(builder);
+        let rw_out_evals = read_hint_slice(builder);
+        let lk_out_evals = read_hint_slice(builder);
         builder.cycle_tracker_end("read omc out evals");
 
         builder.cycle_tracker_start("read tower proofs");
