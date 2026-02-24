@@ -269,9 +269,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.set(&input_ctx, 7, Usize::from(1));
         let n_v = builder.get(&num_variables, 0);
         builder.set(&input_ctx, 8, n_v);
-
-        // _debug
-        // builder.set(&input_ctx, 9, Usize::from(0));
+        builder.set(&input_ctx, 9, Usize::from(0));
 
         let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
         builder.set(&challenges, 0, alpha);
