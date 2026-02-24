@@ -346,7 +346,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
                 builder.cycle_tracker_end("Verify chip proof");
 
-                
                 let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
                 builder
                     .range(0, chip_proof.lk_out_evals_len.clone())
