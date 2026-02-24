@@ -260,9 +260,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let forked_samples: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(proofs_len.get_var());
     let forked_sample_index: Usize<C::N> = builder.eval(C::N::ZERO);
 
-    // _debug
-    // for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
-    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate().take(1) {
+    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
         let circuit_vk = &vk.circuit_vks[circuit_name];
         let chip_id: Var<C::N> = builder.get(&chip_indices, num_chips_verified.get_var());
 
@@ -328,16 +326,12 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 }
 
                 builder.cycle_tracker_start("Verify chip proof");
-
-                // _debug
-                // let (
-                //     input_opening_point,
-                //     chip_shard_ec_sum,
-                //     chip_prod_out_evals,
-                //     chip_logup_out_evals,
-                // ) = 
-                
-                verify_chip_proof(
+                let (
+                    input_opening_point,
+                    chip_shard_ec_sum,
+                    chip_prod_out_evals,
+                    chip_logup_out_evals,
+                ) = verify_chip_proof(
                     circuit_name,
                     builder,
                     &mut chip_challenger,
@@ -352,7 +346,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
                 builder.cycle_tracker_end("Verify chip proof");
 
-                /* _debug
+                
                 let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
                 builder
                     .range(0, chip_proof.lk_out_evals_len.clone())
@@ -431,13 +425,11 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 let chip_sample = chip_challenger.sample_ext(builder);
                 builder.set(&forked_samples, forked_sample_index.get_var(), chip_sample);
                 builder.inc(&forked_sample_index);
-                */
             });
             builder.inc(&num_chips_verified);
         });
     }
 
-    /* _debug
     // truncate the witin and fixed opening arrays
     witin_openings.truncate(builder, num_witin_openings);
     fixed_openings.truncate(builder, num_fixed_openings);
@@ -564,18 +556,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     builder.assert_ext_eq(logup_sum, zero);
 
     shard_ec_sum
-    */
-
-    // _debug
-    SepticPointVariable {
-        x: SepticExtensionVariable {
-            vs: builder.dyn_array(7),
-        },
-        y: SepticExtensionVariable {
-            vs: builder.dyn_array(7),
-        },
-        is_infinity: Usize::uninit(builder),
-    }
 }
 
 pub fn verify_chip_proof<C: Config>(
@@ -590,13 +570,11 @@ pub fn verify_chip_proof<C: Config>(
     vk: &VerifyingKey<E>,
     unipoly_extrapolator: &UniPolyExtrapolator<C>,
     poly_evaluator: &mut PolyEvaluator<C>,
-// _debug
-// ) -> (
-//     Array<C, Ext<C::F, C::EF>>,
-//     SepticPointVariable<C>,
-//     Array<C, Ext<C::F, C::EF>>,
-//     Array<C, Ext<C::F, C::EF>>,
-// ) {
+) -> (
+    Array<C, Ext<C::F, C::EF>>,
+    SepticPointVariable<C>,
+    Array<C, Ext<C::F, C::EF>>,
+    Array<C, Ext<C::F, C::EF>>,
 ) {
     let composed_cs = vk.get_cs();
     let ComposedConstrainSystem {
@@ -661,8 +639,7 @@ pub fn verify_chip_proof<C: Config>(
         builder.eval(chip_proof.r_out_evals_len.clone() + chip_proof.w_out_evals_len.clone());
 
     builder.cycle_tracker_start(format!("verify tower proof for opcode {circuit_name}",).as_str());
-    // _debug
-    // let (_, record_evals, logup_p_evals, logup_q_evals, prod_out_evals, logup_out_evals) =
+    let (_, record_evals, logup_p_evals, logup_q_evals, prod_out_evals, logup_out_evals) =
         verify_tower_proof(
             builder,
             challenger,
@@ -678,7 +655,6 @@ pub fn verify_chip_proof<C: Config>(
         );
     builder.cycle_tracker_end(format!("verify tower proof for opcode {circuit_name}",).as_str());
 
-    /* _debug
     if cs.lk_table_expressions.is_empty() {
         builder
             .range(0, logup_p_evals.len())
@@ -841,7 +817,6 @@ pub fn verify_chip_proof<C: Config>(
     builder.cycle_tracker_end("Verify GKR Circuit");
 
     (rt.fs, shard_ec_sum, prod_out_evals, logup_out_evals)
-    */
 }
 
 pub fn verify_gkr_circuit<C: Config>(
