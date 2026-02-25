@@ -372,46 +372,55 @@ impl ChipScheduler {
             let mut pending: Vec<ChipTask<'a, PB>> = tasks;
 
             while !pending.is_empty() || tasks_inflight > 0 {
-                // A: Non-blocking drain completions
-                for msg in done_rx.try_iter() {
+                // First drain any completions already available to free memory immediately.
+                // This non-blocking path keeps utilization high (and covers the initial loop
+                // iteration when nothing is running yet), so we handle completions here.
+                while let Ok(msg) = done_rx.try_recv() {
                     if let Err(e) = handle_completion(msg, pool, &mut tasks_inflight, "") {
                         drop(task_tx);
                         return Err(e);
                     }
                 }
 
-                // B: Find first task that fits
-                let mut launched_idx = None;
+                // Launch the first pending task whose memory fits; otherwise fall through to wait.
                 if tasks_inflight < CONCURRENT_PROVING_WORKERS {
-                    for (vec_idx, task) in pending.iter().enumerate() {
-                        if pool
-                            .try_book_capacity(task.estimated_memory_bytes)
+                    if let Some(vec_idx) = pending.iter().position(|task| {
+                        pool.try_book_capacity(task.estimated_memory_bytes)
                             .is_some()
-                        {
-                            tracing::info!(
-                                "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
-                                task.circuit_name,
-                                task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
-                                pool.get_booked_total() as f64 / (1024.0 * 1024.0)
-                            );
-                            launched_idx = Some(vec_idx);
-                            break;
-                        }
+                    }) {
+                        let task = pending.remove(vec_idx);
+                        tracing::info!(
+                            "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
+                            task.circuit_name,
+                            task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                            pool.get_booked_total() as f64 / (1024.0 * 1024.0)
+                        );
+                        tasks_inflight += 1;
+                        task_tx.send(task).unwrap();
+                        continue;
                     }
                 }
 
-                if let Some(vec_idx) = launched_idx {
-                    let task = pending.remove(vec_idx);
-                    tasks_inflight += 1;
-                    task_tx.send(task).unwrap();
-                } else if tasks_inflight > 0 {
-                    // C: Block wait for completion when nothing fits
-                    tracing::info!(
-                        "[scheduler] Pool full, waiting for task completion... pool_booked={:.2}MB, inflight={}",
-                        pool.get_booked_total() as f64 / (1024.0 * 1024.0),
-                        tasks_inflight
-                    );
-                    if let Ok(msg) = done_rx.recv() {
+                // No task launched: either nothing fits (so wait) or we are deadlocked.
+                if tasks_inflight == 0 {
+                    tracing::error!("Deadlock: Remaining tasks are too big for the memory pool!");
+                    return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                        "Deadlock: Remaining tasks are too big for the memory pool!"
+                            .to_string()
+                            .into_boxed_str(),
+                    )));
+                }
+
+                tracing::info!(
+                    "[scheduler] Pool full, waiting for task completion... pool_booked={:.2}MB, inflight={}",
+                    pool.get_booked_total() as f64 / (1024.0 * 1024.0),
+                    tasks_inflight
+                );
+
+                // Second call site blocks instead of busy-waiting when the pool is full; this
+                // waits for the next completion to free memory before trying to launch again.
+                match done_rx.recv() {
+                    Ok(msg) => {
                         if let Err(e) =
                             handle_completion(msg, pool, &mut tasks_inflight, " (blocked)")
                         {
@@ -419,13 +428,7 @@ impl ChipScheduler {
                             return Err(e);
                         }
                     }
-                } else {
-                    tracing::error!("Deadlock: Remaining tasks are too big for the memory pool!");
-                    return Err(ZKVMError::BackendError(BackendError::CircuitError(
-                        "Deadlock: Remaining tasks are too big for the memory pool!"
-                            .to_string()
-                            .into_boxed_str(),
-                    )));
+                    Err(_) => break,
                 }
             }
 
