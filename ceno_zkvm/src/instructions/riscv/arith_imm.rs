@@ -62,7 +62,7 @@ mod test {
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::ADDI, 2, 0, 4, imm);
-        let (raw_witin, lkm) = AddiInstruction::<E>::assign_instances(
+        let (raw_witin, lkm) = AddiInstruction::<E>::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,

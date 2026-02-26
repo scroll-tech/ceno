@@ -184,7 +184,7 @@ mod test {
             .unwrap()
             .unwrap();
 
-        let (raw_witin, lkm) = SetLessThanImmInstruction::<E, I>::assign_instances(
+        let (raw_witin, lkm) = SetLessThanImmInstruction::<E, I>::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,

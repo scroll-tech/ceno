@@ -138,11 +138,12 @@ pub fn run(
         state.init_memory(addr.into(), value);
     }
 
-    let steps = state
+    state
         .iter_until_halt()
         .collect::<Result<Vec<_>>>()
         .expect("Failed to run the program");
-    eprintln!("Emulator ran for {} steps.", steps.len());
+    let step_count = state.tracer().recorded_steps().len();
+    eprintln!("Emulator ran for {} steps.", step_count);
     read_all_messages(&state)
 }
 

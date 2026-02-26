@@ -19,7 +19,7 @@ fn test_large_ecall_dummy_keccak() {
     let config = KeccakDummy::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
     let (step, program) = ceno_emul::test_utils::keccak_step();
-    let (raw_witin, lkm) = KeccakDummy::assign_instances(
+    let (raw_witin, lkm) = KeccakDummy::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,

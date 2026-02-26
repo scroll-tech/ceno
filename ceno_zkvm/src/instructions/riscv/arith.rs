@@ -190,7 +190,7 @@ mod test {
 
         // values assignment
         let insn_code = encode_rv32(I::INST_KIND, 2, 3, 4, 0);
-        let (raw_witin, lkm) = ArithInstruction::<GoldilocksExt2, I>::assign_instances(
+        let (raw_witin, lkm) = ArithInstruction::<GoldilocksExt2, I>::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,

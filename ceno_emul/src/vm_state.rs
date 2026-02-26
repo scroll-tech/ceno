@@ -104,6 +104,10 @@ impl<T: Tracer> VMState<T> {
         &self.tracer
     }
 
+    pub fn tracer_mut(&mut self) -> &mut T {
+        &mut self.tracer
+    }
+
     pub fn take_tracer(self) -> T {
         self.tracer
     }
