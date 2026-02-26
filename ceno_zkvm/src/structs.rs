@@ -10,7 +10,7 @@ use crate::{
         TableCircuit,
     },
 };
-use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
+use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepIndex, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
@@ -368,7 +368,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
         config: &OC::InstructionConfig,
-        records: &[StepRecord],
+        shard_steps: &[StepRecord],
+        indices: &[StepIndex],
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
 
@@ -378,7 +379,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             shard_ctx,
             cs.zkvm_v1_css.num_witin as usize,
             cs.zkvm_v1_css.num_structural_witin as usize,
-            records,
+            shard_steps,
+            indices,
         )?;
         let num_instances = vec![witness[0].num_instances()];
         let input = ChipInput::new(

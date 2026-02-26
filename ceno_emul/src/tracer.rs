@@ -6,9 +6,10 @@ use crate::{
     syscalls::{SyscallEffects, SyscallWitness},
 };
 use ceno_rt::WORD_SIZE;
+use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
-use std::{collections::BTreeMap, fmt, mem, sync::Arc};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -38,6 +39,8 @@ pub struct StepRecord {
 
     syscall: Option<SyscallWitness>,
 }
+
+pub type StepIndex = usize;
 
 pub trait StepCellExtractor {
     fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64;
@@ -257,6 +260,8 @@ pub struct ShardPlanBuilder {
     current_shard_start_cycle: Cycle,
     cur_cells: u64,
     cur_cycle_in_shard: Cycle,
+    cur_step_count: usize,
+    max_step_shard: usize,
     shard_id: usize,
     finalized: bool,
 }
@@ -272,6 +277,8 @@ impl ShardPlanBuilder {
             current_shard_start_cycle: initial_cycle,
             cur_cells: 0,
             cur_cycle_in_shard: 0,
+            cur_step_count: 0,
+            max_step_shard: 0,
             shard_id: 0,
             finalized: false,
         }
@@ -291,6 +298,10 @@ impl ShardPlanBuilder {
             .shard_cycle_boundaries
             .last()
             .expect("shard boundaries must contain at least one entry")
+    }
+
+    pub fn max_step_shard(&self) -> usize {
+        self.max_step_shard
     }
 
     pub fn into_cycle_boundaries(self) -> Vec<Cycle> {
@@ -314,6 +325,7 @@ impl ShardPlanBuilder {
         self.cur_cycle_in_shard = self
             .cur_cycle_in_shard
             .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
+        self.cur_step_count = self.cur_step_count.saturating_add(1);
 
         let cycle_limit_hit = self.cur_cycle_in_shard >= self.max_cycle_per_shard;
         let should_split = self.cur_cells >= target || cycle_limit_hit;
@@ -328,6 +340,8 @@ impl ShardPlanBuilder {
             self.current_shard_start_cycle = next_shard_cycle;
             self.cur_cells = 0;
             self.cur_cycle_in_shard = 0;
+            self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
+            self.cur_step_count = 0;
         }
     }
 
@@ -336,6 +350,8 @@ impl ShardPlanBuilder {
             !self.finalized,
             "shard plan cannot be finalized multiple times"
         );
+        self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
+        self.cur_step_count = 0;
         self.push_boundary(max_cycle);
         self.finalized = true;
     }
@@ -654,9 +670,19 @@ impl StepRecord {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FullTracerConfig {
+    /// Maximum number of completed steps per shard. Internally, `FullTracer`
+    /// reserves one extra slot to hold the pending (in-progress) record.
+    pub max_step_shard: usize,
+}
+
 #[derive(Debug)]
 pub struct FullTracer {
-    record: StepRecord,
+    records: Vec<StepRecord>,
+    len: usize,
+    pending_index: usize,
+    pending_cycle: Cycle,
 
     // record each section max access address
     // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
@@ -676,72 +702,139 @@ impl FullTracer {
     pub const SUBCYCLE_MEM: Cycle = <Self as Tracer>::SUBCYCLE_MEM;
     pub const SUBCYCLES_PER_INSN: Cycle = <Self as Tracer>::SUBCYCLES_PER_INSN;
 
-    pub fn new(platform: &Platform) -> FullTracer {
+    pub fn new(platform: &Platform, config: FullTracerConfig) -> FullTracer {
         let mmio_max_access = init_mmio_min_max_access(platform);
-
-        FullTracer {
+        // Always reserve one extra slot for the pending/in-progress record. Without
+        // this, a shard that executes exactly `max_step_shard` steps would panic
+        // when `advance()` tries to reset the next (non-existent) slot.
+        let capacity = config.max_step_shard.saturating_add(1);
+        let mut records = if capacity > 0 {
+            (0..capacity)
+                .into_par_iter()
+                .map(|_| StepRecord::default())
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        if records.is_empty() {
+            records.push(StepRecord::default());
+        }
+        let mut tracer = FullTracer {
+            records,
+            len: 0,
+            pending_index: 0,
+            pending_cycle: Self::SUBCYCLES_PER_INSN,
             mmio_min_max_access: Some(mmio_max_access),
-            record: StepRecord {
-                cycle: Self::SUBCYCLES_PER_INSN,
-                ..StepRecord::default()
-            },
             platform: platform.clone(),
             latest_accesses: LatestAccesses::new(platform),
             max_heap_addr_access: ByteAddr::from(platform.heap.start),
             max_hint_addr_access: ByteAddr::from(platform.hints.start),
+        };
+        tracer.reset_pending_slot();
+        tracer
+    }
+
+    /// Prepare the slot for the next step; panics if the preallocated capacity
+    /// (from `FullTracerConfig::max_step_shard`) is exceeded.
+    #[inline(always)]
+    fn reset_pending_slot(&mut self) {
+        if self.pending_index >= self.records.len() {
+            if cfg!(debug_assertions) {
+                // Allow unit/integration tests (which always build with debug assertions)
+                // to auto-grow so they don't have to plumb accurate shard sizes.
+                self.records.push(StepRecord::default());
+            } else {
+                panic!(
+                    "FullTracer step buffer exhausted: recorded {} steps with capacity {}",
+                    self.pending_index,
+                    self.records.len()
+                );
+            }
         }
+        self.records[self.pending_index] = StepRecord {
+            cycle: self.pending_cycle,
+            ..StepRecord::default()
+        };
+    }
+
+    pub fn reset_step_buffer(&mut self) {
+        self.len = 0;
+        self.pending_index = 0;
+        self.reset_pending_slot();
+    }
+
+    pub fn recorded_steps(&self) -> &[StepRecord] {
+        &self.records[..self.len]
+    }
+
+    #[inline(always)]
+    pub fn step_record(&self, index: StepIndex) -> &StepRecord {
+        assert!(
+            index < self.len,
+            "step index {index} out of bounds {}",
+            self.len
+        );
+        &self.records[index]
     }
 
     /// Return the completed step and advance to the next cycle.
     #[inline(always)]
-    pub fn advance(&mut self) -> StepRecord {
-        let next_cycle = self.record.cycle + Self::SUBCYCLES_PER_INSN;
-        mem::replace(
-            &mut self.record,
-            StepRecord {
-                cycle: next_cycle,
-                ..StepRecord::default()
-            },
-        )
+    pub fn advance(&mut self) -> StepIndex {
+        let idx = self.pending_index;
+        let next_cycle = self.records[self.pending_index].cycle + Self::SUBCYCLES_PER_INSN;
+        self.len = idx + 1;
+        self.pending_cycle = next_cycle;
+        self.pending_index += 1;
+        self.reset_pending_slot();
+        idx
     }
 
     #[inline(always)]
     pub fn store_pc(&mut self, pc: ByteAddr) {
-        self.record.pc.after = pc;
+        self.records[self.pending_index].pc.after = pc;
     }
 
     #[inline(always)]
     pub fn fetch(&mut self, pc: WordAddr, value: Instruction) {
-        self.record.pc.before = pc.baddr();
-        self.record.insn = value;
+        let record = &mut self.records[self.pending_index];
+        record.pc.before = pc.baddr();
+        record.insn = value;
     }
 
     #[inline(always)]
     pub fn track_mmu_maxtouch_before(&mut self) {
-        self.record.heap_maxtouch_addr.before = self.max_heap_addr_access;
-        self.record.hint_maxtouch_addr.before = self.max_hint_addr_access;
+        let heap_access = self.max_heap_addr_access;
+        let hint_access = self.max_hint_addr_access;
+        let record = &mut self.records[self.pending_index];
+        record.heap_maxtouch_addr.before = heap_access;
+        record.hint_maxtouch_addr.before = hint_access;
     }
 
     #[inline(always)]
     pub fn track_mmu_maxtouch_after(&mut self) {
-        self.record.heap_maxtouch_addr.after = self.max_heap_addr_access;
-        self.record.hint_maxtouch_addr.after = self.max_hint_addr_access;
+        let heap_access = self.max_heap_addr_access;
+        let hint_access = self.max_hint_addr_access;
+        let record = &mut self.records[self.pending_index];
+        record.heap_maxtouch_addr.after = heap_access;
+        record.hint_maxtouch_addr.after = hint_access;
     }
 
     #[inline(always)]
     pub fn load_register(&mut self, idx: RegIdx, value: Word) {
         let addr = Platform::register_vma(idx).into();
-
-        match (&self.record.rs1, &self.record.rs2) {
+        match (
+            self.records[self.pending_index].rs1.as_ref(),
+            self.records[self.pending_index].rs2.as_ref(),
+        ) {
             (None, None) => {
-                self.record.rs1 = Some(ReadOp {
+                self.records[self.pending_index].rs1 = Some(ReadOp {
                     addr,
                     value,
                     previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS1),
                 });
             }
             (Some(_), None) => {
-                self.record.rs2 = Some(ReadOp {
+                self.records[self.pending_index].rs2 = Some(ReadOp {
                     addr,
                     value,
                     previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS2),
@@ -753,15 +846,16 @@ impl FullTracer {
 
     #[inline(always)]
     pub fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
-        if self.record.rd.is_some() {
+        if self.records[self.pending_index].rd.is_some() {
             unimplemented!("Only one register write is supported");
         }
 
         let addr = Platform::register_vma(idx).into();
-        self.record.rd = Some(WriteOp {
+        let previous_cycle = self.track_access(addr, Self::SUBCYCLE_RD);
+        self.records[self.pending_index].rd = Some(WriteOp {
             addr,
             value,
-            previous_cycle: self.track_access(addr, Self::SUBCYCLE_RD),
+            previous_cycle,
         });
     }
 
@@ -772,45 +866,40 @@ impl FullTracer {
 
     #[inline(always)]
     pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
-        if self.record.memory_op.is_some() {
+        if self.records[self.pending_index].memory_op.is_some() {
             unimplemented!("Only one memory access is supported");
         }
 
-        // update min/max mmio access
+        // Update the tracked min/max MMIO bounds so later phases only materialize
+        // the actually touched address range for heap / hint regions.
         if let Some((start_addr, (_, end_addr, min_addr, max_addr))) = self
             .mmio_min_max_access
             .as_mut()
-            // find the MMIO region whose start address is less than or equal to the target address
             .and_then(|mmio_max_access| mmio_max_access.range_mut(..=addr).next_back())
+            && addr < *end_addr
         {
-            // skip if the target address is not within the range tracked by this MMIO region
-            // this condition ensures the address is within the MMIO region's end address
-            if addr < *end_addr {
-                // expand the max bound if the address exceeds the current max
-                if addr >= *max_addr {
-                    *max_addr = addr + WordAddr::from(WORD_SIZE as u32); // end is exclusive
+            if addr >= *max_addr {
+                *max_addr = addr + WordAddr::from(WORD_SIZE as u32);
+            }
+            if addr < *min_addr {
+                *min_addr = addr;
+            }
+            if start_addr.baddr().0 == self.platform.heap.start {
+                let access_end = addr + WordAddr::from(WORD_SIZE as u32);
+                let access_end_baddr = access_end.baddr();
+                if access_end_baddr > self.max_heap_addr_access {
+                    self.max_heap_addr_access = access_end_baddr;
                 }
-                // shrink the min bound if the address is below the current min
-                if addr < *min_addr {
-                    *min_addr = addr; // start is inclusive
-                }
-                if start_addr.baddr().0 == self.platform.heap.start {
-                    let access_end = addr + WordAddr::from(WORD_SIZE as u32);
-                    let access_end_baddr = access_end.baddr();
-                    if access_end_baddr > self.max_heap_addr_access {
-                        self.max_heap_addr_access = access_end_baddr;
-                    }
-                } else if start_addr.baddr().0 == self.platform.hints.start {
-                    let access_end = addr + WordAddr::from(WORD_SIZE as u32);
-                    let access_end_baddr = access_end.baddr();
-                    if access_end_baddr > self.max_hint_addr_access {
-                        self.max_hint_addr_access = access_end_baddr;
-                    }
+            } else if start_addr.baddr().0 == self.platform.hints.start {
+                let access_end = addr + WordAddr::from(WORD_SIZE as u32);
+                let access_end_baddr = access_end.baddr();
+                if access_end_baddr > self.max_hint_addr_access {
+                    self.max_hint_addr_access = access_end_baddr;
                 }
             }
         }
 
-        self.record.memory_op = Some(WriteOp {
+        self.records[self.pending_index].memory_op = Some(WriteOp {
             addr,
             value,
             previous_cycle: self.track_access(addr, Self::SUBCYCLE_MEM),
@@ -820,18 +909,17 @@ impl FullTracer {
     #[inline(always)]
     pub fn track_syscall(&mut self, effects: SyscallEffects) {
         let witness = effects.finalize(self);
-
-        assert!(self.record.syscall.is_none(), "Only one syscall per step");
-        self.record.syscall = Some(witness);
+        let record = &mut self.records[self.pending_index];
+        assert!(record.syscall.is_none(), "Only one syscall per step");
+        record.syscall = Some(witness);
     }
 
-    /// - Return the cycle when an address was last accessed.
-    /// - Return 0 if this is the first access.
-    /// - Record the current instruction as the origin of the latest access.
-    /// - Accesses within the same instruction are distinguished by `subcycle ∈ [0, 3]`.
     #[inline(always)]
     pub fn track_access(&mut self, addr: WordAddr, subcycle: Cycle) -> Cycle {
-        let cur_cycle = self.record.cycle + subcycle;
+        // Returns the previous access cycle. Accesses within the same instruction
+        // are distinguished via `subcycle ∈ [0, 3]`; the first touch of an address
+        // yields `0`.
+        let cur_cycle = self.records[self.pending_index].cycle + subcycle;
         self.latest_accesses.track(addr, cur_cycle)
     }
 
@@ -839,21 +927,19 @@ impl FullTracer {
         &self.latest_accesses
     }
 
-    /// Return the cycle of the pending instruction (after the last completed step).
     pub fn cycle(&self) -> Cycle {
-        self.record.cycle
+        self.pending_cycle
     }
 
-    /// Return the number of instruction executed til this moment
-    /// minus 1 since cycle start from Self::SUBCYCLES_PER_INSN
+    /// Number of executed instructions so far (discounting the init slot that
+    /// starts at `SUBCYCLES_PER_INSN`).
     pub fn executed_insts(&self) -> usize {
-        (self.record.cycle / Self::SUBCYCLES_PER_INSN)
+        (self.pending_cycle / Self::SUBCYCLES_PER_INSN)
             .saturating_sub(1)
             .try_into()
             .unwrap()
     }
 
-    /// giving a start address, return (min, max) accessed address within section
     pub fn probe_min_max_address_by_start_addr(
         &self,
         start_addr: WordAddr,
@@ -1195,11 +1281,11 @@ impl Tracer for PreflightTracer {
 }
 
 impl Tracer for FullTracer {
-    type Record = StepRecord;
-    type Config = ();
+    type Record = StepIndex;
+    type Config = FullTracerConfig;
 
-    fn new(platform: &Platform, _config: Self::Config) -> Self {
-        FullTracer::new(platform)
+    fn new(platform: &Platform, config: Self::Config) -> Self {
+        FullTracer::new(platform, config)
     }
 
     #[inline(always)]
@@ -1209,7 +1295,7 @@ impl Tracer for FullTracer {
 
     #[inline(always)]
     fn is_busy_loop(&self, record: &Self::Record) -> bool {
-        record.is_busy_loop()
+        self.step_record(*record).is_busy_loop()
     }
 
     #[inline(always)]

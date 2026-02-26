@@ -47,8 +47,8 @@ use ceno_emul::{
     InsnKind::{self, *},
     KeccakSpec, LogPcCycleSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec,
     Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec, Secp256r1DoubleSpec,
-    Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepCellExtractor, StepRecord, SyscallSpec,
-    Uint256MulSpec, Word,
+    Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepCellExtractor, StepIndex, StepRecord,
+    SyscallSpec, Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
@@ -634,6 +634,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
         instrunction_dispatch_ctx: &mut InstructionDispatchCtx,
+        shard_steps: &[StepRecord],
         witness: &mut ZKVMWitnesses<E>,
     ) -> Result<(), ZKVMError> {
         instrunction_dispatch_ctx.trace_opcode_stats();
@@ -684,6 +685,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     cs,
                     shard_ctx,
                     &self.$config,
+                    shard_steps,
                     records,
                 )?;
             }};
@@ -698,6 +700,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     cs,
                     shard_ctx,
                     &self.$config,
+                    shard_steps,
                     records,
                 )?;
             }};
@@ -868,9 +871,9 @@ pub struct InstructionDispatchCtx {
     insn_to_record_buffer: Vec<Option<usize>>,
     type_to_record_buffer: HashMap<TypeId, usize>,
     insn_kinds: Vec<InsnKind>,
-    circuit_record_buffers: Vec<Vec<StepRecord>>,
-    fallback_record_buffers: Vec<Vec<StepRecord>>,
-    ecall_record_buffers: BTreeMap<u32, Vec<StepRecord>>,
+    circuit_record_buffers: Vec<Vec<StepIndex>>,
+    fallback_record_buffers: Vec<Vec<StepIndex>>,
+    ecall_record_buffers: BTreeMap<u32, Vec<StepIndex>>,
 }
 
 impl InstructionDispatchCtx {
@@ -894,7 +897,7 @@ impl InstructionDispatchCtx {
     }
 
     #[inline(always)]
-    pub fn ingest_step(&mut self, step: StepRecord) {
+    pub fn ingest_step(&mut self, step_idx: StepIndex, step: &StepRecord) {
         let kind = step.insn.kind;
         if kind == InsnKind::ECALL {
             let code = step
@@ -904,11 +907,11 @@ impl InstructionDispatchCtx {
             self.ecall_record_buffers
                 .entry(code)
                 .or_default()
-                .push(step);
+                .push(step_idx);
         } else if let Some(record_buffer_idx) = self.insn_to_record_buffer[kind as usize] {
-            self.circuit_record_buffers[record_buffer_idx].push(step);
+            self.circuit_record_buffers[record_buffer_idx].push(step_idx);
         } else {
-            self.fallback_record_buffers[kind as usize].push(step);
+            self.fallback_record_buffers[kind as usize].push(step_idx);
         }
     }
 
@@ -960,7 +963,7 @@ impl InstructionDispatchCtx {
 
     fn records_for_kinds<E: ExtensionField, I: Instruction<E> + 'static>(
         &self,
-    ) -> Option<&[StepRecord]> {
+    ) -> Option<&[StepIndex]> {
         let record_buffer_id = self
             .type_to_record_buffer
             .get(&TypeId::of::<I>())
@@ -970,7 +973,7 @@ impl InstructionDispatchCtx {
             .map(|records| records.as_slice())
     }
 
-    fn records_for_ecall_code(&self, code: u32) -> Option<&[StepRecord]> {
+    fn records_for_ecall_code(&self, code: u32) -> Option<&[StepIndex]> {
         self.ecall_record_buffers
             .get(&code)
             .map(|records| records.as_slice())
@@ -1007,6 +1010,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
         instrunction_dispatch_ctx: &InstructionDispatchCtx,
+        shard_steps: &[StepRecord],
         witness: &mut ZKVMWitnesses<E>,
     ) -> Result<(), ZKVMError> {
         let phantom_log_pc_cycle_records = instrunction_dispatch_ctx
@@ -1016,6 +1020,7 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
             cs,
             shard_ctx,
             &self.phantom_log_pc_cycle,
+            shard_steps,
             phantom_log_pc_cycle_records,
         )?;
         Ok(())

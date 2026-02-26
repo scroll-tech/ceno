@@ -1,6 +1,8 @@
 use std::{array, marker::PhantomData};
 
-use ceno_emul::{Change, InsnKind, Platform, SHA_EXTEND, StepRecord, WORD_SIZE, WriteOp};
+use ceno_emul::{
+    Change, InsnKind, Platform, SHA_EXTEND, StepIndex, StepRecord, WORD_SIZE, WriteOp,
+};
 use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
@@ -173,10 +175,11 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
         num_witin: usize,
         num_structural_witin: usize,
         steps: &[StepRecord],
+        step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
         let num_structural_witin = config.layout.n_structural_witin.max(num_structural_witin);
-        if steps.is_empty() {
+        if step_indices.is_empty() {
             return Ok((
                 [
                     RowMajorMatrix::new(0, num_witin, InstancePaddingStrategy::Default),
@@ -186,7 +189,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
             ));
         }
 
-        let num_instances = steps.len();
+        let num_instances = step_indices.len();
         let nthreads = max_usable_threads();
         let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
 
@@ -205,15 +208,16 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
         let shard_ctx_vec = shard_ctx.get_forked();
 
         raw_witin_iter
-            .zip_eq(steps.par_chunks(num_instance_per_batch))
+            .zip_eq(step_indices.par_chunks(num_instance_per_batch))
             .zip(shard_ctx_vec)
-            .flat_map(|((instances, steps), mut shard_ctx)| {
+            .flat_map(|((instances, indices), mut shard_ctx)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
 
                 instances
                     .chunks_mut(num_witin)
-                    .zip_eq(steps)
-                    .map(|(instance, step)| {
+                    .zip_eq(indices.iter().copied())
+                    .map(|(instance, idx)| {
+                        let step = &steps[idx];
                         let ops = step.syscall().expect("syscall step");
 
                         // vm_state
@@ -277,9 +281,10 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
             })
             .collect::<Result<(), ZKVMError>>()?;
 
-        let instances = steps
+        let instances = step_indices
             .iter()
-            .map(|step| -> ShaExtendInstance {
+            .map(|&idx| -> ShaExtendInstance {
+                let step = &steps[idx];
                 let ops = step.syscall().expect("syscall step");
                 let w_i_minus_2 = ops.mem_ops[0].value.before;
                 let w_i_minus_7 = ops.mem_ops[1].value.before;
