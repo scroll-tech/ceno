@@ -269,7 +269,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.set(&input_ctx, 7, Usize::from(1));
         let n_v = builder.get(&num_variables, 0);
         builder.set(&input_ctx, 8, n_v);
-        builder.set(&input_ctx, 9, Usize::from(0));
+        builder.set(&input_ctx, 9, Usize::from(1));
 
         let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
         builder.set(&challenges, 0, alpha);
@@ -314,6 +314,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.set(&challenges, 0, new_alpha);
         builder.set(&challenges, 1, c1);
         builder.set(&challenges, 2, c2);
+        builder.set(&input_ctx, 9, Usize::from(0));
 
         builder.sumcheck_layer_eval(
             &input_ctx,
