@@ -208,6 +208,7 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
 
 /// Standalone function for prove_main_constraints that doesn't require &self
 /// This allows it to be called from parallel threads without Send/Sync bounds on GpuProver
+#[allow(clippy::type_complexity)]
 #[tracing::instrument(
     skip_all,
     name = "prove_main_constraints_impl",
@@ -784,7 +785,6 @@ where
     result
 }
 
-#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,

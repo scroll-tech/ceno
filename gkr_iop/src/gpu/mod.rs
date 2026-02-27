@@ -62,22 +62,10 @@ pub mod gpu_prover {
         Lazy::new(|| {
             let device_id: usize = get_ceno_gpu_device_id(0);
             CudaHalBB31::new(device_id)
-                .map(|hal| Arc::new(hal))
+                .map(Arc::new)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         });
 
-    // pub fn get_cuda_hal() -> Result<MutexGuard<'static, CudaHalBB31>, String> {
-    //     let hal_arc = CUDA_HAL
-    //         .as_ref()
-    //         .map_err(|e| format!("HAL not available: {:?}", e))?;
-    //     let hal = hal_arc
-    //         .lock()
-    //         .map_err(|e| format!("Failed to lock HAL: {:?}", e))?;
-    //     hal.inner()
-    //         .synchronize()
-    //         .map_err(|e| format!("Failed to sync: {:?}", e))?;
-    //     Ok(hal)
-    // }
     pub fn get_cuda_hal() -> Result<Arc<CudaHalBB31>, String> {
         CUDA_HAL
             .as_ref()
@@ -92,7 +80,7 @@ pub use gpu_prover::*;
 use std::cell::RefCell;
 
 thread_local! {
-    static THREAD_CUDA_STREAM: RefCell<Option<Arc<CudaStream>>> = RefCell::new(None);
+    static THREAD_CUDA_STREAM: RefCell<Option<Arc<CudaStream>>> = const { RefCell::new(None) };
 }
 
 /// Bind a CUDA stream to the current thread for use by all GPU operations.

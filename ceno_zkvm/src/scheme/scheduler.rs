@@ -16,15 +16,17 @@ use crate::{
     structs::ProvingKey,
 };
 use ff_ext::ExtensionField;
-use gkr_iop::{error::BackendError, hal::ProverBackend};
+use gkr_iop::hal::ProverBackend;
 use mpcs::Point;
 use p3::field::FieldAlgebra;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex, OnceLock, mpsc},
-};
+use std::collections::HashMap;
 use transcript::Transcript;
 
+#[cfg(feature = "gpu")]
+use gkr_iop::error::BackendError;
+#[cfg(feature = "gpu")]
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
+#[cfg(feature = "gpu")]
 const CONCURRENT_PROVING_WORKERS: usize = 8;
 
 #[cfg(feature = "gpu")]
@@ -90,6 +92,7 @@ pub struct ChipTaskResult<E: ExtensionField> {
 }
 
 /// Message sent from worker to scheduler on task completion
+#[cfg(feature = "gpu")]
 struct CompletionMessage<E: ExtensionField> {
     /// The result of the proof
     result: Result<ChipTaskResult<E>, ZKVMError>,
@@ -113,6 +116,7 @@ fn get_cuda_pool() -> std::sync::Arc<ceno_gpu::common::mem_pool::CudaMemPool> {
 }
 
 /// Memory-aware parallel chip proof scheduler
+#[derive(Default)]
 pub struct ChipScheduler;
 
 impl ChipScheduler {
@@ -129,6 +133,7 @@ impl ChipScheduler {
     ///
     /// Handles transcript forking internally. Returns `(results, forked_samples)`
     /// both sorted by task_id.
+    #[allow(clippy::type_complexity)]
     pub fn execute<'a, PB, T, F>(
         &self,
         tasks: Vec<ChipTask<'a, PB>>,
@@ -165,6 +170,7 @@ impl ChipScheduler {
     /// Each task gets a transcript cloned from `parent_transcript` with `task_id`
     /// appended (identical to `ForkableTranscript::fork` default impl).
     /// Returns `(results, forked_samples)` both sorted by task_id.
+    #[allow(clippy::type_complexity)]
     pub(crate) fn execute_sequentially<'a, PB, T, F>(
         &self,
         tasks: Vec<ChipTask<'a, PB>>,
@@ -229,6 +235,7 @@ impl ChipScheduler {
     ///
     /// Returns `(results, forked_samples)` both sorted by task_id.
     #[cfg(feature = "gpu")]
+    #[allow(clippy::type_complexity)]
     fn execute_concurrently<'a, PB, T, F>(
         &self,
         mut tasks: Vec<ChipTask<'a, PB>>,
@@ -408,32 +415,32 @@ impl ChipScheduler {
                 }
 
                 // Launch the first pending task whose memory fits; otherwise fall through to wait.
-                if tasks_inflight < CONCURRENT_PROVING_WORKERS {
-                    if let Some(vec_idx) = pending.iter().position(|task| {
+                if tasks_inflight < CONCURRENT_PROVING_WORKERS
+                    && let Some(vec_idx) = pending.iter().position(|task| {
                         pool.try_book_capacity(task.estimated_memory_bytes)
                             .is_some()
-                    }) {
-                        let task = pending.remove(vec_idx);
-                        let booked_mem = task.estimated_memory_bytes;
-                        tracing::info!(
-                            "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
-                            task.circuit_name,
-                            booked_mem as f64 / (1024.0 * 1024.0),
-                            pool.get_booked_total() as f64 / (1024.0 * 1024.0)
-                        );
-                        tasks_inflight += 1;
-                        if task_tx.send(task).is_err() {
-                            pool.unbook_capacity(booked_mem);
-                            tasks_inflight -= 1;
-                            drop(task_tx);
-                            return Err(ZKVMError::BackendError(BackendError::CircuitError(
-                                "Worker channel closed: all workers have died"
-                                    .to_string()
-                                    .into_boxed_str(),
-                            )));
-                        }
-                        continue;
+                    })
+                {
+                    let task = pending.remove(vec_idx);
+                    let booked_mem = task.estimated_memory_bytes;
+                    tracing::info!(
+                        "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
+                        task.circuit_name,
+                        booked_mem as f64 / (1024.0 * 1024.0),
+                        pool.get_booked_total() as f64 / (1024.0 * 1024.0)
+                    );
+                    tasks_inflight += 1;
+                    if task_tx.send(task).is_err() {
+                        pool.unbook_capacity(booked_mem);
+                        tasks_inflight -= 1;
+                        drop(task_tx);
+                        return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                            "Worker channel closed: all workers have died"
+                                .to_string()
+                                .into_boxed_str(),
+                        )));
                     }
+                    continue;
                 }
 
                 // No task launched: either nothing fits (so wait) or we are deadlocked.

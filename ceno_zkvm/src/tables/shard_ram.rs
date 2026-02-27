@@ -666,8 +666,10 @@ mod tests {
         tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
     };
     #[cfg(feature = "gpu")]
-    use gkr_iop::gpu::{MultilinearExtensionGpu, get_cuda_hal};
-    use gkr_iop::hal::MultilinearPolynomial;
+    use gkr_iop::{
+        gpu::{MultilinearExtensionGpu, get_cuda_hal},
+        hal::MultilinearPolynomial,
+    };
     use multilinear_extensions::mle::IntoMLE;
     use p3::field::PrimeField32;
 

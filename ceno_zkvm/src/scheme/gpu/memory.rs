@@ -35,10 +35,8 @@ fn get_has_trace_cached() -> bool {
 
 #[cfg(feature = "gpu")]
 pub fn get_mem_tracking_mode() -> bool {
-    *MEM_TRACKING_MODE.get_or_init(|| match std::env::var("CENO_GPU_MEM_TRACKING").as_deref() {
-        Ok("1") => true,
-        _ => false,
-    })
+    *MEM_TRACKING_MODE
+        .get_or_init(|| matches!(std::env::var("CENO_GPU_MEM_TRACKING").as_deref(), Ok("1")))
 }
 
 #[cfg(feature = "gpu")]
@@ -344,6 +342,7 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 /// Returns `(resident_witness_bytes, temporary_bytes)`:
 /// - `resident`: poly copies that remain as witness MLEs after extraction
 /// - `temporary`: temp_buffer allocation (2x), freed after extraction
+///
 /// Returns `(0, 0)` when trace is cached (default), because get_trace creates views without allocation.
 pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize) -> (usize, usize) {
     if get_has_trace_cached() {

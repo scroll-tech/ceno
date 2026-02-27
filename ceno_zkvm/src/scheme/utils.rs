@@ -36,11 +36,14 @@ use witness::next_pow2_instance_padding;
 /// mutated) while the `SyncRef` is alive. This is typically the case when the
 /// reference points to data that is immutable for the duration of a
 /// `std::thread::scope` block.
+#[cfg(feature = "gpu")]
 pub(crate) struct SyncRef<'a, T>(pub(crate) &'a T);
 
 // SAFETY: T is only accessed via a shared reference which is read-only.
 // The T: Sync bound ensures &T is safe to share across threads (required for &T: Send).
+#[cfg(feature = "gpu")]
 unsafe impl<T: Sync> Send for SyncRef<'_, T> {}
+#[cfg(feature = "gpu")]
 unsafe impl<T: Sync> Sync for SyncRef<'_, T> {}
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector

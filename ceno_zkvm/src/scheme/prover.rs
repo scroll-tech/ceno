@@ -41,8 +41,10 @@ use crate::{
         hal::{DeviceProvingKey, ProofInput},
         utils::build_main_witness,
     },
-    structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
+    structs::{TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
+#[cfg(feature = "gpu")]
+use crate::structs::ProvingKey;
 
 type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
 
@@ -580,14 +582,14 @@ impl<
 
         let mut tasks: Vec<ChipTask<'_, PB>> = Vec::new();
         let mut task_id = 0usize;
-        let mut circuit_enum_idx = 0usize;
 
-        for ((circuit_name, num_instances), structural_rmm) in name_and_instances
-            .into_iter()
-            .zip_eq(structural_rmms.into_iter())
+        for (circuit_enum_idx, ((circuit_name, num_instances), structural_rmm)) in
+            name_and_instances
+                .into_iter()
+                .zip_eq(structural_rmms.into_iter())
+                .enumerate()
         {
             let this_idx = circuit_enum_idx;
-            circuit_enum_idx += 1;
 
             let circuit_idx = self
                 .pk
@@ -709,6 +711,7 @@ impl<
     }
 
     /// Phase 3: Collect chip proof results into proof components.
+    #[allow(clippy::type_complexity)]
     fn collect_chip_results(
         results: Vec<ChipTaskResult<E>>,
     ) -> (
@@ -756,6 +759,7 @@ impl<
 /// Uses the _impl functions directly, avoiding Send/Sync requirements on ZKVMProver.
 /// This enables parallel execution in the scheduler without capturing &self.
 #[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all, name = "create_chip_proof_gpu_impl", fields(table_name=name, profiling_2), level = "trace")]
 pub fn create_chip_proof_gpu_impl<'a, E, PCS>(
     name: &str,
