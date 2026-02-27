@@ -342,19 +342,45 @@ impl ChipScheduler {
                         let memory = task.estimated_memory_bytes;
                         let task_id = task.task_id;
 
-                        // Fork locally: clone parent transcript + append task_id
-                        // (identical to ForkableTranscript::fork default impl)
-                        let mut local_transcript = tr.0.clone();
-                        local_transcript.append_field_element(
-                            &<PB::E as ExtensionField>::BaseField::from_canonical_u64(
-                                task_id as u64,
-                            ),
-                        );
+                        // Catch panics so a single worker crash doesn't deadlock
+                        // the scheduler (which would block forever on done_rx.recv()
+                        // waiting for a CompletionMessage that never arrives).
+                        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            // Fork locally: clone parent transcript + append task_id
+                            // (identical to ForkableTranscript::fork default impl)
+                            let mut local_transcript = tr.0.clone();
+                            local_transcript.append_field_element(
+                                &<PB::E as ExtensionField>::BaseField::from_canonical_u64(
+                                    task_id as u64,
+                                ),
+                            );
 
-                        let result = execute_fn(task, &mut local_transcript);
+                            let result = execute_fn(task, &mut local_transcript);
 
-                        // Sample from the forked transcript for gather phase
-                        let forked_sample = local_transcript.sample_vec(1)[0];
+                            // Sample from the forked transcript for gather phase
+                            let forked_sample = local_transcript.sample_vec(1)[0];
+                            (result, forked_sample)
+                        }));
+
+                        let (result, forked_sample) = match outcome {
+                            Ok((r, s)) => (r, s),
+                            Err(panic_info) => {
+                                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                                    format!("Worker panicked on task {task_id}: {s}")
+                                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                                    format!("Worker panicked on task {task_id}: {s}")
+                                } else {
+                                    format!("Worker panicked on task {task_id}")
+                                };
+                                tracing::error!("{}", msg);
+                                (
+                                    Err(ZKVMError::BackendError(BackendError::CircuitError(
+                                        msg.into_boxed_str(),
+                                    ))),
+                                    PB::E::ZERO,
+                                )
+                            }
+                        };
 
                         let _ = tx.send(CompletionMessage {
                             result,
@@ -362,7 +388,6 @@ impl ChipScheduler {
                             task_id,
                             forked_sample,
                         });
-                        // local_transcript dropped here — never sent across threads
                     }
                 });
             }
