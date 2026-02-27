@@ -13,7 +13,7 @@ use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{mle::MultilinearExtension, util::ceil_log2};
 use std::{collections::BTreeMap, sync::Arc};
 use sumcheck::structs::IOPProverMessage;
-use transcript::{BasicTranscript, Transcript};
+use transcript::Transcript;
 use witness::next_pow2_instance_padding;
 
 pub trait ProverDevice<PB>:

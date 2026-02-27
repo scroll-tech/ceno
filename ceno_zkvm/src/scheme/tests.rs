@@ -195,7 +195,7 @@ fn test_rw_lk_expression_combination() {
                     .iter()
                     .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
                     .collect_vec(),
-                structural_in = structural_wits_in
+                structural_wits_in
                     .iter()
                     .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
                     .collect_vec(),

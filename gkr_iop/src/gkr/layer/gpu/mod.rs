@@ -1,5 +1,4 @@
 use crate::{
-    cpu::{CpuBackend, CpuProver},
     gkr::{
         booleanhypercube::BooleanHypercube,
         layer::{
@@ -16,14 +15,13 @@ use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     Expression,
-    mle::{MultilinearExtension, Point},
+    mle::Point,
     monomial::Term,
 };
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-use std::sync::Arc;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProof,
@@ -51,24 +49,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Gp
     for GpuProver<GpuBackend<E, PCS>>
 {
     fn prove(
-        layer: &Layer<E>,
-        wit: LayerWitness<GpuBackend<E, PCS>>,
-        out_point: &multilinear_extensions::mle::Point<E>,
-        transcript: &mut impl transcript::Transcript<E>,
+        _layer: &Layer<E>,
+        _wit: LayerWitness<GpuBackend<E, PCS>>,
+        _out_point: &multilinear_extensions::mle::Point<E>,
+        _transcript: &mut impl transcript::Transcript<E>,
     ) -> crate::gkr::layer::sumcheck_layer::LayerProof<E> {
         panic!("LinearLayerProver is not implemented for GPU");
-        let span = entered_span!("LinearLayerProver", profiling_2 = true);
-        let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit
-            .0
-            .into_iter()
-            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
-            .collect();
-        let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
-        let res = <CpuProver<CpuBackend<E, PCS>> as LinearLayerProver<CpuBackend<E, PCS>>>::prove(
-            layer, cpu_wit, out_point, transcript,
-        );
-        exit_span!(span);
-        res
     }
 }
 
@@ -76,31 +62,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
     for GpuProver<GpuBackend<E, PCS>>
 {
     fn prove(
-        layer: &Layer<E>,
-        num_threads: usize,
-        max_num_variables: usize,
-        wit: LayerWitness<'_, GpuBackend<E, PCS>>,
-        challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
-        transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
+        _layer: &Layer<E>,
+        _num_threads: usize,
+        _max_num_variables: usize,
+        _wit: LayerWitness<'_, GpuBackend<E, PCS>>,
+        _challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
+        _transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E> {
         panic!("SumcheckLayerProver is not implemented for GPU");
-        let span = entered_span!("SumcheckLayerProver", profiling_2 = true);
-        let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit
-            .0
-            .into_iter()
-            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
-            .collect();
-        let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
-        let res = <CpuProver<CpuBackend<E, PCS>> as SumcheckLayerProver<CpuBackend<E, PCS>>>::prove(
-            layer,
-            num_threads,
-            max_num_variables,
-            cpu_wit,
-            challenges,
-            transcript,
-        );
-        exit_span!(span);
-        res
     }
 }
 

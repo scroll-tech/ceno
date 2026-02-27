@@ -14,7 +14,7 @@ use multilinear_extensions::{
 };
 use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{iter, rc::Rc, sync::Arc};
+use std::{iter, sync::Arc};
 use witness::RowMajorMatrix;
 
 pub struct CpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {

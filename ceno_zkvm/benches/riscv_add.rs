@@ -3,7 +3,10 @@ use std::time::Duration;
 use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
-    scheme::{create_backend, create_prover, hal::ProofInput, prover::ZKVMProver},
+    scheme::{
+        create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
+        scheduler::ChipTask,
+    },
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };
 mod alloc;
@@ -115,14 +118,21 @@ fn bench_add(c: &mut Criterion) {
                             num_instances: vec![num_instances],
                             has_ecc_ops: false,
                         };
+                        let task = ChipTask {
+                            task_id: 0,
+                            circuit_name: AddInstruction::<E>::name(),
+                            circuit_idx: 0,
+                            pk: circuit_pk,
+                            input,
+                            estimated_memory_bytes: 0,
+                            has_witness_or_fixed: true,
+                            challenges,
+                            witness_trace_idx: None,
+                            num_witin: 0,
+                            structural_rmm: None,
+                        };
                         let _ = prover
-                            .create_chip_proof(
-                                "ADD",
-                                circuit_pk,
-                                input,
-                                &mut transcript,
-                                &challenges,
-                            )
+                            .create_chip_proof(&task, &mut transcript)
                             .expect("create_proof failed");
                         let elapsed = instant.elapsed();
                         println!(
