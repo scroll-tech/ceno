@@ -314,7 +314,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.set(&challenges, 0, new_alpha);
         builder.set(&challenges, 1, c1);
         builder.set(&challenges, 2, c2);
-        builder.set(&input_ctx, 9, Usize::from(0));
+        // builder.set(&input_ctx, 9, Usize::from(0));
 
         builder.sumcheck_layer_eval(
             &input_ctx,
