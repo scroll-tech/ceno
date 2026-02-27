@@ -380,8 +380,7 @@ pub fn build_main_witness<
     #[cfg(feature = "gpu")]
     let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
     #[cfg(feature = "gpu")]
-    let gpu_mem_tracker =
-        crate::scheme::gpu::start_gpu_mem_tracking(&cuda_hal, "build_main_witness");
+    let gpu_mem_tracker = crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "build_main_witness");
 
     let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
         gkr_circuit,

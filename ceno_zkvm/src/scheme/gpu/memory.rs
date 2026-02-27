@@ -18,29 +18,24 @@ use std::sync::OnceLock;
 
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
-#[cfg(feature = "gpu")]
 static MEM_TRACKING_MODE: OnceLock<bool> = OnceLock::new();
 
-#[cfg(feature = "gpu")]
-static HAS_TRACE_CACHED: OnceLock<bool> = OnceLock::new();
+static TRACE_CACHE_LEVEL: OnceLock<bool> = OnceLock::new();
 
-#[cfg(feature = "gpu")]
-fn get_has_trace_cached() -> bool {
-    *HAS_TRACE_CACHED.get_or_init(|| {
+fn get_trace_cached_stats() -> bool {
+    *TRACE_CACHE_LEVEL.get_or_init(|| {
         let cache_level =
             std::env::var("CENO_GPU_CACHE_LEVEL").unwrap_or_else(|_| "full".to_string());
         matches!(cache_level.as_str(), "2" | "full" | "1" | "trace")
     })
 }
 
-#[cfg(feature = "gpu")]
 pub fn get_mem_tracking_mode() -> bool {
     *MEM_TRACKING_MODE
         .get_or_init(|| matches!(std::env::var("CENO_GPU_MEM_TRACKING").as_deref(), Ok("1")))
 }
 
-#[cfg(feature = "gpu")]
-pub fn start_gpu_mem_tracking<'a>(
+pub fn init_gpu_mem_tracker<'a>(
     cuda_hal: &'a CudaHalBB31,
     label: &'static str,
 ) -> Option<MemTracker<'a>> {
@@ -59,13 +54,12 @@ const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 5 * 1024 * 1024; // reserved headr
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
 /// - Over-estimate (estimated > actual): diff must be <= `ESTIMATION_SAFETY_MARGIN_BYTES`
-#[cfg(feature = "gpu")]
 pub fn check_gpu_mem_estimation(mem_tracker: Option<MemTracker>, estimated_bytes: usize) {
     // `mem_tracker will` be Some only in sequential mode with mem tracking enabled, so if it's None, do nothing
     if let Some(mem_tracker) = mem_tracker {
         const ONE_MB: usize = 1024 * 1024;
         let label = mem_tracker.name();
-        let mem_stats = mem_tracker.end();
+        let mem_stats = mem_tracker.finish();
         let actual_bytes = mem_stats.mem_occupancy as usize;
         let diff = estimated_bytes as isize - actual_bytes as isize;
         let to_mb = |b: usize| b as f64 / ONE_MB as f64;
@@ -345,7 +339,7 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 ///
 /// Returns `(0, 0)` when trace is cached (default), because get_trace creates views without allocation.
 pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize) -> (usize, usize) {
-    if get_has_trace_cached() {
+    if get_trace_cached_stats() {
         (0, 0)
     } else {
         let base_elem_size = std::mem::size_of::<BB31Base>();

@@ -55,7 +55,7 @@ mod memory;
 mod util;
 pub use memory::{
     check_gpu_mem_estimation, estimate_chip_proof_memory, estimate_main_witness_bytes,
-    start_gpu_mem_tracking,
+    init_gpu_mem_tracker,
 };
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
@@ -671,7 +671,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 }
 
                 let cuda_hal = get_cuda_hal().unwrap();
-                let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "extract_witness_mles");
+                let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "extract_witness_mles");
 
                 let poly_group = cuda_hal
                     .basefold
@@ -729,7 +729,7 @@ where
 
     let stream = gkr_iop::gpu::get_thread_stream();
     let cuda_hal = get_cuda_hal().unwrap();
-    let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "extract_witness_mles_for_trace");
+    let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "extract_witness_mles_for_trace");
 
     let poly_group = cuda_hal
         .basefold
@@ -772,7 +772,7 @@ where
     let cuda_hal = get_cuda_hal().unwrap();
     let structural_mles = structural_rmm.to_mles();
 
-    let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "transport_structural_witness_to_gpu");
+    let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "transport_structural_witness_to_gpu");
 
     let result = structural_mles
         .iter()
@@ -1093,7 +1093,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         'b: 'c,
     {
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-        let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "prove_tower_relation");
+        let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "prove_tower_relation");
 
         let res = prove_tower_relation_impl::<E, PCS>(
             composed_cs,
@@ -1139,7 +1139,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         ZKVMError,
     > {
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-        let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "prove_main_constraints");
+        let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "prove_main_constraints");
 
         let res = prove_main_constraints_impl::<E, PCS>(
             rt_tower,
@@ -1170,7 +1170,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBa
         // n = num_vars of the ecc quark sumcheck (xs[0].num_vars - 1)
         let n = xs[0].mle.num_vars() - 1;
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-        let gpu_mem_tracker = start_gpu_mem_tracking(&cuda_hal, "prove_ec_sum_quark");
+        let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "prove_ec_sum_quark");
 
         let res = prove_ec_sum_quark_impl::<E, PCS>(num_instances, xs, ys, invs, transcript);
 
