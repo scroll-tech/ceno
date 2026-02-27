@@ -693,6 +693,7 @@ pub fn verify_proofs(
 
         let fri_params = standard_fri_params_with_100_bits_conjectured_security(1);
         let vb = NativeBuilder::default();
+
         air_test_impl::<BabyBearPoseidon2Engine, _>(
             fri_params,
             vb,
@@ -703,6 +704,13 @@ pub fn verify_proofs(
             true,
         )
         .unwrap();
+
+        // _debug
+        // let engine = BabyBearPoseidon2Engine::new(fri_params);
+        // let (mut vm, pk) = VirtualMachine::new_with_keygen(engine, vb, config).expect("create vm");
+        // let vk = pk.get_vk();
+        // vm.verify(&vk, &proofs)
+        //     .expect("segment proofs should verify");
     }
 }
 
