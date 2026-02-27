@@ -446,7 +446,21 @@ impl ChipScheduler {
 
                 // No task launched: either nothing fits (so wait) or we are deadlocked.
                 if tasks_inflight == 0 {
-                    tracing::error!("Deadlock: Remaining tasks are too big for the memory pool!");
+                    tracing::error!(
+                        "Deadlock: {} remaining tasks are too big for the memory pool \
+                         (pool_booked={:.2}MB):",
+                        pending.len(),
+                        pool.get_booked_total() as f64 / (1024.0 * 1024.0),
+                    );
+                    for (i, task) in pending.iter().enumerate() {
+                        tracing::error!(
+                            "  task[{}]: id={}, circuit={}, estimated_mem={:.2}MB",
+                            i,
+                            task.task_id,
+                            task.circuit_name,
+                            task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                        );
+                    }
                     return Err(ZKVMError::BackendError(BackendError::CircuitError(
                         "Deadlock: Remaining tasks are too big for the memory pool!"
                             .to_string()
