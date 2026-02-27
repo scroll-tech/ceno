@@ -13,11 +13,7 @@ use either::Either;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::{
-    Expression,
-    mle::Point,
-    monomial::Term,
-};
+use multilinear_extensions::{Expression, mle::Point, monomial::Term};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,

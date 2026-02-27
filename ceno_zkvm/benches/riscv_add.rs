@@ -4,8 +4,7 @@ use ceno_zkvm::{
     self,
     instructions::{Instruction, riscv::arith::AddInstruction},
     scheme::{
-        create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
-        scheduler::ChipTask,
+        create_backend, create_prover, hal::ProofInput, prover::ZKVMProver, scheduler::ChipTask,
     },
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces},
 };

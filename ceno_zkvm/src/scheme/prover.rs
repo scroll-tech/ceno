@@ -34,6 +34,8 @@ use tracing::info_span;
 use transcript::{ForkableTranscript, Transcript};
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
+#[cfg(feature = "gpu")]
+use crate::structs::ProvingKey;
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
@@ -43,8 +45,6 @@ use crate::{
     },
     structs::{TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
-#[cfg(feature = "gpu")]
-use crate::structs::ProvingKey;
 
 type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
 

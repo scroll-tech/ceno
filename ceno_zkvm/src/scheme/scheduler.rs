@@ -352,22 +352,23 @@ impl ChipScheduler {
                         // Catch panics so a single worker crash doesn't deadlock
                         // the scheduler (which would block forever on done_rx.recv()
                         // waiting for a CompletionMessage that never arrives).
-                        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            // Fork locally: clone parent transcript + append task_id
-                            // (identical to ForkableTranscript::fork default impl)
-                            let mut local_transcript = tr.0.clone();
-                            local_transcript.append_field_element(
-                                &<PB::E as ExtensionField>::BaseField::from_canonical_u64(
-                                    task_id as u64,
-                                ),
-                            );
+                        let outcome =
+                            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                // Fork locally: clone parent transcript + append task_id
+                                // (identical to ForkableTranscript::fork default impl)
+                                let mut local_transcript = tr.0.clone();
+                                local_transcript.append_field_element(
+                                    &<PB::E as ExtensionField>::BaseField::from_canonical_u64(
+                                        task_id as u64,
+                                    ),
+                                );
 
-                            let result = execute_fn(task, &mut local_transcript);
+                                let result = execute_fn(task, &mut local_transcript);
 
-                            // Sample from the forked transcript for gather phase
-                            let forked_sample = local_transcript.sample_vec(1)[0];
-                            (result, forked_sample)
-                        }));
+                                // Sample from the forked transcript for gather phase
+                                let forked_sample = local_transcript.sample_vec(1)[0];
+                                (result, forked_sample)
+                            }));
 
                         let (result, forked_sample) = match outcome {
                             Ok((r, s)) => (r, s),
