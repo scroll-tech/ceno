@@ -24,11 +24,23 @@ pub trait ProverDevice<PB>:
     + DeviceTransporter<PB>
     + ProtocolWitnessGeneratorProver<PB>
     + EccQuarkProver<PB>
+    + ChipInputPreparer<PB>
 // + FixedMLEPadder<PB>
 where
     PB: ProverBackend,
 {
     fn get_pb(&self) -> &PB;
+}
+
+/// Prepare a chip task's input for proving.
+/// CPU: no-op (input already fully populated during task building).
+/// GPU: deferred witness extraction + structural witness transport.
+pub trait ChipInputPreparer<PB: ProverBackend> {
+    fn prepare_chip_input(
+        &self,
+        task: &mut crate::scheme::scheduler::ChipTask<'_, PB>,
+        pcs_data: &PB::PcsData,
+    );
 }
 
 // TODO: remove the lifetime bound

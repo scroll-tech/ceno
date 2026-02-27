@@ -195,7 +195,7 @@ fn test_rw_lk_expression_combination() {
                     .iter()
                     .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
                     .collect_vec(),
-                structural_in = structural_wits_in
+                structural_wits_in
                     .iter()
                     .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
                     .collect_vec(),
@@ -216,14 +216,21 @@ fn test_rw_lk_expression_combination() {
             num_instances: vec![num_instances],
             has_ecc_ops: false,
         };
+        let task = crate::scheme::scheduler::ChipTask {
+            task_id: 0,
+            circuit_name: name.clone(),
+            circuit_idx: 0,
+            pk: prover.pk.circuit_pks.get(&name).unwrap(),
+            input,
+            estimated_memory_bytes: 0,
+            has_witness_or_fixed: true,
+            challenges: prover_challenges,
+            witness_trace_idx: None,
+            num_witin: 0,
+            structural_rmm: None,
+        };
         let (proof, _, _) = prover
-            .create_chip_proof(
-                name.as_str(),
-                prover.pk.circuit_pks.get(&name).unwrap(),
-                input,
-                &mut transcript,
-                &prover_challenges,
-            )
+            .create_chip_proof(&task, &mut transcript)
             .expect("create_proof failed");
 
         // verify proof

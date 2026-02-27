@@ -10,7 +10,7 @@ use std::{
     fmt::{self, Debug},
     iter,
     ops::Div,
-    rc::Rc,
+    sync::Arc,
 };
 use sumcheck::structs::IOPProverMessage;
 
@@ -31,6 +31,7 @@ pub mod cpu;
 pub mod gpu;
 pub mod hal;
 pub mod prover;
+pub mod scheduler;
 pub mod septic_curve;
 pub mod utils;
 pub mod verifier;
@@ -342,13 +343,16 @@ fn byte_to_mb(byte_size: u64) -> f64 {
 pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     max_num_variables: usize,
     security_level: mpcs::SecurityLevel,
-) -> Rc<gkr_iop::cpu::CpuBackend<E, PCS>> {
-    gkr_iop::cpu::CpuBackend::<E, PCS>::new(max_num_variables, security_level).into()
+) -> Arc<gkr_iop::cpu::CpuBackend<E, PCS>> {
+    Arc::new(gkr_iop::cpu::CpuBackend::<E, PCS>::new(
+        max_num_variables,
+        security_level,
+    ))
 }
 
 #[cfg(not(feature = "gpu"))]
 pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-    backend: Rc<gkr_iop::cpu::CpuBackend<E, PCS>>,
+    backend: Arc<gkr_iop::cpu::CpuBackend<E, PCS>>,
 ) -> gkr_iop::cpu::CpuProver<gkr_iop::cpu::CpuBackend<E, PCS>> {
     gkr_iop::cpu::CpuProver::new(backend)
 }
@@ -357,13 +361,16 @@ pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 pub fn create_backend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     max_num_variables: usize,
     security_level: mpcs::SecurityLevel,
-) -> Rc<gkr_iop::gpu::GpuBackend<E, PCS>> {
-    gkr_iop::gpu::GpuBackend::<E, PCS>::new(max_num_variables, security_level).into()
+) -> Arc<gkr_iop::gpu::GpuBackend<E, PCS>> {
+    Arc::new(gkr_iop::gpu::GpuBackend::<E, PCS>::new(
+        max_num_variables,
+        security_level,
+    ))
 }
 
 #[cfg(feature = "gpu")]
 pub fn create_prover<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-    backend: Rc<gkr_iop::gpu::GpuBackend<E, PCS>>,
+    backend: Arc<gkr_iop::gpu::GpuBackend<E, PCS>>,
 ) -> gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>> {
     gkr_iop::gpu::GpuProver::new(backend)
 }

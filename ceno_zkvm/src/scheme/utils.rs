@@ -29,6 +29,23 @@ use rayon::{
 use std::{iter, sync::Arc};
 use witness::next_pow2_instance_padding;
 
+/// Wrapper that asserts a shared reference is safe to send across threads.
+///
+/// # Safety
+/// The caller must guarantee that the referenced data is only **read** (never
+/// mutated) while the `SyncRef` is alive. This is typically the case when the
+/// reference points to data that is immutable for the duration of a
+/// `std::thread::scope` block.
+#[cfg(feature = "gpu")]
+pub(crate) struct SyncRef<'a, T>(pub(crate) &'a T);
+
+// SAFETY: T is only accessed via a shared reference which is read-only.
+// The T: Sync bound ensures &T is safe to share across threads (required for &T: Send).
+#[cfg(feature = "gpu")]
+unsafe impl<T: Sync> Send for SyncRef<'_, T> {}
+#[cfg(feature = "gpu")]
+unsafe impl<T: Sync> Sync for SyncRef<'_, T> {}
+
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
 /// output [[1,3,5,7,0,0,0,0],[2,4,6,8,0,0,0,0]]
@@ -359,6 +376,12 @@ pub fn build_main_witness<
             .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
     );
 
+    // GPU memory estimation
+    #[cfg(feature = "gpu")]
+    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+    #[cfg(feature = "gpu")]
+    let gpu_mem_tracker = crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "build_main_witness");
+
     let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
         gkr_circuit,
         &input.witness,
@@ -368,6 +391,15 @@ pub fn build_main_witness<
         &input.pub_io_evals,
         challenges,
     );
+
+    // GPU memory check: validate estimation against actual usage
+    #[cfg(feature = "gpu")]
+    {
+        let estimated_bytes =
+            crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
+        crate::scheme::gpu::check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
+    }
+
     gkr_circuit_out.0.0
 }
 

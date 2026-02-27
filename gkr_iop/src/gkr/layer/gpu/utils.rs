@@ -124,6 +124,7 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
     selector_ctx: &SelectorContext,
     selector: &SelectorType<E>,
 ) -> MultilinearExtensionGpu<'static, E> {
+    let stream = crate::gpu::get_thread_stream();
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
         panic!("GPU backend only supports Goldilocks base field");
     }
@@ -155,19 +156,25 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
             &indices_u32,
             num_instances,
             sparse_num_var,
+            stream.as_ref(),
         )
         .unwrap();
         eq_buf
     } else {
         let point_gl64: &Point<BB31Ext> = unsafe { std::mem::transmute(point) };
-        let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len, false).unwrap();
-        let gpu_points = hal.alloc_ext_elems_from_host(point_gl64).unwrap();
+        let mut gpu_output = hal
+            .alloc_ext_elems_on_device(eq_len, false, stream.as_ref())
+            .unwrap();
+        let gpu_points = hal
+            .alloc_ext_elems_from_host(point_gl64, stream.as_ref())
+            .unwrap();
         build_mle_as_ceno::<CudaHalBB31, BB31Ext, BB31Base>(
             &hal.inner,
             &gpu_points,
             &mut gpu_output,
             selector_ctx.offset,
             num_instances,
+            stream.as_ref(),
         )
         .unwrap();
         GpuPolynomialExt::new(gpu_output, point.len())
@@ -185,6 +192,7 @@ pub fn build_eq_x_r_gpu<E: ExtensionField>(
     hal: &CudaHalBB31,
     point: &Point<E>,
 ) -> MultilinearExtensionGpu<'static, E> {
+    let stream = crate::gpu::get_thread_stream();
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
         panic!("GPU backend only supports Goldilocks base field");
     }
@@ -193,14 +201,19 @@ pub fn build_eq_x_r_gpu<E: ExtensionField>(
     // type eq
     let point_gl64: &Point<BB31Ext> = unsafe { std::mem::transmute(point) };
     let eq_mle = {
-        let mut gpu_output = hal.alloc_ext_elems_on_device(eq_len, false).unwrap();
-        let gpu_points = hal.alloc_ext_elems_from_host(point_gl64).unwrap();
+        let mut gpu_output = hal
+            .alloc_ext_elems_on_device(eq_len, false, stream.as_ref())
+            .unwrap();
+        let gpu_points = hal
+            .alloc_ext_elems_from_host(point_gl64, stream.as_ref())
+            .unwrap();
         build_mle_as_ceno::<CudaHalBB31, BB31Ext, BB31Base>(
             &hal.inner,
             &gpu_points,
             &mut gpu_output,
             0,
             eq_len,
+            stream.as_ref(),
         )
         .unwrap();
         GpuPolynomialExt::new(gpu_output, point.len())
@@ -221,6 +234,7 @@ pub fn build_rotation_mles_gpu<E: ExtensionField, PCS: PolynomialCommitmentSchem
     bh: &BooleanHypercube,
     rotation_cyclic_group_log2: usize,
 ) -> Vec<MultilinearExtensionGpu<'static, E>> {
+    let stream = crate::gpu::get_thread_stream();
     raw_rotation_exprs
         .iter()
         .map(|rotation_expr| match rotation_expr {
@@ -238,7 +252,7 @@ pub fn build_rotation_mles_gpu<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     _ => panic!("unimplemented input mle"),
                 };
                 let mut output_buf = cuda_hal
-                    .alloc_elems_on_device(input_buf.len(), false)
+                    .alloc_elems_on_device(input_buf.len(), false, stream.as_ref())
                     .unwrap();
 
                 // Safety: GPU buffers are actually 'static lifetime. We only read from input_buf
@@ -252,6 +266,7 @@ pub fn build_rotation_mles_gpu<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     input_buf_static,
                     &rotation_index,
                     cyclic_group_size,
+                    stream.as_ref(),
                 )
                 .unwrap();
                 let output_mle = MultilinearExtensionGpu::from_ceno_gpu_base(GpuPolynomial::new(
@@ -278,10 +293,11 @@ pub fn build_rotation_selector_gpu<E: ExtensionField, PCS: PolynomialCommitmentS
     rotation_cyclic_subgroup_size: usize,
     rotation_cyclic_group_log2: usize,
 ) -> MultilinearExtensionGpu<'static, E> {
+    let stream = crate::gpu::get_thread_stream();
     let total_len = wit[0].evaluations_len(); // Take first mle just to retrieve total length
     assert!(total_len.is_power_of_two());
     let mut output_buf = cuda_hal
-        .alloc_ext_elems_on_device(total_len, false)
+        .alloc_ext_elems_on_device(total_len, false, stream.as_ref())
         .unwrap();
 
     let eq = build_eq_x_r_gpu(cuda_hal, rt);
@@ -303,6 +319,7 @@ pub fn build_rotation_selector_gpu<E: ExtensionField, PCS: PolynomialCommitmentS
         &rotation_index,
         1 << rotation_cyclic_group_log2,
         rotation_cyclic_subgroup_size,
+        stream.as_ref(),
     )
     .unwrap();
     let output_mle = MultilinearExtensionGpu::from_ceno_gpu_ext(GpuPolynomialExt::new(
