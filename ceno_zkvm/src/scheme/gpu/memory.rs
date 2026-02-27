@@ -22,6 +22,18 @@ use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 static MEM_TRACKING_MODE: OnceLock<bool> = OnceLock::new();
 
 #[cfg(feature = "gpu")]
+static HAS_TRACE_CACHED: OnceLock<bool> = OnceLock::new();
+
+#[cfg(feature = "gpu")]
+fn get_has_trace_cached() -> bool {
+    *HAS_TRACE_CACHED.get_or_init(|| {
+        let cache_level =
+            std::env::var("CENO_GPU_CACHE_LEVEL").unwrap_or_else(|_| "full".to_string());
+        matches!(cache_level.as_str(), "2" | "full" | "1" | "trace")
+    })
+}
+
+#[cfg(feature = "gpu")]
 pub fn get_mem_tracking_mode() -> bool {
     *MEM_TRACKING_MODE.get_or_init(|| match std::env::var("CENO_GPU_MEM_TRACKING").as_deref() {
         Ok("1") => true,
@@ -334,10 +346,7 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 /// - `temporary`: temp_buffer allocation (2x), freed after extraction
 /// Returns `(0, 0)` when trace is cached (default), because get_trace creates views without allocation.
 pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize) -> (usize, usize) {
-    let cache_level = std::env::var("CENO_GPU_CACHE_LEVEL").unwrap_or_else(|_| "full".to_string());
-    let has_trace_cached = matches!(cache_level.as_str(), "2" | "full" | "1" | "trace");
-
-    if has_trace_cached {
+    if get_has_trace_cached() {
         (0, 0)
     } else {
         let base_elem_size = std::mem::size_of::<BB31Base>();

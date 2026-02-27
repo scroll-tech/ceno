@@ -39,8 +39,9 @@ use witness::next_pow2_instance_padding;
 pub(crate) struct SyncRef<'a, T>(pub(crate) &'a T);
 
 // SAFETY: T is only accessed via a shared reference which is read-only.
-unsafe impl<T> Send for SyncRef<'_, T> {}
-unsafe impl<T> Sync for SyncRef<'_, T> {}
+// The T: Sync bound ensures &T is safe to share across threads (required for &T: Send).
+unsafe impl<T: Sync> Send for SyncRef<'_, T> {}
+unsafe impl<T: Sync> Sync for SyncRef<'_, T> {}
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3

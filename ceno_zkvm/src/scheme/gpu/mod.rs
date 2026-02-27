@@ -130,9 +130,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
             extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
         exit_span!(span);
 
-        // transcript >>> BasicTranscript<E>
-        let basic_tr: &mut BasicTranscript<BB31Ext> =
-            unsafe { &mut *(transcript as *mut _ as *mut BasicTranscript<BB31Ext>) };
+        let basic_tr = expect_basic_transcript(transcript);
 
         let tower_input = ceno_gpu::TowerInput {
             prod_specs: prod_gpu,
@@ -816,7 +814,12 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
         input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
     let _chip_record_alpha = challenges[0];
 
-    // TODO: safety ?
+    // SAFETY: The `records` slice is borrowed for the duration of this function call.
+    // The lifetime is erased to 'static only to satisfy GPU API signatures that require
+    // 'static bounds. The actual data remains valid because:
+    // 1. `records` is an immutable borrow from the caller's scope
+    // 2. All derived slices (r_set_wit, w_set_wit, etc.) are consumed within this function
+    // 3. No reference with the 'static lifetime escapes this function
     let records = unsafe {
         std::mem::transmute::<
             &[ArcMultilinearExtensionGpu<'_, E>],

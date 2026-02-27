@@ -251,7 +251,7 @@ impl ChipScheduler {
             let task = tasks.remove(0);
             let mut fork = transcript.clone();
             fork.append_field_element(&<PB::E as ExtensionField>::BaseField::from_canonical_u64(
-                0u64,
+                task.task_id as u64,
             ));
             let result = execute_task(task, &mut fork)?;
             let sample = fork.sample_vec(1)[0];
@@ -414,14 +414,24 @@ impl ChipScheduler {
                             .is_some()
                     }) {
                         let task = pending.remove(vec_idx);
+                        let booked_mem = task.estimated_memory_bytes;
                         tracing::info!(
                             "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
                             task.circuit_name,
-                            task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                            booked_mem as f64 / (1024.0 * 1024.0),
                             pool.get_booked_total() as f64 / (1024.0 * 1024.0)
                         );
                         tasks_inflight += 1;
-                        task_tx.send(task).unwrap();
+                        if task_tx.send(task).is_err() {
+                            pool.unbook_capacity(booked_mem);
+                            tasks_inflight -= 1;
+                            drop(task_tx);
+                            return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                                "Worker channel closed: all workers have died"
+                                    .to_string()
+                                    .into_boxed_str(),
+                            )));
+                        }
                         continue;
                     }
                 }
@@ -453,7 +463,16 @@ impl ChipScheduler {
                             return Err(e);
                         }
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        if tasks_inflight > 0 {
+                            return Err(ZKVMError::BackendError(BackendError::CircuitError(
+                                "Completion channel closed with tasks still in-flight"
+                                    .to_string()
+                                    .into_boxed_str(),
+                            )));
+                        }
+                        break;
+                    }
                 }
             }
 

@@ -363,7 +363,13 @@ impl<
         {
             if ChipScheduler::is_concurrent_mode() {
                 // GPU concurrent: standalone function path (no &self needed for Send+Sync)
-                // SAFETY: When feature = "gpu", PB = GpuBackend<E, PCS>, so PcsData types match.
+                // Verify at runtime that PB is indeed GpuBackend<E, PCS> before transmuting.
+                assert_eq!(
+                    std::any::TypeId::of::<PB>(),
+                    std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>(),
+                    "Concurrent GPU path requires PB = GpuBackend<E, PCS>"
+                );
+                // SAFETY: TypeId check above guarantees PB = GpuBackend<E, PCS>, so PcsData types match.
                 let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData =
                     unsafe { std::mem::transmute(witness_data) };
 
@@ -377,7 +383,7 @@ impl<
                         task.circuit_idx as u64,
                     ));
 
-                    // SAFETY: When feature = "gpu", PB = GpuBackend<E, PCS> and the types are compatible.
+                    // SAFETY: TypeId check above (before closure) guarantees PB = GpuBackend<E, PCS>.
                     let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
                         unsafe { std::mem::transmute(task.input) };
 
@@ -646,9 +652,14 @@ impl<
                 num_instances: num_instances.clone(),
                 has_ecc_ops: cs.has_ecc_ops(),
             };
-            // SAFETY: All data in ProofInput is Arc-owned or cloned, and the underlying
-            // MultilinearPoly data is 'static (from DeviceProvingKey<'static, PB>).
-            // We erase the shorter inferred lifetime to satisfy 'static requirements.
+            // SAFETY: All Arcs in ProofInput contain 'static data:
+            // - GPU path: `witness` and `structural_witness` are empty vecs (deferred extraction),
+            //   `fixed` and `public_input` originate from `DeviceProvingKey<'static, PB>`.
+            // - CPU path: `witness_mle` may borrow non-'static data, but the CPU path always
+            //   uses sequential execution (never enters the concurrent scheduler), so the data
+            //   remains valid for the lifetime of `build_chip_tasks`'s caller.
+            // The inferred lifetime is shorter than 'static only because the compiler cannot
+            // prove the Arc contents are 'static across both cfg paths.
             let input = unsafe {
                 std::mem::transmute::<ProofInput<'_, PB>, ProofInput<'static, PB>>(input_temp)
             };
@@ -656,7 +667,12 @@ impl<
             // Estimate memory for this task
             #[cfg(feature = "gpu")]
             let estimated_memory = {
-                // SAFETY: When feature = "gpu", PB = GpuBackend<E, PCS>
+                // SAFETY: TypeId check in run_chip_proofs guarantees PB = GpuBackend<E, PCS>.
+                debug_assert_eq!(
+                    std::any::TypeId::of::<PB>(),
+                    std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>(),
+                    "GPU memory estimation requires PB = GpuBackend<E, PCS>"
+                );
                 let gpu_input: &ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>> =
                     unsafe { std::mem::transmute(&input) };
                 estimate_chip_proof_memory::<E, PCS>(cs, gpu_input, &circuit_name)
