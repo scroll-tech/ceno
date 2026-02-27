@@ -1,11 +1,35 @@
 # Ceno: Non-uniform, Segment and Parallel Risc-V Zero-knowledge Virtual Machine
 
-Please see [the slightly outdated paper](https://eprint.iacr.org/2024/387) for an introduction to Ceno.
+[Run Book](https://scroll-tech.github.io/ceno/) | [Try Examples](#try-end-to-end-with-examples) | [Paper](https://eprint.iacr.org/2024/387)
 
 🚧 This project is currently under construction and not suitable for use in production. 🚧
 
 If you are unfamiliar with the RISC-V instruction set, please have a look at
 the [RISC-V instruction set reference](https://github.com/jameslzhu/riscv-card/releases/download/latest/riscv-card.pdf).
+
+## Installing Ceno command line tools
+
+The `cargo ceno` command is the primary tool for interacting with the Ceno zkVM. You can install it by running the
+following command from the root of the repository:
+
+```sh
+cargo install --path ceno_cli
+```
+
+## Try end-to-end with examples
+
+A variety of [examples](https://github.com/scroll-tech/ceno/tree/master/examples/examples) are availables.
+
+To run an example, you first need to build it. You can run a specific example using the `cargo ceno run` command. For
+instance, to run the [fibonacci](https://github.com/scroll-tech/ceno/blob/master/examples/examples/fibonacci.rs)
+example, use the following command:
+
+```sh
+cargo ceno run --example fibonacci --hints=10 --public-io=4191
+```
+
+This command runs **2^10 (1024) Fibonacci steps** via `--hints=10`. The expected result is `4191`, which is verified
+against the `--public-io=4191` argument.
 
 ## Local build requirements
 
@@ -22,26 +46,6 @@ You will also need to install the Risc-V target for Rust. You can do this with t
 ```sh
 rustup target add riscv32im-unknown-none-elf
 ```
-
-## Installing `cargo ceno`
-
-The `cargo ceno` command is the primary tool for interacting with the Ceno zkVM. You can install it by running the following command from the root of the repository:
-
-```sh
-cargo install --path ceno_cli
-```
-
-## Try end-to-end with examples
-
-A variety of [examples](https://github.com/scroll-tech/ceno/tree/master/examples/examples) are availables.
-
-To run an example, you first need to build it. You can run a specific example using the `cargo ceno run` command. For instance, to run the [fibonacci](https://github.com/scroll-tech/ceno/blob/master/examples/examples/fibonacci.rs) example, use the following command:
-
-```sh
-cargo ceno run --example fibonacci --hints=10 --public-io=4191
-```
-
-This command runs **2^10 (1024) Fibonacci steps** via `--hints=10`. The expected result is `4191`, which is verified against the `--public-io=4191` argument.
 
 ## Building Ceno and running tests
 
