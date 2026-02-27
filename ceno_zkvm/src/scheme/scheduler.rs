@@ -19,27 +19,16 @@ use ff_ext::ExtensionField;
 use gkr_iop::hal::ProverBackend;
 use mpcs::Point;
 use p3::field::FieldAlgebra;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::OnceLock};
 use transcript::Transcript;
-
-#[cfg(feature = "gpu")]
-use gkr_iop::error::BackendError;
-#[cfg(feature = "gpu")]
-use std::sync::{Arc, Mutex, OnceLock, mpsc};
-#[cfg(feature = "gpu")]
-const CONCURRENT_PROVING_WORKERS: usize = 8;
-
-#[cfg(feature = "gpu")]
 static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
 
-#[cfg(feature = "gpu")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChipProvingMode {
     Sequential,
     Concurrent,
 }
 
-#[cfg(feature = "gpu")]
 pub fn get_chip_proving_mode() -> ChipProvingMode {
     *CHIP_PROVING_MODE.get_or_init(|| {
         match std::env::var("CENO_CONCURRENT_CHIP_PROVING").as_deref() {
@@ -48,6 +37,11 @@ pub fn get_chip_proving_mode() -> ChipProvingMode {
         }
     })
 }
+
+#[cfg(feature = "gpu")]
+use gkr_iop::{error::BackendError, gpu::gpu_prover::*};
+#[cfg(feature = "gpu")]
+use std::sync::{Arc, Mutex, mpsc};
 
 /// A chip proving task with its memory requirement
 pub struct ChipTask<'a, PB: ProverBackend> {
@@ -104,17 +98,6 @@ struct CompletionMessage<E: ExtensionField> {
     forked_sample: E,
 }
 
-/// Get a CUDA memory pool from the global CUDA HAL singleton.
-#[cfg(feature = "gpu")]
-fn get_cuda_pool() -> std::sync::Arc<ceno_gpu::common::mem_pool::CudaMemPool> {
-    use gkr_iop::gpu::gpu_prover::CudaHal;
-    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
-    let p = cuda_hal.inner().mem_pool().clone();
-    p.init_booking_baseline()
-        .expect("Failed to init booking baseline");
-    p
-}
-
 /// Memory-aware parallel chip proof scheduler
 #[derive(Default)]
 pub struct ChipScheduler;
@@ -149,8 +132,7 @@ impl ChipScheduler {
         #[cfg(feature = "gpu")]
         {
             if get_chip_proving_mode() == ChipProvingMode::Concurrent {
-                let pool = get_cuda_pool();
-                return self.execute_concurrently(tasks, transcript, &pool, execute_task);
+                return self.execute_concurrently(tasks, transcript, execute_task);
             }
             tracing::info!(
                 "[scheduler] CENO_CONCURRENT_CHIP_PROVING=0, using sequential execution"
@@ -240,7 +222,6 @@ impl ChipScheduler {
         &self,
         mut tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
-        pool: &ceno_gpu::common::mem_pool::CudaMemPool,
         execute_task: F,
     ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
     where
@@ -252,6 +233,15 @@ impl ChipScheduler {
         if tasks.is_empty() {
             return Ok((vec![], vec![]));
         }
+
+        let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
+        let stream_pool_size = cuda_hal.inner().stream_pool_size();
+
+        // must call `init_booking_baseline` before concurrent execution
+        let mem_pool = cuda_hal.inner().mem_pool();
+        mem_pool
+            .init_booking_baseline()
+            .expect("Failed to init booking baseline");
 
         // For single task, just execute directly (no threading overhead)
         if tasks.len() == 1 {
@@ -271,10 +261,10 @@ impl ChipScheduler {
         let total_tasks = tasks.len();
 
         tracing::info!(
-            "[scheduler] Starting {} tasks, workers={}, pool_max={}GB",
+            "[scheduler] Starting {} tasks, workers={}, mem_pool_max={}GB",
             total_tasks,
-            CONCURRENT_PROVING_WORKERS,
-            pool.get_max_size() / (1024 * 1024 * 1024)
+            stream_pool_size,
+            mem_pool.get_max_size() / (1024 * 1024 * 1024)
         );
 
         for task in &tasks {
@@ -300,17 +290,17 @@ impl ChipScheduler {
 
         // Helper to handle a completion message
         let mut handle_completion = |msg: CompletionMessage<PB::E>,
-                                     pool: &ceno_gpu::common::mem_pool::CudaMemPool,
+                                     mem_pool: &ceno_gpu::common::mem_pool::CudaMemPool,
                                      tasks_inflight: &mut usize,
                                      label: &str|
          -> Result<(), ZKVMError> {
-            pool.unbook_capacity(msg.memory_reserved);
+            mem_pool.unbook_capacity(msg.memory_reserved);
             *tasks_inflight -= 1;
             tracing::info!(
                 "[scheduler] Task completed{}, unbooked={:.2}MB, pool_booked={:.2}MB, inflight={}",
                 label,
                 msg.memory_reserved as f64 / (1024.0 * 1024.0),
-                pool.get_booked_total() as f64 / (1024.0 * 1024.0),
+                mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                 *tasks_inflight
             );
             samples.push((msg.task_id, msg.forked_sample));
@@ -330,7 +320,7 @@ impl ChipScheduler {
 
         // 4. Use thread::scope for borrowing references
         let scope_result: Result<(), ZKVMError> = std::thread::scope(|s| {
-            let num_workers = CONCURRENT_PROVING_WORKERS.min(total_tasks);
+            let num_workers = stream_pool_size.min(total_tasks);
             for _worker_id in 0..num_workers {
                 let rx = Arc::clone(&task_rx);
                 let tx = done_tx.clone();
@@ -409,16 +399,17 @@ impl ChipScheduler {
                 // This non-blocking path keeps utilization high (and covers the initial loop
                 // iteration when nothing is running yet), so we handle completions here.
                 while let Ok(msg) = done_rx.try_recv() {
-                    if let Err(e) = handle_completion(msg, pool, &mut tasks_inflight, "") {
+                    if let Err(e) = handle_completion(msg, mem_pool, &mut tasks_inflight, "") {
                         drop(task_tx);
                         return Err(e);
                     }
                 }
 
                 // Launch the first pending task whose memory fits; otherwise fall through to wait.
-                if tasks_inflight < CONCURRENT_PROVING_WORKERS
+                if tasks_inflight < stream_pool_size
                     && let Some(vec_idx) = pending.iter().position(|task| {
-                        pool.try_book_capacity(task.estimated_memory_bytes)
+                        mem_pool
+                            .try_book_capacity(task.estimated_memory_bytes)
                             .is_some()
                     })
                 {
@@ -428,11 +419,11 @@ impl ChipScheduler {
                         "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
                         task.circuit_name,
                         booked_mem as f64 / (1024.0 * 1024.0),
-                        pool.get_booked_total() as f64 / (1024.0 * 1024.0)
+                        mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0)
                     );
                     tasks_inflight += 1;
                     if task_tx.send(task).is_err() {
-                        pool.unbook_capacity(booked_mem);
+                        mem_pool.unbook_capacity(booked_mem);
                         tasks_inflight -= 1;
                         drop(task_tx);
                         return Err(ZKVMError::BackendError(BackendError::CircuitError(
@@ -450,7 +441,7 @@ impl ChipScheduler {
                         "Deadlock: {} remaining tasks are too big for the memory pool \
                          (pool_booked={:.2}MB):",
                         pending.len(),
-                        pool.get_booked_total() as f64 / (1024.0 * 1024.0),
+                        mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                     );
                     for (i, task) in pending.iter().enumerate() {
                         tracing::error!(
@@ -470,7 +461,7 @@ impl ChipScheduler {
 
                 tracing::info!(
                     "[scheduler] Pool full, waiting for task completion... pool_booked={:.2}MB, inflight={}",
-                    pool.get_booked_total() as f64 / (1024.0 * 1024.0),
+                    mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                     tasks_inflight
                 );
 
@@ -479,7 +470,7 @@ impl ChipScheduler {
                 match done_rx.recv() {
                     Ok(msg) => {
                         if let Err(e) =
-                            handle_completion(msg, pool, &mut tasks_inflight, " (blocked)")
+                            handle_completion(msg, mem_pool, &mut tasks_inflight, " (blocked)")
                         {
                             drop(task_tx);
                             return Err(e);

@@ -47,16 +47,6 @@ pub mod gpu_prover {
     pub type BB31Base = p3::babybear::BabyBear;
     pub type BB31Ext = ff_ext::BabyBearExt4;
 
-    // #[allow(clippy::type_complexity)]
-    // pub static CUDA_HAL: Lazy<
-    //     Result<Arc<Mutex<CudaHalBB31>>, Box<dyn std::error::Error + Send + Sync>>,
-    // > = Lazy::new(|| {
-    //     // can be overridden by env variable `CENO_GPU_DEVICE_ID`
-    //     let device_id: usize = get_ceno_gpu_device_id(0);
-    //     CudaHalBB31::new(device_id)
-    //         .map(|hal| Arc::new(Mutex::new(hal)))
-    //         .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    // });
     #[allow(clippy::type_complexity)]
     pub static CUDA_HAL: Lazy<Result<Arc<CudaHalBB31>, Box<dyn std::error::Error + Send + Sync>>> =
         Lazy::new(|| {
