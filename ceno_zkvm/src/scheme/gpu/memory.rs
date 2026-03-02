@@ -11,36 +11,21 @@ use ceno_gpu::{
 use ff_ext::ExtensionField;
 use gkr_iop::gpu::{
     BB31Base, GpuBackend,
-    gpu_prover::{BB31Ext, CudaHalBB31, MemTracker},
+    gpu_prover::{
+        BB31Ext, CacheLevel, CudaHalBB31, MemTracker, get_gpu_cache_level, get_mem_tracking_mode,
+    },
 };
 use mpcs::PolynomialCommitmentScheme;
 use std::sync::OnceLock;
 
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
-static MEM_TRACKING_MODE: OnceLock<bool> = OnceLock::new();
-
-static TRACE_CACHE_LEVEL: OnceLock<bool> = OnceLock::new();
-
-fn get_trace_cached_stats() -> bool {
-    *TRACE_CACHE_LEVEL.get_or_init(|| {
-        let cache_level =
-            std::env::var("CENO_GPU_CACHE_LEVEL").unwrap_or_else(|_| "full".to_string());
-        matches!(cache_level.as_str(), "2" | "full" | "1" | "trace")
-    })
-}
-
-pub fn get_mem_tracking_mode() -> bool {
-    *MEM_TRACKING_MODE
-        .get_or_init(|| matches!(std::env::var("CENO_GPU_MEM_TRACKING").as_deref(), Ok("1")))
-}
-
 pub fn init_gpu_mem_tracker<'a>(
     cuda_hal: &'a CudaHalBB31,
     label: &'static str,
 ) -> Option<MemTracker<'a>> {
     let is_sequential = get_chip_proving_mode() == ChipProvingMode::Sequential;
-    let is_mem_tracking = get_mem_tracking_mode();
+    let is_mem_tracking = get_mem_tracking_mode() == true;
     if is_sequential && is_mem_tracking {
         Some(cuda_hal.inner.mem_tracker(label))
     } else {
@@ -337,16 +322,18 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 /// - `resident`: poly copies that remain as witness MLEs after extraction
 /// - `temporary`: temp_buffer allocation (2x), freed after extraction
 ///
-/// Returns `(0, 0)` when trace is cached (default), because get_trace creates views without allocation.
+/// Returns `(0, 0)` when trace is cached (`CacheLevel::Trace` or `CacheLevel::Full`),
+/// When cache is disabled (`CacheLevel::None`, the default), estimates actual allocation costs.
 pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize) -> (usize, usize) {
-    if get_trace_cached_stats() {
-        (0, 0)
-    } else {
+    if matches!(get_gpu_cache_level(), CacheLevel::None) {
+        // Default cache level is None
         let base_elem_size = std::mem::size_of::<BB31Base>();
         let mle_len = 1usize << num_vars;
         let poly_bytes = num_witin * mle_len * base_elem_size;
         // get_trace allocates poly copies (resident) + temp_buffer (2x, freed after)
         (poly_bytes, 2 * poly_bytes)
+    } else {
+        (0, 0)
     }
 }
 

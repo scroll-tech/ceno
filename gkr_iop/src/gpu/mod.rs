@@ -26,9 +26,10 @@ pub mod gpu_prover {
             CudaHalBB31, GpuDigestLayer, GpuFieldType, GpuMatrix, GpuPolynomial, GpuPolynomialExt,
         },
         common::{
+            CacheLevel,
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
-            get_ceno_gpu_device_id,
+            get_ceno_gpu_device_id, get_gpu_cache_level, get_mem_tracking_mode,
             mem_pool::MemTracker,
             mle::{
                 build_mle_as_ceno, ordered_sparse_selector_gpu, rotation_next_base_mle_gpu,
@@ -170,7 +171,6 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu
     }
 
     fn eval(&self, point: Point<E>) -> E {
-        // panic!("eval");
         self.evaluate(&point)
     }
 
@@ -241,7 +241,6 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
 
     /// Evaluate polynomial at given point
     pub fn evaluate(&self, point: &[E]) -> E {
-        // panic!("evaluate is not implemented for GPU");
         self.inner_to_mle().evaluate(point)
     }
 
