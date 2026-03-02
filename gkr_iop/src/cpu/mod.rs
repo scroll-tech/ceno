@@ -14,7 +14,7 @@ use multilinear_extensions::{
 };
 use p3::field::TwoAdicField;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::{iter, rc::Rc, sync::Arc};
+use std::{iter, sync::Arc};
 use witness::RowMajorMatrix;
 
 pub struct CpuBackend<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
@@ -88,11 +88,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for Cp
 
 /// CPU prover for CPU backend
 pub struct CpuProver<PB: ProverBackend + 'static> {
-    pub backend: Rc<PB>,
+    pub backend: Arc<PB>,
 }
 
 impl<PB: ProverBackend> CpuProver<PB> {
-    pub fn new(backend: Rc<PB>) -> Self {
+    pub fn new(backend: Arc<PB>) -> Self {
         Self { backend }
     }
 }

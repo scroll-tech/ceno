@@ -665,6 +665,11 @@ mod tests {
         structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
         tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
     };
+    #[cfg(feature = "gpu")]
+    use gkr_iop::{
+        gpu::{MultilinearExtensionGpu, get_cuda_hal},
+        hal::MultilinearPolynomial,
+    };
     use multilinear_extensions::mle::IntoMLE;
     use p3::field::PrimeField32;
 
@@ -802,19 +807,54 @@ mod tests {
         let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 
-        let public_input_mles = public_value
-            .to_vec::<E>()
-            .into_iter()
-            .map(|v| Arc::new(v.into_mle()))
-            .collect_vec();
         let pub_io_evals = public_value
             .to_vec::<E>()
             .into_iter()
             .map(|v| Either::Right(E::from(*v.index(0))))
             .collect_vec();
+
+        #[cfg(not(feature = "gpu"))]
+        let (witness_mles, structural_mles, public_input_mles) = {
+            let public_input_mles = public_value
+                .to_vec::<E>()
+                .into_iter()
+                .map(|v| Arc::new(v.into_mle()))
+                .collect_vec();
+            (
+                witness[0].to_mles().into_iter().map(Arc::new).collect(),
+                witness[1].to_mles().into_iter().map(Arc::new).collect(),
+                public_input_mles,
+            )
+        };
+        #[cfg(feature = "gpu")]
+        let (witness_mles, structural_mles, public_input_mles) = {
+            let cuda_hal = get_cuda_hal().unwrap();
+            let witness_cpu: Vec<_> = witness[0].to_mles();
+            let structural_cpu: Vec<_> = witness[1].to_mles();
+            let public_cpu: Vec<_> = public_value
+                .to_vec::<E>()
+                .into_iter()
+                .map(|v| v.into_mle())
+                .collect_vec();
+            (
+                witness_cpu
+                    .iter()
+                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                    .collect_vec(),
+                structural_cpu
+                    .iter()
+                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                    .collect_vec(),
+                public_cpu
+                    .iter()
+                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                    .collect_vec(),
+            )
+        };
+
         let proof_input = ProofInput {
-            witness: witness[0].to_mles().into_iter().map(Arc::new).collect(),
-            structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
+            witness: witness_mles,
+            structural_witness: structural_mles,
             fixed: vec![],
             public_input: public_input_mles.clone(),
             pub_io_evals,
@@ -823,14 +863,21 @@ mod tests {
         };
         let mut rng = thread_rng();
         let challenges = [E::random(&mut rng), E::random(&mut rng)];
+        let task = crate::scheme::scheduler::ChipTask {
+            task_id: 0,
+            circuit_name: ShardRamCircuit::<E>::name(),
+            circuit_idx: 0,
+            pk: &pk,
+            input: proof_input,
+            estimated_memory_bytes: 0,
+            has_witness_or_fixed: true,
+            challenges,
+            witness_trace_idx: None,
+            num_witin: 0,
+            structural_rmm: None,
+        };
         let (proof, _, point) = zkvm_prover
-            .create_chip_proof(
-                ShardRamCircuit::<E>::name().as_str(),
-                &pk,
-                proof_input,
-                &mut transcript,
-                &challenges,
-            )
+            .create_chip_proof(&task, &mut transcript)
             .unwrap();
 
         let mut transcript = BasicTranscript::new(b"global chip test");

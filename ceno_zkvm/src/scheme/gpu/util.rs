@@ -48,11 +48,12 @@ fn read_base_value_from_gpu<'a, E: ExtensionField>(
     poly: &Arc<MultilinearExtensionGpu<'a, E>>,
     index: usize,
 ) -> Result<E::BaseField, ZKVMError> {
+    let stream = gkr_iop::gpu::get_thread_stream();
     match &poly.mle {
         GpuFieldType::Base(base_poly) => {
             let buffer = base_poly.evaluations();
             let raw = buffer
-                .get(index)
+                .get(index, stream.as_ref())
                 .map_err(|e| hal_to_backend_error(format!("failed to read GPU buffer: {e:?}")))?;
             let canonical = raw.as_canonical_u32();
             Ok(E::BaseField::from_canonical_u32(canonical))
@@ -162,6 +163,7 @@ pub fn mle_filter_even_odd_batch<'a, E: ExtensionField>(
     cuda_hal: &CudaHalBB31,
     requests: &[(&[Arc<MultilinearExtensionGpu<'a, E>>], bool)],
 ) -> Result<Vec<Vec<Arc<MultilinearExtensionGpu<'static, E>>>>, ZKVMError> {
+    let stream = gkr_iop::gpu::get_thread_stream();
     if requests.iter().all(|(polys, _)| polys.is_empty()) {
         return Ok(vec![Vec::new(); requests.len()]);
     }
@@ -217,7 +219,7 @@ pub fn mle_filter_even_odd_batch<'a, E: ExtensionField>(
         .iter()
         .map(|_| {
             cuda_hal
-                .alloc_elems_on_device(stride, false)
+                .alloc_elems_on_device(stride, false, stream.as_ref())
                 .map_err(|e| hal_to_backend_error(format!("failed to allocate GPU buffer: {e:?}")))
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -231,7 +233,13 @@ pub fn mle_filter_even_odd_batch<'a, E: ExtensionField>(
         BB31Base,
         GpuFieldType<'static>,
         GpuPolynomial<'static>,
-    >(cuda_hal, flattened_refs, &flags, &mut output_buffers)
+    >(
+        cuda_hal,
+        flattened_refs,
+        &flags,
+        &mut output_buffers,
+        stream.as_ref(),
+    )
     .map_err(|e| hal_to_backend_error(format!("GPU filter kernel failed: {e:?}")))?;
 
     let mut outputs = Vec::with_capacity(requests.len());
