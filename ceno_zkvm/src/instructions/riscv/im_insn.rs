@@ -17,10 +17,10 @@ use multilinear_extensions::{Expression, ToExpr};
 /// - Register reads and writes
 /// - Memory reads
 pub struct IMInstructionConfig<E: ExtensionField> {
-    vm_state: StateInOut<E>,
-    rs1: ReadRS1<E>,
-    rd: WriteRD<E>,
-    mem_read: ReadMEM<E>,
+    pub vm_state: StateInOut<E>,
+    pub rs1: ReadRS1<E>,
+    pub rd: WriteRD<E>,
+    pub mem_read: ReadMEM<E>,
 }
 
 impl<E: ExtensionField> IMInstructionConfig<E> {

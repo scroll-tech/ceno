@@ -438,9 +438,9 @@ impl WriteMEM {
 
 #[derive(Debug)]
 pub struct MemAddr<E: ExtensionField> {
-    addr: UInt<E>,
-    low_bits: Vec<WitIn>,
-    max_bits: usize,
+    pub addr: UInt<E>,
+    pub low_bits: Vec<WitIn>,
+    pub max_bits: usize,
 }
 
 impl<E: ExtensionField> MemAddr<E> {
