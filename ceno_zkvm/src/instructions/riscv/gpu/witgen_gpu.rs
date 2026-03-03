@@ -53,11 +53,19 @@ pub fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
         return Ok(Some(([raw_witin, raw_structural], lk.into_finalize_result())));
     }
 
+    // GPU only supports BabyBear field
+    if std::any::TypeId::of::<E::BaseField>()
+        != std::any::TypeId::of::<<ff_ext::BabyBearExt4 as ExtensionField>::BaseField>()
+    {
+        return Ok(None);
+    }
+
     let hal = match get_cuda_hal() {
         Ok(hal) => hal,
         Err(_) => return Ok(None), // GPU not available, fallback to CPU
     };
 
+    tracing::debug!("[GPU witgen] {:?} with {} instances", kind, total_instances);
     info_span!("gpu_witgen", kind = ?kind, n = total_instances).in_scope(|| {
         gpu_assign_instances_inner::<E, I>(
             config,
