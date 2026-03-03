@@ -250,9 +250,10 @@ mod tests {
         let steps = make_test_steps(n);
         let indices: Vec<usize> = (0..n).collect();
 
-        // CPU path
+        // CPU path — use cpu_assign_instances directly to avoid going through
+        // the GPU override in assign_instances (which would make this GPU vs GPU).
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) = AddInstruction::<E>::assign_instances(
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, AddInstruction<E>>(
             &config,
             &mut shard_ctx,
             num_witin,

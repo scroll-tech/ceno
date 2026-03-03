@@ -30,7 +30,15 @@ pub enum GpuWitgenKind {
 
 /// Try to run GPU witness generation for the given instruction.
 /// Returns `Ok(Some(...))` if GPU was used, `Ok(None)` if GPU is unavailable (caller should fallback to CPU).
-pub fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
+///
+/// # Safety invariant
+///
+/// The caller **must** ensure that `I::InstructionConfig` matches `kind`:
+/// - `GpuWitgenKind::Add` requires `I` to be `ArithInstruction` (config = `ArithConfig<E>`)
+/// - `GpuWitgenKind::Lw`  requires `I` to be `LoadInstruction`  (config = `LoadConfig<E>`)
+///
+/// Violating this will cause undefined behavior via pointer cast in [`gpu_fill_witness`].
+pub(crate) fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,
     shard_ctx: &mut ShardContext,
     num_witin: usize,
