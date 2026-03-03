@@ -2,8 +2,7 @@ use ceno_emul::StepIndex;
 use ceno_gpu::common::witgen_types::{AddColumnMap, AddStepRecordSOA};
 use ff_ext::ExtensionField;
 
-use crate::instructions::riscv::arith::ArithConfig;
-use crate::e2e::ShardContext;
+use crate::{e2e::ShardContext, instructions::riscv::arith::ArithConfig};
 use ceno_emul::StepRecord;
 
 /// Extract column map from a constructed ArithConfig (ADD variant).
@@ -40,7 +39,11 @@ pub fn extract_add_column_map<E: ExtensionField>(
     let rd_id = config.r_insn.rd.id.id as u32;
     let rd_prev_ts = config.r_insn.rd.prev_ts.id as u32;
     let rd_prev_val: [u32; 2] = {
-        let limbs = config.r_insn.rd.prev_value.wits_in()
+        let limbs = config
+            .r_insn
+            .rd
+            .prev_value
+            .wits_in()
             .expect("WriteRD prev_value should have WitIn limbs");
         assert_eq!(limbs.len(), 2, "Expected 2 prev_value limbs");
         [limbs[0].id as u32, limbs[1].id as u32]
@@ -53,13 +56,17 @@ pub fn extract_add_column_map<E: ExtensionField>(
 
     // Arithmetic: rs1/rs2 u16 limbs
     let rs1_limbs: [u32; 2] = {
-        let limbs = config.rs1_read.wits_in()
+        let limbs = config
+            .rs1_read
+            .wits_in()
             .expect("rs1_read should have WitIn limbs");
         assert_eq!(limbs.len(), 2, "Expected 2 rs1_read limbs");
         [limbs[0].id as u32, limbs[1].id as u32]
     };
     let rs2_limbs: [u32; 2] = {
-        let limbs = config.rs2_read.wits_in()
+        let limbs = config
+            .rs2_read
+            .wits_in()
             .expect("rs2_read should have WitIn limbs");
         assert_eq!(limbs.len(), 2, "Expected 2 rs2_read limbs");
         [limbs[0].id as u32, limbs[1].id as u32]
@@ -67,7 +74,10 @@ pub fn extract_add_column_map<E: ExtensionField>(
 
     // rd carries
     let rd_carries: [u32; 2] = {
-        let carries = config.rd_written.carries.as_ref()
+        let carries = config
+            .rd_written
+            .carries
+            .as_ref()
             .expect("rd_written should have carries");
         assert_eq!(carries.len(), 2, "Expected 2 rd_written carries");
         [carries[0].id as u32, carries[1].id as u32]
@@ -117,13 +127,16 @@ pub fn pack_add_soa(
         soa.cycle.push(step.cycle() - offset);
         soa.rs1_reg.push(rs1.register_index() as u32);
         soa.rs1_val.push(rs1.value);
-        soa.rs1_prev_cycle.push(aligned_prev_ts(rs1.previous_cycle, offset));
+        soa.rs1_prev_cycle
+            .push(aligned_prev_ts(rs1.previous_cycle, offset));
         soa.rs2_reg.push(rs2.register_index() as u32);
         soa.rs2_val.push(rs2.value);
-        soa.rs2_prev_cycle.push(aligned_prev_ts(rs2.previous_cycle, offset));
+        soa.rs2_prev_cycle
+            .push(aligned_prev_ts(rs2.previous_cycle, offset));
         soa.rd_reg.push(rd.register_index() as u32);
         soa.rd_val_before.push(rd.value.before);
-        soa.rd_prev_cycle.push(aligned_prev_ts(rd.previous_cycle, offset));
+        soa.rd_prev_cycle
+            .push(aligned_prev_ts(rd.previous_cycle, offset));
     }
 
     soa
@@ -144,13 +157,11 @@ mod tests {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         e2e::ShardContext,
-        instructions::Instruction,
-        instructions::riscv::arith::AddInstruction,
+        instructions::{Instruction, riscv::arith::AddInstruction},
         structs::ProgramParams,
     };
-    use ceno_emul::{Change, encode_rv32, InsnKind, ByteAddr};
-    use ceno_gpu::bb31::CudaHalBB31;
-    use ceno_gpu::Buffer;
+    use ceno_emul::{ByteAddr, Change, InsnKind, encode_rv32};
+    use ceno_gpu::{Buffer, bb31::CudaHalBB31};
     use ff_ext::BabyBearExt4;
 
     type E = BabyBearExt4;
@@ -184,8 +195,8 @@ mod tests {
     fn test_extract_add_column_map() {
         let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = AddInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
-            .unwrap();
+        let config =
+            AddInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
         let col_map = extract_add_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
@@ -195,7 +206,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         // Check uniqueness
@@ -226,8 +240,8 @@ mod tests {
         // Construct circuit
         let mut cs = ConstraintSystem::<E>::new(|| "test_gpu");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config = AddInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
-            .unwrap();
+        let config =
+            AddInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
         let num_witin = cb.cs.num_witin as usize;
         let num_structural_witin = cb.cs.num_structural_witin as usize;
 
@@ -261,8 +275,13 @@ mod tests {
 
         // Compare element by element
         let cpu_data = cpu_witness.values();
-        assert_eq!(gpu_data.len(), cpu_data.len(),
-            "Size mismatch: GPU {} vs CPU {}", gpu_data.len(), cpu_data.len());
+        assert_eq!(
+            gpu_data.len(),
+            cpu_data.len(),
+            "Size mismatch: GPU {} vs CPU {}",
+            gpu_data.len(),
+            cpu_data.len()
+        );
 
         let mut mismatches = 0;
         for row in 0..n {
@@ -280,7 +299,12 @@ mod tests {
                 }
             }
         }
-        assert_eq!(mismatches, 0, "Found {} mismatches out of {} elements",
-            mismatches, n * num_witin);
+        assert_eq!(
+            mismatches,
+            0,
+            "Found {} mismatches out of {} elements",
+            mismatches,
+            n * num_witin
+        );
     }
 }

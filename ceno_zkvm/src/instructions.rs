@@ -199,7 +199,13 @@ pub fn cpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
     num_structural_witin: usize,
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
-) -> Result<(crate::tables::RMMCollections<E::BaseField>, gkr_iop::utils::lk_multiplicity::Multiplicity<u64>), ZKVMError> {
+) -> Result<
+    (
+        crate::tables::RMMCollections<E::BaseField>,
+        gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
+    ),
+    ZKVMError,
+> {
     assert!(num_structural_witin == 0 || num_structural_witin == 1);
     let num_structural_witin = num_structural_witin.max(1);
 
@@ -212,19 +218,15 @@ pub fn cpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
     }
     .max(1);
     let lk_multiplicity = crate::witness::LkMultiplicity::default();
-    let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
-        total_instances,
-        num_witin,
-        I::padding_strategy(),
-    );
+    let mut raw_witin =
+        RowMajorMatrix::<E::BaseField>::new(total_instances, num_witin, I::padding_strategy());
     let mut raw_structual_witin = RowMajorMatrix::<E::BaseField>::new(
         total_instances,
         num_structural_witin,
         I::padding_strategy(),
     );
     let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
-    let raw_structual_witin_iter =
-        raw_structual_witin.par_batch_iter_mut(num_instance_per_batch);
+    let raw_structual_witin_iter = raw_structual_witin.par_batch_iter_mut(num_instance_per_batch);
     let shard_ctx_vec = shard_ctx.get_forked();
 
     raw_witin_iter

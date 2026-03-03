@@ -2,12 +2,11 @@ use ceno_emul::StepIndex;
 use ceno_gpu::common::witgen_types::{LwColumnMap, LwStepRecordSOA};
 use ff_ext::ExtensionField;
 
-use crate::e2e::ShardContext;
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::instructions::riscv::memory::load::LoadConfig;
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::memory::load_v2::LoadConfig;
-use crate::tables::InsnRecord;
+use crate::{e2e::ShardContext, tables::InsnRecord};
 use ceno_emul::{ByteAddr, StepRecord};
 
 /// Extract column map from a constructed LoadConfig (LW variant).
@@ -64,7 +63,11 @@ pub fn extract_lw_column_map<E: ExtensionField>(
     #[cfg(not(feature = "u16limb_circuit"))]
     let imm_sign = None;
     let mem_addr_limbs = {
-        let l = config.memory_addr.addr.wits_in().expect("memory_addr WitIns");
+        let l = config
+            .memory_addr
+            .addr
+            .wits_in()
+            .expect("memory_addr WitIns");
         assert_eq!(l.len(), 2);
         [l[0].id as u32, l[1].id as u32]
     };
@@ -119,8 +122,7 @@ pub fn pack_lw_soa<E: ExtensionField>(
         let imm_field_val: B = imm_pair.1;
 
         // Compute unaligned address
-        let unaligned_addr =
-            ByteAddr::from(rs1_op.value.wrapping_add_signed(imm_pair.0 as i32));
+        let unaligned_addr = ByteAddr::from(rs1_op.value.wrapping_add_signed(imm_pair.0 as i32));
 
         soa.pc_before.push(step.pc().before.0);
         soa.cycle.push(step.cycle() - offset);
@@ -141,8 +143,7 @@ pub fn pack_lw_soa<E: ExtensionField>(
         // imm_sign for v2 variant
         #[cfg(feature = "u16limb_circuit")]
         {
-            let imm_sign_extend =
-                crate::utils::imm_sign_extend(true, step.insn().imm as i16);
+            let imm_sign_extend = crate::utils::imm_sign_extend(true, step.insn().imm as i16);
             let is_neg = if imm_sign_extend[1] > 0 { 1u32 } else { 0u32 };
             if soa.imm_sign_field.is_none() {
                 soa.imm_sign_field = Some(Vec::with_capacity(n));
@@ -171,9 +172,7 @@ mod tests {
         instructions::Instruction,
         structs::ProgramParams,
     };
-    use ceno_emul::{
-        ByteAddr, Change, InsnKind, ReadOp, StepRecord, WordAddr, encode_rv32,
-    };
+    use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, WordAddr, encode_rv32};
     use ceno_gpu::{Buffer, bb31::CudaHalBB31};
     use ff_ext::BabyBearExt4;
 
@@ -216,8 +215,7 @@ mod tests {
     fn test_extract_lw_column_map() {
         let mut cs = ConstraintSystem::<E>::new(|| "test_lw");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            LwInstruction::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+        let config = LwInstruction::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
         let col_map = extract_lw_column_map(&config, cb.cs.num_witin as usize);
         let (n_entries, flat) = col_map.to_flat();
@@ -227,7 +225,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         // Check uniqueness
@@ -243,8 +244,7 @@ mod tests {
 
         let mut cs = ConstraintSystem::<E>::new(|| "test_lw_gpu");
         let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            LwInstruction::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+        let config = LwInstruction::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
         let num_witin = cb.cs.num_witin as usize;
         let num_structural_witin = cb.cs.num_structural_witin as usize;
 
