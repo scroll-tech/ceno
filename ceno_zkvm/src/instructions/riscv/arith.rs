@@ -11,11 +11,11 @@ use ff_ext::ExtensionField;
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]
 pub struct ArithConfig<E: ExtensionField> {
-    r_insn: RInstructionConfig<E>,
+    pub r_insn: RInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    rd_written: UInt<E>,
+    pub rs1_read: UInt<E>,
+    pub rs2_read: UInt<E>,
+    pub rd_written: UInt<E>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
