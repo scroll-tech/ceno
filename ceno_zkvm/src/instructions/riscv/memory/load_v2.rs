@@ -251,4 +251,43 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
 
         Ok(())
     }
+
+    #[cfg(feature = "gpu")]
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut crate::e2e::ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_steps: &[ceno_emul::StepRecord],
+        step_indices: &[ceno_emul::StepIndex],
+    ) -> Result<
+        (
+            crate::tables::RMMCollections<E::BaseField>,
+            gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
+        ),
+        crate::error::ZKVMError,
+    > {
+        use crate::instructions::riscv::gpu::witgen_gpu;
+        if I::INST_KIND == InsnKind::LW {
+            if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+                config,
+                shard_ctx,
+                num_witin,
+                num_structural_witin,
+                shard_steps,
+                step_indices,
+                witgen_gpu::GpuWitgenKind::Lw,
+            )? {
+                return Ok(result);
+            }
+        }
+        crate::instructions::cpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+        )
+    }
 }

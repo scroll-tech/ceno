@@ -190,3 +190,73 @@ pub trait Instruction<E: ExtensionField> {
 pub fn full_step_indices(steps: &[StepRecord]) -> Vec<StepIndex> {
     (0..steps.len()).collect()
 }
+
+/// CPU-only assign_instances. Extracted so GPU-enabled instructions can call this as fallback.
+pub fn cpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
+    config: &I::InstructionConfig,
+    shard_ctx: &mut ShardContext,
+    num_witin: usize,
+    num_structural_witin: usize,
+    shard_steps: &[StepRecord],
+    step_indices: &[StepIndex],
+) -> Result<(crate::tables::RMMCollections<E::BaseField>, gkr_iop::utils::lk_multiplicity::Multiplicity<u64>), ZKVMError> {
+    assert!(num_structural_witin == 0 || num_structural_witin == 1);
+    let num_structural_witin = num_structural_witin.max(1);
+
+    let nthreads = multilinear_extensions::util::max_usable_threads();
+    let total_instances = step_indices.len();
+    let num_instance_per_batch = if total_instances > 256 {
+        total_instances.div_ceil(nthreads)
+    } else {
+        total_instances
+    }
+    .max(1);
+    let lk_multiplicity = crate::witness::LkMultiplicity::default();
+    let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
+        total_instances,
+        num_witin,
+        I::padding_strategy(),
+    );
+    let mut raw_structual_witin = RowMajorMatrix::<E::BaseField>::new(
+        total_instances,
+        num_structural_witin,
+        I::padding_strategy(),
+    );
+    let raw_witin_iter = raw_witin.par_batch_iter_mut(num_instance_per_batch);
+    let raw_structual_witin_iter =
+        raw_structual_witin.par_batch_iter_mut(num_instance_per_batch);
+    let shard_ctx_vec = shard_ctx.get_forked();
+
+    raw_witin_iter
+        .zip_eq(raw_structual_witin_iter)
+        .zip_eq(step_indices.par_chunks(num_instance_per_batch))
+        .zip(shard_ctx_vec)
+        .flat_map(
+            |(((instances, structural_instance), indices), mut shard_ctx)| {
+                let mut lk_multiplicity = lk_multiplicity.clone();
+                instances
+                    .chunks_mut(num_witin)
+                    .zip_eq(structural_instance.chunks_mut(num_structural_witin))
+                    .zip_eq(indices.iter().copied())
+                    .map(|((instance, structural_instance), step_idx)| {
+                        *structural_instance.last_mut().unwrap() = E::BaseField::ONE;
+                        I::assign_instance(
+                            config,
+                            &mut shard_ctx,
+                            instance,
+                            &mut lk_multiplicity,
+                            &shard_steps[step_idx],
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            },
+        )
+        .collect::<Result<(), ZKVMError>>()?;
+
+    raw_witin.padding_by_strategy();
+    raw_structual_witin.padding_by_strategy();
+    Ok((
+        [raw_witin, raw_structual_witin],
+        lk_multiplicity.into_finalize_result(),
+    ))
+}

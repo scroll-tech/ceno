@@ -134,3 +134,8 @@ name = "weierstrass_add"
 [[bench]]
 harness = false
 name = "weierstrass_double"
+
+[[bench]]
+harness = false
+name = "witgen_add_gpu"
+required-features = ["gpu"]
