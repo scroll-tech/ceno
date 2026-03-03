@@ -5,22 +5,22 @@
 /// 2. Runs a CPU loop to collect side effects (shard_ctx.send, lk_multiplicity)
 /// 3. Returns the GPU-generated witness + CPU-collected side effects
 use ceno_emul::{StepIndex, StepRecord};
-use ceno_gpu::bb31::CudaHalBB31;
-use ceno_gpu::Buffer;
+use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use multilinear_extensions::util::max_usable_threads;
 use p3::field::FieldAlgebra;
-use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use rayon::slice::ParallelSlice;
+use rayon::{
+    iter::{IndexedParallelIterator, ParallelIterator},
+    slice::ParallelSlice,
+};
 use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
-use crate::e2e::ShardContext;
-use crate::error::ZKVMError;
-use crate::instructions::Instruction;
-use crate::tables::RMMCollections;
-use crate::witness::LkMultiplicity;
+use crate::{
+    e2e::ShardContext, error::ZKVMError, instructions::Instruction, tables::RMMCollections,
+    witness::LkMultiplicity,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum GpuWitgenKind {
@@ -45,12 +45,14 @@ pub fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
     if total_instances == 0 {
         // Empty: just return empty matrices
         let num_structural_witin = num_structural_witin.max(1);
-        let raw_witin =
-            RowMajorMatrix::<E::BaseField>::new(0, num_witin, I::padding_strategy());
+        let raw_witin = RowMajorMatrix::<E::BaseField>::new(0, num_witin, I::padding_strategy());
         let raw_structural =
             RowMajorMatrix::<E::BaseField>::new(0, num_structural_witin, I::padding_strategy());
         let lk = LkMultiplicity::default();
-        return Ok(Some(([raw_witin, raw_structural], lk.into_finalize_result())));
+        return Ok(Some((
+            [raw_witin, raw_structural],
+            lk.into_finalize_result(),
+        )));
     }
 
     // GPU only supports BabyBear field
@@ -96,7 +98,15 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
 
     // Step 1: GPU fills witness matrix
     let gpu_witness = info_span!("gpu_kernel").in_scope(|| {
-        gpu_fill_witness::<E, I>(hal, config, shard_ctx, num_witin, shard_steps, step_indices, kind)
+        gpu_fill_witness::<E, I>(
+            hal,
+            config,
+            shard_ctx,
+            num_witin,
+            shard_steps,
+            step_indices,
+            kind,
+        )
     })?;
 
     // Step 2: CPU collects side effects (shard_ctx.send, lk_multiplicity)
@@ -118,11 +128,19 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
 
     // Step 4: Convert GPU witness to RowMajorMatrix
     let mut raw_witin = info_span!("d2h_copy").in_scope(|| {
-        gpu_witness_to_rmm::<E>(gpu_witness, total_instances, num_witin, I::padding_strategy())
+        gpu_witness_to_rmm::<E>(
+            gpu_witness,
+            total_instances,
+            num_witin,
+            I::padding_strategy(),
+        )
     })?;
     raw_witin.padding_by_strategy();
 
-    Ok(([raw_witin, raw_structural], lk_multiplicity.into_finalize_result()))
+    Ok((
+        [raw_witin, raw_structural],
+        lk_multiplicity.into_finalize_result(),
+    ))
 }
 
 /// GPU kernel dispatch based on instruction kind.
@@ -134,7 +152,12 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
     kind: GpuWitgenKind,
-) -> Result<ceno_gpu::common::witgen_types::GpuWitnessResult<ceno_gpu::common::BufferImpl<'static, <ff_ext::BabyBearExt4 as ExtensionField>::BaseField>>, ZKVMError> {
+) -> Result<
+    ceno_gpu::common::witgen_types::GpuWitnessResult<
+        ceno_gpu::common::BufferImpl<'static, <ff_ext::BabyBearExt4 as ExtensionField>::BaseField>,
+    >,
+    ZKVMError,
+> {
     match kind {
         GpuWitgenKind::Add => {
             // Safety: we know config is ArithConfig<E> when kind == Add
@@ -142,11 +165,11 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 &*(config as *const I::InstructionConfig
                     as *const crate::instructions::riscv::arith::ArithConfig<E>)
             };
-            let col_map =
-                super::add::extract_add_column_map(arith_config, num_witin);
+            let col_map = super::add::extract_add_column_map(arith_config, num_witin);
             let soa = super::add::pack_add_soa(shard_ctx, shard_steps, step_indices);
-            hal.witgen_add(&col_map, &soa, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("GPU witgen_add failed: {e}").into()))
+            hal.witgen_add(&col_map, &soa, None).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU witgen_add failed: {e}").into())
+            })
         }
         GpuWitgenKind::Lw => {
             // LoadConfig location depends on the u16limb_circuit feature
@@ -160,8 +183,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 &*(config as *const I::InstructionConfig
                     as *const crate::instructions::riscv::memory::load::LoadConfig<E>)
             };
-            let col_map =
-                super::lw::extract_lw_column_map(load_config, num_witin);
+            let col_map = super::lw::extract_lw_column_map(load_config, num_witin);
             let soa = super::lw::pack_lw_soa::<E>(shard_ctx, shard_steps, step_indices);
             hal.witgen_lw(&col_map, &soa, None)
                 .map_err(|e| ZKVMError::InvalidWitness(format!("GPU witgen_lw failed: {e}").into()))

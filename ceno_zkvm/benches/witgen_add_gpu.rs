@@ -1,15 +1,12 @@
 use std::time::Duration;
 
+use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
 use ceno_zkvm::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     e2e::ShardContext,
-    instructions::{
-        Instruction,
-        riscv::arith::AddInstruction,
-    },
+    instructions::{Instruction, riscv::arith::AddInstruction},
     structs::ProgramParams,
 };
-use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
 use criterion::*;
 use ff_ext::BabyBearExt4;
 
