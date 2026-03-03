@@ -22,16 +22,16 @@ use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {
-    im_insn: IMInstructionConfig<E>,
+    pub im_insn: IMInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    imm: WitIn,
-    memory_addr: MemAddr<E>,
+    pub rs1_read: UInt<E>,
+    pub imm: WitIn,
+    pub memory_addr: MemAddr<E>,
 
-    memory_read: UInt<E>,
-    target_limb: Option<WitIn>,
-    target_limb_bytes: Option<Vec<WitIn>>,
-    signed_extend_config: Option<SignedExtendConfig<E>>,
+    pub memory_read: UInt<E>,
+    pub target_limb: Option<WitIn>,
+    pub target_limb_bytes: Option<Vec<WitIn>>,
+    pub signed_extend_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
