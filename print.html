@@ -36,10 +36,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-99aac1db.js";
+            window.path_to_searchindex_js = "searchindex-e4dfb526.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-8efd8917.js"></script>
+        <script src="toc-83df31e6.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -918,6 +918,300 @@ syscall_keccak_permute(&amp;mut state);
 <h2 id="benchmarking"><a class="header" href="#benchmarking">Benchmarking</a></h2>
 <p>The <code>ceno_zkvm</code> crate contains a <code>benches</code> directory with several benchmarks. You can use these as a reference for writing your own benchmarks using <code>criterion</code>.</p>
 <p>Running the benchmarks can give you an idea of the performance of different operations and help you optimize your code. To run the benchmarks, you can use the standard <code>cargo bench</code> command.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="concurrent-chip-proving"><a class="header" href="#concurrent-chip-proving">Concurrent Chip Proving</a></h1>
+<p>This document describes the <strong>concurrent chip proving</strong> mechanism on the GPU,
+centered around a memory-aware parallel scheduler that uses a greedy backfilling
+algorithm to maximize GPU utilization while respecting VRAM limits.</p>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<p>Previously, chip proofs were generated <strong>sequentially</strong> — one circuit at a time.
+This left significant GPU idle time, especially when small chip proofs could run
+in parallel with large ones. The scheduler overlaps chip proofs concurrently with
+preemptive memory reservation, improving overall proving throughput.</p>
+<h2 id="architecture-overview"><a class="header" href="#architecture-overview">Architecture Overview</a></h2>
+<p>The prover’s <code>create_proof_of_shard</code> is restructured into three clean phases:</p>
+<pre><code>┌────────────────────────────────────────────────────────────────────────────────┐
+│                             create_proof_of_shard                              │
+│                                                                                │
+│  ┌──────────────────────┐  ┌──────────────────────┐  ┌──────────────────────┐  │
+│  │ Phase 1: BUILD       │  │ Phase 2: EXECUTE     │  │ Phase 3: COLLECT     │  │
+│  │ build_chip_tasks     │─&gt;│ run_chip_proofs      │─&gt;│ collect_chip_results │  │
+│  │                      │  │                      │  │                      │  │
+│  │ - Iterate circuits   │  │ CPU: sequential      │  │ - Aggregate proofs   │  │
+│  │ - Build ChipTask     │  │ GPU: scheduler       │  │   into BTreeMap      │  │
+│  │ - Estimate GPU mem   │  │   concurrent exec    │  │ - Collect opening    │  │
+│  │ - GPU: defer witness │  │   with backfilling   │  │   points &amp; evals     │  │
+│  │ - CPU: eager witness │  │ - Transcript forking │  │ - Merge PI updates   │  │
+│  │                      │  │   handled internally │  │ - Merge transcript   │  │
+│  └──────────────────────┘  └──────────────────────┘  └──────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h2 id="scheduler-core-greedy-backfilling-algorithm"><a class="header" href="#scheduler-core-greedy-backfilling-algorithm">Scheduler Core: Greedy Backfilling Algorithm</a></h2>
+<p>The scheduler sorts all chip proof tasks by estimated GPU memory (descending),
+then greedily assigns the largest task that fits into currently available VRAM.
+When nothing fits, it blocks until a running task completes and frees memory.</p>
+<pre><code>┌──────────────────────────────────────────────────────────────────────────┐
+│                   ChipScheduler::execute_concurrently                    │
+│                                                                          │
+│  Input: Vec&lt;ChipTask&gt; (unsorted)                                         │
+│                                                                          │
+│  Step 1: Sort by estimated_memory_bytes DESC ("big rocks first")         │
+│  ┌───────────────────────────────────────────────────────────────┐       │
+│  │ Task A (800MB) &gt; Task B (400MB) &gt; Task C (200MB) &gt; Task D ... │       │
+│  └───────────────────────────────────────────────────────────────┘       │
+│                                                                          │
+│  Step 2: Spawn N worker threads (N = min(stream_pool_size, #tasks))      │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐                          │
+│  │ Worker 0   │  │ Worker 1   │  │ Worker 2   │  ...                     │
+│  │ (stream)   │  │ (stream)   │  │ (stream)   │  ...                     │
+│  └────────────┘  └────────────┘  └────────────┘                          │
+│  Each worker: shared task_rx (Mutex&lt;Receiver&gt;), own done_tx (Sender)     │
+│                                                                          │
+│  Step 3: Scheduling loop (main thread)                                   │
+│  ┌───────────────────────────────────────────────────────────────┐       │
+│  │         Begin                                                 │       │
+│  │           │                                                   │       │
+│  │           ┌───────────────────────────────────────────────┐   │       │
+│  │           ▼                                               │   │       │
+│  │  ┌────────────────────┐                                   │   │       │
+│  │  │ Drain completions  │◄── try_recv() (non-blocking)      │   │       │
+│  │  │ release VRAM       │    unbook_capacity()              │   │       │
+│  │  └────────────────────┘                                   │   │       │
+│  │           │                                               │   │       │
+│  │           ▼                                               │   │       │
+│  │  ┌────────────────────┐ YES ┌──────────────────┐          │   │       │
+│  │  │ Pending task fits  │────&gt;│ book_capacity()  ├─────────&gt;┤   │       │
+│  │  │ in VRAM?           │     │ send to worker   │ continue │   │       │
+│  │  └────────────────────┘     └──────────────────┘          │   │       │
+│  │           │  NO                                           │   │       │
+│  │           ▼                                               │   │       │
+│  │  ┌────────────────────┐ YES ┌─────────────────────────┐   │   │       │
+│  │  │ inflight == 0?     │────&gt;│ DEADLOCK: Return Error. │   │   │       │
+│  │  └────────────────────┘     └─────────────────────────┘   │   │       │
+│  │           │  NO                                           │   │       │
+│  │           ▼                                               │   │       │
+│  │  ┌────────────────────┐                                   │   │       │
+│  │  │ Block: wait for    │                                   │   │       │
+│  │  │ next completion    │                                   │   │       │
+│  │  └────────┬───────────┘                                   │   │       │
+│  │           │  recv() (blocking) ──&gt; free VRAM              │   │       │
+│  │           └──────────────────────────────────────────────&gt;┘   │       │
+│  │           │                                                   │       │
+│  │           │  pending.is_empty() &amp;&amp; inflight == 0              │       │
+│  │           ▼                                                   │       │
+│  │          Exit                                                 │       │
+│  └───────────────────────────────────────────────────────────────┘       │
+│                                                                          │
+│  Step 4: Sort results by task_id to restore deterministic order          │
+└──────────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="scheduling-example-timeline"><a class="header" href="#scheduling-example-timeline">Scheduling Example (Timeline)</a></h3>
+<p>Consider 4 tasks on a GPU with 1200MB available VRAM and 4 worker streams:</p>
+<pre><code>Tasks (sorted by memory, descending):
+  A: 800MB    B: 400MB    C: 200MB    D: 50MB
+
+────────────────────────────────────────────────────────────────── time ────────────────────&gt;
+
+        400MB 0MB          400MB 200 150MB   1200MB     &lt;──  Mem Pool (free space)
+            │  │                │ │ │         │ 
+           t0 t1              t2 t3 t4        t5
+            │  │                │ │ │         │ 
+            ▼  ▼                ▼ ▼ ▼         ▼ 
+            ┌─────────────────────────────────┐
+            │ Task A (800MB)                  │ ─── try_book: 1200-800=400MB, fits! book @ t0
+            └─────────────────────────────────┘     unbook @ t5
+               ┌────────────────┐
+            ...│ Task B (400MB) │               ─── try_book: 400-400=0MB, fits! book @ t1
+               └────────────────┘                   unbook @ t2
+                                  ┌──────────┐
+            ......................│ C(200MB) │  ─── try_book: pool full (0MB free), wait
+                                  └──────────┘  ... book @ t3: 400-200=200MB, fits!
+                                    ┌───────┐
+            ........................│ D(50) │   ─── try_book: pool full (0MB free), wait
+                                    └───────┘   ... book @ t4: 200-50=150MB, fits!
+
+Legend:
+  t0: Launch A (800MB). Pool: 400MB free.
+  t1: B (400MB) fits remaining 400MB. Launch B. Pool: 0MB free.
+  t2: B completes → unbook 400MB. 
+  t3: C (200MB) fits. Launch.
+  t4: D (50MB) fits. Launch.
+  t5: All done.
+</code></pre>
+<h2 id="gpu-memory-estimation"><a class="header" href="#gpu-memory-estimation">GPU Memory Estimation</a></h2>
+<p>Before scheduling, each task’s peak GPU memory is estimated without executing it.
+The formula computes <strong>resident</strong> (always occupied) + <strong>max(stage temporaries)</strong>.</p>
+<pre><code>┌───────────────────────────────────────────────────────────────────────┐
+│               estimate_chip_proof_memory(cs, input, name)             │
+│                                                                       │
+│  ┌─── Resident Memory (always occupied) ─────────────────────────┐    │
+│  │                                                               │    │
+│  │ trace_resident = witness_mle_bytes + structural_mle_bytes     │    │
+│  │   (num_witin * 2^num_vars * sizeof(BabyBear))                 │    │
+│  │   + (num_structural * 2^num_vars * sizeof(BB))                │    │
+│  │                                                               │    │
+│  │ main_witness = num_records * 2^num_vars * sizeof(BabyBearExt4)│    │
+│  │   (records = reads + writes + lk_num + lk_den)                │    │
+│  │                                                               │    │
+│  └───────────────────────────────────────────────────────────────┘    │
+│                                                                       │
+│  ┌─── Stage Temporaries (only one active at a time) ───────────────┐  │
+│  │                                                                 │  │
+│  │ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ │  │
+│  │ │ Trace       │ │ Tower       │ │ ECC Quark   │ │ Main GKR    │ │  │
+│  │ │ Extraction  │ │ Build+Prove │ │ Sumcheck    │ │ Zerocheck + │ │  │
+│  │ │ (2x witness │ │ (prod +     │ │ (selectors  │ │ Rotation    │ │  │
+│  │ │  temp_buf)  │ │  logup)     │ │  + splits)  │ │ sumcheck    │ │  │
+│  │ └─────────────┘ └─────────────┘ └─────────────┘ └─────────────┘ │  │
+│  │       └──────────────┴──────────────┴──────────────┘            │  │
+│  │                     max(temporaries)                            │  │
+│  │                                                                 │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
+│                                                                       │
+│  TOTAL = trace_resident + main_witness + max(temporaries) + 5MB       │
+└───────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h3 id="dev-mode-validation"><a class="header" href="#dev-mode-validation">Dev-Mode Validation</a></h3>
+<p>Set <code>CENO_GPU_MEM_TRACKING=1 CENO_CONCURRENT_CHIP_PROVING=0</code> to enable
+estimation validation. Each proving stage compares estimated vs actual GPU
+memory, asserting:</p>
+<ul>
+<li>Under-estimate tolerance: 1MB (actual may exceed estimate by at most 1MB)</li>
+<li>Over-estimate margin: 5MB (estimate may exceed actual by at most 5MB)</li>
+</ul>
+<h2 id="per-task-execution-flow-gpu-concurrent"><a class="header" href="#per-task-execution-flow-gpu-concurrent">Per-Task Execution Flow (GPU Concurrent)</a></h2>
+<p>Each worker thread runs an independent chip proof with its own CUDA stream
+and forked transcript:</p>
+<pre><code>┌──────────────────────────────────────────────────────────────────┐
+│                     Worker Thread (per ChipTask)                 │
+│                                                                  │
+│  1. Acquire pool CUDA stream                                     │
+│     cuda_hal.get_pool_stream()                                   │
+│     bind_thread_stream(stream)  ◄── thread-local CUDA stream     │
+│                                                                  │
+│  2. Fork transcript (deterministic)                              │
+│     local_transcript = clone(parent)                             │
+│     local_transcript.append(task_id)                             │
+│     local_transcript.append(circuit_idx)                         │
+│                                                                  │
+│  3. Deferred witness extraction (GPU JIT)                        │
+│     extract_witness_mles_for_trace(pcs_data, idx, ..)            │
+│     transport_structural_witness_to_gpu(rmm, ..)                 │
+│                                                                  │
+│  4. Chip proof pipeline (standalone _impl functions)             │
+│     ┌──────────────────────────────────────┐                     │
+│     │ [optional] prove_ec_sum_quark_impl   │                     │
+│     │                   │                  │                     │
+│     │                   ▼                  │                     │
+│     │ build_main_witness (GKR witness gen) │                     │
+│     │                   │                  │                     │
+│     │                   ▼                  │                     │
+│     │ prove_tower_relation_impl            │                     │
+│     │ (product + logup tower build &amp; prove)│                     │
+│     │                   │                  │                     │
+│     │                   ▼                  │                     │
+│     │ prove_main_constraints_impl          │                     │
+│     │ (GKR zerocheck + rotation sumcheck)  │                     │
+│     └──────────────────────────────────────┘                     │
+│                                                                  │
+│  5. Sample from forked transcript, send CompletionMessage        │
+│     forked_sample = transcript.sample_vec(1)[0]                  │
+│     done_tx.send(CompletionMessage { result, mem, sample })      │
+│                                                                  │
+│  6. Panic safety: catch_unwind wraps entire execution            │
+│     Converts panics to ZKVMError, prevents scheduler deadlock    │
+└──────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h2 id="thread-safety-design"><a class="header" href="#thread-safety-design">Thread Safety Design</a></h2>
+<p>The concurrent scheduler must avoid <code>Send</code>/<code>Sync</code> requirements on
+<code>ZKVMProver</code> and <code>GpuProver</code>. The solution:</p>
+<pre><code>┌──────────────────────────────────────────────────────────────────┐
+│                      Thread Safety Architecture                  │
+│                                                                  │
+│  Problem: ZKVMProver holds non-Send/Sync state (Rc, closures)    │
+│                                                                  │
+│  Solution: Standalone _impl functions                            │
+│  ┌───────────────────────────────────────────────────────────┐   │
+│  │                                                           │   │
+│  │ Original trait methods        Standalone functions        │   │
+│  │ (require &amp;self)              (no &amp;self, Send+Sync args)   │   │
+│  │                                                           │   │
+│  │ device.prove_tower_relation ─&gt; prove_tower_relation_impl  │   │
+│  │ device.prove_main_constraints&gt; prove_main_constraints_impl│   │
+│  │ device.prove_ec_sum_quark ──&gt; prove_ec_sum_quark_impl     │   │
+│  │ self.create_chip_proof ─────&gt; create_chip_proof_gpu_impl  │   │
+│  │                                                           │   │
+│  │ Trait methods delegate to standalone functions.           │   │
+│  │ Concurrent path calls standalone functions directly.      │   │
+│  │ Sequential path uses self.create_chip_proof (trait).      │   │
+│  └───────────────────────────────────────────────────────────┘   │
+│                                                                  │
+│  Shared data across threads:                                     │
+│  ┌────────────────────────────────────────────────────────────┐  │
+│  │ transcript ──&gt; SyncRef wrapper (read-only, cloned per task)│  │
+│  │ pcs_data ───&gt; SyncRef wrapper (read-only via get_trace)    │  │
+│  │ Rc&lt;Backend&gt; ─&gt; Arc&lt;Backend&gt;  (Rc→Arc migration)            │  │
+│  │ CudaHalBB31 ─&gt; Arc (was Mutex-guarded, now lock-free)      │  │
+│  └────────────────────────────────────────────────────────────┘  │
+│                                                                  │
+│  Per-thread isolation:                                           │
+│  ┌───────────────────────────────────────────────────────────┐   │
+│  │ CUDA stream ──&gt; thread_local! { THREAD_CUDA_STREAM }      │   │
+│  │ transcript ───&gt; cloned per task + task_id appended        │   │
+│  │ GPU memory ──&gt; preemptively booked from shared CudaMemPool│   │
+│  └───────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h2 id="deferred-witness-extraction-gpu"><a class="header" href="#deferred-witness-extraction-gpu">Deferred Witness Extraction (GPU)</a></h2>
+<p>On the GPU path, witness polynomials are <strong>not</strong> extracted from PCS data
+during Phase 1. Instead, they are extracted just-in-time when a worker
+begins executing a task. This reduces peak VRAM usage.</p>
+<pre><code>┌──────────────────────────────────────────────────────────────────────┐
+│               CPU Path (Eager)          GPU Path (Deferred)          │
+│                                                                      │
+│  Phase 1:     extract_witness_mles()   witness = vec![] (empty)      │
+│  build_tasks  transport_structural()   structural = vec![] (empty)   │
+│               structural_rmm = None    structural_rmm = Some(rmm)    │
+│                                                                      │
+│  Phase 2:     create_chip_proof()      create_chip_proof_gpu_impl()  │
+│  execute      (input already filled)   extract_witness_mles_for_     │
+│                                          trace(pcs_data, idx, ..)    │
+│                                        transport_structural_         │
+│                                          witness_to_gpu(rmm, ..)     │
+│                                        (now input is populated)      │
+│                                        ... proceed with proving      │
+└──────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h2 id="configuration"><a class="header" href="#configuration">Configuration</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>Environment Variable</th><th>Default</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td><code>CENO_CONCURRENT_CHIP_PROVING</code></td><td><code>1</code> (enabled)</td><td>Set to <code>0</code> for sequential execution</td></tr>
+<tr><td><code>CENO_SCHEDULER_WORKERS_NUM</code></td><td><code>64</code></td><td>Number of concurrent CUDA streams</td></tr>
+<tr><td><code>CENO_GPU_MEM_TRACKING</code></td><td><code>0</code> (disabled)</td><td>Set to <code>1</code> to enable memory estimation validation</td></tr>
+<tr><td><code>RUST_MIN_STACK</code></td><td>—</td><td>Set to <code>16777216</code> (16MB) for multi-threaded execution</td></tr>
+</tbody>
+</table>
+</div>
+<h2 id="key-source-files"><a class="header" href="#key-source-files">Key Source Files</a></h2>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>File</th><th>Role</th></tr>
+</thead>
+<tbody>
+<tr><td><code>ceno_zkvm/src/scheme/scheduler.rs</code></td><td>Scheduler core: greedy backfilling algorithm</td></tr>
+<tr><td><code>ceno_zkvm/src/scheme/gpu/memory.rs</code></td><td>GPU memory estimation per chip proof stage</td></tr>
+<tr><td><code>ceno_zkvm/src/scheme/gpu/mod.rs</code></td><td>Standalone <code>_impl</code> proving functions</td></tr>
+<tr><td><code>ceno_zkvm/src/scheme/prover.rs</code></td><td>3-phase architecture: build / execute / collect</td></tr>
+<tr><td><code>ceno_zkvm/src/scheme/hal.rs</code></td><td><code>ChipInputPreparer</code> trait for deferred extraction</td></tr>
+<tr><td><code>gkr_iop/src/gpu/mod.rs</code></td><td>Per-thread CUDA stream, <code>Rc→Arc</code>, lock-free HAL</td></tr>
+</tbody>
+</table>
+</div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="differences-from-risc-v"><a class="header" href="#differences-from-risc-v">Differences from RISC-V</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
