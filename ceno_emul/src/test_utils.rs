@@ -1,10 +1,11 @@
 use crate::{
     CENO_PLATFORM, InsnKind, Instruction, Platform, Program, StepRecord, VMState, encode_rv32,
-    encode_rv32u, syscalls::KECCAK_PERMUTE,
+    encode_rv32u,
+    syscalls::{KECCAK_PERMUTE, SyscallWitness},
 };
 use anyhow::Result;
 
-pub fn keccak_step() -> (StepRecord, Vec<Instruction>) {
+pub fn keccak_step() -> (StepRecord, Vec<Instruction>, Vec<SyscallWitness>) {
     let instructions = vec![
         // Call Keccak-f.
         load_immediate(Platform::reg_arg0() as u32, CENO_PLATFORM.heap.start),
@@ -26,8 +27,9 @@ pub fn keccak_step() -> (StepRecord, Vec<Instruction>) {
     let mut vm = VMState::new(CENO_PLATFORM.clone(), program.into());
     vm.iter_until_halt().collect::<Result<Vec<_>>>().unwrap();
     let steps = vm.tracer().recorded_steps();
+    let syscall_witnesses = vm.tracer().syscall_witnesses().to_vec();
 
-    (steps[2].clone(), instructions)
+    (steps[2].clone(), instructions, syscall_witnesses)
 }
 
 const fn load_immediate(rd: u32, imm: u32) -> Instruction {

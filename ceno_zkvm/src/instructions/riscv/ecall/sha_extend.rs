@@ -218,7 +218,8 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
                     .zip_eq(indices.iter().copied())
                     .map(|(instance, idx)| {
                         let step = &steps[idx];
-                        let ops = step.syscall().expect("syscall step");
+                        let sw = shard_ctx.syscall_witnesses.clone();
+                        let ops = step.syscall(&sw).expect("syscall step");
 
                         // vm_state
                         config
@@ -285,7 +286,8 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
             .iter()
             .map(|&idx| -> ShaExtendInstance {
                 let step = &steps[idx];
-                let ops = step.syscall().expect("syscall step");
+                let sw = shard_ctx.syscall_witnesses.clone();
+                let ops = step.syscall(&sw).expect("syscall step");
                 let w_i_minus_2 = ops.mem_ops[0].value.before;
                 let w_i_minus_7 = ops.mem_ops[1].value.before;
                 let w_i_minus_15 = ops.mem_ops[2].value.before;
