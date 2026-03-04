@@ -5,7 +5,7 @@
 /// 2. Runs a CPU loop to collect side effects (shard_ctx.send, lk_multiplicity)
 /// 3. Returns the GPU-generated witness + CPU-collected side effects
 use ceno_emul::{StepIndex, StepRecord};
-use ceno_gpu::{Buffer, bb31::CudaHalBB31};
+use ceno_gpu::{Buffer, CudaHal, CudaSlice, bb31::CudaHalBB31};
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use multilinear_extensions::util::max_usable_threads;
@@ -14,6 +14,7 @@ use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
 };
+use std::cell::RefCell;
 use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
@@ -26,6 +27,89 @@ use crate::{
 pub enum GpuWitgenKind {
     Add,
     Lw,
+}
+
+/// Cached shard_steps device buffer with metadata for logging.
+struct ShardStepsCache {
+    host_ptr: usize,
+    byte_len: usize,
+    shard_id: usize,
+    n_steps: usize,
+    device_buf: CudaSlice<u8>,
+}
+
+// Thread-local cache for shard_steps device buffer. Invalidated when shard changes.
+thread_local! {
+    static SHARD_STEPS_DEVICE: RefCell<Option<ShardStepsCache>> =
+        const { RefCell::new(None) };
+}
+
+/// Upload shard_steps to GPU, reusing cached device buffer if the same data.
+fn upload_shard_steps_cached(
+    hal: &CudaHalBB31,
+    shard_steps: &[StepRecord],
+    shard_id: usize,
+) -> Result<(), ZKVMError> {
+    let ptr = shard_steps.as_ptr() as usize;
+    let byte_len = shard_steps.len() * std::mem::size_of::<StepRecord>();
+
+    SHARD_STEPS_DEVICE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(c) = cache.as_ref() {
+            if c.host_ptr == ptr && c.byte_len == byte_len {
+                return Ok(()); // cache hit
+            }
+        }
+        // Cache miss: upload
+        let mb = byte_len as f64 / (1024.0 * 1024.0);
+        tracing::info!(
+            "[GPU witgen] uploading shard_steps: shard_id={}, n_steps={}, {:.2} MB",
+            shard_id,
+            shard_steps.len(),
+            mb,
+        );
+        let bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(shard_steps.as_ptr() as *const u8, byte_len) };
+        let device_buf = hal.inner.htod_copy_stream(None, bytes).map_err(|e| {
+            ZKVMError::InvalidWitness(format!("shard_steps H2D failed: {e}").into())
+        })?;
+        *cache = Some(ShardStepsCache {
+            host_ptr: ptr,
+            byte_len,
+            shard_id,
+            n_steps: shard_steps.len(),
+            device_buf,
+        });
+        Ok(())
+    })
+}
+
+/// Borrow the cached device buffer for kernel launch.
+/// Panics if `upload_shard_steps_cached` was not called first.
+fn with_cached_shard_steps<R>(f: impl FnOnce(&CudaSlice<u8>) -> R) -> R {
+    SHARD_STEPS_DEVICE.with(|cache| {
+        let cache = cache.borrow();
+        let c = cache.as_ref().expect("shard_steps not uploaded");
+        f(&c.device_buf)
+    })
+}
+
+/// Invalidate the cached shard_steps device buffer.
+/// Call this when shard processing is complete to free GPU memory.
+pub fn invalidate_shard_steps_cache() {
+    SHARD_STEPS_DEVICE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(c) = cache.as_ref() {
+            let mb = c.byte_len as f64 / (1024.0 * 1024.0);
+            tracing::info!(
+                "[GPU witgen] releasing shard_steps cache: shard_id={}, n_steps={}, {:.2} MB",
+                c.shard_id,
+                c.n_steps,
+                mb,
+            );
+        }
+        *cache = None;
+    });
 }
 
 /// Try to run GPU witness generation for the given instruction.
@@ -118,7 +202,6 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     })?;
 
     // Step 2: CPU collects side effects (shard_ctx.send, lk_multiplicity)
-    // We run assign_instance with a scratch buffer per thread and discard the witness data.
     let lk_multiplicity = info_span!("cpu_side_effects").in_scope(|| {
         collect_side_effects::<E, I>(config, shard_ctx, num_witin, shard_steps, step_indices)
     })?;
@@ -166,13 +249,11 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     >,
     ZKVMError,
 > {
-    // Cast shard_steps to bytes for bulk H2D (no gather — GPU does indirect access).
-    let shard_steps_bytes: &[u8] = info_span!("shard_steps_bytes").in_scope(|| unsafe {
-        std::slice::from_raw_parts(
-            shard_steps.as_ptr() as *const u8,
-            shard_steps.len() * std::mem::size_of::<StepRecord>(),
-        )
-    });
+    // Upload shard_steps to GPU once (cached across ADD/LW calls within same shard).
+    let shard_id = shard_ctx.shard_id;
+    info_span!("upload_shard_steps")
+        .in_scope(|| upload_shard_steps_cached(hal, shard_steps, shard_id))?;
+
     // Convert step_indices from usize to u32 for GPU.
     let indices_u32: Vec<u32> = info_span!("indices_u32", n = step_indices.len())
         .in_scope(|| step_indices.iter().map(|&i| i as u32).collect());
@@ -180,7 +261,6 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
 
     match kind {
         GpuWitgenKind::Add => {
-            // Safety: we know config is ArithConfig<E> when kind == Add
             let arith_config = unsafe {
                 &*(config as *const I::InstructionConfig
                     as *const crate::instructions::riscv::arith::ArithConfig<E>)
@@ -188,14 +268,15 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             let col_map = info_span!("col_map")
                 .in_scope(|| super::add::extract_add_column_map(arith_config, num_witin));
             info_span!("hal_witgen_add").in_scope(|| {
-                hal.witgen_add(&col_map, shard_steps_bytes, &indices_u32, shard_offset, None)
-                    .map_err(|e| {
-                        ZKVMError::InvalidWitness(format!("GPU witgen_add failed: {e}").into())
-                    })
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_add(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(format!("GPU witgen_add failed: {e}").into())
+                        })
+                })
             })
         }
         GpuWitgenKind::Lw => {
-            // LoadConfig location depends on the u16limb_circuit feature
             #[cfg(feature = "u16limb_circuit")]
             let load_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -209,10 +290,12 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             let col_map = info_span!("col_map")
                 .in_scope(|| super::lw::extract_lw_column_map(load_config, num_witin));
             info_span!("hal_witgen_lw").in_scope(|| {
-                hal.witgen_lw(&col_map, shard_steps_bytes, &indices_u32, shard_offset, None)
-                    .map_err(|e| {
-                        ZKVMError::InvalidWitness(format!("GPU witgen_lw failed: {e}").into())
-                    })
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_lw(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(format!("GPU witgen_lw failed: {e}").into())
+                        })
+                })
             })
         }
     }
@@ -244,13 +327,11 @@ fn collect_side_effects<E: ExtensionField, I: Instruction<E>>(
         .zip(shard_ctx_vec)
         .flat_map(|(indices, mut shard_ctx)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
-            // Reusable scratch buffer for this thread's assign_instance calls
             let mut scratch = vec![E::BaseField::ZERO; num_witin];
             indices
                 .iter()
                 .copied()
                 .map(|step_idx| {
-                    // Zero out scratch for each step
                     scratch.fill(E::BaseField::ZERO);
                     I::assign_instance(
                         config,

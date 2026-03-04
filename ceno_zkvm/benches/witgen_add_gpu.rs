@@ -98,30 +98,32 @@ fn bench_witgen_add(c: &mut Criterion) {
             })
         });
 
-        // GPU benchmark (total: H2D + kernel + synchronize)
+        // GPU benchmark (total: H2D records + indices + kernel + synchronize)
         #[cfg(feature = "gpu")]
         group.bench_function("gpu_total", |b| {
             let steps_bytes = step_records_to_bytes(&steps);
             let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
             b.iter(|| {
+                let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
                 let shard_ctx = ShardContext::default();
                 let shard_offset = shard_ctx.current_shard_offset_cycle();
-                hal.witgen_add(&col_map, steps_bytes, &indices_u32, shard_offset, None)
+                hal.witgen_add(&col_map, &gpu_records, &indices_u32, shard_offset, None)
                     .unwrap()
             })
         });
 
-        // GPU benchmark (kernel only: same as total since H2D is inside HAL)
+        // GPU benchmark (kernel only: records pre-uploaded)
         #[cfg(feature = "gpu")]
         {
             let steps_bytes = step_records_to_bytes(&steps);
+            let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
             let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
             let shard_ctx = ShardContext::default();
             let shard_offset = shard_ctx.current_shard_offset_cycle();
 
             group.bench_function("gpu_kernel_only", |b| {
                 b.iter(|| {
-                    hal.witgen_add(&col_map, steps_bytes, &indices_u32, shard_offset, None)
+                    hal.witgen_add(&col_map, &gpu_records, &indices_u32, shard_offset, None)
                         .unwrap()
                 })
             });

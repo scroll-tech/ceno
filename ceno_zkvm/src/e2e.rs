@@ -1352,6 +1352,11 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 )
                 .unwrap();
             tracing::debug!("assign_opcode_circuit finish in {:?}", time.elapsed());
+
+            // Free GPU shard_steps cache after all opcode circuits are done.
+            #[cfg(feature = "gpu")]
+            crate::instructions::riscv::gpu::witgen_gpu::invalidate_shard_steps_cache();
+
             let time = std::time::Instant::now();
             system_config
                 .dummy_config
