@@ -14,6 +14,7 @@
   - [Guest Programming (`ceno_rt`)](./guest-programming.md)
   - [Accelerated Operations with Precompiles (Syscalls)](./precompiles.md)
   - [Profiling & Performance](./profiling.md)
+  - [Concurrent Chip Proving](./concurrent-chip-proving.md)
   - [Differences from RISC-V](./differences-from-risc-v.md)
 - [Integration with Ethereum](./integration-with-ethereum.md)
   - [Prover Network](./prover-network.md)
