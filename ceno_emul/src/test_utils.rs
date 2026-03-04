@@ -29,7 +29,7 @@ pub fn keccak_step() -> (StepRecord, Vec<Instruction>, Vec<SyscallWitness>) {
     let steps = vm.tracer().recorded_steps();
     let syscall_witnesses = vm.tracer().syscall_witnesses().to_vec();
 
-    (steps[2].clone(), instructions, syscall_witnesses)
+    (steps[2], instructions, syscall_witnesses)
 }
 
 const fn load_immediate(rd: u32, imm: u32) -> Instruction {

@@ -138,7 +138,7 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordUtil<E, N_ZEROS> {
         step: &StepRecord,
         shift: u32,
     ) -> Result<(), ZKVMError> {
-        let memory_op = step.memory_op().clone().unwrap();
+        let memory_op = step.memory_op().unwrap();
         let prev_value = Value::new_unchecked(memory_op.value.before);
         let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
 
