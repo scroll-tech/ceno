@@ -1,9 +1,7 @@
-use ceno_emul::StepIndex;
-use ceno_gpu::common::witgen_types::{AddColumnMap, AddStepRecordSOA};
+use ceno_gpu::common::witgen_types::AddColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::{e2e::ShardContext, instructions::riscv::arith::ArithConfig};
-use ceno_emul::StepRecord;
+use crate::instructions::riscv::arith::ArithConfig;
 
 /// Extract column map from a constructed ArithConfig (ADD variant).
 ///
@@ -103,71 +101,20 @@ pub fn extract_add_column_map<E: ExtensionField>(
     }
 }
 
-/// Pack step records into SOA format for GPU transfer.
-///
-/// Pre-computes shard-adjusted timing values on CPU so the GPU kernel
-/// only needs to do witness filling.
-pub fn pack_add_soa(
-    shard_ctx: &ShardContext,
-    shard_steps: &[StepRecord],
-    step_indices: &[StepIndex],
-) -> AddStepRecordSOA {
-    let n = step_indices.len();
-    let mut soa = AddStepRecordSOA::with_capacity(n);
-
-    let offset = shard_ctx.current_shard_offset_cycle();
-
-    for &idx in step_indices {
-        let step = &shard_steps[idx];
-        let rs1 = step.rs1().expect("ADD requires rs1");
-        let rs2 = step.rs2().expect("ADD requires rs2");
-        let rd = step.rd().expect("ADD requires rd");
-
-        soa.pc_before.push(step.pc().before.0);
-        soa.cycle.push(step.cycle() - offset);
-        soa.rs1_reg.push(rs1.register_index() as u32);
-        soa.rs1_val.push(rs1.value);
-        soa.rs1_prev_cycle
-            .push(aligned_prev_ts(rs1.previous_cycle, offset));
-        soa.rs2_reg.push(rs2.register_index() as u32);
-        soa.rs2_val.push(rs2.value);
-        soa.rs2_prev_cycle
-            .push(aligned_prev_ts(rs2.previous_cycle, offset));
-        soa.rd_reg.push(rd.register_index() as u32);
-        soa.rd_val_before.push(rd.value.before);
-        soa.rd_prev_cycle
-            .push(aligned_prev_ts(rd.previous_cycle, offset));
-    }
-
-    soa
-}
-
-/// Inline version of ShardContext::aligned_prev_ts for SOA packing.
-fn aligned_prev_ts(prev_cycle: u64, shard_offset: u64) -> u64 {
-    let mut ts = prev_cycle.saturating_sub(shard_offset);
-    if ts < ceno_emul::FullTracer::SUBCYCLES_PER_INSN {
-        ts = 0;
-    }
-    ts
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        e2e::ShardContext,
         instructions::{Instruction, riscv::arith::AddInstruction},
         structs::ProgramParams,
     };
-    use ceno_emul::{ByteAddr, Change, InsnKind, encode_rv32};
-    use ceno_gpu::{Buffer, bb31::CudaHalBB31};
+    use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
     use ff_ext::BabyBearExt4;
 
     type E = BabyBearExt4;
 
     fn make_test_steps(n: usize) -> Vec<StepRecord> {
-        // Use small PC values that fit within BabyBear field (P ≈ 2×10^9)
         let pc_start = 0x1000u32;
         (0..n)
             .map(|i| {
@@ -175,7 +122,7 @@ mod tests {
                 let rs2 = (i as u32) % 500 + 3;
                 let rd_before = (i as u32) % 200;
                 let rd_after = rs1.wrapping_add(rs2);
-                let cycle = 4 + (i as u64) * 4; // cycles start at 4 (SUBCYCLES_PER_INSN)
+                let cycle = 4 + (i as u64) * 4;
                 let pc = ByteAddr(pc_start + (i as u32) * 4);
                 let insn_code = encode_rv32(InsnKind::ADD, 2, 3, 4, 0);
                 StepRecord::new_r_instruction(
@@ -185,7 +132,7 @@ mod tests {
                     rs1,
                     rs2,
                     Change::new(rd_before, rd_after),
-                    0, // prev_cycle
+                    0,
                 )
             })
             .collect()
@@ -220,21 +167,11 @@ mod tests {
     }
 
     #[test]
-    fn test_pack_add_soa() {
-        let steps = make_test_steps(4);
-        let indices: Vec<usize> = (0..steps.len()).collect();
-        let shard_ctx = ShardContext::default();
-        let soa = pack_add_soa(&shard_ctx, &steps, &indices);
-
-        assert_eq!(soa.len(), 4);
-        // Check first step
-        assert_eq!(soa.rs1_val[0], 1); // 0 * 7 + 1
-        assert_eq!(soa.rs2_val[0], 3); // 0 * 13 + 3
-    }
-
-    #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_add_correctness() {
+        use crate::e2e::ShardContext;
+        use ceno_gpu::{Buffer, bb31::CudaHalBB31};
+
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
 
         // Construct circuit
@@ -250,8 +187,7 @@ mod tests {
         let steps = make_test_steps(n);
         let indices: Vec<usize> = (0..n).collect();
 
-        // CPU path — use cpu_assign_instances directly to avoid going through
-        // the GPU override in assign_instances (which would make this GPU vs GPU).
+        // CPU path
         let mut shard_ctx = ShardContext::default();
         let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, AddInstruction<E>>(
             &config,
@@ -262,13 +198,22 @@ mod tests {
             &indices,
         )
         .unwrap();
-        let cpu_witness = &cpu_rmms[0]; // witness matrix (not structural)
+        let cpu_witness = &cpu_rmms[0];
 
-        // GPU path
+        // GPU path (AOS with indirect indexing)
         let col_map = extract_add_column_map(&config, num_witin);
         let shard_ctx_gpu = ShardContext::default();
-        let soa = pack_add_soa(&shard_ctx_gpu, &steps, &indices);
-        let gpu_result = hal.witgen_add(&col_map, &soa, None).unwrap();
+        let shard_offset = shard_ctx_gpu.current_shard_offset_cycle();
+        let steps_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                steps.as_ptr() as *const u8,
+                steps.len() * std::mem::size_of::<StepRecord>(),
+            )
+        };
+        let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
+        let gpu_result = hal
+            .witgen_add(&col_map, steps_bytes, &indices_u32, shard_offset, None)
+            .unwrap();
 
         // D2H copy
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
@@ -276,13 +221,7 @@ mod tests {
 
         // Compare element by element
         let cpu_data = cpu_witness.values();
-        assert_eq!(
-            gpu_data.len(),
-            cpu_data.len(),
-            "Size mismatch: GPU {} vs CPU {}",
-            gpu_data.len(),
-            cpu_data.len()
-        );
+        assert_eq!(gpu_data.len(), cpu_data.len(), "Size mismatch");
 
         let mut mismatches = 0;
         for row in 0..n {
@@ -300,12 +239,6 @@ mod tests {
                 }
             }
         }
-        assert_eq!(
-            mismatches,
-            0,
-            "Found {} mismatches out of {} elements",
-            mismatches,
-            n * num_witin
-        );
+        assert_eq!(mismatches, 0, "Found {} mismatches", mismatches);
     }
 }

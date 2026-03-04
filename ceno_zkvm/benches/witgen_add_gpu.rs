@@ -13,7 +13,7 @@ use ff_ext::BabyBearExt4;
 #[cfg(feature = "gpu")]
 use ceno_gpu::bb31::CudaHalBB31;
 #[cfg(feature = "gpu")]
-use ceno_zkvm::instructions::riscv::gpu::add::{extract_add_column_map, pack_add_soa};
+use ceno_zkvm::instructions::riscv::gpu::add::extract_add_column_map;
 
 mod alloc;
 
@@ -49,6 +49,16 @@ fn make_test_steps(n: usize) -> Vec<StepRecord> {
             )
         })
         .collect()
+}
+
+#[cfg(feature = "gpu")]
+fn step_records_to_bytes(records: &[StepRecord]) -> &[u8] {
+    unsafe {
+        std::slice::from_raw_parts(
+            records.as_ptr() as *const u8,
+            records.len() * std::mem::size_of::<StepRecord>(),
+        )
+    }
 }
 
 fn bench_witgen_add(c: &mut Criterion) {
@@ -88,24 +98,32 @@ fn bench_witgen_add(c: &mut Criterion) {
             })
         });
 
-        // GPU benchmark (total: SOA pack + H2D + kernel + synchronize)
+        // GPU benchmark (total: H2D + kernel + synchronize)
         #[cfg(feature = "gpu")]
         group.bench_function("gpu_total", |b| {
+            let steps_bytes = step_records_to_bytes(&steps);
+            let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
             b.iter(|| {
                 let shard_ctx = ShardContext::default();
-                let soa = pack_add_soa(&shard_ctx, &steps, &indices);
-                hal.witgen_add(&col_map, &soa, None).unwrap()
+                let shard_offset = shard_ctx.current_shard_offset_cycle();
+                hal.witgen_add(&col_map, steps_bytes, &indices_u32, shard_offset, None)
+                    .unwrap()
             })
         });
 
-        // GPU benchmark (kernel only: pre-upload SOA, measure only kernel)
+        // GPU benchmark (kernel only: same as total since H2D is inside HAL)
         #[cfg(feature = "gpu")]
         {
+            let steps_bytes = step_records_to_bytes(&steps);
+            let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
             let shard_ctx = ShardContext::default();
-            let soa = pack_add_soa(&shard_ctx, &steps, &indices);
+            let shard_offset = shard_ctx.current_shard_offset_cycle();
 
             group.bench_function("gpu_kernel_only", |b| {
-                b.iter(|| hal.witgen_add(&col_map, &soa, None).unwrap())
+                b.iter(|| {
+                    hal.witgen_add(&col_map, steps_bytes, &indices_u32, shard_offset, None)
+                        .unwrap()
+                })
             });
         }
 

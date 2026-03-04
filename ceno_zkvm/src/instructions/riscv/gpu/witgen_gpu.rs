@@ -166,6 +166,18 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     >,
     ZKVMError,
 > {
+    // Cast shard_steps to bytes for bulk H2D (no gather — GPU does indirect access).
+    let shard_steps_bytes: &[u8] = info_span!("shard_steps_bytes").in_scope(|| unsafe {
+        std::slice::from_raw_parts(
+            shard_steps.as_ptr() as *const u8,
+            shard_steps.len() * std::mem::size_of::<StepRecord>(),
+        )
+    });
+    // Convert step_indices from usize to u32 for GPU.
+    let indices_u32: Vec<u32> = info_span!("indices_u32", n = step_indices.len())
+        .in_scope(|| step_indices.iter().map(|&i| i as u32).collect());
+    let shard_offset = shard_ctx.current_shard_offset_cycle();
+
     match kind {
         GpuWitgenKind::Add => {
             // Safety: we know config is ArithConfig<E> when kind == Add
@@ -173,10 +185,13 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 &*(config as *const I::InstructionConfig
                     as *const crate::instructions::riscv::arith::ArithConfig<E>)
             };
-            let col_map = super::add::extract_add_column_map(arith_config, num_witin);
-            let soa = super::add::pack_add_soa(shard_ctx, shard_steps, step_indices);
-            hal.witgen_add(&col_map, &soa, None).map_err(|e| {
-                ZKVMError::InvalidWitness(format!("GPU witgen_add failed: {e}").into())
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::add::extract_add_column_map(arith_config, num_witin));
+            info_span!("hal_witgen_add").in_scope(|| {
+                hal.witgen_add(&col_map, shard_steps_bytes, &indices_u32, shard_offset, None)
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(format!("GPU witgen_add failed: {e}").into())
+                    })
             })
         }
         GpuWitgenKind::Lw => {
@@ -191,10 +206,14 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 &*(config as *const I::InstructionConfig
                     as *const crate::instructions::riscv::memory::load::LoadConfig<E>)
             };
-            let col_map = super::lw::extract_lw_column_map(load_config, num_witin);
-            let soa = super::lw::pack_lw_soa::<E>(shard_ctx, shard_steps, step_indices);
-            hal.witgen_lw(&col_map, &soa, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("GPU witgen_lw failed: {e}").into()))
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::lw::extract_lw_column_map(load_config, num_witin));
+            info_span!("hal_witgen_lw").in_scope(|| {
+                hal.witgen_lw(&col_map, shard_steps_bytes, &indices_u32, shard_offset, None)
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(format!("GPU witgen_lw failed: {e}").into())
+                    })
+            })
         }
     }
 }
