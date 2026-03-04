@@ -32,6 +32,8 @@ mod r_insn;
 
 mod ecall_insn;
 
+pub mod gpu;
+
 #[cfg(feature = "u16limb_circuit")]
 mod auipc;
 mod im_insn;

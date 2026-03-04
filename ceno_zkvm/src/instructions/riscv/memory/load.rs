@@ -22,16 +22,16 @@ use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {
-    im_insn: IMInstructionConfig<E>,
+    pub im_insn: IMInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    imm: WitIn,
-    memory_addr: MemAddr<E>,
+    pub rs1_read: UInt<E>,
+    pub imm: WitIn,
+    pub memory_addr: MemAddr<E>,
 
-    memory_read: UInt<E>,
-    target_limb: Option<WitIn>,
-    target_limb_bytes: Option<Vec<WitIn>>,
-    signed_extend_config: Option<SignedExtendConfig<E>>,
+    pub memory_read: UInt<E>,
+    pub target_limb: Option<WitIn>,
+    pub target_limb_bytes: Option<Vec<WitIn>>,
+    pub signed_extend_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
@@ -225,5 +225,44 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         }
 
         Ok(())
+    }
+
+    #[cfg(feature = "gpu")]
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut crate::e2e::ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_steps: &[StepRecord],
+        step_indices: &[ceno_emul::StepIndex],
+    ) -> Result<
+        (
+            crate::tables::RMMCollections<E::BaseField>,
+            gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
+        ),
+        crate::error::ZKVMError,
+    > {
+        use crate::instructions::riscv::gpu::witgen_gpu;
+        if I::INST_KIND == InsnKind::LW {
+            if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+                config,
+                shard_ctx,
+                num_witin,
+                num_structural_witin,
+                shard_steps,
+                step_indices,
+                witgen_gpu::GpuWitgenKind::Lw,
+            )? {
+                return Ok(result);
+            }
+        }
+        crate::instructions::cpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+        )
     }
 }

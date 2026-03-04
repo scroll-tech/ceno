@@ -6,7 +6,7 @@ pub mod load;
 pub mod store;
 
 #[cfg(feature = "u16limb_circuit")]
-mod load_v2;
+pub mod load_v2;
 #[cfg(feature = "u16limb_circuit")]
 mod store_v2;
 #[cfg(test)]
