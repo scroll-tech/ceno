@@ -46,6 +46,10 @@ pub enum GpuWitgenKind {
     Slt(u32),  // 1=SLT(signed), 0=SLTU(unsigned)
     #[cfg(feature = "u16limb_circuit")]
     Slti(u32), // 1=SLTI(signed), 0=SLTIU(unsigned)
+    #[cfg(feature = "u16limb_circuit")]
+    BranchEq(u32), // 1=BEQ, 0=BNE
+    #[cfg(feature = "u16limb_circuit")]
+    BranchCmp(u32), // 1=signed (BLT/BGE), 0=unsigned (BLTU/BGEU)
     Lw,
 }
 
@@ -496,6 +500,44 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                         .map_err(|e| {
                             ZKVMError::InvalidWitness(
                                 format!("GPU witgen_slti failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::BranchEq(is_beq) => {
+            let branch_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::branch::branch_circuit_v2::BranchConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::branch_eq::extract_branch_eq_column_map(branch_config, num_witin));
+            info_span!("hal_witgen_branch_eq").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_branch_eq(&col_map, gpu_records, &indices_u32, shard_offset, is_beq, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_branch_eq failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::BranchCmp(is_signed) => {
+            let branch_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::branch::branch_circuit_v2::BranchConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::branch_cmp::extract_branch_cmp_column_map(branch_config, num_witin));
+            info_span!("hal_witgen_branch_cmp").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_branch_cmp(&col_map, gpu_records, &indices_u32, shard_offset, is_signed, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_branch_cmp failed: {e}").into(),
                             )
                         })
                 })
