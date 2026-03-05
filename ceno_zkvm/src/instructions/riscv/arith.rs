@@ -150,8 +150,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         use crate::instructions::riscv::gpu::witgen_gpu;
-        // Only ADD gets GPU path; SUB and others fall through to CPU
-        if I::INST_KIND == InsnKind::ADD {
+        let gpu_kind = match I::INST_KIND {
+            InsnKind::ADD => Some(witgen_gpu::GpuWitgenKind::Add),
+            InsnKind::SUB => Some(witgen_gpu::GpuWitgenKind::Sub),
+            _ => None,
+        };
+        if let Some(kind) = gpu_kind {
             if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
                 config,
                 shard_ctx,
@@ -159,7 +163,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
                 num_structural_witin,
                 shard_steps,
                 step_indices,
-                witgen_gpu::GpuWitgenKind::Add,
+                kind,
             )? {
                 return Ok(result);
             }

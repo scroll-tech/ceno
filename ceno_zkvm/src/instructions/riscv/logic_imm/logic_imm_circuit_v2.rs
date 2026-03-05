@@ -24,6 +24,13 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
+
+#[cfg(feature = "gpu")]
+use crate::tables::RMMCollections;
+#[cfg(feature = "gpu")]
+use ceno_emul::StepIndex;
+#[cfg(feature = "gpu")]
+use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use multilinear_extensions::ToExpr;
 
 /// The Instruction circuit for a given LogicOp.
@@ -124,18 +131,49 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
 
         config.assign_instance(instance, shard_ctx, lkm, step)
     }
+
+    #[cfg(feature = "gpu")]
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_steps: &[StepRecord],
+        step_indices: &[StepIndex],
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        use crate::instructions::riscv::gpu::witgen_gpu;
+        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+            witgen_gpu::GpuWitgenKind::LogicI,
+        )? {
+            return Ok(result);
+        }
+        crate::instructions::cpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+        )
+    }
 }
 
 /// This config implements I-Instructions that represent registers values as 4 * u8.
 /// Non-generic code shared by several circuits.
 #[derive(Debug)]
 pub struct LogicConfig<E: ExtensionField> {
-    i_insn: IInstructionConfig<E>,
+    pub(crate) i_insn: IInstructionConfig<E>,
 
-    rs1_read: UInt8<E>,
+    pub(crate) rs1_read: UInt8<E>,
     pub(crate) rd_written: UInt8<E>,
-    imm_lo: UIntLimbs<{ LIMB_BITS }, 8, E>,
-    imm_hi: UIntLimbs<{ LIMB_BITS }, 8, E>,
+    pub(crate) imm_lo: UIntLimbs<{ LIMB_BITS }, 8, E>,
+    pub(crate) imm_hi: UIntLimbs<{ LIMB_BITS }, 8, E>,
 }
 
 impl<E: ExtensionField> LogicConfig<E> {

@@ -18,16 +18,23 @@ use p3::field::FieldAlgebra;
 use std::marker::PhantomData;
 use witness::set_val;
 
+#[cfg(feature = "gpu")]
+use crate::tables::RMMCollections;
+#[cfg(feature = "gpu")]
+use ceno_emul::StepIndex;
+#[cfg(feature = "gpu")]
+use gkr_iop::utils::lk_multiplicity::Multiplicity;
+
 pub struct AddiInstruction<E>(PhantomData<E>);
 
 pub struct InstructionConfig<E: ExtensionField> {
-    i_insn: IInstructionConfig<E>,
+    pub(crate) i_insn: IInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    imm: WitIn,
+    pub(crate) rs1_read: UInt<E>,
+    pub(crate) imm: WitIn,
     // 0 positive, 1 negative
-    imm_sign: WitIn,
-    rd_written: UInt<E>,
+    pub(crate) imm_sign: WitIn,
+    pub(crate) rd_written: UInt<E>,
 }
 
 impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
@@ -103,5 +110,36 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
             .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
         Ok(())
+    }
+
+    #[cfg(feature = "gpu")]
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_steps: &[StepRecord],
+        step_indices: &[StepIndex],
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        use crate::instructions::riscv::gpu::witgen_gpu;
+        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+            witgen_gpu::GpuWitgenKind::Addi,
+        )? {
+            return Ok(result);
+        }
+        crate::instructions::cpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+        )
     }
 }

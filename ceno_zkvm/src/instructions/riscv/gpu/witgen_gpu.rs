@@ -26,6 +26,12 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub enum GpuWitgenKind {
     Add,
+    Sub,
+    LogicR,
+    #[cfg(feature = "u16limb_circuit")]
+    LogicI,
+    #[cfg(feature = "u16limb_circuit")]
+    Addi,
     Lw,
 }
 
@@ -272,6 +278,78 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     hal.witgen_add(&col_map, gpu_records, &indices_u32, shard_offset, None)
                         .map_err(|e| {
                             ZKVMError::InvalidWitness(format!("GPU witgen_add failed: {e}").into())
+                        })
+                })
+            })
+        }
+        GpuWitgenKind::Sub => {
+            let arith_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::arith::ArithConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::sub::extract_sub_column_map(arith_config, num_witin));
+            info_span!("hal_witgen_sub").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_sub(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(format!("GPU witgen_sub failed: {e}").into())
+                        })
+                })
+            })
+        }
+        GpuWitgenKind::LogicR => {
+            let logic_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::logic::logic_circuit::LogicConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::logic_r::extract_logic_r_column_map(logic_config, num_witin));
+            info_span!("hal_witgen_logic_r").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_logic_r(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_logic_r failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::LogicI => {
+            let logic_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::logic_imm::logic_imm_circuit_v2::LogicConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::logic_i::extract_logic_i_column_map(logic_config, num_witin));
+            info_span!("hal_witgen_logic_i").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_logic_i(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_logic_i failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Addi => {
+            let addi_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::arith_imm::arith_imm_circuit_v2::InstructionConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::addi::extract_addi_column_map(addi_config, num_witin));
+            info_span!("hal_witgen_addi").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_addi(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_addi failed: {e}").into(),
+                            )
                         })
                 })
             })
