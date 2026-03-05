@@ -786,8 +786,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             self.build_tower_witness(composed_cs, input, records);
         exit_span!(span);
 
-        // bind read/write out evals into transcript before deriving tower challenges
-        for eval in out_evals[0].iter().chain(out_evals[1].iter()).flatten() {
+        // bind read/write/lookup out evals into transcript before deriving tower challenges
+        for eval in out_evals
+            .iter()
+            .flat_map(|evals| evals.iter())
+            .flatten()
+        {
             transcript.append_field_element_ext(eval);
         }
 

@@ -614,7 +614,7 @@ pub fn verify_chip_proof<C: Config>(
         concat(builder, &chip_proof.r_out_evals, &chip_proof.w_out_evals);
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
 
-    // bind read/write out evals into transcript before deriving tower challenges
+    // bind read/write/lookup out evals into transcript before deriving tower challenges
     iter_zip!(builder, chip_proof.r_out_evals).for_each(|ptr_vec, builder| {
         let evals = builder.iter_ptr_get(&chip_proof.r_out_evals, ptr_vec[0]);
         unsafe {
@@ -624,6 +624,13 @@ pub fn verify_chip_proof<C: Config>(
     });
     iter_zip!(builder, chip_proof.w_out_evals).for_each(|ptr_vec, builder| {
         let evals = builder.iter_ptr_get(&chip_proof.w_out_evals, ptr_vec[0]);
+        unsafe {
+            let evals_felts = exts_to_felts(builder, &evals);
+            challenger_multi_observe(builder, challenger, &evals_felts);
+        }
+    });
+    iter_zip!(builder, chip_proof.lk_out_evals).for_each(|ptr_vec, builder| {
+        let evals = builder.iter_ptr_get(&chip_proof.lk_out_evals, ptr_vec[0]);
         unsafe {
             let evals_felts = exts_to_felts(builder, &evals);
             challenger_multi_observe(builder, challenger, &evals_felts);

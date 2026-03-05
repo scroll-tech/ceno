@@ -566,11 +566,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
-        // bind read/write out evals into transcript before deriving tower challenges
+        // bind read/write/lookup out evals into transcript before deriving tower challenges
         for eval in proof
             .r_out_evals
             .iter()
             .chain(proof.w_out_evals.iter())
+            .chain(proof.lk_out_evals.iter())
             .flatten()
         {
             transcript.append_field_element_ext(eval);

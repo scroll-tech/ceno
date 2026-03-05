@@ -130,8 +130,13 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
             extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
         exit_span!(span);
 
-        // bind read/write out evals into transcript before deriving tower challenges
-        for eval in r_out_evals.iter().chain(w_out_evals.iter()).flatten() {
+        // bind read/write/lookup out evals into transcript before deriving tower challenges
+        for eval in r_out_evals
+            .iter()
+            .chain(w_out_evals.iter())
+            .chain(lk_out_evals.iter())
+            .flatten()
+        {
             transcript.append_field_element_ext(eval);
         }
 
