@@ -24,6 +24,13 @@ use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
 use witness::set_val;
 
+#[cfg(feature = "gpu")]
+use crate::tables::RMMCollections;
+#[cfg(feature = "gpu")]
+use ceno_emul::StepIndex;
+#[cfg(feature = "gpu")]
+use gkr_iop::utils::lk_multiplicity::Multiplicity;
+
 pub struct AuipcConfig<E: ExtensionField> {
     pub i_insn: IInstructionConfig<E>,
     // The limbs of the immediate except the least significant limb since it is always 0
@@ -184,6 +191,37 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         lk_multiplicity.logic_u8::<XorTable>(pc[3] as u64, additional_bits as u64);
 
         Ok(())
+    }
+
+    #[cfg(feature = "gpu")]
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_steps: &[ceno_emul::StepRecord],
+        step_indices: &[StepIndex],
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        use crate::instructions::riscv::gpu::witgen_gpu;
+        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+            witgen_gpu::GpuWitgenKind::Auipc,
+        )? {
+            return Ok(result);
+        }
+        crate::instructions::cpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+        )
     }
 }
 

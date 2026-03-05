@@ -32,6 +32,12 @@ pub enum GpuWitgenKind {
     LogicI,
     #[cfg(feature = "u16limb_circuit")]
     Addi,
+    #[cfg(feature = "u16limb_circuit")]
+    Lui,
+    #[cfg(feature = "u16limb_circuit")]
+    Auipc,
+    #[cfg(feature = "u16limb_circuit")]
+    Jal,
     Lw,
 }
 
@@ -349,6 +355,63 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                         .map_err(|e| {
                             ZKVMError::InvalidWitness(
                                 format!("GPU witgen_addi failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Lui => {
+            let lui_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::lui::LuiConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::lui::extract_lui_column_map(lui_config, num_witin));
+            info_span!("hal_witgen_lui").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_lui(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_lui failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Auipc => {
+            let auipc_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::auipc::AuipcConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::auipc::extract_auipc_column_map(auipc_config, num_witin));
+            info_span!("hal_witgen_auipc").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_auipc(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_auipc failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Jal => {
+            let jal_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::jump::jal_v2::JalConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::jal::extract_jal_column_map(jal_config, num_witin));
+            info_span!("hal_witgen_jal").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_jal(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_jal failed: {e}").into(),
                             )
                         })
                 })
