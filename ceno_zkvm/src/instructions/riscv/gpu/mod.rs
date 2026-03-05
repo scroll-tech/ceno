@@ -18,6 +18,10 @@ pub mod lw;
 pub mod shift_i;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod shift_r;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod slt;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod slti;
 #[cfg(feature = "gpu")]
 pub mod sub;
 #[cfg(feature = "gpu")]

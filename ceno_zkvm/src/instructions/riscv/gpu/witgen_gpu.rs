@@ -42,6 +42,10 @@ pub enum GpuWitgenKind {
     ShiftR(u32), // 0=SLL, 1=SRL, 2=SRA
     #[cfg(feature = "u16limb_circuit")]
     ShiftI(u32), // 0=SLLI, 1=SRLI, 2=SRAI
+    #[cfg(feature = "u16limb_circuit")]
+    Slt(u32),  // 1=SLT(signed), 0=SLTU(unsigned)
+    #[cfg(feature = "u16limb_circuit")]
+    Slti(u32), // 1=SLTI(signed), 0=SLTIU(unsigned)
     Lw,
 }
 
@@ -454,6 +458,44 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                         .map_err(|e| {
                             ZKVMError::InvalidWitness(
                                 format!("GPU witgen_shift_i failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Slt(is_signed) => {
+            let slt_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::slt::slt_circuit_v2::SetLessThanConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::slt::extract_slt_column_map(slt_config, num_witin));
+            info_span!("hal_witgen_slt").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_slt(&col_map, gpu_records, &indices_u32, shard_offset, is_signed, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_slt failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Slti(is_signed) => {
+            let slti_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::slti::extract_slti_column_map(slti_config, num_witin));
+            info_span!("hal_witgen_slti").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_slti(&col_map, gpu_records, &indices_u32, shard_offset, is_signed, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_slti failed: {e}").into(),
                             )
                         })
                 })

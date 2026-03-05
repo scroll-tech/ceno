@@ -1,5 +1,5 @@
 #[cfg(feature = "u16limb_circuit")]
-mod slti_circuit_v2;
+pub(crate) mod slti_circuit_v2;
 
 #[cfg(not(feature = "u16limb_circuit"))]
 mod slti_circuit;
