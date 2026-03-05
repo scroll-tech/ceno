@@ -135,4 +135,85 @@ mod tests {
             assert!(seen.insert(col), "Duplicate column ID: {}", col);
         }
     }
+
+    #[test]
+    #[cfg(feature = "gpu")]
+    fn test_gpu_witgen_shift_r_correctness() {
+        use crate::e2e::ShardContext;
+        use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
+        use ceno_gpu::{Buffer, bb31::CudaHalBB31};
+
+        let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
+
+        let mut cs = ConstraintSystem::<E>::new(|| "test_shift_r_gpu");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config =
+            SllInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+        let num_witin = cb.cs.num_witin as usize;
+        let num_structural_witin = cb.cs.num_structural_witin as usize;
+
+        let n = 1024;
+        let steps: Vec<StepRecord> = (0..n)
+            .map(|i| {
+                let rs1 = (i as u32).wrapping_mul(0x01010101);
+                let rs2 = (i as u32) % 32;
+                let rd_after = rs1 << rs2;
+                let cycle = 4 + (i as u64) * 4;
+                let pc = ByteAddr(0x1000 + (i as u32) * 4);
+                let insn_code = encode_rv32(InsnKind::SLL, 2, 3, 4, 0);
+                StepRecord::new_r_instruction(
+                    cycle, pc, insn_code, rs1, rs2,
+                    Change::new((i as u32) % 200, rd_after), 0,
+                )
+            })
+            .collect();
+        let indices: Vec<usize> = (0..n).collect();
+
+        let mut shard_ctx = ShardContext::default();
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, SllInstruction<E>>(
+            &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
+        )
+        .unwrap();
+        let cpu_witness = &cpu_rmms[0];
+
+        let col_map = extract_shift_r_column_map(&config, num_witin);
+        let shard_ctx_gpu = ShardContext::default();
+        let shard_offset = shard_ctx_gpu.current_shard_offset_cycle();
+        let steps_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                steps.as_ptr() as *const u8,
+                steps.len() * std::mem::size_of::<StepRecord>(),
+            )
+        };
+        let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
+        let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
+        let gpu_result = hal
+            .witgen_shift_r(&col_map, &gpu_records, &indices_u32, shard_offset, 0, None)
+            .unwrap();
+
+        let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
+            gpu_result.device_buffer.to_vec().unwrap();
+        let cpu_data = cpu_witness.values();
+        assert_eq!(gpu_data.len(), cpu_data.len(), "Size mismatch");
+
+        let flat = col_map.to_flat();
+        let mut mismatches = 0;
+        for row in 0..n {
+            for &col in &flat {
+                let c = col as usize;
+                let gpu_val = gpu_data[row * num_witin + c];
+                let cpu_val = cpu_data[row * num_witin + c];
+                if gpu_val != cpu_val {
+                    if mismatches < 10 {
+                        eprintln!(
+                            "Mismatch at row={}, col={}: GPU={:?}, CPU={:?}",
+                            row, c, gpu_val, cpu_val
+                        );
+                    }
+                    mismatches += 1;
+                }
+            }
+        }
+        assert_eq!(mismatches, 0, "Found {} mismatches", mismatches);
+    }
 }
