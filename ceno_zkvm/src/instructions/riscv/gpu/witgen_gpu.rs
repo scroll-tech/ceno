@@ -38,6 +38,10 @@ pub enum GpuWitgenKind {
     Auipc,
     #[cfg(feature = "u16limb_circuit")]
     Jal,
+    #[cfg(feature = "u16limb_circuit")]
+    ShiftR(u32), // 0=SLL, 1=SRL, 2=SRA
+    #[cfg(feature = "u16limb_circuit")]
+    ShiftI(u32), // 0=SLLI, 1=SRLI, 2=SRAI
     Lw,
 }
 
@@ -412,6 +416,44 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                         .map_err(|e| {
                             ZKVMError::InvalidWitness(
                                 format!("GPU witgen_jal failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::ShiftR(shift_kind) => {
+            let shift_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::shift::shift_circuit_v2::ShiftRTypeConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::shift_r::extract_shift_r_column_map(shift_config, num_witin));
+            info_span!("hal_witgen_shift_r").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_shift_r(&col_map, gpu_records, &indices_u32, shard_offset, shift_kind, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_shift_r failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::ShiftI(shift_kind) => {
+            let shift_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::shift::shift_circuit_v2::ShiftImmConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::shift_i::extract_shift_i_column_map(shift_config, num_witin));
+            info_span!("hal_witgen_shift_i").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_shift_i(&col_map, gpu_records, &indices_u32, shard_offset, shift_kind, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_shift_i failed: {e}").into(),
                             )
                         })
                 })
