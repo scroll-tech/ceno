@@ -18,7 +18,7 @@ use crate::{
 use crate::{
     arithmetics::{
         arr_product, build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
-        eq_eval_less_or_equal_than, gen_alpha_pows, nested_product,
+        eq_eval_less_or_equal_than, exts_to_felts, gen_alpha_pows, nested_product,
     },
     basefold_verifier::verifier::batch_verify,
     tower_verifier::{
@@ -613,6 +613,22 @@ pub fn verify_chip_proof<C: Config>(
     let prod_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>> =
         concat(builder, &chip_proof.r_out_evals, &chip_proof.w_out_evals);
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
+
+    // bind read/write out evals into transcript before deriving tower challenges
+    iter_zip!(builder, chip_proof.r_out_evals).for_each(|ptr_vec, builder| {
+        let evals = builder.iter_ptr_get(&chip_proof.r_out_evals, ptr_vec[0]);
+        unsafe {
+            let evals_felts = exts_to_felts(builder, &evals);
+            challenger_multi_observe(builder, challenger, &evals_felts);
+        }
+    });
+    iter_zip!(builder, chip_proof.w_out_evals).for_each(|ptr_vec, builder| {
+        let evals = builder.iter_ptr_get(&chip_proof.w_out_evals, ptr_vec[0]);
+        unsafe {
+            let evals_felts = exts_to_felts(builder, &evals);
+            challenger_multi_observe(builder, challenger, &evals_felts);
+        }
+    });
 
     builder.cycle_tracker_start(format!("verify tower proof for opcode {circuit_name}",).as_str());
     let (_, record_evals, logup_p_evals, logup_q_evals) = verify_tower_proof(
