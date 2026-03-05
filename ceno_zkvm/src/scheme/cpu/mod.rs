@@ -787,11 +787,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         exit_span!(span);
 
         // bind read/write/lookup out evals into transcript before deriving tower challenges
-        for eval in out_evals
-            .iter()
-            .flat_map(|evals| evals.iter())
-            .flatten()
-        {
+        for eval in out_evals.iter().flat_map(|evals| evals.iter()).flatten() {
             transcript.append_field_element_ext(eval);
         }
 
