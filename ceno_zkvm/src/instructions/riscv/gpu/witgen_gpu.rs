@@ -60,6 +60,8 @@ pub enum GpuWitgenKind {
     Sb,
     #[cfg(feature = "u16limb_circuit")]
     LoadSub { load_width: u32, is_signed: u32 },
+    #[cfg(feature = "u16limb_circuit")]
+    Mul(u32), // 0=MUL, 1=MULH, 2=MULHU, 3=MULHSU
     Lw,
 }
 
@@ -645,6 +647,25 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                         .map_err(|e| {
                             ZKVMError::InvalidWitness(
                                 format!("GPU witgen_load_sub failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Mul(mul_kind) => {
+            let mul_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::mulh::mulh_circuit_v2::MulhConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::mul::extract_mul_column_map(mul_config, num_witin, mul_kind));
+            info_span!("hal_witgen_mul").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_mul(&col_map, gpu_records, &indices_u32, shard_offset, mul_kind, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_mul failed: {e}").into(),
                             )
                         })
                 })

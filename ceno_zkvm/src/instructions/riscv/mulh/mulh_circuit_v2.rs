@@ -23,16 +23,23 @@ use crate::e2e::ShardContext;
 use itertools::Itertools;
 use std::{array, marker::PhantomData};
 
+#[cfg(feature = "gpu")]
+use crate::tables::RMMCollections;
+#[cfg(feature = "gpu")]
+use ceno_emul::StepIndex;
+#[cfg(feature = "gpu")]
+use gkr_iop::utils::lk_multiplicity::Multiplicity;
+
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
 pub struct MulhConfig<E: ExtensionField> {
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    r_insn: RInstructionConfig<E>,
-    rd_low: [WitIn; UINT_LIMBS],
-    rd_high: Option<[WitIn; UINT_LIMBS]>,
-    rs1_ext: Option<WitIn>,
-    rs2_ext: Option<WitIn>,
+    pub(crate) rs1_read: UInt<E>,
+    pub(crate) rs2_read: UInt<E>,
+    pub(crate) r_insn: RInstructionConfig<E>,
+    pub(crate) rd_low: [WitIn; UINT_LIMBS],
+    pub(crate) rd_high: Option<[WitIn; UINT_LIMBS]>,
+    pub(crate) rs1_ext: Option<WitIn>,
+    pub(crate) rs2_ext: Option<WitIn>,
     phantom: PhantomData<E>,
 }
 
@@ -326,6 +333,43 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         }
 
         Ok(())
+    }
+
+    #[cfg(feature = "gpu")]
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_steps: &[StepRecord],
+        step_indices: &[StepIndex],
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        use crate::instructions::riscv::gpu::witgen_gpu;
+        let mul_kind = match I::INST_KIND {
+            InsnKind::MUL => 0u32,
+            InsnKind::MULH => 1u32,
+            InsnKind::MULHU => 2u32,
+            InsnKind::MULHSU => 3u32,
+            _ => {
+                return crate::instructions::cpu_assign_instances::<E, Self>(
+                    config, shard_ctx, num_witin, num_structural_witin, shard_steps, step_indices,
+                );
+            }
+        };
+        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+            witgen_gpu::GpuWitgenKind::Mul(mul_kind),
+        )? {
+            return Ok(result);
+        }
+        crate::instructions::cpu_assign_instances::<E, Self>(
+            config, shard_ctx, num_witin, num_structural_witin, shard_steps, step_indices,
+        )
     }
 }
 
