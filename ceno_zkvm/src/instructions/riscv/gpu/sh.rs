@@ -226,7 +226,7 @@ mod tests {
         let mut mismatches = 0;
         for row in 0..n {
             for c in 0..num_witin {
-                let gpu_val = gpu_data[row * num_witin + c];
+                let gpu_val = gpu_data[c * n + row];
                 let cpu_val = cpu_data[row * num_witin + c];
                 if gpu_val != cpu_val {
                     if mismatches < 10 {

@@ -5,7 +5,7 @@
 /// 2. Runs a CPU loop to collect side effects (shard_ctx.send, lk_multiplicity)
 /// 3. Returns the GPU-generated witness + CPU-collected side effects
 use ceno_emul::{StepIndex, StepRecord};
-use ceno_gpu::{Buffer, CudaHal, CudaSlice, bb31::CudaHalBB31};
+use ceno_gpu::{Buffer, CudaHal, CudaSlice, bb31::CudaHalBB31, common::transpose::matrix_transpose};
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use multilinear_extensions::util::max_usable_threads;
@@ -255,9 +255,10 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     }
     raw_structural.padding_by_strategy();
 
-    // Step 4: Convert GPU witness to RowMajorMatrix
-    let mut raw_witin = info_span!("d2h_copy").in_scope(|| {
+    // Step 4: Transpose (column-major → row-major) on GPU, then D2H copy to RowMajorMatrix
+    let mut raw_witin = info_span!("transpose_d2h").in_scope(|| {
         gpu_witness_to_rmm::<E>(
+            hal,
             gpu_witness,
             total_instances,
             num_witin,
@@ -764,8 +765,12 @@ fn collect_side_effects<E: ExtensionField, I: Instruction<E>>(
     Ok(lk_multiplicity)
 }
 
-/// Convert GPU device buffer to RowMajorMatrix via D2H copy.
+/// Convert GPU device buffer (column-major) to RowMajorMatrix via GPU transpose + D2H copy.
+///
+/// GPU witgen kernels output column-major layout for better memory coalescing.
+/// This function transposes to row-major on GPU before copying to host.
 fn gpu_witness_to_rmm<E: ExtensionField>(
+    hal: &CudaHalBB31,
     gpu_result: ceno_gpu::common::witgen_types::GpuWitnessResult<
         ceno_gpu::common::BufferImpl<'static, <ff_ext::BabyBearExt4 as ExtensionField>::BaseField>,
     >,
@@ -773,8 +778,27 @@ fn gpu_witness_to_rmm<E: ExtensionField>(
     num_cols: usize,
     padding: InstancePaddingStrategy,
 ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-    let gpu_data: Vec<<ff_ext::BabyBearExt4 as ExtensionField>::BaseField> = gpu_result
-        .device_buffer
+    // Transpose from column-major to row-major on GPU.
+    // Column-major (num_rows x num_cols) is stored as num_cols groups of num_rows elements,
+    // which is equivalent to a (num_cols x num_rows) row-major matrix.
+    // Transposing with cols=num_rows, rows=num_cols produces (num_rows x num_cols) row-major.
+    let mut rmm_buffer = hal
+        .alloc_elems_on_device(num_rows * num_cols, false, None)
+        .map_err(|e| {
+            ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
+        })?;
+    matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+        &hal.inner,
+        &mut rmm_buffer,
+        &gpu_result.device_buffer,
+        num_rows,
+        num_cols,
+    )
+    .map_err(|e| {
+        ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into())
+    })?;
+
+    let gpu_data: Vec<<ff_ext::BabyBearExt4 as ExtensionField>::BaseField> = rmm_buffer
         .to_vec()
         .map_err(|e| ZKVMError::InvalidWitness(format!("GPU D2H copy failed: {e}").into()))?;
 

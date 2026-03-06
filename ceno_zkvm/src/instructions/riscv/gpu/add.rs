@@ -230,19 +230,19 @@ mod tests {
             .witgen_add(&col_map, &gpu_records, &indices_u32, shard_offset, None)
             .unwrap();
 
-        // D2H copy
+        // D2H copy (GPU output is column-major)
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
             gpu_result.device_buffer.to_vec().unwrap();
 
-        // Compare element by element
+        // Compare element by element (GPU is column-major, CPU is row-major)
         let cpu_data = cpu_witness.values();
         assert_eq!(gpu_data.len(), cpu_data.len(), "Size mismatch");
 
         let mut mismatches = 0;
         for row in 0..n {
             for col in 0..num_witin {
-                let gpu_val = gpu_data[row * num_witin + col];
-                let cpu_val = cpu_data[row * num_witin + col];
+                let gpu_val = gpu_data[col * n + row]; // column-major
+                let cpu_val = cpu_data[row * num_witin + col]; // row-major
                 if gpu_val != cpu_val {
                     if mismatches < 10 {
                         eprintln!(
