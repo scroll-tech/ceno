@@ -23,17 +23,24 @@ use multilinear_extensions::{ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
 use std::marker::PhantomData;
 
+#[cfg(feature = "gpu")]
+use crate::tables::RMMCollections;
+#[cfg(feature = "gpu")]
+use ceno_emul::StepIndex;
+#[cfg(feature = "gpu")]
+use gkr_iop::utils::lk_multiplicity::Multiplicity;
+
 pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
-    s_insn: SInstructionConfig<E>,
+    pub(crate) s_insn: SInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    imm: WitIn,
-    imm_sign: WitIn,
-    prev_memory_value: UInt<E>,
+    pub(crate) rs1_read: UInt<E>,
+    pub(crate) rs2_read: UInt<E>,
+    pub(crate) imm: WitIn,
+    pub(crate) imm_sign: WitIn,
+    pub(crate) prev_memory_value: UInt<E>,
 
-    memory_addr: MemAddr<E>,
-    next_memory_value: Option<MemWordUtil<E, N_ZEROS>>,
+    pub(crate) memory_addr: MemAddr<E>,
+    pub(crate) next_memory_value: Option<MemWordUtil<E, N_ZEROS>>,
 }
 
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
@@ -170,5 +177,39 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         }
 
         Ok(())
+    }
+
+    #[cfg(feature = "gpu")]
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_steps: &[StepRecord],
+        step_indices: &[StepIndex],
+    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        use crate::instructions::riscv::gpu::witgen_gpu;
+        // Only SW (N_ZEROS=2) has GPU support currently
+        if I::INST_KIND == InsnKind::SW {
+            if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+                config,
+                shard_ctx,
+                num_witin,
+                num_structural_witin,
+                shard_steps,
+                step_indices,
+                witgen_gpu::GpuWitgenKind::Sw,
+            )? {
+                return Ok(result);
+            }
+        }
+        crate::instructions::cpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+        )
     }
 }

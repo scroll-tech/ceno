@@ -29,6 +29,8 @@ pub mod branch_cmp;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod jalr;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod sw;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod branch_eq;
 #[cfg(feature = "gpu")]
 pub mod witgen_gpu;

@@ -16,10 +16,10 @@ use multilinear_extensions::{Expression, ToExpr};
 /// - Registers reads.
 /// - Memory write
 pub struct SInstructionConfig<E: ExtensionField> {
-    vm_state: StateInOut<E>,
-    rs1: ReadRS1<E>,
-    rs2: ReadRS2<E>,
-    mem_write: WriteMEM,
+    pub(crate) vm_state: StateInOut<E>,
+    pub(crate) rs1: ReadRS1<E>,
+    pub(crate) rs2: ReadRS2<E>,
+    pub(crate) mem_write: WriteMEM,
 }
 
 impl<E: ExtensionField> SInstructionConfig<E> {
