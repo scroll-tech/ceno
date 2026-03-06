@@ -30,18 +30,18 @@ pub struct DivRemConfig<E: ExtensionField> {
     pub(crate) remainder: UInt<E>,
     pub(crate) r_insn: RInstructionConfig<E>,
 
-    dividend_sign: WitIn,
-    divisor_sign: WitIn,
-    quotient_sign: WitIn,
-    remainder_zero: WitIn,
-    divisor_zero: WitIn,
-    divisor_sum_inv: WitIn,
-    remainder_sum_inv: WitIn,
-    remainder_inv: [WitIn; UINT_LIMBS],
-    sign_xor: WitIn,
-    remainder_prime: UInt<E>, // r'
-    lt_marker: [WitIn; UINT_LIMBS],
-    lt_diff: WitIn,
+    pub(crate) dividend_sign: WitIn,
+    pub(crate) divisor_sign: WitIn,
+    pub(crate) quotient_sign: WitIn,
+    pub(crate) remainder_zero: WitIn,
+    pub(crate) divisor_zero: WitIn,
+    pub(crate) divisor_sum_inv: WitIn,
+    pub(crate) remainder_sum_inv: WitIn,
+    pub(crate) remainder_inv: [WitIn; UINT_LIMBS],
+    pub(crate) sign_xor: WitIn,
+    pub(crate) remainder_prime: UInt<E>, // r'
+    pub(crate) lt_marker: [WitIn; UINT_LIMBS],
+    pub(crate) lt_diff: WitIn,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -374,6 +374,54 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             lt_marker,
             lt_diff,
         })
+    }
+
+    #[cfg(feature = "gpu")]
+    fn assign_instances(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_steps: &[StepRecord],
+        step_indices: &[ceno_emul::StepIndex],
+    ) -> Result<
+        (
+            crate::tables::RMMCollections<E::BaseField>,
+            gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
+        ),
+        ZKVMError,
+    > {
+        use crate::instructions::riscv::gpu::witgen_gpu;
+        let div_kind = match I::INST_KIND {
+            InsnKind::DIV => 0u32,
+            InsnKind::DIVU => 1u32,
+            InsnKind::REM => 2u32,
+            InsnKind::REMU => 3u32,
+            _ => {
+                return crate::instructions::cpu_assign_instances::<E, Self>(
+                    config, shard_ctx, num_witin, num_structural_witin, shard_steps, step_indices,
+                );
+            }
+        };
+        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+            witgen_gpu::GpuWitgenKind::Div(div_kind),
+        )? {
+            return Ok(result);
+        }
+        crate::instructions::cpu_assign_instances::<E, Self>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+        )
     }
 
     fn assign_instance(
