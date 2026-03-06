@@ -44,6 +44,10 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         self.msb.expr()
     }
 
+    pub(crate) fn msb(&self) -> WitIn {
+        self.msb
+    }
+
     fn construct_circuit(
         cb: &mut CircuitBuilder<E>,
         n_bits: usize,

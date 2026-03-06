@@ -268,7 +268,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         crate::error::ZKVMError,
     > {
         use crate::instructions::riscv::gpu::witgen_gpu;
-        if I::INST_KIND == InsnKind::LW {
+        let gpu_kind = match I::INST_KIND {
+            InsnKind::LW => Some(witgen_gpu::GpuWitgenKind::Lw),
+            InsnKind::LH => Some(witgen_gpu::GpuWitgenKind::LoadSub { load_width: 16, is_signed: 1 }),
+            InsnKind::LHU => Some(witgen_gpu::GpuWitgenKind::LoadSub { load_width: 16, is_signed: 0 }),
+            InsnKind::LB => Some(witgen_gpu::GpuWitgenKind::LoadSub { load_width: 8, is_signed: 1 }),
+            InsnKind::LBU => Some(witgen_gpu::GpuWitgenKind::LoadSub { load_width: 8, is_signed: 0 }),
+            _ => None,
+        };
+        if let Some(kind) = gpu_kind {
             if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
                 config,
                 shard_ctx,
@@ -276,7 +284,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
                 num_structural_witin,
                 shard_steps,
                 step_indices,
-                witgen_gpu::GpuWitgenKind::Lw,
+                kind,
             )? {
                 return Ok(result);
             }

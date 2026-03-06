@@ -35,6 +35,8 @@ pub mod sh;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod sb;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod load_sub;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod branch_eq;
 #[cfg(feature = "gpu")]
 pub mod witgen_gpu;
