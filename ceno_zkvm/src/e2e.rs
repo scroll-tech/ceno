@@ -1888,86 +1888,86 @@ fn create_proofs_streaming<
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
-        #[cfg(feature = "gpu")]
-        {
-            use crossbeam::channel;
-            let (tx, rx) = channel::bounded(0);
-            std::thread::scope(|s| {
-                // pipeline cpu/gpu workload
-                // cpu producer
-                s.spawn({
-                    move || {
-                        let wit_iter = generate_witness(
-                            &ctx.system_config,
-                            emulation_result,
-                            ctx.program.clone(),
-                            &ctx.platform,
-                            init_mem_state,
-                            target_shard_id,
-                        );
+        // #[cfg(feature = "gpu")]
+        // {
+        //     use crossbeam::channel;
+        //     let (tx, rx) = channel::bounded(0);
+        //     std::thread::scope(|s| {
+        //         // pipeline cpu/gpu workload
+        //         // cpu producer
+        //         s.spawn({
+        //             move || {
+        //                 let wit_iter = generate_witness(
+        //                     &ctx.system_config,
+        //                     emulation_result,
+        //                     ctx.program.clone(),
+        //                     &ctx.platform,
+        //                     init_mem_state,
+        //                     target_shard_id,
+        //                 );
 
-                        let wit_iter = if let Some(target_shard_id) = target_shard_id {
-                            Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
-                        } else {
-                            Box::new(wit_iter)
-                        };
+        //                 let wit_iter = if let Some(target_shard_id) = target_shard_id {
+        //                     Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
+        //                 } else {
+        //                     Box::new(wit_iter)
+        //                 };
 
-                        for proof_input in wit_iter {
-                            if tx.send(proof_input).is_err() {
-                                tracing::warn!(
-                                    "witness consumer dropped; stopping witness generation early"
-                                );
-                                break;
-                            }
-                        }
-                    }
-                });
+        //                 for proof_input in wit_iter {
+        //                     if tx.send(proof_input).is_err() {
+        //                         tracing::warn!(
+        //                             "witness consumer dropped; stopping witness generation early"
+        //                         );
+        //                         break;
+        //                     }
+        //                 }
+        //             }
+        //         });
 
-                // gpu consumer
-                {
-                    let mut proofs = Vec::new();
-                    let mut proof_err = None;
-                    let rx = rx;
-                    while let Ok((zkvm_witness, shard_ctx, pi)) = rx.recv() {
-                        if is_mock_proving {
-                            MockProver::assert_satisfied_full(
-                                &shard_ctx,
-                                &ctx.system_config.zkvm_cs,
-                                ctx.zkvm_fixed_traces.clone(),
-                                &zkvm_witness,
-                                &pi,
-                                &ctx.program,
-                            );
-                            tracing::info!("Mock proving passed");
-                        }
+        //         // gpu consumer
+        //         {
+        //             let mut proofs = Vec::new();
+        //             let mut proof_err = None;
+        //             let rx = rx;
+        //             while let Ok((zkvm_witness, shard_ctx, pi)) = rx.recv() {
+        //                 if is_mock_proving {
+        //                     MockProver::assert_satisfied_full(
+        //                         &shard_ctx,
+        //                         &ctx.system_config.zkvm_cs,
+        //                         ctx.zkvm_fixed_traces.clone(),
+        //                         &zkvm_witness,
+        //                         &pi,
+        //                         &ctx.program,
+        //                     );
+        //                     tracing::info!("Mock proving passed");
+        //                 }
 
-                        let transcript = Transcript::new(b"riscv");
-                        let start = std::time::Instant::now();
-                        match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
-                            Ok(zkvm_proof) => {
-                                tracing::debug!(
-                                    "{}th shard proof created in {:?}",
-                                    shard_ctx.shard_id,
-                                    start.elapsed()
-                                );
-                                proofs.push(zkvm_proof);
-                            }
-                            Err(err) => {
-                                proof_err = Some(err);
-                                break;
-                            }
-                        }
-                    }
-                    drop(rx);
-                    if let Some(err) = proof_err {
-                        panic!("create_proof failed: {err:?}");
-                    }
-                    proofs
-                }
-            })
-        }
+        //                 let transcript = Transcript::new(b"riscv");
+        //                 let start = std::time::Instant::now();
+        //                 match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+        //                     Ok(zkvm_proof) => {
+        //                         tracing::debug!(
+        //                             "{}th shard proof created in {:?}",
+        //                             shard_ctx.shard_id,
+        //                             start.elapsed()
+        //                         );
+        //                         proofs.push(zkvm_proof);
+        //                     }
+        //                     Err(err) => {
+        //                         proof_err = Some(err);
+        //                         break;
+        //                     }
+        //                 }
+        //             }
+        //             drop(rx);
+        //             if let Some(err) = proof_err {
+        //                 panic!("create_proof failed: {err:?}");
+        //             }
+        //             proofs
+        //         }
+        //     })
+        // }
 
-        #[cfg(not(feature = "gpu"))]
+        // #[cfg(not(feature = "gpu"))]
         {
             // Generate witness
             let wit_iter = generate_witness(
