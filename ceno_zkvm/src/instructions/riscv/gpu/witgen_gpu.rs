@@ -50,6 +50,8 @@ pub enum GpuWitgenKind {
     BranchEq(u32), // 1=BEQ, 0=BNE
     #[cfg(feature = "u16limb_circuit")]
     BranchCmp(u32), // 1=signed (BLT/BGE), 0=unsigned (BLTU/BGEU)
+    #[cfg(feature = "u16limb_circuit")]
+    Jalr,
     Lw,
 }
 
@@ -538,6 +540,25 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                         .map_err(|e| {
                             ZKVMError::InvalidWitness(
                                 format!("GPU witgen_branch_cmp failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Jalr => {
+            let jalr_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::jump::jalr_v2::JalrConfig<E>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::jalr::extract_jalr_column_map(jalr_config, num_witin));
+            info_span!("hal_witgen_jalr").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_jalr(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_jalr failed: {e}").into(),
                             )
                         })
                 })
