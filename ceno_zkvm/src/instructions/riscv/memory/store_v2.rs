@@ -189,8 +189,13 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         use crate::instructions::riscv::gpu::witgen_gpu;
-        // Only SW (N_ZEROS=2) has GPU support currently
-        if I::INST_KIND == InsnKind::SW {
+        let gpu_kind = match I::INST_KIND {
+            InsnKind::SW => Some(witgen_gpu::GpuWitgenKind::Sw),
+            InsnKind::SH => Some(witgen_gpu::GpuWitgenKind::Sh),
+            InsnKind::SB => Some(witgen_gpu::GpuWitgenKind::Sb),
+            _ => None,
+        };
+        if let Some(kind) = gpu_kind {
             if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
                 config,
                 shard_ctx,
@@ -198,7 +203,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
                 num_structural_witin,
                 shard_steps,
                 step_indices,
-                witgen_gpu::GpuWitgenKind::Sw,
+                kind,
             )? {
                 return Ok(result);
             }

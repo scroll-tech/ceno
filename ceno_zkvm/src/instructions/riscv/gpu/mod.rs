@@ -31,6 +31,10 @@ pub mod jalr;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod sw;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod sh;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod sb;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod branch_eq;
 #[cfg(feature = "gpu")]
 pub mod witgen_gpu;

@@ -54,6 +54,10 @@ pub enum GpuWitgenKind {
     Jalr,
     #[cfg(feature = "u16limb_circuit")]
     Sw,
+    #[cfg(feature = "u16limb_circuit")]
+    Sh,
+    #[cfg(feature = "u16limb_circuit")]
+    Sb,
     Lw,
 }
 
@@ -580,6 +584,44 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                         .map_err(|e| {
                             ZKVMError::InvalidWitness(
                                 format!("GPU witgen_sw failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Sh => {
+            let sh_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::memory::store_v2::StoreConfig<E, 1>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::sh::extract_sh_column_map(sh_config, num_witin));
+            info_span!("hal_witgen_sh").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_sh(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_sh failed: {e}").into(),
+                            )
+                        })
+                })
+            })
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        GpuWitgenKind::Sb => {
+            let sb_config = unsafe {
+                &*(config as *const I::InstructionConfig
+                    as *const crate::instructions::riscv::memory::store_v2::StoreConfig<E, 0>)
+            };
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::sb::extract_sb_column_map(sb_config, num_witin));
+            info_span!("hal_witgen_sb").in_scope(|| {
+                with_cached_shard_steps(|gpu_records| {
+                    hal.witgen_sb(&col_map, gpu_records, &indices_u32, shard_offset, None)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("GPU witgen_sb failed: {e}").into(),
                             )
                         })
                 })

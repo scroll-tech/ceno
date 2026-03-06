@@ -14,10 +14,10 @@ use p3::field::{Field, FieldAlgebra};
 use witness::set_val;
 
 pub struct MemWordUtil<E: ExtensionField, const N_ZEROS: usize> {
-    prev_limb_bytes: Vec<WitIn>,
-    rs2_limb_bytes: Vec<WitIn>,
+    pub(crate) prev_limb_bytes: Vec<WitIn>,
+    pub(crate) rs2_limb_bytes: Vec<WitIn>,
 
-    expected_limb: Option<WitIn>,
+    pub(crate) expected_limb: Option<WitIn>,
     expect_limbs_expr: [Expression<E>; 2],
 }
 
