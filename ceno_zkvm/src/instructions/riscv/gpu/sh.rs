@@ -223,11 +223,9 @@ mod tests {
         let cpu_data = cpu_witness.values();
         assert_eq!(gpu_data.len(), cpu_data.len(), "Size mismatch");
 
-        let flat = col_map.to_flat();
         let mut mismatches = 0;
         for row in 0..n {
-            for &col in &flat {
-                let c = col as usize;
+            for c in 0..num_witin {
                 let gpu_val = gpu_data[row * num_witin + c];
                 let cpu_val = cpu_data[row * num_witin + c];
                 if gpu_val != cpu_val {
