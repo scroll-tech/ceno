@@ -12,6 +12,7 @@ members = [
   "examples",
   "guest_libs/*",
 ]
+exclude = ["ceno_recursion_v2"]
 resolver = "2"
 
 [workspace.package]
