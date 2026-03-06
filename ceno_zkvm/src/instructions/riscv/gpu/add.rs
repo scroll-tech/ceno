@@ -115,11 +115,25 @@ mod tests {
     type E = BabyBearExt4;
 
     fn make_test_steps(n: usize) -> Vec<StepRecord> {
+        const EDGE_CASES: &[(u32, u32)] = &[
+            (0, 0),
+            (0, 1),
+            (1, 0),
+            (u32::MAX, 1),          // overflow
+            (u32::MAX, u32::MAX),   // double overflow
+            (0x80000000, 0x80000000), // INT_MIN + INT_MIN
+            (0x7FFFFFFF, 1),        // INT_MAX + 1
+            (0xFFFF0000, 0x0000FFFF), // limb carry
+        ];
+
         let pc_start = 0x1000u32;
         (0..n)
             .map(|i| {
-                let rs1 = (i as u32) % 1000 + 1;
-                let rs2 = (i as u32) % 500 + 3;
+                let (rs1, rs2) = if i < EDGE_CASES.len() {
+                    EDGE_CASES[i]
+                } else {
+                    ((i as u32) % 1000 + 1, (i as u32) % 500 + 3)
+                };
                 let rd_before = (i as u32) % 200;
                 let rd_after = rs1.wrapping_add(rs2);
                 let cycle = 4 + (i as u64) * 4;

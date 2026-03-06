@@ -236,15 +236,38 @@ mod tests {
             let num_structural_witin = cb.cs.num_structural_witin as usize;
 
             let n = 1024;
+
+            const EDGE_CASES: &[(u32, u32)] = &[
+                (0, 1),                    // 0 / 1
+                (1, 1),                    // 1 / 1
+                (0, 0),                    // 0 / 0 (zero divisor)
+                (12345, 0),                // non-zero / 0 (zero divisor)
+                (u32::MAX, 0),             // max / 0 (zero divisor)
+                (0x80000000, 0),           // INT_MIN / 0 (zero divisor)
+                (0x80000000, 0xFFFFFFFF),  // INT_MIN / -1 (signed overflow!)
+                (0x7FFFFFFF, 0xFFFFFFFF),  // INT_MAX / -1
+                (0xFFFFFFFF, 0xFFFFFFFF),  // -1 / -1
+                (0x80000000, 1),           // INT_MIN / 1
+                (0x80000000, 2),           // INT_MIN / 2
+                (u32::MAX, u32::MAX),      // max / max
+                (u32::MAX, 1),             // max / 1
+                (1, u32::MAX),             // 1 / max
+            ];
+
             let steps: Vec<StepRecord> = (0..n)
                 .map(|i| {
                     let pc = ByteAddr(0x1000 + (i as u32) * 4);
-                    // Use varied values; include zero divisor and edge cases
-                    let rs1_val = (i as u32).wrapping_mul(12345).wrapping_add(7);
-                    let rs2_val = if i % 50 == 0 {
-                        0 // test zero divisor
+                    // Use edge cases first, then varied values with zero divisor
+                    let (rs1_val, rs2_val) = if i < EDGE_CASES.len() {
+                        EDGE_CASES[i]
                     } else {
-                        (i as u32).wrapping_mul(54321).wrapping_add(13)
+                        let rs1 = (i as u32).wrapping_mul(12345).wrapping_add(7);
+                        let rs2 = if i % 50 == 0 {
+                            0 // test zero divisor
+                        } else {
+                            (i as u32).wrapping_mul(54321).wrapping_add(13)
+                        };
+                        (rs1, rs2)
                     };
                     let rd_after = match insn_kind {
                         InsnKind::DIV => {

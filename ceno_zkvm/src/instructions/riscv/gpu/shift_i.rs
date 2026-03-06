@@ -138,11 +138,26 @@ mod tests {
         let num_witin = cb.cs.num_witin as usize;
         let num_structural_witin = cb.cs.num_structural_witin as usize;
 
+        const EDGE_CASES: &[(u32, u32)] = &[
+            (0, 0),
+            (1, 0),            // shift by 0
+            (1, 31),           // shift to MSB
+            (u32::MAX, 0),     // no shift
+            (u32::MAX, 16),    // shift half
+            (u32::MAX, 31),    // shift max
+            (0x80000000, 1),   // INT_MIN << 1
+            (0xDEADBEEF, 4),   // nibble shift
+        ];
+
         let n = 1024;
         let steps: Vec<StepRecord> = (0..n)
             .map(|i| {
-                let rs1 = (i as u32).wrapping_mul(0x01010101);
-                let shamt = (i as i32) % 32; // 0..31
+                let (rs1, shamt) = if i < EDGE_CASES.len() {
+                    let (r, s) = EDGE_CASES[i];
+                    (r, s as i32)
+                } else {
+                    ((i as u32).wrapping_mul(0x01010101), (i as i32) % 32)
+                };
                 let rd_after = rs1 << (shamt as u32);
                 let cycle = 4 + (i as u64) * 4;
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);

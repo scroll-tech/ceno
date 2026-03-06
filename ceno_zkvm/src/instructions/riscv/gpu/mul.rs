@@ -199,13 +199,33 @@ mod tests {
             let num_witin = cb.cs.num_witin as usize;
             let num_structural_witin = cb.cs.num_structural_witin as usize;
 
+            const EDGE_CASES: &[(u32, u32)] = &[
+                (0, 0),                       // zero * zero
+                (0, 12345),                   // zero * non-zero
+                (12345, 0),                   // non-zero * zero
+                (1, 1),                       // identity
+                (u32::MAX, 1),                // max * 1
+                (1, u32::MAX),                // 1 * max
+                (u32::MAX, u32::MAX),         // max * max
+                (0x80000000, 2),              // INT_MIN * 2 (for MULH)
+                (2, 0x80000000),              // 2 * INT_MIN
+                (0xFFFFFFFF, 0xFFFFFFFF),     // (-1) * (-1) for signed
+                (0x80000000, 0xFFFFFFFF),     // INT_MIN * (-1)
+                (0x7FFFFFFF, 0x7FFFFFFF),     // INT_MAX * INT_MAX
+            ];
+
             let n = 1024;
             let steps: Vec<StepRecord> = (0..n)
                 .map(|i| {
                     let pc = ByteAddr(0x1000 + (i as u32) * 4);
-                    // Use varied values including negative interpretations
-                    let rs1_val = (i as u32).wrapping_mul(12345).wrapping_add(7);
-                    let rs2_val = (i as u32).wrapping_mul(54321).wrapping_add(13);
+                    let (rs1_val, rs2_val) = if i < EDGE_CASES.len() {
+                        EDGE_CASES[i]
+                    } else {
+                        (
+                            (i as u32).wrapping_mul(12345).wrapping_add(7),
+                            (i as u32).wrapping_mul(54321).wrapping_add(13),
+                        )
+                    };
                     let rd_after = match insn_kind {
                         InsnKind::MUL => rs1_val.wrapping_mul(rs2_val),
                         InsnKind::MULH => {
