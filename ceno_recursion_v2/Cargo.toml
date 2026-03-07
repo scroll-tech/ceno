@@ -17,6 +17,7 @@ ceno_host = { path = "../ceno_host" }
 ceno_zkvm = { path = "../ceno_zkvm" }
 clap = { version = "4.5", features = ["derive"] }
 continuations-v2 = { git = "https://github.com/openvm-org/openvm.git", package = "continuations-v2", branch = "develop-v2.0.0-beta", default-features = false }
+eyre = "0.6"
 ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", tag = "v1.0.0-alpha.22" }
 gkr_iop = { path = "../gkr_iop" }
 itertools = "0.13"
@@ -47,6 +48,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", tag = "v1.0.0-alpha.22" }
 whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", tag = "v1.0.0-alpha.22" }
 witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", tag = "v1.0.0-alpha.22" }
+verify-stark = { git = "https://github.com/openvm-org/openvm.git", package = "verify-stark", branch = "develop-v2.0.0-beta", default-features = false }
 
 [features]
 cuda = []

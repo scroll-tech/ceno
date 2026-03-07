@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use ceno_zkvm::scheme::ZKVMProof;
-use continuations_v2::{prover::trace_heights_tracing_info, SC};
+use continuations_v2::{SC};
 use eyre::Result;
 use ff_ext::BabyBearExt4;
 use mpcs::{Basefold, BasefoldRSParams};
@@ -15,13 +15,11 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{
     default_duplex_sponge_recorder, Digest, EF, F,
 };
 use recursion_circuit::system::{
-    AggregationSubCircuit, CachedTraceCtx, VerifierConfig, VerifierExternalData, VerifierTraceGen,
+    AggregationSubCircuit, CachedTraceCtx, VerifierExternalData, VerifierTraceGen,
 };
+use verify_stark::pvs::DeferralPvs;
 
-use continuations_v2::circuit::{
-    inner::{InnerCircuit, InnerTraceGen, ProofsType},
-    Circuit,
-};
+use continuations_v2::circuit::inner::{InnerCircuit, InnerTraceGen, ProofsType};
 
 pub use continuations_v2::prover::ChildVkKind;
 use continuations_v2::prover::debug_constraints;
@@ -88,7 +86,8 @@ where
     ) -> Result<Proof<SC>> {
         let ctx = self.generate_proving_ctx(proofs, child_vk_kind, ProofsType::Vm, None);
         if tracing::enabled!(tracing::Level::DEBUG) {
-            trace_heights_tracing_info::<_, SC>(&ctx.per_trace, &self.circuit.airs());
+            // TODO enable trace height
+            //     trace_heights_tracing_info::<_, SC>(&ctx.per_trace, &self.circuit.airs());
         }
 
         let engine = E::new(self.pk.params.clone());
