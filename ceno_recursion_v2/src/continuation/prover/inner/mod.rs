@@ -1,30 +1,32 @@
 use std::sync::Arc;
 
 use ceno_zkvm::scheme::ZKVMProof;
-use continuations_v2::{SC};
+use continuations_v2::SC;
 use eyre::Result;
-use ff_ext::BabyBearExt4;
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_stark_backend::{
     keygen::types::{MultiStarkProvingKey, MultiStarkVerifyingKey},
+    StarkEngine, SystemParams,
     proof::Proof,
     prover::{CommittedTraceData, DeviceMultiStarkProvingKey, ProverBackend, ProvingContext},
-    StarkEngine, SystemParams,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
     default_duplex_sponge_recorder, Digest, EF, F,
 };
-use recursion_circuit::system::{
-    AggregationSubCircuit, CachedTraceCtx, VerifierExternalData, VerifierTraceGen,
-};
 use verify_stark::pvs::DeferralPvs;
 
-use continuations_v2::circuit::inner::{InnerCircuit, InnerTraceGen, ProofsType};
+use crate::system::{
+    AggregationSubCircuit, CachedTraceCtx, RecursionField, RecursionVk, VerifierConfig,
+    VerifierExternalData, VerifierTraceGen,
+};
+use continuations_v2::circuit::{
+    inner::{InnerCircuit, InnerTraceGen, ProofsType},
+    Circuit,
+};
 
 pub use continuations_v2::prover::ChildVkKind;
 use continuations_v2::prover::debug_constraints;
-
-type RecursionField = BabyBearExt4;
+use openvm_stark_backend::prover::DeviceDataTransporter;
 
 /// Forked inner prover that will bridge Ceno ZKVM proofs with OpenVM recursion.
 pub struct InnerAggregationProver<
@@ -38,7 +40,7 @@ pub struct InnerAggregationProver<
 
     agg_node_tracegen: T,
 
-    child_vk: Arc<MultiStarkVerifyingKey<SC>>,
+    child_vk: Arc<RecursionVk>,
     child_vk_pcs_data: CommittedTraceData<PB>,
     circuit: Arc<InnerCircuit<S>>,
 
@@ -46,36 +48,98 @@ pub struct InnerAggregationProver<
 }
 
 impl<
-        PB: ProverBackend<Val = F, Challenge = EF, Commitment = Digest>,
-        S: AggregationSubCircuit + VerifierTraceGen<PB, SC>,
-        T: InnerTraceGen<PB>,
-    > InnerAggregationProver<PB, S, T>
+    PB: ProverBackend<Val = F, Challenge = EF, Commitment = Digest>,
+    S: AggregationSubCircuit + VerifierTraceGen<PB, SC>,
+    T: InnerTraceGen<PB>,
+> InnerAggregationProver<PB, S, T>
 {
     pub fn new<Eg: StarkEngine<SC = SC, PB = PB>>(
-        _child_vk: Arc<MultiStarkVerifyingKey<SC>>,
-        _system_params: SystemParams,
-        _is_self_recursive: bool,
-        _def_hook_commit: Option<Digest>,
+        child_vk: Arc<RecursionVk>,
+        system_params: SystemParams,
+        is_self_recursive: bool,
+        def_hook_commit: Option<Digest>,
     ) -> Self {
-        unimplemented!("InnerAggregationProver::new placeholder")
+        let verifier_circuit = S::new(
+            child_vk.clone(),
+            VerifierConfig {
+                continuations_enabled: true,
+                has_cached: true,
+                ..Default::default()
+            },
+        );
+        let engine = Eg::new(system_params);
+        let child_vk_pcs_data = verifier_circuit.commit_child_vk(&engine, &child_vk);
+        let circuit = Arc::new(InnerCircuit::new(
+            Arc::new(verifier_circuit),
+            def_hook_commit.map(|d| d.into()),
+        ));
+        let (pk, vk) = engine.keygen(&circuit.airs());
+        let d_pk = engine.device().transport_pk_to_device(&pk);
+        let self_vk_pcs_data = if is_self_recursive {
+            unimplemented!("Self-recursive inner prover support requires converting the local VK into RecursionVk")
+        } else {
+            None
+        };
+        let agg_node_tracegen = T::new(def_hook_commit.is_some());
+        Self {
+            pk: Arc::new(pk),
+            d_pk,
+            vk: Arc::new(vk),
+            agg_node_tracegen,
+            child_vk,
+            child_vk_pcs_data,
+            circuit,
+            self_vk_pcs_data,
+        }
     }
 
     #[allow(dead_code)]
     pub fn from_pk<Eg: StarkEngine<SC = SC, PB = PB>>(
-        _child_vk: Arc<MultiStarkVerifyingKey<SC>>,
-        _pk: Arc<MultiStarkProvingKey<SC>>,
-        _is_self_recursive: bool,
-        _def_hook_commit: Option<Digest>,
+        child_vk: Arc<RecursionVk>,
+        pk: Arc<MultiStarkProvingKey<SC>>,
+        is_self_recursive: bool,
+        def_hook_commit: Option<Digest>,
     ) -> Self {
-        unimplemented!("InnerAggregationProver::from_pk placeholder")
+        let verifier_circuit = S::new(
+            child_vk.clone(),
+            VerifierConfig {
+                continuations_enabled: true,
+                has_cached: true,
+                ..Default::default()
+            },
+        );
+        let engine = Eg::new(pk.params.clone());
+        let child_vk_pcs_data = verifier_circuit.commit_child_vk(&engine, &child_vk);
+        let circuit = Arc::new(InnerCircuit::new(
+            Arc::new(verifier_circuit),
+            def_hook_commit.map(|d| d.into()),
+        ));
+        let vk = Arc::new(pk.get_vk());
+        let d_pk = engine.device().transport_pk_to_device(&pk);
+        let self_vk_pcs_data = if is_self_recursive {
+            unimplemented!("Self-recursive inner prover support requires converting the local VK into RecursionVk")
+        } else {
+            None
+        };
+        let agg_node_tracegen = T::new(def_hook_commit.is_some());
+        Self {
+            pk,
+            d_pk,
+            vk,
+            agg_node_tracegen,
+            child_vk,
+            child_vk_pcs_data,
+            circuit,
+            self_vk_pcs_data,
+        }
     }
 }
 
 impl<
-        PB: ProverBackend<Val = F, Challenge = EF, Commitment = Digest>,
-        S: AggregationSubCircuit + VerifierTraceGen<PB, SC>,
-        T: InnerTraceGen<PB>,
-    > InnerAggregationProver<PB, S, T>
+    PB: ProverBackend<Val = F, Challenge = EF, Commitment = Digest>,
+    S: AggregationSubCircuit + VerifierTraceGen<PB, SC>,
+    T: InnerTraceGen<PB>,
+> InnerAggregationProver<PB, S, T>
 where
     PB::Matrix: Clone,
 {
@@ -91,7 +155,6 @@ where
         }
 
         let engine = E::new(self.pk.params.clone());
-        // TODO(ceno-recursion): wire up local debug hooks once we port them.
         #[cfg(debug_assertions)]
         debug_constraints(&self.circuit, &ctx, &engine);
         let proof = engine.prove(&self.d_pk, ctx)?;
@@ -112,23 +175,22 @@ where
         let vm_proofs = Self::materialize_vm_proofs(proofs);
 
         let (child_vk, child_dag_commit) = match child_vk_kind {
-            ChildVkKind::RecursiveSelf => (
-                &self.vk,
-                self.self_vk_pcs_data
-                    .clone()
-                    .expect("self recursive proofs need cached vk pcs data"),
-            ),
+            ChildVkKind::RecursiveSelf => {
+                unimplemented!("RecursiveSelf proving is not wired for RecursionVk yet")
+            }
             _ => (&self.child_vk, self.child_vk_pcs_data.clone()),
         };
         let child_is_app = matches!(child_vk_kind, ChildVkKind::App);
 
-        let (pre_ctxs, poseidon2_inputs) = self.agg_node_tracegen.generate_pre_verifier_subcircuit_ctxs(
-            &vm_proofs,
-            proofs_type,
-            absent_trace_pvs,
-            child_is_app,
-            child_dag_commit.commitment,
-        );
+        let (pre_ctxs, poseidon2_inputs) = self
+            .agg_node_tracegen
+            .generate_pre_verifier_subcircuit_ctxs(
+                &vm_proofs,
+                proofs_type,
+                absent_trace_pvs,
+                child_is_app,
+                child_dag_commit.commitment,
+            );
 
         let range_check_inputs = vec![];
         let mut external_data = VerifierExternalData {
@@ -150,9 +212,9 @@ where
                 default_duplex_sponge_recorder(),
             )
             .expect("verifier sub-circuit ctx generation");
-        let post_ctxs =
-            self.agg_node_tracegen
-                .generate_post_verifier_subcircuit_ctxs(&vm_proofs, proofs_type, child_is_app);
+        let post_ctxs = self
+            .agg_node_tracegen
+            .generate_post_verifier_subcircuit_ctxs(&vm_proofs, proofs_type, child_is_app);
 
         ProvingContext {
             per_trace: pre_ctxs
