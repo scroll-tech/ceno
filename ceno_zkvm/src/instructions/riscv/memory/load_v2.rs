@@ -12,6 +12,7 @@ use crate::{
             im_insn::IMInstructionConfig,
             insn_base::MemAddr,
         },
+        side_effects::CpuSideEffectSink,
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -43,6 +44,8 @@ pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
     type InstructionConfig = LoadConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = matches!(I::INST_KIND, InsnKind::LW);
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -252,6 +255,63 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         Ok(())
     }
 
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        match I::INST_KIND {
+            InsnKind::LW => {
+                let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+                let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+                let mut sink =
+                    unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+                config
+                    .im_insn
+                    .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+                let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
+                let unaligned_addr =
+                    ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
+                config
+                    .memory_addr
+                    .collect_side_effects(&mut sink, unaligned_addr.into());
+                Ok(())
+            }
+            _ => Err(ZKVMError::InvalidWitness(
+                format!(
+                    "lightweight side effects not implemented for {:?}",
+                    I::INST_KIND
+                )
+                .into(),
+            )),
+        }
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        match I::INST_KIND {
+            InsnKind::LW => {
+                config
+                    .im_insn
+                    .collect_shard_effects(shard_ctx, lk_multiplicity, step);
+                Ok(())
+            }
+            _ => Err(ZKVMError::InvalidWitness(
+                format!(
+                    "shard-only side effects not implemented for {:?}",
+                    I::INST_KIND
+                )
+                .into(),
+            )),
+        }
+    }
+
     #[cfg(feature = "gpu")]
     fn assign_instances(
         config: &Self::InstructionConfig,
@@ -270,10 +330,22 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         use crate::instructions::riscv::gpu::witgen_gpu;
         let gpu_kind = match I::INST_KIND {
             InsnKind::LW => Some(witgen_gpu::GpuWitgenKind::Lw),
-            InsnKind::LH => Some(witgen_gpu::GpuWitgenKind::LoadSub { load_width: 16, is_signed: 1 }),
-            InsnKind::LHU => Some(witgen_gpu::GpuWitgenKind::LoadSub { load_width: 16, is_signed: 0 }),
-            InsnKind::LB => Some(witgen_gpu::GpuWitgenKind::LoadSub { load_width: 8, is_signed: 1 }),
-            InsnKind::LBU => Some(witgen_gpu::GpuWitgenKind::LoadSub { load_width: 8, is_signed: 0 }),
+            InsnKind::LH => Some(witgen_gpu::GpuWitgenKind::LoadSub {
+                load_width: 16,
+                is_signed: 1,
+            }),
+            InsnKind::LHU => Some(witgen_gpu::GpuWitgenKind::LoadSub {
+                load_width: 16,
+                is_signed: 0,
+            }),
+            InsnKind::LB => Some(witgen_gpu::GpuWitgenKind::LoadSub {
+                load_width: 8,
+                is_signed: 1,
+            }),
+            InsnKind::LBU => Some(witgen_gpu::GpuWitgenKind::LoadSub {
+                load_width: 8,
+                is_signed: 0,
+            }),
             _ => None,
         };
         if let Some(kind) = gpu_kind {

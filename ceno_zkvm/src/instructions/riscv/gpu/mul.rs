@@ -60,7 +60,10 @@ pub fn extract_mul_column_map<E: ExtensionField>(
 
     // MULH/MULHU/MULHSU have rd_high + extensions
     let (rd_high, rs1_ext, rs2_ext) = if mul_kind != 0 {
-        let h = config.rd_high.as_ref().expect("MULH variants must have rd_high");
+        let h = config
+            .rd_high
+            .as_ref()
+            .expect("MULH variants must have rd_high");
         (
             Some([h[0].id as u32, h[1].id as u32]),
             Some(config.rs1_ext.expect("MULH variants must have rs1_ext").id as u32),
@@ -114,7 +117,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -190,28 +196,40 @@ mod tests {
             let mut cb = CircuitBuilder::new(&mut cs);
 
             let config = match insn_kind {
-                InsnKind::MUL => MulInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
-                InsnKind::MULH => MulhInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
-                InsnKind::MULHU => MulhuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
-                InsnKind::MULHSU => MulhsuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
+                InsnKind::MUL => {
+                    MulInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
+                InsnKind::MULH => {
+                    MulhInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
+                InsnKind::MULHU => {
+                    MulhuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
+                InsnKind::MULHSU => {
+                    MulhsuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
                 _ => unreachable!(),
             };
             let num_witin = cb.cs.num_witin as usize;
             let num_structural_witin = cb.cs.num_structural_witin as usize;
 
             const EDGE_CASES: &[(u32, u32)] = &[
-                (0, 0),                       // zero * zero
-                (0, 12345),                   // zero * non-zero
-                (12345, 0),                   // non-zero * zero
-                (1, 1),                       // identity
-                (u32::MAX, 1),                // max * 1
-                (1, u32::MAX),                // 1 * max
-                (u32::MAX, u32::MAX),         // max * max
-                (0x80000000, 2),              // INT_MIN * 2 (for MULH)
-                (2, 0x80000000),              // 2 * INT_MIN
-                (0xFFFFFFFF, 0xFFFFFFFF),     // (-1) * (-1) for signed
-                (0x80000000, 0xFFFFFFFF),     // INT_MIN * (-1)
-                (0x7FFFFFFF, 0x7FFFFFFF),     // INT_MAX * INT_MAX
+                (0, 0),                   // zero * zero
+                (0, 12345),               // zero * non-zero
+                (12345, 0),               // non-zero * zero
+                (1, 1),                   // identity
+                (u32::MAX, 1),            // max * 1
+                (1, u32::MAX),            // 1 * max
+                (u32::MAX, u32::MAX),     // max * max
+                (0x80000000, 2),          // INT_MIN * 2 (for MULH)
+                (2, 0x80000000),          // 2 * INT_MIN
+                (0xFFFFFFFF, 0xFFFFFFFF), // (-1) * (-1) for signed
+                (0x80000000, 0xFFFFFFFF), // INT_MIN * (-1)
+                (0x7FFFFFFF, 0x7FFFFFFF), // INT_MAX * INT_MAX
             ];
 
             let n = 1024;
@@ -229,7 +247,8 @@ mod tests {
                     let rd_after = match insn_kind {
                         InsnKind::MUL => rs1_val.wrapping_mul(rs2_val),
                         InsnKind::MULH => {
-                            ((rs1_val as i32 as i64).wrapping_mul(rs2_val as i32 as i64) >> 32) as u32
+                            ((rs1_val as i32 as i64).wrapping_mul(rs2_val as i32 as i64) >> 32)
+                                as u32
                         }
                         InsnKind::MULHU => {
                             ((rs1_val as u64).wrapping_mul(rs2_val as u64) >> 32) as u32
@@ -260,17 +279,47 @@ mod tests {
             let mut shard_ctx = ShardContext::default();
             let (cpu_rmms, _lkm) = match insn_kind {
                 InsnKind::MUL => crate::instructions::cpu_assign_instances::<E, MulInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
-                InsnKind::MULH => crate::instructions::cpu_assign_instances::<E, MulhInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
-                InsnKind::MULHU => crate::instructions::cpu_assign_instances::<E, MulhuInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
-                InsnKind::MULHSU => crate::instructions::cpu_assign_instances::<E, MulhsuInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
+                    &config,
+                    &mut shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    &steps,
+                    &indices,
+                )
+                .unwrap(),
+                InsnKind::MULH => {
+                    crate::instructions::cpu_assign_instances::<E, MulhInstruction<E>>(
+                        &config,
+                        &mut shard_ctx,
+                        num_witin,
+                        num_structural_witin,
+                        &steps,
+                        &indices,
+                    )
+                    .unwrap()
+                }
+                InsnKind::MULHU => {
+                    crate::instructions::cpu_assign_instances::<E, MulhuInstruction<E>>(
+                        &config,
+                        &mut shard_ctx,
+                        num_witin,
+                        num_structural_witin,
+                        &steps,
+                        &indices,
+                    )
+                    .unwrap()
+                }
+                InsnKind::MULHSU => {
+                    crate::instructions::cpu_assign_instances::<E, MulhsuInstruction<E>>(
+                        &config,
+                        &mut shard_ctx,
+                        num_witin,
+                        num_structural_witin,
+                        &steps,
+                        &indices,
+                    )
+                    .unwrap()
+                }
                 _ => unreachable!(),
             };
             let cpu_witness = &cpu_rmms[0];
@@ -288,7 +337,14 @@ mod tests {
             let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
             let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
             let gpu_result = hal
-                .witgen_mul(&col_map, &gpu_records, &indices_u32, shard_offset, mul_kind, None)
+                .witgen_mul(
+                    &col_map,
+                    &gpu_records,
+                    &indices_u32,
+                    shard_offset,
+                    mul_kind,
+                    None,
+                )
                 .unwrap();
 
             let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

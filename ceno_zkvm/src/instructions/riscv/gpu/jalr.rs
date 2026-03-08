@@ -51,13 +51,21 @@ pub fn extract_jalr_column_map<E: ExtensionField>(
 
     // jump_pc_addr: MemAddr has addr (UInt = 2 limbs) + low_bits (Vec<WitIn>)
     let jump_pc_addr: [u32; 2] = {
-        let l = config.jump_pc_addr.addr.wits_in().expect("jump_pc_addr WitIns");
+        let l = config
+            .jump_pc_addr
+            .addr
+            .wits_in()
+            .expect("jump_pc_addr WitIns");
         assert_eq!(l.len(), 2);
         [l[0].id as u32, l[1].id as u32]
     };
     let jump_pc_addr_bit: [u32; 2] = {
         let bits = &config.jump_pc_addr.low_bits;
-        assert_eq!(bits.len(), 2, "JALR MemAddr with n_zeros=0 must have 2 low_bits");
+        assert_eq!(
+            bits.len(),
+            2,
+            "JALR MemAddr with n_zeros=0 must have 2 low_bits"
+        );
         [bits[0].id as u32, bits[1].id as u32]
     };
 
@@ -111,7 +119,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -160,16 +171,15 @@ mod tests {
         let indices: Vec<usize> = (0..n).collect();
 
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) =
-            crate::instructions::cpu_assign_instances::<E, JalrInstruction<E>>(
-                &config,
-                &mut shard_ctx,
-                num_witin,
-                num_structural_witin,
-                &steps,
-                &indices,
-            )
-            .unwrap();
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, JalrInstruction<E>>(
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
+        )
+        .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
         let col_map = extract_jalr_column_map(&config, num_witin);

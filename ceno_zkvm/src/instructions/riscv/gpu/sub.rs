@@ -129,7 +129,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -156,12 +159,12 @@ mod tests {
 
         const EDGE_CASES: &[(u32, u32)] = &[
             (0, 0),
-            (0, 1),          // underflow
+            (0, 1), // underflow
             (1, 0),
-            (0, u32::MAX),   // underflow
+            (0, u32::MAX), // underflow
             (u32::MAX, u32::MAX),
-            (0x80000000, 1), // INT_MIN - 1
-            (0, 0x80000000), // 0 - INT_MIN
+            (0x80000000, 1),          // INT_MIN - 1
+            (0, 0x80000000),          // 0 - INT_MIN
             (0x7FFFFFFF, 0xFFFFFFFF), // INT_MAX - (-1)
         ];
 
@@ -178,8 +181,13 @@ mod tests {
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);
                 let insn_code = encode_rv32(InsnKind::SUB, 2, 3, 4, 0);
                 StepRecord::new_r_instruction(
-                    cycle, pc, insn_code, rs1, rs2,
-                    Change::new((i as u32) % 200, rd_after), 0,
+                    cycle,
+                    pc,
+                    insn_code,
+                    rs1,
+                    rs2,
+                    Change::new((i as u32) % 200, rd_after),
+                    0,
                 )
             })
             .collect();
@@ -188,7 +196,12 @@ mod tests {
         // CPU path
         let mut shard_ctx = ShardContext::default();
         let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, SubInstruction<E>>(
-            &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
         )
         .unwrap();
         let cpu_witness = &cpu_rmms[0];

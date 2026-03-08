@@ -103,7 +103,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -151,7 +154,12 @@ mod tests {
 
         let mut shard_ctx = ShardContext::default();
         let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, AddiInstruction<E>>(
-            &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
         )
         .unwrap();
         let cpu_witness = &cpu_rmms[0];

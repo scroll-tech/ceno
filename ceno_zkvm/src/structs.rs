@@ -363,6 +363,14 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.lk_mlts.get(name)
     }
 
+    pub fn combined_lk_mlt(&self) -> Option<&Vec<HashMap<u64, usize>>> {
+        self.combined_lk_mlt.as_ref()
+    }
+
+    pub fn lk_mlts(&self) -> &BTreeMap<String, Multiplicity<u64>> {
+        &self.lk_mlts
+    }
+
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
         &mut self,
         cs: &ZKVMConstraintSystem<E>,

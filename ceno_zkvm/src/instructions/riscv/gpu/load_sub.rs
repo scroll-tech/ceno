@@ -7,8 +7,8 @@ use crate::instructions::riscv::memory::load_v2::LoadConfig;
 pub fn extract_load_sub_column_map<E: ExtensionField>(
     config: &LoadConfig<E>,
     num_witin: usize,
-    is_byte: bool,    // true for LB/LBU
-    is_signed: bool,  // true for LH/LB
+    is_byte: bool,   // true for LB/LBU
+    is_signed: bool, // true for LH/LB
 ) -> LoadSubColumnMap {
     let im = &config.im_insn;
 
@@ -146,7 +146,10 @@ mod tests {
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::memory::{LhInstruction, LhuInstruction, LbInstruction, LbuInstruction}},
+        instructions::{
+            Instruction,
+            riscv::memory::{LbInstruction, LbuInstruction, LhInstruction, LhuInstruction},
+        },
         structs::ProgramParams,
     };
     use ff_ext::BabyBearExt4;
@@ -159,7 +162,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -222,9 +228,7 @@ mod tests {
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_load_sub_correctness() {
         use crate::e2e::ShardContext;
-        use ceno_emul::{
-            ByteAddr, Change, InsnKind, ReadOp, StepRecord, WordAddr, encode_rv32,
-        };
+        use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, WordAddr, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
@@ -245,10 +249,22 @@ mod tests {
 
             // We need to construct the right instruction type
             let config = match insn_kind {
-                InsnKind::LH => LhInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
-                InsnKind::LHU => LhuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
-                InsnKind::LB => LbInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
-                InsnKind::LBU => LbuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
+                InsnKind::LH => {
+                    LhInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
+                InsnKind::LHU => {
+                    LhuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
+                InsnKind::LB => {
+                    LbInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
+                InsnKind::LBU => {
+                    LbuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
                 _ => unreachable!(),
             };
             let num_witin = cb.cs.num_witin as usize;
@@ -279,9 +295,7 @@ mod tests {
                         (mem_val >> 16) as u16
                     };
                     let rd_after = match insn_kind {
-                        InsnKind::LH => {
-                            (target_limb as i16) as i32 as u32
-                        }
+                        InsnKind::LH => (target_limb as i16) as i32 as u32,
                         InsnKind::LHU => target_limb as u32,
                         InsnKind::LB => {
                             let byte = if bit_0 == 0 {
@@ -328,17 +342,41 @@ mod tests {
             let mut shard_ctx = ShardContext::default();
             let (cpu_rmms, _lkm) = match insn_kind {
                 InsnKind::LH => crate::instructions::cpu_assign_instances::<E, LhInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
+                    &config,
+                    &mut shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    &steps,
+                    &indices,
+                )
+                .unwrap(),
                 InsnKind::LHU => crate::instructions::cpu_assign_instances::<E, LhuInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
+                    &config,
+                    &mut shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    &steps,
+                    &indices,
+                )
+                .unwrap(),
                 InsnKind::LB => crate::instructions::cpu_assign_instances::<E, LbInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
+                    &config,
+                    &mut shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    &steps,
+                    &indices,
+                )
+                .unwrap(),
                 InsnKind::LBU => crate::instructions::cpu_assign_instances::<E, LbuInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
+                    &config,
+                    &mut shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    &steps,
+                    &indices,
+                )
+                .unwrap(),
                 _ => unreachable!(),
             };
             let cpu_witness = &cpu_rmms[0];
@@ -358,7 +396,15 @@ mod tests {
             let load_width: u32 = if is_byte { 8 } else { 16 };
             let is_signed_u32: u32 = if is_signed { 1 } else { 0 };
             let gpu_result = hal
-                .witgen_load_sub(&col_map, &gpu_records, &indices_u32, shard_offset, load_width, is_signed_u32, None)
+                .witgen_load_sub(
+                    &col_map,
+                    &gpu_records,
+                    &indices_u32,
+                    shard_offset,
+                    load_width,
+                    is_signed_u32,
+                    None,
+                )
                 .unwrap();
 
             let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

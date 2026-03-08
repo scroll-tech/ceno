@@ -12,6 +12,7 @@ use crate::{
             constants::{UINT_BYTE_LIMBS, UInt8},
             i_insn::IInstructionConfig,
         },
+        side_effects::{CpuSideEffectSink, emit_const_range_op},
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -42,6 +43,8 @@ pub struct LuiInstruction<E>(PhantomData<E>);
 impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     type InstructionConfig = LuiConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::LUI]
@@ -110,7 +113,7 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
             .i_insn
             .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
-        let rd_written = split_to_u8(step.rd().unwrap().value.after);
+        let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
         for (val, witin) in izip!(rd_written.iter().skip(1), config.rd_written) {
             lk_multiplicity.assert_ux::<8>(*val as u64);
             set_val!(instance, witin, E::BaseField::from_canonical_u8(*val));
@@ -118,6 +121,39 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u64;
         set_val!(instance, config.imm, imm);
 
+        Ok(())
+    }
+
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &ceno_emul::StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config
+            .i_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+        let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
+        for val in rd_written.iter().skip(1) {
+            emit_const_range_op(&mut sink, *val as u64, 8);
+        }
+
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &ceno_emul::StepRecord,
+    ) -> Result<(), ZKVMError> {
+        config
+            .i_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
         Ok(())
     }
 

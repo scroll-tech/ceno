@@ -28,6 +28,8 @@ use ceno_emul::{
     StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
     WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
+#[cfg(feature = "gpu")]
+use ceno_gpu::CudaHal;
 use clap::ValueEnum;
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};
@@ -251,6 +253,39 @@ impl<'a> Default for ShardContext<'a> {
 /// for example, if there are 10 shards and 3 provers,
 /// the shard counts will be distributed as 3, 3, and 4, ensuring an even workload across all provers.
 impl<'a> ShardContext<'a> {
+    /// Create a new ShardContext with the same shard metadata but empty record storage.
+    /// Useful for debug comparisons against the actual shard context.
+    pub fn new_empty_like(&self) -> ShardContext<'static> {
+        let max_threads = max_usable_threads();
+        ShardContext {
+            shard_id: self.shard_id,
+            num_shards: self.num_shards,
+            max_cycle: self.max_cycle,
+            addr_future_accesses: self.addr_future_accesses.clone(),
+            addr_accessed_tbs: Either::Left(vec![Vec::new(); max_threads]),
+            read_records_tbs: Either::Left(
+                (0..max_threads)
+                    .map(|_| BTreeMap::new())
+                    .collect::<Vec<_>>(),
+            ),
+            write_records_tbs: Either::Left(
+                (0..max_threads)
+                    .map(|_| BTreeMap::new())
+                    .collect::<Vec<_>>(),
+            ),
+            cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
+            expected_inst_per_shard: self.expected_inst_per_shard,
+            max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
+            prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
+            prev_shard_heap_range: self.prev_shard_heap_range.clone(),
+            prev_shard_hint_range: self.prev_shard_hint_range.clone(),
+            platform: self.platform.clone(),
+            shard_heap_addr_range: self.shard_heap_addr_range.clone(),
+            shard_hint_addr_range: self.shard_hint_addr_range.clone(),
+            syscall_witnesses: self.syscall_witnesses.clone(),
+        }
+    }
+
     pub fn get_forked(&mut self) -> Vec<ShardContext<'_>> {
         match (
             &mut self.read_records_tbs,
@@ -392,8 +427,38 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
+    pub fn insert_read_record(&mut self, addr: WordAddr, record: RAMRecord) {
+        let ram_record = self
+            .read_records_tbs
+            .as_mut()
+            .right()
+            .expect("illegal type");
+        ram_record.insert(addr, record);
+    }
+
+    #[inline(always)]
+    pub fn insert_write_record(&mut self, addr: WordAddr, record: RAMRecord) {
+        let ram_record = self
+            .write_records_tbs
+            .as_mut()
+            .right()
+            .expect("illegal type");
+        ram_record.insert(addr, record);
+    }
+
+    #[inline(always)]
+    pub fn push_addr_accessed(&mut self, addr: WordAddr) {
+        let addr_accessed = self
+            .addr_accessed_tbs
+            .as_mut()
+            .right()
+            .expect("illegal type");
+        addr_accessed.push(addr);
+    }
+
+    #[inline(always)]
     #[allow(clippy::too_many_arguments)]
-    pub fn send(
+    pub fn record_send_without_touch(
         &mut self,
         ram_type: crate::structs::RAMType,
         addr: WordAddr,
@@ -410,15 +475,9 @@ impl<'a> ShardContext<'a> {
             let addr_raw = addr.baddr().0;
             let is_heap = self.platform.heap.contains(&addr_raw);
             let is_hint = self.platform.hints.contains(&addr_raw);
-            // 1. checking reads from the external bus
             if prev_cycle > 0 || (prev_cycle == 0 && (!is_heap && !is_hint)) {
                 let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
-                let ram_record = self
-                    .read_records_tbs
-                    .as_mut()
-                    .right()
-                    .expect("illegal type");
-                ram_record.insert(
+                self.insert_read_record(
                     addr,
                     RAMRecord {
                         ram_type,
@@ -437,22 +496,15 @@ impl<'a> ShardContext<'a> {
                     prev_cycle == 0 && (is_heap || is_hint),
                     "addr {addr_raw:x} prev_cycle {prev_cycle}, is_heap {is_heap}, is_hint {is_hint}",
                 );
-                // 2. handle heap/hint initial reads outside the shard range.
                 let prev_shard_id = if is_heap && !self.shard_heap_addr_range.contains(&addr_raw) {
                     Some(self.extract_shard_id_by_heap_addr(addr_raw))
                 } else if is_hint && !self.shard_hint_addr_range.contains(&addr_raw) {
                     Some(self.extract_shard_id_by_hint_addr(addr_raw))
                 } else {
-                    // dynamic init in current shard, skip and do nothing
                     None
                 };
                 if let Some(prev_shard_id) = prev_shard_id {
-                    let ram_record = self
-                        .read_records_tbs
-                        .as_mut()
-                        .right()
-                        .expect("illegal type");
-                    ram_record.insert(
+                    self.insert_read_record(
                         addr,
                         RAMRecord {
                             ram_type,
@@ -470,18 +522,12 @@ impl<'a> ShardContext<'a> {
             }
         }
 
-        // check write to external mem bus
         if let Some(future_touch_cycle) = self.find_future_next_access(cycle, addr)
             && self.after_current_shard_cycle(future_touch_cycle)
             && self.is_in_current_shard(cycle)
         {
             let shard_cycle = self.aligned_current_ts(cycle);
-            let ram_record = self
-                .write_records_tbs
-                .as_mut()
-                .right()
-                .expect("illegal type");
-            ram_record.insert(
+            self.insert_write_record(
                 addr,
                 RAMRecord {
                     ram_type,
@@ -496,13 +542,22 @@ impl<'a> ShardContext<'a> {
                 },
             );
         }
+    }
 
-        let addr_accessed = self
-            .addr_accessed_tbs
-            .as_mut()
-            .right()
-            .expect("illegal type");
-        addr_accessed.push(addr);
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn send(
+        &mut self,
+        ram_type: crate::structs::RAMType,
+        addr: WordAddr,
+        id: u64,
+        cycle: Cycle,
+        prev_cycle: Cycle,
+        value: Word,
+        prev_value: Option<Word>,
+    ) {
+        self.record_send_without_touch(ram_type, addr, id, cycle, prev_cycle, value, prev_value);
+        self.push_addr_accessed(addr);
     }
 
     /// merge addr accessed in different threads
@@ -1341,6 +1396,9 @@ pub fn generate_witness<'a, E: ExtensionField>(
             }
 
             let time = std::time::Instant::now();
+            let debug_compare_e2e_shard =
+                std::env::var_os("CENO_GPU_DEBUG_COMPARE_E2E_SHARD").is_some();
+            let debug_shard_ctx_template = debug_compare_e2e_shard.then(|| clone_debug_shard_ctx(&shard_ctx));
             system_config
                 .config
                 .assign_opcode_circuit(
@@ -1355,7 +1413,16 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
             // Free GPU shard_steps cache after all opcode circuits are done.
             #[cfg(feature = "gpu")]
-            crate::instructions::riscv::gpu::witgen_gpu::invalidate_shard_steps_cache();
+            {
+                crate::instructions::riscv::gpu::witgen_gpu::invalidate_shard_steps_cache();
+                if std::env::var_os("CENO_GPU_TRIM_AFTER_WITGEN").is_some() {
+                    use gkr_iop::gpu::gpu_prover::get_cuda_hal;
+
+                    let cuda_hal = get_cuda_hal().unwrap();
+                    cuda_hal.inner().trim_mem_pool().unwrap();
+                    cuda_hal.inner().synchronize().unwrap();
+                }
+            }
 
             let time = std::time::Instant::now();
             system_config
@@ -1370,6 +1437,50 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 .unwrap();
             tracing::debug!("assign_dummy_config finish in {:?}", time.elapsed());
             zkvm_witness.finalize_lk_multiplicities();
+
+            if let Some(mut cpu_shard_ctx) = debug_shard_ctx_template {
+                let mut cpu_witness = ZKVMWitnesses::default();
+                let mut cpu_dispatch_ctx = system_config.inst_dispatch_builder.to_dispatch_ctx();
+                cpu_dispatch_ctx.begin_shard();
+                for (step_idx, step) in shard_steps.iter().enumerate() {
+                    cpu_dispatch_ctx.ingest_step(step_idx, step);
+                }
+
+                // Force CPU path for the debug comparison (thread-local, no env var races).
+                #[cfg(feature = "gpu")]
+                crate::instructions::riscv::gpu::witgen_gpu::set_force_cpu_path(true);
+
+                system_config
+                    .config
+                    .assign_opcode_circuit(
+                        &system_config.zkvm_cs,
+                        &mut cpu_shard_ctx,
+                        &mut cpu_dispatch_ctx,
+                        shard_steps,
+                        &mut cpu_witness,
+                    )
+                    .unwrap();
+                system_config
+                    .dummy_config
+                    .assign_opcode_circuit(
+                        &system_config.zkvm_cs,
+                        &mut cpu_shard_ctx,
+                        &cpu_dispatch_ctx,
+                        shard_steps,
+                        &mut cpu_witness,
+                    )
+                    .unwrap();
+                cpu_witness.finalize_lk_multiplicities();
+
+                #[cfg(feature = "gpu")]
+                crate::instructions::riscv::gpu::witgen_gpu::set_force_cpu_path(false);
+
+                log_shard_ctx_diff("post_opcode_assignment", &cpu_shard_ctx, &shard_ctx);
+
+                // Compare combined_lk_mlt (the merged LK after finalize_lk_multiplicities).
+                // This catches issues where per-chip LK appears correct but the merge differs.
+                log_combined_lk_diff(&cpu_witness, &zkvm_witness);
+            }
 
             // Memory record routing (per address / waddr)
             //
@@ -2054,6 +2165,194 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),
         None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
+    }
+}
+
+fn clone_debug_shard_ctx(src: &ShardContext) -> ShardContext<'static> {
+    let mut cloned = ShardContext::default();
+    cloned.shard_id = src.shard_id;
+    cloned.num_shards = src.num_shards;
+    cloned.max_cycle = src.max_cycle;
+    cloned.addr_future_accesses = src.addr_future_accesses.clone();
+    cloned.cur_shard_cycle_range = src.cur_shard_cycle_range.clone();
+    cloned.expected_inst_per_shard = src.expected_inst_per_shard;
+    cloned.max_num_cross_shard_accesses = src.max_num_cross_shard_accesses;
+    cloned.prev_shard_cycle_range = src.prev_shard_cycle_range.clone();
+    cloned.prev_shard_heap_range = src.prev_shard_heap_range.clone();
+    cloned.prev_shard_hint_range = src.prev_shard_hint_range.clone();
+    cloned.platform = src.platform.clone();
+    cloned.shard_heap_addr_range = src.shard_heap_addr_range.clone();
+    cloned.shard_hint_addr_range = src.shard_hint_addr_range.clone();
+    cloned.syscall_witnesses = src.syscall_witnesses.clone();
+    cloned
+}
+
+fn flatten_ram_records(
+    records: &[BTreeMap<WordAddr, RAMRecord>],
+) -> Vec<(u32, u64, u64, u64, u64, Option<u32>, u32, usize)> {
+    let mut flat = Vec::new();
+    for table in records {
+        for (addr, record) in table {
+            flat.push((
+                addr.0,
+                record.reg_id,
+                record.prev_cycle,
+                record.cycle,
+                record.shard_cycle,
+                record.prev_value,
+                record.value,
+                record.shard_id,
+            ));
+        }
+    }
+    flat
+}
+
+fn log_shard_ctx_diff(kind: &str, cpu: &ShardContext, gpu: &ShardContext) {
+    let cpu_addr = cpu.get_addr_accessed();
+    let gpu_addr = gpu.get_addr_accessed();
+    if cpu_addr != gpu_addr {
+        tracing::error!(
+            "[GPU e2e debug] {} addr_accessed cpu={} gpu={}",
+            kind,
+            cpu_addr.len(),
+            gpu_addr.len()
+        );
+    }
+
+    let cpu_reads = flatten_ram_records(cpu.read_records());
+    let gpu_reads = flatten_ram_records(gpu.read_records());
+    if cpu_reads != gpu_reads {
+        tracing::error!(
+            "[GPU e2e debug] {} read_records cpu={} gpu={}",
+            kind,
+            cpu_reads.len(),
+            gpu_reads.len()
+        );
+    }
+
+    let cpu_writes = flatten_ram_records(cpu.write_records());
+    let gpu_writes = flatten_ram_records(gpu.write_records());
+    if cpu_writes != gpu_writes {
+        tracing::error!(
+            "[GPU e2e debug] {} write_records cpu={} gpu={}",
+            kind,
+            cpu_writes.len(),
+            gpu_writes.len()
+        );
+    }
+}
+
+fn log_combined_lk_diff<E: ExtensionField>(
+    cpu_witness: &ZKVMWitnesses<E>,
+    gpu_witness: &ZKVMWitnesses<E>,
+) {
+    let cpu_combined = cpu_witness.combined_lk_mlt().expect("cpu combined_lk_mlt");
+    let gpu_combined = gpu_witness.combined_lk_mlt().expect("gpu combined_lk_mlt");
+
+    let table_names = [
+        "Dynamic", "DoubleU8", "And", "Or", "Xor", "Ltu", "Pow", "Instruction",
+    ];
+
+    let mut total_diffs = 0usize;
+    for (table_idx, (cpu_table, gpu_table)) in
+        cpu_combined.iter().zip(gpu_combined.iter()).enumerate()
+    {
+        let mut keys: Vec<u64> = cpu_table
+            .keys()
+            .chain(gpu_table.keys())
+            .copied()
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+
+        let mut table_diffs = 0usize;
+        for &key in &keys {
+            let cpu_count = cpu_table.get(&key).copied().unwrap_or(0);
+            let gpu_count = gpu_table.get(&key).copied().unwrap_or(0);
+            if cpu_count != gpu_count {
+                table_diffs += 1;
+                if table_diffs <= 8 {
+                    let name = table_names.get(table_idx).unwrap_or(&"Unknown");
+                    tracing::error!(
+                        "[GPU e2e debug] combined_lk table={} key={} cpu={} gpu={}",
+                        name,
+                        key,
+                        cpu_count,
+                        gpu_count
+                    );
+                }
+            }
+        }
+        total_diffs += table_diffs;
+        if table_diffs > 8 {
+            let name = table_names.get(table_idx).unwrap_or(&"Unknown");
+            tracing::error!(
+                "[GPU e2e debug] combined_lk table={} total_diffs={} (showing first 8)",
+                name,
+                table_diffs
+            );
+        }
+    }
+
+    // Also compare per-chip LK multiplicities
+    let cpu_lk_keys: std::collections::BTreeSet<_> = cpu_witness.lk_mlts().keys().collect();
+    let gpu_lk_keys: std::collections::BTreeSet<_> = gpu_witness.lk_mlts().keys().collect();
+    if cpu_lk_keys != gpu_lk_keys {
+        tracing::error!(
+            "[GPU e2e debug] lk_mlts key mismatch: cpu_only={:?} gpu_only={:?}",
+            cpu_lk_keys.difference(&gpu_lk_keys).collect::<Vec<_>>(),
+            gpu_lk_keys.difference(&cpu_lk_keys).collect::<Vec<_>>(),
+        );
+    }
+    for name in cpu_lk_keys.intersection(&gpu_lk_keys) {
+        let cpu_lk = cpu_witness.lk_mlts().get(*name).unwrap();
+        let gpu_lk = gpu_witness.lk_mlts().get(*name).unwrap();
+        let mut chip_diffs = 0usize;
+        for (t_idx, (ct, gt)) in cpu_lk.iter().zip(gpu_lk.iter()).enumerate() {
+            let mut ks: Vec<u64> = ct.keys().chain(gt.keys()).copied().collect();
+            ks.sort_unstable();
+            ks.dedup();
+            for &k in &ks {
+                let cv = ct.get(&k).copied().unwrap_or(0);
+                let gv = gt.get(&k).copied().unwrap_or(0);
+                if cv != gv {
+                    chip_diffs += 1;
+                    if chip_diffs <= 4 {
+                        let tname = table_names.get(t_idx).unwrap_or(&"Unknown");
+                        tracing::error!(
+                            "[GPU e2e debug] per_chip_lk chip={} table={} key={} cpu={} gpu={}",
+                            name,
+                            tname,
+                            k,
+                            cv,
+                            gv
+                        );
+                    }
+                }
+            }
+        }
+        if chip_diffs > 0 {
+            total_diffs += chip_diffs;
+            tracing::error!(
+                "[GPU e2e debug] per_chip_lk chip={} total_diffs={}",
+                name,
+                chip_diffs
+            );
+        }
+    }
+
+    if total_diffs == 0 {
+        tracing::info!(
+            "[GPU e2e debug] combined_lk_mlt + per_chip_lk: CPU/GPU match (tables={}, chips={})",
+            cpu_combined.len(),
+            cpu_lk_keys.len()
+        );
+    } else {
+        tracing::error!(
+            "[GPU e2e debug] TOTAL LK DIFFS = {} (combined + per-chip)",
+            total_diffs
+        );
     }
 }
 

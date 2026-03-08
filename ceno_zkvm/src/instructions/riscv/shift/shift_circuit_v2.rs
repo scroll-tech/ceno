@@ -1,10 +1,6 @@
 use crate::e2e::ShardContext;
 #[cfg(feature = "gpu")]
 use crate::tables::RMMCollections;
-#[cfg(feature = "gpu")]
-use ceno_emul::StepIndex;
-#[cfg(feature = "gpu")]
-use gkr_iop::utils::lk_multiplicity::Multiplicity;
 /// constrain implementation follow from https://github.com/openvm-org/openvm/blob/main/extensions/rv32im/circuit/src/shift/core.rs
 use crate::{
     instructions::{
@@ -15,12 +11,20 @@ use crate::{
             i_insn::IInstructionConfig,
             r_insn::RInstructionConfig,
         },
+        side_effects::{
+            CpuSideEffectSink, LkOp, SideEffectSink, emit_byte_decomposition_ops,
+            emit_const_range_op,
+        },
     },
     structs::ProgramParams,
     utils::{split_to_limb, split_to_u8},
 };
 use ceno_emul::InsnKind;
+#[cfg(feature = "gpu")]
+use ceno_emul::StepIndex;
 use ff_ext::{ExtensionField, FieldInto};
+#[cfg(feature = "gpu")]
+use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
@@ -212,6 +216,45 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         })
     }
 
+    pub fn collect_side_effects(
+        &self,
+        sink: &mut impl SideEffectSink,
+        kind: InsnKind,
+        b: u32,
+        c: u32,
+    ) {
+        let b = split_to_limb::<u32, LIMB_BITS>(b);
+        let c = split_to_limb::<u32, LIMB_BITS>(c);
+        let (_, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(
+            kind,
+            &b.clone().try_into().unwrap(),
+            &c.clone().try_into().unwrap(),
+        );
+
+        let bit_shift_carry: [u32; NUM_LIMBS] = array::from_fn(|i| match kind {
+            InsnKind::SLL | InsnKind::SLLI => b[i] >> (LIMB_BITS - bit_shift),
+            _ => b[i] % (1 << bit_shift),
+        });
+        for val in bit_shift_carry {
+            sink.emit_lk(LkOp::DynamicRange {
+                value: val as u64,
+                bits: bit_shift as u32,
+            });
+        }
+
+        let num_bits_log = (NUM_LIMBS * LIMB_BITS).ilog2();
+        let carry_quotient =
+            (((c[0] as usize) - bit_shift - limb_shift * LIMB_BITS) >> num_bits_log) as u64;
+        emit_const_range_op(sink, carry_quotient, LIMB_BITS - num_bits_log as usize);
+
+        if matches!(kind, InsnKind::SRA | InsnKind::SRAI) {
+            sink.emit_lk(LkOp::Xor {
+                a: b[NUM_LIMBS - 1] as u8,
+                b: (1 << (LIMB_BITS - 1)) as u8,
+            });
+        }
+    }
+
     pub fn assign_instances(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
@@ -283,6 +326,8 @@ pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftRTypeConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -370,6 +415,43 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         Ok(())
     }
 
+    fn collect_side_effects_instance(
+        config: &ShiftRTypeConfig<E>,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut crate::witness::LkMultiplicity,
+        step: &ceno_emul::StepRecord,
+    ) -> Result<(), crate::error::ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config
+            .r_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+        let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
+        emit_byte_decomposition_ops(&mut sink, &rd_written);
+        config.shift_base_config.collect_side_effects(
+            &mut sink,
+            I::INST_KIND,
+            step.rs1().unwrap().value,
+            step.rs2().unwrap().value,
+        );
+
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut crate::witness::LkMultiplicity,
+        step: &ceno_emul::StepRecord,
+    ) -> Result<(), crate::error::ZKVMError> {
+        config
+            .r_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
+        Ok(())
+    }
+
     #[cfg(feature = "gpu")]
     fn assign_instances(
         config: &Self::InstructionConfig,
@@ -421,6 +503,8 @@ pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -507,6 +591,43 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
             .i_insn
             .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
+        Ok(())
+    }
+
+    fn collect_side_effects_instance(
+        config: &ShiftImmConfig<E>,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut crate::witness::LkMultiplicity,
+        step: &ceno_emul::StepRecord,
+    ) -> Result<(), crate::error::ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config
+            .i_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+        let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
+        emit_byte_decomposition_ops(&mut sink, &rd_written);
+        config.shift_base_config.collect_side_effects(
+            &mut sink,
+            I::INST_KIND,
+            step.rs1().unwrap().value,
+            step.insn().imm as i16 as u16 as u32,
+        );
+
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut crate::witness::LkMultiplicity,
+        step: &ceno_emul::StepRecord,
+    ) -> Result<(), crate::error::ZKVMError> {
+        config
+            .i_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
         Ok(())
     }
 

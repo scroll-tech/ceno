@@ -72,7 +72,11 @@ pub fn extract_sb_column_map<E: ExtensionField>(
     };
 
     // SB-specific: 2 low_bits (bit_0, bit_1)
-    assert_eq!(config.memory_addr.low_bits.len(), 2, "SB should have 2 low_bits");
+    assert_eq!(
+        config.memory_addr.low_bits.len(),
+        2,
+        "SB should have 2 low_bits"
+    );
     let mem_addr_bit_0 = config.memory_addr.low_bits[0].id as u32;
     let mem_addr_bit_1 = config.memory_addr.low_bits[1].id as u32;
 
@@ -146,7 +150,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -159,9 +166,7 @@ mod tests {
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_sb_correctness() {
         use crate::e2e::ShardContext;
-        use ceno_emul::{
-            ByteAddr, Change, InsnKind, StepRecord, WordAddr, WriteOp, encode_rv32,
-        };
+        use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, WordAddr, WriteOp, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
@@ -214,16 +219,15 @@ mod tests {
         let indices: Vec<usize> = (0..n).collect();
 
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) =
-            crate::instructions::cpu_assign_instances::<E, SbInstruction<E>>(
-                &config,
-                &mut shard_ctx,
-                num_witin,
-                num_structural_witin,
-                &steps,
-                &indices,
-            )
-            .unwrap();
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, SbInstruction<E>>(
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
+        )
+        .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
         let col_map = extract_sb_column_map(&config, num_witin);

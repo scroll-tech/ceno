@@ -14,7 +14,11 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::{Instruction, riscv::constants::LIMB_BITS},
+    instructions::{
+        Instruction,
+        riscv::constants::LIMB_BITS,
+        side_effects::{CpuSideEffectSink, LkOp, SideEffectSink, emit_u16_limbs},
+    },
     structs::ProgramParams,
     uint::Value,
     witness::{LkMultiplicity, set_val},
@@ -49,6 +53,8 @@ pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = DivRemConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -399,7 +405,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             InsnKind::REMU => 3u32,
             _ => {
                 return crate::instructions::cpu_assign_instances::<E, Self>(
-                    config, shard_ctx, num_witin, num_structural_witin, shard_steps, step_indices,
+                    config,
+                    shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    shard_steps,
+                    step_indices,
                 );
             }
         };
@@ -568,6 +579,111 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         );
         set_val!(instance, config.lt_diff, lt_diff_val as u64);
 
+        Ok(())
+    }
+
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lkm: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lkm) };
+        config
+            .r_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+        let dividend = step.rs1().unwrap().value;
+        let divisor = step.rs2().unwrap().value;
+        let dividend_value = Value::new_unchecked(dividend);
+        let divisor_value = Value::new_unchecked(divisor);
+        let dividend_limbs = dividend_value.as_u16_limbs();
+        let divisor_limbs = divisor_value.as_u16_limbs();
+
+        let signed = matches!(I::INST_KIND, InsnKind::DIV | InsnKind::REM);
+        let (quotient, remainder, dividend_sign, divisor_sign, quotient_sign, case) =
+            run_divrem(signed, &u32_to_limbs(&dividend), &u32_to_limbs(&divisor));
+
+        emit_u16_limbs(&mut sink, limbs_to_u32(&quotient));
+        emit_u16_limbs(&mut sink, limbs_to_u32(&remainder));
+
+        let carries = run_mul_carries(
+            signed,
+            &u32_to_limbs(&divisor),
+            &quotient,
+            &remainder,
+            quotient_sign,
+        );
+        for i in 0..UINT_LIMBS {
+            sink.emit_lk(LkOp::DynamicRange {
+                value: carries[i] as u64,
+                bits: (LIMB_BITS + 2) as u32,
+            });
+            sink.emit_lk(LkOp::DynamicRange {
+                value: carries[i + UINT_LIMBS] as u64,
+                bits: (LIMB_BITS + 2) as u32,
+            });
+        }
+
+        let sign_xor = dividend_sign ^ divisor_sign;
+        let remainder_prime = if sign_xor {
+            negate(&remainder)
+        } else {
+            remainder
+        };
+        let remainder_zero =
+            remainder.iter().all(|&v| v == 0) && case != DivRemCoreSpecialCase::ZeroDivisor;
+
+        if signed {
+            let dividend_sign_mask = if dividend_sign {
+                1 << (LIMB_BITS - 1)
+            } else {
+                0
+            };
+            let divisor_sign_mask = if divisor_sign {
+                1 << (LIMB_BITS - 1)
+            } else {
+                0
+            };
+            sink.emit_lk(LkOp::DynamicRange {
+                value: ((dividend_limbs[UINT_LIMBS - 1] as u64 - dividend_sign_mask) << 1),
+                bits: 16,
+            });
+            sink.emit_lk(LkOp::DynamicRange {
+                value: ((divisor_limbs[UINT_LIMBS - 1] as u64 - divisor_sign_mask) << 1),
+                bits: 16,
+            });
+        }
+
+        if case == DivRemCoreSpecialCase::None && !remainder_zero {
+            let idx = run_sltu_diff_idx(&u32_to_limbs(&divisor), &remainder_prime, divisor_sign);
+            let val = if divisor_sign {
+                remainder_prime[idx] - divisor_limbs[idx] as u32
+            } else {
+                divisor_limbs[idx] as u32 - remainder_prime[idx]
+            };
+            sink.emit_lk(LkOp::DynamicRange {
+                value: val as u64 - 1,
+                bits: 16,
+            });
+        } else {
+            sink.emit_lk(LkOp::DynamicRange { value: 0, bits: 16 });
+        }
+
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        config
+            .r_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
         Ok(())
     }
 }

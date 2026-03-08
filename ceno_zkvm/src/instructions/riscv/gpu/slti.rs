@@ -109,7 +109,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -139,7 +142,11 @@ mod tests {
             .map(|i| {
                 let rs1 = ((i as i32) * 137 - 500) as u32;
                 let imm = ((i as i32) % 2048 - 1024) as i32; // -1024..1023
-                let rd_after = if (rs1 as i32) < (imm as i32) { 1u32 } else { 0u32 };
+                let rd_after = if (rs1 as i32) < (imm as i32) {
+                    1u32
+                } else {
+                    0u32
+                };
                 let cycle = 4 + (i as u64) * 4;
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);
                 let insn_code = encode_rv32(InsnKind::SLTI, 2, 0, 4, imm);
@@ -157,7 +164,12 @@ mod tests {
 
         let mut shard_ctx = ShardContext::default();
         let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, SltiInstruction<E>>(
-            &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
         )
         .unwrap();
         let cpu_witness = &cpu_rmms[0];

@@ -16,6 +16,7 @@ use crate::{
             i_insn::IInstructionConfig,
             logic_imm::LogicOp,
         },
+        side_effects::{CpuSideEffectSink, emit_logic_u8_ops},
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -39,6 +40,8 @@ pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     type InstructionConfig = LogicConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -132,6 +135,43 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         config.assign_instance(instance, shard_ctx, lkm, step)
     }
 
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config
+            .i_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+        let rs1_lo = step.rs1().unwrap().value & LIMB_MASK;
+        let rs1_hi = (step.rs1().unwrap().value >> LIMB_BITS) & LIMB_MASK;
+        let imm_lo = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32 & LIMB_MASK;
+        let imm_hi = (InsnRecord::<E::BaseField>::imm_signed_internal(&step.insn()).0 as u32
+            >> LIMB_BITS)
+            & LIMB_MASK;
+
+        emit_logic_u8_ops::<I::OpsTable>(&mut sink, rs1_lo.into(), imm_lo.into(), 2);
+        emit_logic_u8_ops::<I::OpsTable>(&mut sink, rs1_hi.into(), imm_hi.into(), 2);
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        config
+            .i_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
+        Ok(())
+    }
+
     #[cfg(feature = "gpu")]
     fn assign_instances(
         config: &Self::InstructionConfig,
@@ -149,7 +189,12 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
             num_structural_witin,
             shard_steps,
             step_indices,
-            witgen_gpu::GpuWitgenKind::LogicI,
+            witgen_gpu::GpuWitgenKind::LogicI(match I::INST_KIND {
+                InsnKind::ANDI => 0,
+                InsnKind::ORI => 1,
+                InsnKind::XORI => 2,
+                kind => unreachable!("unsupported logic_imm GPU kind: {kind:?}"),
+            }),
         )? {
             return Ok(result);
         }

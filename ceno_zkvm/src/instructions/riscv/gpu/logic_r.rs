@@ -34,7 +34,12 @@ pub fn extract_logic_r_column_map<E: ExtensionField>(
     let rd_id = config.r_insn.rd.id.id as u32;
     let rd_prev_ts = config.r_insn.rd.prev_ts.id as u32;
     let rd_prev_val: [u32; 2] = {
-        let limbs = config.r_insn.rd.prev_value.wits_in().expect("rd prev_value WitIns");
+        let limbs = config
+            .r_insn
+            .rd
+            .prev_value
+            .wits_in()
+            .expect("rd prev_value WitIns");
         assert_eq!(limbs.len(), 2);
         [limbs[0].id as u32, limbs[1].id as u32]
     };
@@ -48,17 +53,32 @@ pub fn extract_logic_r_column_map<E: ExtensionField>(
     let rs1_bytes: [u32; 4] = {
         let l = config.rs1_read.wits_in().expect("rs1_read WitIns");
         assert_eq!(l.len(), 4);
-        [l[0].id as u32, l[1].id as u32, l[2].id as u32, l[3].id as u32]
+        [
+            l[0].id as u32,
+            l[1].id as u32,
+            l[2].id as u32,
+            l[3].id as u32,
+        ]
     };
     let rs2_bytes: [u32; 4] = {
         let l = config.rs2_read.wits_in().expect("rs2_read WitIns");
         assert_eq!(l.len(), 4);
-        [l[0].id as u32, l[1].id as u32, l[2].id as u32, l[3].id as u32]
+        [
+            l[0].id as u32,
+            l[1].id as u32,
+            l[2].id as u32,
+            l[3].id as u32,
+        ]
     };
     let rd_bytes: [u32; 4] = {
         let l = config.rd_written.wits_in().expect("rd_written WitIns");
         assert_eq!(l.len(), 4);
-        [l[0].id as u32, l[1].id as u32, l[2].id as u32, l[3].id as u32]
+        [
+            l[0].id as u32,
+            l[1].id as u32,
+            l[2].id as u32,
+            l[3].id as u32,
+        ]
     };
 
     LogicRColumnMap {
@@ -93,6 +113,35 @@ mod tests {
 
     type E = BabyBearExt4;
 
+    fn flatten_records(
+        records: &[std::collections::BTreeMap<ceno_emul::WordAddr, crate::e2e::RAMRecord>],
+    ) -> Vec<(ceno_emul::WordAddr, u64, u64, usize)> {
+        records
+            .iter()
+            .flat_map(|table| {
+                table
+                    .iter()
+                    .map(|(addr, record)| (*addr, record.prev_cycle, record.cycle, record.shard_id))
+            })
+            .collect()
+    }
+
+    fn flatten_lk(
+        multiplicity: &gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
+    ) -> Vec<Vec<(u64, usize)>> {
+        multiplicity
+            .iter()
+            .map(|table| {
+                let mut entries = table
+                    .iter()
+                    .map(|(key, count)| (*key, *count))
+                    .collect::<Vec<_>>();
+                entries.sort_unstable();
+                entries
+            })
+            .collect()
+    }
+
     #[test]
     fn test_extract_logic_r_column_map() {
         let mut cs = ConstraintSystem::<E>::new(|| "test_logic_r");
@@ -107,7 +156,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -149,15 +201,23 @@ mod tests {
                 let (rs1, rs2) = if i < EDGE_CASES.len() {
                     EDGE_CASES[i]
                 } else {
-                    (0xDEAD_0000u32 | (i as u32), 0x00FF_FF00u32 | ((i as u32) << 8))
+                    (
+                        0xDEAD_0000u32 | (i as u32),
+                        0x00FF_FF00u32 | ((i as u32) << 8),
+                    )
                 };
                 let rd_after = rs1 & rs2; // AND
                 let cycle = 4 + (i as u64) * 4;
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);
                 let insn_code = encode_rv32(InsnKind::AND, 2, 3, 4, 0);
                 StepRecord::new_r_instruction(
-                    cycle, pc, insn_code, rs1, rs2,
-                    Change::new((i as u32) % 200, rd_after), 0,
+                    cycle,
+                    pc,
+                    insn_code,
+                    rs1,
+                    rs2,
+                    Change::new((i as u32) % 200, rd_after),
+                    0,
                 )
             })
             .collect();
@@ -165,10 +225,16 @@ mod tests {
 
         // CPU path
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, AndInstruction<E>>(
-            &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-        )
-        .unwrap();
+        let (cpu_rmms, cpu_lkm) =
+            crate::instructions::cpu_assign_instances::<E, AndInstruction<E>>(
+                &config,
+                &mut shard_ctx,
+                num_witin,
+                num_structural_witin,
+                &steps,
+                &indices,
+            )
+            .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
         // GPU path
@@ -209,5 +275,37 @@ mod tests {
             }
         }
         assert_eq!(mismatches, 0, "Found {} mismatches", mismatches);
+
+        let mut shard_ctx_full_gpu = ShardContext::default();
+        let (gpu_rmms, gpu_lkm) =
+            crate::instructions::riscv::gpu::witgen_gpu::try_gpu_assign_instances::<
+                E,
+                AndInstruction<E>,
+            >(
+                &config,
+                &mut shard_ctx_full_gpu,
+                num_witin,
+                num_structural_witin,
+                &steps,
+                &indices,
+                crate::instructions::riscv::gpu::witgen_gpu::GpuWitgenKind::LogicR(0),
+            )
+            .unwrap()
+            .expect("GPU path should be available");
+
+        assert_eq!(gpu_rmms[0].values(), cpu_rmms[0].values());
+        assert_eq!(flatten_lk(&gpu_lkm), flatten_lk(&cpu_lkm));
+        assert_eq!(
+            shard_ctx_full_gpu.get_addr_accessed(),
+            shard_ctx.get_addr_accessed()
+        );
+        assert_eq!(
+            flatten_records(shard_ctx_full_gpu.read_records()),
+            flatten_records(shard_ctx.read_records())
+        );
+        assert_eq!(
+            flatten_records(shard_ctx_full_gpu.write_records()),
+            flatten_records(shard_ctx.write_records())
+        );
     }
 }

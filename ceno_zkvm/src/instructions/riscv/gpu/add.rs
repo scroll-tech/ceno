@@ -114,15 +114,44 @@ mod tests {
 
     type E = BabyBearExt4;
 
+    fn flatten_records(
+        records: &[std::collections::BTreeMap<ceno_emul::WordAddr, crate::e2e::RAMRecord>],
+    ) -> Vec<(ceno_emul::WordAddr, u64, u64, usize)> {
+        records
+            .iter()
+            .flat_map(|table| {
+                table
+                    .iter()
+                    .map(|(addr, record)| (*addr, record.prev_cycle, record.cycle, record.shard_id))
+            })
+            .collect()
+    }
+
+    fn flatten_lk(
+        multiplicity: &gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
+    ) -> Vec<Vec<(u64, usize)>> {
+        multiplicity
+            .iter()
+            .map(|table| {
+                let mut entries = table
+                    .iter()
+                    .map(|(key, count)| (*key, *count))
+                    .collect::<Vec<_>>();
+                entries.sort_unstable();
+                entries
+            })
+            .collect()
+    }
+
     fn make_test_steps(n: usize) -> Vec<StepRecord> {
         const EDGE_CASES: &[(u32, u32)] = &[
             (0, 0),
             (0, 1),
             (1, 0),
-            (u32::MAX, 1),          // overflow
-            (u32::MAX, u32::MAX),   // double overflow
+            (u32::MAX, 1),            // overflow
+            (u32::MAX, u32::MAX),     // double overflow
             (0x80000000, 0x80000000), // INT_MIN + INT_MIN
-            (0x7FFFFFFF, 1),        // INT_MAX + 1
+            (0x7FFFFFFF, 1),          // INT_MAX + 1
             (0xFFFF0000, 0x0000FFFF), // limb carry
         ];
 
@@ -203,15 +232,16 @@ mod tests {
 
         // CPU path
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, AddInstruction<E>>(
-            &config,
-            &mut shard_ctx,
-            num_witin,
-            num_structural_witin,
-            &steps,
-            &indices,
-        )
-        .unwrap();
+        let (cpu_rmms, cpu_lkm) =
+            crate::instructions::cpu_assign_instances::<E, AddInstruction<E>>(
+                &config,
+                &mut shard_ctx,
+                num_witin,
+                num_structural_witin,
+                &steps,
+                &indices,
+            )
+            .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
         // GPU path (AOS with indirect indexing)
@@ -255,5 +285,37 @@ mod tests {
             }
         }
         assert_eq!(mismatches, 0, "Found {} mismatches", mismatches);
+
+        let mut shard_ctx_full_gpu = ShardContext::default();
+        let (gpu_rmms, gpu_lkm) =
+            crate::instructions::riscv::gpu::witgen_gpu::try_gpu_assign_instances::<
+                E,
+                AddInstruction<E>,
+            >(
+                &config,
+                &mut shard_ctx_full_gpu,
+                num_witin,
+                num_structural_witin,
+                &steps,
+                &indices,
+                crate::instructions::riscv::gpu::witgen_gpu::GpuWitgenKind::Add,
+            )
+            .unwrap()
+            .expect("GPU path should be available");
+
+        assert_eq!(gpu_rmms[0].values(), cpu_rmms[0].values());
+        assert_eq!(flatten_lk(&gpu_lkm), flatten_lk(&cpu_lkm));
+        assert_eq!(
+            shard_ctx_full_gpu.get_addr_accessed(),
+            shard_ctx.get_addr_accessed()
+        );
+        assert_eq!(
+            flatten_records(shard_ctx_full_gpu.read_records()),
+            flatten_records(shard_ctx.read_records())
+        );
+        assert_eq!(
+            flatten_records(shard_ctx_full_gpu.write_records()),
+            flatten_records(shard_ctx.write_records())
+        );
     }
 }

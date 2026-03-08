@@ -6,7 +6,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::riscv::insn_base::{StateInOut, WriteRD},
+    instructions::{
+        riscv::insn_base::{StateInOut, WriteRD},
+        side_effects::{LkOp, SideEffectSink},
+    },
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
@@ -67,5 +70,27 @@ impl<E: ExtensionField> JInstructionConfig<E> {
         lk_multiplicity.fetch(step.pc().before.0);
 
         Ok(())
+    }
+
+    pub fn collect_shard_effects(
+        &self,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) {
+        lk_multiplicity.fetch(step.pc().before.0);
+        self.rd.collect_shard_effects(shard_ctx, step);
+    }
+
+    pub fn collect_side_effects(
+        &self,
+        sink: &mut impl SideEffectSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        sink.emit_lk(LkOp::Fetch {
+            pc: step.pc().before.0,
+        });
+        self.rd.collect_side_effects(sink, shard_ctx, step);
     }
 }

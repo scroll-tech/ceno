@@ -86,16 +86,16 @@ pub fn extract_div_column_map<E: ExtensionField>(
 
     // remainder_prime
     let remainder_prime: [u32; 2] = {
-        let l = config.remainder_prime.wits_in().expect("remainder_prime WitIns");
+        let l = config
+            .remainder_prime
+            .wits_in()
+            .expect("remainder_prime WitIns");
         assert_eq!(l.len(), 2);
         [l[0].id as u32, l[1].id as u32]
     };
 
     // lt_marker
-    let lt_marker: [u32; 2] = [
-        config.lt_marker[0].id as u32,
-        config.lt_marker[1].id as u32,
-    ];
+    let lt_marker: [u32; 2] = [config.lt_marker[0].id as u32, config.lt_marker[1].id as u32];
 
     // lt_diff
     let lt_diff = config.lt_diff.id as u32;
@@ -154,7 +154,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -226,10 +229,22 @@ mod tests {
             let mut cb = CircuitBuilder::new(&mut cs);
 
             let config = match insn_kind {
-                InsnKind::DIV => DivInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
-                InsnKind::DIVU => DivuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
-                InsnKind::REM => RemInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
-                InsnKind::REMU => RemuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap(),
+                InsnKind::DIV => {
+                    DivInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
+                InsnKind::DIVU => {
+                    DivuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
+                InsnKind::REM => {
+                    RemInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
+                InsnKind::REMU => {
+                    RemuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default())
+                        .unwrap()
+                }
                 _ => unreachable!(),
             };
             let num_witin = cb.cs.num_witin as usize;
@@ -238,20 +253,20 @@ mod tests {
             let n = 1024;
 
             const EDGE_CASES: &[(u32, u32)] = &[
-                (0, 1),                    // 0 / 1
-                (1, 1),                    // 1 / 1
-                (0, 0),                    // 0 / 0 (zero divisor)
-                (12345, 0),                // non-zero / 0 (zero divisor)
-                (u32::MAX, 0),             // max / 0 (zero divisor)
-                (0x80000000, 0),           // INT_MIN / 0 (zero divisor)
-                (0x80000000, 0xFFFFFFFF),  // INT_MIN / -1 (signed overflow!)
-                (0x7FFFFFFF, 0xFFFFFFFF),  // INT_MAX / -1
-                (0xFFFFFFFF, 0xFFFFFFFF),  // -1 / -1
-                (0x80000000, 1),           // INT_MIN / 1
-                (0x80000000, 2),           // INT_MIN / 2
-                (u32::MAX, u32::MAX),      // max / max
-                (u32::MAX, 1),             // max / 1
-                (1, u32::MAX),             // 1 / max
+                (0, 1),                   // 0 / 1
+                (1, 1),                   // 1 / 1
+                (0, 0),                   // 0 / 0 (zero divisor)
+                (12345, 0),               // non-zero / 0 (zero divisor)
+                (u32::MAX, 0),            // max / 0 (zero divisor)
+                (0x80000000, 0),          // INT_MIN / 0 (zero divisor)
+                (0x80000000, 0xFFFFFFFF), // INT_MIN / -1 (signed overflow!)
+                (0x7FFFFFFF, 0xFFFFFFFF), // INT_MAX / -1
+                (0xFFFFFFFF, 0xFFFFFFFF), // -1 / -1
+                (0x80000000, 1),          // INT_MIN / 1
+                (0x80000000, 2),          // INT_MIN / 2
+                (u32::MAX, u32::MAX),     // max / max
+                (u32::MAX, 1),            // max / 1
+                (1, u32::MAX),            // 1 / max
             ];
 
             let steps: Vec<StepRecord> = (0..n)
@@ -321,17 +336,45 @@ mod tests {
             let mut shard_ctx = ShardContext::default();
             let (cpu_rmms, _lkm) = match insn_kind {
                 InsnKind::DIV => crate::instructions::cpu_assign_instances::<E, DivInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
-                InsnKind::DIVU => crate::instructions::cpu_assign_instances::<E, DivuInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
+                    &config,
+                    &mut shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    &steps,
+                    &indices,
+                )
+                .unwrap(),
+                InsnKind::DIVU => {
+                    crate::instructions::cpu_assign_instances::<E, DivuInstruction<E>>(
+                        &config,
+                        &mut shard_ctx,
+                        num_witin,
+                        num_structural_witin,
+                        &steps,
+                        &indices,
+                    )
+                    .unwrap()
+                }
                 InsnKind::REM => crate::instructions::cpu_assign_instances::<E, RemInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
-                InsnKind::REMU => crate::instructions::cpu_assign_instances::<E, RemuInstruction<E>>(
-                    &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-                ).unwrap(),
+                    &config,
+                    &mut shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    &steps,
+                    &indices,
+                )
+                .unwrap(),
+                InsnKind::REMU => {
+                    crate::instructions::cpu_assign_instances::<E, RemuInstruction<E>>(
+                        &config,
+                        &mut shard_ctx,
+                        num_witin,
+                        num_structural_witin,
+                        &steps,
+                        &indices,
+                    )
+                    .unwrap()
+                }
                 _ => unreachable!(),
             };
             let cpu_witness = &cpu_rmms[0];
@@ -349,7 +392,14 @@ mod tests {
             let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
             let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
             let gpu_result = hal
-                .witgen_div(&col_map, &gpu_records, &indices_u32, shard_offset, div_kind, None)
+                .witgen_div(
+                    &col_map,
+                    &gpu_records,
+                    &indices_u32,
+                    shard_offset,
+                    div_kind,
+                    None,
+                )
                 .unwrap();
 
             let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

@@ -126,7 +126,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -157,13 +160,22 @@ mod tests {
                 // Mix positive, negative, equal cases
                 let rs1 = ((i as i32) * 137 - 500) as u32;
                 let rs2 = ((i as i32) * 89 - 300) as u32;
-                let rd_after = if (rs1 as i32) < (rs2 as i32) { 1u32 } else { 0u32 };
+                let rd_after = if (rs1 as i32) < (rs2 as i32) {
+                    1u32
+                } else {
+                    0u32
+                };
                 let cycle = 4 + (i as u64) * 4;
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);
                 let insn_code = encode_rv32(InsnKind::SLT, 2, 3, 4, 0);
                 StepRecord::new_r_instruction(
-                    cycle, pc, insn_code, rs1, rs2,
-                    Change::new((i as u32) % 200, rd_after), 0,
+                    cycle,
+                    pc,
+                    insn_code,
+                    rs1,
+                    rs2,
+                    Change::new((i as u32) % 200, rd_after),
+                    0,
                 )
             })
             .collect();
@@ -171,7 +183,12 @@ mod tests {
 
         let mut shard_ctx = ShardContext::default();
         let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, SltInstruction<E>>(
-            &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
         )
         .unwrap();
         let cpu_witness = &cpu_rmms[0];

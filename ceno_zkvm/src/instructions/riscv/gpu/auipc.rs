@@ -39,14 +39,19 @@ pub fn extract_auipc_column_map<E: ExtensionField>(
 
     // AUIPC-specific
     let rd_bytes: [u32; 4] = {
-        let l = config.rd_written.wits_in().expect("rd_written UInt8 WitIns");
+        let l = config
+            .rd_written
+            .wits_in()
+            .expect("rd_written UInt8 WitIns");
         assert_eq!(l.len(), 4);
-        [l[0].id as u32, l[1].id as u32, l[2].id as u32, l[3].id as u32]
+        [
+            l[0].id as u32,
+            l[1].id as u32,
+            l[2].id as u32,
+            l[3].id as u32,
+        ]
     };
-    let pc_limbs: [u32; 2] = [
-        config.pc_limbs[0].id as u32,
-        config.pc_limbs[1].id as u32,
-    ];
+    let pc_limbs: [u32; 2] = [config.pc_limbs[0].id as u32, config.pc_limbs[1].id as u32];
     let imm_limbs: [u32; 3] = [
         config.imm_limbs[0].id as u32,
         config.imm_limbs[1].id as u32,
@@ -96,7 +101,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -143,11 +151,15 @@ mod tests {
         let indices: Vec<usize> = (0..n).collect();
 
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) =
-            crate::instructions::cpu_assign_instances::<E, AuipcInstruction<E>>(
-                &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
-            )
-            .unwrap();
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, AuipcInstruction<E>>(
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
+        )
+        .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
         let col_map = extract_auipc_column_map(&config, num_witin);

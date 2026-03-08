@@ -11,6 +11,7 @@ use crate::{
             constants::{UINT_LIMBS, UInt},
             i_insn::IInstructionConfig,
         },
+        side_effects::{CpuSideEffectSink, emit_uint_limbs_lt_ops},
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},
@@ -49,6 +50,8 @@ pub struct SetLessThanImmInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInstruction<E, I> {
     type InstructionConfig = SetLessThanImmConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -138,6 +141,44 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             &imm_sign_extend,
             matches!(step.insn().kind, InsnKind::SLTI),
         )?;
+        Ok(())
+    }
+
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lkm: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lkm) };
+        config
+            .i_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+        let rs1_value = Value::new_unchecked(step.rs1().unwrap().value);
+        let rs1_limbs = rs1_value.as_u16_limbs();
+        let imm_sign_extend = imm_sign_extend(true, step.insn().imm as i16);
+        emit_uint_limbs_lt_ops(
+            &mut sink,
+            matches!(I::INST_KIND, InsnKind::SLTI),
+            &rs1_limbs,
+            &imm_sign_extend,
+        );
+
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        config
+            .i_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
         Ok(())
     }
 

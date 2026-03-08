@@ -31,9 +31,17 @@ pub fn extract_jal_column_map<E: ExtensionField>(
 
     // JAL-specific: rd u8 bytes
     let rd_bytes: [u32; 4] = {
-        let l = config.rd_written.wits_in().expect("rd_written UInt8 WitIns");
+        let l = config
+            .rd_written
+            .wits_in()
+            .expect("rd_written UInt8 WitIns");
         assert_eq!(l.len(), 4);
-        [l[0].id as u32, l[1].id as u32, l[2].id as u32, l[3].id as u32]
+        [
+            l[0].id as u32,
+            l[1].id as u32,
+            l[2].id as u32,
+            l[3].id as u32,
+        ]
     };
 
     JalColumnMap {
@@ -75,7 +83,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -123,7 +134,12 @@ mod tests {
 
         let mut shard_ctx = ShardContext::default();
         let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, JalInstruction<E>>(
-            &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
         )
         .unwrap();
         let cpu_witness = &cpu_rmms[0];

@@ -25,7 +25,12 @@ pub fn extract_shift_i_column_map<E: ExtensionField>(
     let rd_id = config.i_insn.rd.id.id as u32;
     let rd_prev_ts = config.i_insn.rd.prev_ts.id as u32;
     let rd_prev_val: [u32; 2] = {
-        let limbs = config.i_insn.rd.prev_value.wits_in().expect("rd prev_value WitIns");
+        let limbs = config
+            .i_insn
+            .rd
+            .prev_value
+            .wits_in()
+            .expect("rd prev_value WitIns");
         assert_eq!(limbs.len(), 2);
         [limbs[0].id as u32, limbs[1].id as u32]
     };
@@ -39,30 +44,37 @@ pub fn extract_shift_i_column_map<E: ExtensionField>(
     let rs1_bytes: [u32; 4] = {
         let l = config.rs1_read.wits_in().expect("rs1_read WitIns");
         assert_eq!(l.len(), 4);
-        [l[0].id as u32, l[1].id as u32, l[2].id as u32, l[3].id as u32]
+        [
+            l[0].id as u32,
+            l[1].id as u32,
+            l[2].id as u32,
+            l[3].id as u32,
+        ]
     };
     let rd_bytes: [u32; 4] = {
         let l = config.rd_written.wits_in().expect("rd_written WitIns");
         assert_eq!(l.len(), 4);
-        [l[0].id as u32, l[1].id as u32, l[2].id as u32, l[3].id as u32]
+        [
+            l[0].id as u32,
+            l[1].id as u32,
+            l[2].id as u32,
+            l[3].id as u32,
+        ]
     };
 
     // Immediate
     let imm = config.imm.id as u32;
 
     // ShiftBase
-    let bit_shift_marker: [u32; 8] = std::array::from_fn(|i| {
-        config.shift_base_config.bit_shift_marker[i].id as u32
-    });
-    let limb_shift_marker: [u32; 4] = std::array::from_fn(|i| {
-        config.shift_base_config.limb_shift_marker[i].id as u32
-    });
+    let bit_shift_marker: [u32; 8] =
+        std::array::from_fn(|i| config.shift_base_config.bit_shift_marker[i].id as u32);
+    let limb_shift_marker: [u32; 4] =
+        std::array::from_fn(|i| config.shift_base_config.limb_shift_marker[i].id as u32);
     let bit_multiplier_left = config.shift_base_config.bit_multiplier_left.id as u32;
     let bit_multiplier_right = config.shift_base_config.bit_multiplier_right.id as u32;
     let b_sign = config.shift_base_config.b_sign.id as u32;
-    let bit_shift_carry: [u32; 4] = std::array::from_fn(|i| {
-        config.shift_base_config.bit_shift_carry[i].id as u32
-    });
+    let bit_shift_carry: [u32; 4] =
+        std::array::from_fn(|i| config.shift_base_config.bit_shift_carry[i].id as u32);
 
     ShiftIColumnMap {
         pc,
@@ -113,7 +125,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -140,13 +155,13 @@ mod tests {
 
         const EDGE_CASES: &[(u32, u32)] = &[
             (0, 0),
-            (1, 0),            // shift by 0
-            (1, 31),           // shift to MSB
-            (u32::MAX, 0),     // no shift
-            (u32::MAX, 16),    // shift half
-            (u32::MAX, 31),    // shift max
-            (0x80000000, 1),   // INT_MIN << 1
-            (0xDEADBEEF, 4),   // nibble shift
+            (1, 0),          // shift by 0
+            (1, 31),         // shift to MSB
+            (u32::MAX, 0),   // no shift
+            (u32::MAX, 16),  // shift half
+            (u32::MAX, 31),  // shift max
+            (0x80000000, 1), // INT_MIN << 1
+            (0xDEADBEEF, 4), // nibble shift
         ];
 
         let n = 1024;
@@ -176,7 +191,12 @@ mod tests {
 
         let mut shard_ctx = ShardContext::default();
         let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, SlliInstruction<E>>(
-            &config, &mut shard_ctx, num_witin, num_structural_witin, &steps, &indices,
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
         )
         .unwrap();
         let cpu_witness = &cpu_rmms[0];

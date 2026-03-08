@@ -20,10 +20,13 @@ use rayon::{
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 pub mod riscv;
+pub mod side_effects;
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
     type InsnType: Clone + Copy;
+
+    const GPU_SIDE_EFFECTS: bool = false;
 
     fn padding_strategy() -> InstancePaddingStrategy {
         InstancePaddingStrategy::Default
@@ -95,6 +98,36 @@ pub trait Instruction<E: ExtensionField> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError>;
+
+    fn collect_side_effects_instance(
+        _config: &Self::InstructionConfig,
+        _shard_ctx: &mut ShardContext,
+        _lk_multiplicity: &mut LkMultiplicity,
+        _step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        Err(ZKVMError::InvalidWitness(
+            format!(
+                "{} does not implement lightweight side effects collection",
+                Self::name()
+            )
+            .into(),
+        ))
+    }
+
+    fn collect_shard_side_effects_instance(
+        _config: &Self::InstructionConfig,
+        _shard_ctx: &mut ShardContext,
+        _lk_multiplicity: &mut LkMultiplicity,
+        _step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        Err(ZKVMError::InvalidWitness(
+            format!(
+                "{} does not implement shard-only side effects collection",
+                Self::name()
+            )
+            .into(),
+        ))
+    }
 
     fn assign_instances(
         config: &Self::InstructionConfig,
@@ -261,4 +294,81 @@ pub fn cpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
         [raw_witin, raw_structual_witin],
         lk_multiplicity.into_finalize_result(),
     ))
+}
+
+/// CPU-only side-effect collection for GPU-enabled instructions.
+///
+/// This path deliberately avoids scratch witness buffers and calls only the
+/// instruction-specific side-effect collector.
+pub fn cpu_collect_side_effects<E: ExtensionField, I: Instruction<E>>(
+    config: &I::InstructionConfig,
+    shard_ctx: &mut ShardContext,
+    shard_steps: &[StepRecord],
+    step_indices: &[StepIndex],
+) -> Result<Multiplicity<u64>, ZKVMError> {
+    cpu_collect_side_effects_inner::<E, I>(config, shard_ctx, shard_steps, step_indices, false)
+}
+
+/// CPU-side `send()` / `addr_accessed` collection for GPU-assisted lk paths.
+///
+/// Implementations may still increment fetch multiplicity on CPU, but all other
+/// lookup multiplicities are expected to come from the GPU path.
+pub fn cpu_collect_shard_side_effects<E: ExtensionField, I: Instruction<E>>(
+    config: &I::InstructionConfig,
+    shard_ctx: &mut ShardContext,
+    shard_steps: &[StepRecord],
+    step_indices: &[StepIndex],
+) -> Result<Multiplicity<u64>, ZKVMError> {
+    cpu_collect_side_effects_inner::<E, I>(config, shard_ctx, shard_steps, step_indices, true)
+}
+
+fn cpu_collect_side_effects_inner<E: ExtensionField, I: Instruction<E>>(
+    config: &I::InstructionConfig,
+    shard_ctx: &mut ShardContext,
+    shard_steps: &[StepRecord],
+    step_indices: &[StepIndex],
+    shard_only: bool,
+) -> Result<Multiplicity<u64>, ZKVMError> {
+    let nthreads = max_usable_threads();
+    let total = step_indices.len();
+    let batch_size = if total > 256 {
+        total.div_ceil(nthreads)
+    } else {
+        total
+    }
+    .max(1);
+
+    let lk_multiplicity = LkMultiplicity::default();
+    let shard_ctx_vec = shard_ctx.get_forked();
+
+    step_indices
+        .par_chunks(batch_size)
+        .zip(shard_ctx_vec)
+        .flat_map(|(indices, mut shard_ctx)| {
+            let mut lk_multiplicity = lk_multiplicity.clone();
+            indices
+                .iter()
+                .copied()
+                .map(|step_idx| {
+                    if shard_only {
+                        I::collect_shard_side_effects_instance(
+                            config,
+                            &mut shard_ctx,
+                            &mut lk_multiplicity,
+                            &shard_steps[step_idx],
+                        )
+                    } else {
+                        I::collect_side_effects_instance(
+                            config,
+                            &mut shard_ctx,
+                            &mut lk_multiplicity,
+                            &shard_steps[step_idx],
+                        )
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Result<(), ZKVMError>>()?;
+
+    Ok(lk_multiplicity.into_finalize_result())
 }

@@ -2,8 +2,16 @@ use std::marker::PhantomData;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    circuit_builder::CircuitBuilder, e2e::ShardContext, error::ZKVMError,
-    instructions::Instruction, structs::ProgramParams, uint::Value, witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
+    error::ZKVMError,
+    instructions::{
+        Instruction,
+        side_effects::{CpuSideEffectSink, emit_u16_limbs},
+    },
+    structs::ProgramParams,
+    uint::Value,
+    witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
@@ -42,6 +50,8 @@ pub type SubInstruction<E> = ArithInstruction<E, SubOp>;
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = matches!(I::INST_KIND, InsnKind::ADD | InsnKind::SUB);
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -137,6 +147,45 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             _ => unreachable!("Unsupported instruction kind"),
         };
 
+        Ok(())
+    }
+
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config
+            .r_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+        match I::INST_KIND {
+            InsnKind::ADD => {
+                emit_u16_limbs(&mut sink, step.rd().unwrap().value.after);
+            }
+            InsnKind::SUB => {
+                emit_u16_limbs(&mut sink, step.rd().unwrap().value.after);
+                emit_u16_limbs(&mut sink, step.rs1().unwrap().value);
+            }
+            _ => unreachable!("Unsupported instruction kind"),
+        }
+
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        config
+            .r_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
         Ok(())
     }
 

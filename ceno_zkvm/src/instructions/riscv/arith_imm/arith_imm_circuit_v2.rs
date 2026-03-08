@@ -6,6 +6,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
+        side_effects::{CpuSideEffectSink, emit_u16_limbs},
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},
@@ -40,6 +41,8 @@ pub struct InstructionConfig<E: ExtensionField> {
 impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     type InstructionConfig = InstructionConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::ADDI]
@@ -109,6 +112,34 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
             .i_insn
             .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
+        Ok(())
+    }
+
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config
+            .i_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+        emit_u16_limbs(&mut sink, step.rd().unwrap().value.after);
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        config
+            .i_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
         Ok(())
     }
 

@@ -12,6 +12,7 @@ use crate::{
             constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             j_insn::JInstructionConfig,
         },
+        side_effects::{CpuSideEffectSink, LkOp, SideEffectSink, emit_byte_decomposition_ops},
     },
     structs::ProgramParams,
     utils::split_to_u8,
@@ -50,6 +51,8 @@ pub struct JalInstruction<E>(PhantomData<E>);
 impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     type InstructionConfig = JalConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::JAL]
@@ -126,6 +129,45 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
             (last_limb_bits..UInt8::<E>::LIMB_BITS).fold(0, |acc, x| acc + (1 << x));
         lk_multiplicity.logic_u8::<XorTable>(rd_written[3] as u64, additional_bits as u64);
 
+        Ok(())
+    }
+
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &ceno_emul::StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config
+            .j_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+        let rd_written = split_to_u8(step.rd().unwrap().value.after);
+        emit_byte_decomposition_ops(&mut sink, &rd_written);
+
+        let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1);
+        let additional_bits =
+            (last_limb_bits..UInt8::<E>::LIMB_BITS).fold(0, |acc, x| acc + (1 << x));
+        sink.emit_lk(LkOp::Xor {
+            a: rd_written[3],
+            b: additional_bits as u8,
+        });
+
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &ceno_emul::StepRecord,
+    ) -> Result<(), ZKVMError> {
+        config
+            .j_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
         Ok(())
     }
 

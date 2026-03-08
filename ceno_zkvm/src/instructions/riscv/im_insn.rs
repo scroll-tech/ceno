@@ -2,7 +2,10 @@ use crate::{
     chip_handler::{AddressExpr, MemoryExpr, RegisterExpr, general::InstFetch},
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    instructions::riscv::insn_base::{ReadMEM, ReadRS1, StateInOut, WriteRD},
+    instructions::{
+        riscv::insn_base::{ReadMEM, ReadRS1, StateInOut, WriteRD},
+        side_effects::{LkOp, SideEffectSink},
+    },
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
@@ -84,5 +87,31 @@ impl<E: ExtensionField> IMInstructionConfig<E> {
         lk_multiplicity.fetch(step.pc().before.0);
 
         Ok(())
+    }
+
+    pub fn collect_side_effects(
+        &self,
+        sink: &mut impl SideEffectSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        sink.emit_lk(LkOp::Fetch {
+            pc: step.pc().before.0,
+        });
+        self.rs1.collect_side_effects(sink, shard_ctx, step);
+        self.rd.collect_side_effects(sink, shard_ctx, step);
+        self.mem_read.collect_side_effects(sink, shard_ctx, step);
+    }
+
+    pub fn collect_shard_effects(
+        &self,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) {
+        lk_multiplicity.fetch(step.pc().before.0);
+        self.rs1.collect_shard_effects(shard_ctx, step);
+        self.rd.collect_shard_effects(shard_ctx, step);
+        self.mem_read.collect_shard_effects(shard_ctx, step);
     }
 }

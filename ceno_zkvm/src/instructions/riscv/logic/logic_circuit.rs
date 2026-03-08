@@ -11,6 +11,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
+        side_effects::{CpuSideEffectSink, emit_logic_u8_ops},
     },
     structs::ProgramParams,
     utils::split_to_u8,
@@ -37,6 +38,8 @@ pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     type InstructionConfig = LogicConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -80,6 +83,37 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         config.assign_instance(instance, shard_ctx, lk_multiplicity, step)
     }
 
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config.collect_side_effects(&mut sink, shard_ctx_view, step);
+        emit_logic_u8_ops::<I::OpsTable>(
+            &mut sink,
+            step.rs1().unwrap().value as u64,
+            step.rs2().unwrap().value as u64,
+            4,
+        );
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        config
+            .r_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
+        Ok(())
+    }
+
     #[cfg(feature = "gpu")]
     fn assign_instances(
         config: &Self::InstructionConfig,
@@ -97,7 +131,12 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
             num_structural_witin,
             shard_steps,
             step_indices,
-            witgen_gpu::GpuWitgenKind::LogicR,
+            witgen_gpu::GpuWitgenKind::LogicR(match I::INST_KIND {
+                InsnKind::AND => 0,
+                InsnKind::OR => 1,
+                InsnKind::XOR => 2,
+                kind => unreachable!("unsupported logic GPU kind: {kind:?}"),
+            }),
         )? {
             return Ok(result);
         }
@@ -168,5 +207,14 @@ impl<E: ExtensionField> LogicConfig<E> {
         self.rd_written.assign_limbs(instance, &rd_written);
 
         Ok(())
+    }
+
+    fn collect_side_effects(
+        &self,
+        sink: &mut impl crate::instructions::side_effects::SideEffectSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        self.r_insn.collect_side_effects(sink, shard_ctx, step);
     }
 }

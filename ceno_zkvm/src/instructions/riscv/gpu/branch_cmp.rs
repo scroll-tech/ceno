@@ -9,18 +9,12 @@ pub fn extract_branch_cmp_column_map<E: ExtensionField>(
     num_witin: usize,
 ) -> BranchCmpColumnMap {
     let rs1_limbs: [u32; 2] = {
-        let limbs = config
-            .read_rs1
-            .wits_in()
-            .expect("rs1 WitIn");
+        let limbs = config.read_rs1.wits_in().expect("rs1 WitIn");
         assert_eq!(limbs.len(), 2);
         [limbs[0].id as u32, limbs[1].id as u32]
     };
     let rs2_limbs: [u32; 2] = {
-        let limbs = config
-            .read_rs2
-            .wits_in()
-            .expect("rs2 WitIn");
+        let limbs = config.read_rs2.wits_in().expect("rs2 WitIn");
         assert_eq!(limbs.len(), 2);
         [limbs[0].id as u32, limbs[1].id as u32]
     };
@@ -105,7 +99,10 @@ mod tests {
             assert!(
                 (col as usize) < col_map.num_cols as usize,
                 "Column {} (index {}) out of range: {} >= {}",
-                i, col, col, col_map.num_cols
+                i,
+                col,
+                col,
+                col_map.num_cols
             );
         }
         let mut seen = std::collections::HashSet::new();
@@ -157,16 +154,15 @@ mod tests {
         let indices: Vec<usize> = (0..n).collect();
 
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) =
-            crate::instructions::cpu_assign_instances::<E, BltInstruction<E>>(
-                &config,
-                &mut shard_ctx,
-                num_witin,
-                num_structural_witin,
-                &steps,
-                &indices,
-            )
-            .unwrap();
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, BltInstruction<E>>(
+            &config,
+            &mut shard_ctx,
+            num_witin,
+            num_structural_witin,
+            &steps,
+            &indices,
+        )
+        .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
         let col_map = extract_branch_cmp_column_map(&config, num_witin);
@@ -181,14 +177,7 @@ mod tests {
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         let gpu_result = hal
-            .witgen_branch_cmp(
-                &col_map,
-                &gpu_records,
-                &indices_u32,
-                shard_offset,
-                1,
-                None,
-            )
+            .witgen_branch_cmp(&col_map, &gpu_records, &indices_u32, shard_offset, 1, None)
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

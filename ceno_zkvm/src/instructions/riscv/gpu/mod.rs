@@ -5,7 +5,17 @@ pub mod addi;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod auipc;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod branch_cmp;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod branch_eq;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod div;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod jal;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod jalr;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod load_sub;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod logic_i;
 #[cfg(feature = "gpu")]
@@ -14,6 +24,12 @@ pub mod logic_r;
 pub mod lui;
 #[cfg(feature = "gpu")]
 pub mod lw;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod mul;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod sb;
+#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
+pub mod sh;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod shift_i;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
@@ -25,22 +41,6 @@ pub mod slti;
 #[cfg(feature = "gpu")]
 pub mod sub;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
-pub mod branch_cmp;
-#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
-pub mod jalr;
-#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod sw;
-#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
-pub mod sh;
-#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
-pub mod sb;
-#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
-pub mod load_sub;
-#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
-pub mod mul;
-#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
-pub mod div;
-#[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
-pub mod branch_eq;
 #[cfg(feature = "gpu")]
 pub mod witgen_gpu;

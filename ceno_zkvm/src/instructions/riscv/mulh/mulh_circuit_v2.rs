@@ -8,6 +8,7 @@ use crate::{
             constants::{LIMB_BITS, UINT_LIMBS, UInt},
             r_insn::RInstructionConfig,
         },
+        side_effects::{CpuSideEffectSink, LkOp, SideEffectSink},
     },
     structs::ProgramParams,
     uint::Value,
@@ -46,6 +47,8 @@ pub struct MulhConfig<E: ExtensionField> {
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBase<E, I> {
     type InstructionConfig = MulhConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_SIDE_EFFECTS: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -335,6 +338,113 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         Ok(())
     }
 
+    fn collect_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        let rs1 = step.rs1().unwrap().value;
+        let rs1_val = Value::new_unchecked(rs1);
+        let rs2 = step.rs2().unwrap().value;
+        let rs2_val = Value::new_unchecked(rs2);
+
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config
+            .r_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
+
+        let (rd_high, rd_low, carry, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
+            I::INST_KIND,
+            rs1_val
+                .as_u16_limbs()
+                .iter()
+                .map(|x| *x as u32)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            rs2_val
+                .as_u16_limbs()
+                .iter()
+                .map(|x| *x as u32)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+
+        for (rd_low, carry_low) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
+            sink.emit_lk(LkOp::DynamicRange {
+                value: *rd_low as u64,
+                bits: 16,
+            });
+            sink.emit_lk(LkOp::DynamicRange {
+                value: *carry_low as u64,
+                bits: 18,
+            });
+        }
+
+        match I::INST_KIND {
+            InsnKind::MULH | InsnKind::MULHU | InsnKind::MULHSU => {
+                for (rd_high, carry_high) in rd_high.iter().zip(carry[UINT_LIMBS..].iter()) {
+                    sink.emit_lk(LkOp::DynamicRange {
+                        value: *rd_high as u64,
+                        bits: 16,
+                    });
+                    sink.emit_lk(LkOp::DynamicRange {
+                        value: *carry_high as u64,
+                        bits: 18,
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        let sign_mask = 1 << (LIMB_BITS - 1);
+        let ext = (1 << LIMB_BITS) - 1;
+        let rs1_sign = rs1_ext / ext;
+        let rs2_sign = rs2_ext / ext;
+        let rs1_limbs = rs1_val.as_u16_limbs();
+        let rs2_limbs = rs2_val.as_u16_limbs();
+
+        match I::INST_KIND {
+            InsnKind::MULH => {
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
+                    bits: 16,
+                });
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: (2 * (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask)) as u64,
+                    bits: 16,
+                });
+            }
+            InsnKind::MULHSU => {
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
+                    bits: 16,
+                });
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
+                    bits: 16,
+                });
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn collect_shard_side_effects_instance(
+        config: &Self::InstructionConfig,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        config
+            .r_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
+        Ok(())
+    }
+
     #[cfg(feature = "gpu")]
     fn assign_instances(
         config: &Self::InstructionConfig,
@@ -352,7 +462,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             InsnKind::MULHSU => 3u32,
             _ => {
                 return crate::instructions::cpu_assign_instances::<E, Self>(
-                    config, shard_ctx, num_witin, num_structural_witin, shard_steps, step_indices,
+                    config,
+                    shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    shard_steps,
+                    step_indices,
                 );
             }
         };
@@ -368,7 +483,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             return Ok(result);
         }
         crate::instructions::cpu_assign_instances::<E, Self>(
-            config, shard_ctx, num_witin, num_structural_witin, shard_steps, step_indices,
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
         )
     }
 }
