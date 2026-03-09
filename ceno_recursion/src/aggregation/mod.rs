@@ -86,9 +86,10 @@ pub const INTERNAL_LOG_BLOWUP: usize = 2;
 pub const ROOT_LOG_BLOWUP: usize = 3;
 pub const SBOX_SIZE: usize = 7;
 const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
-    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216,
-    2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
+    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 16777216, 2097152,
+    16777216, 2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
+
 pub struct CenoAggregationProver {
     pub base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
