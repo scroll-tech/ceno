@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ceno Recursion"
+  short_description: "Guidelines for Ceno recursion refactors"
+  default_prompt: "Follow the Ceno recursion refactor principles."
