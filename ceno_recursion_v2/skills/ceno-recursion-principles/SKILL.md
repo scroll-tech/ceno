@@ -25,6 +25,7 @@ Use this skill when:
 3. **Recursion VK Alias** – Replace `Arc<MultiStarkVerifyingKey<SC>>` with `Arc<ZKVMVerifyingKey<RecursionField, Basefold<RecursionField, BasefoldRSParams>>>` wherever the “child VK” travels (constructors, traits, agg prover logic). Introduce a local alias (e.g., `type RecursionVk = ZKVMVerifyingKey<…>`) to keep signatures readable.
 4. **Trait Copy Rule** – Only fork upstream definitions when the child-VK type must change. For example, copy `VerifierTraceGen` locally (because it takes `MultiStarkVerifyingKey`), but keep using upstream `VerifierConfig`, `VerifierExternalData`, and `CachedTraceCtx` directly so we don’t duplicate logic unnecessarily.
 5. **Comment, Don’t Delete** – When slicing out unused functionality (compression/root/deferral), comment or `unimplemented!()` the sections you can’t finish yet so the call graph remains visible.
+6. **Mirror Private Upstream Shims** – If recursion modules need items that upstream marks `pub(crate)` (e.g., `system::frame` or `POW_CHECKER_HEIGHT`), copy the minimal shim into this crate so future diffs stay aligned while letting the fork compile.
 
 ## Workflow
 
