@@ -98,18 +98,6 @@ pub fn is_smaller_than<C: Config>(
     RVar::from(v)
 }
 
-pub fn evaluate_at_point_degree_1<C: Config>(
-    builder: &mut Builder<C>,
-    evals: &Array<C, Ext<C::F, C::EF>>,
-    point: &Array<C, Ext<C::F, C::EF>>,
-) -> Ext<C::F, C::EF> {
-    let left = builder.get(evals, 0);
-    let right = builder.get(evals, 1);
-    let r = builder.get(point, 0);
-
-    builder.eval(r * (right - left) + left)
-}
-
 pub fn _fixed_dot_product<C: Config>(
     builder: &mut Builder<C>,
     a: &[Ext<C::F, C::EF>],
@@ -324,24 +312,6 @@ pub fn eq_eval_with_index<C: Config>(
         let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
         let new_acc: Ext<C::F, C::EF> = builder.eval(acc * (xi_yi + xi_yi - v_x - v_y + one));
         builder.assign(&acc, new_acc);
-    });
-
-    acc
-}
-
-// Multiply all elements in a nested Array
-pub fn nested_product<C: Config>(
-    builder: &mut Builder<C>,
-    arr: &Array<C, Array<C, Ext<C::F, C::EF>>>,
-) -> Ext<C::F, C::EF> {
-    let acc = builder.constant(C::EF::ONE);
-    iter_zip!(builder, arr).for_each(|ptr_vec, builder| {
-        let inner_arr = builder.iter_ptr_get(arr, ptr_vec[0]);
-
-        iter_zip!(builder, inner_arr).for_each(|ptr_vec, builder| {
-            let el = builder.iter_ptr_get(&inner_arr, ptr_vec[0]);
-            builder.assign(&acc, acc * el);
-        });
     });
 
     acc
