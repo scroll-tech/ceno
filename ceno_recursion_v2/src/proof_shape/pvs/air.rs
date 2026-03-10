@@ -1,8 +1,8 @@
 use std::borrow::Borrow;
 
-use openvm_circuit_primitives::{utils::not, AlignedBorrow, SubAir};
+use openvm_circuit_primitives::{AlignedBorrow, SubAir, utils::not};
 use openvm_stark_backend::{
-    interaction::InteractionBuilder, BaseAirWithPublicValues, PartitionedBaseAir,
+    BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};

@@ -1,24 +1,19 @@
 use core::cmp::Reverse;
 use std::sync::Arc;
 
-use itertools::{izip, Itertools};
+use itertools::{Itertools, izip};
 use openvm_circuit_primitives::encoder::Encoder;
 use openvm_stark_backend::{
+    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
     keygen::types::{MultiStarkVerifyingKey, VerifierSinglePreprocessedData},
     proof::Proof,
     prover::{AirProvingContext, ColMajorMatrix, CpuBackend},
-    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, Digest, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
-use recursion_circuit::primitives::{
-    bus::{PowerCheckerBus, RangeCheckerBus},
-    pow::PowerCheckerCpuTraceGenerator,
-    range::{RangeCheckerAir, RangeCheckerCpuTraceGenerator},
-};
 use crate::{
     proof_shape::{
         bus::{NumPublicValuesBus, ProofShapePermutationBus, StartingTidxBus},
@@ -26,10 +21,15 @@ use crate::{
         pvs::PublicValuesAir,
     },
     system::{
-        frame::MultiStarkVkeyFrame, AirModule, BusIndexManager, BusInventory, GlobalCtxCpu,
-        Preflight, ProofShapePreflight, TraceGenModule, POW_CHECKER_HEIGHT,
+        AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
+        ProofShapePreflight, TraceGenModule, frame::MultiStarkVkeyFrame,
     },
     tracegen::{ModuleChip, RowMajorChip},
+};
+use recursion_circuit::primitives::{
+    bus::{PowerCheckerBus, RangeCheckerBus},
+    pow::PowerCheckerCpuTraceGenerator,
+    range::{RangeCheckerAir, RangeCheckerCpuTraceGenerator},
 };
 
 pub mod bus;
@@ -374,7 +374,7 @@ mod cuda_tracegen {
 
     use super::*;
     use crate::{
-        cuda::{preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu, GlobalCtxGpu},
+        cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
         primitives::{
             pow::cuda::PowerCheckerGpuTraceGenerator, range::cuda::RangeCheckerGpuTraceGenerator,
         },

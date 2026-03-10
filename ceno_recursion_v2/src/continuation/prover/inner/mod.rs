@@ -5,13 +5,13 @@ use continuations_v2::SC;
 use eyre::Result;
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_stark_backend::{
-    keygen::types::{MultiStarkProvingKey, MultiStarkVerifyingKey},
     StarkEngine, SystemParams,
+    keygen::types::{MultiStarkProvingKey, MultiStarkVerifyingKey},
     proof::Proof,
     prover::{CommittedTraceData, DeviceMultiStarkProvingKey, ProverBackend, ProvingContext},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    default_duplex_sponge_recorder, Digest, EF, F,
+    Digest, EF, F, default_duplex_sponge_recorder,
 };
 use verify_stark::pvs::DeferralPvs;
 
@@ -20,8 +20,8 @@ use crate::system::{
     VerifierExternalData, VerifierTraceGen,
 };
 use continuations_v2::circuit::{
-    inner::{InnerCircuit, InnerTraceGen, ProofsType},
     Circuit,
+    inner::{InnerCircuit, InnerTraceGen, ProofsType},
 };
 
 pub use continuations_v2::prover::ChildVkKind;
@@ -76,7 +76,9 @@ impl<
         let (pk, vk) = engine.keygen(&circuit.airs());
         let d_pk = engine.device().transport_pk_to_device(&pk);
         let self_vk_pcs_data = if is_self_recursive {
-            unimplemented!("Self-recursive inner prover support requires converting the local VK into RecursionVk")
+            unimplemented!(
+                "Self-recursive inner prover support requires converting the local VK into RecursionVk"
+            )
         } else {
             None
         };
@@ -117,7 +119,9 @@ impl<
         let vk = Arc::new(pk.get_vk());
         let d_pk = engine.device().transport_pk_to_device(&pk);
         let self_vk_pcs_data = if is_self_recursive {
-            unimplemented!("Self-recursive inner prover support requires converting the local VK into RecursionVk")
+            unimplemented!(
+                "Self-recursive inner prover support requires converting the local VK into RecursionVk"
+            )
         } else {
             None
         };

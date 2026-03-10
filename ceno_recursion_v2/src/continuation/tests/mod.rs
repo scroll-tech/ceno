@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod prover_integration {
-    use crate::continuation::prover::{InnerCpuProver, ChildVkKind};
+    use crate::continuation::prover::{ChildVkKind, InnerCpuProver};
     use bincode;
     use ceno_zkvm::{scheme::ZKVMProof, structs::ZKVMVerifyingKey};
     use eyre::Result;

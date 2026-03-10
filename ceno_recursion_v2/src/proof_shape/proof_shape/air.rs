@@ -2,12 +2,12 @@ use std::{array::from_fn, borrow::Borrow, sync::Arc};
 
 use itertools::fold;
 use openvm_circuit_primitives::{
+    SubAir,
     encoder::Encoder,
     utils::{and, not, or, select},
-    SubAir,
 };
 use openvm_stark_backend::{
-    interaction::InteractionBuilder, BaseAirWithPublicValues, PartitionedBaseAir,
+    BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, BaseAir};
@@ -27,11 +27,11 @@ use crate::{
         PowerCheckerBus, PowerCheckerBusMessage, RangeCheckerBus, RangeCheckerBusMessage,
     },
     proof_shape::{
+        AirMetadata,
         bus::{
             AirShapeProperty, NumPublicValuesBus, NumPublicValuesMessage, ProofShapePermutationBus,
             ProofShapePermutationMessage, StartingTidxBus, StartingTidxMessage,
         },
-        AirMetadata,
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
 };

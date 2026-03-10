@@ -11,9 +11,9 @@ use p3_matrix::dense::RowMajorMatrix;
 use crate::{
     primitives::{pow::PowerCheckerCpuTraceGenerator, range::RangeCheckerCpuTraceGenerator},
     proof_shape::proof_shape::air::{
-        borrow_var_cols_mut, decompose_f, decompose_usize, ProofShapeCols, ProofShapeVarColsMut,
+        ProofShapeCols, ProofShapeVarColsMut, borrow_var_cols_mut, decompose_f, decompose_usize,
     },
-    system::{Preflight, POW_CHECKER_HEIGHT},
+    system::{POW_CHECKER_HEIGHT, Preflight},
     tracegen::RowMajorChip,
 };
 

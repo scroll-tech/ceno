@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
-use openvm_cuda_backend::{base::DeviceMatrix, prelude::Digest, GpuBackend};
+use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix, prelude::Digest};
 use openvm_cuda_common::{copy::MemCopyH2D, memory_manager::MemTracker};
 use openvm_stark_backend::prover::AirProvingContext;
 use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;

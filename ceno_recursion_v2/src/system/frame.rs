@@ -1,10 +1,10 @@
 use itertools::Itertools;
 use openvm_stark_backend::{
+    SystemParams,
     keygen::types::{
         MultiStarkVerifyingKey, StarkVerifyingKey, StarkVerifyingParams,
         VerifierSinglePreprocessedData,
     },
-    SystemParams,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, Digest, F};
 
