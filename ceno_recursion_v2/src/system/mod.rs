@@ -1,26 +1,25 @@
-mod types;
 pub mod frame;
+mod types;
 
-pub use crate::proof_shape::ProofShapeModule;
+pub use crate::{batch_constraint::BatchConstraintModule, proof_shape::ProofShapeModule};
 pub use types::{RecursionField, RecursionPcs, RecursionVk};
 
 use std::sync::Arc;
 
+use crate::batch_constraint::CachedTraceRecord;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
+    AirRef, FiatShamirTranscript, StarkEngine, StarkProtocolConfig, TranscriptHistory,
     interaction::BusIndex,
     proof::Proof,
     prover::{AirProvingContext, CommittedTraceData, ProverBackend},
-    AirRef, FiatShamirTranscript, StarkEngine, StarkProtocolConfig, TranscriptHistory,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
-use recursion_circuit::batch_constraint::expr_eval::CachedTraceRecord;
 
 use crate::gkr::GkrModule;
 pub use recursion_circuit::{
-    batch_constraint::BatchConstraintModule,
     system::{
-        AirModule, AggregationSubCircuit, BusIndexManager, BusInventory, CachedTraceCtx,
+        AggregationSubCircuit, AirModule, BusIndexManager, BusInventory, CachedTraceCtx,
         GkrPreflight, GlobalCtxCpu, Preflight, ProofShapePreflight, TraceGenModule, VerifierConfig,
         VerifierExternalData,
     },
@@ -96,11 +95,8 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
     pub(crate) batch_constraint: BatchConstraintModule,
 }
 
-impl<
-        PB: ProverBackend,
-        SC: StarkProtocolConfig<F = F>,
-        const MAX_NUM_PROOFS: usize,
-    > VerifierTraceGen<PB, SC> for VerifierSubCircuit<MAX_NUM_PROOFS>
+impl<PB: ProverBackend, SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
+    VerifierTraceGen<PB, SC> for VerifierSubCircuit<MAX_NUM_PROOFS>
 {
     fn new(_child_vk: Arc<RecursionVk>, _config: VerifierConfig) -> Self {
         unimplemented!("VerifierSubCircuit::new placeholder")
