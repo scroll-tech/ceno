@@ -14,8 +14,10 @@ use crate::gkr::{
     GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage,
     bus::{
         GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
-        GkrSumcheckInputBus, GkrSumcheckInputMessage, GkrSumcheckOutputBus,
-        GkrSumcheckOutputMessage,
+        GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage,
+        GkrLogupLayerClaimViewMessage, GkrProdClaimBus, GkrProdClaimInputBus, GkrProdClaimMessage,
+        GkrProdLayerClaimViewMessage, GkrSumcheckInputBus, GkrSumcheckInputMessage,
+        GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
     },
 };
 
@@ -32,6 +34,7 @@ pub struct GkrLayerCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
+    pub is_first_air_idx: T,
     pub is_first: T,
 
     /// An enabled row which is not involved in any interactions
@@ -61,6 +64,11 @@ pub struct GkrLayerCols<T> {
     // Sumcheck claim input
     pub sumcheck_claim_in: [T; D_EF],
 
+    pub prod_claim: [T; D_EF],
+    pub logup_claim: [T; D_EF],
+    pub num_prod_count: T,
+    pub num_logup_count: T,
+
     /// Received from GkrLayerSumcheckAir
     pub eq_at_r_prime: [T; D_EF],
 
@@ -82,6 +90,10 @@ pub struct GkrLayerAir {
     pub sumcheck_input_bus: GkrSumcheckInputBus,
     pub sumcheck_output_bus: GkrSumcheckOutputBus,
     pub sumcheck_challenge_bus: GkrSumcheckChallengeBus,
+    pub prod_claim_input_bus: GkrProdClaimInputBus,
+    pub prod_claim_bus: GkrProdClaimBus,
+    pub logup_claim_input_bus: GkrLogupClaimInputBus,
+    pub logup_claim_bus: GkrLogupClaimBus,
 }
 
 impl<F: Field> BaseAir<F> for GkrLayerAir {
@@ -111,12 +123,13 @@ where
         ///////////////////////////////////////////////////////////////////////
 
         builder.assert_bool(local.is_dummy);
+        builder.assert_bool(local.is_first_air_idx);
 
         ///////////////////////////////////////////////////////////////////////
         // Proof Index and Loop Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        type LoopSubAir = NestedForLoopSubAir<1>;
+        type LoopSubAir = NestedForLoopSubAir<2>;
 
         // This subair has the following constraints:
         // 1. Boolean enabled flag
@@ -127,14 +140,14 @@ where
             (
                 NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    counter: [local.proof_idx],
-                    is_first: [local.is_first],
+                    counter: [local.proof_idx, local.idx],
+                    is_first: [local.is_first_air_idx, local.is_first],
                 }
                 .map_into(),
                 NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    counter: [next.proof_idx],
-                    is_first: [next.is_first],
+                    counter: [next.proof_idx, next.idx],
+                    is_first: [next.is_first_air_idx, next.is_first],
                 }
                 .map_into(),
             ),
@@ -142,6 +155,10 @@ where
 
         let is_transition = LoopSubAir::local_is_transition(next.is_enabled, next.is_first);
         let is_last = LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first);
+        let lambda_for_next: [AB::Expr; D_EF] = core::array::from_fn(|i| {
+            let limb: AB::Expr = next.lambda[i].into();
+            limb * is_transition.clone()
+        });
 
         // Layer index starts from 0
         builder.when(local.is_first).assert_zero(local.layer_idx);
@@ -190,14 +207,11 @@ where
         // Inter-Layer Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        // Next layer claim is RLC of previous layer numer_claim and denom_claim
+        let folded_claim = ext_field_add::<AB::Expr>(local.prod_claim, local.logup_claim);
         assert_array_eq(
             &mut builder.when(is_transition.clone()),
             next.sumcheck_claim_in,
-            ext_field_add::<AB::Expr>(
-                local.numer_claim,
-                ext_field_multiply::<AB::Expr>(next.lambda, local.denom_claim),
-            ),
+            folded_claim,
         );
 
         // Transcript index increment
@@ -217,19 +231,72 @@ where
         let is_not_dummy = AB::Expr::ONE - local.is_dummy;
         let is_non_root_layer = local.is_enabled * (AB::Expr::ONE - local.is_first);
 
+        self.prod_claim_input_bus.send(
+            builder,
+            local.proof_idx,
+            GkrProdLayerClaimViewMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                tidx: local.tidx.into(),
+                lambda: lambda_for_next.clone(),
+                mu: local.mu.map(Into::into),
+                p_xi_0: local.p_xi_0.map(Into::into),
+                p_xi_1: local.p_xi_1.map(Into::into),
+                num_prod_count: local.num_prod_count.into(),
+            },
+            is_not_dummy.clone(),
+        );
+        self.logup_claim_input_bus.send(
+            builder,
+            local.proof_idx,
+            GkrLogupLayerClaimViewMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                tidx: local.tidx.into(),
+                lambda: lambda_for_next.clone(),
+                mu: local.mu.map(Into::into),
+                p_xi_0: local.p_xi_0.map(Into::into),
+                p_xi_1: local.p_xi_1.map(Into::into),
+                q_xi_0: local.q_xi_0.map(Into::into),
+                q_xi_1: local.q_xi_1.map(Into::into),
+                num_logup_count: local.num_logup_count.into(),
+            },
+            is_not_dummy.clone(),
+        );
+        self.prod_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            GkrProdClaimMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                claim: local.prod_claim.map(Into::into),
+            },
+            is_not_dummy.clone(),
+        );
+        self.logup_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            GkrLogupClaimMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                claim: local.logup_claim.map(Into::into),
+            },
+            is_not_dummy.clone(),
+        );
+
         // 1. GkrLayerInputBus
         // 1a. Receive GKR layers input
         self.layer_input_bus.receive(
             builder,
             local.proof_idx,
             GkrLayerInputMessage {
-                idx: local.idx,
-                tidx: local.tidx,
+                idx: local.idx.into(),
+                tidx: local.tidx.into(),
                 r0_claim: local.r0_claim.map(Into::into),
                 w0_claim: local.w0_claim.map(Into::into),
-                q0_claim: local.sumcheck_claim_in,
+                q0_claim: local.sumcheck_claim_in.map(Into::into),
             },
-            local.is_first * is_not_dummy.clone(),
+            local.is_first_air_idx * is_not_dummy.clone(),
         );
         // 2. GkrLayerOutputBus
         // 2a. Send GKR input layer claims back
@@ -237,7 +304,7 @@ where
             builder,
             local.proof_idx,
             GkrLayerOutputMessage {
-                idx: local.idx,
+                idx: local.idx.into(),
                 tidx: tidx_end,
                 layer_idx_end: local.layer_idx.into(),
                 input_layer_claim: [

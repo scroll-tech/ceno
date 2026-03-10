@@ -15,16 +15,18 @@ pub struct GkrLayerRecord {
     pub layer_claims: Vec<[EF; 4]>,
     pub lambdas: Vec<EF>,
     pub eq_at_r_primes: Vec<EF>,
+    pub prod_counts: Vec<usize>,
+    pub logup_counts: Vec<usize>,
 }
 
 impl GkrLayerRecord {
     #[inline]
-    fn layer_count(&self) -> usize {
+    pub(crate) fn layer_count(&self) -> usize {
         self.layer_claims.len()
     }
 
     #[inline]
-    fn lambda_at(&self, layer_idx: usize) -> EF {
+    pub(crate) fn lambda_at(&self, layer_idx: usize) -> EF {
         layer_idx
             .checked_sub(1)
             .and_then(|idx| self.lambdas.get(idx))
@@ -33,7 +35,7 @@ impl GkrLayerRecord {
     }
 
     #[inline]
-    fn eq_at(&self, layer_idx: usize) -> EF {
+    pub(crate) fn eq_at(&self, layer_idx: usize) -> EF {
         layer_idx
             .checked_sub(1)
             .and_then(|idx| self.eq_at_r_primes.get(idx))
@@ -42,13 +44,27 @@ impl GkrLayerRecord {
     }
 
     #[inline]
-    fn layer_tidx(&self, layer_idx: usize) -> usize {
+    pub(crate) fn layer_tidx(&self, layer_idx: usize) -> usize {
         if layer_idx == 0 {
             self.tidx
         } else {
             let j = layer_idx;
             self.tidx + D_EF * (2 * j * j + 4 * j - 1)
         }
+    }
+
+    #[inline]
+    pub(crate) fn prod_count_at(&self, layer_idx: usize) -> usize {
+        self.prod_counts.get(layer_idx).copied().unwrap_or(1).max(1)
+    }
+
+    #[inline]
+    pub(crate) fn logup_count_at(&self, layer_idx: usize) -> usize {
+        self.logup_counts
+            .get(layer_idx)
+            .copied()
+            .unwrap_or(1)
+            .max(1)
     }
 }
 
@@ -122,6 +138,7 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                         cols.is_enabled = F::ONE;
                         cols.proof_idx = F::from_usize(proof_idx);
                         cols.idx = F::ZERO;
+                        cols.is_first_air_idx = F::ONE;
                         cols.is_first = F::ONE;
                         cols.is_dummy = F::ONE;
                         let q0_basis = q0_claim.as_basis_coefficients_slice();
@@ -131,6 +148,10 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                         cols.q_xi_0 = [F::ONE, F::ZERO, F::ZERO, F::ZERO];
                         cols.q_xi_1 = [F::ONE, F::ZERO, F::ZERO, F::ZERO];
                         cols.denom_claim = [F::ONE, F::ZERO, F::ZERO, F::ZERO];
+                        cols.prod_claim = [F::ZERO, F::ZERO, F::ZERO, F::ZERO];
+                        cols.logup_claim = [F::ZERO, F::ZERO, F::ZERO, F::ZERO];
+                        cols.num_prod_count = F::ZERO;
+                        cols.num_logup_count = F::ZERO;
                         return;
                     }
 
@@ -144,11 +165,14 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                         .for_each(|(layer_idx, row_data)| {
                             let cols: &mut GkrLayerCols<F> = row_data.borrow_mut();
                             cols.proof_idx = F::from_usize(proof_idx);
-                             cols.idx = F::ZERO;
+                            cols.idx = F::ZERO;
+                            cols.is_first_air_idx = F::from_bool(layer_idx == 0);
                             cols.is_enabled = F::ONE;
                             cols.is_first = F::from_bool(layer_idx == 0);
                             cols.layer_idx = F::from_usize(layer_idx);
                             cols.tidx = F::from_usize(record.layer_tidx(layer_idx));
+                            cols.num_prod_count = F::from_usize(record.prod_count_at(layer_idx));
+                            cols.num_logup_count = F::from_usize(record.logup_count_at(layer_idx));
                             let q0_basis = q0_claim.as_basis_coefficients_slice();
                             cols.r0_claim.copy_from_slice(q0_basis);
                             cols.w0_claim.copy_from_slice(q0_basis);
@@ -194,10 +218,18 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                                 );
                             cols.numer_claim = numer_base;
                             cols.denom_claim = denom_base;
+                            cols.prod_claim = numer_base;
 
                             let numer = claims[0] * (EF::ONE - mu) + claims[2] * mu;
                             let denom = claims[1] * (EF::ONE - mu) + claims[3] * mu;
                             prev_layer_eval = Some((numer, denom));
+
+                            let lambda_next = record.lambda_at(layer_idx + 1);
+                            let logup_claim = lambda_next * denom;
+                            cols.logup_claim = logup_claim
+                                .as_basis_coefficients_slice()
+                                .try_into()
+                                .unwrap();
                         });
                 },
             );

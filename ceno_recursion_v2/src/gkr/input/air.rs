@@ -184,7 +184,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             builder,
             local.proof_idx,
             GkrLayerInputMessage {
-                idx: local.idx,
+                idx: local.idx.into(),
                 // Skip q0_claim
                 tidx: (tidx_after_pow_and_alpha_beta + AB::Expr::from_usize(D_EF))
                     * has_interactions.clone(),
@@ -200,7 +200,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             builder,
             local.proof_idx,
             GkrLayerOutputMessage {
-                idx: local.idx,
+                idx: local.idx.into(),
                 tidx: tidx_after_gkr_layers.clone(),
                 layer_idx_end: num_layers.clone() - AB::Expr::ONE,
                 input_layer_claim: local.input_layer_claim.map(|claim| claim.map(Into::into)),

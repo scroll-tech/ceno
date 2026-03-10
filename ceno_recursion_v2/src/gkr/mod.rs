@@ -83,7 +83,11 @@ use crate::{
     gkr::{
         bus::{GkrLayerInputBus, GkrLayerOutputBus, GkrXiSamplerBus},
         input::{GkrInputAir, GkrInputRecord, GkrInputTraceGenerator},
-        layer::{GkrLayerAir, GkrLayerRecord, GkrLayerTraceGenerator},
+        layer::{
+            GkrLayerAir, GkrLayerRecord, GkrLayerTraceGenerator, GkrLogupSumCheckClaimAir,
+            GkrLogupSumCheckClaimTraceGenerator, GkrProdSumCheckClaimAir,
+            GkrProdSumCheckClaimTraceGenerator,
+        },
         sumcheck::{GkrLayerSumcheckAir, GkrSumcheckRecord, GkrSumcheckTraceGenerator},
         xi_sampler::{GkrXiSamplerAir, GkrXiSamplerRecord, GkrXiSamplerTraceGenerator},
     },
@@ -97,6 +101,8 @@ use crate::{
 // Internal bus definitions
 mod bus;
 pub use bus::{
+    GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupLayerClaimViewMessage,
+    GkrProdClaimBus, GkrProdClaimInputBus, GkrProdClaimMessage, GkrProdLayerClaimViewMessage,
     GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage, GkrSumcheckInputBus,
     GkrSumcheckInputMessage, GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
 };
@@ -120,6 +126,10 @@ pub struct GkrModule {
     sumcheck_input_bus: GkrSumcheckInputBus,
     sumcheck_output_bus: GkrSumcheckOutputBus,
     sumcheck_challenge_bus: GkrSumcheckChallengeBus,
+    prod_claim_input_bus: GkrProdClaimInputBus,
+    prod_claim_bus: GkrProdClaimBus,
+    logup_claim_input_bus: GkrLogupClaimInputBus,
+    logup_claim_bus: GkrLogupClaimBus,
 }
 
 struct GkrBlobCpu {
@@ -146,6 +156,10 @@ impl GkrModule {
             sumcheck_input_bus: GkrSumcheckInputBus::new(b.new_bus_idx()),
             sumcheck_output_bus: GkrSumcheckOutputBus::new(b.new_bus_idx()),
             sumcheck_challenge_bus: GkrSumcheckChallengeBus::new(b.new_bus_idx()),
+            prod_claim_input_bus: GkrProdClaimInputBus::new(b.new_bus_idx()),
+            prod_claim_bus: GkrProdClaimBus::new(b.new_bus_idx()),
+            logup_claim_input_bus: GkrLogupClaimInputBus::new(b.new_bus_idx()),
+            logup_claim_bus: GkrLogupClaimBus::new(b.new_bus_idx()),
             xi_sampler_bus: GkrXiSamplerBus::new(b.new_bus_idx()),
         }
     }
@@ -284,6 +298,20 @@ impl AirModule for GkrModule {
             sumcheck_input_bus: self.sumcheck_input_bus,
             sumcheck_challenge_bus: self.sumcheck_challenge_bus,
             sumcheck_output_bus: self.sumcheck_output_bus,
+            prod_claim_input_bus: self.prod_claim_input_bus,
+            prod_claim_bus: self.prod_claim_bus,
+            logup_claim_input_bus: self.logup_claim_input_bus,
+            logup_claim_bus: self.logup_claim_bus,
+        };
+
+        let gkr_prod_claim_air = GkrProdSumCheckClaimAir {
+            prod_claim_input_bus: self.prod_claim_input_bus,
+            prod_claim_bus: self.prod_claim_bus,
+        };
+
+        let gkr_logup_claim_air = GkrLogupSumCheckClaimAir {
+            logup_claim_input_bus: self.logup_claim_input_bus,
+            logup_claim_bus: self.logup_claim_bus,
         };
 
         let gkr_sumcheck_air = GkrLayerSumcheckAir::new(
@@ -303,6 +331,8 @@ impl AirModule for GkrModule {
         vec![
             Arc::new(gkr_input_air) as AirRef<_>,
             Arc::new(gkr_layer_air) as AirRef<_>,
+            Arc::new(gkr_prod_claim_air) as AirRef<_>,
+            Arc::new(gkr_logup_claim_air) as AirRef<_>,
             Arc::new(gkr_sumcheck_air) as AirRef<_>,
             Arc::new(gkr_xi_sampler_air) as AirRef<_>,
         ]
@@ -390,6 +420,8 @@ impl GkrModule {
                     layer_claims: Vec::with_capacity(num_layers),
                     lambdas: Vec::with_capacity(sumcheck_layer_count),
                     eq_at_r_primes: Vec::with_capacity(sumcheck_layer_count),
+                    prod_counts: Vec::with_capacity(num_layers),
+                    logup_counts: Vec::with_capacity(num_layers),
                 };
                 let mut mus = Vec::with_capacity(num_layers.max(1));
 
@@ -440,6 +472,8 @@ impl GkrModule {
                         root_claims.p_xi_1,
                         root_claims.q_xi_1,
                     ]);
+                    layer_record.prod_counts.push(1);
+                    layer_record.logup_counts.push(1);
                     mus.push(mu);
                 }
 
@@ -511,6 +545,8 @@ impl GkrModule {
                         claims.p_xi_1,
                         claims.q_xi_1,
                     ]);
+                    layer_record.prod_counts.push(1);
+                    layer_record.logup_counts.push(1);
                     mus.push(mu);
                 }
 
@@ -577,6 +613,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         let chips = [
             GkrModuleChip::Input,
             GkrModuleChip::Layer,
+            GkrModuleChip::ProdClaim,
+            GkrModuleChip::LogupClaim,
             GkrModuleChip::LayerSumcheck,
             GkrModuleChip::XiSampler,
         ];
@@ -605,6 +643,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 enum GkrModuleChip {
     Input,
     Layer,
+    ProdClaim,
+    LogupClaim,
     LayerSumcheck,
     XiSampler,
 }
@@ -637,6 +677,10 @@ impl RowMajorChip<F> for GkrModuleChip {
                 &(&blob.layer_records, &blob.mus_records, &blob.q0_claims),
                 required_height,
             ),
+            ProdClaim => GkrProdSumCheckClaimTraceGenerator
+                .generate_trace(&(&blob.layer_records, &blob.mus_records), required_height),
+            LogupClaim => GkrLogupSumCheckClaimTraceGenerator
+                .generate_trace(&(&blob.layer_records, &blob.mus_records), required_height),
             LayerSumcheck => GkrSumcheckTraceGenerator.generate_trace(
                 &(&blob.sumcheck_records, &blob.mus_records),
                 required_height,
@@ -685,6 +729,8 @@ mod cuda_tracegen {
             let chips = [
                 GkrModuleChip::Input,
                 GkrModuleChip::Layer,
+                GkrModuleChip::ProdClaim,
+                GkrModuleChip::LogupClaim,
                 GkrModuleChip::LayerSumcheck,
                 GkrModuleChip::XiSampler,
             ];

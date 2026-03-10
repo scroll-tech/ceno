@@ -65,6 +65,7 @@ AIR’s columns, constraints, or interactions change.
 | `is_enabled`                           | scalar   | Row selector.                                                      
 | `proof_idx`                            | scalar   | Proof counter shared with input AIR.                               
 | `idx`                                  | scalar   | AIR index within the proof (matches the input AIR).                
+| `is_first_air_idx`                     | scalar   | First row flag for each `(proof_idx, idx)` block.                  
 | `is_first`                             | scalar   | Indicates the first layer row of a proof.                          
 | `is_dummy`                             | scalar   | Marks padding rows that still satisfy constraints.                 
 | `layer_idx`                            | scalar   | Layer number, enforced to start at 0 and increment per transition. 
@@ -74,14 +75,17 @@ AIR’s columns, constraints, or interactions change.
 | `numer_claim`, `denom_claim`           | `[D_EF]` | Linear interpolation results `(p,q)` at point `mu`.                
 | `sumcheck_claim_in`                    | `[D_EF]` | Claim passed to sumcheck.                                          
 | `prod_claim`                           | `[D_EF]` | Folded product contribution received from `ProdSumCheck` AIR.      
+| `num_prod_count`                       | scalar   | Declared accumulator length for the product AIR.                   
 | `logup_claim`                          | `[D_EF]` | Folded logup contribution received from `LogUpSumCheck` AIR.       
+| `num_logup_count`                      | scalar   | Declared accumulator length for the logup AIR.                     
 | `eq_at_r_prime`                        | `[D_EF]` | Product of eq evaluations returned from sumcheck.                  
 | `mu`                                   | `[D_EF]` | Reduction point sampled from transcript.                           
 
 ### Row Constraints
 
-- **Looping**: `NestedForLoopSubAir<2>` enforces `(proof_idx, idx)` sequencing before iterating `layer_idx`, emitting
-  `is_transition` / `is_last` guards for each axis.
+- **Looping**: `NestedForLoopSubAir<2>` now tracks both `(proof_idx, idx)` via the new `is_first_air_idx` boolean before
+  dropping into the per-layer loop (`is_first`). This ensures bus traffic only occurs once per input AIR instance, even
+  when multiple GKR layers share the same proof.
 - **Layer counter**: On the first row, `layer_idx = 0`; on transitions, `next.layer_idx = layer_idx + 1`.
 - **Root layer**: Requires `p_cross_term = 0` and `q_cross_term = sumcheck_claim_in`, using helper
   `compute_recursive_relations`.
@@ -107,7 +111,8 @@ AIR’s columns, constraints, or interactions change.
 - **Xi randomness bus**
     - On the proof’s final layer, sends `mu` as the shared xi challenge consumed by later modules.
 - **Prod/logup buses**
-    - Receives folded claims from `GkrProdSumCheckClaimAir` and `GkrLogUpSumCheckClaimAir` before transitioning.
+    - Receives folded claims from `GkrProdSumCheckClaimAir` and `GkrLogUpSumCheckClaimAir` before transitioning and
+      forwards `(num_prod_count, num_logup_count)` so sub-AIRs can enforce their internal accumulator lengths.
 
 ### Notes
 
@@ -118,37 +123,43 @@ AIR’s columns, constraints, or interactions change.
 ## GkrProdSumCheckClaimAir (`src/gkr/layer/prod_claim/air.rs`)
 
 ### Columns & Loops
-- Utilizes `NestedForLoopSubAir<3>` over `(proof_idx, idx, layer_idx)` so each proof/AIR/layer triple maintains its own
-  accumulator.
-- Columns: `is_enabled`, `proof_idx`, `idx`, `layer_idx`, `is_first`, `tidx`, `lambda`, `mu`, `p_xi_0`, `p_xi_1`,
-  interpolated `p_xi`, `pow_lambda`, and `acc_sum`.
+- `NestedForLoopSubAir<3>` now enforces lexicographic ordering on `(proof_idx, idx, layer_idx)` via the trio of
+  booleans `[is_first_air_idx, is_first_layer, is_first]`. Beyond the enumeration counters, each row also tracks an
+  `index_id` that counts accumulator rows within the fixed `(proof_idx, idx, layer_idx)` triple.
+- Columns: `is_enabled`, `proof_idx`, `idx`, `layer_idx`, `is_first_air_idx`, `is_first_layer`, `is_first`, `index_id`,
+  transcript/tensor metadata (`tidx`, `lambda`, `mu`, `p_xi_0`, `p_xi_1`, interpolated `p_xi`), running powers
+  `pow_lambda`, running sum `acc_sum`, and the declared `num_prod_count` received from `GkrLayerAir`.
 
 ### Constraints
-- Per row interpolation `p_xi = (1 - mu) * p_xi_0 + mu * p_xi_1`.
-- Accumulator updates `acc_sum_next = acc_sum + p_xi * pow_lambda`, seeded with zero.
-- Power progression `pow_lambda_next = pow_lambda * lambda` with initial value 1.
-- Final row of the triple publishes `acc_sum` through `GkrProdClaimBus`.
+- Interpolation `p_xi = (1 - mu) * p_xi_0 + mu * p_xi_1` is recomputed every row.
+- `index_id` starts at 0 when `is_first_layer` is asserted, increments on non-terminal rows, and must equal
+  `num_prod_count - 1` on the row that publishes the folded claim.
+- Accumulator updates `acc_sum_next = acc_sum + p_xi * pow_lambda` with the usual `pow_lambda` recurrence; the same
+  equations still target the next-layer row because today only one accumulator row exists, but the constraints ensure the
+  last row per triple owns the bus send.
+- Final row (detected via the nested-loop `is_last` helper) is the only row allowed to send on `GkrProdClaimBus`.
 
 ### Interactions
-- Receives layer metadata from `GkrLayerAir` (lambda, mu, p-claims) at the start of each layer.
+- Receives layer metadata (including `num_prod_count`) only on the first accumulator row for the layer.
 - Sends the folded claim back to `GkrLayerAir` when the triple completes.
 
 ## GkrLogUpSumCheckClaimAir (`src/gkr/layer/logup_claim/air.rs`)
 
 ### Columns & Loops
-- Shares the `(proof_idx, idx, layer_idx)` loop.
-- Columns: `is_enabled`, `proof_idx`, `idx`, `layer_idx`, `tidx`, `lambda`, `mu`, `(p_xi_0, p_xi_1)`, `(q_xi_0, q_xi_1)`,
-  `pow_lambda`, and `acc_sum`.
+- Shares the `(proof_idx, idx, layer_idx)` nested-loop structure and reuses `index_id` to count accumulator rows.
+- Columns mirror the product AIR plus the denominator evaluations: `is_enabled`, the loop counters/flags,
+  `(p_xi_0, p_xi_1, q_xi_0, q_xi_1)`, interpolated `(p_xi, q_xi)`, `lambda`, `mu`, `pow_lambda`, `acc_sum`,
+  `index_id`, and `num_logup_count`.
 
 ### Constraints
-- Each row computes the logup reduction using the local `(p,q,mu)` pair and accumulates it via
-  `acc_sum_next = acc_sum + logup_contribution * pow_lambda`.
-- Maintains the same `pow_lambda` recurrence, starting at 1.
-- Final `acc_sum` returned via `GkrLogupClaimBus`.
+- Recomputes both `p_xi` and `q_xi` in every row.
+- Uses the existing log-up contribution `acc_sum_next = acc_sum + (lambda * q_xi) * pow_lambda`.
+- `index_id` obeys the same initialization/increment/final-row checks against `num_logup_count` as the product AIR.
+- Only the final accumulator row per `(proof_idx, idx, layer_idx)` may drive `GkrLogupClaimBus`.
 
 ### Interactions
-- Receives interpolation inputs from `GkrLayerAir`.
-- Sends a single folded logup claim that the layer AIR adds to the product claim.
+- Layer metadata is consumed on the row flagged by `is_first_layer`.
+- Folded logup claim is emitted exactly once per triple when the accumulator row counter reaches `num_logup_count`.
 
 ## GkrLayerSumcheckAir (`src/gkr/sumcheck/air.rs`)
 
