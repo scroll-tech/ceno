@@ -16,7 +16,10 @@ define_typed_per_proof_permutation_bus!(GkrXiSamplerBus, GkrXiSamplerMessage);
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct GkrLayerInputMessage<T> {
+    pub idx: T,
     pub tidx: T,
+    pub r0_claim: [T; D_EF],
+    pub w0_claim: [T; D_EF],
     pub q0_claim: [T; D_EF],
 }
 
@@ -26,12 +29,33 @@ define_typed_per_proof_permutation_bus!(GkrLayerInputBus, GkrLayerInputMessage);
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct GkrLayerOutputMessage<T> {
+    pub idx: T,
     pub tidx: T,
     pub layer_idx_end: T,
     pub input_layer_claim: [[T; D_EF]; 2],
 }
 
 define_typed_per_proof_permutation_bus!(GkrLayerOutputBus, GkrLayerOutputMessage);
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug, Clone)]
+pub struct GkrProdClaimMessage<T> {
+    pub idx: T,
+    pub layer_idx: T,
+    pub claim: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(GkrProdClaimBus, GkrProdClaimMessage);
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug, Clone)]
+pub struct GkrLogupClaimMessage<T> {
+    pub idx: T,
+    pub layer_idx: T,
+    pub claim: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(GkrLogupClaimBus, GkrLogupClaimMessage);
 
 /// Message sent from GkrLayerAir to GkrLayerSumcheckAir
 #[repr(C)]
