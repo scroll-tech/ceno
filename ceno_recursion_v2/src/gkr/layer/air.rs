@@ -31,6 +31,7 @@ pub struct GkrLayerCols<T> {
     /// Whether the current row is enabled (i.e. not padding)
     pub is_enabled: T,
     pub proof_idx: T,
+    pub idx: T,
     pub is_first: T,
 
     /// An enabled row which is not involved in any interactions
@@ -65,6 +66,9 @@ pub struct GkrLayerCols<T> {
 
     /// Corresponds to `mu` - reduction point
     pub mu: [T; D_EF],
+
+    pub r0_claim: [T; D_EF],
+    pub w0_claim: [T; D_EF],
 }
 
 /// The GkrLayerAir handles layer-to-layer transitions in the GKR protocol
@@ -170,7 +174,7 @@ where
         ///////////////////////////////////////////////////////////////////////
 
         // Reduce to single evaluation
-        // `numer_claim = (p_xi_1 - p_xi_0) * mu + p_xi_0`
+        // `numer_claim = (p_xi_1 - p_xi_0) * mu + p_xi_0` =>
         // `denom_claim = (q_xi_1 - q_xi_0) * mu + q_xi_0`
         let (numer_claim, denom_claim) = reduce_to_single_evaluation(
             local.p_xi_0,
@@ -219,7 +223,10 @@ where
             builder,
             local.proof_idx,
             GkrLayerInputMessage {
+                idx: local.idx,
                 tidx: local.tidx,
+                r0_claim: local.r0_claim.map(Into::into),
+                w0_claim: local.w0_claim.map(Into::into),
                 q0_claim: local.sumcheck_claim_in,
             },
             local.is_first * is_not_dummy.clone(),
@@ -230,6 +237,7 @@ where
             builder,
             local.proof_idx,
             GkrLayerOutputMessage {
+                idx: local.idx,
                 tidx: tidx_end,
                 layer_idx_end: local.layer_idx.into(),
                 input_layer_claim: [
@@ -241,6 +249,7 @@ where
         );
         // 3. GkrSumcheckInputBus
         // 3a. Send claim to sumcheck
+        // only send sumcheck on non root layer
         self.sumcheck_input_bus.send(
             builder,
             local.proof_idx,

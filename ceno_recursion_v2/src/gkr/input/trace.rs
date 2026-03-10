@@ -10,6 +10,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 #[derive(Debug, Clone, Default)]
 pub struct GkrInputRecord {
+    pub idx: usize,
     pub tidx: usize,
     pub n_logup: usize,
     pub n_max: usize,
@@ -60,6 +61,7 @@ impl RowMajorChip<F> for GkrInputTraceGenerator {
 
                 cols.is_enabled = F::ONE;
                 cols.proof_idx = F::from_usize(proof_idx);
+                cols.idx = F::from_usize(record.idx);
 
                 cols.tidx = F::from_usize(record.tidx);
 
@@ -75,7 +77,10 @@ impl RowMajorChip<F> for GkrInputTraceGenerator {
                 cols.logup_pow_witness = record.logup_pow_witness;
                 cols.logup_pow_sample = record.logup_pow_sample;
 
-                cols.q0_claim = q0_claim.as_basis_coefficients_slice().try_into().unwrap();
+                let q0_basis = q0_claim.as_basis_coefficients_slice();
+                cols.r0_claim.copy_from_slice(q0_basis);
+                cols.w0_claim.copy_from_slice(q0_basis);
+                cols.q0_claim.copy_from_slice(q0_basis);
                 cols.alpha_logup = record
                     .alpha_logup
                     .as_basis_coefficients_slice()

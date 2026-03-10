@@ -34,6 +34,7 @@ pub struct GkrInputCols<T> {
     pub is_enabled: T,
 
     pub proof_idx: T,
+    pub idx: T,
 
     pub n_logup: T,
     pub n_max: T,
@@ -48,6 +49,8 @@ pub struct GkrInputCols<T> {
     /// Transcript index
     pub tidx: T,
 
+    pub r0_claim: [T; D_EF],
+    pub w0_claim: [T; D_EF],
     /// Root denominator claim
     pub q0_claim: [T; D_EF],
 
@@ -181,9 +184,12 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             builder,
             local.proof_idx,
             GkrLayerInputMessage {
+                idx: local.idx,
                 // Skip q0_claim
                 tidx: (tidx_after_pow_and_alpha_beta + AB::Expr::from_usize(D_EF))
                     * has_interactions.clone(),
+                r0_claim: local.r0_claim.map(Into::into),
+                w0_claim: local.w0_claim.map(Into::into),
                 q0_claim: local.q0_claim.map(Into::into),
             },
             local.is_enabled * has_interactions.clone(),
@@ -194,6 +200,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             builder,
             local.proof_idx,
             GkrLayerOutputMessage {
+                idx: local.idx,
                 tidx: tidx_after_gkr_layers.clone(),
                 layer_idx_end: num_layers.clone() - AB::Expr::ONE,
                 input_layer_claim: local.input_layer_claim.map(|claim| claim.map(Into::into)),

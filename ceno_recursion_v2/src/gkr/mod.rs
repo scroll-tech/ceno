@@ -368,6 +368,7 @@ impl GkrModule {
                     .unwrap_or([EF::ZERO, alpha_logup]);
 
                 let input_record = GkrInputRecord {
+                    idx: 0,
                     tidx: preflight.proof_shape.post_tidx,
                     n_logup: preflight.proof_shape.n_logup,
                     n_max: preflight.proof_shape.n_max,

@@ -121,8 +121,12 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                         let cols: &mut GkrLayerCols<F> = row_data.borrow_mut();
                         cols.is_enabled = F::ONE;
                         cols.proof_idx = F::from_usize(proof_idx);
+                        cols.idx = F::ZERO;
                         cols.is_first = F::ONE;
                         cols.is_dummy = F::ONE;
+                        let q0_basis = q0_claim.as_basis_coefficients_slice();
+                        cols.r0_claim.copy_from_slice(q0_basis);
+                        cols.w0_claim.copy_from_slice(q0_basis);
                         cols.sumcheck_claim_in = [F::ONE, F::ZERO, F::ZERO, F::ZERO];
                         cols.q_xi_0 = [F::ONE, F::ZERO, F::ZERO, F::ZERO];
                         cols.q_xi_1 = [F::ONE, F::ZERO, F::ZERO, F::ZERO];
@@ -140,10 +144,14 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                         .for_each(|(layer_idx, row_data)| {
                             let cols: &mut GkrLayerCols<F> = row_data.borrow_mut();
                             cols.proof_idx = F::from_usize(proof_idx);
+                             cols.idx = F::ZERO;
                             cols.is_enabled = F::ONE;
                             cols.is_first = F::from_bool(layer_idx == 0);
                             cols.layer_idx = F::from_usize(layer_idx);
                             cols.tidx = F::from_usize(record.layer_tidx(layer_idx));
+                            let q0_basis = q0_claim.as_basis_coefficients_slice();
+                            cols.r0_claim.copy_from_slice(q0_basis);
+                            cols.w0_claim.copy_from_slice(q0_basis);
 
                             let lambda = record.lambda_at(layer_idx);
                             let eq_at_r_prime = record.eq_at(layer_idx);
