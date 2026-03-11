@@ -392,10 +392,10 @@ impl GkrModule {
                                 last_layer.p_xi_0 + *rho * (last_layer.p_xi_1 - last_layer.p_xi_0);
                             let q_claim =
                                 last_layer.q_xi_0 + *rho * (last_layer.q_xi_1 - last_layer.q_xi_0);
-                            [p_claim, q_claim]
+                            p_claim + q_claim
                         })
                     })
-                    .unwrap_or([EF::ZERO, alpha_logup]);
+                    .unwrap_or(EF::ZERO);
 
                 let input_record = GkrInputRecord {
                     idx: 0,

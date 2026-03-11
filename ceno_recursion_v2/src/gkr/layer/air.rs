@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 
-use openvm_circuit_primitives::{SubAir, utils::assert_array_eq};
+use openvm_circuit_primitives::SubAir;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
@@ -14,10 +14,12 @@ use crate::gkr::{
     GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage,
     bus::{
         GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
-        GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage,
-        GkrLogupLayerClaimViewMessage, GkrProdClaimBus, GkrProdClaimInputBus, GkrProdClaimMessage,
-        GkrProdLayerClaimViewMessage, GkrSumcheckInputBus, GkrSumcheckInputMessage,
-        GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
+        GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupInitClaimBus,
+        GkrLogupInitClaimInputBus, GkrProdReadClaimBus, GkrProdReadClaimInputBus,
+        GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus, GkrProdWriteClaimBus,
+        GkrProdWriteClaimInputBus, GkrProdWriteInitClaimBus, GkrProdWriteInitClaimInputBus,
+        GkrSumcheckInputBus, GkrSumcheckInputMessage, GkrSumcheckOutputBus,
+        GkrSumcheckOutputMessage,
     },
 };
 
@@ -49,22 +51,13 @@ pub struct GkrLayerCols<T> {
 
     /// Sampled batching challenge
     pub lambda: [T; D_EF],
+    /// Reduction point
+    pub mu: [T; D_EF],
 
-    /// Layer claims
-    pub p_xi_0: [T; D_EF],
-    pub q_xi_0: [T; D_EF],
-    pub p_xi_1: [T; D_EF],
-    pub q_xi_1: [T; D_EF],
-
-    // (p_xi_1 - p_xi_0) * mu + p_xi_0
-    pub numer_claim: [T; D_EF],
-    // (q_xi_1 - q_xi_0) * mu + q_xi_0
-    pub denom_claim: [T; D_EF],
-
-    // Sumcheck claim input
     pub sumcheck_claim_in: [T; D_EF],
 
-    pub prod_claim: [T; D_EF],
+    pub read_claim: [T; D_EF],
+    pub write_claim: [T; D_EF],
     pub logup_claim: [T; D_EF],
     pub num_prod_count: T,
     pub num_logup_count: T,
@@ -72,11 +65,9 @@ pub struct GkrLayerCols<T> {
     /// Received from GkrLayerSumcheckAir
     pub eq_at_r_prime: [T; D_EF],
 
-    /// Corresponds to `mu` - reduction point
-    pub mu: [T; D_EF],
-
     pub r0_claim: [T; D_EF],
     pub w0_claim: [T; D_EF],
+    pub q0_claim: [T; D_EF],
 }
 
 /// The GkrLayerAir handles layer-to-layer transitions in the GKR protocol
@@ -90,10 +81,18 @@ pub struct GkrLayerAir {
     pub sumcheck_input_bus: GkrSumcheckInputBus,
     pub sumcheck_output_bus: GkrSumcheckOutputBus,
     pub sumcheck_challenge_bus: GkrSumcheckChallengeBus,
-    pub prod_claim_input_bus: GkrProdClaimInputBus,
-    pub prod_claim_bus: GkrProdClaimBus,
+    pub prod_read_claim_input_bus: GkrProdReadClaimInputBus,
+    pub prod_read_claim_bus: GkrProdReadClaimBus,
+    pub prod_write_claim_input_bus: GkrProdWriteClaimInputBus,
+    pub prod_write_claim_bus: GkrProdWriteClaimBus,
+    pub prod_read_init_claim_input_bus: GkrProdReadInitClaimInputBus,
+    pub prod_read_init_claim_bus: GkrProdReadInitClaimBus,
+    pub prod_write_init_claim_input_bus: GkrProdWriteInitClaimInputBus,
+    pub prod_write_init_claim_bus: GkrProdWriteInitClaimBus,
     pub logup_claim_input_bus: GkrLogupClaimInputBus,
     pub logup_claim_bus: GkrLogupClaimBus,
+    pub logup_init_claim_input_bus: GkrLogupInitClaimInputBus,
+    pub logup_init_claim_bus: GkrLogupInitClaimBus,
 }
 
 impl<F: Field> BaseAir<F> for GkrLayerAir {

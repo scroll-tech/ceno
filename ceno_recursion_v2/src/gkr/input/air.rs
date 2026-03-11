@@ -7,7 +7,7 @@ use crate::gkr::bus::{
 use openvm_circuit_primitives::{
     SubAir,
     is_zero::{IsZeroAuxCols, IsZeroIo, IsZeroSubAir},
-    utils::{assert_array_eq, not, or},
+    utils::{not, or},
 };
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
@@ -17,10 +17,7 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::{
-    bus::{
-        BatchConstraintModuleBus, BatchConstraintModuleMessage, GkrModuleBus, GkrModuleMessage,
-        TranscriptBus,
-    },
+    bus::{BatchConstraintModuleBus, GkrModuleBus, GkrModuleMessage, TranscriptBus},
     primitives::bus::{ExpBitsLenBus, ExpBitsLenMessage},
     subairs::proof_idx::{ProofIdxIoCols, ProofIdxSubAir},
     utils::{assert_zeros, pow_tidx_count},
@@ -56,7 +53,7 @@ pub struct GkrInputCols<T> {
 
     pub alpha_logup: [T; D_EF],
 
-    pub input_layer_claim: [[T; D_EF]; 2],
+    pub input_layer_claim: [T; D_EF],
 
     // Grinding
     pub logup_pow_witness: T,
@@ -143,15 +140,10 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
         ///////////////////////////////////////////////////////////////////////
 
         let has_interactions = AB::Expr::ONE - local.is_n_logup_zero;
-        // Input layer claim is [0, \alpha] when no interactions
+        // Input layer claim defaults to zero when no interactions
         assert_zeros(
             &mut builder.when(not::<AB::Expr>(has_interactions.clone())),
-            local.input_layer_claim[0],
-        );
-        assert_array_eq(
-            &mut builder.when(not::<AB::Expr>(has_interactions.clone())),
-            local.input_layer_claim[1],
-            local.alpha_logup,
+            local.input_layer_claim,
         );
 
         ///////////////////////////////////////////////////////////////////////
@@ -203,7 +195,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
                 idx: local.idx.into(),
                 tidx: tidx_after_gkr_layers.clone(),
                 layer_idx_end: num_layers.clone() - AB::Expr::ONE,
-                input_layer_claim: local.input_layer_claim.map(|claim| claim.map(Into::into)),
+                input_layer_claim: local.input_layer_claim.map(Into::into),
             },
             local.is_enabled * has_interactions.clone(),
         );
@@ -284,16 +276,18 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
         );
 
         // 3. BatchConstraintModuleBus
-        // 3a. Send input layer claims for further verification
+        // Temporarily disabled until downstream module is updated.
+        /*
         self.bc_module_bus.send(
             builder,
             local.proof_idx,
             BatchConstraintModuleMessage {
                 tidx: tidx_end,
-                gkr_input_layer_claim: local.input_layer_claim.map(|claim| claim.map(Into::into)),
+                gkr_input_layer_claim: local.input_layer_claim.map(Into::into),
             },
             local.is_enabled,
         );
+        */
 
         // 4. ExpBitsLenBus
         // 4a. Check proof-of-work using `ExpBitsLenBus`.

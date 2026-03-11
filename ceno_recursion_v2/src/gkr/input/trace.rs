@@ -17,7 +17,7 @@ pub struct GkrInputRecord {
     pub logup_pow_witness: F,
     pub logup_pow_sample: F,
     pub alpha_logup: EF,
-    pub input_layer_claim: [EF; 2],
+    pub input_layer_claim: EF,
 }
 
 pub struct GkrInputTraceGenerator;
@@ -86,16 +86,11 @@ impl RowMajorChip<F> for GkrInputTraceGenerator {
                     .as_basis_coefficients_slice()
                     .try_into()
                     .unwrap();
-                cols.input_layer_claim = [
-                    record.input_layer_claim[0]
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap(),
-                    record.input_layer_claim[1]
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap(),
-                ];
+                cols.input_layer_claim = record
+                    .input_layer_claim
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap();
             });
 
         Some(RowMajorMatrix::new(trace, width))
