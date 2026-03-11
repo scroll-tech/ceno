@@ -11,8 +11,8 @@ use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::gkr::bus::{
-    GkrProdInitClaimBus, GkrProdInitClaimMessage, GkrProdInitLayerMessage,
-    GkrProdLayerChallengeMessage, GkrProdReadClaimBus, GkrProdReadClaimInputBus,
+    GkrProdInitClaimMessage, GkrProdInitLayerMessage, GkrProdLayerChallengeMessage,
+    GkrProdReadClaimBus, GkrProdReadClaimInputBus,
     GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus, GkrProdSumClaimMessage,
     GkrProdWriteClaimBus, GkrProdWriteClaimInputBus, GkrProdWriteInitClaimBus,
     GkrProdWriteInitClaimInputBus,
@@ -29,7 +29,6 @@ pub struct GkrProdSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
-    pub is_first_air_idx: T,
     pub is_first_layer: T,
     pub is_first: T,
     pub is_dummy: T,
@@ -54,7 +53,6 @@ pub struct GkrProdInitSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
-    pub is_first_air_idx: T,
     pub is_first_layer: T,
     pub is_first: T,
     pub is_dummy: T,
@@ -90,23 +88,32 @@ pub type GkrProdReadInitSumCheckClaimAir =
 pub type GkrProdWriteInitSumCheckClaimAir =
     GkrProdInitSumCheckClaimAir<GkrProdWriteInitClaimInputBus, GkrProdWriteInitClaimBus>;
 
-impl<F: Field, IB, OB> BaseAir<F> for GkrProdSumCheckClaimAir<IB, OB> {
+impl<F: Field, IB: Sync, OB: Sync> BaseAir<F> for GkrProdSumCheckClaimAir<IB, OB> {
     fn width(&self) -> usize {
         GkrProdSumCheckClaimCols::<F>::width()
     }
 }
 
-impl<F: Field, IB, OB> BaseAirWithPublicValues<F> for GkrProdSumCheckClaimAir<IB, OB> {}
-impl<F: Field, IB, OB> PartitionedBaseAir<F> for GkrProdSumCheckClaimAir<IB, OB> {}
+impl<F: Field, IB: Sync, OB: Sync> BaseAirWithPublicValues<F>
+    for GkrProdSumCheckClaimAir<IB, OB>
+{
+}
+impl<F: Field, IB: Sync, OB: Sync> PartitionedBaseAir<F> for GkrProdSumCheckClaimAir<IB, OB> {}
 
-impl<F: Field, IB, OB> BaseAir<F> for GkrProdInitSumCheckClaimAir<IB, OB> {
+impl<F: Field, IB: Sync, OB: Sync> BaseAir<F> for GkrProdInitSumCheckClaimAir<IB, OB> {
     fn width(&self) -> usize {
         GkrProdInitSumCheckClaimCols::<F>::width()
     }
 }
 
-impl<F: Field, IB, OB> BaseAirWithPublicValues<F> for GkrProdInitSumCheckClaimAir<IB, OB> {}
-impl<F: Field, IB, OB> PartitionedBaseAir<F> for GkrProdInitSumCheckClaimAir<IB, OB> {}
+impl<F: Field, IB: Sync, OB: Sync> BaseAirWithPublicValues<F>
+    for GkrProdInitSumCheckClaimAir<IB, OB>
+{
+}
+impl<F: Field, IB: Sync, OB: Sync> PartitionedBaseAir<F>
+    for GkrProdInitSumCheckClaimAir<IB, OB>
+{
+}
 
 impl<IB, OB> GkrProdSumCheckClaimAir<IB, OB> {
     fn eval_core<AB, Recv, Send>(
@@ -135,23 +142,22 @@ impl<IB, OB> GkrProdSumCheckClaimAir<IB, OB> {
         let next: &GkrProdSumCheckClaimCols<AB::Var> = (*next_row).borrow();
 
         builder.assert_bool(local.is_dummy);
-        builder.assert_bool(local.is_first_air_idx);
         builder.assert_bool(local.is_first_layer);
 
-        type LoopSubAir = NestedForLoopSubAir<3>;
+        type LoopSubAir = NestedForLoopSubAir<2>;
         LoopSubAir {}.eval(
             builder,
             (
                 NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.idx, local.layer_idx],
-                    is_first: [local.is_first_air_idx, local.is_first_layer, local.is_first],
+                    counter: [local.proof_idx, local.idx],
+                    is_first: [local.is_first_layer, local.is_first],
                 }
                 .map_into(),
                 NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.idx, next.layer_idx],
-                    is_first: [next.is_first_air_idx, next.is_first_layer, next.is_first],
+                    counter: [next.proof_idx, next.idx],
+                    is_first: [next.is_first_layer, next.is_first],
                 }
                 .map_into(),
             ),
@@ -292,23 +298,22 @@ impl<IB, OB> GkrProdInitSumCheckClaimAir<IB, OB> {
         let next: &GkrProdInitSumCheckClaimCols<AB::Var> = (*next_row).borrow();
 
         builder.assert_bool(local.is_dummy);
-        builder.assert_bool(local.is_first_air_idx);
         builder.assert_bool(local.is_first_layer);
 
-        type LoopSubAir = NestedForLoopSubAir<3>;
+        type LoopSubAir = NestedForLoopSubAir<2>;
         LoopSubAir {}.eval(
             builder,
             (
                 NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.idx, local.layer_idx],
-                    is_first: [local.is_first_air_idx, local.is_first_layer, local.is_first],
+                    counter: [local.proof_idx, local.idx],
+                    is_first: [local.is_first_layer, local.is_first],
                 }
                 .map_into(),
                 NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.idx, next.layer_idx],
-                    is_first: [next.is_first_air_idx, next.is_first_layer, next.is_first],
+                    counter: [next.proof_idx, next.idx],
+                    is_first: [next.is_first_layer, next.is_first],
                 }
                 .map_into(),
             ),
@@ -347,6 +352,7 @@ impl<IB, OB> GkrProdInitSumCheckClaimAir<IB, OB> {
 
         let product = ext_field_multiply::<AB::Expr>(local.p_xi_0, local.p_xi_1);
         let acc_sum_with_cur = ext_field_add::<AB::Expr>(local.acc_sum, product.clone());
+        let acc_sum_export = acc_sum_with_cur.clone();
 
         assert_array_eq(
             &mut builder.when(stay_in_layer.clone()),
@@ -373,7 +379,7 @@ impl<IB, OB> GkrProdInitSumCheckClaimAir<IB, OB> {
             GkrProdInitClaimMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                acc_sum: acc_sum_with_cur.map(Into::into),
+                acc_sum: acc_sum_export.map(Into::into),
                 num_prod_count: local.num_prod_count.into(),
             },
             is_last_layer_row * is_not_dummy.clone(),

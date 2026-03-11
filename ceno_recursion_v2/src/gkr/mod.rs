@@ -107,13 +107,12 @@ mod bus;
 pub use bus::{
     GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupInitClaimBus,
     GkrLogupInitClaimInputBus, GkrLogupInitClaimMessage, GkrLogupInitLayerMessage,
-    GkrLogupLayerChallengeMessage, GkrProdInitClaimBus, GkrProdInitClaimMessage,
-    GkrProdInitLayerMessage, GkrProdLayerChallengeMessage, GkrProdReadClaimBus,
-    GkrProdReadClaimInputBus, GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus,
-    GkrProdSumClaimMessage, GkrProdWriteClaimBus, GkrProdWriteClaimInputBus,
-    GkrProdWriteInitClaimBus, GkrProdWriteInitClaimInputBus, GkrSumcheckChallengeBus,
-    GkrSumcheckChallengeMessage, GkrSumcheckInputBus, GkrSumcheckInputMessage,
-    GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
+    GkrLogupLayerChallengeMessage, GkrProdInitClaimMessage, GkrProdInitLayerMessage,
+    GkrProdLayerChallengeMessage, GkrProdReadClaimBus, GkrProdReadClaimInputBus,
+    GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus, GkrProdSumClaimMessage,
+    GkrProdWriteClaimBus, GkrProdWriteClaimInputBus, GkrProdWriteInitClaimBus,
+    GkrProdWriteInitClaimInputBus, GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage,
+    GkrSumcheckInputBus, GkrSumcheckInputMessage, GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
 };
 
 // Sub-modules for different AIRs

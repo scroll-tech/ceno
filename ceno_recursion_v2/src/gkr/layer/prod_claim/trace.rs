@@ -1,4 +1,5 @@
 use openvm_stark_sdk::config::baby_bear_poseidon2::{EF, F};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::{GkrProdInitSumCheckClaimCols, GkrProdSumCheckClaimCols};

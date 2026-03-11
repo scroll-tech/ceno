@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 
-use openvm_circuit_primitives::SubAir;
+use openvm_circuit_primitives::{SubAir, utils::assert_array_eq};
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
@@ -16,12 +16,12 @@ use crate::gkr::{
         GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
         GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupInitClaimBus,
         GkrLogupInitClaimInputBus, GkrLogupInitClaimMessage, GkrLogupInitLayerMessage,
-        GkrLogupLayerChallengeMessage, GkrProdInitClaimBus, GkrProdInitClaimMessage,
-        GkrProdInitLayerMessage, GkrProdLayerChallengeMessage, GkrProdReadClaimBus,
-        GkrProdReadClaimInputBus, GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus,
-        GkrProdSumClaimMessage, GkrProdWriteClaimBus, GkrProdWriteClaimInputBus,
-        GkrProdWriteInitClaimBus, GkrProdWriteInitClaimInputBus, GkrSumcheckInputBus,
-        GkrSumcheckInputMessage, GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
+        GkrLogupLayerChallengeMessage, GkrProdInitClaimMessage, GkrProdInitLayerMessage,
+        GkrProdLayerChallengeMessage, GkrProdReadClaimBus, GkrProdReadClaimInputBus,
+        GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus, GkrProdSumClaimMessage,
+        GkrProdWriteClaimBus, GkrProdWriteClaimInputBus, GkrProdWriteInitClaimBus,
+        GkrProdWriteInitClaimInputBus, GkrSumcheckInputBus, GkrSumcheckInputMessage,
+        GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
     },
 };
 
@@ -413,7 +413,7 @@ where
             is_non_root_layer.clone() * is_not_dummy.clone(),
         );
         // 1b. Observe layer claims
-        let mut tidx = tidx_after_sumcheck;
+        let tidx = tidx_after_sumcheck;
         // 1c. Sample `mu`
         self.transcript_bus.sample_ext(
             builder,

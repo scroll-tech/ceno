@@ -27,7 +27,6 @@ pub struct GkrLogupSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
-    pub is_first_air_idx: T,
     pub is_first_layer: T,
     pub is_first: T,
     pub is_dummy: T,
@@ -57,7 +56,6 @@ pub struct GkrLogupInitSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
-    pub is_first_air_idx: T,
     pub is_first_layer: T,
     pub is_first: T,
     pub is_dummy: T,
@@ -103,6 +101,9 @@ impl<F: Field> BaseAir<F> for GkrLogupInitSumCheckClaimAir {
     }
 }
 
+impl<F: Field> BaseAirWithPublicValues<F> for GkrLogupInitSumCheckClaimAir {}
+impl<F: Field> PartitionedBaseAir<F> for GkrLogupInitSumCheckClaimAir {}
+
 impl<AB> Air<AB> for GkrLogupSumCheckClaimAir
 where
     AB: AirBuilder + InteractionBuilder,
@@ -118,23 +119,22 @@ where
         let next: &GkrLogupSumCheckClaimCols<AB::Var> = (*next_row).borrow();
 
         builder.assert_bool(local.is_dummy);
-        builder.assert_bool(local.is_first_air_idx);
         builder.assert_bool(local.is_first_layer);
 
-        type LoopSubAir = NestedForLoopSubAir<3>;
+        type LoopSubAir = NestedForLoopSubAir<2>;
         LoopSubAir {}.eval(
             builder,
             (
                 NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.idx, local.layer_idx],
-                    is_first: [local.is_first_air_idx, local.is_first_layer, local.is_first],
+                    counter: [local.proof_idx, local.idx],
+                    is_first: [local.is_first_layer, local.is_first],
                 }
                 .map_into(),
                 NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.idx, next.layer_idx],
-                    is_first: [next.is_first_air_idx, next.is_first_layer, next.is_first],
+                    counter: [next.proof_idx, next.idx],
+                    is_first: [next.is_first_layer, next.is_first],
                 }
                 .map_into(),
             ),
@@ -192,9 +192,13 @@ where
             ext_field_add::<AB::Expr>(local.q_xi_0, ext_field_multiply(delta_q, local.mu));
         assert_array_eq(builder, local.q_xi, expected_q_xi);
 
-        let logup_term = ext_field_multiply::<AB::Expr>(local.lambda.map(Into::into), local.q_xi);
+        let lambda = local.lambda.map(Into::into);
         let pow_lambda = local.pow_lambda.map(Into::into);
-        let contribution = ext_field_multiply::<AB::Expr>(logup_term, pow_lambda.clone());
+        let combined = ext_field_add::<AB::Expr>(
+            local.p_xi,
+            ext_field_multiply::<AB::Expr>(lambda.clone(), local.q_xi),
+        );
+        let contribution = ext_field_multiply::<AB::Expr>(pow_lambda.clone(), combined);
         let acc_sum_with_cur = ext_field_add::<AB::Expr>(local.acc_sum, contribution);
         let acc_sum_export = acc_sum_with_cur.clone();
 
@@ -203,7 +207,7 @@ where
             next.acc_sum,
             acc_sum_with_cur,
         );
-        let pow_lambda_next = ext_field_multiply::<AB::Expr>(pow_lambda, local.lambda.map(Into::into));
+        let pow_lambda_next = ext_field_multiply::<AB::Expr>(pow_lambda, lambda);
         assert_array_eq(
             &mut builder.when(stay_in_layer),
             next.pow_lambda,
@@ -264,23 +268,22 @@ where
         let next: &GkrLogupInitSumCheckClaimCols<AB::Var> = (*next_row).borrow();
 
         builder.assert_bool(local.is_dummy);
-        builder.assert_bool(local.is_first_air_idx);
         builder.assert_bool(local.is_first_layer);
 
-        type LoopSubAir = NestedForLoopSubAir<3>;
+        type LoopSubAir = NestedForLoopSubAir<2>;
         LoopSubAir {}.eval(
             builder,
             (
                 NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.idx, local.layer_idx],
-                    is_first: [local.is_first_air_idx, local.is_first_layer, local.is_first],
+                    counter: [local.proof_idx, local.idx],
+                    is_first: [local.is_first_layer, local.is_first],
                 }
                 .map_into(),
                 NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.idx, next.layer_idx],
-                    is_first: [next.is_first_air_idx, next.is_first_layer, next.is_first],
+                    counter: [next.proof_idx, next.idx],
+                    is_first: [next.is_first_layer, next.is_first],
                 }
                 .map_into(),
             ),
