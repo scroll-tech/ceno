@@ -11,10 +11,12 @@ use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::gkr::bus::{
-    GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupLayerClaimViewMessage,
+    GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupInitClaimBus,
+    GkrLogupInitClaimInputBus, GkrLogupInitClaimMessage, GkrLogupInitLayerMessage,
+    GkrLogupLayerChallengeMessage,
 };
-
 use recursion_circuit::{
+    bus::TranscriptBus,
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     utils::{assert_zeros, ext_field_add, ext_field_multiply, ext_field_subtract},
 };
@@ -41,17 +43,49 @@ pub struct GkrLogupSumCheckClaimCols<T> {
     pub p_xi_1: [T; D_EF],
     pub q_xi_0: [T; D_EF],
     pub q_xi_1: [T; D_EF],
-
     pub p_xi: [T; D_EF],
     pub q_xi: [T; D_EF],
+
     pub pow_lambda: [T; D_EF],
     pub acc_sum: [T; D_EF],
     pub num_logup_count: T,
 }
 
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
+pub struct GkrLogupInitSumCheckClaimCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub idx: T,
+    pub is_first_air_idx: T,
+    pub is_first_layer: T,
+    pub is_first: T,
+    pub is_dummy: T,
+
+    pub layer_idx: T,
+    pub index_id: T,
+    pub tidx: T,
+
+    pub p_xi_0: [T; D_EF],
+    pub p_xi_1: [T; D_EF],
+    pub q_xi_0: [T; D_EF],
+    pub q_xi_1: [T; D_EF],
+
+    pub acc_p_cross: [T; D_EF],
+    pub acc_q_cross: [T; D_EF],
+    pub num_logup_count: T,
+}
+
 pub struct GkrLogupSumCheckClaimAir {
+    pub transcript_bus: TranscriptBus,
     pub logup_claim_input_bus: GkrLogupClaimInputBus,
     pub logup_claim_bus: GkrLogupClaimBus,
+}
+
+pub struct GkrLogupInitSumCheckClaimAir {
+    pub transcript_bus: TranscriptBus,
+    pub logup_init_claim_input_bus: GkrLogupInitClaimInputBus,
+    pub logup_init_claim_bus: GkrLogupInitClaimBus,
 }
 
 impl<F: Field> BaseAir<F> for GkrLogupSumCheckClaimAir {
@@ -63,18 +97,25 @@ impl<F: Field> BaseAir<F> for GkrLogupSumCheckClaimAir {
 impl<F: Field> BaseAirWithPublicValues<F> for GkrLogupSumCheckClaimAir {}
 impl<F: Field> PartitionedBaseAir<F> for GkrLogupSumCheckClaimAir {}
 
-impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrLogupSumCheckClaimAir
+impl<F: Field> BaseAir<F> for GkrLogupInitSumCheckClaimAir {
+    fn width(&self) -> usize {
+        GkrLogupInitSumCheckClaimCols::<F>::width()
+    }
+}
+
+impl<AB> Air<AB> for GkrLogupSumCheckClaimAir
 where
+    AB: AirBuilder + InteractionBuilder,
     <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (
+        let (local_row, next_row) = (
             main.row_slice(0).expect("window should have two elements"),
             main.row_slice(1).expect("window should have two elements"),
         );
-        let local: &GkrLogupSumCheckClaimCols<AB::Var> = (*local).borrow();
-        let next: &GkrLogupSumCheckClaimCols<AB::Var> = (*next).borrow();
+        let local: &GkrLogupSumCheckClaimCols<AB::Var> = (*local_row).borrow();
+        let next: &GkrLogupSumCheckClaimCols<AB::Var> = (*next_row).borrow();
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_first_air_idx);
@@ -102,8 +143,8 @@ where
         let is_transition = LoopSubAir::local_is_transition(next.is_enabled, next.is_first);
         let is_last_layer_row =
             LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first);
-        let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
         let stay_in_layer = AB::Expr::ONE - is_transition.clone();
+        let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
 
         builder
             .when(local.is_first)
@@ -129,14 +170,16 @@ where
             );
 
         assert_zeros(
-            &mut builder.when(local.is_first),
+            &mut builder.when(local.is_first * is_not_dummy.clone()),
             local.acc_sum.map(Into::into),
         );
         builder
-            .when(local.is_first)
+            .when(local.is_first * is_not_dummy.clone())
             .assert_eq(local.pow_lambda[0], AB::Expr::ONE);
         for limb in local.pow_lambda.iter().copied().skip(1) {
-            builder.when(local.is_first).assert_zero(limb);
+            builder
+                .when(local.is_first * is_not_dummy.clone())
+                .assert_zero(limb);
         }
 
         let delta_p = ext_field_subtract::<AB::Expr>(local.p_xi_1, local.p_xi_0);
@@ -149,21 +192,20 @@ where
             ext_field_add::<AB::Expr>(local.q_xi_0, ext_field_multiply(delta_q, local.mu));
         assert_array_eq(builder, local.q_xi, expected_q_xi);
 
-        // TODO: confirm logup folding formula once ZKVM proof plumbing lands.
-        let pow_lambda = local.pow_lambda.map(Into::into);
         let logup_term = ext_field_multiply::<AB::Expr>(local.lambda.map(Into::into), local.q_xi);
+        let pow_lambda = local.pow_lambda.map(Into::into);
         let contribution = ext_field_multiply::<AB::Expr>(logup_term, pow_lambda.clone());
         let acc_sum_with_cur = ext_field_add::<AB::Expr>(local.acc_sum, contribution);
         let acc_sum_export = acc_sum_with_cur.clone();
 
         assert_array_eq(
-            &mut builder.when(is_transition.clone()),
+            &mut builder.when(stay_in_layer.clone()),
             next.acc_sum,
             acc_sum_with_cur,
         );
-        let pow_lambda_next = ext_field_multiply::<AB::Expr>(pow_lambda, local.lambda);
+        let pow_lambda_next = ext_field_multiply::<AB::Expr>(pow_lambda, local.lambda.map(Into::into));
         assert_array_eq(
-            &mut builder.when(is_transition.clone()),
+            &mut builder.when(stay_in_layer),
             next.pow_lambda,
             pow_lambda_next,
         );
@@ -171,17 +213,12 @@ where
         self.logup_claim_input_bus.receive(
             builder,
             local.proof_idx,
-            GkrLogupLayerClaimViewMessage {
+            GkrLogupLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into(),
                 lambda: local.lambda.map(Into::into),
                 mu: local.mu.map(Into::into),
-                p_xi_0: local.p_xi_0.map(Into::into),
-                p_xi_1: local.p_xi_1.map(Into::into),
-                q_xi_0: local.q_xi_0.map(Into::into),
-                q_xi_1: local.q_xi_1.map(Into::into),
-                num_logup_count: local.num_logup_count.into(),
             },
             local.is_first_layer * is_not_dummy.clone(),
         );
@@ -193,8 +230,173 @@ where
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 claim: acc_sum_export.map(Into::into),
+                num_logup_count: local.num_logup_count.into(),
             },
-            is_last_layer_row * is_not_dummy,
+            is_last_layer_row * is_not_dummy.clone(),
         );
+
+        let mut tidx = local.tidx.into();
+        for claim in [local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1] {
+            self.transcript_bus.observe_ext(
+                builder,
+                local.proof_idx,
+                tidx.clone(),
+                claim,
+                local.is_enabled * is_not_dummy.clone(),
+            );
+            tidx += AB::Expr::from_usize(D_EF);
+        }
     }
+}
+
+impl<AB> Air<AB> for GkrLogupInitSumCheckClaimAir
+where
+    AB: AirBuilder + InteractionBuilder,
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let (local_row, next_row) = (
+            main.row_slice(0).expect("window should have two elements"),
+            main.row_slice(1).expect("window should have two elements"),
+        );
+        let local: &GkrLogupInitSumCheckClaimCols<AB::Var> = (*local_row).borrow();
+        let next: &GkrLogupInitSumCheckClaimCols<AB::Var> = (*next_row).borrow();
+
+        builder.assert_bool(local.is_dummy);
+        builder.assert_bool(local.is_first_air_idx);
+        builder.assert_bool(local.is_first_layer);
+
+        type LoopSubAir = NestedForLoopSubAir<3>;
+        LoopSubAir {}.eval(
+            builder,
+            (
+                NestedForLoopIoCols {
+                    is_enabled: local.is_enabled,
+                    counter: [local.proof_idx, local.idx, local.layer_idx],
+                    is_first: [local.is_first_air_idx, local.is_first_layer, local.is_first],
+                }
+                .map_into(),
+                NestedForLoopIoCols {
+                    is_enabled: next.is_enabled,
+                    counter: [next.proof_idx, next.idx, next.layer_idx],
+                    is_first: [next.is_first_air_idx, next.is_first_layer, next.is_first],
+                }
+                .map_into(),
+            ),
+        );
+
+        let is_transition = LoopSubAir::local_is_transition(next.is_enabled, next.is_first);
+        let is_last_layer_row =
+            LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first);
+        let stay_in_layer = AB::Expr::ONE - is_transition.clone();
+        let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
+
+        builder
+            .when(local.is_first)
+            .assert_zero(local.layer_idx.clone());
+        builder
+            .when(is_transition.clone())
+            .assert_eq(next.layer_idx, local.layer_idx + AB::Expr::ONE);
+
+        builder
+            .when(local.is_first_layer)
+            .assert_zero(local.index_id.clone());
+        builder
+            .when(local.is_enabled * next.is_enabled * next.is_first_layer)
+            .assert_zero(next.index_id.clone());
+        builder
+            .when(is_not_dummy.clone() * stay_in_layer.clone())
+            .assert_eq(next.index_id, local.index_id + AB::Expr::ONE);
+        builder
+            .when(is_last_layer_row.clone() * is_not_dummy.clone())
+            .assert_eq(
+                local.index_id + AB::Expr::ONE,
+                local.num_logup_count.clone(),
+            );
+
+        assert_zeros(
+            &mut builder.when(local.is_first * is_not_dummy.clone()),
+            local.acc_p_cross.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(local.is_first * is_not_dummy.clone()),
+            local.acc_q_cross.map(Into::into),
+        );
+
+        let (p_cross_term, q_cross_term) = compute_recursive_relations(
+            local.p_xi_0,
+            local.q_xi_0,
+            local.p_xi_1,
+            local.q_xi_1,
+        );
+        let acc_p_with_cur = ext_field_add::<AB::Expr>(local.acc_p_cross, p_cross_term);
+        let acc_q_with_cur = ext_field_add::<AB::Expr>(local.acc_q_cross, q_cross_term);
+
+        assert_array_eq(
+            &mut builder.when(stay_in_layer.clone()),
+            next.acc_p_cross,
+            acc_p_with_cur.clone(),
+        );
+        assert_array_eq(
+            &mut builder.when(stay_in_layer.clone()),
+            next.acc_q_cross,
+            acc_q_with_cur.clone(),
+        );
+
+        self.logup_init_claim_input_bus.receive(
+            builder,
+            local.proof_idx,
+            GkrLogupInitLayerMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                tidx: local.tidx.into(),
+            },
+            local.is_first_layer * is_not_dummy.clone(),
+        );
+
+        self.logup_init_claim_bus.send(
+            builder,
+            local.proof_idx,
+            GkrLogupInitClaimMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                acc_p_cross: acc_p_with_cur.map(Into::into),
+                acc_q_cross: acc_q_with_cur.map(Into::into),
+                num_logup_count: local.num_logup_count.into(),
+            },
+            is_last_layer_row * is_not_dummy.clone(),
+        );
+
+        let mut tidx = local.tidx.into();
+        for claim in [local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1] {
+            self.transcript_bus.observe_ext(
+                builder,
+                local.proof_idx,
+                tidx.clone(),
+                claim,
+                local.is_enabled * is_not_dummy.clone(),
+            );
+            tidx += AB::Expr::from_usize(D_EF);
+        }
+    }
+}
+
+fn compute_recursive_relations<F, FA>(
+    p_xi_0: [F; D_EF],
+    q_xi_0: [F; D_EF],
+    p_xi_1: [F; D_EF],
+    q_xi_1: [F; D_EF],
+) -> ([FA; D_EF], [FA; D_EF])
+where
+    F: Into<FA> + Copy,
+    FA: PrimeCharacteristicRing,
+    FA::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    let p_cross_term = ext_field_add::<FA>(
+        ext_field_multiply::<FA>(p_xi_0, q_xi_1),
+        ext_field_multiply::<FA>(p_xi_1, q_xi_0),
+    );
+    let q_cross_term = ext_field_multiply::<FA>(q_xi_0, q_xi_1);
+    (p_cross_term, q_cross_term)
 }

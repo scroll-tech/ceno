@@ -5,9 +5,15 @@ mod trace;
 
 pub use air::{GkrLayerAir, GkrLayerCols};
 pub use logup_claim::{
-    GkrLogupSumCheckClaimAir, GkrLogupSumCheckClaimCols, GkrLogupSumCheckClaimTraceGenerator,
+    GkrLogupInitSumCheckClaimAir, GkrLogupInitSumCheckClaimCols,
+    GkrLogupInitSumCheckClaimTraceGenerator, GkrLogupSumCheckClaimAir, GkrLogupSumCheckClaimCols,
+    GkrLogupSumCheckClaimTraceGenerator,
 };
 pub use prod_claim::{
-    GkrProdSumCheckClaimAir, GkrProdSumCheckClaimCols, GkrProdSumCheckClaimTraceGenerator,
+    GkrProdInitSumCheckClaimCols, GkrProdReadInitSumCheckClaimAir,
+    GkrProdReadInitSumCheckClaimTraceGenerator, GkrProdReadSumCheckClaimAir,
+    GkrProdReadSumCheckClaimTraceGenerator, GkrProdSumCheckClaimCols,
+    GkrProdWriteInitSumCheckClaimAir, GkrProdWriteInitSumCheckClaimTraceGenerator,
+    GkrProdWriteSumCheckClaimAir, GkrProdWriteSumCheckClaimTraceGenerator,
 };
 pub use trace::{GkrLayerRecord, GkrLayerTraceGenerator};

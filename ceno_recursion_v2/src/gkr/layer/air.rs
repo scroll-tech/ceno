@@ -15,18 +15,20 @@ use crate::gkr::{
     bus::{
         GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
         GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupInitClaimBus,
-        GkrLogupInitClaimInputBus, GkrProdReadClaimBus, GkrProdReadClaimInputBus,
-        GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus, GkrProdWriteClaimBus,
-        GkrProdWriteClaimInputBus, GkrProdWriteInitClaimBus, GkrProdWriteInitClaimInputBus,
-        GkrSumcheckInputBus, GkrSumcheckInputMessage, GkrSumcheckOutputBus,
-        GkrSumcheckOutputMessage,
+        GkrLogupInitClaimInputBus, GkrLogupInitClaimMessage, GkrLogupInitLayerMessage,
+        GkrLogupLayerChallengeMessage, GkrProdInitClaimBus, GkrProdInitClaimMessage,
+        GkrProdInitLayerMessage, GkrProdLayerChallengeMessage, GkrProdReadClaimBus,
+        GkrProdReadClaimInputBus, GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus,
+        GkrProdSumClaimMessage, GkrProdWriteClaimBus, GkrProdWriteClaimInputBus,
+        GkrProdWriteInitClaimBus, GkrProdWriteInitClaimInputBus, GkrSumcheckInputBus,
+        GkrSumcheckInputMessage, GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
     },
 };
 
 use recursion_circuit::{
     bus::{TranscriptBus, XiRandomnessBus, XiRandomnessMessage},
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
-    utils::{assert_zeros, ext_field_add, ext_field_multiply, ext_field_subtract},
+    utils::{assert_zeros, ext_field_add},
 };
 
 #[repr(C)]
@@ -154,11 +156,6 @@ where
 
         let is_transition = LoopSubAir::local_is_transition(next.is_enabled, next.is_first);
         let is_last = LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first);
-        let lambda_for_next: [AB::Expr; D_EF] = core::array::from_fn(|i| {
-            let limb: AB::Expr = next.lambda[i].into();
-            limb * is_transition.clone()
-        });
-
         // Layer index starts from 0
         builder.when(local.is_first).assert_zero(local.layer_idx);
         // Layer index increments by 1
@@ -170,43 +167,18 @@ where
         // Root Layer Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        // Compute cross terms: p_cross = p_xi_0 * q_xi_1 + p_xi_1 * q_xi_0
-        //                       q_cross = q_xi_0 * q_xi_1
-        let (p_cross_term, q_cross_term) =
-            compute_recursive_relations(local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1);
-
-        // Zero-check: verify p_cross = 0 at root layer
-        assert_zeros(&mut builder.when(local.is_first), p_cross_term.clone());
-
-        // Root consistency check: verify q_cross = q0_claim
-        assert_array_eq(
+        assert_zeros(
             &mut builder.when(local.is_first),
-            q_cross_term.clone(),
-            local.sumcheck_claim_in,
+            local.sumcheck_claim_in.map(Into::into),
         );
-
-        ///////////////////////////////////////////////////////////////////////
-        // Layer Constraints
-        ///////////////////////////////////////////////////////////////////////
-
-        // Reduce to single evaluation
-        // `numer_claim = (p_xi_1 - p_xi_0) * mu + p_xi_0` =>
-        // `denom_claim = (q_xi_1 - q_xi_0) * mu + q_xi_0`
-        let (numer_claim, denom_claim) = reduce_to_single_evaluation(
-            local.p_xi_0,
-            local.p_xi_1,
-            local.q_xi_0,
-            local.q_xi_1,
-            local.mu,
-        );
-        assert_array_eq(builder, local.numer_claim, numer_claim);
-        assert_array_eq(builder, local.denom_claim, denom_claim);
 
         ///////////////////////////////////////////////////////////////////////
         // Inter-Layer Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        let folded_claim = ext_field_add::<AB::Expr>(local.prod_claim, local.logup_claim);
+        let read_plus_write =
+            ext_field_add::<AB::Expr>(local.read_claim, local.write_claim);
+        let folded_claim = ext_field_add::<AB::Expr>(read_plus_write, local.logup_claim);
         assert_array_eq(
             &mut builder.when(is_transition.clone()),
             next.sumcheck_claim_in,
@@ -230,45 +202,57 @@ where
         let is_not_dummy = AB::Expr::ONE - local.is_dummy;
         let is_non_root_layer = local.is_enabled * (AB::Expr::ONE - local.is_first);
 
-        self.prod_claim_input_bus.send(
+        let tidx_for_claims = tidx_after_sumcheck.clone();
+        let challenge_msg = GkrProdLayerChallengeMessage {
+            idx: local.idx.into(),
+            layer_idx: local.layer_idx.into(),
+            tidx: tidx_for_claims.clone(),
+            lambda: local.lambda.map(Into::into),
+            mu: local.mu.map(Into::into),
+        };
+        self.prod_read_claim_input_bus.send(
             builder,
             local.proof_idx,
-            GkrProdLayerClaimViewMessage {
-                idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
-                tidx: local.tidx.into(),
-                lambda: lambda_for_next.clone(),
-                mu: local.mu.map(Into::into),
-                p_xi_0: local.p_xi_0.map(Into::into),
-                p_xi_1: local.p_xi_1.map(Into::into),
-                num_prod_count: local.num_prod_count.into(),
-            },
+            challenge_msg.clone(),
+            is_not_dummy.clone(),
+        );
+        self.prod_write_claim_input_bus.send(
+            builder,
+            local.proof_idx,
+            challenge_msg,
             is_not_dummy.clone(),
         );
         self.logup_claim_input_bus.send(
             builder,
             local.proof_idx,
-            GkrLogupLayerClaimViewMessage {
+            GkrLogupLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: local.tidx.into(),
-                lambda: lambda_for_next.clone(),
+                tidx: tidx_for_claims.clone(),
+                lambda: local.lambda.map(Into::into),
                 mu: local.mu.map(Into::into),
-                p_xi_0: local.p_xi_0.map(Into::into),
-                p_xi_1: local.p_xi_1.map(Into::into),
-                q_xi_0: local.q_xi_0.map(Into::into),
-                q_xi_1: local.q_xi_1.map(Into::into),
-                num_logup_count: local.num_logup_count.into(),
             },
             is_not_dummy.clone(),
         );
-        self.prod_claim_bus.receive(
+        self.prod_read_claim_bus.receive(
             builder,
             local.proof_idx,
-            GkrProdClaimMessage {
+            GkrProdSumClaimMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                claim: local.prod_claim.map(Into::into),
+                claim: local.read_claim.map(Into::into),
+                num_prod_count: local.num_prod_count.into(),
+            },
+            is_not_dummy.clone(),
+        );
+        self.prod_write_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            GkrProdSumClaimMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                claim: local.write_claim.map(Into::into),
+                num_prod_count: local.num_prod_count.into(),
             },
             is_not_dummy.clone(),
         );
@@ -279,8 +263,72 @@ where
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 claim: local.logup_claim.map(Into::into),
+                num_logup_count: local.num_logup_count.into(),
             },
             is_not_dummy.clone(),
+        );
+
+        let is_root_layer = local.is_first;
+        let init_msg = GkrProdInitLayerMessage {
+            idx: local.idx.into(),
+            layer_idx: local.layer_idx.into(),
+            tidx: local.tidx.into(),
+        };
+        self.prod_read_init_claim_input_bus.send(
+            builder,
+            local.proof_idx,
+            init_msg.clone(),
+            is_root_layer * is_not_dummy.clone(),
+        );
+        self.prod_write_init_claim_input_bus.send(
+            builder,
+            local.proof_idx,
+            init_msg,
+            is_root_layer * is_not_dummy.clone(),
+        );
+        self.logup_init_claim_input_bus.send(
+            builder,
+            local.proof_idx,
+            GkrLogupInitLayerMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                tidx: local.tidx.into(),
+            },
+            is_root_layer * is_not_dummy.clone(),
+        );
+        self.prod_read_init_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            GkrProdInitClaimMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                acc_sum: local.r0_claim.map(Into::into),
+                num_prod_count: local.num_prod_count.into(),
+            },
+            is_root_layer * is_not_dummy.clone(),
+        );
+        self.prod_write_init_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            GkrProdInitClaimMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                acc_sum: local.w0_claim.map(Into::into),
+                num_prod_count: local.num_prod_count.into(),
+            },
+            is_root_layer * is_not_dummy.clone(),
+        );
+        self.logup_init_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            GkrLogupInitClaimMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                acc_p_cross: core::array::from_fn(|_| AB::Expr::ZERO),
+                acc_q_cross: local.q0_claim.map(Into::into),
+                num_logup_count: local.num_logup_count.into(),
+            },
+            is_root_layer * is_not_dummy.clone(),
         );
 
         // 1. GkrLayerInputBus
@@ -293,7 +341,7 @@ where
                 tidx: local.tidx.into(),
                 r0_claim: local.r0_claim.map(Into::into),
                 w0_claim: local.w0_claim.map(Into::into),
-                q0_claim: local.sumcheck_claim_in.map(Into::into),
+                q0_claim: local.q0_claim.map(Into::into),
             },
             local.is_first_air_idx * is_not_dummy.clone(),
         );
@@ -306,10 +354,7 @@ where
                 idx: local.idx.into(),
                 tidx: tidx_end,
                 layer_idx_end: local.layer_idx.into(),
-                input_layer_claim: [
-                    local.numer_claim.map(Into::into),
-                    local.denom_claim.map(Into::into),
-                ],
+                input_layer_claim: local.sumcheck_claim_in.map(Into::into),
             },
             is_last.clone() * is_not_dummy.clone(),
         );
@@ -329,13 +374,7 @@ where
         );
         // 3. GkrSumcheckOutputBus
         // 3a. Receive sumcheck results
-        let sumcheck_claim_out = ext_field_multiply::<AB::Expr>(
-            ext_field_add::<AB::Expr>(
-                p_cross_term,
-                ext_field_multiply::<AB::Expr>(local.lambda, q_cross_term),
-            ),
-            local.eq_at_r_prime,
-        );
+        let sumcheck_claim_out = local.sumcheck_claim_in;
         self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
@@ -375,16 +414,6 @@ where
         );
         // 1b. Observe layer claims
         let mut tidx = tidx_after_sumcheck;
-        for claim in [local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1].into_iter() {
-            self.transcript_bus.observe_ext(
-                builder,
-                local.proof_idx,
-                tidx.clone(),
-                claim,
-                local.is_enabled * is_not_dummy.clone(),
-            );
-            tidx += AB::Expr::from_usize(D_EF);
-        }
         // 1c. Sample `mu`
         self.transcript_bus.sample_ext(
             builder,
@@ -406,61 +435,4 @@ where
             is_last * is_not_dummy.clone(),
         );
     }
-}
-
-/// Computes recursive relations from layer claims.
-///
-/// Returns `(p_cross_term, q_cross_term)` where:
-/// - `p_cross_term = p_xi_0 * q_xi_1 + p_xi_1 * q_xi_0`
-/// - `q_cross_term = q_xi_0 * q_xi_1`
-fn compute_recursive_relations<F, FA>(
-    p_xi_0: [F; D_EF],
-    q_xi_0: [F; D_EF],
-    p_xi_1: [F; D_EF],
-    q_xi_1: [F; D_EF],
-) -> ([FA; D_EF], [FA; D_EF])
-where
-    F: Into<FA> + Copy,
-    FA: PrimeCharacteristicRing,
-    FA::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
-{
-    let p_cross_term = ext_field_add::<FA>(
-        ext_field_multiply::<FA>(p_xi_0, q_xi_1),
-        ext_field_multiply::<FA>(p_xi_1, q_xi_0),
-    );
-    let q_cross_term = ext_field_multiply::<FA>(q_xi_0, q_xi_1);
-    (p_cross_term, q_cross_term)
-}
-
-/// Linearly interpolates between two points at 0 and 1.
-fn interpolate_linear_at_01<F, FA>(evals: [[F; D_EF]; 2], x: [F; D_EF]) -> [FA; D_EF]
-where
-    F: Into<FA> + Copy,
-    FA: PrimeCharacteristicRing,
-    FA::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
-{
-    let p: [FA; D_EF] = ext_field_subtract(evals[1], evals[0]);
-    ext_field_add(ext_field_multiply::<FA>(p, x), evals[0])
-}
-
-/// Reduces claims to a single evaluation point using linear interpolation.
-///
-/// Returns `(numer, denom)` where:
-/// - `numer = (p_xi_1 - p_xi_0) * mu + p_xi_0`
-/// - `denom = (q_xi_1 - q_xi_0) * mu + q_xi_0`
-pub(super) fn reduce_to_single_evaluation<F, FA>(
-    p_xi_0: [F; D_EF],
-    p_xi_1: [F; D_EF],
-    q_xi_0: [F; D_EF],
-    q_xi_1: [F; D_EF],
-    mu: [F; D_EF],
-) -> ([FA; D_EF], [FA; D_EF])
-where
-    F: Into<FA> + Copy,
-    FA: PrimeCharacteristicRing,
-    FA::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
-{
-    let numer = interpolate_linear_at_01([p_xi_0, p_xi_1], mu);
-    let denom = interpolate_linear_at_01([q_xi_0, q_xi_1], mu);
-    (numer, denom)
 }

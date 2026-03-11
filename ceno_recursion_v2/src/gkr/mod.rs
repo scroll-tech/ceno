@@ -84,9 +84,13 @@ use crate::{
         bus::{GkrLayerInputBus, GkrLayerOutputBus, GkrXiSamplerBus},
         input::{GkrInputAir, GkrInputRecord, GkrInputTraceGenerator},
         layer::{
-            GkrLayerAir, GkrLayerRecord, GkrLayerTraceGenerator, GkrLogupSumCheckClaimAir,
-            GkrLogupSumCheckClaimTraceGenerator, GkrProdSumCheckClaimAir,
-            GkrProdSumCheckClaimTraceGenerator,
+            GkrLayerAir, GkrLayerRecord, GkrLayerTraceGenerator,
+            GkrLogupInitSumCheckClaimAir, GkrLogupInitSumCheckClaimTraceGenerator,
+            GkrLogupSumCheckClaimAir, GkrLogupSumCheckClaimTraceGenerator,
+            GkrProdReadInitSumCheckClaimAir, GkrProdReadInitSumCheckClaimTraceGenerator,
+            GkrProdReadSumCheckClaimAir, GkrProdReadSumCheckClaimTraceGenerator,
+            GkrProdWriteInitSumCheckClaimAir, GkrProdWriteInitSumCheckClaimTraceGenerator,
+            GkrProdWriteSumCheckClaimAir, GkrProdWriteSumCheckClaimTraceGenerator,
         },
         sumcheck::{GkrLayerSumcheckAir, GkrSumcheckRecord, GkrSumcheckTraceGenerator},
         xi_sampler::{GkrXiSamplerAir, GkrXiSamplerRecord, GkrXiSamplerTraceGenerator},
@@ -101,10 +105,15 @@ use crate::{
 // Internal bus definitions
 mod bus;
 pub use bus::{
-    GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupLayerClaimViewMessage,
-    GkrProdClaimBus, GkrProdClaimInputBus, GkrProdClaimMessage, GkrProdLayerClaimViewMessage,
-    GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage, GkrSumcheckInputBus,
-    GkrSumcheckInputMessage, GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
+    GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupInitClaimBus,
+    GkrLogupInitClaimInputBus, GkrLogupInitClaimMessage, GkrLogupInitLayerMessage,
+    GkrLogupLayerChallengeMessage, GkrProdInitClaimBus, GkrProdInitClaimMessage,
+    GkrProdInitLayerMessage, GkrProdLayerChallengeMessage, GkrProdReadClaimBus,
+    GkrProdReadClaimInputBus, GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus,
+    GkrProdSumClaimMessage, GkrProdWriteClaimBus, GkrProdWriteClaimInputBus,
+    GkrProdWriteInitClaimBus, GkrProdWriteInitClaimInputBus, GkrSumcheckChallengeBus,
+    GkrSumcheckChallengeMessage, GkrSumcheckInputBus, GkrSumcheckInputMessage,
+    GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
 };
 
 // Sub-modules for different AIRs
@@ -126,10 +135,18 @@ pub struct GkrModule {
     sumcheck_input_bus: GkrSumcheckInputBus,
     sumcheck_output_bus: GkrSumcheckOutputBus,
     sumcheck_challenge_bus: GkrSumcheckChallengeBus,
-    prod_claim_input_bus: GkrProdClaimInputBus,
-    prod_claim_bus: GkrProdClaimBus,
+    prod_read_claim_input_bus: GkrProdReadClaimInputBus,
+    prod_read_claim_bus: GkrProdReadClaimBus,
+    prod_write_claim_input_bus: GkrProdWriteClaimInputBus,
+    prod_write_claim_bus: GkrProdWriteClaimBus,
+    prod_read_init_claim_input_bus: GkrProdReadInitClaimInputBus,
+    prod_read_init_claim_bus: GkrProdReadInitClaimBus,
+    prod_write_init_claim_input_bus: GkrProdWriteInitClaimInputBus,
+    prod_write_init_claim_bus: GkrProdWriteInitClaimBus,
     logup_claim_input_bus: GkrLogupClaimInputBus,
     logup_claim_bus: GkrLogupClaimBus,
+    logup_init_claim_input_bus: GkrLogupInitClaimInputBus,
+    logup_init_claim_bus: GkrLogupInitClaimBus,
 }
 
 struct GkrBlobCpu {
@@ -156,10 +173,18 @@ impl GkrModule {
             sumcheck_input_bus: GkrSumcheckInputBus::new(b.new_bus_idx()),
             sumcheck_output_bus: GkrSumcheckOutputBus::new(b.new_bus_idx()),
             sumcheck_challenge_bus: GkrSumcheckChallengeBus::new(b.new_bus_idx()),
-            prod_claim_input_bus: GkrProdClaimInputBus::new(b.new_bus_idx()),
-            prod_claim_bus: GkrProdClaimBus::new(b.new_bus_idx()),
+            prod_read_claim_input_bus: GkrProdReadClaimInputBus::new(b.new_bus_idx()),
+            prod_read_claim_bus: GkrProdReadClaimBus::new(b.new_bus_idx()),
+            prod_write_claim_input_bus: GkrProdWriteClaimInputBus::new(b.new_bus_idx()),
+            prod_write_claim_bus: GkrProdWriteClaimBus::new(b.new_bus_idx()),
+            prod_read_init_claim_input_bus: GkrProdReadInitClaimInputBus::new(b.new_bus_idx()),
+            prod_read_init_claim_bus: GkrProdReadInitClaimBus::new(b.new_bus_idx()),
+            prod_write_init_claim_input_bus: GkrProdWriteInitClaimInputBus::new(b.new_bus_idx()),
+            prod_write_init_claim_bus: GkrProdWriteInitClaimBus::new(b.new_bus_idx()),
             logup_claim_input_bus: GkrLogupClaimInputBus::new(b.new_bus_idx()),
             logup_claim_bus: GkrLogupClaimBus::new(b.new_bus_idx()),
+            logup_init_claim_input_bus: GkrLogupInitClaimInputBus::new(b.new_bus_idx()),
+            logup_init_claim_bus: GkrLogupInitClaimBus::new(b.new_bus_idx()),
             xi_sampler_bus: GkrXiSamplerBus::new(b.new_bus_idx()),
         }
     }
@@ -296,22 +321,56 @@ impl AirModule for GkrModule {
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
             sumcheck_input_bus: self.sumcheck_input_bus,
-            sumcheck_challenge_bus: self.sumcheck_challenge_bus,
             sumcheck_output_bus: self.sumcheck_output_bus,
-            prod_claim_input_bus: self.prod_claim_input_bus,
-            prod_claim_bus: self.prod_claim_bus,
+            sumcheck_challenge_bus: self.sumcheck_challenge_bus,
+            prod_read_claim_input_bus: self.prod_read_claim_input_bus,
+            prod_read_claim_bus: self.prod_read_claim_bus,
+            prod_write_claim_input_bus: self.prod_write_claim_input_bus,
+            prod_write_claim_bus: self.prod_write_claim_bus,
+            prod_read_init_claim_input_bus: self.prod_read_init_claim_input_bus,
+            prod_read_init_claim_bus: self.prod_read_init_claim_bus,
+            prod_write_init_claim_input_bus: self.prod_write_init_claim_input_bus,
+            prod_write_init_claim_bus: self.prod_write_init_claim_bus,
+            logup_claim_input_bus: self.logup_claim_input_bus,
+            logup_claim_bus: self.logup_claim_bus,
+            logup_init_claim_input_bus: self.logup_init_claim_input_bus,
+            logup_init_claim_bus: self.logup_init_claim_bus,
+        };
+
+        let gkr_prod_read_sum_air = GkrProdReadSumCheckClaimAir {
+            transcript_bus: self.bus_inventory.transcript_bus,
+            prod_claim_input_bus: self.prod_read_claim_input_bus,
+            prod_claim_bus: self.prod_read_claim_bus,
+        };
+
+        let gkr_prod_write_sum_air = GkrProdWriteSumCheckClaimAir {
+            transcript_bus: self.bus_inventory.transcript_bus,
+            prod_claim_input_bus: self.prod_write_claim_input_bus,
+            prod_claim_bus: self.prod_write_claim_bus,
+        };
+
+        let gkr_prod_read_init_air = GkrProdReadInitSumCheckClaimAir {
+            transcript_bus: self.bus_inventory.transcript_bus,
+            prod_init_claim_input_bus: self.prod_read_init_claim_input_bus,
+            prod_init_claim_bus: self.prod_read_init_claim_bus,
+        };
+
+        let gkr_prod_write_init_air = GkrProdWriteInitSumCheckClaimAir {
+            transcript_bus: self.bus_inventory.transcript_bus,
+            prod_init_claim_input_bus: self.prod_write_init_claim_input_bus,
+            prod_init_claim_bus: self.prod_write_init_claim_bus,
+        };
+
+        let gkr_logup_sum_air = GkrLogupSumCheckClaimAir {
+            transcript_bus: self.bus_inventory.transcript_bus,
             logup_claim_input_bus: self.logup_claim_input_bus,
             logup_claim_bus: self.logup_claim_bus,
         };
 
-        let gkr_prod_claim_air = GkrProdSumCheckClaimAir {
-            prod_claim_input_bus: self.prod_claim_input_bus,
-            prod_claim_bus: self.prod_claim_bus,
-        };
-
-        let gkr_logup_claim_air = GkrLogupSumCheckClaimAir {
-            logup_claim_input_bus: self.logup_claim_input_bus,
-            logup_claim_bus: self.logup_claim_bus,
+        let gkr_logup_init_air = GkrLogupInitSumCheckClaimAir {
+            transcript_bus: self.bus_inventory.transcript_bus,
+            logup_init_claim_input_bus: self.logup_init_claim_input_bus,
+            logup_init_claim_bus: self.logup_init_claim_bus,
         };
 
         let gkr_sumcheck_air = GkrLayerSumcheckAir::new(
@@ -331,8 +390,12 @@ impl AirModule for GkrModule {
         vec![
             Arc::new(gkr_input_air) as AirRef<_>,
             Arc::new(gkr_layer_air) as AirRef<_>,
-            Arc::new(gkr_prod_claim_air) as AirRef<_>,
-            Arc::new(gkr_logup_claim_air) as AirRef<_>,
+            Arc::new(gkr_prod_read_init_air) as AirRef<_>,
+            Arc::new(gkr_prod_write_init_air) as AirRef<_>,
+            Arc::new(gkr_prod_read_sum_air) as AirRef<_>,
+            Arc::new(gkr_prod_write_sum_air) as AirRef<_>,
+            Arc::new(gkr_logup_init_air) as AirRef<_>,
+            Arc::new(gkr_logup_sum_air) as AirRef<_>,
             Arc::new(gkr_sumcheck_air) as AirRef<_>,
             Arc::new(gkr_xi_sampler_air) as AirRef<_>,
         ]
@@ -613,7 +676,11 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         let chips = [
             GkrModuleChip::Input,
             GkrModuleChip::Layer,
-            GkrModuleChip::ProdClaim,
+            GkrModuleChip::ProdReadInitClaim,
+            GkrModuleChip::ProdWriteInitClaim,
+            GkrModuleChip::ProdReadClaim,
+            GkrModuleChip::ProdWriteClaim,
+            GkrModuleChip::LogupInitClaim,
             GkrModuleChip::LogupClaim,
             GkrModuleChip::LayerSumcheck,
             GkrModuleChip::XiSampler,
@@ -643,7 +710,11 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 enum GkrModuleChip {
     Input,
     Layer,
-    ProdClaim,
+    ProdReadInitClaim,
+    ProdWriteInitClaim,
+    ProdReadClaim,
+    ProdWriteClaim,
+    LogupInitClaim,
     LogupClaim,
     LayerSumcheck,
     XiSampler,
@@ -677,10 +748,30 @@ impl RowMajorChip<F> for GkrModuleChip {
                 &(&blob.layer_records, &blob.mus_records, &blob.q0_claims),
                 required_height,
             ),
-            ProdClaim => GkrProdSumCheckClaimTraceGenerator
-                .generate_trace(&(&blob.layer_records, &blob.mus_records), required_height),
-            LogupClaim => GkrLogupSumCheckClaimTraceGenerator
-                .generate_trace(&(&blob.layer_records, &blob.mus_records), required_height),
+            ProdReadInitClaim => GkrProdReadInitSumCheckClaimTraceGenerator.generate_trace(
+                &(&blob.layer_records, &blob.mus_records),
+                required_height,
+            ),
+            ProdWriteInitClaim => GkrProdWriteInitSumCheckClaimTraceGenerator.generate_trace(
+                &(&blob.layer_records, &blob.mus_records),
+                required_height,
+            ),
+            ProdReadClaim => GkrProdReadSumCheckClaimTraceGenerator.generate_trace(
+                &(&blob.layer_records, &blob.mus_records),
+                required_height,
+            ),
+            ProdWriteClaim => GkrProdWriteSumCheckClaimTraceGenerator.generate_trace(
+                &(&blob.layer_records, &blob.mus_records),
+                required_height,
+            ),
+            LogupInitClaim => GkrLogupInitSumCheckClaimTraceGenerator.generate_trace(
+                &(&blob.layer_records, &blob.mus_records),
+                required_height,
+            ),
+            LogupClaim => GkrLogupSumCheckClaimTraceGenerator.generate_trace(
+                &(&blob.layer_records, &blob.mus_records),
+                required_height,
+            ),
             LayerSumcheck => GkrSumcheckTraceGenerator.generate_trace(
                 &(&blob.sumcheck_records, &blob.mus_records),
                 required_height,
@@ -729,7 +820,11 @@ mod cuda_tracegen {
             let chips = [
                 GkrModuleChip::Input,
                 GkrModuleChip::Layer,
-                GkrModuleChip::ProdClaim,
+                GkrModuleChip::ProdReadInitClaim,
+                GkrModuleChip::ProdWriteInitClaim,
+                GkrModuleChip::ProdReadClaim,
+                GkrModuleChip::ProdWriteClaim,
+                GkrModuleChip::LogupInitClaim,
                 GkrModuleChip::LogupClaim,
                 GkrModuleChip::LayerSumcheck,
                 GkrModuleChip::XiSampler,
