@@ -32,7 +32,10 @@ impl GkrLayerRecord {
 
     #[inline]
     pub(crate) fn eq_at(&self, layer_idx: usize) -> EF {
-        self.eq_at_r_primes.get(layer_idx).copied().unwrap_or(EF::ZERO)
+        self.eq_at_r_primes
+            .get(layer_idx)
+            .copied()
+            .unwrap_or(EF::ZERO)
     }
 
     #[inline]
@@ -108,76 +111,103 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                     .zip(q0_claims.par_iter()),
             )
             .enumerate()
-            .for_each(|(proof_idx, (chunk, ((record, mus_for_proof), q0_claim)))| {
-                let q0_basis = q0_claim.as_basis_coefficients_slice();
-                let mus_for_proof = mus_for_proof.as_slice();
+            .for_each(
+                |(proof_idx, (chunk, ((record, mus_for_proof), q0_claim)))| {
+                    let q0_basis = q0_claim.as_basis_coefficients_slice();
+                    let mus_for_proof = mus_for_proof.as_slice();
 
-                if record.layer_claims.is_empty() {
-                    debug_assert_eq!(chunk.len(), width);
-                    let row_data = &mut chunk[..width];
-                    let cols: &mut GkrLayerCols<F> = row_data.borrow_mut();
-                    cols.is_enabled = F::ONE;
-                    cols.proof_idx = F::from_usize(proof_idx);
-                    cols.idx = F::ZERO;
-                    cols.is_first_air_idx = F::ONE;
-                    cols.is_first = F::ONE;
-                    cols.is_dummy = F::ONE;
-                    cols.layer_idx = F::ZERO;
-                    cols.tidx = F::from_usize(record.tidx);
-                    cols.lambda = [F::ZERO; D_EF];
-                    cols.mu = [F::ZERO; D_EF];
-                    cols.sumcheck_claim_in = [F::ZERO; D_EF];
-                    cols.read_claim = [F::ZERO; D_EF];
-                    cols.write_claim = [F::ZERO; D_EF];
-                    cols.logup_claim = [F::ZERO; D_EF];
-                    cols.num_prod_count = F::ZERO;
-                    cols.num_logup_count = F::ZERO;
-                    cols.eq_at_r_prime = [F::ZERO; D_EF];
-                    cols.r0_claim.copy_from_slice(q0_basis);
-                    cols.w0_claim.copy_from_slice(q0_basis);
-                    cols.q0_claim.copy_from_slice(q0_basis);
-                    return;
-                }
-
-                chunk
-                    .chunks_mut(width)
-                    .take(record.layer_count())
-                    .enumerate()
-                    .for_each(|(layer_idx, row_data)| {
+                    if record.layer_claims.is_empty() {
+                        debug_assert_eq!(chunk.len(), width);
+                        let row_data = &mut chunk[..width];
                         let cols: &mut GkrLayerCols<F> = row_data.borrow_mut();
                         cols.is_enabled = F::ONE;
-                        cols.is_dummy = F::ZERO;
                         cols.proof_idx = F::from_usize(proof_idx);
                         cols.idx = F::ZERO;
-                        cols.is_first_air_idx = F::from_bool(layer_idx == 0);
-                        cols.is_first = F::from_bool(layer_idx == 0);
-                        cols.layer_idx = F::from_usize(layer_idx);
-                        cols.tidx = F::from_usize(record.layer_tidx(layer_idx));
-                        cols.lambda = record
-                            .lambda_at(layer_idx)
-                            .as_basis_coefficients_slice()
-                            .try_into()
-                            .unwrap();
-                        let mu = mus_for_proof.get(layer_idx).copied().unwrap_or(EF::ZERO);
-                        cols.mu = mu.as_basis_coefficients_slice().try_into().unwrap();
+                        cols.is_first_air_idx = F::ONE;
+                        cols.is_first = F::ONE;
+                        cols.is_dummy = F::ONE;
+                        cols.layer_idx = F::ZERO;
+                        cols.tidx = F::from_usize(record.tidx);
+                        cols.lambda = [F::ZERO; D_EF];
+                        let mut lambda_prime_one = [F::ZERO; D_EF];
+                        lambda_prime_one[0] = F::ONE;
+                        cols.lambda_prime = lambda_prime_one;
+                        cols.mu = [F::ZERO; D_EF];
                         cols.sumcheck_claim_in = [F::ZERO; D_EF];
                         cols.read_claim = [F::ZERO; D_EF];
+                        cols.read_claim_prime = [F::ZERO; D_EF];
                         cols.write_claim = [F::ZERO; D_EF];
+                        cols.write_claim_prime = [F::ZERO; D_EF];
                         cols.logup_claim = [F::ZERO; D_EF];
-                        cols.num_prod_count =
-                            F::from_usize(record.prod_count_at(layer_idx).max(1));
-                        cols.num_logup_count =
-                            F::from_usize(record.logup_count_at(layer_idx).max(1));
-                        cols.eq_at_r_prime = record
-                            .eq_at(layer_idx)
-                            .as_basis_coefficients_slice()
-                            .try_into()
-                            .unwrap();
+                        cols.logup_claim_prime = [F::ZERO; D_EF];
+                        cols.num_prod_count = F::ZERO;
+                        cols.num_logup_count = F::ZERO;
+                        cols.eq_at_r_prime = [F::ZERO; D_EF];
                         cols.r0_claim.copy_from_slice(q0_basis);
                         cols.w0_claim.copy_from_slice(q0_basis);
                         cols.q0_claim.copy_from_slice(q0_basis);
-                    });
-            });
+                        return;
+                    }
+
+                    chunk
+                        .chunks_mut(width)
+                        .take(record.layer_count())
+                        .enumerate()
+                        .for_each(|(layer_idx, row_data)| {
+                            let cols: &mut GkrLayerCols<F> = row_data.borrow_mut();
+                            cols.is_enabled = F::ONE;
+                            cols.is_dummy = F::ZERO;
+                            cols.proof_idx = F::from_usize(proof_idx);
+                            cols.idx = F::ZERO;
+                            cols.is_first_air_idx = F::from_bool(layer_idx == 0);
+                            cols.is_first = F::from_bool(layer_idx == 0);
+                            cols.layer_idx = F::from_usize(layer_idx);
+                            cols.tidx = F::from_usize(record.layer_tidx(layer_idx));
+                            cols.lambda = record
+                                .lambda_at(layer_idx)
+                                .as_basis_coefficients_slice()
+                                .try_into()
+                                .unwrap();
+                            cols.lambda_prime = if layer_idx == 0 {
+                                let mut one = [F::ZERO; D_EF];
+                                one[0] = F::ONE;
+                                one
+                            } else {
+                                record
+                                    .lambda_at(layer_idx.saturating_sub(1))
+                                    .as_basis_coefficients_slice()
+                                    .try_into()
+                                    .unwrap()
+                            };
+                            let mu = mus_for_proof.get(layer_idx).copied().unwrap_or(EF::ZERO);
+                            cols.mu = mu.as_basis_coefficients_slice().try_into().unwrap();
+                            cols.sumcheck_claim_in = [F::ZERO; D_EF];
+                            cols.read_claim = [F::ZERO; D_EF];
+                            cols.read_claim_prime = [F::ZERO; D_EF];
+                            cols.write_claim = [F::ZERO; D_EF];
+                            cols.write_claim_prime = [F::ZERO; D_EF];
+                            cols.logup_claim = [F::ZERO; D_EF];
+                            cols.logup_claim_prime = [F::ZERO; D_EF];
+                            cols.num_prod_count =
+                                F::from_usize(record.prod_count_at(layer_idx).max(1));
+                            cols.num_logup_count =
+                                F::from_usize(record.logup_count_at(layer_idx).max(1));
+                            cols.eq_at_r_prime = record
+                                .eq_at(layer_idx)
+                                .as_basis_coefficients_slice()
+                                .try_into()
+                                .unwrap();
+                            cols.r0_claim.copy_from_slice(q0_basis);
+                            cols.w0_claim.copy_from_slice(q0_basis);
+                            cols.q0_claim.copy_from_slice(q0_basis);
+                            if layer_idx == 0 {
+                                cols.read_claim_prime.copy_from_slice(&cols.r0_claim);
+                                cols.write_claim_prime.copy_from_slice(&cols.w0_claim);
+                                cols.logup_claim_prime.copy_from_slice(&cols.q0_claim);
+                            }
+                        });
+                },
+            );
 
         Some(RowMajorMatrix::new(trace, width))
     }

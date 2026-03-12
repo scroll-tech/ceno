@@ -14,13 +14,10 @@ use crate::gkr::{
     GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage,
     bus::{
         GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
-        GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupInitClaimBus,
-        GkrLogupInitClaimInputBus, GkrLogupInitClaimMessage, GkrLogupInitLayerMessage,
-        GkrLogupLayerChallengeMessage, GkrProdInitClaimMessage, GkrProdInitLayerMessage,
-        GkrProdLayerChallengeMessage, GkrProdReadClaimBus, GkrProdReadClaimInputBus,
-        GkrProdReadInitClaimBus, GkrProdReadInitClaimInputBus, GkrProdSumClaimMessage,
-        GkrProdWriteClaimBus, GkrProdWriteClaimInputBus, GkrProdWriteInitClaimBus,
-        GkrProdWriteInitClaimInputBus, GkrSumcheckInputBus, GkrSumcheckInputMessage,
+        GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage,
+        GkrLogupLayerChallengeMessage, GkrProdLayerChallengeMessage, GkrProdReadClaimBus,
+        GkrProdReadClaimInputBus, GkrProdSumClaimMessage, GkrProdWriteClaimBus,
+        GkrProdWriteClaimInputBus, GkrSumcheckInputBus, GkrSumcheckInputMessage,
         GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
     },
 };
@@ -53,14 +50,19 @@ pub struct GkrLayerCols<T> {
 
     /// Sampled batching challenge
     pub lambda: [T; D_EF],
+    /// Challenge inherited from previous layer
+    pub lambda_prime: [T; D_EF],
     /// Reduction point
     pub mu: [T; D_EF],
 
     pub sumcheck_claim_in: [T; D_EF],
 
     pub read_claim: [T; D_EF],
+    pub read_claim_prime: [T; D_EF],
     pub write_claim: [T; D_EF],
+    pub write_claim_prime: [T; D_EF],
     pub logup_claim: [T; D_EF],
+    pub logup_claim_prime: [T; D_EF],
     pub num_prod_count: T,
     pub num_logup_count: T,
 
@@ -87,14 +89,8 @@ pub struct GkrLayerAir {
     pub prod_read_claim_bus: GkrProdReadClaimBus,
     pub prod_write_claim_input_bus: GkrProdWriteClaimInputBus,
     pub prod_write_claim_bus: GkrProdWriteClaimBus,
-    pub prod_read_init_claim_input_bus: GkrProdReadInitClaimInputBus,
-    pub prod_read_init_claim_bus: GkrProdReadInitClaimBus,
-    pub prod_write_init_claim_input_bus: GkrProdWriteInitClaimInputBus,
-    pub prod_write_init_claim_bus: GkrProdWriteInitClaimBus,
     pub logup_claim_input_bus: GkrLogupClaimInputBus,
     pub logup_claim_bus: GkrLogupClaimBus,
-    pub logup_init_claim_input_bus: GkrLogupInitClaimInputBus,
-    pub logup_init_claim_bus: GkrLogupInitClaimBus,
 }
 
 impl<F: Field> BaseAir<F> for GkrLayerAir {
@@ -163,6 +159,22 @@ where
             .when(is_transition.clone())
             .assert_eq(next.layer_idx, local.layer_idx + AB::Expr::ONE);
 
+        let lambda_prime_one = {
+            let mut arr = core::array::from_fn(|_| AB::Expr::ZERO);
+            arr[0] = AB::Expr::ONE;
+            arr
+        };
+        assert_array_eq(
+            &mut builder.when(local.is_first),
+            local.lambda_prime,
+            lambda_prime_one,
+        );
+        assert_array_eq(
+            &mut builder.when(is_transition.clone()),
+            next.lambda_prime,
+            local.lambda,
+        );
+
         ///////////////////////////////////////////////////////////////////////
         // Root Layer Constraints
         ///////////////////////////////////////////////////////////////////////
@@ -176,8 +188,7 @@ where
         // Inter-Layer Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        let read_plus_write =
-            ext_field_add::<AB::Expr>(local.read_claim, local.write_claim);
+        let read_plus_write = ext_field_add::<AB::Expr>(local.read_claim, local.write_claim);
         let folded_claim = ext_field_add::<AB::Expr>(read_plus_write, local.logup_claim);
         assert_array_eq(
             &mut builder.when(is_transition.clone()),
@@ -208,6 +219,7 @@ where
             layer_idx: local.layer_idx.into(),
             tidx: tidx_for_claims.clone(),
             lambda: local.lambda.map(Into::into),
+            lambda_prime: local.lambda_prime.map(Into::into),
             mu: local.mu.map(Into::into),
         };
         self.prod_read_claim_input_bus.send(
@@ -230,6 +242,7 @@ where
                 layer_idx: local.layer_idx.into(),
                 tidx: tidx_for_claims.clone(),
                 lambda: local.lambda.map(Into::into),
+                lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
             is_not_dummy.clone(),
@@ -240,7 +253,8 @@ where
             GkrProdSumClaimMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                claim: local.read_claim.map(Into::into),
+                lambda_claim: local.read_claim.map(Into::into),
+                lambda_prime_claim: local.read_claim_prime.map(Into::into),
                 num_prod_count: local.num_prod_count.into(),
             },
             is_not_dummy.clone(),
@@ -251,7 +265,8 @@ where
             GkrProdSumClaimMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                claim: local.write_claim.map(Into::into),
+                lambda_claim: local.write_claim.map(Into::into),
+                lambda_prime_claim: local.write_claim_prime.map(Into::into),
                 num_prod_count: local.num_prod_count.into(),
             },
             is_not_dummy.clone(),
@@ -262,73 +277,28 @@ where
             GkrLogupClaimMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                claim: local.logup_claim.map(Into::into),
+                lambda_claim: local.logup_claim.map(Into::into),
+                lambda_prime_claim: local.logup_claim_prime.map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
             is_not_dummy.clone(),
         );
 
-        let is_root_layer = local.is_first;
-        let init_msg = GkrProdInitLayerMessage {
-            idx: local.idx.into(),
-            layer_idx: local.layer_idx.into(),
-            tidx: local.tidx.into(),
-        };
-        self.prod_read_init_claim_input_bus.send(
-            builder,
-            local.proof_idx,
-            init_msg.clone(),
-            is_root_layer * is_not_dummy.clone(),
+        let root_layer_mask = local.is_first * is_not_dummy.clone();
+        assert_array_eq(
+            &mut builder.when(root_layer_mask.clone()),
+            local.read_claim_prime,
+            local.r0_claim,
         );
-        self.prod_write_init_claim_input_bus.send(
-            builder,
-            local.proof_idx,
-            init_msg,
-            is_root_layer * is_not_dummy.clone(),
+        assert_array_eq(
+            &mut builder.when(root_layer_mask.clone()),
+            local.write_claim_prime,
+            local.w0_claim,
         );
-        self.logup_init_claim_input_bus.send(
-            builder,
-            local.proof_idx,
-            GkrLogupInitLayerMessage {
-                idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
-                tidx: local.tidx.into(),
-            },
-            is_root_layer * is_not_dummy.clone(),
-        );
-        self.prod_read_init_claim_bus.receive(
-            builder,
-            local.proof_idx,
-            GkrProdInitClaimMessage {
-                idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
-                acc_sum: local.r0_claim.map(Into::into),
-                num_prod_count: local.num_prod_count.into(),
-            },
-            is_root_layer * is_not_dummy.clone(),
-        );
-        self.prod_write_init_claim_bus.receive(
-            builder,
-            local.proof_idx,
-            GkrProdInitClaimMessage {
-                idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
-                acc_sum: local.w0_claim.map(Into::into),
-                num_prod_count: local.num_prod_count.into(),
-            },
-            is_root_layer * is_not_dummy.clone(),
-        );
-        self.logup_init_claim_bus.receive(
-            builder,
-            local.proof_idx,
-            GkrLogupInitClaimMessage {
-                idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
-                acc_p_cross: core::array::from_fn(|_| AB::Expr::ZERO),
-                acc_q_cross: local.q0_claim.map(Into::into),
-                num_logup_count: local.num_logup_count.into(),
-            },
-            is_root_layer * is_not_dummy.clone(),
+        assert_array_eq(
+            &mut builder.when(root_layer_mask),
+            local.logup_claim_prime,
+            local.q0_claim,
         );
 
         // 1. GkrLayerInputBus
@@ -374,7 +344,8 @@ where
         );
         // 3. GkrSumcheckOutputBus
         // 3a. Receive sumcheck results
-        let sumcheck_claim_out = local.sumcheck_claim_in;
+        let prime_fold = ext_field_add::<AB::Expr>(local.read_claim_prime, local.write_claim_prime);
+        let sumcheck_claim_out = ext_field_add::<AB::Expr>(prime_fold, local.logup_claim_prime);
         self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,

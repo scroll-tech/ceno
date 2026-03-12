@@ -2,11 +2,6 @@ pub mod air;
 pub mod trace;
 
 pub use air::{
-    GkrProdInitSumCheckClaimCols, GkrProdReadInitSumCheckClaimAir,
-    GkrProdReadSumCheckClaimAir, GkrProdSumCheckClaimCols, GkrProdWriteInitSumCheckClaimAir,
-    GkrProdWriteSumCheckClaimAir,
+    GkrProdReadSumCheckClaimAir, GkrProdSumCheckClaimCols, GkrProdWriteSumCheckClaimAir,
 };
-pub use trace::{
-    GkrProdReadInitSumCheckClaimTraceGenerator, GkrProdReadSumCheckClaimTraceGenerator,
-    GkrProdWriteInitSumCheckClaimTraceGenerator, GkrProdWriteSumCheckClaimTraceGenerator,
-};
+pub use trace::{GkrProdReadSumCheckClaimTraceGenerator, GkrProdWriteSumCheckClaimTraceGenerator};

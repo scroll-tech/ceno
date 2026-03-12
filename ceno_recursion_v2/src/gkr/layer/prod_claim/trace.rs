@@ -2,7 +2,7 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::{GkrProdInitSumCheckClaimCols, GkrProdSumCheckClaimCols};
+use super::GkrProdSumCheckClaimCols;
 use crate::{gkr::layer::trace::GkrLayerRecord, tracegen::RowMajorChip};
 
 fn zero_trace(width: usize, required_height: Option<usize>) -> Option<RowMajorMatrix<F>> {
@@ -12,8 +12,6 @@ fn zero_trace(width: usize, required_height: Option<usize>) -> Option<RowMajorMa
 
 pub struct GkrProdReadSumCheckClaimTraceGenerator;
 pub struct GkrProdWriteSumCheckClaimTraceGenerator;
-pub struct GkrProdReadInitSumCheckClaimTraceGenerator;
-pub struct GkrProdWriteInitSumCheckClaimTraceGenerator;
 
 impl RowMajorChip<F> for GkrProdReadSumCheckClaimTraceGenerator {
     type Ctx<'a> = (&'a [GkrLayerRecord], &'a [Vec<EF>]);
@@ -38,31 +36,5 @@ impl RowMajorChip<F> for GkrProdWriteSumCheckClaimTraceGenerator {
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
         zero_trace(GkrProdSumCheckClaimCols::<F>::width(), required_height)
-    }
-}
-
-impl RowMajorChip<F> for GkrProdReadInitSumCheckClaimTraceGenerator {
-    type Ctx<'a> = (&'a [GkrLayerRecord], &'a [Vec<EF>]);
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    fn generate_trace(
-        &self,
-        _ctx: &Self::Ctx<'_>,
-        required_height: Option<usize>,
-    ) -> Option<RowMajorMatrix<F>> {
-        zero_trace(GkrProdInitSumCheckClaimCols::<F>::width(), required_height)
-    }
-}
-
-impl RowMajorChip<F> for GkrProdWriteInitSumCheckClaimTraceGenerator {
-    type Ctx<'a> = (&'a [GkrLayerRecord], &'a [Vec<EF>]);
-
-    #[tracing::instrument(level = "trace", skip_all)]
-    fn generate_trace(
-        &self,
-        _ctx: &Self::Ctx<'_>,
-        required_height: Option<usize>,
-    ) -> Option<RowMajorMatrix<F>> {
-        zero_trace(GkrProdInitSumCheckClaimCols::<F>::width(), required_height)
     }
 }

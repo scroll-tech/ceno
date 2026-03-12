@@ -277,17 +277,15 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
 
         // 3. BatchConstraintModuleBus
         // Temporarily disabled until downstream module is updated.
-        /*
-        self.bc_module_bus.send(
-            builder,
-            local.proof_idx,
-            BatchConstraintModuleMessage {
-                tidx: tidx_end,
-                gkr_input_layer_claim: local.input_layer_claim.map(Into::into),
-            },
-            local.is_enabled,
-        );
-        */
+        // self.bc_module_bus.send(
+        // builder,
+        // local.proof_idx,
+        // BatchConstraintModuleMessage {
+        // tidx: tidx_end,
+        // gkr_input_layer_claim: local.input_layer_claim.map(Into::into),
+        // },
+        // local.is_enabled,
+        // );
 
         // 4. ExpBitsLenBus
         // 4a. Check proof-of-work using `ExpBitsLenBus`.
