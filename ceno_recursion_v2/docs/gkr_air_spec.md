@@ -43,8 +43,6 @@ AIR’s columns, constraints, or interactions change.
 - **Internal buses**
     - `GkrLayerInputBus.send`: emits `(idx, tidx skip roots, r0/w0/q0_claim)` when interactions exist.
     - `GkrLayerOutputBus.receive`: pulls reduced `(idx, layer_idx_end, input_layer_claim, lambda, mu)` back.
-    - `GkrXiSamplerBus.send/receive`: dispatches request `(idx = num_layers, tidx_after_layers)` and waits for
-      completion `(idx = n_layer + l_skip - 1, tidx_end)`.
 - **External buses**
     - `GkrModuleBus.receive`: initial module message (`idx`, `tidx`, `n_layer`) per enabled row.
     - `BatchConstraintModuleBus.send`: forwards the final input-layer claim with the final transcript index.
@@ -250,45 +248,8 @@ AIR’s columns, constraints, or interactions change.
   layer, `challenge` published for the next layer or eq export).
 - All three buses now include the `idx` field so messages disambiguate distinct module instances inside the same proof.
 - `transcript_bus.observe_ext`: records `ev1/ev2/ev3`, followed by `sample_ext` of `challenge`.
-- `xi_randomness_bus.send`: on final layer rows, exposes `challenge` (the last xi) for downstream consumers.
 
 ### Notes
 
 - Dummy rows short-circuit all bus traffic; guard send/receive calls with `is_not_dummy`.
 - The layout assumes cubic polynomials (degree 3) and would need updates if the sumcheck arity changes.
-
-## GkrXiSamplerAir (`src/gkr/xi_sampler/air.rs`)
-
-### Columns
-
-| Field                | Shape    | Description                                           |
-|----------------------|----------|-------------------------------------------------------|
-| `is_enabled`         | scalar   | Row selector.                                         
-| `proof_idx`          | scalar   | Proof counter.                                        
-| `is_first_challenge` | scalar   | Marks the first xi of a proof’s sampler phase.        
-| `is_dummy`           | scalar   | Dummy padding flag.                                   
-| `idx`                | scalar   | Challenge index (offset from layer-derived xi count). 
-| `xi`                 | `[D_EF]` | Sampled challenge value.                              
-| `tidx`               | scalar   | Transcript cursor for the sample.                     
-
-### Row Constraints
-
-- **Looping**: `NestedForLoopSubAir<1>` keeps `(proof_idx, is_first_challenge)` sequencing, emitting
-  `is_transition_challenge` and `is_last_challenge` flags.
-- **Index monotonicity**: On transitions, enforce `next.idx = idx + 1` and `next.tidx = tidx + D_EF`.
-- **Boolean guards**: `is_dummy` flagged as boolean; all constraints wrap with `is_not_dummy` before talking to buses or
-  transcript.
-
-### Interactions
-
-- `GkrXiSamplerBus.receive`: first non-dummy row per proof imports `(idx, tidx)` from `GkrInputAir`.
-- `GkrXiSamplerBus.send`: on the final challenge, returns `(idx, tidx_end)` so the input AIR knows where transcript
-  sampling stopped.
-- `TranscriptBus.sample_ext`: samples the actual `xi` challenge at each enabled row.
-- `XiRandomnessBus.send`: mirrors every sampled `xi` to the shared randomness channel for any module that depends on the
-  full xi vector.
-
-### Notes
-
-- This AIR exists solely because the sampler interacts with transcript/lookups differently from the layer AIR; long term
-  it may be folded into batch-constraint logic once shared randomness is enforced elsewhere.

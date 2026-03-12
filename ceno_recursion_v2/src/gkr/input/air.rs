@@ -2,7 +2,6 @@ use core::borrow::Borrow;
 
 use crate::gkr::bus::{
     GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
-    GkrXiSamplerBus, GkrXiSamplerMessage,
 };
 use openvm_circuit_primitives::{
     SubAir,
@@ -74,7 +73,6 @@ pub struct GkrInputAir {
     pub exp_bits_len_bus: ExpBitsLenBus,
     pub layer_input_bus: GkrLayerInputBus,
     pub layer_output_bus: GkrLayerOutputBus,
-    pub xi_sampler_bus: GkrXiSamplerBus,
 }
 
 impl<F: Field> BaseAir<F> for GkrInputAir {
@@ -177,7 +175,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
                 * (num_layers.clone() + AB::Expr::TWO)
                 * AB::Expr::from_usize(2 * D_EF);
         // Add separately sampled challenges
-        let tidx_end = tidx_after_gkr_layers.clone()
+        let _tidx_end = tidx_after_gkr_layers.clone()
             + needs_challenges.clone() * num_challenges.clone() * AB::Expr::from_usize(D_EF);
 
         // 1. GkrLayerInputBus
@@ -211,28 +209,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             },
             local.is_enabled * has_interactions.clone(),
         );
-        // 3. GkrXiSamplerBus
-        // 3a. Send input to GkrXiSamplerAir
-        self.xi_sampler_bus.send(
-            builder,
-            local.proof_idx,
-            GkrXiSamplerMessage {
-                idx: has_interactions.clone() * num_layers,
-                tidx: tidx_after_gkr_layers,
-            },
-            local.is_enabled * needs_challenges.clone(),
-        );
-        // 3b. Receive output from GkrXiSamplerAir
-        self.xi_sampler_bus.receive(
-            builder,
-            local.proof_idx,
-            GkrXiSamplerMessage {
-                idx: local.n_max + AB::Expr::from_usize(self.l_skip - 1),
-                tidx: tidx_end.clone(),
-            },
-            local.is_enabled * needs_challenges,
-        );
-
         ///////////////////////////////////////////////////////////////////////
         // External Interactions
         ///////////////////////////////////////////////////////////////////////
