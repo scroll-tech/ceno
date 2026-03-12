@@ -1,13 +1,12 @@
 use openvm_stark_backend::{
     StarkProtocolConfig,
     keygen::types::MultiStarkVerifyingKey,
-    proof::Proof,
     prover::{AirProvingContext, ColMajorMatrix, CpuBackend, ProverBackend},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::system::Preflight;
+use crate::system::{Preflight, RecursionProof};
 
 /// Backend-generic trait to generate a proving context
 pub(crate) trait ModuleChip<PB: ProverBackend> {
@@ -40,7 +39,7 @@ pub(crate) trait RowMajorChip<F> {
 
 pub(crate) struct StandardTracegenCtx<'a> {
     pub vk: &'a MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
-    pub proofs: &'a [&'a Proof<BabyBearPoseidon2Config>],
+    pub proofs: &'a [RecursionProof],
     pub preflights: &'a [&'a Preflight],
 }
 

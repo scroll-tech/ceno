@@ -1,8 +1,13 @@
 pub mod frame;
+mod preflight;
 mod types;
 
 pub use crate::{batch_constraint::BatchConstraintModule, proof_shape::ProofShapeModule};
-pub use types::{RecursionField, RecursionPcs, RecursionVk};
+pub use preflight::{GkrPreflight, Preflight, ProofShapePreflight};
+pub use types::{
+    convert_proof_from_zkvm, convert_vk_from_zkvm, RecursionField, RecursionPcs, RecursionProof,
+    RecursionVk,
+};
 
 use std::sync::Arc;
 
@@ -11,7 +16,6 @@ use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkEngine, StarkProtocolConfig, TranscriptHistory,
     interaction::BusIndex,
-    proof::Proof,
     prover::{AirProvingContext, CommittedTraceData, ProverBackend},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
@@ -20,13 +24,21 @@ use crate::gkr::GkrModule;
 pub use recursion_circuit::{
     system::{
         AggregationSubCircuit, AirModule, BusIndexManager, BusInventory, CachedTraceCtx,
-        GkrPreflight, GlobalCtxCpu, Preflight, ProofShapePreflight, TraceGenModule, VerifierConfig,
-        VerifierExternalData,
+        GlobalTraceGenCtx, TraceGenModule, VerifierConfig, VerifierExternalData,
     },
     transcript::TranscriptModule,
 };
 
 pub const POW_CHECKER_HEIGHT: usize = 32;
+
+/// Local override of the upstream CPU tracegen context so modules accept ZKVM proofs.
+pub struct GlobalCtxCpu;
+
+impl GlobalTraceGenCtx for GlobalCtxCpu {
+    type ChildVerifyingKey = RecursionVk;
+    type MultiProof = [RecursionProof];
+    type PreflightRecords = [Preflight];
+}
 
 pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
     fn new(child_vk: Arc<RecursionVk>, config: VerifierConfig) -> Self;
@@ -47,7 +59,7 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
         &self,
         child_vk: &RecursionVk,
         cached_trace_ctx: CachedTraceCtx<PB>,
-        proofs: &[Proof<BabyBearPoseidon2Config>],
+        proofs: &[RecursionProof],
         external_data: &mut VerifierExternalData<PB>,
         initial_transcript: TS,
     ) -> Option<Vec<AirProvingContext<PB>>>;
@@ -59,7 +71,7 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
         &self,
         child_vk: &RecursionVk,
         cached_trace_ctx: CachedTraceCtx<PB>,
-        proofs: &[Proof<BabyBearPoseidon2Config>],
+        proofs: &[RecursionProof],
         initial_transcript: TS,
     ) -> Vec<AirProvingContext<PB>> {
         let poseidon2_compress_inputs = vec![];
@@ -121,7 +133,7 @@ impl<PB: ProverBackend, SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: us
         &self,
         _child_vk: &RecursionVk,
         _cached_trace_ctx: CachedTraceCtx<PB>,
-        _proofs: &[Proof<BabyBearPoseidon2Config>],
+        _proofs: &[RecursionProof],
         _external_data: &mut VerifierExternalData<PB>,
         _initial_transcript: TS,
     ) -> Option<Vec<AirProvingContext<PB>>> {

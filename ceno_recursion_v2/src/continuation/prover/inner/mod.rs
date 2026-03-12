@@ -211,7 +211,7 @@ where
             .generate_proving_ctxs(
                 child_vk,
                 cached_trace_ctx,
-                &vm_proofs,
+                proofs,
                 &mut external_data,
                 default_duplex_sponge_recorder(),
             )

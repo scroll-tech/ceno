@@ -6,7 +6,6 @@ use openvm_circuit_primitives::encoder::Encoder;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
     keygen::types::{MultiStarkVerifyingKey, VerifierSinglePreprocessedData},
-    proof::Proof,
     prover::{AirProvingContext, ColMajorMatrix, CpuBackend},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, Digest, F};
@@ -21,8 +20,9 @@ use crate::{
         pvs::PublicValuesAir,
     },
     system::{
-        AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        ProofShapePreflight, TraceGenModule, frame::MultiStarkVkeyFrame,
+        convert_proof_from_zkvm, convert_vk_from_zkvm, AirModule, BusIndexManager, BusInventory,
+        GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight, ProofShapePreflight, RecursionProof,
+        RecursionVk, TraceGenModule, frame::MultiStarkVkeyFrame,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
@@ -143,12 +143,13 @@ impl ProofShapeModule {
     pub fn run_preflight<TS>(
         &self,
         child_vk: &MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
-        proof: &Proof<BabyBearPoseidon2Config>,
+        proof: &RecursionProof,
         preflight: &mut Preflight,
         ts: &mut TS,
     ) where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
+        let proof = convert_proof_from_zkvm(proof);
         let l_skip = child_vk.inner.params.l_skip;
         ts.observe_commit(child_vk.pre_hash);
         ts.observe_commit(proof.common_main_commit);
@@ -281,12 +282,14 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     #[tracing::instrument(skip_all)]
     fn generate_proving_ctxs(
         &self,
-        child_vk: &MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
-        proofs: &[Proof<BabyBearPoseidon2Config>],
+        child_vk: &RecursionVk,
+        proofs: &[RecursionProof],
         preflights: &[Preflight],
         ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
+        let child_vk_arc = convert_vk_from_zkvm(child_vk);
+        let child_vk = child_vk_arc.as_ref();
         let pow_checker = &ctx.0;
         let external_range_checks = ctx.1;
 
@@ -343,7 +346,7 @@ impl ProofShapeModuleChip {
 impl RowMajorChip<F> for ProofShapeModuleChip {
     type Ctx<'a> = (
         &'a MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
-        &'a [Proof<BabyBearPoseidon2Config>],
+        &'a [RecursionProof],
         &'a [Preflight],
     );
 

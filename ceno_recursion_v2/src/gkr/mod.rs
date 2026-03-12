@@ -81,8 +81,8 @@ use crate::{
         sumcheck::{GkrLayerSumcheckAir, GkrSumcheckRecord, GkrSumcheckTraceGenerator},
     },
     system::{
-        AirModule, BusIndexManager, BusInventory, GkrPreflight, GlobalCtxCpu, Preflight,
-        TraceGenModule,
+        convert_proof_from_zkvm, AirModule, BusIndexManager, BusInventory, GkrPreflight,
+        GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
@@ -129,6 +129,22 @@ struct GkrBlobCpu {
     q0_claims: Vec<EF>,
 }
 
+trait ToOpenVmProof {
+    fn to_openvm_proof(&self) -> Proof<BabyBearPoseidon2Config>;
+}
+
+impl ToOpenVmProof for RecursionProof {
+    fn to_openvm_proof(&self) -> Proof<BabyBearPoseidon2Config> {
+        convert_proof_from_zkvm(self)
+    }
+}
+
+impl ToOpenVmProof for Proof<BabyBearPoseidon2Config> {
+    fn to_openvm_proof(&self) -> Proof<BabyBearPoseidon2Config> {
+        self.clone()
+    }
+}
+
 impl GkrModule {
     pub fn new(
         mvk: &MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
@@ -156,12 +172,13 @@ impl GkrModule {
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn run_preflight<TS>(
         &self,
-        proof: &Proof<BabyBearPoseidon2Config>,
+        proof: &RecursionProof,
         preflight: &mut Preflight,
         ts: &mut TS,
     ) where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
+        let proof = convert_proof_from_zkvm(proof);
         let GkrProof {
             q0_claim,
             claims_per_layer,
@@ -332,13 +349,15 @@ impl AirModule for GkrModule {
 
 impl GkrModule {
     #[tracing::instrument(skip_all)]
-    fn generate_blob(
+    fn generate_blob<P>(
         &self,
-        _child_vk: &MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
-        proofs: &[&Proof<BabyBearPoseidon2Config>],
+        proofs: &[P],
         preflights: &[&Preflight],
         exp_bits_len_gen: &ExpBitsLenTraceGenerator,
-    ) -> GkrBlobCpu {
+    ) -> GkrBlobCpu
+    where
+        P: ToOpenVmProof + Sync,
+    {
         debug_assert_eq!(proofs.len(), preflights.len());
 
         // NOTE: we only collect the zipped vec because rayon vs itertools has different treatment
@@ -346,7 +365,9 @@ impl GkrModule {
         let zipped_records: Vec<_> = proofs
             .par_iter()
             .zip(preflights.par_iter())
-            .map(|(proof, preflight)| {
+            .map(|(proof_src, preflight)| {
+                let proof = proof_src.to_openvm_proof();
+                let preflight = *preflight;
                 let start_idx = preflight.proof_shape.post_tidx;
                 let mut ts = ReadOnlyTranscript::new(&preflight.transcript, start_idx);
 
@@ -541,13 +562,7 @@ impl GkrModule {
                     mus.push(mu);
                 }
 
-                (
-                    input_record,
-                    layer_record,
-                    sumcheck_record,
-                    mus,
-                    *q0_claim,
-                )
+                (input_record, layer_record, sumcheck_record, mus, *q0_claim)
             })
             .collect();
         let (input_records, layer_records, sumcheck_records, mus_records, q0_claims): (
@@ -574,15 +589,14 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     #[tracing::instrument(skip_all)]
     fn generate_proving_ctxs(
         &self,
-        child_vk: &MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
-        proofs: &[Proof<BabyBearPoseidon2Config>],
+        _child_vk: &RecursionVk,
+        proofs: &[RecursionProof],
         preflights: &[Preflight],
         exp_bits_len_gen: &ExpBitsLenTraceGenerator,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
-        let proof_refs = proofs.iter().collect_vec();
         let preflight_refs = preflights.iter().collect_vec();
-        let blob = self.generate_blob(child_vk, &proof_refs, &preflight_refs, exp_bits_len_gen);
+        let blob = self.generate_blob(proofs, &preflight_refs, exp_bits_len_gen);
 
         let chips = [
             GkrModuleChip::Input,
@@ -694,12 +708,7 @@ mod cuda_tracegen {
                 .iter()
                 .map(|preflight| &preflight.cpu)
                 .collect_vec();
-            let blob = self.generate_blob(
-                &child_vk.cpu,
-                &proofs_cpu,
-                &preflights_cpu,
-                exp_bits_len_gen,
-            );
+            let blob = self.generate_blob(&proofs_cpu, &preflights_cpu, exp_bits_len_gen);
             let chips = [
                 GkrModuleChip::Input,
                 GkrModuleChip::Layer,

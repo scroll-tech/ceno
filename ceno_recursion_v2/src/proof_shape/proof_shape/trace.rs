@@ -2,7 +2,7 @@ use std::{array::from_fn, borrow::BorrowMut, sync::Arc};
 
 use openvm_circuit_primitives::encoder::Encoder;
 use openvm_stark_backend::{
-    interaction::Interaction, keygen::types::MultiStarkVerifyingKey, proof::Proof,
+    interaction::Interaction, keygen::types::MultiStarkVerifyingKey,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
@@ -13,7 +13,7 @@ use crate::{
     proof_shape::proof_shape::air::{
         ProofShapeCols, ProofShapeVarColsMut, borrow_var_cols_mut, decompose_f, decompose_usize,
     },
-    system::{POW_CHECKER_HEIGHT, Preflight},
+    system::{convert_proof_from_zkvm, POW_CHECKER_HEIGHT, Preflight, RecursionProof},
     tracegen::RowMajorChip,
 };
 
@@ -55,7 +55,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
 {
     type Ctx<'a> = (
         &'a MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
-        &'a [Proof<BabyBearPoseidon2Config>],
+        &'a [RecursionProof],
         &'a [Preflight],
     );
 
@@ -90,7 +90,8 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
         let mut trace = vec![F::ZERO; height * total_width];
         let mut chunks = trace.chunks_exact_mut(total_width);
 
-        for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
+        for (proof_idx, (zk_proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
+            let proof = convert_proof_from_zkvm(zk_proof);
             let mut sorted_idx = 0usize;
             let mut total_interactions = 0usize;
             let mut cidx = 1usize;

@@ -5,6 +5,11 @@ This document summarizes the aggregation layer under `src/system`. The code mirr
 ## Type Aliases (`src/system/types.rs`)
 - `RecursionField = BabyBearExt4` and `RecursionPcs = Basefold<RecursionField, BasefoldRSParams>` unify ZKVM field choices across the crate.
 - `RecursionVk = ZKVMVerifyingKey<RecursionField, RecursionPcs>` replaces the upstream `MultiStarkVerifyingKey` so future traits accept ZKVM proofs/VKs natively.
+- `RecursionProof = ZKVMProof<RecursionField, RecursionPcs>` is the canonical proof type exposed to modules; `convert_proof_from_zkvm` is the shim that turns it into OpenVM's `Proof<BabyBearPoseidon2Config>` right before legacy logic runs.
+
+## Preflight Records (`src/system/preflight.rs`)
+- Local fork of the upstream `Preflight`/`ProofShapePreflight`/`GkrPreflight` structs so we can evolve transcript layout and bookkeeping independently of OpenVM.
+- Only the fields that current modules need are mirrored (trace metadata, tidx checkpoints, transcript log, Poseidon inputs). Additional upstream functionality stays commented out until required.
 
 ## Frame Shim (`src/system/frame.rs`)
 - Local copy of upstream `system::frame` because the originals are `pub(crate)`.
@@ -13,6 +18,10 @@ This document summarizes the aggregation layer under `src/system`. The code mirr
 
 ## POW Checker Constant
 - `POW_CHECKER_HEIGHT: usize = 32` mirrors the upstream constant so modules (ProofShape, batch-constraint) can type-check their `PowerChecker` gadgets without reaching into a private upstream module.
+
+## GlobalCtxCpu Override (`src/system/mod.rs`)
+- The upstream `GlobalCtxCpu` binds `TraceGenModule` to `[Proof<BabyBearPoseidon2Config>]`. We shadow it locally with a struct of the same name that implements `GlobalTraceGenCtx` but sets `type MultiProof = [RecursionProof]`.
+- This keeps all CPU tracegen entry points on ZKVM proofs while leaving the trait definitions untouched; CUDA tracegen continues to use the upstream GPU context.
 
 ## VerifierTraceGen Trait
 Located at `src/system/mod.rs:28`.
@@ -52,6 +61,6 @@ Fields capture the stateful modules that participate in recursive verification:
 5. **VerifierSubCircuit** orchestrates these modules: it shares `BusInventory`, ensures every module gets consistent handles, and sequences trace generation so transcript state advances consistently.
 
 ## Pending Work / Notes
-- Once ZKVM proof objects replace `Proof<BabyBearPoseidon2Config>`, `VerifierSubCircuit::commit_child_vk` will need adapters to hash the ZKVM verifying key into the transcript.
+- ZKVM proof objects now flow through every CPU tracegen module; `VerifierSubCircuit::commit_child_vk` still needs adapters that hash the ZKVM verifying key into the transcript before we can run end-to-end.
 - Bus wiring currently happens upstream; replicating it locally may require copying additional files if upstream keeps types `pub(crate)`.
 - All module constructors should remain aligned with upstream layout to minimize future rebase conflicts; prefer small local wrappers over structural rewrites.

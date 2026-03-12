@@ -1,16 +1,19 @@
 use std::borrow::BorrowMut;
 
-use openvm_stark_backend::proof::Proof;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::F;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::{proof_shape::pvs::air::PublicValuesCols, system::Preflight, tracegen::RowMajorChip};
+use crate::{
+    proof_shape::pvs::air::PublicValuesCols,
+    system::{convert_proof_from_zkvm, Preflight, RecursionProof},
+    tracegen::RowMajorChip,
+};
 
 pub struct PublicValuesTraceGenerator;
 
 impl RowMajorChip<F> for PublicValuesTraceGenerator {
-    type Ctx<'a> = (&'a [Proof<BabyBearPoseidon2Config>], &'a [Preflight]);
+    type Ctx<'a> = (&'a [RecursionProof], &'a [Preflight]);
 
     #[tracing::instrument(level = "trace", skip_all)]
     fn generate_trace(
@@ -19,7 +22,11 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
         let (proofs, preflights) = ctx;
-        let num_valid_rows = proofs
+        let converted_proofs: Vec<_> = proofs
+            .iter()
+            .map(|proof| convert_proof_from_zkvm(proof))
+            .collect();
+        let num_valid_rows = converted_proofs
             .iter()
             .map(|proof| {
                 proof
@@ -38,12 +45,14 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
         };
         let width = PublicValuesCols::<u8>::width();
 
-        debug_assert_eq!(proofs.len(), preflights.len());
+        debug_assert_eq!(converted_proofs.len(), preflights.len());
 
         let mut trace = vec![F::ZERO; height * width];
         let mut chunks = trace.chunks_exact_mut(width);
 
-        for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
+        for (proof_idx, (proof, preflight)) in
+            converted_proofs.iter().zip(preflights.iter()).enumerate()
+        {
             let mut row_idx = 0usize;
 
             for ((air_idx, pvs), &starting_tidx) in proof
