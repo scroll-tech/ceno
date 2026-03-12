@@ -29,8 +29,10 @@ pub struct GkrLayerSumcheckCols<T> {
     /// Whether the current row is enabled (i.e. not padding)
     pub is_enabled: T,
     pub proof_idx: T,
+    pub idx: T,
     pub layer_idx: T,
-    pub is_proof_start: T,
+    pub is_first_idx: T,
+    pub is_first_layer: T,
     pub is_first_round: T,
 
     /// An enabled row which is not involved in any interactions
@@ -129,20 +131,24 @@ where
         // Proof Index and Loop Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        type LoopSubAir = NestedForLoopSubAir<2>;
+        type LoopSubAir = NestedForLoopSubAir<3>;
         LoopSubAir {}.eval(
             builder,
             (
                 NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.layer_idx],
-                    is_first: [local.is_proof_start, local.is_first_round],
+                    counter: [local.proof_idx, local.idx, local.layer_idx],
+                    is_first: [
+                        local.is_first_idx,
+                        local.is_first_layer,
+                        local.is_first_round,
+                    ],
                 }
                 .map_into(),
                 NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.layer_idx],
-                    is_first: [next.is_proof_start, next.is_first_round],
+                    counter: [next.proof_idx, next.idx, next.layer_idx],
+                    is_first: [next.is_first_idx, next.is_first_layer, next.is_first_round],
                 }
                 .map_into(),
             ),
@@ -216,10 +222,11 @@ where
             builder,
             local.proof_idx,
             GkrSumcheckInputMessage {
-                layer_idx: local.layer_idx,
-                is_last_layer: local.is_last_layer,
-                tidx: local.tidx,
-                claim: local.claim_in,
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                is_last_layer: local.is_last_layer.into(),
+                tidx: local.tidx.into(),
+                claim: local.claim_in.map(Into::into),
             },
             local.is_first_round * is_not_dummy.clone(),
         );
@@ -229,6 +236,7 @@ where
             builder,
             local.proof_idx,
             GkrSumcheckOutputMessage {
+                idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into() + AB::Expr::from_usize(4 * D_EF),
                 claim_out: local.claim_out.map(Into::into),
@@ -243,6 +251,7 @@ where
             builder,
             local.proof_idx,
             GkrSumcheckChallengeMessage {
+                idx: local.idx.clone().into(),
                 layer_idx: local.layer_idx - AB::Expr::ONE,
                 sumcheck_round: local.round.into(),
                 challenge: local.prev_challenge.map(Into::into),
@@ -254,6 +263,7 @@ where
             builder,
             local.proof_idx,
             GkrSumcheckChallengeMessage {
+                idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 sumcheck_round: local.round.into() + AB::Expr::ONE,
                 challenge: local.challenge.map(Into::into),

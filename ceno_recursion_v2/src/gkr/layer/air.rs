@@ -25,9 +25,8 @@ use crate::gkr::{
 use recursion_circuit::{
     bus::{TranscriptBus, XiRandomnessBus, XiRandomnessMessage},
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
-    utils::{assert_zeros, ext_field_add},
+    utils::{assert_zeros, ext_field_add, ext_field_multiply},
 };
-use recursion_circuit::utils::ext_field_multiply;
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
@@ -346,6 +345,7 @@ where
             builder,
             local.proof_idx,
             GkrSumcheckInputMessage {
+                idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 is_last_layer: is_last.clone(),
                 tidx: local.tidx + AB::Expr::from_usize(D_EF),
@@ -364,6 +364,7 @@ where
             builder,
             local.proof_idx,
             GkrSumcheckOutputMessage {
+                idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: tidx_after_sumcheck.clone(),
                 claim_out: sumcheck_claim_out.map(Into::into),
@@ -377,6 +378,7 @@ where
             builder,
             local.proof_idx,
             GkrSumcheckChallengeMessage {
+                idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 sumcheck_round: AB::Expr::ZERO,
                 challenge: local.mu.map(Into::into),

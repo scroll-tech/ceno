@@ -93,6 +93,8 @@ define_typed_per_proof_permutation_bus!(GkrLogupClaimBus, GkrLogupClaimMessage);
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct GkrSumcheckInputMessage<T> {
+    /// Module index within the proof
+    pub idx: T,
     /// GKR layer index
     pub layer_idx: T,
     pub is_last_layer: T,
@@ -108,6 +110,8 @@ define_typed_per_proof_permutation_bus!(GkrSumcheckInputBus, GkrSumcheckInputMes
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct GkrSumcheckOutputMessage<T> {
+    /// Module index within the proof
+    pub idx: T,
     /// GKR layer index
     pub layer_idx: T,
     /// Transcript index after sumcheck
@@ -124,6 +128,8 @@ define_typed_per_proof_permutation_bus!(GkrSumcheckOutputBus, GkrSumcheckOutputM
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct GkrSumcheckChallengeMessage<T> {
+    /// Module index within the proof
+    pub idx: T,
     /// GKR layer index
     pub layer_idx: T,
     /// Sumcheck round number

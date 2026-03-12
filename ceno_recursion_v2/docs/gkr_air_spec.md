@@ -214,8 +214,10 @@ AIR’s columns, constraints, or interactions change.
 |-------------------------------|----------|------------------------------------------------------------|
 | `is_enabled`                  | scalar   | Row selector.                                              
 | `proof_idx`                   | scalar   | Proof counter.                                             
+| `idx`                         | scalar   | Module index within the proof (mirrors `GkrLayerAir`).     
 | `layer_idx`                   | scalar   | Layer whose sumcheck is being executed.                    
-| `is_proof_start`              | scalar   | First sumcheck row for the proof.                          
+| `is_first_idx`                | scalar   | First sumcheck row for the current `(proof_idx, idx)` pair.|
+| `is_first_layer`              | scalar   | First round row for the current layer.                     
 | `is_first_round`              | scalar   | First round inside the layer.                              
 | `is_dummy`                    | scalar   | Padding flag.                                              
 | `is_last_layer`               | scalar   | Whether this layer is the final GKR layer.                 
@@ -228,8 +230,9 @@ AIR’s columns, constraints, or interactions change.
 
 ### Row Constraints
 
-- **Looping**: `NestedForLoopSubAir<2>` iterates over `(proof_idx, layer_idx)` with per-layer rounds; emits
-  `is_transition_round`/`is_last_round` flags.
+- **Looping**: `NestedForLoopSubAir<3>` now iterates over `(proof_idx, idx, layer_idx)` with the sumcheck round serving
+  as the innermost loop. The `is_first_idx` flag gates reset logic when we advance to a new module instance, while
+  `is_first_layer` protects the per-layer bookkeeping just before the round loop begins.
 - **Round counter**: `round` starts at 0 and increments each transition; final round enforces `round = layer_idx - 1`.
 - **Eq accumulator**: `eq_in = 1` on the first round; `eq_out = update_eq(eq_in, prev_challenge, challenge)` and
   propagates forward.
@@ -243,6 +246,7 @@ AIR’s columns, constraints, or interactions change.
 - `sumcheck_output.send`: last non-dummy round returns `(claim_out, eq_at_r_prime)` to the layer AIR.
 - `sumcheck_challenge.receive/send`: enforces challenge chaining between layers/rounds (`prev_challenge` from prior
   layer, `challenge` published for the next layer or eq export).
+- All three buses now include the `idx` field so messages disambiguate distinct module instances inside the same proof.
 - `transcript_bus.observe_ext`: records `ev1/ev2/ev3`, followed by `sample_ext` of `challenge`.
 - `xi_randomness_bus.send`: on final layer rows, exposes `challenge` (the last xi) for downstream consumers.
 

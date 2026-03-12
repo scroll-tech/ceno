@@ -126,9 +126,11 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
                     cols.is_enabled = F::ONE;
                     cols.tidx = F::from_usize(D_EF);
                     cols.proof_idx = F::from_usize(proof_idx);
+                    cols.idx = F::ZERO;
                     cols.layer_idx = F::ONE;
                     cols.is_first_round = F::ONE;
-                    cols.is_proof_start = F::ONE;
+                    cols.is_first_idx = F::ONE;
+                    cols.is_first_layer = F::ONE;
                     cols.is_last_layer = F::ONE;
                     cols.is_dummy = F::ONE;
                     cols.eq_in = [F::ONE, F::ZERO, F::ZERO, F::ZERO];
@@ -194,13 +196,15 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
                             row_iter.next().unwrap().borrow_mut();
                         cols.is_enabled = F::ONE;
                         cols.proof_idx = F::from_usize(proof_idx);
+                        cols.idx = F::ZERO;
 
                         cols.layer_idx = F::from_usize(layer_idx_value);
                         cols.is_last_layer = F::from_bool(is_last_layer);
 
                         cols.round = F::from_usize(round_in_layer);
                         cols.is_first_round = F::from_bool(round_in_layer == 0);
-                        cols.is_proof_start =
+                        cols.is_first_layer = F::from_bool(round_in_layer == 0);
+                        cols.is_first_idx =
                             F::from_bool(layer_idx_value == 1 && round_in_layer == 0);
 
                         let tidx = record.derive_tidx(layer_idx, round_in_layer);
