@@ -11,6 +11,7 @@ use ceno_gpu::{
 use ceno_gpu::bb31::ShardDeviceBuffers;
 use ceno_gpu::common::witgen_types::{GpuRamRecordSlot, GpuShardScalars};
 use ff_ext::ExtensionField;
+use rayon::prelude::*;
 use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use p3::field::FieldAlgebra;
 use std::cell::{Cell, RefCell};
@@ -195,24 +196,25 @@ fn ensure_shard_metadata_cached(
         }
 
         // Build sorted future-access arrays from HashMap
-        let (fa_cycles_vec, fa_addrs_vec, fa_next_vec) = {
-            let mut entries: Vec<(u64, u32, u64)> = Vec::new();
-            for (cycle, pairs) in shard_ctx.addr_future_accesses.iter() {
-                for &(addr, next_cycle) in pairs.iter() {
-                    entries.push((*cycle, addr.0, next_cycle));
+        let (fa_cycles_vec, fa_addrs_vec, fa_next_vec) =
+            tracing::info_span!("fa_sort").in_scope(|| {
+                let mut entries: Vec<(u64, u32, u64)> = Vec::new();
+                for (cycle, pairs) in shard_ctx.addr_future_accesses.iter() {
+                    for &(addr, next_cycle) in pairs.iter() {
+                        entries.push((*cycle, addr.0, next_cycle));
+                    }
                 }
-            }
-            entries.sort_unstable();
-            let mut cycles = Vec::with_capacity(entries.len());
-            let mut addrs = Vec::with_capacity(entries.len());
-            let mut nexts = Vec::with_capacity(entries.len());
-            for (c, a, n) in entries {
-                cycles.push(c);
-                addrs.push(a);
-                nexts.push(n);
-            }
-            (cycles, addrs, nexts)
-        };
+                entries.par_sort_unstable();
+                let mut cycles = Vec::with_capacity(entries.len());
+                let mut addrs = Vec::with_capacity(entries.len());
+                let mut nexts = Vec::with_capacity(entries.len());
+                for (c, a, n) in entries {
+                    cycles.push(c);
+                    addrs.push(a);
+                    nexts.push(n);
+                }
+                (cycles, addrs, nexts)
+            });
 
         // Build GpuShardScalars
         let scalars = GpuShardScalars {
@@ -234,42 +236,48 @@ fn ensure_shard_metadata_cached(
             num_prev_hint_ranges: shard_ctx.prev_shard_hint_range.len() as u32,
         };
 
-        // H2D copy scalar struct
-        let scalars_bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(
-                &scalars as *const GpuShardScalars as *const u8,
-                std::mem::size_of::<GpuShardScalars>(),
-            )
-        };
-        let scalars_device = hal.inner.htod_copy_stream(None, scalars_bytes).map_err(|e| {
-            ZKVMError::InvalidWitness(format!("shard scalars H2D failed: {e}").into())
+        // H2D uploads
+        let (scalars_device, fa_cycles_device, fa_addrs_device, fa_next_device,
+             pscr_device, pshr_device, pshi_device) =
+            tracing::info_span!("shard_meta_h2d").in_scope(|| -> Result<_, ZKVMError> {
+            let scalars_bytes: &[u8] = unsafe {
+                std::slice::from_raw_parts(
+                    &scalars as *const GpuShardScalars as *const u8,
+                    std::mem::size_of::<GpuShardScalars>(),
+                )
+            };
+            let scalars_device = hal.inner.htod_copy_stream(None, scalars_bytes).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("shard scalars H2D failed: {e}").into())
+            })?;
+
+            let fa_cycles_device = hal
+                .alloc_u64_from_host(if fa_cycles_vec.is_empty() { &[0u64] } else { &fa_cycles_vec }, None)
+                .map_err(|e| ZKVMError::InvalidWitness(format!("fa_cycles H2D failed: {e}").into()))?;
+            let fa_addrs_device = hal
+                .alloc_u32_from_host(if fa_addrs_vec.is_empty() { &[0u32] } else { &fa_addrs_vec }, None)
+                .map_err(|e| ZKVMError::InvalidWitness(format!("fa_addrs H2D failed: {e}").into()))?;
+            let fa_next_device = hal
+                .alloc_u64_from_host(if fa_next_vec.is_empty() { &[0u64] } else { &fa_next_vec }, None)
+                .map_err(|e| ZKVMError::InvalidWitness(format!("fa_next H2D failed: {e}").into()))?;
+
+            let pscr = &shard_ctx.prev_shard_cycle_range;
+            let pscr_device = hal
+                .alloc_u64_from_host(if pscr.is_empty() { &[0u64] } else { pscr }, None)
+                .map_err(|e| ZKVMError::InvalidWitness(format!("pscr H2D failed: {e}").into()))?;
+
+            let pshr = &shard_ctx.prev_shard_heap_range;
+            let pshr_device = hal
+                .alloc_u32_from_host(if pshr.is_empty() { &[0u32] } else { pshr }, None)
+                .map_err(|e| ZKVMError::InvalidWitness(format!("pshr H2D failed: {e}").into()))?;
+
+            let pshi = &shard_ctx.prev_shard_hint_range;
+            let pshi_device = hal
+                .alloc_u32_from_host(if pshi.is_empty() { &[0u32] } else { pshi }, None)
+                .map_err(|e| ZKVMError::InvalidWitness(format!("pshi H2D failed: {e}").into()))?;
+
+            Ok((scalars_device, fa_cycles_device, fa_addrs_device, fa_next_device,
+                pscr_device, pshr_device, pshi_device))
         })?;
-
-        // H2D copy arrays (use empty slice [0] sentinel for empty arrays)
-        let fa_cycles_device = hal
-            .alloc_u64_from_host(if fa_cycles_vec.is_empty() { &[0u64] } else { &fa_cycles_vec }, None)
-            .map_err(|e| ZKVMError::InvalidWitness(format!("fa_cycles H2D failed: {e}").into()))?;
-        let fa_addrs_device = hal
-            .alloc_u32_from_host(if fa_addrs_vec.is_empty() { &[0u32] } else { &fa_addrs_vec }, None)
-            .map_err(|e| ZKVMError::InvalidWitness(format!("fa_addrs H2D failed: {e}").into()))?;
-        let fa_next_device = hal
-            .alloc_u64_from_host(if fa_next_vec.is_empty() { &[0u64] } else { &fa_next_vec }, None)
-            .map_err(|e| ZKVMError::InvalidWitness(format!("fa_next H2D failed: {e}").into()))?;
-
-        let pscr = &shard_ctx.prev_shard_cycle_range;
-        let pscr_device = hal
-            .alloc_u64_from_host(if pscr.is_empty() { &[0u64] } else { pscr }, None)
-            .map_err(|e| ZKVMError::InvalidWitness(format!("pscr H2D failed: {e}").into()))?;
-
-        let pshr = &shard_ctx.prev_shard_heap_range;
-        let pshr_device = hal
-            .alloc_u32_from_host(if pshr.is_empty() { &[0u32] } else { pshr }, None)
-            .map_err(|e| ZKVMError::InvalidWitness(format!("pshr H2D failed: {e}").into()))?;
-
-        let pshi = &shard_ctx.prev_shard_hint_range;
-        let pshi_device = hal
-            .alloc_u32_from_host(if pshi.is_empty() { &[0u32] } else { pshi }, None)
-            .map_err(|e| ZKVMError::InvalidWitness(format!("pshi H2D failed: {e}").into()))?;
 
         let mb = (fa_cycles_vec.len() * 8 * 2 + fa_addrs_vec.len() * 4) as f64 / (1024.0 * 1024.0);
         tracing::info!(
@@ -696,7 +704,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     let (fetch_base_pc, fetch_num_slots) = compute_fetch_params(shard_steps, step_indices);
 
     // Ensure shard metadata is cached for GPU shard records (shared across all kernel kinds)
-    ensure_shard_metadata_cached(hal, shard_ctx)?;
+    info_span!("ensure_shard_meta").in_scope(|| ensure_shard_metadata_cached(hal, shard_ctx))?;
 
     match kind {
         GpuWitgenKind::Add => {
