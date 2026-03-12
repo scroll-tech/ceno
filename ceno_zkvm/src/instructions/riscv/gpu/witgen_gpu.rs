@@ -4,19 +4,21 @@
 /// 1. Runs the GPU kernel to fill the witness matrix (fast)
 /// 2. Runs a lightweight CPU loop to collect side effects without witness replay
 /// 3. Returns the GPU-generated witness + CPU-collected side effects
-use ceno_emul::{StepIndex, StepRecord};
+use ceno_emul::{StepIndex, StepRecord, WordAddr};
 use ceno_gpu::{
     Buffer, CudaHal, CudaSlice, bb31::CudaHalBB31, common::transpose::matrix_transpose,
 };
+use ceno_gpu::bb31::ShardDeviceBuffers;
+use ceno_gpu::common::witgen_types::{GpuRamRecordSlot, GpuShardScalars, RAM_SLOTS_PER_INST};
 use ff_ext::ExtensionField;
-use gkr_iop::{tables::LookupTable, utils::lk_multiplicity::Multiplicity};
+use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use p3::field::FieldAlgebra;
 use std::cell::{Cell, RefCell};
 use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
-    e2e::ShardContext,
+    e2e::{RAMRecord, ShardContext},
     error::ZKVMError,
     instructions::{Instruction, cpu_collect_shard_side_effects, cpu_collect_side_effects},
     tables::RMMCollections,
@@ -165,6 +167,250 @@ pub fn invalidate_shard_steps_cache() {
     });
 }
 
+/// Cached shard metadata device buffers for GPU shard records.
+/// Invalidated when shard_id changes; shared across all kernel invocations in one shard.
+struct ShardMetadataCache {
+    shard_id: usize,
+    device_bufs: ShardDeviceBuffers,
+}
+
+thread_local! {
+    static SHARD_META_CACHE: RefCell<Option<ShardMetadataCache>> =
+        const { RefCell::new(None) };
+}
+
+/// Build and cache shard metadata device buffers for GPU shard records.
+/// Returns a reference to the cached `ShardDeviceBuffers`.
+fn ensure_shard_metadata_cached(
+    hal: &CudaHalBB31,
+    shard_ctx: &ShardContext,
+) -> Result<(), ZKVMError> {
+    let shard_id = shard_ctx.shard_id;
+    SHARD_META_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(c) = cache.as_ref() {
+            if c.shard_id == shard_id {
+                return Ok(()); // cache hit
+            }
+        }
+
+        // Build sorted future-access arrays from HashMap
+        let (fa_cycles_vec, fa_addrs_vec, fa_next_vec) = {
+            let mut entries: Vec<(u64, u32, u64)> = Vec::new();
+            for (cycle, pairs) in shard_ctx.addr_future_accesses.iter() {
+                for &(addr, next_cycle) in pairs.iter() {
+                    entries.push((*cycle, addr.0, next_cycle));
+                }
+            }
+            entries.sort_unstable();
+            let mut cycles = Vec::with_capacity(entries.len());
+            let mut addrs = Vec::with_capacity(entries.len());
+            let mut nexts = Vec::with_capacity(entries.len());
+            for (c, a, n) in entries {
+                cycles.push(c);
+                addrs.push(a);
+                nexts.push(n);
+            }
+            (cycles, addrs, nexts)
+        };
+
+        // Build GpuShardScalars
+        let scalars = GpuShardScalars {
+            shard_cycle_start: shard_ctx.cur_shard_cycle_range.start as u64,
+            shard_cycle_end: shard_ctx.cur_shard_cycle_range.end as u64,
+            shard_offset_cycle: shard_ctx.current_shard_offset_cycle(),
+            shard_id: shard_id as u32,
+            heap_start: shard_ctx.platform.heap.start,
+            heap_end: shard_ctx.platform.heap.end,
+            hint_start: shard_ctx.platform.hints.start,
+            hint_end: shard_ctx.platform.hints.end,
+            shard_heap_start: shard_ctx.shard_heap_addr_range.start,
+            shard_heap_end: shard_ctx.shard_heap_addr_range.end,
+            shard_hint_start: shard_ctx.shard_hint_addr_range.start,
+            shard_hint_end: shard_ctx.shard_hint_addr_range.end,
+            fa_count: fa_cycles_vec.len() as u32,
+            num_prev_shards: shard_ctx.prev_shard_cycle_range.len() as u32,
+            num_prev_heap_ranges: shard_ctx.prev_shard_heap_range.len() as u32,
+            num_prev_hint_ranges: shard_ctx.prev_shard_hint_range.len() as u32,
+        };
+
+        // H2D copy scalar struct
+        let scalars_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                &scalars as *const GpuShardScalars as *const u8,
+                std::mem::size_of::<GpuShardScalars>(),
+            )
+        };
+        let scalars_device = hal.inner.htod_copy_stream(None, scalars_bytes).map_err(|e| {
+            ZKVMError::InvalidWitness(format!("shard scalars H2D failed: {e}").into())
+        })?;
+
+        // H2D copy arrays (use empty slice [0] sentinel for empty arrays)
+        let fa_cycles_device = hal
+            .alloc_u64_from_host(if fa_cycles_vec.is_empty() { &[0u64] } else { &fa_cycles_vec }, None)
+            .map_err(|e| ZKVMError::InvalidWitness(format!("fa_cycles H2D failed: {e}").into()))?;
+        let fa_addrs_device = hal
+            .alloc_u32_from_host(if fa_addrs_vec.is_empty() { &[0u32] } else { &fa_addrs_vec }, None)
+            .map_err(|e| ZKVMError::InvalidWitness(format!("fa_addrs H2D failed: {e}").into()))?;
+        let fa_next_device = hal
+            .alloc_u64_from_host(if fa_next_vec.is_empty() { &[0u64] } else { &fa_next_vec }, None)
+            .map_err(|e| ZKVMError::InvalidWitness(format!("fa_next H2D failed: {e}").into()))?;
+
+        let pscr = &shard_ctx.prev_shard_cycle_range;
+        let pscr_device = hal
+            .alloc_u64_from_host(if pscr.is_empty() { &[0u64] } else { pscr }, None)
+            .map_err(|e| ZKVMError::InvalidWitness(format!("pscr H2D failed: {e}").into()))?;
+
+        let pshr = &shard_ctx.prev_shard_heap_range;
+        let pshr_device = hal
+            .alloc_u32_from_host(if pshr.is_empty() { &[0u32] } else { pshr }, None)
+            .map_err(|e| ZKVMError::InvalidWitness(format!("pshr H2D failed: {e}").into()))?;
+
+        let pshi = &shard_ctx.prev_shard_hint_range;
+        let pshi_device = hal
+            .alloc_u32_from_host(if pshi.is_empty() { &[0u32] } else { pshi }, None)
+            .map_err(|e| ZKVMError::InvalidWitness(format!("pshi H2D failed: {e}").into()))?;
+
+        let mb = (fa_cycles_vec.len() * 8 * 2 + fa_addrs_vec.len() * 4) as f64 / (1024.0 * 1024.0);
+        tracing::info!(
+            "[GPU shard] built ShardMetadataCache: shard_id={}, fa_entries={}, {:.2} MB",
+            shard_id, fa_cycles_vec.len(), mb,
+        );
+
+        *cache = Some(ShardMetadataCache {
+            shard_id,
+            device_bufs: ShardDeviceBuffers {
+                scalars: scalars_device,
+                fa_cycles: fa_cycles_device,
+                fa_addrs: fa_addrs_device,
+                fa_next_cycles: fa_next_device,
+                prev_shard_cycle_range: pscr_device,
+                prev_shard_heap_range: pshr_device,
+                prev_shard_hint_range: pshi_device,
+            },
+        });
+        Ok(())
+    })
+}
+
+/// Borrow the cached shard device buffers for kernel launch.
+fn with_cached_shard_meta<R>(f: impl FnOnce(&ShardDeviceBuffers) -> R) -> R {
+    SHARD_META_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        let c = cache.as_ref().expect("shard metadata not uploaded");
+        f(&c.device_bufs)
+    })
+}
+
+/// Invalidate the shard metadata cache (call when shard processing is complete).
+pub fn invalidate_shard_meta_cache() {
+    SHARD_META_CACHE.with(|cache| {
+        *cache.borrow_mut() = None;
+    });
+}
+
+/// CPU-side lightweight scan of GPU-produced RAM record slots.
+///
+/// Reconstructs BTreeMap read/write records and addr_accessed from the GPU output,
+/// replacing the previous `collect_shard_side_effects()` CPU loop.
+fn gpu_collect_shard_records(
+    shard_ctx: &mut ShardContext,
+    slots: &[GpuRamRecordSlot],
+) {
+    let current_shard_id = shard_ctx.shard_id;
+
+    for slot in slots {
+        // Check was_sent flag (bit 4): this slot corresponds to a send() call
+        if slot.flags & (1 << 4) != 0 {
+            shard_ctx.push_addr_accessed(WordAddr(slot.addr));
+        }
+
+        // Check active flag (bit 0): this slot has a read or write record
+        if slot.flags & 1 == 0 {
+            continue;
+        }
+
+        let ram_type = match (slot.flags >> 5) & 0x7 {
+            1 => RAMType::Register,
+            2 => RAMType::Memory,
+            _ => continue,
+        };
+        let has_prev_value = slot.flags & (1 << 3) != 0;
+        let prev_value = if has_prev_value { Some(slot.prev_value) } else { None };
+        let addr = WordAddr(slot.addr);
+
+        // Insert read record (bit 1)
+        if slot.flags & (1 << 1) != 0 {
+            shard_ctx.insert_read_record(
+                addr,
+                RAMRecord {
+                    ram_type,
+                    reg_id: slot.reg_id as u64,
+                    addr,
+                    prev_cycle: slot.prev_cycle,
+                    cycle: slot.cycle,
+                    shard_cycle: 0,
+                    prev_value,
+                    value: slot.value,
+                    shard_id: slot.read_shard_id as usize,
+                },
+            );
+        }
+
+        // Insert write record (bit 2)
+        if slot.flags & (1 << 2) != 0 {
+            shard_ctx.insert_write_record(
+                addr,
+                RAMRecord {
+                    ram_type,
+                    reg_id: slot.reg_id as u64,
+                    addr,
+                    prev_cycle: slot.prev_cycle,
+                    cycle: slot.cycle,
+                    shard_cycle: slot.shard_cycle,
+                    prev_value,
+                    value: slot.value,
+                    shard_id: current_shard_id,
+                },
+            );
+        }
+    }
+}
+
+/// Returns true if GPU shard records are verified for this kind.
+fn kind_has_verified_shard(kind: GpuWitgenKind) -> bool {
+    if is_shard_kind_disabled(kind) {
+        return false;
+    }
+    match kind {
+        GpuWitgenKind::Add => true,
+        _ => false,
+    }
+}
+
+/// Check if GPU shard records are disabled for a specific kind via env var.
+fn is_shard_kind_disabled(kind: GpuWitgenKind) -> bool {
+    thread_local! {
+        static DISABLED: std::cell::OnceCell<Vec<String>> = const { std::cell::OnceCell::new() };
+    }
+    DISABLED.with(|cell| {
+        let disabled = cell.get_or_init(|| {
+            std::env::var("CENO_GPU_DISABLE_SHARD_KINDS")
+                .ok()
+                .map(|s| s.split(',').map(|t| t.trim().to_lowercase()).collect())
+                .unwrap_or_default()
+        });
+        if disabled.is_empty() {
+            return false;
+        }
+        if disabled.iter().any(|d| d == "all") {
+            return true;
+        }
+        let tag = kind_tag(kind);
+        disabled.iter().any(|d| d == tag)
+    })
+}
+
 /// Returns true if GPU witgen is globally disabled via CENO_GPU_DISABLE_WITGEN env var.
 /// The value is cached at first access so it's immune to runtime env var manipulation.
 fn is_gpu_witgen_disabled() -> bool {
@@ -270,8 +516,8 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     let num_structural_witin = num_structural_witin.max(1);
     let total_instances = step_indices.len();
 
-    // Step 1: GPU fills witness matrix (+ LK counters for merged kinds)
-    let (gpu_witness, gpu_lk_counters) = info_span!("gpu_kernel").in_scope(|| {
+    // Step 1: GPU fills witness matrix (+ LK counters + shard records for merged kinds)
+    let (gpu_witness, gpu_lk_counters, gpu_ram_slots) = info_span!("gpu_kernel").in_scope(|| {
         gpu_fill_witness::<E, I>(
             hal,
             config,
@@ -284,19 +530,36 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     })?;
 
     // Step 2: Collect side effects
-    // For verified GPU kinds: LK from GPU, shard records from CPU
-    // For unverified kinds: full CPU side effects (GPU witness still used)
+    // Priority: GPU shard records > CPU shard records > full CPU side effects
     let lk_multiplicity = if gpu_lk_counters.is_some() && kind_has_verified_lk(kind) {
         let lk_multiplicity = info_span!("gpu_lk_d2h").in_scope(|| {
             gpu_lk_counters_to_multiplicity(gpu_lk_counters.unwrap())
         })?;
-        // CPU: collect shard records only (send/addr_accessed).
-        // We call collect_shard_side_effects which also computes fetch, but we
-        // discard its returned Multiplicity since GPU already has all LK + fetch.
-        info_span!("cpu_shard_records").in_scope(|| {
-            let _ = collect_shard_side_effects::<E, I>(config, shard_ctx, shard_steps, step_indices)?;
-            Ok::<(), ZKVMError>(())
-        })?;
+
+        if gpu_ram_slots.is_some() && kind_has_verified_shard(kind) {
+            // GPU shard records path: D2H + lightweight CPU scan
+            info_span!("gpu_shard_records").in_scope(|| {
+                let ram_buf = gpu_ram_slots.unwrap();
+                let slot_bytes: Vec<u32> = ram_buf.to_vec().map_err(|e| {
+                    ZKVMError::InvalidWitness(format!("ram_slots D2H failed: {e}").into())
+                })?;
+                // Reinterpret u32 buffer as GpuRamRecordSlot slice
+                let slots: &[GpuRamRecordSlot] = unsafe {
+                    std::slice::from_raw_parts(
+                        slot_bytes.as_ptr() as *const GpuRamRecordSlot,
+                        slot_bytes.len() * 4 / std::mem::size_of::<GpuRamRecordSlot>(),
+                    )
+                };
+                gpu_collect_shard_records(shard_ctx, slots);
+                Ok::<(), ZKVMError>(())
+            })?;
+        } else {
+            // CPU: collect shard records only (send/addr_accessed).
+            info_span!("cpu_shard_records").in_scope(|| {
+                let _ = collect_shard_side_effects::<E, I>(config, shard_ctx, shard_steps, step_indices)?;
+                Ok::<(), ZKVMError>(())
+            })?;
+        }
         lk_multiplicity
     } else {
         // GPU LK counters missing or unverified — fall back to full CPU side effects
@@ -348,6 +611,7 @@ type WitBuf = ceno_gpu::common::BufferImpl<
     <ff_ext::BabyBearExt4 as ExtensionField>::BaseField,
 >;
 type LkBuf = ceno_gpu::common::BufferImpl<'static, u32>;
+type RamBuf = ceno_gpu::common::BufferImpl<'static, u32>;
 type WitResult = ceno_gpu::common::witgen_types::GpuWitnessResult<WitBuf>;
 type LkResult = ceno_gpu::common::witgen_types::GpuLookupCountersResult<LkBuf>;
 
@@ -381,7 +645,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
     kind: GpuWitgenKind,
-) -> Result<(WitResult, Option<LkResult>), ZKVMError> {
+) -> Result<(WitResult, Option<LkResult>, Option<RamBuf>), ZKVMError> {
     // Upload shard_steps to GPU once (cached across ADD/LW calls within same shard).
     let shard_id = shard_ctx.shard_id;
     info_span!("upload_shard_steps")
@@ -396,7 +660,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     macro_rules! split_full {
         ($result:expr) => {{
             let full = $result?;
-            Ok((full.witness, Some(full.lk_counters)))
+            Ok((full.witness, Some(full.lk_counters), None))
         }};
     }
 
@@ -411,21 +675,28 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             };
             let col_map = info_span!("col_map")
                 .in_scope(|| super::add::extract_add_column_map(arith_config, num_witin));
+            ensure_shard_metadata_cached(hal, shard_ctx)?;
             info_span!("hal_witgen_add").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
-                    split_full!(hal
-                        .witgen_add(
-                            &col_map,
-                            gpu_records,
-                            &indices_u32,
-                            shard_offset,
-                            fetch_base_pc,
-                            fetch_num_slots,
-                            None,
-                        )
-                        .map_err(|e| {
-                            ZKVMError::InvalidWitness(format!("GPU witgen_add failed: {e}").into())
-                        }))
+                    with_cached_shard_meta(|shard_bufs| {
+                        let full = hal
+                            .witgen_add(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_add failed: {e}").into(),
+                                )
+                            })?;
+                        Ok((full.witness, Some(full.lk_counters), full.ram_slots))
+                    })
                 })
             })
         }
