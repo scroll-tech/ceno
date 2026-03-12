@@ -3,7 +3,7 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 use anyhow::Result;
 use ceno_emul::{
     BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, EmuContext, InsnKind,
-    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, StepRecord,
+    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, StepRecord, SyscallWitness,
     UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
     host_utils::{read_all_messages, read_all_messages_as_words},
 };
@@ -21,7 +21,7 @@ fn test_ceno_rt_mini() -> Result<()> {
         ..CENO_PLATFORM.clone()
     };
     let mut state = VMState::new(platform, Arc::new(program));
-    let _steps = run(&mut state)?;
+    let (_steps, _syscall_witnesses) = run(&mut state)?;
     Ok(())
 }
 
@@ -39,7 +39,7 @@ fn test_ceno_rt_panic() {
         ..CENO_PLATFORM.clone()
     };
     let mut state = VMState::new(platform, Arc::new(program));
-    let steps = run(&mut state).unwrap();
+    let (steps, _syscall_witnesses) = run(&mut state).unwrap();
     let last = steps.last().unwrap();
     assert_eq!(last.insn().kind, InsnKind::ECALL);
     assert_eq!(last.rs1().unwrap().value, Platform::ecall_halt());
@@ -56,7 +56,7 @@ fn test_ceno_rt_mem() -> Result<()> {
     };
     let sheap = program.sheap.into();
     let mut state = VMState::new(platform, Arc::new(program.clone()));
-    let _steps = run(&mut state)?;
+    let (_steps, _syscall_witnesses) = run(&mut state)?;
 
     let value = state.peek_memory(sheap);
     assert_eq!(value, 6765, "Expected Fibonacci 20, got {}", value);
@@ -72,7 +72,7 @@ fn test_ceno_rt_alloc() -> Result<()> {
         ..CENO_PLATFORM.clone()
     };
     let mut state = VMState::new(platform, Arc::new(program));
-    let _steps = run(&mut state)?;
+    let (_steps, _syscall_witnesses) = run(&mut state)?;
 
     // Search for the RAM action of the test program.
     let mut found = (false, false);
@@ -102,7 +102,7 @@ fn test_ceno_rt_io() -> Result<()> {
         ..CENO_PLATFORM.clone()
     };
     let mut state = VMState::new(platform, Arc::new(program));
-    let _steps = run(&mut state)?;
+    let (_steps, _syscall_witnesses) = run(&mut state)?;
 
     let all_messages = messages_to_strings(&read_all_messages(&state));
     for msg in &all_messages {
@@ -235,7 +235,7 @@ fn test_hashing() -> Result<()> {
 fn test_keccak_syscall() -> Result<()> {
     let program_elf = ceno_examples::keccak_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let steps = run(&mut state)?;
+    let (steps, syscall_witnesses) = run(&mut state)?;
 
     // Expect the program to have written successive states between Keccak permutations.
     let keccak_first_iter_outs = sample_keccak_f(1);
@@ -251,7 +251,10 @@ fn test_keccak_syscall() -> Result<()> {
     }
 
     // Find the syscall records.
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert_eq!(syscalls.len(), 100);
 
     // Check the syscall effects.
@@ -293,9 +296,12 @@ fn bytes_to_words(bytes: [u8; 65]) -> [u32; 16] {
 fn test_secp256k1() -> Result<()> {
     let program_elf = ceno_examples::secp256k1;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let steps = run(&mut state)?;
+    let (steps, syscall_witnesses) = run(&mut state)?;
 
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert!(!syscalls.is_empty());
 
     Ok(())
@@ -305,9 +311,12 @@ fn test_secp256k1() -> Result<()> {
 fn test_secp256k1_add() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_add_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let steps = run(&mut state)?;
+    let (steps, syscall_witnesses) = run(&mut state)?;
 
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert_eq!(syscalls.len(), 1);
 
     let witness = syscalls[0];
@@ -358,9 +367,12 @@ fn test_secp256k1_double() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_double_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
 
-    let steps = run(&mut state)?;
+    let (steps, syscall_witnesses) = run(&mut state)?;
 
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert_eq!(syscalls.len(), 1);
 
     let witness = syscalls[0];
@@ -394,9 +406,12 @@ fn test_secp256k1_decompress() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_decompress_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
 
-    let steps = run(&mut state)?;
+    let (steps, syscall_witnesses) = run(&mut state)?;
 
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert_eq!(syscalls.len(), 1);
 
     let witness = syscalls[0];
@@ -456,8 +471,11 @@ fn test_secp256k1_ecrecover() -> Result<()> {
     let program_elf = ceno_examples::secp256k1_ecrecover;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
 
-    let steps = run(&mut state)?;
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let (steps, syscall_witnesses) = run(&mut state)?;
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert!(!syscalls.is_empty());
 
     Ok(())
@@ -479,8 +497,11 @@ fn test_sha256_extend() -> Result<()> {
     ];
 
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let steps = run(&mut state)?;
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let (steps, syscall_witnesses) = run(&mut state)?;
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert_eq!(syscalls.len(), 48);
 
     for round in 0..48 {
@@ -534,10 +555,13 @@ fn test_sha256_full() -> Result<()> {
 fn test_bn254_fptower_syscalls() -> Result<()> {
     let program_elf = ceno_examples::bn254_fptower_syscalls;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let steps = run(&mut state)?;
+    let (steps, syscall_witnesses) = run(&mut state)?;
 
     const RUNS: usize = 10;
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert_eq!(syscalls.len(), 4 * RUNS);
 
     for witness in syscalls.iter() {
@@ -584,9 +608,12 @@ fn test_bn254_fptower_syscalls() -> Result<()> {
 fn test_bn254_curve() -> Result<()> {
     let program_elf = ceno_examples::bn254_curve_syscalls;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-    let steps = run(&mut state)?;
+    let (steps, syscall_witnesses) = run(&mut state)?;
 
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert_eq!(syscalls.len(), 3);
 
     // add
@@ -652,9 +679,12 @@ fn test_uint256_mul() -> Result<()> {
     let program_elf = ceno_examples::uint256_mul_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
 
-    let steps = run(&mut state)?;
+    let (steps, syscall_witnesses) = run(&mut state)?;
 
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    let syscalls = steps
+        .iter()
+        .filter_map(|step| step.syscall(&syscall_witnesses))
+        .collect_vec();
     assert_eq!(syscalls.len(), 1);
 
     let witness = syscalls[0];
@@ -805,9 +835,10 @@ fn messages_to_strings(messages: &[Vec<u8>]) -> Vec<String> {
         .collect()
 }
 
-fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
+fn run(state: &mut VMState) -> Result<(Vec<StepRecord>, Vec<SyscallWitness>)> {
     state.iter_until_halt().collect::<Result<Vec<_>>>()?;
     let steps = state.tracer().recorded_steps().to_vec();
+    let syscall_witnesses = state.tracer().syscall_witnesses().to_vec();
     eprintln!("Emulator ran for {} steps.", steps.len());
-    Ok(steps)
+    Ok((steps, syscall_witnesses))
 }

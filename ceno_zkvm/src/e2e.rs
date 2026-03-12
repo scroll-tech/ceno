@@ -24,9 +24,9 @@ use crate::{
 };
 use ceno_emul::{
     Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, IterAddresses,
-    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, StepCellExtractor,
-    StepIndex, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
-    host_utils::read_all_messages,
+    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
+    StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
+    WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -199,6 +199,8 @@ pub struct ShardContext<'a> {
     pub platform: Platform,
     pub shard_heap_addr_range: Range<Addr>,
     pub shard_hint_addr_range: Range<Addr>,
+    /// Syscall witnesses for StepRecord::syscall() lookups.
+    pub syscall_witnesses: Arc<Vec<SyscallWitness>>,
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -233,6 +235,7 @@ impl<'a> Default for ShardContext<'a> {
             platform: CENO_PLATFORM.clone(),
             shard_heap_addr_range: CENO_PLATFORM.heap.clone(),
             shard_hint_addr_range: CENO_PLATFORM.hints.clone(),
+            syscall_witnesses: Arc::new(Vec::new()),
         }
     }
 }
@@ -279,6 +282,7 @@ impl<'a> ShardContext<'a> {
                     platform: self.platform.clone(),
                     shard_heap_addr_range: self.shard_heap_addr_range.clone(),
                     shard_hint_addr_range: self.shard_hint_addr_range.clone(),
+                    syscall_witnesses: self.syscall_witnesses.clone(),
                 })
                 .collect_vec(),
             _ => panic!("invalid type"),
@@ -750,6 +754,7 @@ pub trait StepSource: Iterator<Item = StepIndex> {
     fn start_new_shard(&mut self);
     fn shard_steps(&self) -> &[StepRecord];
     fn step_record(&self, idx: StepIndex) -> &StepRecord;
+    fn syscall_witnesses(&self) -> &[SyscallWitness];
 }
 
 /// Lazily replays `StepRecord`s by re-running the VM up to the number of steps
@@ -821,6 +826,10 @@ impl StepSource for StepReplay {
     #[inline(always)]
     fn step_record(&self, idx: StepIndex) -> &StepRecord {
         self.vm.tracer().step_record(idx)
+    }
+
+    fn syscall_witnesses(&self) -> &[SyscallWitness] {
+        self.vm.tracer().syscall_witnesses()
     }
 }
 
@@ -899,8 +908,8 @@ pub fn emulate_program<'a>(
     let reg_final = reg_init
         .iter()
         .map(|rec| {
-            let index = rec.addr as usize;
-            if index < VM_REG_COUNT {
+            if (rec.addr as usize) < VM_REG_COUNT {
+                let index = rec.addr as RegIdx;
                 let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
                     ram_type: RAMType::Register,
@@ -1282,6 +1291,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 };
             tracing::debug!("position_next_shard finish in {:?}", time.elapsed());
             let shard_steps = step_iter.shard_steps();
+            shard_ctx.syscall_witnesses = Arc::new(step_iter.syscall_witnesses().to_vec());
 
             let mut zkvm_witness = ZKVMWitnesses::default();
             let mut pi = pi_template.clone();
@@ -2122,7 +2132,9 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 #[cfg(test)]
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder};
-    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepIndex, StepRecord};
+    use ceno_emul::{
+        CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepIndex, StepRecord, SyscallWitness,
+    };
     use itertools::Itertools;
     use std::sync::Arc;
 
@@ -2223,6 +2235,10 @@ mod tests {
 
             fn step_record(&self, idx: StepIndex) -> &StepRecord {
                 &self.steps[self.shard_start + idx]
+            }
+
+            fn syscall_witnesses(&self) -> &[SyscallWitness] {
+                &[] // Test replay doesn't track syscalls
             }
         }
 

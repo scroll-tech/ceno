@@ -221,7 +221,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                     .zip_eq(indices.iter().copied())
                     .map(|(instance_with_rotation, idx)| {
                         let step = &steps[idx];
-                        let ops = &step.syscall().expect("syscall step");
+                        let sw = shard_ctx.syscall_witnesses.clone();
+                        let ops = &step.syscall(&sw).expect("syscall step");
 
                         let bh = BooleanHypercube::new(KECCAK_ROUNDS_CEIL_LOG2);
                         let mut cyclic_group = bh.into_iter();
@@ -285,7 +286,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .map(|&idx| -> KeccakInstance {
                 let step = &steps[idx];
                 let (instance, prev_ts): (Vec<u32>, Vec<Cycle>) = step
-                    .syscall()
+                    .syscall(&shard_ctx.syscall_witnesses)
                     .unwrap()
                     .mem_ops
                     .iter()
