@@ -23,7 +23,7 @@ use crate::gkr::{
 };
 
 use recursion_circuit::{
-    bus::{TranscriptBus, XiRandomnessBus, XiRandomnessMessage},
+    bus::TranscriptBus,
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     utils::{assert_zeros, ext_field_add, ext_field_multiply},
 };
@@ -77,7 +77,6 @@ pub struct GkrLayerCols<T> {
 /// The GkrLayerAir handles layer-to-layer transitions in the GKR protocol
 pub struct GkrLayerAir {
     // External buses
-    pub xi_randomness_bus: XiRandomnessBus,
     pub transcript_bus: TranscriptBus,
     // Internal buses
     pub layer_input_bus: GkrLayerInputBus,
@@ -195,7 +194,7 @@ where
         assert_array_eq(
             &mut builder.when(is_transition.clone()),
             next.sumcheck_claim_in,
-            folded_claim,
+            folded_claim.clone(),
         );
 
         // Transcript index increment
@@ -334,7 +333,9 @@ where
                 idx: local.idx.into(),
                 tidx: tidx_end,
                 layer_idx_end: local.layer_idx.into(),
-                input_layer_claim: local.sumcheck_claim_in.map(Into::into),
+                input_layer_claim: folded_claim.map(Into::into),
+                lambda: local.lambda.map(Into::into),
+                mu: local.mu.map(Into::into),
             },
             is_last.clone() * is_not_dummy.clone(),
         );
@@ -391,13 +392,16 @@ where
         ///////////////////////////////////////////////////////////////////////
 
         // 1. TranscriptBus
+        // sample lambda and mu
+        // in root & intermediate layer: for next.sumcheck_claim_in
+        // in last layer: for send back to GKR input layer
         // 1a. Sample `lambda`
         self.transcript_bus.sample_ext(
             builder,
             local.proof_idx,
             local.tidx,
             local.lambda,
-            is_non_root_layer.clone() * is_not_dummy.clone(),
+            local.is_enabled * is_not_dummy.clone(),
         );
         // 1b. Observe layer claims
         let tidx = tidx_after_sumcheck;
@@ -408,18 +412,6 @@ where
             tidx,
             local.mu,
             local.is_enabled * is_not_dummy.clone(),
-        );
-
-        // 2. XiRandomnessBus
-        // 2a. Send shared randomness
-        self.xi_randomness_bus.send(
-            builder,
-            local.proof_idx,
-            XiRandomnessMessage {
-                idx: AB::Expr::ZERO,
-                xi: local.mu.map(Into::into),
-            },
-            is_last * is_not_dummy.clone(),
         );
     }
 }

@@ -297,7 +297,6 @@ impl AirModule for GkrModule {
         };
 
         let gkr_layer_air = GkrLayerAir {
-            xi_randomness_bus: self.bus_inventory.xi_randomness_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,

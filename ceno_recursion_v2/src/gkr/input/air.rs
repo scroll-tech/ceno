@@ -54,6 +54,8 @@ pub struct GkrInputCols<T> {
     pub alpha_logup: [T; D_EF],
 
     pub input_layer_claim: [T; D_EF],
+    pub layer_output_lambda: [T; D_EF],
+    pub layer_output_mu: [T; D_EF],
 
     // Grinding
     pub logup_pow_witness: T,
@@ -145,6 +147,14 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             &mut builder.when(not::<AB::Expr>(has_interactions.clone())),
             local.input_layer_claim,
         );
+        assert_zeros(
+            &mut builder.when(not::<AB::Expr>(has_interactions.clone())),
+            local.layer_output_lambda,
+        );
+        assert_zeros(
+            &mut builder.when(not::<AB::Expr>(has_interactions.clone())),
+            local.layer_output_mu,
+        );
 
         ///////////////////////////////////////////////////////////////////////
         // Module Interactions
@@ -196,6 +206,8 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
                 tidx: tidx_after_gkr_layers.clone(),
                 layer_idx_end: num_layers.clone() - AB::Expr::ONE,
                 input_layer_claim: local.input_layer_claim.map(Into::into),
+                lambda: local.layer_output_lambda.map(Into::into),
+                mu: local.layer_output_mu.map(Into::into),
             },
             local.is_enabled * has_interactions.clone(),
         );

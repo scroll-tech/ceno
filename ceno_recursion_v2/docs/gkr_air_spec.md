@@ -21,7 +21,9 @@ AIR’s columns, constraints, or interactions change.
 | `w0_claim`          | `[D_EF]`        | Root witness commitment supplied to `GkrLayerAir`.                          |
 | `q0_claim`          | `[D_EF]`        | Root denominator commitment supplied to `GkrLayerAir`.                      |
 | `alpha_logup`       | `[D_EF]`        | Transcript challenge sampled before passing inputs to GKR layers.           |
-| `input_layer_claim` | `[[D_EF]; 2]`   | (numerator, denominator) pair returned from `GkrLayerAir`.                  |
+| `input_layer_claim` | `[D_EF]`        | Folded claim returned from `GkrLayerAir`.                                   |
+| `layer_output_lambda` | `[D_EF]`     | Batching challenge sampled in the final GKR layer (zeros if unused).        |
+| `layer_output_mu`     | `[D_EF]`     | Reduction point sampled in the final GKR layer (zeros if unused).           |
 | `logup_pow_witness` | scalar          | Optional PoW witness.                                                       |
 | `logup_pow_sample`  | scalar          | Optional PoW challenge sample.                                              |
 
@@ -40,7 +42,7 @@ AIR’s columns, constraints, or interactions change.
 
 - **Internal buses**
     - `GkrLayerInputBus.send`: emits `(idx, tidx skip roots, r0/w0/q0_claim)` when interactions exist.
-    - `GkrLayerOutputBus.receive`: pulls reduced `(idx, layer_idx_end, input_layer_claim)` back.
+    - `GkrLayerOutputBus.receive`: pulls reduced `(idx, layer_idx_end, input_layer_claim, lambda, mu)` back.
     - `GkrXiSamplerBus.send/receive`: dispatches request `(idx = num_layers, tidx_after_layers)` and waits for
       completion `(idx = n_layer + l_skip - 1, tidx_end)`.
 - **External buses**
@@ -107,8 +109,8 @@ AIR’s columns, constraints, or interactions change.
 
 - **Layer buses**
     - `layer_input.receive`: only on the first non-dummy row; provides `(idx, tidx, r0/w0/q0_claim)`.
-    - `layer_output.send`: on the last non-dummy row; reports `(idx, tidx_end, layer_idx_end, [numer, denom])` back to
-      `GkrInputAir`.
+    - `layer_output.send`: on the last non-dummy row; reports `(idx, tidx_end, layer_idx_end, folded claim, lambda, mu)`
+      back to `GkrInputAir` so the caller can record the transcript state for downstream verifiers.
 - **Sumcheck buses**
     - `sumcheck_input.send`: for non-root layers, dispatches `(layer_idx, is_last_layer, tidx + D_EF, claim)` to the
       sumcheck AIR.

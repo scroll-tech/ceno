@@ -33,6 +33,8 @@ pub struct GkrLayerOutputMessage<T> {
     pub tidx: T,
     pub layer_idx_end: T,
     pub input_layer_claim: [T; D_EF],
+    pub lambda: [T; D_EF],
+    pub mu: [T; D_EF],
 }
 
 define_typed_per_proof_permutation_bus!(GkrLayerOutputBus, GkrLayerOutputMessage);
