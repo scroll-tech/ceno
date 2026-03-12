@@ -27,6 +27,7 @@ use recursion_circuit::{
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     utils::{assert_zeros, ext_field_add},
 };
+use recursion_circuit::utils::ext_field_multiply;
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
@@ -159,6 +160,7 @@ where
             .when(is_transition.clone())
             .assert_eq(next.layer_idx, local.layer_idx + AB::Expr::ONE);
 
+        // constrain lambda_prime
         let lambda_prime_one = {
             let mut arr = core::array::from_fn(|_| AB::Expr::ZERO);
             arr[0] = AB::Expr::ONE;
@@ -169,6 +171,7 @@ where
             local.lambda_prime,
             lambda_prime_one,
         );
+        // constrain lambda_prime
         assert_array_eq(
             &mut builder.when(is_transition.clone()),
             next.lambda_prime,
@@ -214,26 +217,34 @@ where
         let is_non_root_layer = local.is_enabled * (AB::Expr::ONE - local.is_first);
 
         let tidx_for_claims = tidx_after_sumcheck.clone();
-        let challenge_msg = GkrProdLayerChallengeMessage {
-            idx: local.idx.into(),
-            layer_idx: local.layer_idx.into(),
-            tidx: tidx_for_claims.clone(),
-            lambda: local.lambda.map(Into::into),
-            lambda_prime: local.lambda_prime.map(Into::into),
-            mu: local.mu.map(Into::into),
-        };
         self.prod_read_claim_input_bus.send(
             builder,
             local.proof_idx,
-            challenge_msg.clone(),
+            GkrProdLayerChallengeMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                tidx: tidx_for_claims.clone(),
+                lambda: local.lambda.map(Into::into),
+                lambda_prime: local.lambda_prime.map(Into::into),
+                mu: local.mu.map(Into::into),
+            },
             is_not_dummy.clone(),
         );
+        // TODO separate lambda, lambda_prime for prod-write the relation should be local.lambda^(num_read)
         self.prod_write_claim_input_bus.send(
             builder,
             local.proof_idx,
-            challenge_msg,
+            GkrProdLayerChallengeMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                tidx: tidx_for_claims.clone(),
+                lambda: local.lambda.map(Into::into),
+                lambda_prime: local.lambda_prime.map(Into::into),
+                mu: local.mu.map(Into::into),
+            },
             is_not_dummy.clone(),
         );
+        // TODO separate lambda, lambda_prime for logup the relation should be local.lambda^(num_read + num_write)
         self.logup_claim_input_bus.send(
             builder,
             local.proof_idx,
@@ -345,7 +356,10 @@ where
         // 3. GkrSumcheckOutputBus
         // 3a. Receive sumcheck results
         let prime_fold = ext_field_add::<AB::Expr>(local.read_claim_prime, local.write_claim_prime);
-        let sumcheck_claim_out = ext_field_add::<AB::Expr>(prime_fold, local.logup_claim_prime);
+        let sumcheck_claim_out = ext_field_multiply::<AB::Expr>(
+            ext_field_add::<AB::Expr>(prime_fold, local.logup_claim_prime),
+            local.eq_at_r_prime,
+        );
         self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
