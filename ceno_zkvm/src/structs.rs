@@ -20,7 +20,7 @@ use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSlice,
 };
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -351,7 +351,7 @@ impl<E: ExtensionField> ChipInput<E> {
 pub struct ZKVMWitnesses<E: ExtensionField> {
     pub witnesses: BTreeMap<String, Vec<ChipInput<E>>>,
     lk_mlts: BTreeMap<String, Multiplicity<u64>>,
-    combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
+    combined_lk_mlt: Option<Vec<FxHashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
@@ -363,7 +363,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         self.lk_mlts.get(name)
     }
 
-    pub fn combined_lk_mlt(&self) -> Option<&Vec<HashMap<u64, usize>>> {
+    pub fn combined_lk_mlt(&self) -> Option<&Vec<FxHashMap<u64, usize>>> {
         self.combined_lk_mlt.as_ref()
     }
 

@@ -1,6 +1,7 @@
 //! Range tables as circuits with trait TableCircuit.
 
-use std::{collections::HashMap, marker::PhantomData};
+use rustc_hash::FxHashMap;
+use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -68,7 +69,7 @@ impl<E: ExtensionField, const MAX_BITS: usize> TableCircuit<E>
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        multiplicity: &[HashMap<u64, usize>],
+        multiplicity: &[FxHashMap<u64, usize>],
         _input: &(),
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[LookupTable::Dynamic as usize];
@@ -149,7 +150,7 @@ impl<E: ExtensionField, const MAX_BITS_1: usize, const MAX_BITS_2: usize, R: Ran
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        multiplicity: &[HashMap<u64, usize>],
+        multiplicity: &[FxHashMap<u64, usize>],
         _input: &(),
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[R::ROM_TYPE as usize];

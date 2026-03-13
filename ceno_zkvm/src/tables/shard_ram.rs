@@ -1,4 +1,5 @@
-use std::{collections::HashMap, iter::repeat_n, marker::PhantomData};
+use rustc_hash::FxHashMap;
+use std::{iter::repeat_n, marker::PhantomData};
 
 use crate::{
     Value,
@@ -474,7 +475,7 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
+        _multiplicity: &[FxHashMap<u64, usize>],
         steps: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         if steps.is_empty() {

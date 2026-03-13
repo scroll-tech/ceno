@@ -7,7 +7,7 @@ use gkr_iop::{
 };
 use itertools::Itertools;
 use multilinear_extensions::ToExpr;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use witness::RowMajorMatrix;
 
 mod shard_ram;
@@ -94,7 +94,7 @@ pub trait TableCircuit<E: ExtensionField> {
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        multiplicity: &[HashMap<u64, usize>],
+        multiplicity: &[FxHashMap<u64, usize>],
         input: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError>;
 }

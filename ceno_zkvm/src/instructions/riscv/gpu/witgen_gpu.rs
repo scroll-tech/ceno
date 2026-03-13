@@ -13,6 +13,7 @@ use ceno_gpu::common::witgen_types::{CompactEcResult, GpuRamRecordSlot, GpuShard
 use ff_ext::ExtensionField;
 use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use p3::field::FieldAlgebra;
+use rustc_hash::FxHashMap;
 use std::cell::{Cell, RefCell};
 use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
@@ -419,13 +420,13 @@ fn gpu_compact_ec_d2h(
         return Ok(vec![]);
     }
 
-    // D2H the buffer (all u32s), then reinterpret as GpuShardRamRecord
-    let buf_vec: Vec<u32> = compact.buffer.to_vec().map_err(|e| {
+    // Partial D2H: only transfer the first `count` records (not the full allocation)
+    let record_u32s = std::mem::size_of::<GpuShardRamRecord>() / 4; // 26
+    let total_u32s = count * record_u32s;
+    let buf_vec: Vec<u32> = compact.buffer.to_vec_n(total_u32s).map_err(|e| {
         ZKVMError::InvalidWitness(format!("compact_out D2H failed: {e}").into())
     })?;
 
-    let record_u32s = std::mem::size_of::<GpuShardRamRecord>() / 4; // 26
-    let total_u32s = count * record_u32s;
     let records: Vec<GpuShardRamRecord> = unsafe {
         let ptr = buf_vec.as_ptr() as *const GpuShardRamRecord;
         std::slice::from_raw_parts(ptr, count).to_vec()
@@ -602,7 +603,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     let total_instances = step_indices.len();
 
     // Step 1: GPU fills witness matrix (+ LK counters + shard records for merged kinds)
-    let (gpu_witness, gpu_lk_counters, gpu_ram_slots, gpu_compact_ec) = info_span!("gpu_kernel").in_scope(|| {
+    let (gpu_witness, gpu_lk_counters, gpu_ram_slots, gpu_compact_ec, gpu_compact_addr) = info_span!("gpu_kernel").in_scope(|| {
         gpu_fill_witness::<E, I>(
             hal,
             config,
@@ -626,44 +627,71 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             // D2H only the active records (much smaller than full N*3 slot buffer).
             info_span!("gpu_ec_shard").in_scope(|| {
                 let compact = gpu_compact_ec.unwrap();
-                let compact_records = gpu_compact_ec_d2h(&compact)?;
+                let compact_records = info_span!("compact_d2h")
+                    .in_scope(|| gpu_compact_ec_d2h(&compact))?;
 
-                // D2H ram_slots for addr_accessed (WAS_SENT flags only).
-                // Do NOT insert into BTreeMap — gpu_ec_records replace BTreeMap records.
-                let slots_vec: Option<Vec<u32>> = if gpu_ram_slots.is_some() {
-                    let ram_buf = gpu_ram_slots.unwrap();
-                    Some(ram_buf.to_vec().map_err(|e| {
-                        ZKVMError::InvalidWitness(format!("ram_slots D2H failed: {e}").into())
-                    })?)
-                } else {
-                    None
-                };
-                let slots: &[GpuRamRecordSlot] = if let Some(ref sv) = slots_vec {
-                    unsafe {
-                        std::slice::from_raw_parts(
-                            sv.as_ptr() as *const GpuRamRecordSlot,
-                            sv.len() * 4 / std::mem::size_of::<GpuRamRecordSlot>(),
-                        )
+                // D2H ram_slots lazily (only for debug or fallback).
+                // Avoid the 68 MB D2H in the common case.
+                let ram_slots_d2h = || -> Result<Vec<GpuRamRecordSlot>, ZKVMError> {
+                    if let Some(ref ram_buf) = gpu_ram_slots {
+                        let sv: Vec<u32> = ram_buf.to_vec().map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("ram_slots D2H failed: {e}").into(),
+                            )
+                        })?;
+                        Ok(unsafe {
+                            let ptr = sv.as_ptr() as *const GpuRamRecordSlot;
+                            let len = sv.len() * 4 / std::mem::size_of::<GpuRamRecordSlot>();
+                            std::slice::from_raw_parts(ptr, len).to_vec()
+                        })
+                    } else {
+                        Ok(vec![])
                     }
-                } else {
-                    &[]
                 };
 
-                // Debug: compare GPU shard_ctx vs CPU shard_ctx independently
-                debug_compare_shard_ec::<E, I>(
-                    &compact_records, slots, config, shard_ctx,
-                    shard_steps, step_indices, kind,
-                );
-
-                // Populate shard_ctx: addr_accessed from ram_slots
-                if !slots.is_empty() {
-                    let mut forked = shard_ctx.get_forked();
-                    let thread_ctx = &mut forked[0];
-                    for slot in slots {
-                        if slot.flags & (1 << 4) != 0 {
-                            thread_ctx.push_addr_accessed(WordAddr(slot.addr));
+                // D2H compact addr_accessed (GPU-side compaction via atomicAdd).
+                // Much smaller than full ram_slots D2H (4 bytes/addr vs 48 bytes/slot).
+                info_span!("compact_addr_d2h").in_scope(|| -> Result<(), ZKVMError> {
+                    if let Some(ref ca) = gpu_compact_addr {
+                        let count_vec: Vec<u32> = ca.count_buf.to_vec().map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("compact_addr_count D2H failed: {e}").into(),
+                            )
+                        })?;
+                        let n = count_vec[0] as usize;
+                        if n > 0 {
+                            let addrs: Vec<u32> = ca.buffer.to_vec_n(n).map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("compact_addr D2H failed: {e}").into(),
+                                )
+                            })?;
+                            let mut forked = shard_ctx.get_forked();
+                            let thread_ctx = &mut forked[0];
+                            for &addr in &addrs {
+                                thread_ctx.push_addr_accessed(WordAddr(addr));
+                            }
+                        }
+                    } else {
+                        // Fallback: D2H full ram_slots for addr_accessed
+                        let slots = ram_slots_d2h()?;
+                        let mut forked = shard_ctx.get_forked();
+                        let thread_ctx = &mut forked[0];
+                        for slot in &slots {
+                            if slot.flags & (1 << 4) != 0 {
+                                thread_ctx.push_addr_accessed(WordAddr(slot.addr));
+                            }
                         }
                     }
+                    Ok(())
+                })?;
+
+                // Debug: compare GPU shard_ctx vs CPU shard_ctx independently
+                if std::env::var_os("CENO_GPU_DEBUG_COMPARE_EC").is_some() {
+                    let slots = ram_slots_d2h()?;
+                    debug_compare_shard_ec::<E, I>(
+                        &compact_records, &slots, config, shard_ctx,
+                        shard_steps, step_indices, kind,
+                    );
                 }
 
                 // Populate shard_ctx: gpu_ec_records (raw bytes for assign_shared_circuit)
@@ -788,7 +816,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
     kind: GpuWitgenKind,
-) -> Result<(WitResult, Option<LkResult>, Option<RamBuf>, Option<CompactEcBuf>), ZKVMError> {
+) -> Result<(WitResult, Option<LkResult>, Option<RamBuf>, Option<CompactEcBuf>, Option<CompactEcBuf>), ZKVMError> {
     // Upload shard_steps to GPU once (cached across ADD/LW calls within same shard).
     let shard_id = shard_ctx.shard_id;
     info_span!("upload_shard_steps")
@@ -799,11 +827,11 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
         .in_scope(|| step_indices.iter().map(|&i| i as u32).collect());
     let shard_offset = shard_ctx.current_shard_offset_cycle();
 
-    // Helper to split GpuWitgenFullResult into (witness, Some(lk_counters), ram_slots, compact_ec)
+    // Helper to split GpuWitgenFullResult into (witness, Some(lk_counters), ram_slots, compact_ec, compact_addr)
     macro_rules! split_full {
         ($result:expr) => {{
             let full = $result?;
-            Ok((full.witness, Some(full.lk_counters), full.ram_slots, full.compact_ec))
+            Ok((full.witness, Some(full.lk_counters), full.ram_slots, full.compact_ec, full.compact_addr))
         }};
     }
 
@@ -2263,83 +2291,75 @@ fn lookup_table_name(table_idx: usize) -> &'static str {
 }
 
 fn gpu_lk_counters_to_multiplicity(counters: LkResult) -> Result<Multiplicity<u64>, ZKVMError> {
-    let mut lk = LkMultiplicity::default();
-    merge_dense_counter_table(
-        &mut lk,
-        LookupTable::Dynamic,
-        &counters.dynamic.to_vec().map_err(|e| {
+    let mut tables: [FxHashMap<u64, usize>; 8] = Default::default();
+
+    // Dynamic: D2H + direct FxHashMap construction (no LkMultiplicity)
+    info_span!("lk_dynamic_d2h").in_scope(|| {
+        let counts: Vec<u32> = counters.dynamic.to_vec().map_err(|e| {
             ZKVMError::InvalidWitness(format!("GPU dynamic lk D2H failed: {e}").into())
-        })?,
-    );
-    merge_dense_counter_table(
-        &mut lk,
-        LookupTable::DoubleU8,
-        &counters.double_u8.to_vec().map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU double_u8 lk D2H failed: {e}").into())
-        })?,
-    );
-    merge_dense_counter_table(
-        &mut lk,
-        LookupTable::And,
-        &counters
-            .and_table
-            .to_vec()
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU and lk D2H failed: {e}").into()))?,
-    );
-    merge_dense_counter_table(
-        &mut lk,
-        LookupTable::Or,
-        &counters
-            .or_table
-            .to_vec()
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU or lk D2H failed: {e}").into()))?,
-    );
-    merge_dense_counter_table(
-        &mut lk,
-        LookupTable::Xor,
-        &counters
-            .xor_table
-            .to_vec()
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU xor lk D2H failed: {e}").into()))?,
-    );
-    merge_dense_counter_table(
-        &mut lk,
-        LookupTable::Ltu,
-        &counters
-            .ltu_table
-            .to_vec()
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU ltu lk D2H failed: {e}").into()))?,
-    );
-    merge_dense_counter_table(
-        &mut lk,
-        LookupTable::Pow,
-        &counters
-            .pow_table
-            .to_vec()
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU pow lk D2H failed: {e}").into()))?,
-    );
-    // Merge fetch (Instruction) table if present
-    if let Some(fetch_buf) = counters.fetch {
-        let base_pc = counters.fetch_base_pc;
-        let fetch_counts = fetch_buf.to_vec().map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU fetch lk D2H failed: {e}").into())
         })?;
-        for (slot_idx, &count) in fetch_counts.iter().enumerate() {
+        let nnz = counts.iter().filter(|&&c| c != 0).count();
+        let map = &mut tables[LookupTable::Dynamic as usize];
+        map.reserve(nnz);
+        for (key, &count) in counts.iter().enumerate() {
             if count != 0 {
-                let pc = base_pc as u64 + (slot_idx as u64) * 4;
-                lk.set_count(LookupTable::Instruction, pc, count as usize);
+                map.insert(key as u64, count as usize);
             }
         }
-    }
-    Ok(lk.into_finalize_result())
-}
+        Ok::<(), ZKVMError>(())
+    })?;
 
-fn merge_dense_counter_table(lk: &mut LkMultiplicity, table: LookupTable, counts: &[u32]) {
-    for (key, &count) in counts.iter().enumerate() {
-        if count != 0 {
-            lk.set_count(table, key as u64, count as usize);
+    // Dense tables: same pattern, skip None
+    info_span!("lk_dense_d2h").in_scope(|| {
+        let dense: &[(LookupTable, &Option<RamBuf>)] = &[
+            (LookupTable::DoubleU8, &counters.double_u8),
+            (LookupTable::And, &counters.and_table),
+            (LookupTable::Or, &counters.or_table),
+            (LookupTable::Xor, &counters.xor_table),
+            (LookupTable::Ltu, &counters.ltu_table),
+            (LookupTable::Pow, &counters.pow_table),
+        ];
+        for &(table, ref buf_opt) in dense {
+            if let Some(buf) = buf_opt {
+                let counts: Vec<u32> = buf.to_vec().map_err(|e| {
+                    ZKVMError::InvalidWitness(
+                        format!("GPU {:?} lk D2H failed: {e}", table).into(),
+                    )
+                })?;
+                let nnz = counts.iter().filter(|&&c| c != 0).count();
+                let map = &mut tables[table as usize];
+                map.reserve(nnz);
+                for (key, &count) in counts.iter().enumerate() {
+                    if count != 0 {
+                        map.insert(key as u64, count as usize);
+                    }
+                }
+            }
         }
+        Ok::<(), ZKVMError>(())
+    })?;
+
+    // Fetch (Instruction table)
+    if let Some(fetch_buf) = counters.fetch {
+        info_span!("lk_fetch_d2h").in_scope(|| {
+            let base_pc = counters.fetch_base_pc;
+            let counts = fetch_buf.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU fetch lk D2H failed: {e}").into())
+            })?;
+            let nnz = counts.iter().filter(|&&c| c != 0).count();
+            let map = &mut tables[LookupTable::Instruction as usize];
+            map.reserve(nnz);
+            for (slot_idx, &count) in counts.iter().enumerate() {
+                if count != 0 {
+                    let pc = base_pc as u64 + (slot_idx as u64) * 4;
+                    map.insert(pc, count as usize);
+                }
+            }
+            Ok::<(), ZKVMError>(())
+        })?;
     }
+
+    Ok(Multiplicity(tables))
 }
 
 /// Convert GPU device buffer (column-major) to RowMajorMatrix via GPU transpose + D2H copy.
