@@ -716,7 +716,6 @@ impl RowMajorChip<F> for GkrModuleChip {
 #[cfg(feature = "cuda")]
 mod cuda_tracegen {
     use openvm_cuda_backend::GpuBackend;
-    use openvm_stark_backend::p3_maybe_rayon::prelude::*;
 
     use super::*;
     use crate::{
@@ -736,15 +735,43 @@ mod cuda_tracegen {
             exp_bits_len_gen: &ExpBitsLenTraceGenerator,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
-            let _ = (
-                self,
-                child_vk,
-                proofs,
-                preflights,
+            let proofs_cpu: Vec<_> = proofs.iter().map(|proof| proof.cpu.clone()).collect();
+            let preflights_cpu: Vec<_> = preflights
+                .iter()
+                .map(|preflight| preflight.cpu.clone())
+                .collect();
+            let blob = match self.generate_blob(
+                &child_vk.cpu,
+                &proofs_cpu,
+                &preflights_cpu,
                 exp_bits_len_gen,
-                required_heights,
-            );
-            unimplemented!("GKR GPU trace generation is not implemented for ZKVM proofs");
+            ) {
+                Ok(blob) => blob,
+                Err(err) => {
+                    error!(?err, "failed to build GKR trace blob (cuda)");
+                    return None;
+                }
+            };
+
+            let chips = [
+                GkrModuleChip::Input,
+                GkrModuleChip::Layer,
+                GkrModuleChip::ProdReadClaim,
+                GkrModuleChip::ProdWriteClaim,
+                GkrModuleChip::LogupClaim,
+                GkrModuleChip::LayerSumcheck,
+            ];
+
+            chips
+                .iter()
+                .map(|chip| {
+                    generate_gpu_proving_ctx(
+                        chip,
+                        &blob,
+                        required_heights.and_then(|heights| heights.get(chip.index()).copied()),
+                    )
+                })
+                .collect()
         }
     }
 }

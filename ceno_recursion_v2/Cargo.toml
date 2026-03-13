@@ -30,6 +30,8 @@ openvm-circuit-primitives = { git = "https://github.com/openvm-org/openvm.git", 
 openvm-poseidon2-air = { git = "https://github.com/openvm-org/openvm.git", branch = "develop-v2.0.0-beta", package = "openvm-poseidon2-air", default-features = false }
 openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2", default-features = false }
 openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2" }
+openvm-cuda-backend = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2", optional = true }
+openvm-cuda-common = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2", optional = true }
 p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", branch = "feat/bump-p3" }
 p3-air = { version = "=0.4.1", default-features = false }
 p3-field = { version = "=0.4.1", default-features = false }
@@ -54,5 +56,8 @@ whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir
 witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", branch = "feat/bump-p3" }
 
 [features]
-cuda = []
+cuda = [
+    "dep:openvm-cuda-backend",
+    "dep:openvm-cuda-common",
+]
 default = []

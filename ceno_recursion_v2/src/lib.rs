@@ -5,6 +5,9 @@ pub mod proof_shape;
 pub mod system;
 pub mod tracegen;
 
+#[cfg(feature = "cuda")]
+pub mod cuda;
+
 pub use recursion_circuit::{bus, primitives, subairs};
 
 pub use recursion_circuit::define_typed_per_proof_permutation_bus;
