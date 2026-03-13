@@ -10,7 +10,8 @@ use openvm_native_circuit::EXT_DEG;
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
-use openvm_stark_backend::p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use openvm_stark_backend::p3_field::{FieldExtensionAlgebra, PrimeCharacteristicRing as FieldAlgebra};
+use crate::field_ext::CanonicalFieldExt;
 
 type E = BabyBearExt4;
 const MAX_NUM_VARS: usize = 25;
@@ -1060,7 +1061,8 @@ mod tests {
         conversion::{CompilerOptions, convert_program},
         ir::Ext,
     };
-    use p3::{babybear::BabyBear, field::FieldAlgebra};
+    use p3::babybear::BabyBear;
+    use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 
     use crate::arithmetics::eval_stacked_wellform_address_vec;
 

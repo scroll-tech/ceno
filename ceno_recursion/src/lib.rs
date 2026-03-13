@@ -2,6 +2,7 @@
 #![allow(clippy::too_many_arguments)]
 mod arithmetics;
 mod basefold_verifier;
+mod field_ext;
 pub mod constants;
 mod tower_verifier;
 mod transcript;

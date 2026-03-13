@@ -3,6 +3,7 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
 };
+use p3::field::PrimeCharacteristicRing;
 use std::{
     collections::{BTreeMap, HashMap},
     marker::PhantomData,
@@ -24,7 +25,6 @@ use multilinear_extensions::{
     Expression, Instance,
     mle::{IntoMLE, MultilinearExtension},
 };
-use p3::field::FieldAlgebra;
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -207,10 +207,9 @@ impl<
 
                 let circuit_idx = self.pk.circuit_name_to_index.get(name).unwrap();
                 // write (circuit_idx, num_var) to transcript
-                transcript.append_field_element(&E::BaseField::from_canonical_usize(*circuit_idx));
+                transcript.append_field_element(&E::BaseField::from_usize(*circuit_idx));
                 for num_instance in num_instances {
-                    transcript
-                        .append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
+                    transcript.append_field_element(&E::BaseField::from_usize(*num_instance));
                 }
             }
 
@@ -381,9 +380,8 @@ impl<
 
                 return scheduler.execute(tasks, transcript, |task, transcript| {
                     // Append circuit_idx to per-task forked transcript (matching verifier)
-                    transcript.append_field_element(&E::BaseField::from_canonical_u64(
-                        task.circuit_idx as u64,
-                    ));
+                    transcript
+                        .append_field_element(&E::BaseField::from_u64(task.circuit_idx as u64));
 
                     // SAFETY: TypeId check above (before closure) guarantees PB = GpuBackend<E, PCS>.
                     let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
@@ -418,8 +416,7 @@ impl<
         // Uses execute_sequentially directly to avoid Send+Sync requirement on the closure.
         scheduler.execute_sequentially(tasks, transcript, |mut task, transcript| {
             // Append circuit_idx to per-task forked transcript (matching verifier)
-            transcript
-                .append_field_element(&E::BaseField::from_canonical_u64(task.circuit_idx as u64));
+            transcript.append_field_element(&E::BaseField::from_u64(task.circuit_idx as u64));
 
             // Prepare: deferred extraction for GPU, no-op for CPU
             self.device.prepare_chip_input(&mut task, witness_data);

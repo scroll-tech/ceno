@@ -1,6 +1,5 @@
 use ceno_emul::{Cycle, WriteOp};
 use ff_ext::{ExtensionField, FieldInto};
-use p3::field::FieldAlgebra;
 use witness::set_val;
 
 use super::constants::UInt;
@@ -16,6 +15,7 @@ use crate::{
 };
 use ceno_emul::FullTracer as Tracer;
 use multilinear_extensions::{ToExpr, WitIn};
+use p3::field::PrimeCharacteristicRing;
 
 #[derive(Debug)]
 pub struct OpFixedRS<E: ExtensionField, const REG_ID: usize, const RW: bool> {
@@ -35,7 +35,7 @@ impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID
             let prev_value = UInt::new_unchecked(|| "prev_rd_value", circuit_builder)?;
             let (_, lt_cfg) = circuit_builder.register_write(
                 || "write_rd",
-                E::BaseField::from_canonical_u64(REG_ID as u64),
+                E::BaseField::from_u64(REG_ID as u64),
                 prev_ts.expr(),
                 cur_ts.expr() + Tracer::SUBCYCLE_RD,
                 prev_value.register_expr(),
@@ -45,7 +45,7 @@ impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID
         } else {
             let (_, lt_cfg) = circuit_builder.register_read(
                 || "read_rs",
-                E::BaseField::from_canonical_u64(REG_ID as u64),
+                E::BaseField::from_u64(REG_ID as u64),
                 prev_ts.expr(),
                 // share same ts with RS1
                 cur_ts.expr() + Tracer::SUBCYCLE_RS1,

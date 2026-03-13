@@ -21,7 +21,7 @@ use crate::{
 use ceno_emul::InsnKind;
 use gkr_iop::tables::{LookupTable, ops::XorTable};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 use witness::set_val;
 
 pub struct AuipcConfig<E: ExtensionField> {
@@ -68,8 +68,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             .iter()
             .enumerate()
             .fold(E::BaseField::ZERO.expr(), |acc, (i, &val)| {
-                acc + val.expr()
-                    * E::BaseField::from_canonical_u32(1 << (i * UInt8::<E>::LIMB_BITS)).expr()
+                acc + val.expr() * E::BaseField::from_u32(1 << (i * UInt8::<E>::LIMB_BITS)).expr()
             });
 
         let i_insn = IInstructionConfig::<E>::construct_circuit(
@@ -88,16 +87,13 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
                 .enumerate()
                 .fold(E::BaseField::ZERO.expr(), |acc, (i, val)| {
                     acc + val.expr()
-                        * E::BaseField::from_canonical_u32(1 << ((i + 1) * UInt8::<E>::LIMB_BITS))
-                            .expr()
+                        * E::BaseField::from_u32(1 << ((i + 1) * UInt8::<E>::LIMB_BITS)).expr()
                 });
 
         // Compute the most significant limb of PC
         let pc_msl = (i_insn.vm_state.pc.expr() - intermed_val.expr())
-            * (E::BaseField::from_canonical_usize(
-                1 << (UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1)),
-            )
-            .inverse())
+            * (E::BaseField::from_usize(1 << (UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1)))
+                .inverse())
             .expr();
 
         // The vector pc_limbs contains the actual limbs of PC in little endian order
@@ -113,7 +109,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1);
         let additional_bits =
             (last_limb_bits..UInt8::<E>::LIMB_BITS).fold(0, |acc, x| acc + (1 << x));
-        let additional_bits = E::BaseField::from_canonical_u32(additional_bits);
+        let additional_bits = E::BaseField::from_u32(additional_bits);
         circuit_builder.logic_u8(
             LookupTable::Xor,
             pc_limbs_expr[3].expr(),
@@ -123,7 +119,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
 
         let mut carry: [Expression<E>; UINT_BYTE_LIMBS] =
             std::array::from_fn(|_| E::BaseField::ZERO.expr());
-        let carry_divide = E::BaseField::from_canonical_usize(1 << UInt8::<E>::LIMB_BITS)
+        let carry_divide = E::BaseField::from_usize(1 << UInt8::<E>::LIMB_BITS)
             .inverse()
             .expr();
 
@@ -169,13 +165,13 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         let pc = split_to_u8(step.pc().before.0);
         for (val, witin) in izip!(pc.iter().skip(1), config.pc_limbs) {
             lk_multiplicity.assert_ux::<8>(*val as u64);
-            set_val!(instance, witin, E::BaseField::from_canonical_u8(*val));
+            set_val!(instance, witin, E::BaseField::from_u8(*val));
         }
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32;
         let imm = split_to_u8(imm);
         for (val, witin) in izip!(imm.iter(), config.imm_limbs) {
             lk_multiplicity.assert_ux::<8>(*val as u64);
-            set_val!(instance, witin, E::BaseField::from_canonical_u8(*val));
+            set_val!(instance, witin, E::BaseField::from_u8(*val));
         }
         // constrain pc msb limb range via xor
         let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1);

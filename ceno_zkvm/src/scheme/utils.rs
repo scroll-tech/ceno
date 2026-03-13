@@ -565,7 +565,7 @@ mod tests {
         smart_slice::SmartSlice,
         util::ceil_log2,
     };
-    use p3::field::FieldAlgebra;
+    use p3::field::PrimeCharacteristicRing;
 
     use crate::scheme::utils::{
         infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
@@ -576,8 +576,8 @@ mod tests {
         type E = GoldilocksExt2;
         let num_product_fanin = 2;
         let last_layer: Vec<MultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from_canonical_u64(2u64)].into_mle(),
-            vec![E::from_canonical_u64(3u64), E::from_canonical_u64(4u64)].into_mle(),
+            vec![E::ONE, E::from_u64(2u64)].into_mle(),
+            vec![E::from_u64(3u64), E::from_u64(4u64)].into_mle(),
         ];
         let num_vars = ceil_log2(last_layer[0].evaluations().len()) + 1;
         let res = infer_tower_product_witness(num_vars, last_layer.clone(), 2);
@@ -610,16 +610,10 @@ mod tests {
         let num_product_fanin = 2;
         // [[1, 2], [3, 4], [5, 6], [7, 8]]
         let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from_canonical_u64(2u64)].into_mle().into(),
-            vec![E::from_canonical_u64(3u64), E::from_canonical_u64(4u64)]
-                .into_mle()
-                .into(),
-            vec![E::from_canonical_u64(5u64), E::from_canonical_u64(6u64)]
-                .into_mle()
-                .into(),
-            vec![E::from_canonical_u64(7u64), E::from_canonical_u64(8u64)]
-                .into_mle()
-                .into(),
+            vec![E::ONE, E::from_u64(2u64)].into_mle().into(),
+            vec![E::from_u64(3u64), E::from_u64(4u64)].into_mle().into(),
+            vec![E::from_u64(5u64), E::from_u64(6u64)].into_mle().into(),
+            vec![E::from_u64(7u64), E::from_u64(8u64)].into_mle().into(),
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ONE);
         // [[1, 3, 5, 7], [2, 4, 6, 8]]
@@ -627,18 +621,18 @@ mod tests {
             res[0].get_ext_field_vec(),
             vec![
                 E::ONE,
-                E::from_canonical_u64(3u64),
-                E::from_canonical_u64(5u64),
-                E::from_canonical_u64(7u64)
+                E::from_u64(3u64),
+                E::from_u64(5u64),
+                E::from_u64(7u64)
             ],
         );
         assert_eq!(
             res[1].get_ext_field_vec(),
             vec![
-                E::from_canonical_u64(2u64),
-                E::from_canonical_u64(4u64),
-                E::from_canonical_u64(6u64),
-                E::from_canonical_u64(8u64)
+                E::from_u64(2u64),
+                E::from_u64(4u64),
+                E::from_u64(6u64),
+                E::from_u64(8u64)
             ],
         );
     }
@@ -651,13 +645,9 @@ mod tests {
         // case 1: test limb level padding
         // [[1,2],[3,4],[5,6]]]
         let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from_canonical_u64(2u64)].into_mle().into(),
-            vec![E::from_canonical_u64(3u64), E::from_canonical_u64(4u64)]
-                .into_mle()
-                .into(),
-            vec![E::from_canonical_u64(5u64), E::from_canonical_u64(6u64)]
-                .into_mle()
-                .into(),
+            vec![E::ONE, E::from_u64(2u64)].into_mle().into(),
+            vec![E::from_u64(3u64), E::from_u64(4u64)].into_mle().into(),
+            vec![E::from_u64(5u64), E::from_u64(6u64)].into_mle().into(),
         ];
         let res = interleaving_mles_to_mles(&input_mles, 2, num_product_fanin, E::ZERO);
         // [[1, 3, 5, 0], [2, 4, 6, 0]]
@@ -665,42 +655,33 @@ mod tests {
             res[0].get_ext_field_vec(),
             vec![
                 E::ONE,
-                E::from_canonical_u64(3u64),
-                E::from_canonical_u64(5u64),
-                E::from_canonical_u64(0u64)
+                E::from_u64(3u64),
+                E::from_u64(5u64),
+                E::from_u64(0u64)
             ],
         );
         assert_eq!(
             res[1].get_ext_field_vec(),
             vec![
-                E::from_canonical_u64(2u64),
-                E::from_canonical_u64(4u64),
-                E::from_canonical_u64(6u64),
-                E::from_canonical_u64(0u64)
+                E::from_u64(2u64),
+                E::from_u64(4u64),
+                E::from_u64(6u64),
+                E::from_u64(0u64)
             ],
         );
 
         // case 2: test instance level padding
         // [[1,0],[3,0],[5,0]]]
         let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::ONE, E::from_canonical_u64(0u64)].into_mle().into(),
-            vec![E::from_canonical_u64(3u64), E::from_canonical_u64(0u64)]
-                .into_mle()
-                .into(),
-            vec![E::from_canonical_u64(5u64), E::from_canonical_u64(0u64)]
-                .into_mle()
-                .into(),
+            vec![E::ONE, E::from_u64(0u64)].into_mle().into(),
+            vec![E::from_u64(3u64), E::from_u64(0u64)].into_mle().into(),
+            vec![E::from_u64(5u64), E::from_u64(0u64)].into_mle().into(),
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[1, 3, 5, 1], [1, 1, 1, 1]]
         assert_eq!(
             res[0].get_ext_field_vec(),
-            vec![
-                E::ONE,
-                E::from_canonical_u64(3u64),
-                E::from_canonical_u64(5u64),
-                E::ONE
-            ],
+            vec![E::ONE, E::from_u64(3u64), E::from_u64(5u64), E::ONE],
         );
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE; 4],);
     }
@@ -711,14 +692,14 @@ mod tests {
         let num_product_fanin = 2;
         // one instance, 2 mles: [[2], [3]]
         let input_mles: Vec<ArcMultilinearExtension<E>> = vec![
-            vec![E::from_canonical_u64(2u64)].into_mle().into(),
-            vec![E::from_canonical_u64(3u64)].into_mle().into(),
+            vec![E::from_u64(2u64)].into_mle().into(),
+            vec![E::from_u64(3u64)].into_mle().into(),
         ];
         let res = interleaving_mles_to_mles(&input_mles, 1, num_product_fanin, E::ONE);
         // [[2, 3], [1, 1]]
         assert_eq!(
             res[0].get_ext_field_vec(),
-            vec![E::from_canonical_u64(2u64), E::from_canonical_u64(3u64)],
+            vec![E::from_u64(2u64), E::from_u64(3u64)],
         );
         assert_eq!(res[1].get_ext_field_vec(), vec![E::ONE, E::ONE],);
     }
@@ -730,12 +711,12 @@ mod tests {
         let q: Vec<MultilinearExtension<E>> = vec![
             vec![1, 2, 3, 4]
                 .into_iter()
-                .map(E::from_canonical_u64)
+                .map(E::from_u64)
                 .collect_vec()
                 .into_mle(),
             vec![5, 6, 7, 8]
                 .into_iter()
-                .map(E::from_canonical_u64)
+                .map(E::from_u64)
                 .collect_vec()
                 .into_mle(),
         ];
@@ -778,53 +759,32 @@ mod tests {
         assert_eq!(
             layer[0].evaluations().clone(),
             FieldType::<E>::Ext(SmartSlice::Owned(vec![
-                vec![1 + 5]
-                    .into_iter()
-                    .map(E::from_canonical_u64)
-                    .sum::<E>(),
-                vec![2 + 6]
-                    .into_iter()
-                    .map(E::from_canonical_u64)
-                    .sum::<E>()
+                vec![1 + 5].into_iter().map(E::from_u64).sum::<E>(),
+                vec![2 + 6].into_iter().map(E::from_u64).sum::<E>()
             ]))
         );
         // next layer p2
         assert_eq!(
             layer[1].evaluations().clone(),
             FieldType::<E>::Ext(SmartSlice::Owned(vec![
-                vec![3 + 7]
-                    .into_iter()
-                    .map(E::from_canonical_u64)
-                    .sum::<E>(),
-                vec![4 + 8]
-                    .into_iter()
-                    .map(E::from_canonical_u64)
-                    .sum::<E>()
+                vec![3 + 7].into_iter().map(E::from_u64).sum::<E>(),
+                vec![4 + 8].into_iter().map(E::from_u64).sum::<E>()
             ]))
         );
         // next layer q1
         assert_eq!(
             layer[2].evaluations().clone(),
             FieldType::<E>::Ext(SmartSlice::Owned(vec![
-                vec![5].into_iter().map(E::from_canonical_u64).sum::<E>(),
-                vec![2 * 6]
-                    .into_iter()
-                    .map(E::from_canonical_u64)
-                    .sum::<E>()
+                vec![5].into_iter().map(E::from_u64).sum::<E>(),
+                vec![2 * 6].into_iter().map(E::from_u64).sum::<E>()
             ]))
         );
         // next layer q2
         assert_eq!(
             layer[3].evaluations().clone(),
             FieldType::<E>::Ext(SmartSlice::Owned(vec![
-                vec![3 * 7]
-                    .into_iter()
-                    .map(E::from_canonical_u64)
-                    .sum::<E>(),
-                vec![4 * 8]
-                    .into_iter()
-                    .map(E::from_canonical_u64)
-                    .sum::<E>()
+                vec![3 * 7].into_iter().map(E::from_u64).sum::<E>(),
+                vec![4 * 8].into_iter().map(E::from_u64).sum::<E>()
             ]))
         );
 
@@ -837,7 +797,7 @@ mod tests {
             FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![(1 + 5) * (3 * 7) + (3 + 7) * 5]
                     .into_iter()
-                    .map(E::from_canonical_u64)
+                    .map(E::from_u64)
                     .sum::<E>(),
             ]))
         );
@@ -848,7 +808,7 @@ mod tests {
             FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![(2 + 6) * (4 * 8) + (4 + 8) * (2 * 6)]
                     .into_iter()
-                    .map(E::from_canonical_u64)
+                    .map(E::from_u64)
                     .sum::<E>(),
             ]))
         );
@@ -857,10 +817,7 @@ mod tests {
             layer[2].evaluations().clone(),
             // q12 * q11
             FieldType::<E>::Ext(SmartSlice::Owned(vec![
-                vec![(3 * 7) * 5]
-                    .into_iter()
-                    .map(E::from_canonical_u64)
-                    .sum::<E>(),
+                vec![(3 * 7) * 5].into_iter().map(E::from_u64).sum::<E>(),
             ]))
         );
         // q2
@@ -870,7 +827,7 @@ mod tests {
             FieldType::<E>::Ext(SmartSlice::Owned(vec![
                 vec![(4 * 8) * (2 * 6)]
                     .into_iter()
-                    .map(E::from_canonical_u64)
+                    .map(E::from_u64)
                     .sum::<E>(),
             ]))
         );

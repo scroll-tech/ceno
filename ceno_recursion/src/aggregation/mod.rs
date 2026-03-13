@@ -26,6 +26,7 @@ use openvm_continuations::{
         internal::types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
     },
 };
+use crate::field_ext::CanonicalFieldExt;
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
 use openvm_native_circuit::{NativeBuilder, NativeConfig};
@@ -56,7 +57,7 @@ use openvm_stark_sdk::{
     openvm_stark_backend::keygen::types::MultiStarkVerifyingKey,
     p3_bn254_fr::Bn254Fr,
 };
-use p3::field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
@@ -720,7 +721,7 @@ mod tests {
     };
     use mpcs::{Basefold, BasefoldRSParams};
     use openvm_stark_sdk::{config::setup_tracing_with_log_level, p3_bn254_fr::Bn254Fr};
-    use p3::field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing as FieldAlgebra;
     use std::fs::File;
 
     pub fn aggregation_inner_thread() {

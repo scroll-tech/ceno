@@ -19,7 +19,7 @@ use openvm_stark_sdk::{
     config::{FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Config},
     openvm_stark_backend::p3_field::PrimeField32,
 };
-use p3::field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 
 use openvm_continuations::verifier::{
     common::{

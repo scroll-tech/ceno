@@ -10,7 +10,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
-use p3::field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use rayon::{
     iter::{IntoParallelIterator, ParallelIterator},
     slice::ParallelSliceMut,
@@ -386,7 +386,7 @@ mod tests {
     use multilinear_extensions::{
         StructuralWitIn, ToExpr, util::ceil_log2, virtual_poly::build_eq_x_r_vec,
     };
-    use p3::field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use rand::thread_rng;
 
     use crate::selector::{SelectorContext, SelectorType};

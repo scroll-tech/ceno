@@ -36,7 +36,7 @@ const TWO_ADIC_GENERATORS: [usize; 33] = [
 ];
 
 use openvm_native_compiler::prelude::*;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 
 fn two_adic_generator<C: Config>(
     builder: &mut Builder<C>,

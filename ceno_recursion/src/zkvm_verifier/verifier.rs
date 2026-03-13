@@ -54,8 +54,9 @@ use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{
     CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
 };
-use openvm_stark_backend::p3_field::FieldAlgebra;
+use openvm_stark_backend::p3_field::PrimeCharacteristicRing as FieldAlgebra;
 use p3::babybear::BabyBear;
+use crate::field_ext::CanonicalFieldExt;
 
 type F = BabyBear;
 type E = BabyBearExt4;

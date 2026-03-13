@@ -449,6 +449,7 @@ where
         let num_pvs_tidx = tidx.clone();
         tidx += num_pvs.clone() * local.is_present;
 
+        // constrain next air tid
         self.starting_tidx_bus.send(
             builder,
             local.proof_idx,

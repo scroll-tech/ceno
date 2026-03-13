@@ -16,7 +16,7 @@ use crate::{
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{Expression, ToExpr as _, WitIn};
-use p3::field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 use witness::set_val;
 
 use crate::e2e::ShardContext;
@@ -63,7 +63,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         let rs1_expr = rs1_read.expr();
         let rs2_expr = rs2_read.expr();
 
-        let carry_divide = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
+        let carry_divide = E::BaseField::from_u32(1 << UInt::<E>::LIMB_BITS).inverse();
 
         let rd_low: [_; UINT_LIMBS] =
             array::from_fn(|i| circuit_builder.create_witin(|| format!("rd_low_{i}")));
@@ -86,12 +86,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             circuit_builder.assert_dynamic_range(
                 || format!("range_check_rd_low_{i}"),
                 rd_low.expr(),
-                E::BaseField::from_canonical_u32(16).expr(),
+                E::BaseField::from_u32(16).expr(),
             )?;
             circuit_builder.assert_dynamic_range(
                 || format!("range_check_carry_low_{i}"),
                 carry_low.expr(),
-                E::BaseField::from_canonical_u32(18).expr(),
+                E::BaseField::from_u32(18).expr(),
             )?;
         }
 
@@ -125,17 +125,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                     circuit_builder.assert_dynamic_range(
                         || format!("range_check_high_{i}"),
                         rd_high.expr(),
-                        E::BaseField::from_canonical_u32(16).expr(),
+                        E::BaseField::from_u32(16).expr(),
                     )?;
                     circuit_builder.assert_dynamic_range(
                         || format!("range_check_carry_high_{i}"),
                         carry_high.expr(),
-                        E::BaseField::from_canonical_u32(18).expr(),
+                        E::BaseField::from_u32(18).expr(),
                     )?;
                 }
 
-                let sign_mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1));
-                let ext_inv = E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).inverse();
+                let sign_mask = E::BaseField::from_u32(1 << (LIMB_BITS - 1));
+                let ext_inv = E::BaseField::from_u32((1 << LIMB_BITS) - 1).inverse();
                 let rs1_sign: Expression<E> = rs1_ext.expr() * ext_inv.expr();
                 let rs2_sign: Expression<E> = rs2_ext.expr() * ext_inv.expr();
 
@@ -147,15 +147,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                         // Implement MULH circuit here
                         circuit_builder.assert_dynamic_range(
                             || "mulh_range_check_rs1_last",
-                            E::BaseField::from_canonical_u32(2).expr()
+                            E::BaseField::from_u32(2).expr()
                                 * (rs1_expr[UINT_LIMBS - 1].clone() - rs1_sign * sign_mask.expr()),
-                            E::BaseField::from_canonical_u32(16).expr(),
+                            E::BaseField::from_u32(16).expr(),
                         )?;
                         circuit_builder.assert_dynamic_range(
                             || "mulh_range_check_rs2_last",
-                            E::BaseField::from_canonical_u32(2).expr()
+                            E::BaseField::from_u32(2).expr()
                                 * (rs2_expr[UINT_LIMBS - 1].clone() - rs2_sign * sign_mask.expr()),
-                            E::BaseField::from_canonical_u32(16).expr(),
+                            E::BaseField::from_u32(16).expr(),
                         )?;
                     }
                     InsnKind::MULHU => {
@@ -169,14 +169,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
                             .require_zero(|| "mulhsu_rs2_sign_zero", rs2_sign.clone())?;
                         circuit_builder.assert_dynamic_range(
                             || "mulhsu_range_check_rs1_last",
-                            E::BaseField::from_canonical_u32(2).expr()
+                            E::BaseField::from_u32(2).expr()
                                 * (rs1_expr[UINT_LIMBS - 1].clone() - rs1_sign * sign_mask.expr()),
-                            E::BaseField::from_canonical_u32(16).expr(),
+                            E::BaseField::from_u32(16).expr(),
                         )?;
                         circuit_builder.assert_dynamic_range(
                             || "mulhsu_range_check_rs2_last",
                             rs2_expr[UINT_LIMBS - 1].clone() - rs2_sign * sign_mask.expr(),
-                            E::BaseField::from_canonical_u32(16).expr(),
+                            E::BaseField::from_u32(16).expr(),
                         )?;
                     }
                     InsnKind::MUL => (),

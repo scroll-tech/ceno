@@ -12,7 +12,7 @@ use gkr_iop::{
 };
 use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
-use p3::{field::FieldAlgebra, matrix::Matrix};
+use p3::matrix::Matrix;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
@@ -42,6 +42,7 @@ use crate::{
     tables::{InsnRecord, RMMCollections},
     witness::LkMultiplicity,
 };
+use p3::field::PrimeCharacteristicRing;
 
 pub trait Fp2MulSpec: FpOpField {
     const SYSCALL_CODE: u32;
@@ -178,8 +179,7 @@ fn build_fp2_mul_circuit<E: ExtensionField, P: FpOpField + Fp2MulSpec + NumWords
             WriteMEM::construct_circuit(
                 cb,
                 value_ptr_0.prev_value.as_ref().unwrap().value()
-                    + E::BaseField::from_canonical_u32(ByteAddr::from((i * WORD_SIZE) as u32).0)
-                        .expr(),
+                    + E::BaseField::from_u32(ByteAddr::from((i * WORD_SIZE) as u32).0).expr(),
                 val_before.clone(),
                 val_after.clone(),
                 vm_state.ts,
@@ -195,10 +195,7 @@ fn build_fp2_mul_circuit<E: ExtensionField, P: FpOpField + Fp2MulSpec + NumWords
                 WriteMEM::construct_circuit(
                     cb,
                     value_ptr_1.prev_value.as_ref().unwrap().value()
-                        + E::BaseField::from_canonical_u32(
-                            ByteAddr::from((i * WORD_SIZE) as u32).0,
-                        )
-                        .expr(),
+                        + E::BaseField::from_u32(ByteAddr::from((i * WORD_SIZE) as u32).0).expr(),
                     val_before.clone(),
                     val_before.clone(),
                     vm_state.ts,

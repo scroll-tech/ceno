@@ -19,18 +19,18 @@ clap = { version = "4.5", features = ["derive"] }
 continuations-v2 = { git = "https://github.com/openvm-org/openvm.git", package = "continuations-v2", branch = "develop-v2.0.0-beta", default-features = false }
 derive-new = "0.6.0"
 eyre = "0.6"
-ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", tag = "v1.0.0-alpha.22" }
+ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", branch = "feat/bump-p3" }
 gkr_iop = { path = "../gkr_iop" }
 itertools = "0.13"
-mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", tag = "v1.0.0-alpha.22" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", tag = "v1.0.0-alpha.22" }
+mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", branch = "feat/bump-p3" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", branch = "feat/bump-p3" }
 openvm = { git = "https://github.com/openvm-org/openvm.git", branch = "develop-v2.0.0-beta", default-features = false }
 openvm-circuit = { git = "https://github.com/openvm-org/openvm.git", branch = "develop-v2.0.0-beta", default-features = false }
 openvm-circuit-primitives = { git = "https://github.com/openvm-org/openvm.git", branch = "develop-v2.0.0-beta", default-features = false }
 openvm-poseidon2-air = { git = "https://github.com/openvm-org/openvm.git", branch = "develop-v2.0.0-beta", package = "openvm-poseidon2-air", default-features = false }
 openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2", default-features = false }
 openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2" }
-p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", tag = "v1.0.0-alpha.22" }
+p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", branch = "feat/bump-p3" }
 p3-air = { version = "=0.4.1", default-features = false }
 p3-field = { version = "=0.4.1", default-features = false }
 p3-matrix = { version = "=0.4.1", default-features = false }
@@ -44,14 +44,14 @@ serde_json = "1.0"
 stark-recursion-circuit-derive = { git = "https://github.com/openvm-org/openvm.git", package = "stark-recursion-circuit-derive", branch = "develop-v2.0.0-beta" }
 strum = "0.26"
 strum_macros = "0.26"
-sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", tag = "v1.0.0-alpha.22" }
+sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", branch = "feat/bump-p3" }
 tracing = { version = "0.1", features = ["attributes"] }
 tracing-forest = { version = "0.1.6" }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", tag = "v1.0.0-alpha.22" }
+transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", branch = "feat/bump-p3" }
 verify-stark = { git = "https://github.com/openvm-org/openvm.git", package = "verify-stark", branch = "develop-v2.0.0-beta", default-features = false }
-whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", tag = "v1.0.0-alpha.22" }
-witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", tag = "v1.0.0-alpha.22" }
+whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", branch = "feat/bump-p3" }
+witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", branch = "feat/bump-p3" }
 
 [features]
 cuda = []
