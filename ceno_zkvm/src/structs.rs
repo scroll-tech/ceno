@@ -1,9 +1,9 @@
 use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
-    e2e::{E2EProgramCtx, ShardContext},
+    e2e::{E2EProgramCtx, GPU_SHARD_RAM_RECORD_SIZE, ShardContext},
     error::ZKVMError,
     instructions::Instruction,
-    scheme::septic_curve::SepticPoint,
+    scheme::septic_curve::{SepticExtension, SepticPoint},
     state::StateCircuit,
     tables::{
         ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
@@ -541,6 +541,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             })
             .collect::<Vec<_>>();
 
+        // GPU EC records: convert raw bytes to ShardRamInput (EC points already computed on GPU)
+        let gpu_ec_inputs = if shard_ctx.has_gpu_ec_records() {
+            gpu_ec_records_to_shard_ram_inputs::<E>(&shard_ctx.gpu_ec_records)
+        } else {
+            vec![]
+        };
+
         let global_input = shard_ctx
             .write_records()
             .par_iter()
@@ -570,6 +577,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     }
                 })
             }))
+            .chain(gpu_ec_inputs.into_par_iter())
             .collect::<Vec<_>>();
 
         if tracing::enabled!(Level::DEBUG) {
@@ -847,4 +855,74 @@ where
     // circuit index -> circuit name
     // mainly used for debugging
     pub circuit_index_to_name: BTreeMap<usize, String>,
+}
+
+/// Convert raw GPU EC record bytes to ShardRamInput.
+/// The raw bytes are from `GpuShardRamRecord` structs (104 bytes each).
+/// EC points are already computed on GPU — no Poseidon2/SepticCurve needed.
+fn gpu_ec_records_to_shard_ram_inputs<E: ExtensionField>(
+    raw: &[u8],
+) -> Vec<ShardRamInput<E>> {
+    use gkr_iop::RAMType;
+    use p3::field::FieldAlgebra;
+
+    // GpuShardRamRecord layout (104 bytes, 8-byte aligned):
+    //   addr: u32 (0), ram_type: u32 (4), value: u32 (8), _pad: u32 (12),
+    //   shard: u64 (16), local_clk: u64 (24), global_clk: u64 (32),
+    //   is_to_write_set: u32 (40), nonce: u32 (44),
+    //   point_x: [u32;7] (48..76), point_y: [u32;7] (76..104)
+
+    assert!(raw.len() % GPU_SHARD_RAM_RECORD_SIZE == 0);
+    let count = raw.len() / GPU_SHARD_RAM_RECORD_SIZE;
+
+    (0..count).map(|i| {
+        let base = i * GPU_SHARD_RAM_RECORD_SIZE;
+        let r = &raw[base..base + GPU_SHARD_RAM_RECORD_SIZE];
+
+        let addr = u32::from_le_bytes(r[0..4].try_into().unwrap());
+        let ram_type_val = u32::from_le_bytes(r[4..8].try_into().unwrap());
+        let value = u32::from_le_bytes(r[8..12].try_into().unwrap());
+        let shard = u64::from_le_bytes(r[16..24].try_into().unwrap());
+        let local_clk = u64::from_le_bytes(r[24..32].try_into().unwrap());
+        let global_clk = u64::from_le_bytes(r[32..40].try_into().unwrap());
+        let is_to_write_set = u32::from_le_bytes(r[40..44].try_into().unwrap()) != 0;
+        let nonce = u32::from_le_bytes(r[44..48].try_into().unwrap());
+
+        let mut point_x_arr = [E::BaseField::ZERO; 7];
+        let mut point_y_arr = [E::BaseField::ZERO; 7];
+        for j in 0..7 {
+            let xoff = 48 + j * 4;
+            let yoff = 76 + j * 4;
+            point_x_arr[j] = E::BaseField::from_canonical_u32(
+                u32::from_le_bytes(r[xoff..xoff+4].try_into().unwrap())
+            );
+            point_y_arr[j] = E::BaseField::from_canonical_u32(
+                u32::from_le_bytes(r[yoff..yoff+4].try_into().unwrap())
+            );
+        }
+
+        let record = ShardRamRecord {
+            addr,
+            ram_type: if ram_type_val == 1 { RAMType::Register } else { RAMType::Memory },
+            value,
+            shard,
+            local_clk,
+            global_clk,
+            is_to_write_set,
+        };
+
+        let x = SepticExtension(point_x_arr);
+        let y = SepticExtension(point_y_arr);
+        let point = SepticPoint::from_affine(x, y);
+
+        ShardRamInput {
+            name: if is_to_write_set {
+                "current_shard_external_write"
+            } else {
+                "current_shard_external_read"
+            },
+            record,
+            ec_point: ECPoint { nonce, point },
+        }
+    }).collect()
 }

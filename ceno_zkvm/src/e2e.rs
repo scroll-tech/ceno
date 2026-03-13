@@ -212,6 +212,10 @@ pub struct ShardContext<'a> {
     pub shard_hint_addr_range: Range<Addr>,
     /// Syscall witnesses for StepRecord::syscall() lookups.
     pub syscall_witnesses: Arc<Vec<SyscallWitness>>,
+    /// GPU-produced compact EC shard records (raw bytes of GpuShardRamRecord).
+    /// Each record is GPU_SHARD_RAM_RECORD_SIZE bytes. These bypass BTreeMap and
+    /// are converted to ShardRamInput in assign_shared_circuit.
+    pub gpu_ec_records: Vec<u8>,
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -250,9 +254,13 @@ impl<'a> Default for ShardContext<'a> {
             shard_heap_addr_range: CENO_PLATFORM.heap.clone(),
             shard_hint_addr_range: CENO_PLATFORM.hints.clone(),
             syscall_witnesses: Arc::new(Vec::new()),
+            gpu_ec_records: vec![],
         }
     }
 }
+
+/// Size of a single GpuShardRamRecord in bytes (must match CUDA struct).
+pub const GPU_SHARD_RAM_RECORD_SIZE: usize = 104;
 
 /// `prover_id` and `num_provers` in MultiProver are exposed as arguments
 /// to specify the number of physical provers in a cluster,
@@ -296,6 +304,7 @@ impl<'a> ShardContext<'a> {
             shard_heap_addr_range: self.shard_heap_addr_range.clone(),
             shard_hint_addr_range: self.shard_hint_addr_range.clone(),
             syscall_witnesses: self.syscall_witnesses.clone(),
+            gpu_ec_records: vec![],
         }
     }
 
@@ -332,6 +341,7 @@ impl<'a> ShardContext<'a> {
                     shard_heap_addr_range: self.shard_heap_addr_range.clone(),
                     shard_hint_addr_range: self.shard_hint_addr_range.clone(),
                     syscall_witnesses: self.syscall_witnesses.clone(),
+                    gpu_ec_records: vec![],
                 })
                 .collect_vec(),
             _ => panic!("invalid type"),
@@ -468,6 +478,22 @@ impl<'a> ShardContext<'a> {
             .right()
             .expect("illegal type");
         addr_accessed.push(addr);
+    }
+
+    /// Extend GPU EC records with raw bytes from GpuShardRamRecord slice.
+    /// Called from the GPU EC path to accumulate records across kernel invocations.
+    pub fn extend_gpu_ec_records_raw(&mut self, raw_bytes: &[u8]) {
+        self.gpu_ec_records.extend_from_slice(raw_bytes);
+    }
+
+    /// Returns true if GPU EC records have been collected.
+    pub fn has_gpu_ec_records(&self) -> bool {
+        !self.gpu_ec_records.is_empty()
+    }
+
+    /// Take GPU EC records, leaving the field empty.
+    pub fn take_gpu_ec_records(&mut self) -> Vec<u8> {
+        std::mem::take(&mut self.gpu_ec_records)
     }
 
     #[inline(always)]

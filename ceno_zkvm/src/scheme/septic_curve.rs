@@ -1171,4 +1171,82 @@ mod tests {
         assert!(j4.is_on_curve());
         assert_eq!(j4.into_affine(), p4);
     }
+
+    /// GPU vs CPU EC point computation test.
+    /// Launches the `test_septic_ec_point` CUDA kernel with known inputs,
+    /// then compares GPU outputs against CPU `ShardRamRecord::to_ec_point()`.
+    #[test]
+    #[cfg(feature = "gpu")]
+    fn test_gpu_ec_point_matches_cpu() {
+        use crate::tables::{ECPoint, ShardRamRecord};
+        use ceno_gpu::bb31::test_impl::{TestEcInput, run_gpu_ec_test};
+        use ceno_gpu::bb31::CudaHalBB31;
+        use ff_ext::{PoseidonField, SmallField};
+        use gkr_iop::RAMType;
+
+        let hal = CudaHalBB31::new(0).unwrap();
+        let perm = F::get_default_perm();
+
+        // Test cases: various write/read, register/memory, edge cases
+        let test_inputs = vec![
+            TestEcInput { addr: 5, ram_type: 1, value: 0x12345678, is_write: 1, shard: 1, global_clk: 100 },
+            TestEcInput { addr: 5, ram_type: 1, value: 0x12345678, is_write: 0, shard: 0, global_clk: 50 },
+            TestEcInput { addr: 0x80000, ram_type: 2, value: 0xDEADBEEF, is_write: 1, shard: 2, global_clk: 200 },
+            TestEcInput { addr: 0x80000, ram_type: 2, value: 0xDEADBEEF, is_write: 0, shard: 1, global_clk: 150 },
+            TestEcInput { addr: 0, ram_type: 1, value: 0, is_write: 1, shard: 0, global_clk: 1 },
+            TestEcInput { addr: 31, ram_type: 1, value: 0xFFFFFFFF, is_write: 0, shard: 3, global_clk: 999 },
+            TestEcInput { addr: 0x40000000, ram_type: 2, value: 42, is_write: 1, shard: 5, global_clk: 500000 },
+            TestEcInput { addr: 10, ram_type: 1, value: 1, is_write: 0, shard: 100, global_clk: 1000000 },
+        ];
+
+        let gpu_results = run_gpu_ec_test(&hal, &test_inputs);
+
+        let mut mismatches = 0;
+        for (i, (input, gpu_rec)) in test_inputs.iter().zip(gpu_results.iter()).enumerate() {
+            // Build CPU ShardRamRecord and compute EC point
+            let cpu_record = ShardRamRecord {
+                addr: input.addr,
+                ram_type: if input.ram_type == 1 { RAMType::Register } else { RAMType::Memory },
+                value: input.value,
+                shard: input.shard,
+                local_clk: if input.is_write != 0 { input.global_clk } else { 0 },
+                global_clk: input.global_clk,
+                is_to_write_set: input.is_write != 0,
+            };
+            let cpu_ec: ECPoint<ff_ext::BabyBearExt4> = cpu_record.to_ec_point(&perm);
+
+            let mut has_diff = false;
+
+            if gpu_rec.nonce != cpu_ec.nonce {
+                eprintln!("[{i}] nonce: gpu={} cpu={}", gpu_rec.nonce, cpu_ec.nonce);
+                has_diff = true;
+            }
+
+            for j in 0..7 {
+                let gpu_x = gpu_rec.point_x[j];
+                let cpu_x = cpu_ec.point.x.0[j].to_canonical_u64() as u32;
+                if gpu_x != cpu_x {
+                    eprintln!("[{i}] x[{j}]: gpu={gpu_x} cpu={cpu_x}");
+                    has_diff = true;
+                }
+                let gpu_y = gpu_rec.point_y[j];
+                let cpu_y = cpu_ec.point.y.0[j].to_canonical_u64() as u32;
+                if gpu_y != cpu_y {
+                    eprintln!("[{i}] y[{j}]: gpu={gpu_y} cpu={cpu_y}");
+                    has_diff = true;
+                }
+            }
+
+            if has_diff {
+                eprintln!("MISMATCH [{i}]: addr={} ram_type={} value={:#x} is_write={} shard={} clk={}",
+                    input.addr, input.ram_type, input.value, input.is_write, input.shard, input.global_clk);
+                mismatches += 1;
+            }
+        }
+
+        assert_eq!(mismatches, 0,
+            "{mismatches}/{} test cases had GPU/CPU EC point mismatches",
+            test_inputs.len());
+        eprintln!("All {} GPU EC point test cases match CPU!", test_inputs.len());
+    }
 }

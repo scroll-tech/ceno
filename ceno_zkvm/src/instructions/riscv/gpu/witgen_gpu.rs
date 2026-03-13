@@ -9,7 +9,7 @@ use ceno_gpu::{
     Buffer, CudaHal, CudaSlice, bb31::CudaHalBB31, common::transpose::matrix_transpose,
 };
 use ceno_gpu::bb31::ShardDeviceBuffers;
-use ceno_gpu::common::witgen_types::{GpuRamRecordSlot, GpuShardScalars};
+use ceno_gpu::common::witgen_types::{CompactEcResult, GpuRamRecordSlot, GpuShardRamRecord, GpuShardScalars};
 use ff_ext::ExtensionField;
 use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use p3::field::FieldAlgebra;
@@ -206,6 +206,7 @@ fn ensure_shard_metadata_cached(
                 prev_shard_cycle_range: _,
                 prev_shard_heap_range: _,
                 prev_shard_hint_range: _,
+                gpu_ec_shard_id: _,
             } = c.device_bufs;
             next_access_packed
         });
@@ -314,6 +315,7 @@ fn ensure_shard_metadata_cached(
                 prev_shard_cycle_range: pscr_device,
                 prev_shard_heap_range: pshr_device,
                 prev_shard_hint_range: pshi_device,
+                gpu_ec_shard_id: Some(shard_id as u64),
             },
         });
         Ok(())
@@ -402,6 +404,34 @@ fn gpu_collect_shard_records(
             );
         }
     }
+}
+
+/// D2H the compact EC result: read count, then partial-D2H only that many records.
+fn gpu_compact_ec_d2h(
+    compact: &CompactEcResult<RamBuf>,
+) -> Result<Vec<GpuShardRamRecord>, ZKVMError> {
+    // D2H the count (1 u32)
+    let count_vec: Vec<u32> = compact.count_buf.to_vec().map_err(|e| {
+        ZKVMError::InvalidWitness(format!("compact_count D2H failed: {e}").into())
+    })?;
+    let count = count_vec[0] as usize;
+    if count == 0 {
+        return Ok(vec![]);
+    }
+
+    // D2H the buffer (all u32s), then reinterpret as GpuShardRamRecord
+    let buf_vec: Vec<u32> = compact.buffer.to_vec().map_err(|e| {
+        ZKVMError::InvalidWitness(format!("compact_out D2H failed: {e}").into())
+    })?;
+
+    let record_u32s = std::mem::size_of::<GpuShardRamRecord>() / 4; // 26
+    let total_u32s = count * record_u32s;
+    let records: Vec<GpuShardRamRecord> = unsafe {
+        let ptr = buf_vec.as_ptr() as *const GpuShardRamRecord;
+        std::slice::from_raw_parts(ptr, count).to_vec()
+    };
+    tracing::debug!("GPU EC compact D2H: {} active records ({} bytes)", count, total_u32s * 4);
+    Ok(records)
 }
 
 /// Returns true if GPU shard records are verified for this kind.
@@ -567,7 +597,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     let total_instances = step_indices.len();
 
     // Step 1: GPU fills witness matrix (+ LK counters + shard records for merged kinds)
-    let (gpu_witness, gpu_lk_counters, gpu_ram_slots) = info_span!("gpu_kernel").in_scope(|| {
+    let (gpu_witness, gpu_lk_counters, gpu_ram_slots, gpu_compact_ec) = info_span!("gpu_kernel").in_scope(|| {
         gpu_fill_witness::<E, I>(
             hal,
             config,
@@ -586,23 +616,59 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             gpu_lk_counters_to_multiplicity(gpu_lk_counters.unwrap())
         })?;
 
-        if gpu_ram_slots.is_some() && kind_has_verified_shard(kind) {
-            // GPU shard records path: D2H + lightweight CPU scan
+        if gpu_compact_ec.is_some() && kind_has_verified_shard(kind) {
+            // GPU EC path: compact records already have EC points computed on device.
+            // D2H only the active records (much smaller than full N*3 slot buffer).
+            info_span!("gpu_ec_shard").in_scope(|| {
+                let compact = gpu_compact_ec.unwrap();
+                let compact_records = gpu_compact_ec_d2h(&compact)?;
+                debug_compare_ec_points(&compact_records, kind);
+
+                // Still need addr_accessed from the old ram_slots path
+                // (WAS_SENT flag indicates send() calls for addr_accessed tracking).
+                if gpu_ram_slots.is_some() {
+                    let ram_buf = gpu_ram_slots.unwrap();
+                    let slot_bytes: Vec<u32> = ram_buf.to_vec().map_err(|e| {
+                        ZKVMError::InvalidWitness(format!("ram_slots D2H failed: {e}").into())
+                    })?;
+                    let slots: &[GpuRamRecordSlot] = unsafe {
+                        std::slice::from_raw_parts(
+                            slot_bytes.as_ptr() as *const GpuRamRecordSlot,
+                            slot_bytes.len() * 4 / std::mem::size_of::<GpuRamRecordSlot>(),
+                        )
+                    };
+                    let mut forked = shard_ctx.get_forked();
+                    let thread_ctx = &mut forked[0];
+                    // Only collect addr_accessed (WAS_SENT) and BTreeMap records
+                    // from slot-based path, for compatibility.
+                    gpu_collect_shard_records(thread_ctx, slots);
+                }
+
+                // Store raw GPU EC records for downstream assign_shared_circuit.
+                // Records are stored as raw bytes and converted to ShardRamInput<E> later.
+                let raw_bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        compact_records.as_ptr() as *const u8,
+                        compact_records.len() * std::mem::size_of::<GpuShardRamRecord>(),
+                    )
+                };
+                shard_ctx.extend_gpu_ec_records_raw(raw_bytes);
+
+                Ok::<(), ZKVMError>(())
+            })?;
+        } else if gpu_ram_slots.is_some() && kind_has_verified_shard(kind) {
+            // GPU shard records path (no EC): D2H + lightweight CPU scan
             info_span!("gpu_shard_records").in_scope(|| {
                 let ram_buf = gpu_ram_slots.unwrap();
                 let slot_bytes: Vec<u32> = ram_buf.to_vec().map_err(|e| {
                     ZKVMError::InvalidWitness(format!("ram_slots D2H failed: {e}").into())
                 })?;
-                // Reinterpret u32 buffer as GpuRamRecordSlot slice
                 let slots: &[GpuRamRecordSlot] = unsafe {
                     std::slice::from_raw_parts(
                         slot_bytes.as_ptr() as *const GpuRamRecordSlot,
                         slot_bytes.len() * 4 / std::mem::size_of::<GpuRamRecordSlot>(),
                     )
                 };
-                // Use a forked sub-context (Right variant) since
-                // insert_read_record/insert_write_record/push_addr_accessed
-                // require per-thread mutable references.
                 let mut forked = shard_ctx.get_forked();
                 let thread_ctx = &mut forked[0];
                 gpu_collect_shard_records(thread_ctx, slots);
@@ -669,6 +735,7 @@ type LkBuf = ceno_gpu::common::BufferImpl<'static, u32>;
 type RamBuf = ceno_gpu::common::BufferImpl<'static, u32>;
 type WitResult = ceno_gpu::common::witgen_types::GpuWitnessResult<WitBuf>;
 type LkResult = ceno_gpu::common::witgen_types::GpuLookupCountersResult<LkBuf>;
+type CompactEcBuf = ceno_gpu::common::witgen_types::CompactEcResult<RamBuf>;
 
 /// Compute fetch counter parameters from step data.
 fn compute_fetch_params(
@@ -700,7 +767,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
     kind: GpuWitgenKind,
-) -> Result<(WitResult, Option<LkResult>, Option<RamBuf>), ZKVMError> {
+) -> Result<(WitResult, Option<LkResult>, Option<RamBuf>, Option<CompactEcBuf>), ZKVMError> {
     // Upload shard_steps to GPU once (cached across ADD/LW calls within same shard).
     let shard_id = shard_ctx.shard_id;
     info_span!("upload_shard_steps")
@@ -711,11 +778,11 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
         .in_scope(|| step_indices.iter().map(|&i| i as u32).collect());
     let shard_offset = shard_ctx.current_shard_offset_cycle();
 
-    // Helper to split GpuWitgenFullResult into (witness, Some(lk_counters), ram_slots)
+    // Helper to split GpuWitgenFullResult into (witness, Some(lk_counters), ram_slots, compact_ec)
     macro_rules! split_full {
         ($result:expr) => {{
             let full = $result?;
-            Ok((full.witness, Some(full.lk_counters), full.ram_slots))
+            Ok((full.witness, Some(full.lk_counters), full.ram_slots, full.compact_ec))
         }};
     }
 
@@ -1563,6 +1630,7 @@ fn kind_has_verified_lk(kind: GpuWitgenKind) -> bool {
         GpuWitgenKind::Mul(_) => true,
         #[cfg(feature = "u16limb_circuit")]
         GpuWitgenKind::Div(_) => true,
+        #[cfg(not(feature = "u16limb_circuit"))]
         _ => false,
     }
 }
@@ -1793,6 +1861,134 @@ fn debug_compare_shard_side_effects<E: ExtensionField, I: Instruction<E>>(
     }
 
     Ok(())
+}
+
+/// Compare GPU-produced EC points against CPU to_ec_point() for correctness.
+/// Activated by CENO_GPU_DEBUG_COMPARE_EC=1.
+/// Limit output with CENO_GPU_DEBUG_COMPARE_EC_LIMIT (default: 16).
+fn debug_compare_ec_points(
+    compact_records: &[GpuShardRamRecord],
+    kind: GpuWitgenKind,
+) {
+    if std::env::var_os("CENO_GPU_DEBUG_COMPARE_EC").is_none() {
+        return;
+    }
+
+    println!("debug_compare_ec_points");
+
+    use crate::scheme::septic_curve::{SepticExtension, SepticPoint};
+    use crate::tables::{ECPoint, ShardRamRecord};
+    use ff_ext::{BabyBearExt4 as E, PoseidonField, SmallField};
+    use p3::babybear::BabyBear;
+    let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_EC_LIMIT")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(16);
+
+    let perm = BabyBear::get_default_perm();
+
+    let mut mismatches = 0usize;
+    let mut field_mismatches = 0usize;
+    let mut nonce_mismatches = 0usize;
+
+    for (i, gpu_rec) in compact_records.iter().enumerate() {
+        // Reconstruct ShardRamRecord from GPU record fields
+        let cpu_record = ShardRamRecord {
+            addr: gpu_rec.addr,
+            ram_type: if gpu_rec.ram_type == 1 {
+                RAMType::Register
+            } else {
+                RAMType::Memory
+            },
+            value: gpu_rec.value,
+            shard: gpu_rec.shard,
+            local_clk: gpu_rec.local_clk,
+            global_clk: gpu_rec.global_clk,
+            is_to_write_set: gpu_rec.is_to_write_set != 0,
+        };
+
+        // CPU computes EC point
+        let cpu_ec: ECPoint<E> = cpu_record.to_ec_point(&perm);
+
+        // GPU EC point (from canonical u32)
+        let gpu_x = SepticExtension(
+            gpu_rec.point_x.map(|v| BabyBear::from_canonical_u32(v)),
+        );
+        let gpu_y = SepticExtension(
+            gpu_rec.point_y.map(|v| BabyBear::from_canonical_u32(v)),
+        );
+        // Verify point is on curve (optional sanity check)
+        let _gpu_point = SepticPoint::from_affine(gpu_x, gpu_y);
+
+        let mut has_diff = false;
+
+        // Compare nonce
+        if gpu_rec.nonce != cpu_ec.nonce {
+            nonce_mismatches += 1;
+            has_diff = true;
+            if mismatches < limit {
+                tracing::error!(
+                    "[GPU EC debug] kind={kind:?} rec[{i}] nonce mismatch: gpu={} cpu={}",
+                    gpu_rec.nonce,
+                    cpu_ec.nonce
+                );
+            }
+        }
+
+        // Compare x coordinates
+        for j in 0..7 {
+            let gpu_v = gpu_rec.point_x[j];
+            let cpu_v = cpu_ec.point.x.0[j].to_canonical_u64() as u32;
+            if gpu_v != cpu_v {
+                field_mismatches += 1;
+                has_diff = true;
+                if mismatches < limit {
+                    tracing::error!(
+                        "[GPU EC debug] kind={kind:?} rec[{i}] x[{j}] mismatch: gpu={gpu_v} cpu={cpu_v}"
+                    );
+                }
+            }
+        }
+
+        // Compare y coordinates
+        for j in 0..7 {
+            let gpu_v = gpu_rec.point_y[j];
+            let cpu_v = cpu_ec.point.y.0[j].to_canonical_u64() as u32;
+            if gpu_v != cpu_v {
+                field_mismatches += 1;
+                has_diff = true;
+                if mismatches < limit {
+                    tracing::error!(
+                        "[GPU EC debug] kind={kind:?} rec[{i}] y[{j}] mismatch: gpu={gpu_v} cpu={cpu_v}  \
+                         (addr={} ram_type={} value={} shard={} clk={} is_write={})",
+                        gpu_rec.addr,
+                        gpu_rec.ram_type,
+                        gpu_rec.value,
+                        gpu_rec.shard,
+                        gpu_rec.global_clk,
+                        gpu_rec.is_to_write_set
+                    );
+                }
+            }
+        }
+
+        if has_diff {
+            mismatches += 1;
+        }
+    }
+
+    if mismatches == 0 {
+        tracing::info!(
+            "[GPU EC debug] kind={kind:?} ALL {} EC points match CPU",
+            compact_records.len()
+        );
+    } else {
+        tracing::error!(
+            "[GPU EC debug] kind={kind:?} {mismatches}/{} records have mismatches \
+             (nonce_diffs={nonce_mismatches} field_diffs={field_mismatches})",
+            compact_records.len()
+        );
+    }
 }
 
 fn flatten_ram_records(
