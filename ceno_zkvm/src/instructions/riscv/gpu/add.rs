@@ -257,12 +257,12 @@ mod tests {
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         let gpu_result = hal
-            .witgen_add(&col_map, &gpu_records, &indices_u32, shard_offset, None)
+            .witgen_add(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, None, None)
             .unwrap();
 
         // D2H copy (GPU output is column-major)
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
-            gpu_result.device_buffer.to_vec().unwrap();
+            gpu_result.witness.device_buffer.to_vec().unwrap();
 
         // Compare element by element (GPU is column-major, CPU is row-major)
         let cpu_data = cpu_witness.values();

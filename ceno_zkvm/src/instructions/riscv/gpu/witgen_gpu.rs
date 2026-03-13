@@ -1874,8 +1874,6 @@ fn debug_compare_ec_points(
         return;
     }
 
-    println!("debug_compare_ec_points");
-
     use crate::scheme::septic_curve::{SepticExtension, SepticPoint};
     use crate::tables::{ECPoint, ShardRamRecord};
     use ff_ext::{BabyBearExt4 as E, PoseidonField, SmallField};

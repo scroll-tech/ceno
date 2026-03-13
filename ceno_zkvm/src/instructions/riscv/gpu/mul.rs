@@ -343,12 +343,15 @@ mod tests {
                     &indices_u32,
                     shard_offset,
                     mul_kind,
+                    0,
+                    0,
+                    None,
                     None,
                 )
                 .unwrap();
 
             let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
-                gpu_result.device_buffer.to_vec().unwrap();
+                gpu_result.witness.device_buffer.to_vec().unwrap();
             let cpu_data = cpu_witness.values();
             assert_eq!(gpu_data.len(), cpu_data.len(), "{}: Size mismatch", name);
 
