@@ -10,6 +10,7 @@ use crate::tracegen::RowMajorChip;
 
 #[derive(Default, Debug, Clone)]
 pub struct GkrSumcheckRecord {
+    pub proof_idx: usize,
     pub tidx: usize,
     pub evals: Vec<[EF; 3]>,
     pub ris: Vec<EF>,
@@ -109,8 +110,7 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
         trace_slices
             .par_iter_mut()
             .zip(gkr_sumcheck_records.par_iter().zip(mus.par_iter()))
-            .enumerate()
-            .for_each(|(proof_idx, (proof_trace, (record, mus_for_proof)))| {
+            .for_each(|(proof_trace, (record, mus_for_proof))| {
                 let mus_for_proof = mus_for_proof.as_slice();
                 let total_rounds = record.total_rounds();
                 let num_layers = record.num_layers();
@@ -125,7 +125,7 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
                     let cols: &mut GkrLayerSumcheckCols<F> = row_data.borrow_mut();
                     cols.is_enabled = F::ONE;
                     cols.tidx = F::from_usize(D_EF);
-                    cols.proof_idx = F::from_usize(proof_idx);
+                    cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::ZERO;
                     cols.layer_idx = F::ONE;
                     cols.is_first_round = F::ONE;
@@ -195,7 +195,7 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
                         let cols: &mut GkrLayerSumcheckCols<F> =
                             row_iter.next().unwrap().borrow_mut();
                         cols.is_enabled = F::ONE;
-                        cols.proof_idx = F::from_usize(proof_idx);
+                        cols.proof_idx = F::from_usize(record.proof_idx);
                         cols.idx = F::ZERO;
 
                         cols.layer_idx = F::from_usize(layer_idx_value);
