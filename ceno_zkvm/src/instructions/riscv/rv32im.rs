@@ -69,6 +69,7 @@ use std::{
     collections::{BTreeMap, HashMap},
 };
 use strum::{EnumCount, IntoEnumIterator};
+use tracing::info_span;
 
 pub mod mmu;
 
@@ -681,13 +682,17 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 let records = instrunction_dispatch_ctx
                     .records_for_kinds::<E, $instruction>()
                     .unwrap_or(&[]);
-                witness.assign_opcode_circuit::<$instruction>(
-                    cs,
-                    shard_ctx,
-                    &self.$config,
-                    shard_steps,
-                    records,
-                )?;
+                let n = records.len();
+                info_span!("assign_chip", chip = %<$instruction>::name(), n)
+                    .in_scope(|| {
+                        witness.assign_opcode_circuit::<$instruction>(
+                            cs,
+                            shard_ctx,
+                            &self.$config,
+                            shard_steps,
+                            records,
+                        )
+                    })?;
             }};
         }
 
@@ -696,13 +701,17 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 let records = instrunction_dispatch_ctx
                     .records_for_ecall_code($code)
                     .unwrap_or(&[]);
-                witness.assign_opcode_circuit::<$instruction>(
-                    cs,
-                    shard_ctx,
-                    &self.$config,
-                    shard_steps,
-                    records,
-                )?;
+                let n = records.len();
+                info_span!("assign_chip", chip = %<$instruction>::name(), n)
+                    .in_scope(|| {
+                        witness.assign_opcode_circuit::<$instruction>(
+                            cs,
+                            shard_ctx,
+                            &self.$config,
+                            shard_steps,
+                            records,
+                        )
+                    })?;
             }};
         }
 
@@ -846,22 +855,20 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
     ) -> Result<(), ZKVMError> {
-        witness.assign_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>(
-            cs,
-            &self.dynamic_range_config,
-            &(),
-        )?;
-        witness.assign_table_circuit::<DoubleU8TableCircuit<E>>(
-            cs,
-            &self.double_u8_range_config,
-            &(),
-        )?;
-        witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &())?;
-        witness.assign_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &())?;
-        witness.assign_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &())?;
-        witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
+        macro_rules! assign_table {
+            ($table:ty, $config:expr) => {
+                info_span!("assign_table", table = %<$table>::name())
+                    .in_scope(|| witness.assign_table_circuit::<$table>(cs, $config, &()))?;
+            };
+        }
+        assign_table!(DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>, &self.dynamic_range_config);
+        assign_table!(DoubleU8TableCircuit<E>, &self.double_u8_range_config);
+        assign_table!(AndTableCircuit<E>, &self.and_table_config);
+        assign_table!(OrTableCircuit<E>, &self.or_table_config);
+        assign_table!(XorTableCircuit<E>, &self.xor_table_config);
+        assign_table!(LtuTableCircuit<E>, &self.ltu_config);
         #[cfg(not(feature = "u16limb_circuit"))]
-        witness.assign_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &())?;
+        assign_table!(PowTableCircuit<E>, &self.pow_config);
 
         Ok(())
     }
@@ -1016,13 +1023,17 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let phantom_log_pc_cycle_records = instrunction_dispatch_ctx
             .records_for_ecall_code(LogPcCycleSpec::CODE)
             .unwrap_or(&[]);
-        witness.assign_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
-            cs,
-            shard_ctx,
-            &self.phantom_log_pc_cycle,
-            shard_steps,
-            phantom_log_pc_cycle_records,
-        )?;
+        let n = phantom_log_pc_cycle_records.len();
+        info_span!("assign_chip", chip = %LargeEcallDummy::<E, LogPcCycleSpec>::name(), n)
+            .in_scope(|| {
+                witness.assign_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
+                    cs,
+                    shard_ctx,
+                    &self.phantom_log_pc_cycle,
+                    shard_steps,
+                    phantom_log_pc_cycle_records,
+                )
+            })?;
         Ok(())
     }
 }

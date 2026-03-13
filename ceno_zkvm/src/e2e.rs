@@ -1413,17 +1413,17 @@ pub fn generate_witness<'a, E: ExtensionField>(
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
-            let time = std::time::Instant::now();
             instrunction_dispatch_ctx.begin_shard();
             let (mut shard_ctx, shard_summary) =
-                match shard_ctx_builder.position_next_shard(
-                    &mut step_iter,
-                    |idx, record| instrunction_dispatch_ctx.ingest_step(idx, record),
-                ) {
+                match info_span!("position_next_shard").in_scope(|| {
+                    shard_ctx_builder.position_next_shard(
+                        &mut step_iter,
+                        |idx, record| instrunction_dispatch_ctx.ingest_step(idx, record),
+                    )
+                }) {
                     Some(result) => result,
                     None => return None,
                 };
-            tracing::debug!("position_next_shard finish in {:?}", time.elapsed());
             let shard_steps = step_iter.shard_steps();
             shard_ctx.syscall_witnesses = Arc::new(step_iter.syscall_witnesses().to_vec());
 
@@ -1474,21 +1474,20 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 }
             }
 
-            let time = std::time::Instant::now();
             let debug_compare_e2e_shard =
                 std::env::var_os("CENO_GPU_DEBUG_COMPARE_E2E_SHARD").is_some();
             let debug_shard_ctx_template = debug_compare_e2e_shard.then(|| clone_debug_shard_ctx(&shard_ctx));
-            system_config
-                .config
-                .assign_opcode_circuit(
-                    &system_config.zkvm_cs,
-                    &mut shard_ctx,
-                    &mut instrunction_dispatch_ctx,
-                    shard_steps,
-                    &mut zkvm_witness,
-                )
-                .unwrap();
-            tracing::debug!("assign_opcode_circuit finish in {:?}", time.elapsed());
+            info_span!("assign_opcode_circuits").in_scope(|| {
+                system_config
+                    .config
+                    .assign_opcode_circuit(
+                        &system_config.zkvm_cs,
+                        &mut shard_ctx,
+                        &mut instrunction_dispatch_ctx,
+                        shard_steps,
+                        &mut zkvm_witness,
+                    )
+            }).unwrap();
 
             // Free GPU shard_steps cache after all opcode circuits are done.
             #[cfg(feature = "gpu")]
@@ -1503,19 +1502,20 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 }
             }
 
-            let time = std::time::Instant::now();
-            system_config
-                .dummy_config
-                .assign_opcode_circuit(
-                    &system_config.zkvm_cs,
-                    &mut shard_ctx,
-                    &instrunction_dispatch_ctx,
-                    shard_steps,
-                    &mut zkvm_witness,
-                )
-                .unwrap();
-            tracing::debug!("assign_dummy_config finish in {:?}", time.elapsed());
-            zkvm_witness.finalize_lk_multiplicities();
+            info_span!("assign_dummy_circuits").in_scope(|| {
+                system_config
+                    .dummy_config
+                    .assign_opcode_circuit(
+                        &system_config.zkvm_cs,
+                        &mut shard_ctx,
+                        &instrunction_dispatch_ctx,
+                        shard_steps,
+                        &mut zkvm_witness,
+                    )
+            }).unwrap();
+            info_span!("finalize_lk_multiplicities").in_scope(|| {
+                zkvm_witness.finalize_lk_multiplicities();
+            });
 
             if let Some(mut cpu_shard_ctx) = debug_shard_ctx_template {
                 let mut cpu_witness = ZKVMWitnesses::default();
@@ -1594,110 +1594,102 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // ├─ later rw? NO  -> ShardRAM + LocalFinalize
             // └─ later rw? YES -> ShardRAM
 
-            let time = std::time::Instant::now();
-            system_config
-                .config
-                .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
-                .unwrap();
-            tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
+            info_span!("assign_table_circuits").in_scope(|| {
+                system_config
+                    .config
+                    .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
+            }).unwrap();
 
-            if shard_ctx.is_first_shard() {
-                let time = std::time::Instant::now();
+            info_span!("assign_init_table").in_scope(|| {
+                if shard_ctx.is_first_shard() {
+                    system_config
+                        .mmu_config
+                        .assign_init_table_circuit(
+                            &system_config.zkvm_cs,
+                            &mut zkvm_witness,
+                            &pi,
+                            &emul_result.final_mem_state.reg,
+                            &emul_result.final_mem_state.mem,
+                            &emul_result.final_mem_state.io,
+                            &emul_result.final_mem_state.stack,
+                        )
+                } else {
+                    system_config
+                        .mmu_config
+                        .assign_init_table_circuit(
+                            &system_config.zkvm_cs,
+                            &mut zkvm_witness,
+                            &pi,
+                            &[],
+                            &[],
+                            &[],
+                            &[],
+                        )
+                }
+            }).unwrap();
+
+            info_span!("assign_dynamic_init_table").in_scope(|| {
                 system_config
                     .mmu_config
-                    .assign_init_table_circuit(
+                    .assign_dynamic_init_table_circuit(
                         &system_config.zkvm_cs,
+                        &mut zkvm_witness,
+                        &pi,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.heap,
+                    )
+            }).unwrap();
+
+            info_span!("assign_continuation").in_scope(|| {
+                system_config
+                    .mmu_config
+                    .assign_continuation_circuit(
+                        &system_config.zkvm_cs,
+                        &shard_ctx,
                         &mut zkvm_witness,
                         &pi,
                         &emul_result.final_mem_state.reg,
                         &emul_result.final_mem_state.mem,
                         &emul_result.final_mem_state.io,
+                        &emul_result.final_mem_state.hints,
                         &emul_result.final_mem_state.stack,
+                        &emul_result.final_mem_state.heap,
                     )
-                    .unwrap();
-                tracing::debug!("assign_init_table_circuit finish in {:?}", time.elapsed());
-            } else {
-                system_config
-                    .mmu_config
-                    .assign_init_table_circuit(
+            }).unwrap();
+
+            info_span!("assign_program_table").in_scope(|| {
+                zkvm_witness
+                    .assign_table_circuit::<ProgramTableCircuit<E>>(
                         &system_config.zkvm_cs,
-                        &mut zkvm_witness,
-                        &pi,
-                        &[],
-                        &[],
-                        &[],
-                        &[],
+                        &system_config.prog_config,
+                        &program,
                     )
-                    .unwrap();
-            }
-
-            let time = std::time::Instant::now();
-            system_config
-                .mmu_config
-                .assign_dynamic_init_table_circuit(
-                    &system_config.zkvm_cs,
-                    &mut zkvm_witness,
-                    &pi,
-                    &emul_result.final_mem_state.hints,
-                    &emul_result.final_mem_state.heap,
-                )
-                .unwrap();
-            tracing::debug!(
-                "assign_dynamic_init_table_circuit finish in {:?}",
-                time.elapsed()
-            );
-            let time = std::time::Instant::now();
-            system_config
-                .mmu_config
-                .assign_continuation_circuit(
-                    &system_config.zkvm_cs,
-                    &shard_ctx,
-                    &mut zkvm_witness,
-                    &pi,
-                    &emul_result.final_mem_state.reg,
-                    &emul_result.final_mem_state.mem,
-                    &emul_result.final_mem_state.io,
-                    &emul_result.final_mem_state.hints,
-                    &emul_result.final_mem_state.stack,
-                    &emul_result.final_mem_state.heap,
-                )
-                .unwrap();
-            tracing::debug!("assign_continuation_circuit finish in {:?}", time.elapsed());
-
-            let time = std::time::Instant::now();
-            zkvm_witness
-                .assign_table_circuit::<ProgramTableCircuit<E>>(
-                    &system_config.zkvm_cs,
-                    &system_config.prog_config,
-                    &program,
-                )
-                .unwrap();
-            tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
+            }).unwrap();
 
             if let Some(shard_ram_witnesses) =
                 zkvm_witness.get_witness(&ShardRamCircuit::<E>::name())
             {
-                let time = std::time::Instant::now();
-                let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
-                    .iter()
-                    .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
-                    .map(|shard_ram_witness| {
-                        ShardRamCircuit::<E>::extract_ec_sum(
-                            &system_config.mmu_config.ram_bus_circuit,
-                            &shard_ram_witness.witness_rmms[0],
-                        )
-                    })
-                    .sum();
+                info_span!("shard_ram_ec_sum").in_scope(|| {
+                    let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
+                        .iter()
+                        .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
+                        .map(|shard_ram_witness| {
+                            ShardRamCircuit::<E>::extract_ec_sum(
+                                &system_config.mmu_config.ram_bus_circuit,
+                                &shard_ram_witness.witness_rmms[0],
+                            )
+                        })
+                        .sum();
 
-                let xy = shard_ram_ec_sum
-                    .x
-                    .0
-                    .iter()
-                    .chain(shard_ram_ec_sum.y.0.iter());
-                for (f, v) in xy.zip_eq(pi.shard_rw_sum.as_mut_slice()) {
-                    *v = f.to_canonical_u64() as u32;
-                }
-                tracing::debug!("update pi shard_rw_sum finish in {:?}", time.elapsed());
+                    let xy = shard_ram_ec_sum
+                        .x
+                        .0
+                        .iter()
+                        .chain(shard_ram_ec_sum.y.0.iter());
+                    for (f, v) in xy.zip_eq(pi.shard_rw_sum.as_mut_slice()) {
+                        *v = f.to_canonical_u64() as u32;
+                    }
+                });
             }
 
             Some((zkvm_witness, shard_ctx, pi))
