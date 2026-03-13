@@ -435,7 +435,12 @@ fn gpu_compact_ec_d2h(
 }
 
 /// Returns true if GPU shard records are verified for this kind.
+/// Set CENO_GPU_DISABLE_SHARD_KINDS=all to force ALL kinds back to CPU shard path.
 fn kind_has_verified_shard(kind: GpuWitgenKind) -> bool {
+    // Global kill switch: force pure CPU shard path for baseline testing
+    if std::env::var_os("CENO_GPU_CPU_SHARD").is_some() {
+        return false;
+    }
     if is_shard_kind_disabled(kind) {
         return false;
     }
@@ -622,30 +627,46 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             info_span!("gpu_ec_shard").in_scope(|| {
                 let compact = gpu_compact_ec.unwrap();
                 let compact_records = gpu_compact_ec_d2h(&compact)?;
-                debug_compare_ec_points(&compact_records, kind);
 
-                // Still need addr_accessed from the old ram_slots path
-                // (WAS_SENT flag indicates send() calls for addr_accessed tracking).
-                if gpu_ram_slots.is_some() {
+                // D2H ram_slots for addr_accessed (WAS_SENT flags only).
+                // Do NOT insert into BTreeMap — gpu_ec_records replace BTreeMap records.
+                let slots_vec: Option<Vec<u32>> = if gpu_ram_slots.is_some() {
                     let ram_buf = gpu_ram_slots.unwrap();
-                    let slot_bytes: Vec<u32> = ram_buf.to_vec().map_err(|e| {
+                    Some(ram_buf.to_vec().map_err(|e| {
                         ZKVMError::InvalidWitness(format!("ram_slots D2H failed: {e}").into())
-                    })?;
-                    let slots: &[GpuRamRecordSlot] = unsafe {
+                    })?)
+                } else {
+                    None
+                };
+                let slots: &[GpuRamRecordSlot] = if let Some(ref sv) = slots_vec {
+                    unsafe {
                         std::slice::from_raw_parts(
-                            slot_bytes.as_ptr() as *const GpuRamRecordSlot,
-                            slot_bytes.len() * 4 / std::mem::size_of::<GpuRamRecordSlot>(),
+                            sv.as_ptr() as *const GpuRamRecordSlot,
+                            sv.len() * 4 / std::mem::size_of::<GpuRamRecordSlot>(),
                         )
-                    };
+                    }
+                } else {
+                    &[]
+                };
+
+                // Debug: compare GPU shard_ctx vs CPU shard_ctx independently
+                debug_compare_shard_ec::<E, I>(
+                    &compact_records, slots, config, shard_ctx,
+                    shard_steps, step_indices, kind,
+                );
+
+                // Populate shard_ctx: addr_accessed from ram_slots
+                if !slots.is_empty() {
                     let mut forked = shard_ctx.get_forked();
                     let thread_ctx = &mut forked[0];
-                    // Only collect addr_accessed (WAS_SENT) and BTreeMap records
-                    // from slot-based path, for compatibility.
-                    gpu_collect_shard_records(thread_ctx, slots);
+                    for slot in slots {
+                        if slot.flags & (1 << 4) != 0 {
+                            thread_ctx.push_addr_accessed(WordAddr(slot.addr));
+                        }
+                    }
                 }
 
-                // Store raw GPU EC records for downstream assign_shared_circuit.
-                // Records are stored as raw bytes and converted to ShardRamInput<E> later.
+                // Populate shard_ctx: gpu_ec_records (raw bytes for assign_shared_circuit)
                 let raw_bytes = unsafe {
                     std::slice::from_raw_parts(
                         compact_records.as_ptr() as *const u8,
@@ -1863,11 +1884,27 @@ fn debug_compare_shard_side_effects<E: ExtensionField, I: Instruction<E>>(
     Ok(())
 }
 
-/// Compare GPU-produced EC points against CPU to_ec_point() for correctness.
+/// Compare GPU shard context vs CPU shard context, field by field.
+///
+/// Both paths are independent and produce equivalent ShardContext state:
+///   CPU path:  cpu_collect_shard_side_effects → addr_accessed + write_records + read_records
+///   GPU path:  compact_records → shard records (④gpu_ec_records)
+///              ram_slots WAS_SENT → addr_accessed (①)
+///              (②write_records and ③read_records stay empty for GPU EC kernels)
+///
+/// This function builds both independently and compares:
+///   A. addr_accessed sets
+///   B. shard records (sorted, normalized to ShardRamRecord)
+///   C. EC points (nonce + SepticPoint x,y)
+///
 /// Activated by CENO_GPU_DEBUG_COMPARE_EC=1.
-/// Limit output with CENO_GPU_DEBUG_COMPARE_EC_LIMIT (default: 16).
-fn debug_compare_ec_points(
+fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
     compact_records: &[GpuShardRamRecord],
+    ram_slots: &[GpuRamRecordSlot],
+    config: &I::InstructionConfig,
+    shard_ctx: &ShardContext,
+    shard_steps: &[StepRecord],
+    step_indices: &[StepIndex],
     kind: GpuWitgenKind,
 ) {
     if std::env::var_os("CENO_GPU_DEBUG_COMPARE_EC").is_none() {
@@ -1876,115 +1913,279 @@ fn debug_compare_ec_points(
 
     use crate::scheme::septic_curve::{SepticExtension, SepticPoint};
     use crate::tables::{ECPoint, ShardRamRecord};
-    use ff_ext::{BabyBearExt4 as E, PoseidonField, SmallField};
-    use p3::babybear::BabyBear;
+    use ff_ext::{PoseidonField, SmallField};
+
     let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_EC_LIMIT")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(16);
 
-    let perm = BabyBear::get_default_perm();
+    // ========== Build CPU shard context (independent, isolated) ==========
+    let mut cpu_ctx = shard_ctx.new_empty_like();
+    if let Err(e) = cpu_collect_shard_side_effects::<E, I>(
+        config, &mut cpu_ctx, shard_steps, step_indices,
+    ) {
+        tracing::error!("[GPU EC debug] kind={kind:?} CPU shard side effects failed: {e:?}");
+        return;
+    }
 
-    let mut mismatches = 0usize;
-    let mut field_mismatches = 0usize;
-    let mut nonce_mismatches = 0usize;
+    let perm = <E::BaseField as PoseidonField>::get_default_perm();
 
-    for (i, gpu_rec) in compact_records.iter().enumerate() {
-        // Reconstruct ShardRamRecord from GPU record fields
-        let cpu_record = ShardRamRecord {
-            addr: gpu_rec.addr,
-            ram_type: if gpu_rec.ram_type == 1 {
-                RAMType::Register
-            } else {
-                RAMType::Memory
-            },
-            value: gpu_rec.value,
-            shard: gpu_rec.shard,
-            local_clk: gpu_rec.local_clk,
-            global_clk: gpu_rec.global_clk,
-            is_to_write_set: gpu_rec.is_to_write_set != 0,
-        };
+    // CPU: addr_accessed
+    let cpu_addr = cpu_ctx.get_addr_accessed();
 
-        // CPU computes EC point
-        let cpu_ec: ECPoint<E> = cpu_record.to_ec_point(&perm);
+    // CPU: shard records (BTreeMap → ShardRamRecord + ECPoint)
+    let mut cpu_entries: Vec<(ShardRamRecord, ECPoint<E>)> = Vec::new();
+    for records in cpu_ctx.write_records() {
+        for (vma, record) in records {
+            let rec: ShardRamRecord = (vma, record, true).into();
+            let ec = rec.to_ec_point::<E, _>(&perm);
+            cpu_entries.push((rec, ec));
+        }
+    }
+    for records in cpu_ctx.read_records() {
+        for (vma, record) in records {
+            let rec: ShardRamRecord = (vma, record, false).into();
+            let ec = rec.to_ec_point::<E, _>(&perm);
+            cpu_entries.push((rec, ec));
+        }
+    }
+    cpu_entries.sort_by_key(|(r, _)| (r.addr, r.is_to_write_set as u8, r.ram_type as u8));
 
-        // GPU EC point (from canonical u32)
-        let gpu_x = SepticExtension(
-            gpu_rec.point_x.map(|v| BabyBear::from_canonical_u32(v)),
+    // ========== Build GPU shard context (independent, from D2H data only) ==========
+
+    // GPU: addr_accessed (from ram_slots WAS_SENT flags)
+    let gpu_addr: rustc_hash::FxHashSet<WordAddr> = ram_slots
+        .iter()
+        .filter(|s| s.flags & (1 << 4) != 0)
+        .map(|s| WordAddr(s.addr))
+        .collect();
+
+    // GPU: shard records (compact_records → ShardRamRecord + ECPoint)
+    let mut gpu_entries: Vec<(ShardRamRecord, ECPoint<E>)> = compact_records
+        .iter()
+        .map(|g| {
+            let rec = ShardRamRecord {
+                addr: g.addr,
+                ram_type: if g.ram_type == 1 { RAMType::Register } else { RAMType::Memory },
+                value: g.value,
+                shard: g.shard,
+                local_clk: g.local_clk,
+                global_clk: g.global_clk,
+                is_to_write_set: g.is_to_write_set != 0,
+            };
+            let x = SepticExtension(g.point_x.map(|v| E::BaseField::from_canonical_u32(v)));
+            let y = SepticExtension(g.point_y.map(|v| E::BaseField::from_canonical_u32(v)));
+            let point = SepticPoint::from_affine(x, y);
+            let ec = ECPoint::<E> { nonce: g.nonce, point };
+            (rec, ec)
+        })
+        .collect();
+    gpu_entries.sort_by_key(|(r, _)| (r.addr, r.is_to_write_set as u8, r.ram_type as u8));
+
+    // ========== Compare A: addr_accessed ==========
+    if cpu_addr != gpu_addr {
+        let cpu_only: Vec<_> = cpu_addr.difference(&gpu_addr).collect();
+        let gpu_only: Vec<_> = gpu_addr.difference(&cpu_addr).collect();
+        tracing::error!(
+            "[GPU EC debug] kind={kind:?} ADDR_ACCESSED MISMATCH: cpu={} gpu={} \
+             cpu_only={} gpu_only={}",
+            cpu_addr.len(), gpu_addr.len(), cpu_only.len(), gpu_only.len()
         );
-        let gpu_y = SepticExtension(
-            gpu_rec.point_y.map(|v| BabyBear::from_canonical_u32(v)),
-        );
-        // Verify point is on curve (optional sanity check)
-        let _gpu_point = SepticPoint::from_affine(gpu_x, gpu_y);
-
-        let mut has_diff = false;
-
-        // Compare nonce
-        if gpu_rec.nonce != cpu_ec.nonce {
-            nonce_mismatches += 1;
-            has_diff = true;
-            if mismatches < limit {
-                tracing::error!(
-                    "[GPU EC debug] kind={kind:?} rec[{i}] nonce mismatch: gpu={} cpu={}",
-                    gpu_rec.nonce,
-                    cpu_ec.nonce
-                );
-            }
+        for (i, addr) in cpu_only.iter().enumerate() {
+            if i >= limit { break; }
+            tracing::error!("[GPU EC debug] kind={kind:?} addr_accessed CPU-only: {}", addr.0);
         }
-
-        // Compare x coordinates
-        for j in 0..7 {
-            let gpu_v = gpu_rec.point_x[j];
-            let cpu_v = cpu_ec.point.x.0[j].to_canonical_u64() as u32;
-            if gpu_v != cpu_v {
-                field_mismatches += 1;
-                has_diff = true;
-                if mismatches < limit {
-                    tracing::error!(
-                        "[GPU EC debug] kind={kind:?} rec[{i}] x[{j}] mismatch: gpu={gpu_v} cpu={cpu_v}"
-                    );
-                }
-            }
-        }
-
-        // Compare y coordinates
-        for j in 0..7 {
-            let gpu_v = gpu_rec.point_y[j];
-            let cpu_v = cpu_ec.point.y.0[j].to_canonical_u64() as u32;
-            if gpu_v != cpu_v {
-                field_mismatches += 1;
-                has_diff = true;
-                if mismatches < limit {
-                    tracing::error!(
-                        "[GPU EC debug] kind={kind:?} rec[{i}] y[{j}] mismatch: gpu={gpu_v} cpu={cpu_v}  \
-                         (addr={} ram_type={} value={} shard={} clk={} is_write={})",
-                        gpu_rec.addr,
-                        gpu_rec.ram_type,
-                        gpu_rec.value,
-                        gpu_rec.shard,
-                        gpu_rec.global_clk,
-                        gpu_rec.is_to_write_set
-                    );
-                }
-            }
-        }
-
-        if has_diff {
-            mismatches += 1;
+        for (i, addr) in gpu_only.iter().enumerate() {
+            if i >= limit { break; }
+            tracing::error!("[GPU EC debug] kind={kind:?} addr_accessed GPU-only: {}", addr.0);
         }
     }
 
-    if mismatches == 0 {
+    // ========== Compare B+C: shard records + EC points ==========
+
+    // Check counts
+    if cpu_entries.len() != gpu_entries.len() {
+        tracing::error!(
+            "[GPU EC debug] kind={kind:?} RECORD COUNT MISMATCH: cpu={} gpu={}",
+            cpu_entries.len(), gpu_entries.len()
+        );
+        let cpu_keys: std::collections::BTreeSet<_> = cpu_entries
+            .iter().map(|(r, _)| (r.addr, r.is_to_write_set)).collect();
+        let gpu_keys: std::collections::BTreeSet<_> = gpu_entries
+            .iter().map(|(r, _)| (r.addr, r.is_to_write_set)).collect();
+        let mut logged = 0usize;
+        for key in cpu_keys.difference(&gpu_keys) {
+            if logged >= limit { break; }
+            tracing::error!("[GPU EC debug] kind={kind:?} CPU-only: addr={} is_write={}", key.0, key.1);
+            logged += 1;
+        }
+        for key in gpu_keys.difference(&cpu_keys) {
+            if logged >= limit { break; }
+            tracing::error!("[GPU EC debug] kind={kind:?} GPU-only: addr={} is_write={}", key.0, key.1);
+            logged += 1;
+        }
+    }
+
+    // Check GPU duplicates (BTreeMap deduplicates, atomicAdd doesn't)
+    let mut gpu_dup_count = 0usize;
+    for w in gpu_entries.windows(2) {
+        if w[0].0.addr == w[1].0.addr
+            && w[0].0.is_to_write_set == w[1].0.is_to_write_set
+            && w[0].0.ram_type == w[1].0.ram_type
+        {
+            gpu_dup_count += 1;
+            if gpu_dup_count <= limit {
+                tracing::error!(
+                    "[GPU EC debug] kind={kind:?} GPU DUPLICATE: addr={} is_write={} ram_type={:?}",
+                    w[0].0.addr, w[0].0.is_to_write_set, w[0].0.ram_type
+                );
+            }
+        }
+    }
+
+    // Merge-walk sorted lists
+    let mut ci = 0usize;
+    let mut gi = 0usize;
+    let mut record_mismatches = 0usize;
+    let mut ec_mismatches = 0usize;
+    let mut matched = 0usize;
+
+    while ci < cpu_entries.len() && gi < gpu_entries.len() {
+        let (cr, ce) = &cpu_entries[ci];
+        let (gr, ge) = &gpu_entries[gi];
+        let ck = (cr.addr, cr.is_to_write_set as u8, cr.ram_type as u8);
+        let gk = (gr.addr, gr.is_to_write_set as u8, gr.ram_type as u8);
+
+        match ck.cmp(&gk) {
+            std::cmp::Ordering::Less => {
+                if record_mismatches < limit {
+                    tracing::error!(
+                        "[GPU EC debug] kind={kind:?} MISSING in GPU: addr={} is_write={} ram={:?} val={} shard={} clk={}",
+                        cr.addr, cr.is_to_write_set, cr.ram_type, cr.value, cr.shard, cr.global_clk
+                    );
+                }
+                record_mismatches += 1;
+                ci += 1;
+                continue;
+            }
+            std::cmp::Ordering::Greater => {
+                if record_mismatches < limit {
+                    tracing::error!(
+                        "[GPU EC debug] kind={kind:?} EXTRA in GPU: addr={} is_write={} ram={:?} val={} shard={} clk={}",
+                        gr.addr, gr.is_to_write_set, gr.ram_type, gr.value, gr.shard, gr.global_clk
+                    );
+                }
+                record_mismatches += 1;
+                gi += 1;
+                continue;
+            }
+            std::cmp::Ordering::Equal => {}
+        }
+
+        // Keys match — compare record fields
+        let mut field_diff = false;
+        for (name, cv, gv) in [
+            ("value", cr.value as u64, gr.value as u64),
+            ("shard", cr.shard, gr.shard),
+            ("local_clk", cr.local_clk, gr.local_clk),
+            ("global_clk", cr.global_clk, gr.global_clk),
+        ] {
+            if cv != gv {
+                field_diff = true;
+                if record_mismatches < limit {
+                    tracing::error!(
+                        "[GPU EC debug] kind={kind:?} addr={} {name}: cpu={cv} gpu={gv}",
+                        cr.addr
+                    );
+                }
+            }
+        }
+        if field_diff {
+            record_mismatches += 1;
+        }
+
+        // Compare EC points
+        let mut ec_diff = false;
+        if ce.nonce != ge.nonce {
+            ec_diff = true;
+            if ec_mismatches < limit {
+                tracing::error!(
+                    "[GPU EC debug] kind={kind:?} addr={} nonce: cpu={} gpu={}",
+                    cr.addr, ce.nonce, ge.nonce
+                );
+            }
+        }
+        for j in 0..7 {
+            let cv = ce.point.x.0[j].to_canonical_u64() as u32;
+            let gv = ge.point.x.0[j].to_canonical_u64() as u32;
+            if cv != gv {
+                ec_diff = true;
+                if ec_mismatches < limit {
+                    tracing::error!(
+                        "[GPU EC debug] kind={kind:?} addr={} x[{j}]: cpu={cv} gpu={gv}", cr.addr
+                    );
+                }
+            }
+        }
+        for j in 0..7 {
+            let cv = ce.point.y.0[j].to_canonical_u64() as u32;
+            let gv = ge.point.y.0[j].to_canonical_u64() as u32;
+            if cv != gv {
+                ec_diff = true;
+                if ec_mismatches < limit {
+                    tracing::error!(
+                        "[GPU EC debug] kind={kind:?} addr={} y[{j}]: cpu={cv} gpu={gv}", cr.addr
+                    );
+                }
+            }
+        }
+        if ec_diff {
+            ec_mismatches += 1;
+        }
+
+        matched += 1;
+        ci += 1;
+        gi += 1;
+    }
+
+    // Remaining unmatched
+    while ci < cpu_entries.len() {
+        if record_mismatches < limit {
+            let (cr, _) = &cpu_entries[ci];
+            tracing::error!(
+                "[GPU EC debug] kind={kind:?} MISSING in GPU (tail): addr={} is_write={} val={}",
+                cr.addr, cr.is_to_write_set, cr.value
+            );
+        }
+        record_mismatches += 1;
+        ci += 1;
+    }
+    while gi < gpu_entries.len() {
+        if record_mismatches < limit {
+            let (gr, _) = &gpu_entries[gi];
+            tracing::error!(
+                "[GPU EC debug] kind={kind:?} EXTRA in GPU (tail): addr={} is_write={} val={}",
+                gr.addr, gr.is_to_write_set, gr.value
+            );
+        }
+        record_mismatches += 1;
+        gi += 1;
+    }
+
+    // ========== Summary ==========
+    let addr_ok = cpu_addr == gpu_addr;
+    if addr_ok && record_mismatches == 0 && ec_mismatches == 0 && gpu_dup_count == 0 {
         tracing::info!(
-            "[GPU EC debug] kind={kind:?} ALL {} EC points match CPU",
-            compact_records.len()
+            "[GPU EC debug] kind={kind:?} ALL MATCH: {} records, {} addr_accessed, EC points OK",
+            matched, cpu_addr.len()
         );
     } else {
         tracing::error!(
-            "[GPU EC debug] kind={kind:?} {mismatches}/{} records have mismatches \
-             (nonce_diffs={nonce_mismatches} field_diffs={field_mismatches})",
-            compact_records.len()
+            "[GPU EC debug] kind={kind:?} MISMATCH: matched={matched} record_diffs={record_mismatches} \
+             ec_diffs={ec_mismatches} gpu_dups={gpu_dup_count} addr_ok={addr_ok} \
+             (cpu_records={} gpu_records={} cpu_addrs={} gpu_addrs={})",
+            cpu_entries.len(), gpu_entries.len(), cpu_addr.len(), gpu_addr.len()
         );
     }
 }

@@ -542,11 +542,16 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             .collect::<Vec<_>>();
 
         // GPU EC records: convert raw bytes to ShardRamInput (EC points already computed on GPU)
-        let gpu_ec_inputs = if shard_ctx.has_gpu_ec_records() {
-            gpu_ec_records_to_shard_ram_inputs::<E>(&shard_ctx.gpu_ec_records)
-        } else {
-            vec![]
-        };
+        // Partition into writes and reads to maintain the ordering invariant required by
+        // ShardRamCircuit::assign_instances (writes first, reads after).
+        let (gpu_ec_writes, gpu_ec_reads): (Vec<_>, Vec<_>) =
+            if shard_ctx.has_gpu_ec_records() {
+                gpu_ec_records_to_shard_ram_inputs::<E>(&shard_ctx.gpu_ec_records)
+                    .into_iter()
+                    .partition(|input| input.record.is_to_write_set)
+            } else {
+                (vec![], vec![])
+            };
 
         let global_input = shard_ctx
             .write_records()
@@ -565,6 +570,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             })
             .chain(first_shard_access_later_records.into_par_iter())
             .chain(current_shard_access_later.into_par_iter())
+            .chain(gpu_ec_writes.into_par_iter())
             .chain(shard_ctx.read_records().par_iter().flat_map(|records| {
                 // global read -> local write
                 records.par_iter().map(|(vma, record)| {
@@ -577,7 +583,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     }
                 })
             }))
-            .chain(gpu_ec_inputs.into_par_iter())
+            .chain(gpu_ec_reads.into_par_iter())
             .collect::<Vec<_>>();
 
         if tracing::enabled!(Level::DEBUG) {
@@ -605,6 +611,34 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     count,
                     pct
                 );
+            }
+        }
+
+        // Invariant: all writes (is_to_write_set=true) must precede all reads.
+        // ShardRamCircuit::assign_instances uses take_while to count writes.
+        // Activate with CENO_DEBUG_SHARD_RAM_ORDER=1.
+        if std::env::var_os("CENO_DEBUG_SHARD_RAM_ORDER").is_some() {
+            let mut seen_read = false;
+            for (i, input) in global_input.iter().enumerate() {
+                if input.record.is_to_write_set {
+                    if seen_read {
+                        tracing::error!(
+                            "[SHARD_RAM_ORDER] BUG: write after read at index={i} \
+                             addr={} ram_type={:?} shard={} global_clk={} \
+                             (total={} writes={} reads={})",
+                            input.record.addr,
+                            input.record.ram_type,
+                            shard_ctx.shard_id,
+                            input.record.global_clk,
+                            global_input.len(),
+                            global_input.iter().filter(|x| x.record.is_to_write_set).count(),
+                            global_input.iter().filter(|x| !x.record.is_to_write_set).count(),
+                        );
+                        break;
+                    }
+                } else {
+                    seen_read = true;
+                }
             }
         }
 
