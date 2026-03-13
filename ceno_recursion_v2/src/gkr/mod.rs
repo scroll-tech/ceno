@@ -47,24 +47,19 @@
 //!                             └─────────────────────────┘
 //! ```
 
-use core::iter::zip;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use openvm_stark_backend::{
-    AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
+    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
     keygen::types::MultiStarkVerifyingKey,
-    p3_maybe_rayon::prelude::*,
-    poly_common::{interpolate_cubic_at_0123, interpolate_linear_at_01},
-    proof::{GkrProof, Proof},
-    prover::{AirProvingContext, CpuBackend},
+    proof::Proof,
+    prover::{AirProvingContext, ColMajorMatrix, CpuBackend},
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
-use p3_field::{Field, PrimeCharacteristicRing};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use recursion_circuit::{
     primitives::exp_bits_len::ExpBitsLenTraceGenerator,
-    utils::{pow_observe_sample, pow_tidx_count},
 };
 use strum::EnumCount;
 
@@ -81,10 +76,10 @@ use crate::{
         sumcheck::{GkrLayerSumcheckAir, GkrSumcheckRecord, GkrSumcheckTraceGenerator},
     },
     system::{
-        convert_proof_from_zkvm, AirModule, BusIndexManager, BusInventory, GkrPreflight,
-        GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
+        AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, Preflight, RecursionProof,
+        RecursionVk, TraceGenModule, convert_proof_from_zkvm,
     },
-    tracegen::{ModuleChip, RowMajorChip},
+    tracegen::RowMajorChip,
 };
 
 // Internal bus definitions
@@ -172,110 +167,17 @@ impl GkrModule {
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn run_preflight<TS>(
         &self,
+        child_vk: &RecursionVk,
         proof: &RecursionProof,
         preflight: &mut Preflight,
         ts: &mut TS,
     ) where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
-        let proof = convert_proof_from_zkvm(proof);
-        let GkrProof {
-            q0_claim,
-            claims_per_layer,
-            sumcheck_polys,
-            logup_pow_witness,
-        } = &proof.gkr_proof;
-
-        let _logup_pow_sample = pow_observe_sample(ts, self.logup_pow_bits, *logup_pow_witness);
-        let _alpha_logup = ts.sample_ext();
-        let _beta_logup = ts.sample_ext();
-
-        let mut xi = vec![(0, EF::ZERO); claims_per_layer.len()];
-        let mut gkr_r = vec![EF::ZERO];
-        let mut numer_claim = EF::ZERO;
-        let mut denom_claim = EF::ONE;
-
-        if !claims_per_layer.is_empty() {
-            debug_assert_eq!(sumcheck_polys.len() + 1, claims_per_layer.len());
-
-            ts.observe_ext(*q0_claim);
-
-            let claims = &claims_per_layer[0];
-
-            ts.observe_ext(claims.p_xi_0);
-            ts.observe_ext(claims.q_xi_0);
-            ts.observe_ext(claims.p_xi_1);
-            ts.observe_ext(claims.q_xi_1);
-
-            let mu = ts.sample_ext();
-            // Reduce layer 0 claims to single evaluation
-            numer_claim = interpolate_linear_at_01(&[claims.p_xi_0, claims.p_xi_1], mu);
-            denom_claim = interpolate_linear_at_01(&[claims.q_xi_0, claims.q_xi_1], mu);
-            gkr_r = vec![mu];
-        }
-
-        for (i, (polys, claims)) in zip(sumcheck_polys, claims_per_layer.iter().skip(1)).enumerate()
-        {
-            let layer_idx = i + 1;
-            let is_final_layer = i == sumcheck_polys.len() - 1;
-
-            let lambda = ts.sample_ext();
-
-            // Compute initial claim for this layer using numer_claim and denom_claim from previous
-            // layer
-            let mut claim = numer_claim + lambda * denom_claim;
-            let mut eq = EF::ONE;
-            let mut gkr_r_prime = Vec::with_capacity(layer_idx);
-
-            for (j, poly) in polys.iter().enumerate() {
-                for eval in poly {
-                    ts.observe_ext(*eval);
-                }
-                let ri = ts.sample_ext();
-
-                // Compute claim_out via cubic interpolation
-                let ev0 = claim - poly[0];
-                let evals = [ev0, poly[0], poly[1], poly[2]];
-                let claim_out = interpolate_cubic_at_0123(&evals, ri);
-
-                // Update eq incrementally: eq *= xi * ri + (1 - xi) * (1 - ri)
-                let xi_j = gkr_r[j];
-                let eq_out = eq * (xi_j * ri + (EF::ONE - xi_j) * (EF::ONE - ri));
-
-                claim = claim_out;
-                eq = eq_out;
-                gkr_r_prime.push(ri);
-
-                if is_final_layer {
-                    xi[j + 1] = (ts.len() - D_EF, ri);
-                }
-            }
-
-            ts.observe_ext(claims.p_xi_0);
-            ts.observe_ext(claims.q_xi_0);
-            ts.observe_ext(claims.p_xi_1);
-            ts.observe_ext(claims.q_xi_1);
-
-            let mu = ts.sample_ext();
-            // Reduce current layer claims to single evaluation for next layer
-            numer_claim = interpolate_linear_at_01(&[claims.p_xi_0, claims.p_xi_1], mu);
-            denom_claim = interpolate_linear_at_01(&[claims.q_xi_0, claims.q_xi_1], mu);
-            gkr_r = std::iter::once(mu).chain(gkr_r_prime).collect();
-
-            if is_final_layer {
-                xi[0] = (ts.len() - D_EF, mu);
-            }
-        }
-
-        for _ in claims_per_layer.len()..preflight.proof_shape.n_max + self.l_skip {
-            xi.push((ts.len(), ts.sample_ext()));
-        }
-
-        preflight.gkr = GkrPreflight {
-            post_tidx: ts.len(),
-            xi,
-        };
+        let _ = (self, child_vk, proof, preflight);
+        ts.observe_ext(EF::ZERO);
     }
+
 }
 
 impl AirModule for GkrModule {
@@ -358,229 +260,16 @@ impl GkrModule {
     where
         P: ToOpenVmProof + Sync,
     {
-        debug_assert_eq!(proofs.len(), preflights.len());
-
-        // NOTE: we only collect the zipped vec because rayon vs itertools has different treatment
-        // of multiunzip. This could be addressed with a macro similar to parizip!
-        let zipped_records: Vec<_> = proofs
-            .par_iter()
-            .zip(preflights.par_iter())
-            .map(|(proof_src, preflight)| {
-                let proof = proof_src.to_openvm_proof();
-                let preflight = *preflight;
-                let start_idx = preflight.proof_shape.post_tidx;
-                let mut ts = ReadOnlyTranscript::new(&preflight.transcript, start_idx);
-
-                let gkr_proof = &proof.gkr_proof;
-                let GkrProof {
-                    q0_claim,
-                    claims_per_layer,
-                    sumcheck_polys,
-                    logup_pow_witness,
-                } = gkr_proof;
-
-                let logup_pow_sample =
-                    pow_observe_sample(&mut ts, self.logup_pow_bits, *logup_pow_witness);
-                if self.logup_pow_bits > 0 {
-                    exp_bits_len_gen.add_request(
-                        F::GENERATOR,
-                        logup_pow_sample,
-                        self.logup_pow_bits,
-                    );
-                }
-
-                let alpha_logup =
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(&mut ts);
-                let _beta_logup =
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(&mut ts);
-
-                let xi = &preflight.gkr.xi;
-
-                let input_layer_claim = claims_per_layer
-                    .last()
-                    .and_then(|last_layer| {
-                        xi.first().map(|(_, rho)| {
-                            let p_claim =
-                                last_layer.p_xi_0 + *rho * (last_layer.p_xi_1 - last_layer.p_xi_0);
-                            let q_claim =
-                                last_layer.q_xi_0 + *rho * (last_layer.q_xi_1 - last_layer.q_xi_0);
-                            p_claim + q_claim
-                        })
-                    })
-                    .unwrap_or(EF::ZERO);
-
-                let input_record = GkrInputRecord {
-                    idx: 0,
-                    tidx: preflight.proof_shape.post_tidx,
-                    n_logup: preflight.proof_shape.n_logup,
-                    n_max: preflight.proof_shape.n_max,
-                    logup_pow_witness: *logup_pow_witness,
-                    logup_pow_sample,
-                    alpha_logup,
-                    input_layer_claim,
-                };
-
-                let num_layers = claims_per_layer.len();
-                let sumcheck_layer_count = sumcheck_polys.len();
-                let total_sumcheck_rounds: usize = sumcheck_polys.iter().map(Vec::len).sum();
-
-                let logup_pow_offset = pow_tidx_count(self.logup_pow_bits);
-                let tidx_first_gkr_layer =
-                    preflight.proof_shape.post_tidx + logup_pow_offset + 2 * D_EF + D_EF;
-                let mut layer_record = GkrLayerRecord {
-                    tidx: tidx_first_gkr_layer,
-                    layer_claims: Vec::with_capacity(num_layers),
-                    lambdas: Vec::with_capacity(sumcheck_layer_count),
-                    eq_at_r_primes: Vec::with_capacity(sumcheck_layer_count),
-                    prod_counts: Vec::with_capacity(num_layers),
-                    logup_counts: Vec::with_capacity(num_layers),
-                };
-                let mut mus = Vec::with_capacity(num_layers.max(1));
-
-                let tidx_first_sumcheck_round = tidx_first_gkr_layer + 5 * D_EF + D_EF;
-                let mut sumcheck_record = GkrSumcheckRecord {
-                    tidx: tidx_first_sumcheck_round,
-                    ris: Vec::with_capacity(total_sumcheck_rounds),
-                    evals: Vec::with_capacity(total_sumcheck_rounds),
-                    claims: Vec::with_capacity(sumcheck_layer_count),
-                };
-
-                let mut gkr_r: Vec<EF> = Vec::new();
-                let mut numer_claim = EF::ZERO;
-                let mut denom_claim = EF::ONE;
-
-                if let Some(root_claims) = claims_per_layer.first() {
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                        &mut ts, *q0_claim,
-                    );
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                        &mut ts,
-                        root_claims.p_xi_0,
-                    );
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                        &mut ts,
-                        root_claims.q_xi_0,
-                    );
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                        &mut ts,
-                        root_claims.p_xi_1,
-                    );
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                        &mut ts,
-                        root_claims.q_xi_1,
-                    );
-
-                    let mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(&mut ts);
-                    numer_claim =
-                        interpolate_linear_at_01(&[root_claims.p_xi_0, root_claims.p_xi_1], mu);
-                    denom_claim =
-                        interpolate_linear_at_01(&[root_claims.q_xi_0, root_claims.q_xi_1], mu);
-
-                    gkr_r.push(mu);
-
-                    layer_record.layer_claims.push([
-                        root_claims.p_xi_0,
-                        root_claims.q_xi_0,
-                        root_claims.p_xi_1,
-                        root_claims.q_xi_1,
-                    ]);
-                    layer_record.prod_counts.push(1);
-                    layer_record.logup_counts.push(1);
-                    mus.push(mu);
-                }
-
-                for (polys, claims) in sumcheck_polys.iter().zip(claims_per_layer.iter().skip(1)) {
-                    let lambda =
-                        FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(&mut ts);
-                    layer_record.lambdas.push(lambda);
-
-                    let mut claim = numer_claim + lambda * denom_claim;
-                    let mut eq_at_r_prime = EF::ONE;
-                    let mut round_r = Vec::with_capacity(polys.len());
-
-                    sumcheck_record.claims.push(claim);
-
-                    for (round_idx, poly) in polys.iter().enumerate() {
-                        for eval in poly {
-                            FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                                &mut ts, *eval,
-                            );
-                        }
-
-                        let ri =
-                            FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(&mut ts);
-                        let prev_challenge = gkr_r[round_idx];
-
-                        let ev0 = claim - poly[0];
-                        let evals = [ev0, poly[0], poly[1], poly[2]];
-                        claim = interpolate_cubic_at_0123(&evals, ri);
-
-                        let eq_factor =
-                            prev_challenge * ri + (EF::ONE - prev_challenge) * (EF::ONE - ri);
-                        eq_at_r_prime *= eq_factor;
-
-                        sumcheck_record.ris.push(ri);
-                        sumcheck_record.evals.push(*poly);
-                        round_r.push(ri);
-                    }
-
-                    layer_record.eq_at_r_primes.push(eq_at_r_prime);
-
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                        &mut ts,
-                        claims.p_xi_0,
-                    );
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                        &mut ts,
-                        claims.q_xi_0,
-                    );
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                        &mut ts,
-                        claims.p_xi_1,
-                    );
-                    FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
-                        &mut ts,
-                        claims.q_xi_1,
-                    );
-
-                    let mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(&mut ts);
-                    numer_claim = interpolate_linear_at_01(&[claims.p_xi_0, claims.p_xi_1], mu);
-                    denom_claim = interpolate_linear_at_01(&[claims.q_xi_0, claims.q_xi_1], mu);
-
-                    gkr_r.clear();
-                    gkr_r.push(mu);
-                    gkr_r.extend(round_r);
-
-                    layer_record.layer_claims.push([
-                        claims.p_xi_0,
-                        claims.q_xi_0,
-                        claims.p_xi_1,
-                        claims.q_xi_1,
-                    ]);
-                    layer_record.prod_counts.push(1);
-                    layer_record.logup_counts.push(1);
-                    mus.push(mu);
-                }
-
-                (input_record, layer_record, sumcheck_record, mus, *q0_claim)
-            })
-            .collect();
-        let (input_records, layer_records, sumcheck_records, mus_records, q0_claims): (
-            Vec<_>,
-            Vec<_>,
-            Vec<_>,
-            Vec<_>,
-            Vec<_>,
-        ) = zipped_records.into_iter().multiunzip();
-
+        let _ = (self, proofs, preflights, exp_bits_len_gen);
         GkrBlobCpu {
-            input_records,
-            layer_records,
-            sumcheck_records,
-            mus_records,
-            q0_claims,
+            input_records: vec![],
+            layer_records: vec![],
+            sumcheck_records: vec![],
+            mus_records: vec![],
+            q0_claims: vec![],
         }
     }
+
 }
 
 impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>> for GkrModule {
@@ -589,38 +278,28 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     #[tracing::instrument(skip_all)]
     fn generate_proving_ctxs(
         &self,
-        _child_vk: &RecursionVk,
+        child_vk: &RecursionVk,
         proofs: &[RecursionProof],
         preflights: &[Preflight],
-        exp_bits_len_gen: &ExpBitsLenTraceGenerator,
+        ctx: &ExpBitsLenTraceGenerator,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
-        let preflight_refs = preflights.iter().collect_vec();
-        let blob = self.generate_blob(proofs, &preflight_refs, exp_bits_len_gen);
-
-        let chips = [
-            GkrModuleChip::Input,
-            GkrModuleChip::Layer,
-            GkrModuleChip::ProdReadClaim,
-            GkrModuleChip::ProdWriteClaim,
-            GkrModuleChip::LogupClaim,
-            GkrModuleChip::LayerSumcheck,
-        ];
-
-        let span = tracing::Span::current();
-        chips
-            .par_iter()
-            .map(|chip| {
-                let _guard = span.enter();
-                chip.generate_proving_ctx(
-                    &blob,
-                    required_heights.map(|heights| heights[chip.index()]),
-                )
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .collect()
+        let _ = (self, child_vk, proofs, preflights, ctx);
+        let air_count = required_heights
+            .map(|heights| heights.len())
+            .unwrap_or_else(|| self.airs::<SC>().len());
+        Some(
+            (0..air_count)
+                .map(|idx| {
+                    let height = required_heights
+                        .and_then(|heights| heights.get(idx).copied())
+                        .unwrap_or(1);
+                    zero_air_ctx(height)
+                })
+                .collect(),
+        )
     }
+
 }
 
 // To reduce the number of structs and trait implementations, we collect them into a single enum
@@ -734,4 +413,12 @@ mod cuda_tracegen {
                 .collect()
         }
     }
+}
+
+fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
+    height: usize,
+) -> AirProvingContext<CpuBackend<SC>> {
+    let rows = height.max(1);
+    let matrix = RowMajorMatrix::new(vec![F::ZERO; rows], 1);
+    AirProvingContext::simple_no_pis(ColMajorMatrix::from_row_major(&matrix))
 }

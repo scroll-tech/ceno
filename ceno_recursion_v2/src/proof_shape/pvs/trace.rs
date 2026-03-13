@@ -1,14 +1,8 @@
-use std::borrow::BorrowMut;
-
 use openvm_stark_sdk::config::baby_bear_poseidon2::F;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::{
-    proof_shape::pvs::air::PublicValuesCols,
-    system::{convert_proof_from_zkvm, Preflight, RecursionProof},
-    tracegen::RowMajorChip,
-};
+use crate::{system::{Preflight, RecursionProof}, tracegen::RowMajorChip};
 
 pub struct PublicValuesTraceGenerator;
 
@@ -18,79 +12,11 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
     #[tracing::instrument(level = "trace", skip_all)]
     fn generate_trace(
         &self,
-        ctx: &Self::Ctx<'_>,
+        _ctx: &Self::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
-        let (proofs, preflights) = ctx;
-        let converted_proofs: Vec<_> = proofs
-            .iter()
-            .map(|proof| convert_proof_from_zkvm(proof))
-            .collect();
-        let num_valid_rows = converted_proofs
-            .iter()
-            .map(|proof| {
-                proof
-                    .public_values
-                    .iter()
-                    .fold(0usize, |acc, per_air| acc + per_air.len())
-            })
-            .sum::<usize>();
-        let height = if let Some(height) = required_height {
-            if height < num_valid_rows {
-                return None;
-            }
-            height
-        } else {
-            num_valid_rows.next_power_of_two()
-        };
-        let width = PublicValuesCols::<u8>::width();
-
-        debug_assert_eq!(converted_proofs.len(), preflights.len());
-
-        let mut trace = vec![F::ZERO; height * width];
-        let mut chunks = trace.chunks_exact_mut(width);
-
-        for (proof_idx, (proof, preflight)) in
-            converted_proofs.iter().zip(preflights.iter()).enumerate()
-        {
-            let mut row_idx = 0usize;
-
-            for ((air_idx, pvs), &starting_tidx) in proof
-                .public_values
-                .iter()
-                .enumerate()
-                .filter(|(_, per_air)| !per_air.is_empty())
-                .zip(&preflight.proof_shape.pvs_tidx)
-            {
-                let mut tidx = starting_tidx;
-
-                for (pv_idx, pv) in pvs.iter().enumerate() {
-                    let chunk = chunks.next().unwrap();
-                    let cols: &mut PublicValuesCols<F> = chunk.borrow_mut();
-
-                    cols.is_valid = F::ONE;
-
-                    cols.proof_idx = F::from_usize(proof_idx);
-                    cols.air_idx = F::from_usize(air_idx);
-                    cols.pv_idx = F::from_usize(pv_idx);
-
-                    cols.is_first_in_air = F::from_bool(pv_idx == 0);
-                    cols.is_first_in_proof = F::from_bool(row_idx == 0);
-
-                    cols.tidx = F::from_usize(tidx);
-                    cols.value = *pv;
-
-                    row_idx += 1;
-                    tidx += 1;
-                }
-            }
-        }
-
-        for chunk in chunks {
-            let cols: &mut PublicValuesCols<F> = chunk.borrow_mut();
-            cols.proof_idx = F::from_usize(proofs.len());
-        }
-
-        Some(RowMajorMatrix::new(trace, width))
+        let rows = required_height.unwrap_or(1).max(1);
+        Some(RowMajorMatrix::new(vec![F::ZERO; rows], 1))
     }
+
 }

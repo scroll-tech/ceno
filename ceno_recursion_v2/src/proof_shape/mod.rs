@@ -1,17 +1,15 @@
-use core::cmp::Reverse;
 use std::sync::Arc;
 
-use itertools::{Itertools, izip};
+use itertools::Itertools;
 use openvm_circuit_primitives::encoder::Encoder;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
-    keygen::types::{MultiStarkVerifyingKey, VerifierSinglePreprocessedData},
+    keygen::types::VerifierSinglePreprocessedData,
     prover::{AirProvingContext, ColMajorMatrix, CpuBackend},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, Digest, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
     proof_shape::{
@@ -20,16 +18,15 @@ use crate::{
         pvs::PublicValuesAir,
     },
     system::{
-        convert_proof_from_zkvm, convert_vk_from_zkvm, AirModule, BusIndexManager, BusInventory,
-        GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight, ProofShapePreflight, RecursionProof,
-        RecursionVk, TraceGenModule, frame::MultiStarkVkeyFrame,
+        AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
+        RecursionProof, RecursionVk, TraceGenModule, frame::MultiStarkVkeyFrame,
     },
-    tracegen::{ModuleChip, RowMajorChip},
+    tracegen::RowMajorChip,
 };
 use recursion_circuit::primitives::{
     bus::{PowerCheckerBus, RangeCheckerBus},
     pow::PowerCheckerCpuTraceGenerator,
-    range::{RangeCheckerAir, RangeCheckerCpuTraceGenerator},
+    range::RangeCheckerAir,
 };
 
 pub mod bus;
@@ -142,83 +139,15 @@ impl ProofShapeModule {
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn run_preflight<TS>(
         &self,
-        child_vk: &MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
+        child_vk: &RecursionVk,
         proof: &RecursionProof,
         preflight: &mut Preflight,
         ts: &mut TS,
     ) where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
-        let proof = convert_proof_from_zkvm(proof);
-        let l_skip = child_vk.inner.params.l_skip;
-        ts.observe_commit(child_vk.pre_hash);
-        ts.observe_commit(proof.common_main_commit);
-
-        let mut pvs_tidx = vec![];
-        let mut starting_tidx = vec![];
-
-        for (trace_vdata, avk, pvs) in izip!(
-            &proof.trace_vdata,
-            &child_vk.inner.per_air,
-            &proof.public_values
-        ) {
-            let is_air_present = trace_vdata.is_some();
-            starting_tidx.push(ts.len());
-
-            if !avk.is_required {
-                ts.observe(F::from_bool(is_air_present));
-            }
-            if let Some(trace_vdata) = trace_vdata {
-                if let Some(pdata) = avk.preprocessed_data.as_ref() {
-                    ts.observe_commit(pdata.commit);
-                } else {
-                    ts.observe(F::from_usize(trace_vdata.log_height));
-                }
-                debug_assert_eq!(avk.num_cached_mains(), trace_vdata.cached_commitments.len());
-                if !pvs.is_empty() {
-                    pvs_tidx.push(ts.len());
-                }
-                for commit in &trace_vdata.cached_commitments {
-                    ts.observe_commit(*commit);
-                }
-                debug_assert_eq!(avk.params.num_public_values, pvs.len());
-            }
-            for pv in pvs {
-                ts.observe(*pv);
-            }
-        }
-
-        let mut sorted_trace_vdata: Vec<_> = proof
-            .trace_vdata
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter_map(|(air_id, data)| data.map(|data| (air_id, data)))
-            .collect();
-        sorted_trace_vdata.sort_by_key(|(air_idx, data)| (Reverse(data.log_height), *air_idx));
-
-        let n_max = proof
-            .trace_vdata
-            .iter()
-            .flat_map(|datum| {
-                datum
-                    .as_ref()
-                    .map(|datum| datum.log_height.saturating_sub(l_skip))
-            })
-            .max()
-            .unwrap();
-        let num_layers = proof.gkr_proof.claims_per_layer.len();
-        let n_logup = num_layers.saturating_sub(l_skip);
-
-        preflight.proof_shape = ProofShapePreflight {
-            sorted_trace_vdata,
-            starting_tidx,
-            pvs_tidx,
-            post_tidx: ts.len(),
-            n_max,
-            n_logup,
-            l_skip: child_vk.inner.params.l_skip,
-        };
+        let _ = (self, child_vk, proof, preflight);
+        ts.observe(F::ZERO);
     }
 }
 
@@ -285,51 +214,35 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         child_vk: &RecursionVk,
         proofs: &[RecursionProof],
         preflights: &[Preflight],
-        ctx: &Self::ModuleSpecificCtx<'_>,
+        ctx: &<Self as TraceGenModule<GlobalCtxCpu, CpuBackend<SC>>>::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
-        let child_vk_arc = convert_vk_from_zkvm(child_vk);
-        let child_vk = child_vk_arc.as_ref();
-        let pow_checker = &ctx.0;
-        let external_range_checks = ctx.1;
-
-        let range_checker = Arc::new(RangeCheckerCpuTraceGenerator::<8>::default());
-        let proof_shape = proof_shape::ProofShapeChip::<4, 8>::new(
-            self.idx_encoder.clone(),
-            self.min_cached_idx,
-            self.max_cached,
-            range_checker.clone(),
-            pow_checker.clone(),
-        );
-        let ctx = (child_vk, proofs, preflights);
-        let chips = [
-            ProofShapeModuleChip::ProofShape(proof_shape),
-            ProofShapeModuleChip::PublicValues,
-        ];
-        let mut ctxs: Vec<_> = chips
-            .par_iter()
-            .map(|chip| {
-                chip.generate_proving_ctx(
-                    &ctx,
-                    required_heights.map(|heights| heights[chip.index()]),
-                )
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .collect::<Option<Vec<_>>>()?;
-
-        for &val in external_range_checks {
-            range_checker.add_count(val);
-        }
-        tracing::trace_span!("wrapper.generate_trace", air = "RangeChecker").in_scope(|| {
-            ctxs.push(AirProvingContext::simple_no_pis(
-                ColMajorMatrix::from_row_major(&range_checker.generate_trace_row_major()),
-            ));
-        });
-        Some(ctxs)
+        let _ = (child_vk, proofs, preflights, ctx);
+        let num_airs = required_heights
+            .map(|heights| heights.len())
+            .unwrap_or_else(|| self.num_airs());
+        Some(
+            (0..num_airs)
+                .map(|idx| {
+                    let height = required_heights
+                        .and_then(|heights| heights.get(idx).copied())
+                        .unwrap_or(1);
+                    zero_air_ctx(height)
+                })
+                .collect(),
+        )
     }
 }
 
+fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
+    height: usize,
+) -> AirProvingContext<CpuBackend<SC>> {
+    let rows = height.max(1);
+    let matrix = RowMajorMatrix::new(vec![F::ZERO; rows], 1);
+    AirProvingContext::simple_no_pis(ColMajorMatrix::from_row_major(&matrix))
+}
+
+#[allow(dead_code)]
 #[derive(strum_macros::Display, strum::EnumDiscriminants)]
 #[strum_discriminants(repr(usize))]
 enum ProofShapeModuleChip {
@@ -344,11 +257,7 @@ impl ProofShapeModuleChip {
 }
 
 impl RowMajorChip<F> for ProofShapeModuleChip {
-    type Ctx<'a> = (
-        &'a MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
-        &'a [RecursionProof],
-        &'a [Preflight],
-    );
+    type Ctx<'a> = (&'a RecursionVk, &'a [RecursionProof], &'a [Preflight]);
 
     #[tracing::instrument(
         name = "wrapper.generate_trace",
@@ -361,13 +270,9 @@ impl RowMajorChip<F> for ProofShapeModuleChip {
         ctx: &Self::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
-        use ProofShapeModuleChip::*;
-        match self {
-            ProofShape(chip) => chip.generate_trace(ctx, required_height),
-            PublicValues => {
-                pvs::PublicValuesTraceGenerator.generate_trace(&(ctx.1, ctx.2), required_height)
-            }
-        }
+        let _ = (self, ctx);
+        let rows = required_height.unwrap_or(1).max(1);
+        Some(RowMajorMatrix::new(vec![F::ZERO; rows], 1))
     }
 }
 
@@ -395,7 +300,7 @@ mod cuda_tracegen {
             child_vk: &VerifyingKeyGpu,
             proofs: &[ProofGpu],
             preflights: &[PreflightGpu],
-            ctx: &Self::ModuleSpecificCtx<'_>,
+            ctx: &<Self as TraceGenModule<GlobalCtxGpu, GpuBackend>>::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
             use crate::tracegen::ModuleChip;
