@@ -19,7 +19,8 @@ use crate::{
 use ceno_emul::{InsnKind, StepRecord, Word};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
-use p3::field::FieldAlgebra;
+
+use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 use witness::set_val;
 
@@ -114,7 +115,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
             .assign_value(instance, Value::new_unchecked(rs1));
 
         let imm = step.insn().imm as i16 as u16;
-        set_val!(instance, config.imm, E::BaseField::from_canonical_u16(imm));
+        set_val!(instance, config.imm, E::BaseField::from_u16(imm));
         // according to riscvim32 spec, imm always do signed extension
         let imm_sign_extend = imm_sign_extend(true, step.insn().imm as i16);
         set_val!(

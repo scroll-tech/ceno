@@ -20,6 +20,7 @@ mpcs.workspace = true
 multilinear_extensions.workspace = true
 once_cell.workspace = true
 p3.workspace = true
+p3-field.workspace = true
 rand.workspace = true
 rayon.workspace = true
 serde.workspace = true

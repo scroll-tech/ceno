@@ -19,7 +19,8 @@ use gkr_iop::hal::ProverBackend;
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
+
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
 use tracing::{error, level_filters::LevelFilter};

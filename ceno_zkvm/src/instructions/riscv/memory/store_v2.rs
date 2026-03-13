@@ -20,7 +20,7 @@ use crate::{
 use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
-use p3::field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 use std::marker::PhantomData;
 
 pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
@@ -79,15 +79,15 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         }
 
         // rs1 + imm = mem_addr
-        let inv = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
+        let inv = E::BaseField::from_u32(1 << UInt::<E>::LIMB_BITS).inverse();
 
         let carry = (rs1_read.expr()[0].expr() + imm.expr()
             - memory_addr.uint_unaligned().expr()[0].expr())
             * inv.expr();
         circuit_builder.assert_bit(|| "carry_lo_bit", carry.expr())?;
 
-        let imm_extend_limb = imm_sign.expr()
-            * E::BaseField::from_canonical_u32((1 << UInt::<E>::LIMB_BITS) - 1).expr();
+        let imm_extend_limb =
+            imm_sign.expr() * E::BaseField::from_u32((1 << UInt::<E>::LIMB_BITS) - 1).expr();
         let carry = (rs1_read.expr()[1].expr() + imm_extend_limb.expr() + carry
             - memory_addr.uint_unaligned().expr()[1].expr())
             * inv.expr();

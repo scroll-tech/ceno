@@ -18,7 +18,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use gkr_iop::hal::ProverBackend;
 use mpcs::Point;
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 use std::{collections::HashMap, sync::OnceLock};
 use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
@@ -186,7 +186,7 @@ impl ChipScheduler {
             // Fork: clone parent + append task_id
             // (identical to ForkableTranscript::fork default impl)
             let mut forked = parent_transcript.clone();
-            forked.append_field_element(&<PB::E as ExtensionField>::BaseField::from_canonical_u64(
+            forked.append_field_element(&<PB::E as ExtensionField>::BaseField::from_u64(
                 task_id as u64,
             ));
 
@@ -247,7 +247,7 @@ impl ChipScheduler {
         if tasks.len() == 1 {
             let task = tasks.remove(0);
             let mut fork = transcript.clone();
-            fork.append_field_element(&<PB::E as ExtensionField>::BaseField::from_canonical_u64(
+            fork.append_field_element(&<PB::E as ExtensionField>::BaseField::from_u64(
                 task.task_id as u64,
             ));
             let result = execute_task(task, &mut fork)?;
@@ -348,9 +348,7 @@ impl ChipScheduler {
                                 // (identical to ForkableTranscript::fork default impl)
                                 let mut local_transcript = tr.0.clone();
                                 local_transcript.append_field_element(
-                                    &<PB::E as ExtensionField>::BaseField::from_canonical_u64(
-                                        task_id as u64,
-                                    ),
+                                    &<PB::E as ExtensionField>::BaseField::from_u64(task_id as u64),
                                 );
 
                                 let result = execute_fn(task, &mut local_transcript);

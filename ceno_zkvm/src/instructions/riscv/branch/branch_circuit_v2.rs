@@ -18,7 +18,7 @@ use crate::{
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 use std::{array, marker::PhantomData};
 use witness::set_val;
 
@@ -170,7 +170,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
                         return (
                             !is_beq,
                             i,
-                            (F::from_canonical_u16(x[i]) - F::from_canonical_u16(y[i])).inverse(),
+                            (F::from_u16(x[i]) - F::from_u16(y[i])).inverse(),
                         );
                     }
                 }

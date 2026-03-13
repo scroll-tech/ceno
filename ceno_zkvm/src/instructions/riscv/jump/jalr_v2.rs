@@ -23,7 +23,7 @@ use crate::{
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 
 pub struct JalrConfig<E: ExtensionField> {
     pub i_insn: IInstructionConfig<E>,
@@ -64,8 +64,8 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         let vm_state = StateInOut::construct_circuit(circuit_builder, true)?;
         let rd_high = circuit_builder.create_witin(|| "rd_high");
         let rd_low: Expression<_> = vm_state.pc.expr()
-            + E::BaseField::from_canonical_usize(PC_STEP_SIZE).expr()
-            - rd_high.expr() * E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).expr();
+            + E::BaseField::from_usize(PC_STEP_SIZE).expr()
+            - rd_high.expr() * E::BaseField::from_u32(1 << UInt::<E>::LIMB_BITS).expr();
         // rd range check
         // rd_low
         circuit_builder.assert_const_range(|| "rd_low_u16", rd_low.expr(), UInt::<E>::LIMB_BITS)?;
@@ -102,15 +102,15 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         //  1. rs1 + imm = jump_pc_addr + overflow*2^32
         //  3. next_pc = jump_pc_addr aligned to even value (round down)
 
-        let inv = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
+        let inv = E::BaseField::from_u32(1 << UInt::<E>::LIMB_BITS).inverse();
 
         let carry = (rs1_read.expr()[0].expr() + imm.expr()
             - jump_pc_addr.uint_unaligned().expr()[0].expr())
             * inv.expr();
         circuit_builder.assert_bit(|| "carry_lo_bit", carry.expr())?;
 
-        let imm_extend_limb = imm_sign.expr()
-            * E::BaseField::from_canonical_u32((1 << UInt::<E>::LIMB_BITS) - 1).expr();
+        let imm_extend_limb =
+            imm_sign.expr() * E::BaseField::from_u32((1 << UInt::<E>::LIMB_BITS) - 1).expr();
         let carry = (rs1_read.expr()[1].expr() + imm_extend_limb.expr() + carry
             - jump_pc_addr.uint_unaligned().expr()[1].expr())
             * inv.expr();
@@ -166,11 +166,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         config
             .rs1_read
             .assign_value(instance, Value::new_unchecked(rs1));
-        set_val!(
-            instance,
-            config.rd_high,
-            E::BaseField::from_canonical_u16(rd_limb[1])
-        );
+        set_val!(instance, config.rd_high, E::BaseField::from_u16(rd_limb[1]));
 
         let (sum, _) = rs1.overflowing_add_signed(i32::from_ne_bytes([
             imm_sign_extend[0] as u8,

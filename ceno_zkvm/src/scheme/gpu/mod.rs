@@ -815,7 +815,6 @@ fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     let stream = gkr_iop::gpu::get_thread_stream();
     use crate::scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP};
     use ceno_gpu::{CudaHal as _, bb31::GpuPolynomialExt};
-    use p3::field::FieldAlgebra;
 
     let ComposedConstrainSystem {
         zkvm_v1_css: cs, ..

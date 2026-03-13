@@ -3,7 +3,7 @@ use ff_ext::{ExtensionField, FromUniformBytes};
 use multilinear_extensions::Expression;
 // The extension field and curve definition are adapted from
 // https://github.com/succinctlabs/sp1/blob/v5.2.1/crates/stark/src/septic_curve.rs
-use p3::field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -233,8 +233,8 @@ impl<F: Field> SepticExtension<F> {
 
     pub fn square(&self) -> Self {
         let mut result = [F::ZERO; 7];
-        let two = F::from_canonical_u32(2);
-        let five = F::from_canonical_u32(5);
+        let two = F::from_u32(2);
+        let five = F::from_u32(5);
 
         // i < j
         for i in 0..7 {
@@ -423,7 +423,7 @@ impl<F: Field> From<[u32; 7]> for SepticExtension<F> {
     fn from(arr: [u32; 7]) -> Self {
         let mut result = [F::ZERO; 7];
         for i in 0..7 {
-            result[i] = F::from_canonical_u32(arr[i]);
+            result[i] = F::from_u32(arr[i]);
         }
         Self(result)
     }
@@ -549,8 +549,8 @@ impl<F: Field> Mul<Self> for &SepticExtension<F> {
 
     fn mul(self, other: Self) -> Self::Output {
         let mut result = [F::ZERO; 7];
-        let five = F::from_canonical_u32(5);
-        let two = F::from_canonical_u32(2);
+        let five = F::from_u32(5);
+        let two = F::from_u32(2);
         for i in 0..7 {
             for j in 0..7 {
                 let term = self.0[i] * other.0[j];
@@ -683,8 +683,8 @@ impl<E: ExtensionField> Mul<Self> for &SymbolicSepticExtension<E> {
 
     fn mul(self, other: Self) -> Self::Output {
         let mut result = vec![Expression::Constant(Either::Left(E::BaseField::ZERO)); 7];
-        let five = Expression::Constant(Either::Left(E::BaseField::from_canonical_u32(5)));
-        let two = Expression::Constant(Either::Left(E::BaseField::from_canonical_u32(2)));
+        let five = Expression::Constant(Either::Left(E::BaseField::from_u32(5)));
+        let two = Expression::Constant(Either::Left(E::BaseField::from_u32(2)));
 
         for i in 0..7 {
             for j in 0..7 {
@@ -770,7 +770,7 @@ impl<F: Field> SepticPoint<F> {
     // if there exists y such that (x, y) is on the curve, return one of them
     pub fn from_x(x: SepticExtension<F>) -> Option<Self> {
         let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
-        let a: F = F::from_canonical_u32(2);
+        let a: F = F::from_u32(2);
 
         let y2 = x.square() * &x + (&x * a) + &b;
         if y2.is_square() {
@@ -792,9 +792,9 @@ impl<F: Field> SepticPoint<F> {
         Self { x, y, is_infinity }
     }
     pub fn double(&self) -> Self {
-        let a = F::from_canonical_u32(2);
-        let three = F::from_canonical_u32(3);
-        let two = F::from_canonical_u32(2);
+        let a = F::from_u32(2);
+        let three = F::from_u32(3);
+        let two = F::from_u32(2);
 
         let x1 = &self.x;
         let y1 = &self.y;
@@ -891,7 +891,7 @@ impl<F: Field> SepticPoint<F> {
         }
 
         let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
-        let a: F = F::from_canonical_u32(2);
+        let a: F = F::from_u32(2);
 
         self.y.square() == self.x.square() * &self.x + (&self.x * a) + b
     }
@@ -955,7 +955,7 @@ impl<F: Field> SepticJacobianPoint<F> {
         }
 
         let b: SepticExtension<F> = [0, 0, 0, 0, 0, 26, 0].into();
-        let a: F = F::from_canonical_u32(2);
+        let a: F = F::from_u32(2);
 
         let z2 = self.z.square();
         let z4 = z2.square();
@@ -1015,7 +1015,7 @@ impl<F: Field> Add<Self> for &SepticJacobianPoint<F> {
             }
         }
 
-        let two = F::from_canonical_u32(2);
+        let two = F::from_u32(2);
         let h = u2 - &u1;
         let i = (&h * two).square();
         let j = &h * &i;
@@ -1052,10 +1052,10 @@ impl<F: Field> SepticJacobianPoint<F> {
             return SepticJacobianPoint::point_at_infinity();
         }
 
-        let two = F::from_canonical_u32(2);
-        let three = F::from_canonical_u32(3);
-        let eight = F::from_canonical_u32(8);
-        let a = F::from_canonical_u32(2); // The curve coefficient a
+        let two = F::from_u32(2);
+        let three = F::from_u32(3);
+        let eight = F::from_u32(8);
+        let a = F::from_u32(2); // The curve coefficient a
 
         // xx = x1^2
         let xx = self.x.square();

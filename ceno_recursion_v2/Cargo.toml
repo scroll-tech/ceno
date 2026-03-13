@@ -1,0 +1,63 @@
+[package]
+categories = ["cryptography", "zk", "blockchain", "ceno"]
+description = "Next-generation recursion circuits for Ceno built on OpenVM v2"
+edition = "2024"
+keywords = ["cryptography", "zk", "blockchain", "ceno"]
+license = "MIT OR Apache-2.0"
+name = "ceno_recursion_v2"
+readme = "../README.md"
+repository = "https://github.com/scroll-tech/ceno"
+version = "0.1.0"
+
+[dependencies]
+bincode = "1"
+ceno-examples = { path = "../examples-builder" }
+ceno_emul = { path = "../ceno_emul" }
+ceno_host = { path = "../ceno_host" }
+ceno_zkvm = { path = "../ceno_zkvm" }
+clap = { version = "4.5", features = ["derive"] }
+continuations-v2 = { git = "https://github.com/openvm-org/openvm.git", package = "continuations-v2", branch = "develop-v2.0.0-beta", default-features = false }
+derive-new = "0.6.0"
+eyre = "0.6"
+ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", branch = "feat/bump-p3" }
+gkr_iop = { path = "../gkr_iop" }
+itertools = "0.13"
+mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", branch = "feat/bump-p3" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", branch = "feat/bump-p3" }
+openvm = { git = "https://github.com/openvm-org/openvm.git", branch = "develop-v2.0.0-beta", default-features = false }
+openvm-circuit = { git = "https://github.com/openvm-org/openvm.git", branch = "develop-v2.0.0-beta", default-features = false }
+openvm-circuit-primitives = { git = "https://github.com/openvm-org/openvm.git", branch = "develop-v2.0.0-beta", default-features = false }
+openvm-poseidon2-air = { git = "https://github.com/openvm-org/openvm.git", branch = "develop-v2.0.0-beta", package = "openvm-poseidon2-air", default-features = false }
+openvm-stark-backend = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2", default-features = false }
+openvm-stark-sdk = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2" }
+openvm-cuda-backend = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2", optional = true }
+openvm-cuda-common = { git = "https://github.com/openvm-org/stark-backend.git", branch = "develop-v2", optional = true }
+p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", branch = "feat/bump-p3" }
+p3-air = { version = "=0.4.1", default-features = false }
+p3-field = { version = "=0.4.1", default-features = false }
+p3-matrix = { version = "=0.4.1", default-features = false }
+p3-maybe-rayon = { version = "=0.4.1", default-features = false }
+p3-symmetric = { version = "=0.4.1", default-features = false }
+parse-size = "1.1"
+rand = "0.8"
+recursion-circuit = { git = "https://github.com/openvm-org/openvm.git", package = "recursion-circuit", branch = "develop-v2.0.0-beta", default-features = false }
+serde = { version = "1.0", features = ["derive", "rc"] }
+serde_json = "1.0"
+stark-recursion-circuit-derive = { git = "https://github.com/openvm-org/openvm.git", package = "stark-recursion-circuit-derive", branch = "develop-v2.0.0-beta" }
+strum = "0.26"
+strum_macros = "0.26"
+sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", branch = "feat/bump-p3" }
+tracing = { version = "0.1", features = ["attributes"] }
+tracing-forest = { version = "0.1.6" }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", branch = "feat/bump-p3" }
+verify-stark = { git = "https://github.com/openvm-org/openvm.git", package = "verify-stark", branch = "develop-v2.0.0-beta", default-features = false }
+whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", branch = "feat/bump-p3" }
+witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", branch = "feat/bump-p3" }
+
+[features]
+cuda = [
+    "dep:openvm-cuda-backend",
+    "dep:openvm-cuda-common",
+]
+default = []

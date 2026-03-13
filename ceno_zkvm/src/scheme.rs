@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -24,7 +23,7 @@ use crate::{
     },
     structs::{TowerProofs, ZKVMVerifyingKey},
 };
-
+use p3::field::PrimeCharacteristicRing;
 pub mod constants;
 pub mod cpu;
 #[cfg(feature = "gpu")]
@@ -120,19 +119,17 @@ impl PublicValues {
     }
     pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
         vec![
-            vec![E::BaseField::from_canonical_u32(self.exit_code & 0xffff)],
-            vec![E::BaseField::from_canonical_u32(
-                (self.exit_code >> 16) & 0xffff,
-            )],
-            vec![E::BaseField::from_canonical_u32(self.init_pc)],
-            vec![E::BaseField::from_canonical_u64(self.init_cycle)],
-            vec![E::BaseField::from_canonical_u32(self.end_pc)],
-            vec![E::BaseField::from_canonical_u64(self.end_cycle)],
-            vec![E::BaseField::from_canonical_u32(self.shard_id)],
-            vec![E::BaseField::from_canonical_u32(self.heap_start_addr)],
-            vec![E::BaseField::from_canonical_u32(self.heap_shard_len)],
-            vec![E::BaseField::from_canonical_u32(self.hint_start_addr)],
-            vec![E::BaseField::from_canonical_u32(self.hint_shard_len)],
+            vec![E::BaseField::from_u32(self.exit_code & 0xffff)],
+            vec![E::BaseField::from_u32((self.exit_code >> 16) & 0xffff)],
+            vec![E::BaseField::from_u32(self.init_pc)],
+            vec![E::BaseField::from_u64(self.init_cycle)],
+            vec![E::BaseField::from_u32(self.end_pc)],
+            vec![E::BaseField::from_u64(self.end_cycle)],
+            vec![E::BaseField::from_u32(self.shard_id)],
+            vec![E::BaseField::from_u32(self.heap_start_addr)],
+            vec![E::BaseField::from_u32(self.heap_shard_len)],
+            vec![E::BaseField::from_u32(self.hint_start_addr)],
+            vec![E::BaseField::from_u32(self.hint_shard_len)],
         ]
         .into_iter()
         .chain(
@@ -142,7 +139,7 @@ impl PublicValues {
                     self.public_io
                         .iter()
                         .map(|value| {
-                            E::BaseField::from_canonical_u16(
+                            E::BaseField::from_u16(
                                 ((value >> (limb_index * LIMB_BITS)) & LIMB_MASK) as u16,
                             )
                         })
@@ -153,7 +150,7 @@ impl PublicValues {
         .chain(
             self.shard_rw_sum
                 .iter()
-                .map(|value| vec![E::BaseField::from_canonical_u32(*value)])
+                .map(|value| vec![E::BaseField::from_u32(*value)])
                 .collect_vec(),
         )
         .collect::<Vec<_>>()

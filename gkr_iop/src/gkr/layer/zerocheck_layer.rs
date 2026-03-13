@@ -9,7 +9,7 @@ use multilinear_extensions::{
     utils::{eval_by_expr, eval_by_expr_with_instance, expr_convert_to_witins},
     virtual_poly::VPAuxInfo,
 };
-use p3::field::{FieldAlgebra, dot_product};
+use p3_field::{PrimeCharacteristicRing, dot_product};
 use smallvec::SmallVec;
 use std::{cmp::Ordering, collections::BTreeMap, marker::PhantomData, ops::Neg};
 use sumcheck::{

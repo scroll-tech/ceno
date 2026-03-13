@@ -25,10 +25,11 @@ use openvm_native_compiler::{
 };
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::hints::{Hintable, VecAutoHintable};
-use openvm_stark_backend::p3_field::{FieldAlgebra, extension::BinomialExtensionField};
+use openvm_stark_backend::p3_field::{PrimeCharacteristicRing as FieldAlgebra, extension::BinomialExtensionField};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldExtensionAlgebra;
 use sumcheck::structs::IOPProof;
+use crate::field_ext::CanonicalFieldExt;
 
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, 4>;

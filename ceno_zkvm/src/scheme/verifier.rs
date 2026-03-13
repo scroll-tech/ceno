@@ -1,5 +1,6 @@
 use either::Either;
 use ff_ext::ExtensionField;
+use p3::field::PrimeCharacteristicRing;
 use std::{
     iter::{self, once, repeat_n},
     marker::PhantomData,
@@ -38,7 +39,7 @@ use multilinear_extensions::{
     utils::eval_by_expr_with_instance,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
-use p3::field::FieldAlgebra;
+
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState},
     util::get_challenge_pows,
@@ -116,13 +117,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 }
                 // each shard set init cycle = Tracer::SUBCYCLES_PER_INSN
                 // to satisfy initial reads for all prev_cycle = 0 < init_cycle
-                assert_eq!(vm_proof.pi_evals[INIT_CYCLE_IDX], E::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN));
+                assert_eq!(vm_proof.pi_evals[INIT_CYCLE_IDX], E::from_u64(Tracer::SUBCYCLES_PER_INSN));
                 // check init_pc match prev end_pc
                 if let Some(prev_pc) = prev_pc {
                     assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], prev_pc);
                 } else {
                     // first chunk, check program entry
-                    assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], E::from_canonical_u32(self.vk.entry_pc));
+                    assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], E::from_u32(self.vk.entry_pc));
                 }
                 let end_pc = vm_proof.pi_evals[END_PC_IDX];
 
@@ -191,7 +192,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // check shard id
         assert_eq!(
             vm_proof.raw_pi[SHARD_ID_IDX],
-            vec![E::BaseField::from_canonical_usize(shard_id)]
+            vec![E::BaseField::from_usize(shard_id)]
         );
 
         // verify constant poly(s) evaluation result match
@@ -223,10 +224,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // write (circuit_idx, num_instance) to transcript
         for (circuit_idx, proofs) in vm_proof.chip_proofs.iter() {
-            transcript.append_field_element(&E::BaseField::from_canonical_u32(*circuit_idx as u32));
+            transcript.append_field_element(&E::BaseField::from_u32(*circuit_idx as u32));
             // length of proof.num_instances will be constrained in verify_chip_proof
             for num_instance in proofs.iter().flat_map(|proof| &proof.num_instances) {
-                transcript.append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
+                transcript.append_field_element(&E::BaseField::from_usize(*num_instance));
             }
         }
 
@@ -340,7 +341,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 })
                 .sum::<E>();
 
-            transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
+            transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
             if circuit_vk.get_cs().is_with_lk_table() {
                 logup_sum -= chip_logup_sum;
             } else {
@@ -391,8 +392,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
             }
         }
-        logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
-            * dummy_table_item.inverse();
+        logup_sum -= E::from_u64(dummy_table_item_multiplicity as u64) * dummy_table_item.inverse();
 
         #[cfg(debug_assertions)]
         {

@@ -17,7 +17,7 @@ mod tests {
     };
     use openvm_stark_backend::{
         config::StarkGenericConfig,
-        p3_field::{Field, FieldAlgebra},
+        p3_field::{Field, PrimeCharacteristicRing as FieldAlgebra},
     };
     use openvm_stark_sdk::{
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,

@@ -60,7 +60,7 @@ impl<F: SmallField> XorOperation<F> {
         let y_bytes = y.to_le_bytes();
         for i in 0..WORD_SIZE {
             let xor = x_bytes[i] ^ y_bytes[i];
-            self.value[i] = F::from_canonical_u8(xor);
+            self.value[i] = F::from_u8(xor);
 
             record.lookup_xor_byte(x_bytes[i] as u64, y_bytes[i] as u64);
         }

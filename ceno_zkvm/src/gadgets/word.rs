@@ -130,7 +130,7 @@ impl<T> IndexMut<usize> for Word<T> {
 
 impl<F: SmallField> From<u32> for Word<F> {
     fn from(value: u32) -> Self {
-        Word(value.to_le_bytes().map(F::from_canonical_u8))
+        Word(value.to_le_bytes().map(F::from_u8))
     }
 }
 

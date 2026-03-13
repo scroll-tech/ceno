@@ -3,17 +3,15 @@
 use std::{
     borrow::{Borrow, BorrowMut},
     iter::from_fn,
-    mem::transmute,
 };
 
 use ff_ext::{BabyBearExt4, ExtensionField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use num_bigint::BigUint;
 use p3::{
-    babybear::BabyBearInternalLayerParameters,
-    field::{Field, FieldAlgebra, PrimeField},
+    babybear::{BabyBearInternalLayerParameters, BabyBearParameters},
+    field::{Field, PrimeCharacteristicRing as FieldAlgebra, PrimeField},
     monty_31::InternalLayerBaseParameters,
     poseidon2::{GenericPoseidon2LinearLayers, MDSMat4, mds_light_permutation},
     poseidon2_air::{FullRound, PartialRound, Poseidon2Cols, SBox, num_cols},
@@ -86,28 +84,15 @@ pub struct Poseidon2Config<
 #[derive(Debug, Clone)]
 pub struct Poseidon2LinearLayers;
 
-impl<F: Field, const WIDTH: usize> GenericPoseidon2LinearLayers<F, WIDTH>
-    for Poseidon2LinearLayers
+impl<const WIDTH: usize> GenericPoseidon2LinearLayers<WIDTH> for Poseidon2LinearLayers
+where
+    BabyBearInternalLayerParameters: InternalLayerBaseParameters<BabyBearParameters, WIDTH>,
 {
-    fn internal_linear_layer(state: &mut [F; WIDTH]) {
-        // this only works when F is BabyBear field for now
-        let babybear_prime = BigUint::from(0x7800_0001u32);
-        if F::order() == babybear_prime {
-            let diag_m1_matrix = &<BabyBearInternalLayerParameters as InternalLayerBaseParameters<
-            _,
-            16,
-        >>::INTERNAL_DIAG_MONTY;
-            let diag_m1_matrix: &[F; WIDTH] = unsafe { transmute(diag_m1_matrix) };
-            let sum = state.iter().cloned().sum::<F>();
-            for (input, diag_m1) in state.iter_mut().zip(diag_m1_matrix) {
-                *input = sum + F::from_f(*diag_m1) * *input;
-            }
-        } else {
-            panic!("Unsupported field");
-        }
+    fn internal_linear_layer<R: FieldAlgebra>(state: &mut [R; WIDTH]) {
+        BabyBearInternalLayerParameters::generic_internal_linear_layer(state);
     }
 
-    fn external_linear_layer(state: &mut [F; WIDTH]) {
+    fn external_linear_layer<R: FieldAlgebra>(state: &mut [R; WIDTH]) {
         mds_light_permutation(state, &MDSMat4);
     }
 }
@@ -120,6 +105,8 @@ impl<
     const HALF_FULL_ROUNDS: usize,
     const PARTIAL_ROUNDS: usize,
 > Poseidon2Config<E, STATE_WIDTH, SBOX_DEGREE, SBOX_REGISTERS, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>
+where
+    BabyBearInternalLayerParameters: InternalLayerBaseParameters<BabyBearParameters, STATE_WIDTH>,
 {
     // constraints taken from poseidon2_air/src/air.rs
     fn eval_sbox(
@@ -205,25 +192,7 @@ impl<
     }
 
     fn internal_linear_layer(state: &mut [Expression<E>; STATE_WIDTH]) {
-        let sum: Expression<E> = state.iter().map(|s| s.get_monomial_form()).sum();
-        // reduce to monomial form
-        let sum = sum.get_monomial_form();
-        let babybear_prime = BigUint::from(0x7800_0001u32);
-        if E::BaseField::order() == babybear_prime {
-            // BabyBear
-            let diag_m1_matrix_bb =
-                &<BabyBearInternalLayerParameters as InternalLayerBaseParameters<_, 16>>::
-                    INTERNAL_DIAG_MONTY;
-            let diag_m1_matrix: &[E::BaseField; STATE_WIDTH] =
-                unsafe { transmute(diag_m1_matrix_bb) };
-            for (input, diag_m1) in state.iter_mut().zip_eq(diag_m1_matrix) {
-                let updated = sum.clone() + Expression::from_f(*diag_m1) * input.clone();
-                // reduce to monomial form
-                *input = updated.get_monomial_form();
-            }
-        } else {
-            panic!("Unsupported field");
-        }
+        BabyBearInternalLayerParameters::generic_internal_linear_layer(state);
     }
 
     pub fn construct(
@@ -288,7 +257,7 @@ impl<
             .inputs
             .iter_mut()
             .zip_eq(post_linear_layer_cols[0..STATE_WIDTH].iter())
-            .for_each(|(input, post_linear)| {
+            .for_each(|(input, post_linear): (&mut Expression<E>, &WitIn)| {
                 cb.require_equal(
                     || "post_linear_layer = input",
                     post_linear.expr(),
@@ -325,7 +294,7 @@ impl<
             .inputs
             .iter_mut()
             .zip_eq(post_linear_layer_cols[STATE_WIDTH + PARTIAL_ROUNDS..].iter())
-            .for_each(|(input, post_linear)| {
+            .for_each(|(input, post_linear): (&mut Expression<E>, &WitIn)| {
                 cb.require_equal(
                     || "post_linear_layer = input",
                     post_linear.expr(),
@@ -433,7 +402,7 @@ impl<
 //////////////////////////////////////////////////////////////////////////
 fn generate_trace_rows_for_perm<
     F: PrimeField,
-    LinearLayers: GenericPoseidon2LinearLayers<F, WIDTH>,
+    LinearLayers: GenericPoseidon2LinearLayers<WIDTH>,
     const WIDTH: usize,
     const SBOX_DEGREE: u64,
     const SBOX_REGISTERS: usize,
@@ -518,7 +487,7 @@ fn generate_trace_rows_for_perm<
 #[inline]
 fn generate_full_round<
     F: PrimeField,
-    LinearLayers: GenericPoseidon2LinearLayers<F, WIDTH>,
+    LinearLayers: GenericPoseidon2LinearLayers<WIDTH>,
     const WIDTH: usize,
     const SBOX_DEGREE: u64,
     const SBOX_REGISTERS: usize,
@@ -546,7 +515,7 @@ fn generate_full_round<
 #[inline]
 fn generate_partial_round<
     F: PrimeField,
-    LinearLayers: GenericPoseidon2LinearLayers<F, WIDTH>,
+    LinearLayers: GenericPoseidon2LinearLayers<WIDTH>,
     const WIDTH: usize,
     const SBOX_DEGREE: u64,
     const SBOX_REGISTERS: usize,

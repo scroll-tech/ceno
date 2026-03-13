@@ -13,7 +13,8 @@ use crate::{
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
-use openvm_stark_backend::p3_field::FieldAlgebra;
+use openvm_stark_backend::p3_field::PrimeCharacteristicRing as FieldAlgebra;
+use crate::field_ext::CanonicalFieldExt;
 const NATIVE_SUMCHECK_CTX_LEN: usize = 9;
 
 pub fn iop_verifier_state_verify<C: Config>(
@@ -494,7 +495,7 @@ pub fn verify_tower_proof<C: Config>(
 // use p3_baby_bear::BabyBear;
 // use p3_field::extension::BinomialExtensionField;
 // use p3_field::Field;
-// use p3_field::FieldAlgebra;
+// use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 // use rand::thread_rng;
 //
 // type F = BabyBear;

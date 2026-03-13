@@ -45,7 +45,7 @@ use multilinear_extensions::{
     util::{ceil_log2, max_usable_threads},
 };
 use num::BigUint;
-use p3::field::FieldAlgebra;
+
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::{IntoParallelRefIterator, ParallelSlice},
@@ -76,6 +76,7 @@ use crate::{
     structs::PointAndEval,
     witness::LkMultiplicity,
 };
+use p3::field::PrimeCharacteristicRing;
 
 #[derive(Clone, Debug, AlignedBorrow)]
 #[repr(C)]
@@ -505,7 +506,7 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParam
             WriteMEM::construct_circuit(
                 &mut cb,
                 // mem address := state_ptr_0 + i
-                point_ptr_0.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
+                point_ptr_0.expr() + E::BaseField::from_u32(i as u32).expr(),
                 val_before.clone(),
                 val_after.clone(),
                 vm_state.ts,
