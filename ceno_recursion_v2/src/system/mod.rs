@@ -28,9 +28,11 @@ use openvm_stark_backend::{
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
-use recursion_circuit::primitives::{exp_bits_len::ExpBitsLenTraceGenerator, pow::PowerCheckerCpuTraceGenerator};
 use p3_matrix::dense::RowMajorMatrix;
-use recursion_circuit::transcript::TranscriptModule;
+use recursion_circuit::{
+    primitives::{exp_bits_len::ExpBitsLenTraceGenerator, pow::PowerCheckerCpuTraceGenerator},
+    transcript::TranscriptModule,
+};
 use tracing::Span;
 
 pub const POW_CHECKER_HEIGHT: usize = 32;

@@ -10,12 +10,11 @@ use p3_matrix::dense::RowMajorMatrix;
 
 #[derive(Debug, Clone, Default)]
 pub struct GkrInputRecord {
+    pub proof_idx: usize,
     pub idx: usize,
     pub tidx: usize,
     pub n_logup: usize,
     pub n_max: usize,
-    pub logup_pow_witness: F,
-    pub logup_pow_sample: F,
     pub alpha_logup: EF,
     pub input_layer_claim: EF,
 }
@@ -55,12 +54,11 @@ impl RowMajorChip<F> for GkrInputTraceGenerator {
         data_slice
             .par_chunks_mut(width)
             .zip(gkr_input_records.par_iter().zip(q0_claims.par_iter()))
-            .enumerate()
-            .for_each(|(proof_idx, (row_data, (record, q0_claim)))| {
+            .for_each(|(row_data, (record, q0_claim))| {
                 let cols: &mut GkrInputCols<F> = row_data.borrow_mut();
 
                 cols.is_enabled = F::ONE;
-                cols.proof_idx = F::from_usize(proof_idx);
+                cols.proof_idx = F::from_usize(record.proof_idx);
                 cols.idx = F::from_usize(record.idx);
 
                 cols.tidx = F::from_usize(record.tidx);
@@ -73,9 +71,6 @@ impl RowMajorChip<F> for GkrInputTraceGenerator {
                     cols.n_logup,
                     (&mut cols.is_n_logup_zero_aux.inv, &mut cols.is_n_logup_zero),
                 );
-
-                cols.logup_pow_witness = record.logup_pow_witness;
-                cols.logup_pow_sample = record.logup_pow_sample;
 
                 let q0_basis = q0_claim.as_basis_coefficients_slice();
                 cols.r0_claim.copy_from_slice(q0_basis);

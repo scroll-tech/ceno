@@ -2,7 +2,10 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::F;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
-use crate::{system::{Preflight, RecursionProof}, tracegen::RowMajorChip};
+use crate::{
+    system::{Preflight, RecursionProof},
+    tracegen::RowMajorChip,
+};
 
 pub struct PublicValuesTraceGenerator;
 
@@ -18,5 +21,4 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
         let rows = required_height.unwrap_or(1).max(1);
         Some(RowMajorMatrix::new(vec![F::ZERO; rows], 1))
     }
-
 }

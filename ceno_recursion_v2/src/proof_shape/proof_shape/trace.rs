@@ -63,5 +63,4 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
         let rows = required_height.unwrap_or(1).max(1);
         Some(RowMajorMatrix::new(vec![F::ZERO; rows], 1))
     }
-
 }

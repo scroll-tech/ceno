@@ -24,8 +24,6 @@ AIR’s columns, constraints, or interactions change.
 | `input_layer_claim` | `[D_EF]`        | Folded claim returned from `GkrLayerAir`.                                   |
 | `layer_output_lambda` | `[D_EF]`     | Batching challenge sampled in the final GKR layer (zeros if unused).        |
 | `layer_output_mu`     | `[D_EF]`     | Reduction point sampled in the final GKR layer (zeros if unused).           |
-| `logup_pow_witness` | scalar          | Optional PoW witness.                                                       |
-| `logup_pow_sample`  | scalar          | Optional PoW challenge sample.                                              |
 
 ### Row Constraints
 
@@ -34,7 +32,7 @@ AIR’s columns, constraints, or interactions change.
 - **Zero test**: `IsZeroSubAir` checks `n_logup` against `is_n_logup_zero`, unlocking the “no interaction” path.
 - **Input layer defaults**: When `n_logup == 0`, the input-layer claim must be `[0, α]` (numerator zero, denominator
   equals `alpha_logup`).
-- **Derived counts**: Local expressions compute `num_layers = n_layer + l_skip`, transcript offsets for PoW / alpha
+- **Derived counts**: Local expressions compute `num_layers = n_layer + l_skip`, transcript offsets for alpha
   sampling / per-layer reductions, and the xi-sampling window. There is no separate `n_max`; xi usage is implied by
   `n_layer`.
 
@@ -46,13 +44,10 @@ AIR’s columns, constraints, or interactions change.
 - **External buses**
     - `GkrModuleBus.receive`: initial module message (`idx`, `tidx`, `n_layer`) per enabled row.
     - `BatchConstraintModuleBus.send`: forwards the final input-layer claim with the final transcript index.
-    - `TranscriptBus`: optional PoW observe/sample, sample `alpha_logup`, and observe `q0_claim` only when
-      `has_interactions`.
-    - `ExpBitsLenBus.lookup`: validates PoW challenge bits if PoW is configured.
+    - `TranscriptBus`: sample `alpha_logup` and observe `q0_claim` only when `has_interactions`.
 
 ### Notes
 
-- Transcript offsets rely on `pow_tidx_count(logup_pow_bits)` to keep challenges contiguous.
 - Local booleans `has_interactions` gate all downstream activity, so future refactors must keep those semantics aligned
   with the code branches.
 
