@@ -11,7 +11,8 @@ pub use platform::{CENO_PLATFORM, Platform};
 mod tracer;
 pub use tracer::{
     Change, FullTracer, FullTracerConfig, LatestAccesses, MemOp, NextAccessPair, NextCycleAccess,
-    PreflightTracer, PreflightTracerConfig, ReadOp, ShardPlanBuilder, StepCellExtractor, StepIndex,
+    PackedNextAccessEntry, PreflightTracer, PreflightTracerConfig, ReadOp, ShardPlanBuilder,
+    StepCellExtractor, StepIndex,
     StepRecord, Tracer, WriteOp,
 };
 

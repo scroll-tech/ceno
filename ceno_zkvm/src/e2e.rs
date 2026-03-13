@@ -24,7 +24,8 @@ use crate::{
 };
 use ceno_emul::{
     Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, IterAddresses,
-    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
+    NextCycleAccess, PackedNextAccessEntry, Platform, PreflightTracer, PreflightTracerConfig, Program,
+    RegIdx,
     StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
     WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
@@ -41,6 +42,7 @@ use itertools::MinMaxResult;
 use itertools::{Itertools, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
+use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 #[cfg(debug_assertions)]
@@ -181,11 +183,18 @@ impl Default for MultiProver {
     }
 }
 
+/// Pre-sorted packed future access entries for GPU bulk H2D upload.
+/// Sorted by (cycle, addr) composite key.
+pub struct SortedNextAccesses {
+    pub packed: Vec<PackedNextAccessEntry>,
+}
+
 pub struct ShardContext<'a> {
     pub shard_id: usize,
     num_shards: usize,
     max_cycle: Cycle,
     pub addr_future_accesses: Arc<NextCycleAccess>,
+    pub sorted_next_accesses: Arc<SortedNextAccesses>,
     addr_accessed_tbs: Either<Vec<Vec<WordAddr>>, &'a mut Vec<WordAddr>>,
     read_records_tbs:
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
@@ -217,6 +226,9 @@ impl<'a> Default for ShardContext<'a> {
             num_shards: 1,
             max_cycle: Cycle::MAX,
             addr_future_accesses: Arc::new(Default::default()),
+            sorted_next_accesses: Arc::new(SortedNextAccesses {
+                packed: vec![],
+            }),
             addr_accessed_tbs: Either::Left(vec![Vec::new(); max_threads]),
             read_records_tbs: Either::Left(
                 (0..max_threads)
@@ -262,6 +274,7 @@ impl<'a> ShardContext<'a> {
             num_shards: self.num_shards,
             max_cycle: self.max_cycle,
             addr_future_accesses: self.addr_future_accesses.clone(),
+            sorted_next_accesses: self.sorted_next_accesses.clone(),
             addr_accessed_tbs: Either::Left(vec![Vec::new(); max_threads]),
             read_records_tbs: Either::Left(
                 (0..max_threads)
@@ -305,6 +318,7 @@ impl<'a> ShardContext<'a> {
                     num_shards: self.num_shards,
                     max_cycle: self.max_cycle,
                     addr_future_accesses: self.addr_future_accesses.clone(),
+                    sorted_next_accesses: self.sorted_next_accesses.clone(),
                     addr_accessed_tbs: Either::Right(addr_accessed_tbs),
                     read_records_tbs: Either::Right(read),
                     write_records_tbs: Either::Right(write),
@@ -663,6 +677,7 @@ impl ShardStepSummary {
 pub struct ShardContextBuilder {
     pub cur_shard_id: usize,
     addr_future_accesses: Arc<NextCycleAccess>,
+    sorted_next_accesses: Arc<SortedNextAccesses>,
     prev_shard_cycle_range: Vec<Cycle>,
     prev_shard_heap_range: Vec<Addr>,
     prev_shard_hint_range: Vec<Addr>,
@@ -676,6 +691,9 @@ impl Default for ShardContextBuilder {
         ShardContextBuilder {
             cur_shard_id: 0,
             addr_future_accesses: Arc::new(Default::default()),
+            sorted_next_accesses: Arc::new(SortedNextAccesses {
+                packed: vec![],
+            }),
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
             prev_shard_hint_range: vec![],
@@ -693,12 +711,45 @@ impl ShardContextBuilder {
         shard_cycle_boundaries: Arc<Vec<Cycle>>,
         max_cycle: Cycle,
         addr_future_accesses: NextCycleAccess,
+        next_accesses_vec: Vec<PackedNextAccessEntry>,
     ) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
+
+        let sorted_next_accesses =
+            info_span!("next_access_presort").in_scope(|| {
+                let source = std::env::var("CENO_NEXT_ACCESS_SOURCE").unwrap_or_default();
+                let mut entries = if source == "hashmap" {
+                    tracing::info!("[next-access presort] converting from HashMap");
+                    info_span!("next_access_from_hashmap").in_scope(|| {
+                        let mut entries = Vec::new();
+                        for (cycle, pairs) in addr_future_accesses.iter() {
+                            for &(addr, next_cycle) in pairs.iter() {
+                                entries.push(PackedNextAccessEntry::new(*cycle, addr.0, next_cycle));
+                            }
+                        }
+                        entries
+                    })
+                } else {
+                    tracing::info!(
+                        "[next-access presort] using preflight-appended vec ({} entries)",
+                        next_accesses_vec.len()
+                    );
+                    next_accesses_vec
+                };
+                let len = entries.len();
+                info_span!("next_access_par_sort", n = len).in_scope(|| {
+                    entries.par_sort_unstable();
+                });
+                tracing::info!("[next-access presort] sorted {} entries ({:.2} MB)",
+                    len, len * 16 / (1024 * 1024));
+                Arc::new(SortedNextAccesses { packed: entries })
+            });
+
         ShardContextBuilder {
             cur_shard_id: 0,
             addr_future_accesses: Arc::new(addr_future_accesses),
+            sorted_next_accesses,
             prev_shard_cycle_range: vec![0],
             prev_shard_heap_range: vec![0],
             prev_shard_hint_range: vec![0],
@@ -785,6 +836,7 @@ impl ShardContextBuilder {
             cur_shard_cycle_range: summary.first_cycle as usize
                 ..(summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN) as usize,
             addr_future_accesses: self.addr_future_accesses.clone(),
+            sorted_next_accesses: self.sorted_next_accesses.clone(),
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
             prev_shard_heap_range: self.prev_shard_heap_range.clone(),
             prev_shard_hint_range: self.prev_shard_hint_range.clone(),
@@ -1103,7 +1155,7 @@ pub fn emulate_program<'a>(
     }
 
     let tracer = vm.take_tracer();
-    let (plan_builder, next_accesses) = tracer.into_shard_plan();
+    let (plan_builder, next_accesses, next_accesses_vec) = tracer.into_shard_plan();
     let max_step_shard = plan_builder.max_step_shard();
     let shard_cycle_boundaries = Arc::new(plan_builder.into_cycle_boundaries());
     let shard_ctx_builder = ShardContextBuilder::from_plan(
@@ -1112,6 +1164,7 @@ pub fn emulate_program<'a>(
         shard_cycle_boundaries.clone(),
         max_cycle,
         next_accesses,
+        next_accesses_vec,
     );
     tracing::info!(
         "num_shards: {}, max_cycle {}, shard_cycle_boundaries {:?}",
@@ -2174,6 +2227,7 @@ fn clone_debug_shard_ctx(src: &ShardContext) -> ShardContext<'static> {
     cloned.num_shards = src.num_shards;
     cloned.max_cycle = src.max_cycle;
     cloned.addr_future_accesses = src.addr_future_accesses.clone();
+    cloned.sorted_next_accesses = src.sorted_next_accesses.clone();
     cloned.cur_shard_cycle_range = src.cur_shard_cycle_range.clone();
     cloned.expected_inst_per_shard = src.expected_inst_per_shard;
     cloned.max_num_cross_shard_accesses = src.max_num_cross_shard_accesses;
@@ -2498,6 +2552,7 @@ mod tests {
             shard_cycle_boundaries,
             max_cycle,
             NextCycleAccess::default(),
+            Vec::new(),
         );
         struct TestReplay {
             steps: Vec<StepRecord>,

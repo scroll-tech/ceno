@@ -86,6 +86,60 @@ pub trait StepCellExtractor {
 pub type NextAccessPair = SmallVec<[(WordAddr, Cycle); 1]>;
 pub type NextCycleAccess = FxHashMap<Cycle, NextAccessPair>;
 
+/// Packed next-access entry (16 bytes, u128-aligned).
+/// Stores (cycle, addr, next_cycle) with 40-bit cycles for GPU bulk H2D upload.
+/// Must be layout-compatible with CUDA `PackedNextAccessEntry` in shard_helpers.cuh.
+#[repr(C, align(16))]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PackedNextAccessEntry {
+    pub cycles_lo: u32,
+    pub addr: u32,
+    pub nexts_lo: u32,
+    pub cycles_hi: u8,
+    pub nexts_hi: u8,
+    pub _reserved: u16,
+}
+
+impl PackedNextAccessEntry {
+    #[inline]
+    pub fn new(cycle: u64, addr: u32, next_cycle: u64) -> Self {
+        Self {
+            cycles_lo: cycle as u32,
+            addr,
+            nexts_lo: next_cycle as u32,
+            cycles_hi: (cycle >> 32) as u8,
+            nexts_hi: (next_cycle >> 32) as u8,
+            _reserved: 0,
+        }
+    }
+}
+
+impl Eq for PackedNextAccessEntry {}
+
+impl PartialEq for PackedNextAccessEntry {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.cycles_hi == other.cycles_hi
+            && self.cycles_lo == other.cycles_lo
+            && self.addr == other.addr
+    }
+}
+
+impl Ord for PackedNextAccessEntry {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.cycles_hi, self.cycles_lo, self.addr)
+            .cmp(&(other.cycles_hi, other.cycles_lo, other.addr))
+    }
+}
+
+impl PartialOrd for PackedNextAccessEntry {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 fn init_mmio_min_max_access(
     platform: &Platform,
 ) -> BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)> {
@@ -1051,6 +1105,7 @@ pub struct PreflightTracer {
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: LatestAccesses,
     next_accesses: NextCycleAccess,
+    next_accesses_vec: Vec<PackedNextAccessEntry>,
     register_reads_tracked: u8,
     planner: Option<ShardPlanBuilder>,
     current_shard_start_cycle: Cycle,
@@ -1075,6 +1130,7 @@ impl fmt::Debug for PreflightTracer {
             .field("mmio_min_max_access", &self.mmio_min_max_access)
             .field("latest_accesses", &self.latest_accesses)
             .field("next_accesses", &self.next_accesses)
+            .field("next_accesses_vec_len", &self.next_accesses_vec.len())
             .field("register_reads_tracked", &self.register_reads_tracked)
             .field("planner", &self.planner)
             .field("current_shard_start_cycle", &self.current_shard_start_cycle)
@@ -1172,6 +1228,7 @@ impl PreflightTracer {
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: FxHashMap::default(),
+            next_accesses_vec: Vec::new(),
             register_reads_tracked: 0,
             planner: Some(ShardPlanBuilder::new(
                 max_cell_per_shard,
@@ -1184,14 +1241,14 @@ impl PreflightTracer {
         tracer
     }
 
-    pub fn into_shard_plan(self) -> (ShardPlanBuilder, NextCycleAccess) {
+    pub fn into_shard_plan(self) -> (ShardPlanBuilder, NextCycleAccess, Vec<PackedNextAccessEntry>) {
         let Some(mut planner) = self.planner else {
             panic!("shard planner missing")
         };
         if !planner.finalized {
             planner.finalize(self.cycle);
         }
-        (planner, self.next_accesses)
+        (planner, self.next_accesses, self.next_accesses_vec)
     }
 
     #[inline(always)]
@@ -1312,6 +1369,8 @@ impl Tracer for PreflightTracer {
                 .entry(prev_cycle)
                 .or_default()
                 .push((addr, cur_cycle));
+            self.next_accesses_vec
+                .push(PackedNextAccessEntry::new(prev_cycle, addr.0, cur_cycle));
         }
         prev_cycle
     }

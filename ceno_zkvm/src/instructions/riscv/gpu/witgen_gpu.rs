@@ -11,7 +11,6 @@ use ceno_gpu::{
 use ceno_gpu::bb31::ShardDeviceBuffers;
 use ceno_gpu::common::witgen_types::{GpuRamRecordSlot, GpuShardScalars};
 use ff_ext::ExtensionField;
-use rayon::prelude::*;
 use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use p3::field::FieldAlgebra;
 use std::cell::{Cell, RefCell};
@@ -181,7 +180,10 @@ thread_local! {
 }
 
 /// Build and cache shard metadata device buffers for GPU shard records.
-/// Returns a reference to the cached `ShardDeviceBuffers`.
+///
+/// FA (future access) device buffers are global and identical across all shards,
+/// so they are uploaded once and reused via move. Only per-shard data (scalars +
+/// prev_shard_ranges) is re-uploaded when the shard changes.
 fn ensure_shard_metadata_cached(
     hal: &CudaHalBB31,
     shard_ctx: &ShardContext,
@@ -195,28 +197,50 @@ fn ensure_shard_metadata_cached(
             }
         }
 
-        // Build sorted future-access arrays from HashMap
-        let (fa_cycles_vec, fa_addrs_vec, fa_next_vec) =
-            tracing::info_span!("fa_sort").in_scope(|| {
-                let mut entries: Vec<(u64, u32, u64)> = Vec::new();
-                for (cycle, pairs) in shard_ctx.addr_future_accesses.iter() {
-                    for &(addr, next_cycle) in pairs.iter() {
-                        entries.push((*cycle, addr.0, next_cycle));
-                    }
-                }
-                entries.par_sort_unstable();
-                let mut cycles = Vec::with_capacity(entries.len());
-                let mut addrs = Vec::with_capacity(entries.len());
-                let mut nexts = Vec::with_capacity(entries.len());
-                for (c, a, n) in entries {
-                    cycles.push(c);
-                    addrs.push(a);
-                    nexts.push(n);
-                }
-                (cycles, addrs, nexts)
-            });
+        // Move FA device buffer from previous cache (reuse across shards).
+        // FA data is global — identical across all shards — so we reuse, not re-upload.
+        let existing_fa = cache.take().map(|c| {
+            let ShardDeviceBuffers {
+                next_access_packed,
+                scalars: _,
+                prev_shard_cycle_range: _,
+                prev_shard_heap_range: _,
+                prev_shard_hint_range: _,
+            } = c.device_bufs;
+            next_access_packed
+        });
 
-        // Build GpuShardScalars
+        let next_access_packed_device = if let Some(fa) = existing_fa {
+            fa // Reuse existing GPU memory — zero cost pointer move
+        } else {
+            // First shard: bulk H2D upload packed FA entries (no sort here)
+            let sorted = &shard_ctx.sorted_next_accesses;
+            tracing::info_span!("next_access_h2d").in_scope(|| -> Result<_, ZKVMError> {
+                let packed_bytes: &[u8] = if sorted.packed.is_empty() {
+                    &[0u8; 16] // sentinel for empty
+                } else {
+                    unsafe {
+                        std::slice::from_raw_parts(
+                            sorted.packed.as_ptr() as *const u8,
+                            sorted.packed.len() * std::mem::size_of::<ceno_emul::PackedNextAccessEntry>(),
+                        )
+                    }
+                };
+                let buf = hal.inner.htod_copy_stream(None, packed_bytes).map_err(|e| {
+                    ZKVMError::InvalidWitness(format!("next_access_packed H2D: {e}").into())
+                })?;
+                let next_access_device = ceno_gpu::common::buffer::BufferImpl::new(buf);
+                let mb = packed_bytes.len() as f64 / (1024.0 * 1024.0);
+                tracing::info!(
+                    "[GPU shard] FA uploaded once: {} entries, {:.2} MB (packed)",
+                    sorted.packed.len(),
+                    mb,
+                );
+                Ok(next_access_device)
+            })?
+        };
+
+        // Per-shard: always re-upload scalars + prev_shard_ranges
         let scalars = GpuShardScalars {
             shard_cycle_start: shard_ctx.cur_shard_cycle_range.start as u64,
             shard_cycle_end: shard_ctx.cur_shard_cycle_range.end as u64,
@@ -230,68 +254,63 @@ fn ensure_shard_metadata_cached(
             shard_heap_end: shard_ctx.shard_heap_addr_range.end,
             shard_hint_start: shard_ctx.shard_hint_addr_range.start,
             shard_hint_end: shard_ctx.shard_hint_addr_range.end,
-            fa_count: fa_cycles_vec.len() as u32,
+            next_access_count: shard_ctx.sorted_next_accesses.packed.len() as u32,
             num_prev_shards: shard_ctx.prev_shard_cycle_range.len() as u32,
             num_prev_heap_ranges: shard_ctx.prev_shard_heap_range.len() as u32,
             num_prev_hint_ranges: shard_ctx.prev_shard_hint_range.len() as u32,
         };
 
-        // H2D uploads
-        let (scalars_device, fa_cycles_device, fa_addrs_device, fa_next_device,
-             pscr_device, pshr_device, pshi_device) =
-            tracing::info_span!("shard_meta_h2d").in_scope(|| -> Result<_, ZKVMError> {
-            let scalars_bytes: &[u8] = unsafe {
-                std::slice::from_raw_parts(
-                    &scalars as *const GpuShardScalars as *const u8,
-                    std::mem::size_of::<GpuShardScalars>(),
-                )
-            };
-            let scalars_device = hal.inner.htod_copy_stream(None, scalars_bytes).map_err(|e| {
-                ZKVMError::InvalidWitness(format!("shard scalars H2D failed: {e}").into())
+        let (scalars_device, pscr_device, pshr_device, pshi_device) =
+            tracing::info_span!("shard_scalars_h2d").in_scope(|| -> Result<_, ZKVMError> {
+                let scalars_bytes: &[u8] = unsafe {
+                    std::slice::from_raw_parts(
+                        &scalars as *const GpuShardScalars as *const u8,
+                        std::mem::size_of::<GpuShardScalars>(),
+                    )
+                };
+                let scalars_device =
+                    hal.inner
+                        .htod_copy_stream(None, scalars_bytes)
+                        .map_err(|e| {
+                            ZKVMError::InvalidWitness(
+                                format!("shard scalars H2D failed: {e}").into(),
+                            )
+                        })?;
+
+                let pscr = &shard_ctx.prev_shard_cycle_range;
+                let pscr_device = hal
+                    .alloc_u64_from_host(if pscr.is_empty() { &[0u64] } else { pscr }, None)
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(format!("pscr H2D failed: {e}").into())
+                    })?;
+
+                let pshr = &shard_ctx.prev_shard_heap_range;
+                let pshr_device = hal
+                    .alloc_u32_from_host(if pshr.is_empty() { &[0u32] } else { pshr }, None)
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(format!("pshr H2D failed: {e}").into())
+                    })?;
+
+                let pshi = &shard_ctx.prev_shard_hint_range;
+                let pshi_device = hal
+                    .alloc_u32_from_host(if pshi.is_empty() { &[0u32] } else { pshi }, None)
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(format!("pshi H2D failed: {e}").into())
+                    })?;
+
+                Ok((scalars_device, pscr_device, pshr_device, pshi_device))
             })?;
 
-            let fa_cycles_device = hal
-                .alloc_u64_from_host(if fa_cycles_vec.is_empty() { &[0u64] } else { &fa_cycles_vec }, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("fa_cycles H2D failed: {e}").into()))?;
-            let fa_addrs_device = hal
-                .alloc_u32_from_host(if fa_addrs_vec.is_empty() { &[0u32] } else { &fa_addrs_vec }, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("fa_addrs H2D failed: {e}").into()))?;
-            let fa_next_device = hal
-                .alloc_u64_from_host(if fa_next_vec.is_empty() { &[0u64] } else { &fa_next_vec }, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("fa_next H2D failed: {e}").into()))?;
-
-            let pscr = &shard_ctx.prev_shard_cycle_range;
-            let pscr_device = hal
-                .alloc_u64_from_host(if pscr.is_empty() { &[0u64] } else { pscr }, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("pscr H2D failed: {e}").into()))?;
-
-            let pshr = &shard_ctx.prev_shard_heap_range;
-            let pshr_device = hal
-                .alloc_u32_from_host(if pshr.is_empty() { &[0u32] } else { pshr }, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("pshr H2D failed: {e}").into()))?;
-
-            let pshi = &shard_ctx.prev_shard_hint_range;
-            let pshi_device = hal
-                .alloc_u32_from_host(if pshi.is_empty() { &[0u32] } else { pshi }, None)
-                .map_err(|e| ZKVMError::InvalidWitness(format!("pshi H2D failed: {e}").into()))?;
-
-            Ok((scalars_device, fa_cycles_device, fa_addrs_device, fa_next_device,
-                pscr_device, pshr_device, pshi_device))
-        })?;
-
-        let mb = (fa_cycles_vec.len() * 8 * 2 + fa_addrs_vec.len() * 4) as f64 / (1024.0 * 1024.0);
         tracing::info!(
-            "[GPU shard] built ShardMetadataCache: shard_id={}, fa_entries={}, {:.2} MB",
-            shard_id, fa_cycles_vec.len(), mb,
+            "[GPU shard] shard_id={}: per-shard scalars updated",
+            shard_id,
         );
 
         *cache = Some(ShardMetadataCache {
             shard_id,
             device_bufs: ShardDeviceBuffers {
                 scalars: scalars_device,
-                fa_cycles: fa_cycles_device,
-                fa_addrs: fa_addrs_device,
-                fa_next_cycles: fa_next_device,
+                next_access_packed: next_access_packed_device,
                 prev_shard_cycle_range: pscr_device,
                 prev_shard_heap_range: pshr_device,
                 prev_shard_hint_range: pshi_device,
