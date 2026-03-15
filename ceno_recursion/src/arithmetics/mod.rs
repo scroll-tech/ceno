@@ -10,6 +10,7 @@ use openvm_native_circuit::EXT_DEG;
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
 use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
+use openvm_native_recursion::vars::HintSlice;
 use openvm_stark_backend::p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 
 type E = BabyBearExt4;
@@ -65,7 +66,33 @@ pub fn challenger_multi_observe<C: Config>(
     arr: &Array<C, Felt<C::F>>,
 ) {
     let next_input_ptr =
-        builder.poseidon2_multi_observe(&challenger.sponge_state, challenger.input_ptr, arr);
+        builder.poseidon2_multi_observe(&challenger.sponge_state, challenger.input_ptr, arr, None);
+    builder.assign(
+        &challenger.input_ptr,
+        challenger.io_empty_ptr + next_input_ptr.clone(),
+    );
+    builder.if_ne(next_input_ptr, Usize::from(0)).then_or_else(
+        |builder| {
+            builder.assign(&challenger.output_ptr, challenger.io_empty_ptr);
+        },
+        |builder| {
+            builder.assign(&challenger.output_ptr, challenger.io_full_ptr);
+        },
+    );
+}
+
+pub fn challenger_hint_observe<C: Config>(
+    builder: &mut Builder<C>,
+    challenger: &mut DuplexChallengerVariable<C>,
+    hint_slice: &HintSlice<C>,
+) {
+    let dummy_arr: Array<C, Felt<C::F>> = builder.dyn_array(0);
+    let next_input_ptr = builder.poseidon2_multi_observe(
+        &challenger.sponge_state,
+        challenger.input_ptr,
+        &dummy_arr,
+        Some(hint_slice.id.get_var()),
+    );
     builder.assign(
         &challenger.input_ptr,
         challenger.io_empty_ptr + next_input_ptr.clone(),
