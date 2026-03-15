@@ -14,8 +14,15 @@ use crate::{
         hash::HashVariable,
         query_phase::PointAndEvalsVariable,
         utils::pow_2,
-        verifier::batch_verify,
     },
+};
+// use crate::basefold_verifier::verifier::batch_verify;
+use crate::{
+    arithmetics::{
+        arr_product, build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
+        eq_eval_less_or_equal_than, exts_to_felts, gen_alpha_pows, nested_product,
+    },
+    basefold_verifier::verifier::batch_verify,
     tower_verifier::{
         binding::{PointAndEvalVariable, PointVariable},
         program::{iop_verifier_state_verify, verify_tower_proof},
@@ -635,6 +642,29 @@ pub fn verify_chip_proof<C: Config>(
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
     let num_prod_spec: Usize<C::N> =
         builder.eval(chip_proof.r_out_evals_len.clone() + chip_proof.w_out_evals_len.clone());
+
+    // bind read/write/lookup out evals into transcript before deriving tower challenges
+    iter_zip!(builder, chip_proof.r_out_evals).for_each(|ptr_vec, builder| {
+        let evals = builder.iter_ptr_get(&chip_proof.r_out_evals, ptr_vec[0]);
+        unsafe {
+            let evals_felts = exts_to_felts(builder, &evals);
+            challenger_multi_observe(builder, challenger, &evals_felts);
+        }
+    });
+    iter_zip!(builder, chip_proof.w_out_evals).for_each(|ptr_vec, builder| {
+        let evals = builder.iter_ptr_get(&chip_proof.w_out_evals, ptr_vec[0]);
+        unsafe {
+            let evals_felts = exts_to_felts(builder, &evals);
+            challenger_multi_observe(builder, challenger, &evals_felts);
+        }
+    });
+    iter_zip!(builder, chip_proof.lk_out_evals).for_each(|ptr_vec, builder| {
+        let evals = builder.iter_ptr_get(&chip_proof.lk_out_evals, ptr_vec[0]);
+        unsafe {
+            let evals_felts = exts_to_felts(builder, &evals);
+            challenger_multi_observe(builder, challenger, &evals_felts);
+        }
+    });
 
     builder.cycle_tracker_start(format!("verify tower proof for opcode {circuit_name}",).as_str());
     let (_, record_evals, logup_p_evals, logup_q_evals, prod_out_evals, logup_out_evals) =
