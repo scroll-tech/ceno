@@ -9,7 +9,7 @@ use super::{
     types::{TraceHeight, TraceMetadata},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PreflightGpu {
     pub cpu: Preflight,
     pub transcript: TranscriptLog,
@@ -25,7 +25,7 @@ pub struct TranscriptLog {
     _dummy: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProofShapePreflightGpu {
     pub sorted_trace_heights: DeviceBuffer<TraceHeight>,
     pub sorted_trace_metadata: DeviceBuffer<TraceMetadata>,
@@ -46,12 +46,12 @@ pub struct GkrPreflightGpu {
     _dummy: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BatchConstraintPreflightGpu {
     pub sumcheck_rnd: DeviceBuffer<EF>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct StackingPreflightGpu {
     pub sumcheck_rnd: DeviceBuffer<EF>,
 }

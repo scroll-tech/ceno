@@ -5,8 +5,8 @@ mod types;
 pub use crate::{batch_constraint::BatchConstraintModule, proof_shape::ProofShapeModule};
 pub use preflight::{GkrPreflight, Preflight, ProofShapePreflight};
 pub use recursion_circuit::system::{
-    AggregationSubCircuit, AirModule, BusIndexManager, BusInventory, CachedTraceCtx,
-    GlobalTraceGenCtx, TraceGenModule, VerifierConfig, VerifierExternalData,
+    AggregationSubCircuit, AirModule, BusIndexManager, BusInventory, GlobalTraceGenCtx,
+    TraceGenModule, VerifierConfig, VerifierExternalData,
 };
 pub use types::{
     RecursionField, RecursionPcs, RecursionProof, RecursionVk, convert_proof_from_zkvm,
@@ -16,15 +16,19 @@ pub use types::{
 use std::sync::Arc;
 
 use crate::{
-    batch_constraint::{BatchConstraintModule as LocalBatchConstraintModule, CachedTraceRecord},
+    batch_constraint::{
+        BatchConstraintModule as LocalBatchConstraintModule, CachedTraceRecord,
+        LOCAL_SYMBOLIC_EXPRESSION_AIR_IDX,
+    },
     gkr::GkrModule,
 };
+use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkEngine, StarkProtocolConfig, TranscriptHistory,
     interaction::BusIndex,
     p3_maybe_rayon::prelude::*,
-    prover::{AirProvingContext, ColMajorMatrix, CommittedTraceData, CpuBackend, ProverBackend},
+    prover::{AirProvingContext, CommittedTraceData, ProverBackend},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
@@ -65,9 +69,9 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
     >(
         &self,
         child_vk: &RecursionVk,
-        cached_trace_ctx: CachedTraceCtx<PB>,
+        child_vk_pcs_data: CommittedTraceData<PB>,
         proofs: &[RecursionProof],
-        external_data: &mut VerifierExternalData<PB>,
+        external_data: &mut VerifierExternalData<'_>,
         initial_transcript: TS,
     ) -> Option<Vec<AirProvingContext<PB>>>;
 
@@ -77,15 +81,17 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
     >(
         &self,
         child_vk: &RecursionVk,
-        cached_trace_ctx: CachedTraceCtx<PB>,
+        child_vk_pcs_data: CommittedTraceData<PB>,
         proofs: &[RecursionProof],
         initial_transcript: TS,
     ) -> Vec<AirProvingContext<PB>> {
         let poseidon2_compress_inputs = vec![];
+        let poseidon2_permute_inputs = vec![];
         let range_check_inputs = vec![];
 
         let mut external_data = VerifierExternalData {
             poseidon2_compress_inputs: &poseidon2_compress_inputs,
+            poseidon2_permute_inputs: &poseidon2_permute_inputs,
             range_check_inputs: &range_check_inputs,
             required_heights: None,
             final_transcript_state: None,
@@ -93,7 +99,7 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
 
         self.generate_proving_ctxs::<TS>(
             child_vk,
-            cached_trace_ctx,
+            child_vk_pcs_data,
             proofs,
             &mut external_data,
             initial_transcript,
@@ -157,8 +163,7 @@ impl<'a> TraceModuleRef<'a> {
         preflights: &[Preflight],
         pow_checker_gen: &Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
         exp_bits_len_gen: &ExpBitsLenTraceGenerator,
-        cached_trace_record: &Option<&CachedTraceRecord>,
-        external_data: &VerifierExternalData<CpuBackend<SC>>,
+        external_data: &VerifierExternalData<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         match self {
@@ -198,7 +203,7 @@ impl<'a> TraceModuleRef<'a> {
                 child_vk,
                 proofs,
                 preflights,
-                &(cached_trace_record, pow_checker_gen),
+                &pow_checker_gen,
                 required_heights,
             ),
         }
@@ -287,9 +292,9 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
     >(
         &self,
         child_vk: &RecursionVk,
-        cached_trace_ctx: CachedTraceCtx<CpuBackend<SC>>,
+        child_vk_pcs_data: CommittedTraceData<CpuBackend<SC>>,
         proofs: &[RecursionProof],
-        external_data: &mut VerifierExternalData<CpuBackend<SC>>,
+        external_data: &mut VerifierExternalData<'_>,
         initial_transcript: TS,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         debug_assert!(proofs.len() <= MAX_NUM_PROOFS);
@@ -334,11 +339,6 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             TraceModuleRef::Gkr(&self.gkr),
         ];
 
-        let cached_trace_record = match &cached_trace_ctx {
-            CachedTraceCtx::Records(record) => Some(record),
-            _ => None,
-        };
-
         let span = Span::current();
         let ctxs_by_module = modules
             .into_par_iter()
@@ -351,15 +351,18 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
                     &preflights,
                     &power_checker_gen,
                     &exp_bits_len_gen,
-                    &cached_trace_record,
                     external_data,
                     required_heights,
                 )
             })
             .collect::<Vec<_>>();
 
-        let ctxs_by_module: Vec<Vec<AirProvingContext<CpuBackend<SC>>>> =
+        let mut ctxs_by_module: Vec<Vec<AirProvingContext<CpuBackend<SC>>>> =
             ctxs_by_module.into_iter().collect::<Option<Vec<_>>>()?;
+        if !ctxs_by_module.is_empty() && !ctxs_by_module[BATCH_CONSTRAINT_MOD_IDX].is_empty() {
+            ctxs_by_module[BATCH_CONSTRAINT_MOD_IDX][LOCAL_SYMBOLIC_EXPRESSION_AIR_IDX]
+                .cached_mains = vec![child_vk_pcs_data];
+        }
 
         let mut ctx_per_trace = ctxs_by_module.into_iter().flatten().collect::<Vec<_>>();
         let power_height = power_checker_required.unwrap_or(POW_CHECKER_HEIGHT);
@@ -393,5 +396,5 @@ fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
 ) -> AirProvingContext<CpuBackend<SC>> {
     let rows = height.max(1);
     let matrix = RowMajorMatrix::new(vec![F::ZERO; rows], 1);
-    AirProvingContext::simple_no_pis(ColMajorMatrix::from_row_major(&matrix))
+    AirProvingContext::simple_no_pis(matrix)
 }

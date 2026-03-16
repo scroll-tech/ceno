@@ -1,10 +1,9 @@
-use std::sync::Arc;
-
+use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkEngine, StarkProtocolConfig, TranscriptHistory,
     keygen::types::MultiStarkVerifyingKey,
-    prover::{AirProvingContext, ColMajorMatrix, CommittedTraceData, CpuBackend},
+    prover::{AirProvingContext, CommittedTraceData},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
@@ -14,6 +13,7 @@ use recursion_circuit::{
     primitives::pow::PowerCheckerCpuTraceGenerator,
     system::{AirModule, BusIndexManager, BusInventory},
 };
+use std::sync::Arc;
 
 pub use recursion_circuit::batch_constraint::expr_eval::CachedTraceRecord;
 
@@ -30,7 +30,6 @@ pub struct BatchConstraintModule {
     pub transcript_bus: TranscriptBus,
     pub gkr_claim_bus: BatchConstraintModuleBus,
     inner: Arc<recursion_circuit::batch_constraint::BatchConstraintModule>,
-    has_cached: bool,
 }
 
 impl BatchConstraintModule {
@@ -39,25 +38,18 @@ impl BatchConstraintModule {
         b: &mut BusIndexManager,
         bus_inventory: BusInventory,
         max_num_proofs: usize,
-        has_cached: bool,
     ) -> Self {
         let inner = recursion_circuit::batch_constraint::BatchConstraintModule::new(
             child_vk,
             b,
             bus_inventory.clone(),
             max_num_proofs,
-            has_cached,
         );
         Self {
             transcript_bus: bus_inventory.transcript_bus,
             gkr_claim_bus: bus_inventory.bc_module_bus,
             inner: Arc::new(inner),
-            has_cached,
         }
-    }
-
-    pub fn has_cached(&self) -> bool {
-        self.has_cached
     }
 
     pub fn run_preflight<TS>(
@@ -106,10 +98,7 @@ impl AirModule for BatchConstraintModule {
 impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>>
     for BatchConstraintModule
 {
-    type ModuleSpecificCtx<'a> = (
-        &'a Option<&'a CachedTraceRecord>,
-        &'a Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
-    );
+    type ModuleSpecificCtx<'a> = &'a Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>;
 
     fn generate_proving_ctxs(
         &self,
@@ -141,5 +130,5 @@ fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
 ) -> AirProvingContext<CpuBackend<SC>> {
     let rows = height.max(1);
     let matrix = RowMajorMatrix::new(vec![F::ZERO; rows], 1);
-    AirProvingContext::simple_no_pis(ColMajorMatrix::from_row_major(&matrix))
+    AirProvingContext::simple_no_pis(matrix)
 }

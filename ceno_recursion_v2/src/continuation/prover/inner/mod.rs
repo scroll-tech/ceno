@@ -13,14 +13,14 @@ use openvm_stark_backend::{
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
     Digest, EF, F, default_duplex_sponge_recorder,
 };
-use verify_stark::pvs::DeferralPvs;
+use verify_stark::pvs::{DagCommit, DeferralPvs};
 
 use crate::system::{
-    AggregationSubCircuit, CachedTraceCtx, RecursionField, RecursionVk, VerifierConfig,
-    VerifierExternalData, VerifierTraceGen,
+    AggregationSubCircuit, RecursionField, RecursionVk, VerifierConfig, VerifierExternalData,
+    VerifierTraceGen, convert_vk_from_zkvm,
 };
 use continuations_v2::circuit::{
-    Circuit,
+    Circuit, SubCircuitTraceData,
     inner::{InnerCircuit, InnerTraceGen, ProofsType},
 };
 
@@ -63,7 +63,6 @@ impl<
             child_vk.clone(),
             VerifierConfig {
                 continuations_enabled: true,
-                has_cached: true,
                 ..Default::default()
             },
         );
@@ -106,7 +105,6 @@ impl<
             child_vk.clone(),
             VerifierConfig {
                 continuations_enabled: true,
-                has_cached: true,
                 ..Default::default()
             },
         );
@@ -178,39 +176,48 @@ where
 
         let vm_proofs = Self::materialize_vm_proofs(proofs);
 
-        let (child_vk, child_dag_commit) = match child_vk_kind {
+        let (child_vk, child_vk_pcs_data) = match child_vk_kind {
             ChildVkKind::RecursiveSelf => {
                 unimplemented!("RecursiveSelf proving is not wired for RecursionVk yet")
             }
             _ => (&self.child_vk, self.child_vk_pcs_data.clone()),
         };
         let child_is_app = matches!(child_vk_kind, ChildVkKind::App);
+        let openvm_child_vk = convert_vk_from_zkvm(child_vk);
+        let child_dag_commit = DagCommit {
+            cached_commit: child_vk_pcs_data.commitment,
+            vk_pre_hash: openvm_child_vk.pre_hash,
+        };
 
-        let (pre_ctxs, poseidon2_inputs) = self
+        let SubCircuitTraceData {
+            air_proving_ctxs,
+            poseidon2_compress_inputs,
+            poseidon2_permute_inputs,
+        } = self
             .agg_node_tracegen
             .generate_pre_verifier_subcircuit_ctxs(
                 &vm_proofs,
                 proofs_type,
                 absent_trace_pvs,
                 child_is_app,
-                child_dag_commit.commitment,
+                child_dag_commit,
             );
 
         let range_check_inputs = vec![];
         let mut external_data = VerifierExternalData {
-            poseidon2_compress_inputs: &poseidon2_inputs,
+            poseidon2_compress_inputs: &poseidon2_compress_inputs,
+            poseidon2_permute_inputs: &poseidon2_permute_inputs,
             range_check_inputs: &range_check_inputs,
             required_heights: None,
             final_transcript_state: None,
         };
 
-        let cached_trace_ctx = CachedTraceCtx::PcsData(child_dag_commit);
         let subcircuit_ctxs = self
             .circuit
             .verifier_circuit
             .generate_proving_ctxs(
                 child_vk,
-                cached_trace_ctx,
+                child_vk_pcs_data,
                 proofs,
                 &mut external_data,
                 default_duplex_sponge_recorder(),
@@ -221,7 +228,7 @@ where
             .generate_post_verifier_subcircuit_ctxs(&vm_proofs, proofs_type, child_is_app);
 
         ProvingContext {
-            per_trace: pre_ctxs
+            per_trace: air_proving_ctxs
                 .into_iter()
                 .chain(subcircuit_ctxs)
                 .chain(post_ctxs)

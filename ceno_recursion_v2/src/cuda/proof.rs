@@ -4,7 +4,6 @@ use crate::system::{RecursionProof, RecursionVk};
 
 use super::{to_device_or_nullptr, types::PublicValueData};
 
-#[derive(Debug)]
 pub struct ProofGpu {
     pub cpu: RecursionProof,
     pub proof_shape: ProofShapeProofGpu,
@@ -14,27 +13,22 @@ pub struct ProofGpu {
     pub whir: WhirProofGpu,
 }
 
-#[derive(Debug)]
 pub struct ProofShapeProofGpu {
     pub public_values: DeviceBuffer<PublicValueData>,
 }
 
-#[derive(Debug)]
 pub struct GkrProofGpu {
     _dummy: usize,
 }
 
-#[derive(Debug)]
 pub struct BatchConstraintProofGpu {
     _dummy: usize,
 }
 
-#[derive(Debug)]
 pub struct StackingProofGpu {
     _dummy: usize,
 }
 
-#[derive(Debug)]
 pub struct WhirProofGpu {
     _dummy: usize,
 }

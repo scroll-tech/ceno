@@ -1,5 +1,5 @@
 use continuations_v2::{SC, circuit::inner::InnerTraceGenImpl};
-use openvm_stark_backend::prover::CpuBackend;
+use openvm_cpu_backend::CpuBackend;
 
 use crate::system::VerifierSubCircuit;
 

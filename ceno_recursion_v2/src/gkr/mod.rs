@@ -50,10 +50,10 @@
 use std::sync::Arc;
 
 use ::sumcheck::structs::IOPProverMessage;
+use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
-    p3_maybe_rayon::prelude::*,
-    prover::{AirProvingContext, CpuBackend},
+    p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
 use p3_field::PrimeCharacteristicRing;
@@ -83,7 +83,6 @@ use crate::{
 };
 use ceno_zkvm::{scheme::ZKVMChipProof, structs::VerifyingKey};
 use eyre::{Result, WrapErr};
-use tower::TowerReplayResult;
 
 // Internal bus definitions
 mod bus;

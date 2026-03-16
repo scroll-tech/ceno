@@ -8,12 +8,12 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 
 use crate::{
     cuda::{preflight::PreflightGpu, vk::VerifyingKeyGpu},
-    primitives::{
-        pow::cuda::PowerCheckerGpuTraceGenerator, range::cuda::RangeCheckerGpuTraceGenerator,
-    },
     proof_shape::{cuda_abi::proof_shape_tracegen, proof_shape::ProofShapeCols},
     system::POW_CHECKER_HEIGHT,
     tracegen::ModuleChip,
+};
+use recursion_circuit::primitives::{
+    pow::cuda::PowerCheckerGpuTraceGenerator, range::cuda::RangeCheckerGpuTraceGenerator,
 };
 
 #[repr(C)]
