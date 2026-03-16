@@ -100,8 +100,6 @@ pub mod layer;
 pub mod sumcheck;
 mod tower;
 pub struct GkrModule {
-    // System Params
-    l_skip: usize,
     // Global bus inventory
     bus_inventory: BusInventory,
     // Module buses
@@ -137,7 +135,6 @@ struct GkrBlobCpu {
 impl GkrModule {
     pub fn new(_vk: &RecursionVk, b: &mut BusIndexManager, bus_inventory: BusInventory) -> Self {
         GkrModule {
-            l_skip: 0,
             bus_inventory,
             layer_input_bus: GkrLayerInputBus::new(b.new_bus_idx()),
             layer_output_bus: GkrLayerOutputBus::new(b.new_bus_idx()),
@@ -394,7 +391,6 @@ fn build_chip_records(
         idx: chip_idx,
         tidx: 0,
         n_logup: layer_count,
-        n_max: layer_count,
         alpha_logup: EF::ZERO,
         input_layer_claim,
     };
@@ -464,7 +460,6 @@ impl AirModule for GkrModule {
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
         let gkr_input_air = GkrInputAir {
-            l_skip: self.l_skip,
             gkr_module_bus: self.bus_inventory.gkr_module_bus,
             bc_module_bus: self.bus_inventory.bc_module_bus,
             transcript_bus: self.bus_inventory.transcript_bus,

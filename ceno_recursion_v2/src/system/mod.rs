@@ -5,9 +5,11 @@ mod types;
 pub use crate::{batch_constraint::BatchConstraintModule, proof_shape::ProofShapeModule};
 pub use preflight::{GkrPreflight, Preflight, ProofShapePreflight};
 pub use recursion_circuit::system::{
-    AggregationSubCircuit, AirModule, BusIndexManager, BusInventory, GlobalTraceGenCtx,
-    TraceGenModule, VerifierConfig, VerifierExternalData,
+    AggregationSubCircuit, AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule,
+    VerifierConfig, VerifierExternalData,
 };
+mod bus_inventory;
+pub use bus_inventory::BusInventory;
 pub use types::{
     RecursionField, RecursionPcs, RecursionProof, RecursionVk, convert_proof_from_zkvm,
     convert_vk_from_zkvm,
@@ -378,8 +380,8 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
         unimplemented!("VerifierSubCircuit::airs placeholder")
     }
 
-    fn bus_inventory(&self) -> &BusInventory {
-        &self.bus_inventory
+    fn bus_inventory(&self) -> &recursion_circuit::system::BusInventory {
+        self.bus_inventory.inner()
     }
 
     fn next_bus_idx(&self) -> BusIndex {

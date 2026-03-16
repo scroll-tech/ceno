@@ -887,8 +887,6 @@ where
             GkrModuleMessage {
                 tidx: local.starting_tidx.into(),
                 n_logup: n_logup.into(),
-                n_max: local.n_max.into(),
-                is_n_max_greater: local.is_n_max_greater.into(),
             },
             local.is_last,
         );

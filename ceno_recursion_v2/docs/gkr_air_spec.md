@@ -32,9 +32,8 @@ AIR’s columns, constraints, or interactions change.
 - **Zero test**: `IsZeroSubAir` checks `n_logup` against `is_n_logup_zero`, unlocking the “no interaction” path.
 - **Input layer defaults**: When `n_logup == 0`, the input-layer claim must be `[0, α]` (numerator zero, denominator
   equals `alpha_logup`).
-- **Derived counts**: Local expressions compute `num_layers = n_layer + l_skip`, transcript offsets for alpha
-  sampling / per-layer reductions, and the xi-sampling window. There is no separate `n_max`; xi usage is implied by
-  `n_layer`.
+- **Transcript math**: Local expressions derive the transcript offsets for alpha sampling, per-layer reductions, and the
+  xi-sampling window directly from `n_layer`. No auxiliary `n_max` adjustment is needed.
 
 ### Interactions
 
@@ -42,7 +41,7 @@ AIR’s columns, constraints, or interactions change.
     - `GkrLayerInputBus.send`: emits `(idx, tidx skip roots, r0/w0/q0_claim)` when interactions exist.
     - `GkrLayerOutputBus.receive`: pulls reduced `(idx, layer_idx_end, input_layer_claim, lambda, mu)` back.
 - **External buses**
-    - `GkrModuleBus.receive`: initial module message (`idx`, `tidx`, `n_layer`) per enabled row.
+    - `GkrModuleBus.receive`: initial module message (`tidx`, `n_logup`) per enabled row.
     - `BatchConstraintModuleBus.send`: forwards the final input-layer claim with the final transcript index.
     - `TranscriptBus`: sample `alpha_logup` and observe `q0_claim` only when `has_interactions`.
 

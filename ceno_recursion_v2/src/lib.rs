@@ -8,6 +8,7 @@ pub mod tracegen;
 #[cfg(feature = "cuda")]
 pub mod cuda;
 
-pub use recursion_circuit::{bus, primitives, subairs};
+pub mod bus;
+pub use recursion_circuit::{primitives, subairs};
 
 pub use recursion_circuit::define_typed_per_proof_permutation_bus;

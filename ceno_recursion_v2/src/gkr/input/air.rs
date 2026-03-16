@@ -1,12 +1,13 @@
 use core::borrow::Borrow;
 
-use crate::gkr::bus::{
-    GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
+use crate::{
+    bus::{BatchConstraintModuleBus, GkrModuleBus, GkrModuleMessage, TranscriptBus},
+    gkr::bus::{GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage},
 };
 use openvm_circuit_primitives::{
     SubAir,
     is_zero::{IsZeroAuxCols, IsZeroIo, IsZeroSubAir},
-    utils::{not, or},
+    utils::not,
 };
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
@@ -16,7 +17,6 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::{
-    bus::{BatchConstraintModuleBus, GkrModuleBus, GkrModuleMessage, TranscriptBus},
     subairs::proof_idx::{ProofIdxIoCols, ProofIdxSubAir},
     utils::assert_zeros,
 };
@@ -32,14 +32,11 @@ pub struct GkrInputCols<T> {
     pub idx: T,
 
     pub n_logup: T,
-    pub n_max: T,
 
     /// Flag indicating whether there are any interactions
     /// n_logup = 0 <=> total_interactions = 0
     pub is_n_logup_zero: T,
     pub is_n_logup_zero_aux: IsZeroAuxCols<T>,
-
-    pub is_n_max_greater_than_n_logup: T,
 
     /// Transcript index
     pub tidx: T,
@@ -58,8 +55,6 @@ pub struct GkrInputCols<T> {
 
 /// The GkrInputAir handles reading and passing the GkrInput
 pub struct GkrInputAir {
-    // System Params
-    pub l_skip: usize,
     // Buses
     pub gkr_module_bus: GkrModuleBus,
     pub bc_module_bus: BatchConstraintModuleBus,
@@ -151,11 +146,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
         // Module Interactions
         ///////////////////////////////////////////////////////////////////////
 
-        let num_layers = local.n_logup + AB::Expr::from_usize(self.l_skip);
-
-        let needs_challenges = or(local.is_n_max_greater_than_n_logup, local.is_n_logup_zero);
-        let num_challenges = local.n_max + AB::Expr::from_usize(self.l_skip)
-            - has_interactions.clone() * num_layers.clone();
+        let num_layers = local.n_logup;
 
         // Add PoW (if any) and alpha, beta
         let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(2 * D_EF);
@@ -165,10 +156,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
                 * num_layers.clone()
                 * (num_layers.clone() + AB::Expr::TWO)
                 * AB::Expr::from_usize(2 * D_EF);
-        // Add separately sampled challenges
-        let _tidx_end = tidx_after_gkr_layers.clone()
-            + needs_challenges.clone() * num_challenges.clone() * AB::Expr::from_usize(D_EF);
-
         // 1. GkrLayerInputBus
         // 1a. Send input to GkrLayerAir
         self.layer_input_bus.send(
@@ -212,8 +199,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             GkrModuleMessage {
                 tidx: local.tidx,
                 n_logup: local.n_logup,
-                n_max: local.n_max,
-                is_n_max_greater: local.is_n_max_greater_than_n_logup,
             },
             local.is_enabled,
         );

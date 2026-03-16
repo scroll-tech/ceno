@@ -11,15 +11,15 @@ use p3_matrix::dense::RowMajorMatrix;
 use recursion_circuit::{
     bus::{BatchConstraintModuleBus, TranscriptBus},
     primitives::pow::PowerCheckerCpuTraceGenerator,
-    system::{AirModule, BusIndexManager, BusInventory},
+    system::{AirModule, BusIndexManager},
 };
 use std::sync::Arc;
 
 pub use recursion_circuit::batch_constraint::expr_eval::CachedTraceRecord;
 
 use crate::system::{
-    GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight, RecursionProof, RecursionVk, TraceGenModule,
-    convert_vk_from_zkvm,
+    BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight, RecursionProof, RecursionVk,
+    TraceGenModule, convert_vk_from_zkvm,
 };
 
 pub(crate) const LOCAL_SYMBOLIC_EXPRESSION_AIR_IDX: usize = 0;
@@ -39,10 +39,11 @@ impl BatchConstraintModule {
         bus_inventory: BusInventory,
         max_num_proofs: usize,
     ) -> Self {
+        let upstream_inventory = bus_inventory.clone_inner();
         let inner = recursion_circuit::batch_constraint::BatchConstraintModule::new(
             child_vk,
             b,
-            bus_inventory.clone(),
+            upstream_inventory,
             max_num_proofs,
         );
         Self {

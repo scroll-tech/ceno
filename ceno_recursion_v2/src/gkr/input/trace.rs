@@ -14,7 +14,6 @@ pub struct GkrInputRecord {
     pub idx: usize,
     pub tidx: usize,
     pub n_logup: usize,
-    pub n_max: usize,
     pub alpha_logup: EF,
     pub input_layer_claim: EF,
 }
@@ -64,9 +63,6 @@ impl RowMajorChip<F> for GkrInputTraceGenerator {
                 cols.tidx = F::from_usize(record.tidx);
 
                 cols.n_logup = F::from_usize(record.n_logup);
-                cols.n_max = F::from_usize(record.n_max);
-                cols.is_n_max_greater_than_n_logup = F::from_bool(record.n_max > record.n_logup);
-
                 IsZeroSubAir.generate_subrow(
                     cols.n_logup,
                     (&mut cols.is_n_logup_zero_aux.inv, &mut cols.is_n_logup_zero),
