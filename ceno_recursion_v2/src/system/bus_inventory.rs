@@ -43,6 +43,8 @@ pub struct BusInventory {
     pub public_values_bus: LocalPublicValuesBus,
     pub range_checker_bus: RangeCheckerBus,
     pub power_checker_bus: PowerCheckerBus,
+    pub exp_bits_len_bus: ExpBitsLenBus,
+    pub right_shift_bus: RightShiftBus,
     pub xi_randomness_bus: XiRandomnessBus,
 }
 
@@ -152,6 +154,8 @@ impl BusInventory {
             public_values_bus,
             range_checker_bus,
             power_checker_bus,
+            exp_bits_len_bus,
+            right_shift_bus,
             xi_randomness_bus,
         }
     }

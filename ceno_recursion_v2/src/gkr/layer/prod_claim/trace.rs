@@ -20,12 +20,18 @@ type ProdTraceCtx<'a> = (
     &'a [Vec<EF>],
 );
 
-fn prod_rows_for_record(record: &GkrLayerRecord) -> usize {
+fn prod_rows_for_record(record: &GkrLayerRecord, is_write: bool) -> usize {
     if record.layer_count() == 0 {
         1
     } else {
         (0..record.layer_count())
-            .map(|layer_idx| record.prod_count_at(layer_idx).max(1))
+            .map(|layer_idx| {
+                if is_write {
+                    record.write_count_at(layer_idx).max(1)
+                } else {
+                    record.read_count_at(layer_idx).max(1)
+                }
+            })
             .sum()
     }
 }
@@ -39,7 +45,10 @@ fn generate_prod_trace(
     required_height: Option<usize>,
 ) -> Option<RowMajorMatrix<F>> {
     let width = GkrProdSumCheckClaimCols::<F>::width();
-    let rows_per_proof: Vec<usize> = records.iter().map(prod_rows_for_record).collect();
+    let rows_per_proof: Vec<usize> = records
+        .iter()
+        .map(|record| prod_rows_for_record(record, is_write))
+        .collect();
     let num_valid_rows: usize = rows_per_proof.iter().sum();
     let height = if let Some(height) = required_height {
         if height < num_valid_rows {
@@ -114,7 +123,11 @@ fn generate_prod_trace(
                         .map(|rows| rows.as_slice())
                         .unwrap_or(&[])
                 };
-                let total_rows = record.prod_count_at(layer_idx).max(1);
+                let total_rows = if is_write {
+                    record.write_count_at(layer_idx).max(1)
+                } else {
+                    record.read_count_at(layer_idx).max(1)
+                };
                 debug_assert!(
                     total_rows == active_rows.len().max(1),
                     "unexpected prod count mismatch at layer {layer_idx}"

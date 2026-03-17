@@ -210,6 +210,7 @@ where
         );
         let local: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*local)[..const_width].borrow();
         let next: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*next)[..const_width].borrow();
+        let n_logup = local.starting_cidx;
 
         self.idx_encoder.eval(builder, localv.idx_flags);
 
@@ -309,6 +310,9 @@ where
         // Select values for NumPublicValuesBus
         let mut num_pvs = AB::Expr::ZERO;
         let mut has_pvs = AB::Expr::ZERO;
+        let mut num_read_count = AB::Expr::ZERO;
+        let mut num_write_count = AB::Expr::ZERO;
+        let mut num_logup_count = AB::Expr::ZERO;
 
         for (i, air_data) in self.per_air.iter().enumerate() {
             // We keep a running tally of how many transcript reads there should be up to any
@@ -367,6 +371,13 @@ where
                 cached_present[cached_idx] += is_current_air.clone();
                 cached_widths[cached_idx] += is_current_air.clone() * AB::Expr::from_usize(*width);
             }
+
+            num_read_count +=
+                is_current_air.clone() * AB::Expr::from_usize(air_data.num_read_count);
+            num_write_count +=
+                is_current_air.clone() * AB::Expr::from_usize(air_data.num_write_count);
+            num_logup_count +=
+                is_current_air.clone() * AB::Expr::from_usize(air_data.num_logup_count);
         }
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -518,6 +529,37 @@ where
                 value: local.need_rot.into(),
             },
             local.is_present * local.num_columns,
+        );
+        self.air_shape_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            AirShapeBusMessage {
+                sort_idx: local.sorted_idx.into(),
+                property_idx: AirShapeProperty::NumRead.to_field(),
+                value: num_read_count.clone(),
+            },
+            // each layer lookup once if current air was present
+            local.is_present * n_logup,
+        );
+        self.air_shape_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            AirShapeBusMessage {
+                sort_idx: local.sorted_idx.into(),
+                property_idx: AirShapeProperty::NumWrite.to_field(),
+                value: num_write_count.clone(),
+            },
+            local.is_present * n_logup,
+        );
+        self.air_shape_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            AirShapeBusMessage {
+                sort_idx: local.sorted_idx.into(),
+                property_idx: AirShapeProperty::NumLk.to_field(),
+                value: num_logup_count,
+            },
+            local.is_present * n_logup,
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -814,8 +856,6 @@ where
         let non_zero_marker = local.lifted_height_limbs;
         let limb_to_range_check = local.height;
         let msb_limb_zero_bits_exp = local.log_height;
-        let n_logup = local.starting_cidx;
-
         let mut prefix = AB::Expr::ZERO;
         let mut expected_limb_to_range_check = AB::Expr::ZERO;
         let mut msb_limb_zero_bits = AB::Expr::ZERO;
@@ -885,6 +925,7 @@ where
             builder,
             local.proof_idx,
             GkrModuleMessage {
+                idx: local.idx.into(),
                 tidx: local.starting_tidx.into(),
                 n_logup: n_logup.into(),
             },

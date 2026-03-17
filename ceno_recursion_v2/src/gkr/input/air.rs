@@ -197,8 +197,9 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             builder,
             local.proof_idx,
             GkrModuleMessage {
-                tidx: local.tidx,
-                n_logup: local.n_logup,
+                idx: local.idx.into(),
+                tidx: local.tidx.into(),
+                n_logup: local.n_logup.into(),
             },
             local.is_enabled,
         );

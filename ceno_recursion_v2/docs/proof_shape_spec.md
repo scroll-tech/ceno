@@ -15,8 +15,9 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
 
 ### Key Fields
 
-- `per_air: Vec<AirMetadata>`: records whether each AIR is required, its widths, cached commitments, and number of
-  interactions.
+- `per_air: Vec<AirMetadata>`: records whether each AIR is required, its widths, cached commitments, number of
+  interactions, and the expected read/write/log lookup counts (`num_read_count`, `num_write_count`, `num_logup_count`)
+  used by the GKR module.
 - `l_skip`, `max_interaction_count`, `commit_mult`: parameters derived from the child VK/config.
 - `idx_encoder`: enforces permutation ordering between `idx` (VK order) and `sorted_idx` (runtime order).
 - Bus handles: power/range checker, proof-shape permutation, starting tidx, number of public values, GKR module,
@@ -66,15 +67,17 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
   `starting_cidx`/`starting_tidx` communicate the first column/ transcript offset for each AIR.
 - **Expression lookups**: `ExpressionClaimNMaxBus`, `FractionFolderInputBus`, and `NLiftBus` mirror the computed
   `n_logup`, `n_max`, and `lifted_height` metadata so batch constraint and fraction-folder modules can cross-check
-  expectations.
+  expectations. `AirShapeBus` exposes additional per-AIR properties (`NumRead`, `NumWrite`, `NumLk`) so GKR AIRs can
+  enforce that their runtime layer counts match the verifying-key declarations.
 
 ### Bus Interactions
 
 - Sends on: `ProofShapePermutationBus`, `HyperdimBus`, `LiftedHeightsBus`, `CommitmentsBus`, `ExpressionClaimNMaxBus`,
   `FractionFolderInputBus`, `NLiftBus`, `StartingTidxBus`, `NumPublicValuesBus`, `CachedCommitBus` (if continuations
   enabled).
-- Receives from: `ProofShapePermutationBus` (VK order), `GkrModuleBus` (per-proof configuration), `AirShapeBus` (per-air
-  property lookups), `PowerCheckerBus` (for PoW enforcement), `RangeCheckerBus` (monotonic log heights),
+- Receives from: `ProofShapePermutationBus` (VK order), `GkrModuleBus` (per-proof configuration), `AirShapeBus`
+  (per-air property lookups, including the new `NumRead` / `NumWrite` / `NumLk` counters that downstream GKR AIRs
+  enforce), `PowerCheckerBus` (for PoW enforcement), `RangeCheckerBus` (monotonic log heights),
   `TranscriptBus` (sample/observe tidx-aligned data), `CachedCommitBus` (continuations), `CommitmentsBus` (when reading
   transcript commitments).
 

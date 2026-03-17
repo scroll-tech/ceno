@@ -36,6 +36,9 @@ pub enum AirShapeProperty {
     AirId,
     NumInteractions,
     NeedRot,
+    NumRead,
+    NumWrite,
+    NumLk,
 }
 
 impl AirShapeProperty {

@@ -10,16 +10,20 @@ use p3_field::{Field, PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::gkr::{
-    GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage,
-    bus::{
-        GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
-        GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage,
-        GkrLogupLayerChallengeMessage, GkrProdLayerChallengeMessage, GkrProdReadClaimBus,
-        GkrProdReadClaimInputBus, GkrProdSumClaimMessage, GkrProdWriteClaimBus,
-        GkrProdWriteClaimInputBus, GkrSumcheckInputBus, GkrSumcheckInputMessage,
-        GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
+use crate::{
+    bus::{AirShapeBus, AirShapeBusMessage},
+    gkr::{
+        GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage,
+        bus::{
+            GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
+            GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage,
+            GkrLogupLayerChallengeMessage, GkrProdLayerChallengeMessage, GkrProdReadClaimBus,
+            GkrProdReadClaimInputBus, GkrProdSumClaimMessage, GkrProdWriteClaimBus,
+            GkrProdWriteClaimInputBus, GkrSumcheckInputBus, GkrSumcheckInputMessage,
+            GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
+        },
     },
+    proof_shape::bus::AirShapeProperty,
 };
 
 use recursion_circuit::{
@@ -63,7 +67,8 @@ pub struct GkrLayerCols<T> {
     pub write_claim_prime: [T; D_EF],
     pub logup_claim: [T; D_EF],
     pub logup_claim_prime: [T; D_EF],
-    pub num_prod_count: T,
+    pub num_read_count: T,
+    pub num_write_count: T,
     pub num_logup_count: T,
 
     /// Received from GkrLayerSumcheckAir
@@ -78,6 +83,7 @@ pub struct GkrLayerCols<T> {
 pub struct GkrLayerAir {
     // External buses
     pub transcript_bus: TranscriptBus,
+    pub air_shape_bus: AirShapeBus,
     // Internal buses
     pub layer_input_bus: GkrLayerInputBus,
     pub layer_output_bus: GkrLayerOutputBus,
@@ -214,6 +220,38 @@ where
         let is_not_dummy = AB::Expr::ONE - local.is_dummy;
         let is_non_root_layer = local.is_enabled * (AB::Expr::ONE - local.is_first);
 
+        let lookup_enable = local.is_enabled * is_not_dummy.clone();
+        self.air_shape_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            AirShapeBusMessage {
+                sort_idx: local.idx.into(),
+                property_idx: AirShapeProperty::NumRead.to_field(),
+                value: local.num_read_count.into(),
+            },
+            lookup_enable.clone(),
+        );
+        self.air_shape_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            AirShapeBusMessage {
+                sort_idx: local.idx.into(),
+                property_idx: AirShapeProperty::NumWrite.to_field(),
+                value: local.num_write_count.into(),
+            },
+            lookup_enable.clone(),
+        );
+        self.air_shape_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            AirShapeBusMessage {
+                sort_idx: local.idx.into(),
+                property_idx: AirShapeProperty::NumLk.to_field(),
+                value: local.num_logup_count.into(),
+            },
+            lookup_enable.clone(),
+        );
+
         let tidx_for_claims = tidx_after_sumcheck.clone();
         self.prod_read_claim_input_bus.send(
             builder,
@@ -264,7 +302,7 @@ where
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: local.read_claim.map(Into::into),
                 lambda_prime_claim: local.read_claim_prime.map(Into::into),
-                num_prod_count: local.num_prod_count.into(),
+                num_prod_count: local.num_read_count.into(),
             },
             is_not_dummy.clone(),
         );
@@ -276,7 +314,7 @@ where
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: local.write_claim.map(Into::into),
                 lambda_prime_claim: local.write_claim_prime.map(Into::into),
-                num_prod_count: local.num_prod_count.into(),
+                num_prod_count: local.num_write_count.into(),
             },
             is_not_dummy.clone(),
         );

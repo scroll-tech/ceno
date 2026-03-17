@@ -15,7 +15,7 @@ pub use types::{
     convert_vk_from_zkvm,
 };
 
-use std::sync::Arc;
+use std::{iter, mem, sync::Arc};
 
 use crate::{
     batch_constraint::{
@@ -29,6 +29,7 @@ use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkEngine, StarkProtocolConfig, TranscriptHistory,
     interaction::BusIndex,
+    keygen::types::LinearConstraint,
     p3_maybe_rayon::prelude::*,
     prover::{AirProvingContext, CommittedTraceData, ProverBackend},
 };
@@ -36,7 +37,10 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use recursion_circuit::{
-    primitives::{exp_bits_len::ExpBitsLenTraceGenerator, pow::PowerCheckerCpuTraceGenerator},
+    primitives::{
+        exp_bits_len::{ExpBitsLenAir, ExpBitsLenTraceGenerator},
+        pow::{PowerCheckerAir, PowerCheckerCpuTraceGenerator},
+    },
     transcript::TranscriptModule,
 };
 use tracing::Span;
@@ -213,6 +217,64 @@ impl<'a> TraceModuleRef<'a> {
 }
 
 impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
+    pub fn new(child_vk: Arc<RecursionVk>) -> Self {
+        Self::new_with_options(child_vk, VerifierConfig::default())
+    }
+
+    pub fn new_with_options(child_vk: Arc<RecursionVk>, config: VerifierConfig) -> Self {
+        let child_mvk = convert_vk_from_zkvm(child_vk.as_ref());
+        let proof_shape_constraint = LinearConstraint {
+            coefficients: child_mvk
+                .inner
+                .per_air
+                .iter()
+                .map(|avk| avk.num_interactions() as u32)
+                .collect(),
+            threshold: child_mvk.inner.params.logup.max_interaction_count,
+        };
+        for (i, constraint) in child_mvk.inner.trace_height_constraints.iter().enumerate() {
+            assert!(
+                constraint.is_implied_by(&proof_shape_constraint),
+                "child_vk trace_height_constraint[{i}] is not implied by ProofShapeAir's check. \
+                 The recursion circuit cannot enforce this constraint. \
+                 Constraint: coefficients={:?}, threshold={}",
+                constraint.coefficients,
+                constraint.threshold,
+            );
+        }
+
+        let mut bus_idx_manager = BusIndexManager::new();
+        let bus_inventory = BusInventory::new(&mut bus_idx_manager);
+
+        let transcript = TranscriptModule::new(
+            bus_inventory.clone_inner(),
+            child_mvk.inner.params.clone(),
+            config.final_state_bus_enabled,
+        );
+        let proof_shape = ProofShapeModule::new(
+            child_vk.as_ref(),
+            &mut bus_idx_manager,
+            bus_inventory.clone(),
+            config.continuations_enabled,
+        );
+        let gkr = GkrModule::new(child_vk.as_ref(), &mut bus_idx_manager, bus_inventory.clone());
+        let batch_constraint = LocalBatchConstraintModule::new(
+            child_mvk.as_ref(),
+            &mut bus_idx_manager,
+            bus_inventory.clone(),
+            MAX_NUM_PROOFS,
+        );
+
+        VerifierSubCircuit {
+            bus_inventory,
+            bus_idx_manager,
+            transcript,
+            proof_shape,
+            gkr,
+            batch_constraint,
+        }
+    }
+
     /// Runs preflight for a single proof.
     #[tracing::instrument(name = "execute_preflight", skip_all)]
     fn run_preflight<TS>(
@@ -271,20 +333,20 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
     VerifierTraceGen<CpuBackend<SC>, SC> for VerifierSubCircuit<MAX_NUM_PROOFS>
 {
-    fn new(_child_vk: Arc<RecursionVk>, _config: VerifierConfig) -> Self {
-        unimplemented!("VerifierSubCircuit::new placeholder")
+    fn new(child_vk: Arc<RecursionVk>, config: VerifierConfig) -> Self {
+        Self::new_with_options(child_vk, config)
     }
 
     fn commit_child_vk<E: StarkEngine<SC = SC, PB = CpuBackend<SC>>>(
         &self,
-        _engine: &E,
-        _child_vk: &RecursionVk,
+        engine: &E,
+        child_vk: &RecursionVk,
     ) -> CommittedTraceData<CpuBackend<SC>> {
-        unimplemented!("VerifierSubCircuit::commit_child_vk placeholder")
+        self.batch_constraint.commit_child_vk(engine, child_vk)
     }
 
-    fn cached_trace_record(&self, _child_vk: &RecursionVk) -> CachedTraceRecord {
-        unimplemented!("VerifierSubCircuit::cached_trace_record placeholder")
+    fn cached_trace_record(&self, child_vk: &RecursionVk) -> CachedTraceRecord {
+        self.batch_constraint.cached_trace_record(child_vk)
     }
 
     #[tracing::instrument(name = "subcircuit_generate_proving_ctxs", skip_all)]
@@ -367,6 +429,9 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         }
 
         let mut ctx_per_trace = ctxs_by_module.into_iter().flatten().collect::<Vec<_>>();
+        if power_checker_required.is_some_and(|h| h != POW_CHECKER_HEIGHT) {
+            return None;
+        }
         let power_height = power_checker_required.unwrap_or(POW_CHECKER_HEIGHT);
         ctx_per_trace.push(zero_air_ctx(power_height));
         let exp_bits_height = exp_bits_len_required.unwrap_or(1);
@@ -375,9 +440,32 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
     }
 }
 
+fn peek_bus_idx(manager: &BusIndexManager) -> BusIndex {
+    // SAFETY: BusIndexManager is currently a transparent wrapper around a single BusIndex field.
+    unsafe { mem::transmute::<BusIndexManager, BusIndex>(manager.clone()) }
+}
+
 impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<MAX_NUM_PROOFS> {
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
-        unimplemented!("VerifierSubCircuit::airs placeholder")
+        let exp_bits_len_air = ExpBitsLenAir::new(
+            self.bus_inventory.exp_bits_len_bus,
+            self.bus_inventory.right_shift_bus,
+        );
+        let power_checker_air = PowerCheckerAir::<2, POW_CHECKER_HEIGHT> {
+            pow_bus: self.bus_inventory.power_checker_bus,
+            range_bus: self.bus_inventory.range_checker_bus,
+        };
+
+        iter::empty()
+            .chain(self.batch_constraint.airs())
+            .chain(self.transcript.airs())
+            .chain(self.proof_shape.airs())
+            .chain(self.gkr.airs())
+            .chain([
+                Arc::new(power_checker_air) as AirRef<_>,
+                Arc::new(exp_bits_len_air) as AirRef<_>,
+            ])
+            .collect()
     }
 
     fn bus_inventory(&self) -> &recursion_circuit::system::BusInventory {
@@ -385,7 +473,7 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
     }
 
     fn next_bus_idx(&self) -> BusIndex {
-        unimplemented!("VerifierSubCircuit::next_bus_idx placeholder")
+        peek_bus_idx(&self.bus_idx_manager)
     }
 
     fn max_num_proofs(&self) -> usize {

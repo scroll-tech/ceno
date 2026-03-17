@@ -17,7 +17,8 @@ pub struct GkrLayerRecord {
     pub layer_claims: Vec<[EF; 4]>,
     pub lambdas: Vec<EF>,
     pub eq_at_r_primes: Vec<EF>,
-    pub prod_counts: Vec<usize>,
+    pub read_counts: Vec<usize>,
+    pub write_counts: Vec<usize>,
     pub logup_counts: Vec<usize>,
     pub read_claims: Vec<EF>,
     pub read_prime_claims: Vec<EF>,
@@ -117,8 +118,13 @@ impl GkrLayerRecord {
     }
 
     #[inline]
-    pub(crate) fn prod_count_at(&self, layer_idx: usize) -> usize {
-        self.prod_counts.get(layer_idx).copied().unwrap_or(1)
+    pub(crate) fn read_count_at(&self, layer_idx: usize) -> usize {
+        self.read_counts.get(layer_idx).copied().unwrap_or(1)
+    }
+
+    #[inline]
+    pub(crate) fn write_count_at(&self, layer_idx: usize) -> usize {
+        self.write_counts.get(layer_idx).copied().unwrap_or(1)
     }
 
     #[inline]
@@ -213,7 +219,8 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                     cols.write_claim_prime = [F::ZERO; D_EF];
                     cols.logup_claim = [F::ZERO; D_EF];
                     cols.logup_claim_prime = [F::ZERO; D_EF];
-                    cols.num_prod_count = F::ZERO;
+                    cols.num_read_count = F::ZERO;
+                    cols.num_write_count = F::ZERO;
                     cols.num_logup_count = F::ZERO;
                     cols.eq_at_r_prime = [F::ZERO; D_EF];
                     cols.r0_claim.copy_from_slice(q0_basis);
@@ -270,7 +277,10 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                             .as_basis_coefficients_slice()
                             .try_into()
                             .unwrap();
-                        cols.num_prod_count = F::from_usize(record.prod_count_at(layer_idx).max(1));
+                        cols.num_read_count =
+                            F::from_usize(record.read_count_at(layer_idx).max(1));
+                        cols.num_write_count =
+                            F::from_usize(record.write_count_at(layer_idx).max(1));
                         cols.num_logup_count =
                             F::from_usize(record.logup_count_at(layer_idx).max(1));
                         cols.eq_at_r_prime = record

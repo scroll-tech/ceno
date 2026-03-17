@@ -19,7 +19,7 @@ use crate::{
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        RecursionProof, RecursionVk, TraceGenModule, frame::MultiStarkVkeyFrame,
+        RecursionProof, RecursionVk, TraceGenModule, convert_vk_from_zkvm, frame::MultiStarkVkeyFrame,
     },
     tracegen::RowMajorChip,
 };
@@ -44,6 +44,9 @@ pub struct AirMetadata {
     num_interactions: usize,
     main_width: usize,
     cached_widths: Vec<usize>,
+    num_read_count: usize,
+    num_write_count: usize,
+    num_logup_count: usize,
     preprocessed_width: Option<usize>,
     preprocessed_data: Option<VerifierSinglePreprocessedData<Digest>>,
 }
@@ -78,21 +81,25 @@ pub struct ProofShapeModule {
 
 impl ProofShapeModule {
     pub fn new(
-        mvk: &MultiStarkVkeyFrame,
+        child_vk: &RecursionVk,
         b: &mut BusIndexManager,
         bus_inventory: BusInventory,
         continuations_enabled: bool,
     ) -> Self {
-        let idx_encoder = Arc::new(Encoder::new(mvk.per_air.len(), 2, true));
+        let openvm_vk = convert_vk_from_zkvm(child_vk);
+        let mvk_frame: MultiStarkVkeyFrame = openvm_vk.as_ref().into();
+        let idx_encoder = Arc::new(Encoder::new(mvk_frame.per_air.len(), 2, true));
 
-        let (min_cached_idx, min_cached) = mvk
+        let rwlk_counts = extract_rwlk_counts(child_vk, mvk_frame.per_air.len());
+
+        let (min_cached_idx, min_cached) = mvk_frame
             .per_air
             .iter()
             .enumerate()
             .min_by_key(|(_, avk)| avk.params.width.cached_mains.len())
             .map(|(idx, avk)| (idx, avk.params.width.cached_mains.len()))
             .unwrap();
-        let mut max_cached = mvk
+        let mut max_cached = mvk_frame
             .per_air
             .iter()
             .map(|avk| avk.params.width.cached_mains.len())
@@ -102,15 +109,19 @@ impl ProofShapeModule {
             max_cached += 1;
         }
 
-        let per_air = mvk
+        let per_air = mvk_frame
             .per_air
             .iter()
-            .map(|avk| AirMetadata {
+            .zip(rwlk_counts.into_iter())
+            .map(|(avk, (num_read_count, num_write_count, num_logup_count))| AirMetadata {
                 is_required: avk.is_required,
                 num_public_values: avk.params.num_public_values,
                 num_interactions: avk.num_interactions,
                 main_width: avk.params.width.common_main,
                 cached_widths: avk.params.width.cached_mains.clone(),
+                num_read_count,
+                num_write_count,
+                num_logup_count,
                 preprocessed_width: avk.params.width.preprocessed,
                 preprocessed_data: avk.preprocessed_data.clone(),
             })
@@ -120,8 +131,8 @@ impl ProofShapeModule {
         let pow_bus = bus_inventory.power_checker_bus;
         Self {
             per_air,
-            l_skip: mvk.params.l_skip,
-            max_interaction_count: mvk.params.logup.max_interaction_count,
+            l_skip: mvk_frame.params.l_skip,
+            max_interaction_count: mvk_frame.params.logup.max_interaction_count,
             bus_inventory,
             range_bus,
             pow_bus,
@@ -131,7 +142,7 @@ impl ProofShapeModule {
             idx_encoder,
             min_cached_idx,
             max_cached,
-            commit_mult: mvk.params.whir.rounds.first().unwrap().num_queries,
+            commit_mult: mvk_frame.params.whir.rounds.first().unwrap().num_queries,
             continuations_enabled,
         }
     }
@@ -149,6 +160,28 @@ impl ProofShapeModule {
         let _ = (self, child_vk, proof, preflight);
         ts.observe(F::ZERO);
     }
+}
+
+fn extract_rwlk_counts(
+    child_vk: &RecursionVk,
+    expected_len: usize,
+) -> Vec<(usize, usize, usize)> {
+    (0..expected_len)
+        .map(|idx| {
+            child_vk
+                .circuit_index_to_name
+                .get(&idx)
+                .and_then(|name| child_vk.circuit_vks.get(name))
+                .map(|circuit_vk| {
+                    let cs = circuit_vk.get_cs();
+                    (cs.num_reads(), cs.num_writes(), cs.num_lks())
+                })
+                .unwrap_or_else(|| {
+                    // TODO: Populate GKR count metadata once every AIR is backed by a concrete VK.
+                    (0, 0, 0)
+                })
+        })
+        .collect()
 }
 
 impl AirModule for ProofShapeModule {

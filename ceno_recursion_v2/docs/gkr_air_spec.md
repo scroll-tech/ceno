@@ -41,7 +41,7 @@ AIR’s columns, constraints, or interactions change.
     - `GkrLayerInputBus.send`: emits `(idx, tidx skip roots, r0/w0/q0_claim)` when interactions exist.
     - `GkrLayerOutputBus.receive`: pulls reduced `(idx, layer_idx_end, input_layer_claim, lambda, mu)` back.
 - **External buses**
-    - `GkrModuleBus.receive`: initial module message (`tidx`, `n_logup`) per enabled row.
+    - `GkrModuleBus.receive`: initial module message `(idx, tidx, n_logup)` per enabled row.
     - `BatchConstraintModuleBus.send`: forwards the final input-layer claim with the final transcript index.
     - `TranscriptBus`: sample `alpha_logup` and observe `q0_claim` only when `has_interactions`.
 
@@ -74,8 +74,9 @@ AIR’s columns, constraints, or interactions change.
 | `write_claim_prime`      | `[D_EF]` | Companion write claim.                                                      |
 | `logup_claim`            | `[D_EF]` | LogUp folded claim w.r.t. `lambda`.                                         |
 | `logup_claim_prime`      | `[D_EF]` | LogUp folded claim w.r.t. `lambda_prime` (root = q₀).                       |
-| `num_prod_count`         | scalar   | Declared accumulator length shared by read/write prod AIRs.                 |
-| `num_logup_count`        | scalar   | Declared accumulator length for the logup AIR.                              |
+| `num_read_count`         | scalar   | Declared accumulator length for the read prod AIR (must equal `n_logup`).   |
+| `num_write_count`        | scalar   | Declared accumulator length for the write prod AIR (must equal `n_logup`).  |
+| `num_logup_count`        | scalar   | Declared accumulator length for the logup AIR (must equal `n_logup`).       |
 | `eq_at_r_prime`          | `[D_EF]` | Product of eq evaluations returned from sumcheck.                           |
 | `r0_claim`, `w0_claim`, `q0_claim` | `[D_EF]` each | Root evaluations supplied by `GkrInputAir`.                           |
 
@@ -94,6 +95,8 @@ AIR’s columns, constraints, or interactions change.
 - **Inter-layer propagation**: `next.sumcheck_claim_in = read_claim + write_claim + logup_claim` on transitions. The
   `_prime` versions feed `sumcheck_claim_out = read_claim_prime + write_claim_prime + logup_claim_prime`, which is what
   the sumcheck AIR receives.
+- **Count consistency**: `num_read_count`, `num_write_count`, and `num_logup_count` are all constrained to equal
+  `n_logup`, and each is individually range-checked against ProofShape metadata via `AirShapeBus`.
 - **Transcript timing**: Same `tidx` arithmetic as before, but now the post-sumcheck transcript window must also cover
   the sample/observe operations that the product/logup AIRs perform themselves.
 
@@ -114,7 +117,8 @@ AIR’s columns, constraints, or interactions change.
     - On the proof’s final layer, sends `mu` as the shared xi challenge consumed by later modules.
 - **Prod/logup buses**
     - Sends `(idx, layer_idx, tidx, lambda, lambda_prime, mu)` to the read/write prod AIRs every row (dummy rows are
-      masked out). Receives back both `lambda_claim` and `lambda_prime_claim` along with `num_prod_count`.
+      masked out). Receives back both `lambda_claim` and `lambda_prime_claim` along with `num_read_count` /
+      `num_write_count`.
     - Sends the same challenge payload to the logup AIR and receives its dual claims plus `num_logup_count`.
     - No separate “init” buses exist anymore; setting `lambda_prime = 1` on the root row instructs the sub-AIRs to act as
       the initialization accumulators whose outputs are compared directly against `r0/w0/q0`.
@@ -131,7 +135,8 @@ AIR’s columns, constraints, or interactions change.
 - `NestedForLoopSubAir<2>` enumerates `(proof_idx, idx)` and treats `layer_idx` as an inner counter controlled by
   `is_first_layer`; within each `(proof_idx, idx, layer_idx)` triple an `index_id` column counts accumulator rows.
 - Columns include:
-  - Loop/indexing flags (`is_enabled`, `is_first_layer`, `is_first`, `is_dummy`, `index_id`, `num_prod_count`).
+  - Loop/indexing flags (`is_enabled`, `is_first_layer`, `is_first`, `is_dummy`, `index_id`, `num_read_count`,
+    `num_write_count`).
   - Metadata observed from `GkrLayerAir`: `layer_idx`, `tidx`, challenges `lambda`, `lambda_prime`, `mu`.
   - Transcript observations: `p_xi_0`, `p_xi_1`, interpolated `p_xi`.
   - Dual running powers/sums: `(pow_lambda, acc_sum)` for the standard sumcheck, `(pow_lambda_prime, acc_sum_prime)` for
@@ -139,7 +144,7 @@ AIR’s columns, constraints, or interactions change.
 
 ### Constraints
 - Clamp `index_id` to zero on the first row of every layer triple, increment it while `stay_in_layer = 1`, and enforce
-  `index_id + 1 = num_prod_count` on the row that sends results.
+  `index_id + 1 = num_read_count` / `num_write_count` on the rows that send results.
 - Recompute `p_xi` via the usual linear interpolation in `mu`.
 - Update both accumulators:
     - `acc_sum_next = acc_sum + p_xi * pow_lambda`, with `pow_lambda_next = pow_lambda * lambda`.
@@ -150,8 +155,8 @@ AIR’s columns, constraints, or interactions change.
 
 ### Interactions
 - First row per layer triple receives `GkrProdLayerChallengeMessage { idx, layer_idx, tidx, lambda, lambda_prime, mu }`.
-- Final row sends `GkrProdSumClaimMessage { lambda_claim = acc_sum, lambda_prime_claim = acc_sum_prime }` alongside
-  `num_prod_count`. Read/write variants simply use different buses.
+- Final row sends `GkrProdSumClaimMessage { lambda_claim = acc_sum, lambda_prime_claim = acc_sum_prime }` alongside the
+  appropriate `num_*_count`. Read/write variants simply use different buses.
 
 ## GkrLogUpSumCheckClaimAir (`src/gkr/layer/logup_claim/air.rs`)
 

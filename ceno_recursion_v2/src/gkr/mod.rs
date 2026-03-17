@@ -317,7 +317,8 @@ fn build_chip_records(
         layer_claims: Vec::with_capacity(layer_count),
         lambdas: vec![EF::ZERO; layer_count],
         eq_at_r_primes: vec![EF::ZERO; layer_count],
-        prod_counts: vec![1; layer_count],
+        read_counts: vec![1; layer_count],
+        write_counts: vec![1; layer_count],
         logup_counts: vec![1; layer_count],
         read_claims: vec![EF::ZERO; layer_count],
         read_prime_claims: vec![EF::ZERO; layer_count],
@@ -348,7 +349,8 @@ fn build_chip_records(
             read_len, write_len,
             "read/write prod spec count mismatch at layer {layer_idx}"
         );
-        layer_record.prod_counts[layer_idx] = read_len.max(1);
+        layer_record.read_counts[layer_idx] = read_len.max(1);
+        layer_record.write_counts[layer_idx] = write_len.max(1);
         layer_record.logup_counts[layer_idx] = logup_len.max(1);
     }
 
@@ -469,6 +471,7 @@ impl AirModule for GkrModule {
 
         let gkr_layer_air = GkrLayerAir {
             transcript_bus: self.bus_inventory.transcript_bus,
+            air_shape_bus: self.bus_inventory.air_shape_bus,
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
             sumcheck_input_bus: self.sumcheck_input_bus,

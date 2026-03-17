@@ -11,6 +11,7 @@ pub use upstream::{
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct GkrModuleMessage<T> {
+    pub idx: T,
     pub tidx: T,
     pub n_logup: T,
 }
