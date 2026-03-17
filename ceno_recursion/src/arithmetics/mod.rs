@@ -9,8 +9,10 @@ use multilinear_extensions::{Expression, Fixed, Instance};
 use openvm_native_circuit::EXT_DEG;
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
-use openvm_native_recursion::vars::HintSlice;
+use openvm_native_recursion::{
+    challenger::{FeltChallenger, duplex::DuplexChallengerVariable},
+    vars::HintSlice,
+};
 use openvm_stark_backend::p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 
 type E = BabyBearExt4;

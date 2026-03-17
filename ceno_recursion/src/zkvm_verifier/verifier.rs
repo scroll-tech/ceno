@@ -7,8 +7,7 @@ use crate::{
         PolyEvaluator, UniPolyExtrapolator, arr_product, assert_ext_arr_eq,
         build_eq_x_r_vec_sequential, challenger_hint_observe, challenger_multi_observe, concat,
         dot_product as ext_dot_product, eq_eval, eq_eval_less_or_equal_than,
-        eval_ceno_expr_with_instance, eval_wellform_address_vec, gen_alpha_pows,
-        mask_arr, reverse,
+        eval_ceno_expr_with_instance, eval_wellform_address_vec, gen_alpha_pows, mask_arr, reverse,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
