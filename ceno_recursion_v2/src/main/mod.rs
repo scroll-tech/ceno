@@ -24,7 +24,7 @@ use self::{
     trace::{MainRecord, MainTraceGenerator},
 };
 use crate::{
-    bus::{MainBus, MainSumcheckInputBus, MainSumcheckOutputBus},
+    bus::{MainBus, MainExpressionClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus},
     gkr::convert_logup_claim,
     system::{
         AirModule, BusIndexManager, BusInventory, ChipTranscriptRange, GlobalCtxCpu, Preflight,
@@ -41,6 +41,7 @@ pub struct MainModule {
     main_bus: MainBus,
     sumcheck_input_bus: MainSumcheckInputBus,
     sumcheck_output_bus: MainSumcheckOutputBus,
+    expression_claim_bus: MainExpressionClaimBus,
 }
 
 impl MainModule {
@@ -49,10 +50,12 @@ impl MainModule {
         let main_bus = bus_inventory.main_bus;
         let sumcheck_input_bus = bus_inventory.main_sumcheck_input_bus;
         let sumcheck_output_bus = bus_inventory.main_sumcheck_output_bus;
+        let expression_claim_bus = bus_inventory.main_expression_claim_bus;
         Self {
             main_bus,
             sumcheck_input_bus,
             sumcheck_output_bus,
+            expression_claim_bus,
         }
     }
 
@@ -138,6 +141,7 @@ impl AirModule for MainModule {
             main_bus: self.main_bus,
             sumcheck_input_bus: self.sumcheck_input_bus,
             sumcheck_output_bus: self.sumcheck_output_bus,
+            expression_claim_bus: self.expression_claim_bus,
         };
         let main_sumcheck_air = MainSumcheckAir {
             sumcheck_input_bus: self.sumcheck_input_bus,

@@ -1,7 +1,7 @@
 use core::borrow::Borrow;
 
 use crate::{
-    bus::{BatchConstraintModuleBus, GkrModuleBus, GkrModuleMessage, MainBus, MainMessage, TranscriptBus},
+    bus::{GkrModuleBus, GkrModuleMessage, MainBus, MainMessage, TranscriptBus},
     gkr::bus::{GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage},
 };
 use openvm_circuit_primitives::{
@@ -57,7 +57,6 @@ pub struct GkrInputCols<T> {
 pub struct GkrInputAir {
     // Buses
     pub gkr_module_bus: GkrModuleBus,
-    pub bc_module_bus: BatchConstraintModuleBus,
     pub main_bus: MainBus,
     pub transcript_bus: TranscriptBus,
     pub layer_input_bus: GkrLayerInputBus,

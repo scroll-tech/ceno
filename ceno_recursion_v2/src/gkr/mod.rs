@@ -479,7 +479,6 @@ impl AirModule for GkrModule {
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
         let gkr_input_air = GkrInputAir {
             gkr_module_bus: self.bus_inventory.gkr_module_bus,
-            bc_module_bus: self.bus_inventory.bc_module_bus,
             main_bus: self.bus_inventory.main_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             layer_input_bus: self.layer_input_bus,

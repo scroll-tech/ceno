@@ -1,7 +1,7 @@
 use recursion_circuit::{
     bus::{
-        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage,
-        BatchConstraintModuleBus, CachedCommitBus, CachedCommitBusMessage, ColumnClaimsBus,
+        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage, BatchConstraintModuleBus,
+        CachedCommitBus, CachedCommitBusMessage, ColumnClaimsBus,
         CommitmentsBus, CommitmentsBusMessage, ConstraintSumcheckRandomnessBus,
         ConstraintsFoldingInputBus, ConstraintsFoldingInputMessage, DagCommitBus, EqNegBaseRandBus,
         EqNegResultBus, EqNsNLogupMaxBus, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
@@ -18,19 +18,19 @@ use recursion_circuit::{
 };
 
 use crate::bus::{
-    BatchConstraintModuleBus as LocalBatchConstraintBus, CachedCommitBus as LocalCachedCommitBus,
-    CommitmentsBus as LocalCommitmentsBus, ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
+    CachedCommitBus as LocalCachedCommitBus, CommitmentsBus as LocalCommitmentsBus,
+    ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
     FractionFolderInputBus as LocalFractionFolderInputBus, GkrModuleBus, MainBus,
-    MainSumcheckInputBus, MainSumcheckOutputBus, HyperdimBus as LocalHyperdimBus,
-    LiftedHeightsBus as LocalLiftedHeightsBus, NLiftBus as LocalNLiftBus,
-    PublicValuesBus as LocalPublicValuesBus, TranscriptBus as LocalTranscriptBus,
+    MainExpressionClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus,
+    HyperdimBus as LocalHyperdimBus, LiftedHeightsBus as LocalLiftedHeightsBus,
+    NLiftBus as LocalNLiftBus, PublicValuesBus as LocalPublicValuesBus,
+    TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
 pub struct BusInventory {
     inner: UpstreamBusInventory,
     pub transcript_bus: LocalTranscriptBus,
-    pub bc_module_bus: LocalBatchConstraintBus,
     pub gkr_module_bus: GkrModuleBus,
     pub expression_claim_n_max_bus: LocalExpressionClaimNMaxBus,
     pub fraction_folder_input_bus: LocalFractionFolderInputBus,
@@ -47,6 +47,7 @@ pub struct BusInventory {
     pub main_bus: MainBus,
     pub main_sumcheck_input_bus: MainSumcheckInputBus,
     pub main_sumcheck_output_bus: MainSumcheckOutputBus,
+    pub main_expression_claim_bus: MainExpressionClaimBus,
     pub right_shift_bus: RightShiftBus,
     pub xi_randomness_bus: XiRandomnessBus,
 }
@@ -62,7 +63,7 @@ impl BusInventory {
         let gkr_module_bus = GkrModuleBus::new(gkr_bus_idx);
         let upstream_gkr_module_bus = recursion_circuit::bus::GkrModuleBus::new(gkr_bus_idx);
 
-        let bc_module_bus = LocalBatchConstraintBus::new(b.new_bus_idx());
+        let bc_module_bus = BatchConstraintModuleBus::new(b.new_bus_idx());
         let stacking_module_bus = StackingModuleBus::new(b.new_bus_idx());
         let whir_module_bus = WhirModuleBus::new(b.new_bus_idx());
         let whir_mu_bus = WhirMuBus::new(b.new_bus_idx());
@@ -97,6 +98,7 @@ impl BusInventory {
         let main_bus = MainBus::new(b.new_bus_idx());
         let main_sumcheck_input_bus = MainSumcheckInputBus::new(b.new_bus_idx());
         let main_sumcheck_output_bus = MainSumcheckOutputBus::new(b.new_bus_idx());
+        let main_expression_claim_bus = MainExpressionClaimBus::new(b.new_bus_idx());
 
         let cached_commit_bus = LocalCachedCommitBus::new(b.new_bus_idx());
         let pre_hash_bus = PreHashBus::new(b.new_bus_idx());
@@ -147,7 +149,6 @@ impl BusInventory {
         Self {
             inner,
             transcript_bus,
-            bc_module_bus,
             gkr_module_bus,
             expression_claim_n_max_bus,
             fraction_folder_input_bus,
@@ -164,6 +165,7 @@ impl BusInventory {
             main_bus,
             main_sumcheck_input_bus,
             main_sumcheck_output_bus,
+            main_expression_claim_bus,
             right_shift_bus,
             xi_randomness_bus,
         }

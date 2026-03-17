@@ -1,6 +1,6 @@
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::TranscriptLog;
-use openvm_stark_sdk::config::baby_bear_poseidon2::F;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{EF, F};
 
 /// Placeholder types mirroring upstream recursion preflight records.
 /// These will be populated with real transcript metadata once the
@@ -15,7 +15,15 @@ pub struct Preflight {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ProofShapePreflight;
+pub struct ProofShapePreflight {
+    pub sorted_trace_vdata: Vec<(usize, TraceVData)>,
+    pub l_skip: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TraceVData {
+    pub log_height: usize,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct MainPreflight {
@@ -28,7 +36,13 @@ pub struct GkrPreflight {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct BatchConstraintPreflight;
+pub struct BatchConstraintPreflight {
+    pub lambda_tidx: usize,
+    pub tidx_before_univariate: usize,
+    pub sumcheck_rnd: Vec<F>,
+    pub eq_ns_frontloaded: Vec<EF>,
+    pub eq_sharp_ns_frontloaded: Vec<EF>,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct ChipTranscriptRange {

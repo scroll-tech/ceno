@@ -5,6 +5,7 @@ pub mod main;
 pub mod proof_shape;
 pub mod system;
 pub mod tracegen;
+pub mod utils;
 
 #[cfg(feature = "cuda")]
 pub mod cuda;

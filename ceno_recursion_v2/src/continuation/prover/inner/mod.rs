@@ -217,7 +217,7 @@ where
             .verifier_circuit
             .generate_proving_ctxs(
                 child_vk,
-                child_vk_pcs_data,
+                child_vk_pcs_data.clone(),
                 proofs,
                 &mut external_data,
                 default_duplex_sponge_recorder(),

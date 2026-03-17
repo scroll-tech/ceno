@@ -12,7 +12,8 @@ use recursion_circuit::subairs::nested_for_loop::{NestedForLoopIoCols, NestedFor
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::bus::{
-    MainBus, MainMessage, MainSumcheckInputBus, MainSumcheckInputMessage, MainSumcheckOutputBus,
+    MainBus, MainExpressionClaimBus, MainExpressionClaimMessage, MainMessage,
+    MainSumcheckInputBus, MainSumcheckInputMessage, MainSumcheckOutputBus,
     MainSumcheckOutputMessage,
 };
 
@@ -33,6 +34,7 @@ pub struct MainAir {
     pub main_bus: MainBus,
     pub sumcheck_input_bus: MainSumcheckInputBus,
     pub sumcheck_output_bus: MainSumcheckOutputBus,
+    pub expression_claim_bus: MainExpressionClaimBus,
 }
 
 impl<F: Field> BaseAir<F> for MainAir {
@@ -110,6 +112,16 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
             &mut builder.when(local.is_enabled),
             local.claim_in,
             local.claim_out,
+        );
+
+        self.expression_claim_bus.send(
+            builder,
+            local.proof_idx,
+            MainExpressionClaimMessage {
+                idx: local.idx.into(),
+                claim: local.claim_out.map(Into::into),
+            },
+            local.is_enabled * local.is_first,
         );
     }
 }
