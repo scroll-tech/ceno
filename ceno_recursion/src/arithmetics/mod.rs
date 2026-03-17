@@ -65,8 +65,13 @@ pub fn challenger_multi_observe<C: Config>(
     challenger: &mut DuplexChallengerVariable<C>,
     arr: &Array<C, Felt<C::F>>,
 ) {
-    let next_input_ptr =
-        builder.poseidon2_multi_observe(&challenger.sponge_state, challenger.input_ptr, arr, None);
+    let next_input_ptr = builder.poseidon2_multi_observe(
+        &challenger.sponge_state,
+        challenger.input_ptr,
+        arr,
+        arr.len(),
+        None,
+    );
     builder.assign(
         &challenger.input_ptr,
         challenger.io_empty_ptr + next_input_ptr.clone(),
@@ -87,10 +92,12 @@ pub fn challenger_hint_observe<C: Config>(
     hint_slice: &HintSlice<C>,
 ) {
     let dummy_arr: Array<C, Felt<C::F>> = builder.dyn_array(0);
+    let felt_len: Usize<C::N> = builder.eval(hint_slice.length.clone() * Usize::from(C::EF::D));
     let next_input_ptr = builder.poseidon2_multi_observe(
         &challenger.sponge_state,
         challenger.input_ptr,
         &dummy_arr,
+        felt_len,
         Some(hint_slice.id.get_var()),
     );
     builder.assign(
