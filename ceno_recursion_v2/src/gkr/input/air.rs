@@ -1,7 +1,7 @@
 use core::borrow::Borrow;
 
 use crate::{
-    bus::{BatchConstraintModuleBus, GkrModuleBus, GkrModuleMessage, TranscriptBus},
+    bus::{BatchConstraintModuleBus, GkrModuleBus, GkrModuleMessage, MainBus, MainMessage, TranscriptBus},
     gkr::bus::{GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage},
 };
 use openvm_circuit_primitives::{
@@ -58,6 +58,7 @@ pub struct GkrInputAir {
     // Buses
     pub gkr_module_bus: GkrModuleBus,
     pub bc_module_bus: BatchConstraintModuleBus,
+    pub main_bus: MainBus,
     pub transcript_bus: TranscriptBus,
     pub layer_input_bus: GkrLayerInputBus,
     pub layer_output_bus: GkrLayerOutputBus,
@@ -219,19 +220,18 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             local.proof_idx,
             local.tidx + AB::Expr::from_usize(2 * D_EF),
             local.q0_claim,
-            local.is_enabled * has_interactions,
+            local.is_enabled * has_interactions.clone(),
         );
 
-        // 3. BatchConstraintModuleBus
-        // Temporarily disabled until downstream module is updated.
-        // self.bc_module_bus.send(
-        // builder,
-        // local.proof_idx,
-        // BatchConstraintModuleMessage {
-        // tidx: tidx_end,
-        // gkr_input_layer_claim: local.input_layer_claim.map(Into::into),
-        // },
-        // local.is_enabled,
-        // );
+        self.main_bus.send(
+            builder,
+            local.proof_idx,
+            MainMessage {
+                idx: local.idx.into(),
+                tidx: tidx_after_gkr_layers.clone(),
+                claim: local.input_layer_claim.map(Into::into),
+            },
+            local.is_enabled * has_interactions,
+        );
     }
 }

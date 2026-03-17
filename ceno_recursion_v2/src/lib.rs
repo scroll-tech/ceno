@@ -1,6 +1,7 @@
 pub mod batch_constraint;
 pub mod continuation;
 pub mod gkr;
+pub mod main;
 pub mod proof_shape;
 pub mod system;
 pub mod tracegen;

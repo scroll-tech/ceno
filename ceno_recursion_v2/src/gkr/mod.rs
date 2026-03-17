@@ -51,8 +51,9 @@ use std::sync::Arc;
 
 use ::sumcheck::structs::IOPProverMessage;
 use openvm_cpu_backend::CpuBackend;
+use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
-    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
+    AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
     p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
@@ -76,8 +77,8 @@ use crate::{
         tower::replay_tower_proof,
     },
     system::{
-        AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, Preflight, RecursionField,
-        RecursionProof, RecursionVk, TraceGenModule,
+        AirModule, BusIndexManager, BusInventory, ChipTranscriptRange, GlobalCtxCpu, Preflight,
+        RecursionField, RecursionProof, RecursionVk, TraceGenModule,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
@@ -158,14 +159,27 @@ impl GkrModule {
         preflight: &mut Preflight,
         ts: &mut TS,
     ) where
-        TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
+        TS: FiatShamirTranscript<BabyBearPoseidon2Config>
+            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
-        let _ = (self, child_vk, proof, preflight);
-        ts.observe_ext(EF::ZERO);
+        let _ = (self, child_vk);
+        for (&chip_idx, chip_instances) in &proof.chip_proofs {
+            if let Some(chip_proof) = chip_instances.first() {
+                let tidx = ts.len();
+                let _ = record_gkr_transcript(ts, chip_idx, chip_proof);
+                preflight
+                    .gkr
+                    .chips
+                    .push(ChipTranscriptRange { chip_idx, tidx });
+            }
+        }
     }
 }
 
-fn convert_logup_claim(chip_proof: &ZKVMChipProof<RecursionField>, layer_idx: usize) -> [EF; 4] {
+pub(crate) fn convert_logup_claim(
+    chip_proof: &ZKVMChipProof<RecursionField>,
+    layer_idx: usize,
+) -> [EF; 4] {
     chip_proof
         .tower_proof
         .logup_specs_eval
@@ -247,6 +261,8 @@ fn build_chip_records(
     chip_idx: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
     circuit_vk: &VerifyingKey<RecursionField>,
+    alpha_logup: EF,
+    tidx: usize,
 ) -> Result<(
     GkrInputRecord,
     GkrLayerRecord,
@@ -391,9 +407,9 @@ fn build_chip_records(
     let input_record = GkrInputRecord {
         proof_idx,
         idx: chip_idx,
-        tidx: 0,
+        tidx,
         n_logup: layer_count,
-        alpha_logup: EF::ZERO,
+        alpha_logup,
         input_layer_claim,
     };
     let flattened_ris: Vec<EF> = replay
@@ -464,6 +480,7 @@ impl AirModule for GkrModule {
         let gkr_input_air = GkrInputAir {
             gkr_module_bus: self.bus_inventory.gkr_module_bus,
             bc_module_bus: self.bus_inventory.bc_module_bus,
+            main_bus: self.bus_inventory.main_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
@@ -532,76 +549,128 @@ impl GkrModule {
         exp_bits_len_gen: &ExpBitsLenTraceGenerator,
     ) -> Result<GkrBlobCpu> {
         let _ = (self, preflights, exp_bits_len_gen);
-        let mut input_records = Vec::new();
-        let mut layer_records = Vec::new();
-        let mut tower_records = Vec::new();
-        let mut sumcheck_records = Vec::new();
-        let mut mus_records = Vec::new();
-        let mut q0_claims = Vec::new();
+        build_gkr_blob(child_vk, proofs, preflights)
+    }
+}
 
-        for (proof_idx, proof) in proofs.iter().enumerate() {
-            let mut has_chip = false;
-            for (&chip_idx, chip_instances) in &proof.chip_proofs {
-                if let Some(chip_proof) = chip_instances.first() {
-                    has_chip = true;
-                    let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx).ok_or_else(|| {
-                        eyre::eyre!("missing circuit verifying key for index {chip_idx}")
-                    })?;
-                    let (
-                        input_record,
-                        layer_record,
-                        tower_record,
-                        sumcheck_record,
-                        mus_record,
-                        q0_claim,
-                    ) = build_chip_records(proof_idx, chip_idx, chip_proof, circuit_vk)?;
-                    input_records.push(input_record);
-                    layer_records.push(layer_record);
-                    tower_records.push(tower_record);
-                    sumcheck_records.push(sumcheck_record);
-                    mus_records.push(mus_record);
-                    q0_claims.push(q0_claim);
+pub(crate) fn build_gkr_blob(
+    child_vk: &RecursionVk,
+    proofs: &[RecursionProof],
+    preflights: &[Preflight],
+) -> Result<GkrBlobCpu> {
+    let mut input_records = Vec::new();
+    let mut layer_records = Vec::new();
+    let mut tower_records = Vec::new();
+    let mut sumcheck_records = Vec::new();
+    let mut mus_records = Vec::new();
+    let mut q0_claims = Vec::new();
+
+    eyre::ensure!(
+        proofs.len() == preflights.len(),
+        "proof/preflight length mismatch"
+    );
+
+    for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
+        let mut has_chip = false;
+        let mut chip_preflight_entries = preflight.gkr.chips.iter();
+        for (&chip_idx, chip_instances) in &proof.chip_proofs {
+            if let Some(chip_proof) = chip_instances.first() {
+                has_chip = true;
+                let pf_entry = chip_preflight_entries
+                    .next()
+                    .ok_or_else(|| eyre::eyre!("missing GKR preflight entry for chip {chip_idx}"))?;
+                if pf_entry.chip_idx != chip_idx {
+                    return Err(eyre::eyre!(
+                        "gkr preflight chip mismatch (expected {}, found {})",
+                        chip_idx,
+                        pf_entry.chip_idx
+                    ));
                 }
-            }
+                let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
+                let alpha_logup = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
 
-            if !has_chip {
-                input_records.push(GkrInputRecord {
+                let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx).ok_or_else(|| {
+                    eyre::eyre!("missing circuit verifying key for index {chip_idx}")
+                })?;
+                let (
+                    input_record,
+                    layer_record,
+                    tower_record,
+                    sumcheck_record,
+                    mus_record,
+                    q0_claim,
+                ) = build_chip_records(
                     proof_idx,
-                    ..Default::default()
-                });
-                layer_records.push(GkrLayerRecord {
-                    idx: 0,
-                    proof_idx,
-                    ..Default::default()
-                });
-                tower_records.push(GkrTowerEvalRecord::default());
-                sumcheck_records.push(GkrSumcheckRecord {
-                    proof_idx,
-                    ..Default::default()
-                });
-                mus_records.push(vec![]);
-                q0_claims.push(EF::ZERO);
+                    chip_idx,
+                    chip_proof,
+                    circuit_vk,
+                    alpha_logup,
+                    pf_entry.tidx,
+                )?;
+                input_records.push(input_record);
+                layer_records.push(layer_record);
+                tower_records.push(tower_record);
+                sumcheck_records.push(sumcheck_record);
+                mus_records.push(mus_record);
+                q0_claims.push(q0_claim);
             }
         }
 
-        if input_records.is_empty() {
-            input_records.push(GkrInputRecord::default());
-            layer_records.push(GkrLayerRecord::default());
-            sumcheck_records.push(GkrSumcheckRecord::default());
+        if !has_chip {
+            input_records.push(GkrInputRecord {
+                proof_idx,
+                ..Default::default()
+            });
+            layer_records.push(GkrLayerRecord {
+                idx: 0,
+                proof_idx,
+                ..Default::default()
+            });
             tower_records.push(GkrTowerEvalRecord::default());
+            sumcheck_records.push(GkrSumcheckRecord {
+                proof_idx,
+                ..Default::default()
+            });
             mus_records.push(vec![]);
             q0_claims.push(EF::ZERO);
         }
-
-        Ok(GkrBlobCpu {
-            input_records,
-            layer_records,
-            tower_records,
-            sumcheck_records,
-            mus_records,
-            q0_claims,
-        })
     }
+
+    if input_records.is_empty() {
+        input_records.push(GkrInputRecord::default());
+        layer_records.push(GkrLayerRecord::default());
+        sumcheck_records.push(GkrSumcheckRecord::default());
+        tower_records.push(GkrTowerEvalRecord::default());
+        mus_records.push(vec![]);
+        q0_claims.push(EF::ZERO);
+    }
+
+    Ok(GkrBlobCpu {
+        input_records,
+        layer_records,
+        tower_records,
+        sumcheck_records,
+        mus_records,
+        q0_claims,
+    })
+}
+
+fn record_gkr_transcript<TS>(
+    ts: &mut TS,
+    _chip_idx: usize,
+    chip_proof: &ZKVMChipProof<RecursionField>,
+) -> EF
+where
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
+{
+    if let Some(q0) = chip_proof
+        .lk_out_evals
+        .get(0)
+        .and_then(|evals| evals.get(2))
+    {
+        ts.observe_ext(*q0);
+    }
+    FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts)
 }
 
 impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>> for GkrModule {

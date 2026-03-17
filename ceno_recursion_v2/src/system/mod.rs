@@ -3,7 +3,10 @@ mod preflight;
 mod types;
 
 pub use crate::{batch_constraint::BatchConstraintModule, proof_shape::ProofShapeModule};
-pub use preflight::{GkrPreflight, Preflight, ProofShapePreflight};
+pub use preflight::{
+    BatchConstraintPreflight, ChipTranscriptRange, GkrPreflight, MainPreflight, Preflight,
+    ProofShapePreflight,
+};
 pub use recursion_circuit::system::{
     AggregationSubCircuit, AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule,
     VerifierConfig, VerifierExternalData,
@@ -23,6 +26,7 @@ use crate::{
         LOCAL_SYMBOLIC_EXPRESSION_AIR_IDX,
     },
     gkr::GkrModule,
+    main::MainModule,
 };
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
@@ -122,6 +126,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
     pub(crate) bus_idx_manager: BusIndexManager,
     pub(crate) transcript: TranscriptModule,
     pub(crate) proof_shape: ProofShapeModule,
+    pub(crate) main_module: MainModule,
     pub(crate) gkr: GkrModule,
     pub(crate) batch_constraint: LocalBatchConstraintModule,
 }
@@ -130,6 +135,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
 enum TraceModuleRef<'a> {
     Transcript(&'a TranscriptModule),
     ProofShape(&'a ProofShapeModule),
+    Main(&'a MainModule),
     Gkr(&'a GkrModule),
     BatchConstraint(&'a LocalBatchConstraintModule),
 }
@@ -150,6 +156,7 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::ProofShape(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
+            TraceModuleRef::Main(module) => module.run_preflight(child_vk, proof, preflight, sponge),
             TraceModuleRef::Gkr(module) => module.run_preflight(child_vk, proof, preflight, sponge),
             TraceModuleRef::BatchConstraint(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
@@ -196,6 +203,13 @@ impl<'a> TraceModuleRef<'a> {
                     pow_checker_gen.clone(),
                     external_data.range_check_inputs.as_slice(),
                 ),
+                required_heights,
+            ),
+            TraceModuleRef::Main(module) => module.generate_proving_ctxs(
+                child_vk,
+                proofs,
+                preflights,
+                &(),
                 required_heights,
             ),
             TraceModuleRef::Gkr(module) => module.generate_proving_ctxs(
@@ -257,6 +271,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             bus_inventory.clone(),
             config.continuations_enabled,
         );
+        let main_module = MainModule::new(&mut bus_idx_manager, bus_inventory.clone());
         let gkr = GkrModule::new(child_vk.as_ref(), &mut bus_idx_manager, bus_inventory.clone());
         let batch_constraint = LocalBatchConstraintModule::new(
             child_mvk.as_ref(),
@@ -270,6 +285,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             bus_idx_manager,
             transcript,
             proof_shape,
+            main_module,
             gkr,
             batch_constraint,
         }
@@ -290,12 +306,14 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let mut preflight = Preflight::default();
         let modules = [
             TraceModuleRef::ProofShape(&self.proof_shape),
+            TraceModuleRef::Main(&self.main_module),
             TraceModuleRef::Gkr(&self.gkr),
             TraceModuleRef::BatchConstraint(&self.batch_constraint),
         ];
         for module in modules {
             module.run_preflight(child_vk, proof, &mut preflight, &mut sponge);
         }
+        preflight.transcript = sponge.into_log();
         preflight
     }
 
@@ -307,8 +325,9 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let bc_n = self.batch_constraint.num_airs();
         let t_n = self.transcript.num_airs();
         let ps_n = self.proof_shape.num_airs();
+        let main_n = self.main_module.num_airs();
         let gkr_n = self.gkr.num_airs();
-        let module_air_counts = [bc_n, t_n, ps_n, gkr_n];
+        let module_air_counts = [bc_n, t_n, ps_n, main_n, gkr_n];
 
         let Some(heights) = required_heights else {
             return (vec![None; module_air_counts.len()], None, None);
@@ -400,6 +419,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             TraceModuleRef::BatchConstraint(&self.batch_constraint),
             TraceModuleRef::Transcript(&self.transcript),
             TraceModuleRef::ProofShape(&self.proof_shape),
+            TraceModuleRef::Main(&self.main_module),
             TraceModuleRef::Gkr(&self.gkr),
         ];
 
@@ -460,6 +480,7 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
             .chain(self.batch_constraint.airs())
             .chain(self.transcript.airs())
             .chain(self.proof_shape.airs())
+            .chain(self.main_module.airs())
             .chain(self.gkr.airs())
             .chain([
                 Arc::new(power_checker_air) as AirRef<_>,

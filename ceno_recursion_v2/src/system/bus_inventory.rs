@@ -20,10 +20,10 @@ use recursion_circuit::{
 use crate::bus::{
     BatchConstraintModuleBus as LocalBatchConstraintBus, CachedCommitBus as LocalCachedCommitBus,
     CommitmentsBus as LocalCommitmentsBus, ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
-    FractionFolderInputBus as LocalFractionFolderInputBus, GkrModuleBus,
-    HyperdimBus as LocalHyperdimBus, LiftedHeightsBus as LocalLiftedHeightsBus,
-    NLiftBus as LocalNLiftBus, PublicValuesBus as LocalPublicValuesBus,
-    TranscriptBus as LocalTranscriptBus,
+    FractionFolderInputBus as LocalFractionFolderInputBus, GkrModuleBus, MainBus,
+    MainSumcheckInputBus, MainSumcheckOutputBus, HyperdimBus as LocalHyperdimBus,
+    LiftedHeightsBus as LocalLiftedHeightsBus, NLiftBus as LocalNLiftBus,
+    PublicValuesBus as LocalPublicValuesBus, TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
@@ -44,6 +44,9 @@ pub struct BusInventory {
     pub range_checker_bus: RangeCheckerBus,
     pub power_checker_bus: PowerCheckerBus,
     pub exp_bits_len_bus: ExpBitsLenBus,
+    pub main_bus: MainBus,
+    pub main_sumcheck_input_bus: MainSumcheckInputBus,
+    pub main_sumcheck_output_bus: MainSumcheckOutputBus,
     pub right_shift_bus: RightShiftBus,
     pub xi_randomness_bus: XiRandomnessBus,
 }
@@ -91,6 +94,9 @@ impl BusInventory {
         let sel_uni_bus = SelUniBus::new(b.new_bus_idx());
         let eq_neg_result_bus = EqNegResultBus::new(b.new_bus_idx());
         let eq_neg_base_rand_bus = EqNegBaseRandBus::new(b.new_bus_idx());
+        let main_bus = MainBus::new(b.new_bus_idx());
+        let main_sumcheck_input_bus = MainSumcheckInputBus::new(b.new_bus_idx());
+        let main_sumcheck_output_bus = MainSumcheckOutputBus::new(b.new_bus_idx());
 
         let cached_commit_bus = LocalCachedCommitBus::new(b.new_bus_idx());
         let pre_hash_bus = PreHashBus::new(b.new_bus_idx());
@@ -155,6 +161,9 @@ impl BusInventory {
             range_checker_bus,
             power_checker_bus,
             exp_bits_len_bus,
+            main_bus,
+            main_sumcheck_input_bus,
+            main_sumcheck_output_bus,
             right_shift_bus,
             xi_randomness_bus,
         }
