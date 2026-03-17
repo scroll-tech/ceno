@@ -614,6 +614,23 @@ impl<'a> ShardContext<'a> {
         }
     }
 
+    /// merge addr accessed into a sorted Vec for fast binary search lookups.
+    /// Much faster than FxHashSet for large sets (avoids hashing overhead).
+    pub fn get_addr_accessed_sorted(&self) -> Vec<WordAddr> {
+        if let Either::Left(addr_accessed_tbs) = &self.addr_accessed_tbs {
+            let total: usize = addr_accessed_tbs.iter().map(|v| v.len()).sum();
+            let mut merged = Vec::with_capacity(total);
+            for addrs in addr_accessed_tbs {
+                merged.extend_from_slice(addrs);
+            }
+            merged.par_sort_unstable();
+            merged.dedup();
+            merged
+        } else {
+            panic!("invalid type");
+        }
+    }
+
     /// Splits a total count `num_shards` into up to `num_provers` non-empty parts, distributing as evenly as possible.
     ///
     /// # Behavior

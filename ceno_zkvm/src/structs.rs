@@ -20,7 +20,7 @@ use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSlice,
 };
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -480,18 +480,16 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         use tracing::info_span;
 
         let addr_accessed = info_span!("get_addr_accessed").in_scope(|| {
-            shard_ctx.get_addr_accessed()
+            shard_ctx.get_addr_accessed_sorted()
         });
 
         // GPU EC records: convert raw bytes to ShardRamInput (EC points already computed on GPU)
         // Partition into writes and reads to maintain the ordering invariant required by
         // ShardRamCircuit::assign_instances (writes first, reads after).
-        let (gpu_ec_writes, gpu_ec_reads): (Vec<_>, Vec<_>) =
+        let (gpu_ec_writes, gpu_ec_reads) =
             info_span!("gpu_ec_convert", n = shard_ctx.gpu_ec_records.len() / 104).in_scope(|| {
                 if shard_ctx.has_gpu_ec_records() {
                     gpu_ec_records_to_shard_ram_inputs::<E>(&shard_ctx.gpu_ec_records)
-                        .into_iter()
-                        .partition(|input| input.record.is_to_write_set)
                 } else {
                     (vec![], vec![])
                 }
@@ -747,9 +745,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         waddr: WordAddr,
         addr: u32,
         shard_ctx: &ShardContext,
-        addr_accessed: &FxHashSet<WordAddr>,
+        addr_accessed: &[WordAddr],
     ) -> Option<(ShardRamRecord, &'static str)> {
-        if addr_accessed.contains(&waddr) || !shard_ctx.after_current_shard_cycle(mem_record.cycle)
+        if addr_accessed.binary_search(&waddr).is_ok()
+            || !shard_ctx.after_current_shard_cycle(mem_record.cycle)
         {
             return None;
         }
@@ -921,59 +920,45 @@ where
 /// Convert raw GPU EC record bytes to ShardRamInput.
 /// The raw bytes are from `GpuShardRamRecord` structs (104 bytes each).
 /// EC points are already computed on GPU — no Poseidon2/SepticCurve needed.
+/// Returns (writes, reads) pre-partitioned using parallel iteration.
 fn gpu_ec_records_to_shard_ram_inputs<E: ExtensionField>(
     raw: &[u8],
-) -> Vec<ShardRamInput<E>> {
-    use gkr_iop::RAMType;
-    use p3::field::FieldAlgebra;
-
+) -> (Vec<ShardRamInput<E>>, Vec<ShardRamInput<E>>) {
     assert!(raw.len() % GPU_SHARD_RAM_RECORD_SIZE == 0);
     let count = raw.len() / GPU_SHARD_RAM_RECORD_SIZE;
 
-    // Reinterpret raw bytes as GpuShardRamRecord slice (zero-copy).
-    // GpuShardRamRecord is #[repr(C)], 104 bytes, 8-byte aligned.
-    #[cfg(feature = "gpu")]
-    let as_gpu_record = |i: usize| -> &ceno_gpu::common::witgen_types::GpuShardRamRecord {
-        use ceno_gpu::common::witgen_types::GpuShardRamRecord;
+    #[inline(always)]
+    fn convert_record<E: ExtensionField>(raw: &[u8], i: usize) -> ShardRamInput<E> {
+        use gkr_iop::RAMType;
+        use p3::field::FieldAlgebra;
+
         let base = i * GPU_SHARD_RAM_RECORD_SIZE;
-        let ptr = raw[base..].as_ptr() as *const GpuShardRamRecord;
-        unsafe { &*ptr }
-    };
+        let r = &raw[base..base + GPU_SHARD_RAM_RECORD_SIZE];
 
-    (0..count).map(|i| {
-        #[cfg(feature = "gpu")]
-        let (addr, ram_type_val, value, shard, local_clk, global_clk, is_to_write_set, nonce, point_x, point_y) = {
-            let g = as_gpu_record(i);
-            (g.addr, g.ram_type, g.value, g.shard, g.local_clk, g.global_clk,
-             g.is_to_write_set != 0, g.nonce, g.point_x, g.point_y)
-        };
-
-        #[cfg(not(feature = "gpu"))]
-        let (addr, ram_type_val, value, shard, local_clk, global_clk, is_to_write_set, nonce, point_x, point_y) = {
-            let base = i * GPU_SHARD_RAM_RECORD_SIZE;
-            let r = &raw[base..base + GPU_SHARD_RAM_RECORD_SIZE];
-            let addr = u32::from_le_bytes(r[0..4].try_into().unwrap());
-            let ram_type_val = u32::from_le_bytes(r[4..8].try_into().unwrap());
-            let value = u32::from_le_bytes(r[8..12].try_into().unwrap());
-            let shard = u64::from_le_bytes(r[16..24].try_into().unwrap());
-            let local_clk = u64::from_le_bytes(r[24..32].try_into().unwrap());
-            let global_clk = u64::from_le_bytes(r[32..40].try_into().unwrap());
-            let is_to_write_set = u32::from_le_bytes(r[40..44].try_into().unwrap()) != 0;
-            let nonce = u32::from_le_bytes(r[44..48].try_into().unwrap());
-            let mut px = [0u32; 7];
-            let mut py = [0u32; 7];
-            for j in 0..7 {
-                px[j] = u32::from_le_bytes(r[48 + j*4..52 + j*4].try_into().unwrap());
-                py[j] = u32::from_le_bytes(r[76 + j*4..80 + j*4].try_into().unwrap());
-            }
-            (addr, ram_type_val, value, shard, local_clk, global_clk, is_to_write_set, nonce, px, py)
-        };
+        // Read fields directly from the byte buffer.
+        // Layout matches GpuShardRamRecord (104 bytes, #[repr(C)]):
+        //   0: addr(u32), 4: ram_type(u32), 8: value(u32), 12: _pad(u32),
+        //   16: shard(u64), 24: local_clk(u64), 32: global_clk(u64),
+        //   40: is_to_write_set(u32), 44: nonce(u32),
+        //   48: point_x[7](u32×7), 76: point_y[7](u32×7)
+        let addr = u32::from_le_bytes(r[0..4].try_into().unwrap());
+        let ram_type_val = u32::from_le_bytes(r[4..8].try_into().unwrap());
+        let value = u32::from_le_bytes(r[8..12].try_into().unwrap());
+        let shard = u64::from_le_bytes(r[16..24].try_into().unwrap());
+        let local_clk = u64::from_le_bytes(r[24..32].try_into().unwrap());
+        let global_clk = u64::from_le_bytes(r[32..40].try_into().unwrap());
+        let is_to_write_set = u32::from_le_bytes(r[40..44].try_into().unwrap()) != 0;
+        let nonce = u32::from_le_bytes(r[44..48].try_into().unwrap());
 
         let mut point_x_arr = [E::BaseField::ZERO; 7];
         let mut point_y_arr = [E::BaseField::ZERO; 7];
         for j in 0..7 {
-            point_x_arr[j] = E::BaseField::from_canonical_u32(point_x[j]);
-            point_y_arr[j] = E::BaseField::from_canonical_u32(point_y[j]);
+            point_x_arr[j] = E::BaseField::from_canonical_u32(
+                u32::from_le_bytes(r[48 + j*4..52 + j*4].try_into().unwrap()),
+            );
+            point_y_arr[j] = E::BaseField::from_canonical_u32(
+                u32::from_le_bytes(r[76 + j*4..80 + j*4].try_into().unwrap()),
+            );
         }
 
         let record = ShardRamRecord {
@@ -986,10 +971,6 @@ fn gpu_ec_records_to_shard_ram_inputs<E: ExtensionField>(
             is_to_write_set,
         };
 
-        let x = SepticExtension(point_x_arr);
-        let y = SepticExtension(point_y_arr);
-        let point = SepticPoint::from_affine(x, y);
-
         ShardRamInput {
             name: if is_to_write_set {
                 "current_shard_external_write"
@@ -997,7 +978,19 @@ fn gpu_ec_records_to_shard_ram_inputs<E: ExtensionField>(
                 "current_shard_external_read"
             },
             record,
-            ec_point: ECPoint { nonce, point },
+            ec_point: ECPoint {
+                nonce,
+                point: SepticPoint::from_affine(
+                    SepticExtension(point_x_arr),
+                    SepticExtension(point_y_arr),
+                ),
+            },
         }
-    }).collect()
+    }
+
+    // Parallel convert + partition in one pass
+    (0..count)
+        .into_par_iter()
+        .map(|i| convert_record::<E>(raw, i))
+        .partition(|input| input.record.is_to_write_set)
 }
