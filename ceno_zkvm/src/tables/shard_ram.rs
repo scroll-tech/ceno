@@ -166,21 +166,21 @@ impl ShardRamRecord {
 /// 3. For a local memory write record which will be read in the future,
 ///    the shard ram circuit will insert a local read record and write it to the **global set**.
 pub struct ShardRamConfig<E: ExtensionField> {
-    addr: WitIn,
-    is_ram_register: WitIn,
-    value: UInt<E>,
-    shard: WitIn,
-    global_clk: WitIn,
-    local_clk: WitIn,
-    nonce: WitIn,
+    pub(crate) addr: WitIn,
+    pub(crate) is_ram_register: WitIn,
+    pub(crate) value: UInt<E>,
+    pub(crate) shard: WitIn,
+    pub(crate) global_clk: WitIn,
+    pub(crate) local_clk: WitIn,
+    pub(crate) nonce: WitIn,
     // if it's write to global set, then insert a local read record
     // s.t. local offline memory checking can cancel out
     // serves as propagating local write to global.
-    is_global_write: WitIn,
-    x: Vec<WitIn>,
-    y: Vec<WitIn>,
-    slope: Vec<WitIn>,
-    perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
+    pub(crate) is_global_write: WitIn,
+    pub(crate) x: Vec<WitIn>,
+    pub(crate) y: Vec<WitIn>,
+    pub(crate) slope: Vec<WitIn>,
+    pub(crate) perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
 }
 
 impl<E: ExtensionField> ShardRamConfig<E> {
@@ -484,6 +484,13 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
                 witness::RowMajorMatrix::empty(),
             ]);
         }
+
+        #[cfg(feature = "gpu")]
+        {
+            if let Some(result) = Self::try_gpu_assign_instances(config, num_witin, num_structural_witin, steps)? {
+                return Ok(result);
+            }
+        }
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
@@ -641,6 +648,233 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
             InstancePaddingStrategy::Default,
         );
         Ok([raw_witin, raw_structual_witin])
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl<E: ExtensionField> ShardRamCircuit<E> {
+    /// Try to run assign_instances on GPU. Returns None if GPU is unavailable.
+    fn try_gpu_assign_instances(
+        config: &ShardRamConfig<E>,
+        num_witin: usize,
+        num_structural_witin: usize,
+        steps: &[ShardRamInput<E>],
+    ) -> Result<Option<RMMCollections<E::BaseField>>, ZKVMError> {
+        use ceno_gpu::{
+            Buffer, CudaHal,
+            bb31::CudaHalBB31,
+            common::{
+                transpose::matrix_transpose,
+                witgen_types::GpuShardRamRecord,
+            },
+        };
+        use gkr_iop::gpu::gpu_prover::get_cuda_hal;
+        use p3::field::PrimeField32;
+
+        type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
+
+        // GPU only supports BabyBear
+        if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>() {
+            return Ok(None);
+        }
+
+        let hal = match get_cuda_hal() {
+            Ok(h) => h,
+            Err(_) => return Ok(None),
+        };
+
+        let num_local_reads = steps
+            .iter()
+            .take_while(|s| s.record.is_to_write_set)
+            .count();
+
+        let n = next_pow2_instance_padding(steps.len());
+        let num_rows_padded = 2 * n;
+
+        // 1. Convert ShardRamInput → GpuShardRamRecord
+        let gpu_records: Vec<GpuShardRamRecord> = steps
+            .iter()
+            .map(|step| {
+                let r = &step.record;
+                let ec = &step.ec_point;
+                let mut rec = GpuShardRamRecord::default();
+                rec.addr = r.addr;
+                rec.ram_type = r.ram_type as u32;
+                rec.value = r.value;
+                rec.shard = r.shard;
+                rec.local_clk = r.local_clk;
+                rec.global_clk = r.global_clk;
+                rec.is_to_write_set = if r.is_to_write_set { 1 } else { 0 };
+                rec.nonce = ec.nonce;
+                for i in 0..7 {
+                    // Safe: TypeId check above guarantees E::BaseField == BB
+                    let px: BB = unsafe { *(&ec.point.x.0[i] as *const E::BaseField as *const BB) };
+                    let py: BB = unsafe { *(&ec.point.y.0[i] as *const E::BaseField as *const BB) };
+                    rec.point_x[i] = px.as_canonical_u32();
+                    rec.point_y[i] = py.as_canonical_u32();
+                }
+                rec
+            })
+            .collect();
+
+        // 2. Extract column map
+        let col_map = crate::instructions::riscv::gpu::shard_ram::extract_shard_ram_column_map(
+            config, num_witin,
+        );
+
+        // 3. GPU Phase 1: per-row assignment
+        let (gpu_witness, gpu_structural) = hal
+            .witgen_shard_ram_per_row(
+                &col_map,
+                &gpu_records,
+                num_local_reads as u32,
+                num_witin as u32,
+                num_structural_witin as u32,
+                num_rows_padded as u32,
+                None,
+            )
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(
+                    format!("GPU shard_ram per-row kernel failed: {e}").into(),
+                )
+            })?;
+
+        // 4. GPU Phase 2: EC binary tree
+        let col_offsets = col_map.to_flat();
+        let gpu_cols = hal.alloc_u32_from_host(&col_offsets, None).map_err(|e| {
+            ZKVMError::InvalidWitness(format!("GPU alloc col offsets failed: {e}").into())
+        })?;
+
+        // Build initial layer points (padded to n) using BB (BabyBear) directly
+        let mut init_x = vec![BB::ZERO; n * 7];
+        let mut init_y = vec![BB::ZERO; n * 7];
+        for (i, step) in steps.iter().enumerate() {
+            for j in 0..7 {
+                // E::BaseField == BB at runtime (checked above), safe to transmute
+                init_x[i * 7 + j] =
+                    unsafe { *(&step.ec_point.point.x.0[j] as *const E::BaseField as *const BB) };
+                init_y[i * 7 + j] =
+                    unsafe { *(&step.ec_point.point.y.0[j] as *const E::BaseField as *const BB) };
+            }
+        }
+
+        let mut cur_x = hal.alloc_elems_from_host(&init_x, None).map_err(|e| {
+            ZKVMError::InvalidWitness(format!("GPU alloc init_x failed: {e}").into())
+        })?;
+        let mut cur_y = hal.alloc_elems_from_host(&init_y, None).map_err(|e| {
+            ZKVMError::InvalidWitness(format!("GPU alloc init_y failed: {e}").into())
+        })?;
+
+        let mut witness_buf = gpu_witness.device_buffer;
+        let mut offset = num_rows_padded / 2; // n
+        let mut current_layer_len = n;
+
+        loop {
+            if current_layer_len <= 1 {
+                break;
+            }
+
+            let (next_x, next_y) = hal
+                .shard_ram_ec_tree_layer(
+                    &gpu_cols,
+                    &cur_x,
+                    &cur_y,
+                    &mut witness_buf,
+                    current_layer_len,
+                    offset,
+                    num_rows_padded,
+                    None,
+                )
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(
+                        format!("GPU EC tree layer failed: {e}").into(),
+                    )
+                })?;
+
+            current_layer_len /= 2;
+            offset += current_layer_len;
+            cur_x = next_x;
+            cur_y = next_y;
+        }
+
+        // 5. GPU transpose: column-major → row-major + D2H
+        let wit_num_rows = num_rows_padded;
+        let wit_num_cols = num_witin;
+        let mut rmm_buf = hal
+            .alloc_elems_on_device(wit_num_rows * wit_num_cols, false, None)
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
+            })?;
+        matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+            &hal.inner,
+            &mut rmm_buf,
+            &witness_buf,
+            wit_num_rows,
+            wit_num_cols,
+        )
+        .map_err(|e| ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into()))?;
+
+        let gpu_wit_data: Vec<BB> = rmm_buf.to_vec().map_err(|e| {
+            ZKVMError::InvalidWitness(format!("GPU D2H wit failed: {e}").into())
+        })?;
+        let wit_data: Vec<E::BaseField> = unsafe {
+            let mut data = std::mem::ManuallyDrop::new(gpu_wit_data);
+            Vec::from_raw_parts(
+                data.as_mut_ptr() as *mut E::BaseField,
+                data.len(),
+                data.capacity(),
+            )
+        };
+
+        let struct_num_cols = num_structural_witin;
+        let mut struct_rmm_buf = hal
+            .alloc_elems_on_device(wit_num_rows * struct_num_cols, false, None)
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(
+                    format!("GPU alloc for struct transpose failed: {e}").into(),
+                )
+            })?;
+        matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+            &hal.inner,
+            &mut struct_rmm_buf,
+            &gpu_structural.device_buffer,
+            wit_num_rows,
+            struct_num_cols,
+        )
+        .map_err(|e| {
+            ZKVMError::InvalidWitness(format!("GPU struct transpose failed: {e}").into())
+        })?;
+
+        let gpu_struct_data: Vec<BB> = struct_rmm_buf.to_vec().map_err(|e| {
+            ZKVMError::InvalidWitness(format!("GPU D2H struct failed: {e}").into())
+        })?;
+        let struct_data: Vec<E::BaseField> = unsafe {
+            let mut data = std::mem::ManuallyDrop::new(gpu_struct_data);
+            Vec::from_raw_parts(
+                data.as_mut_ptr() as *mut E::BaseField,
+                data.len(),
+                data.capacity(),
+            )
+        };
+
+        let raw_witin = witness::RowMajorMatrix::new_by_values(
+            wit_data,
+            wit_num_cols,
+            InstancePaddingStrategy::Default,
+        );
+        let raw_structural_witin = witness::RowMajorMatrix::new_by_values(
+            struct_data,
+            struct_num_cols,
+            InstancePaddingStrategy::Default,
+        );
+
+        tracing::debug!(
+            "GPU shard_ram assign_instances: {} records, {} padded rows",
+            steps.len(),
+            num_rows_padded
+        );
+
+        Ok(Some([raw_witin, raw_structural_witin]))
     }
 }
 
