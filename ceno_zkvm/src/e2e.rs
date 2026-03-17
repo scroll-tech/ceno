@@ -602,15 +602,16 @@ impl<'a> ShardContext<'a> {
 
     /// merge addr accessed in different threads
     pub fn get_addr_accessed(&self) -> FxHashSet<WordAddr> {
-        let mut merged = FxHashSet::default();
         if let Either::Left(addr_accessed_tbs) = &self.addr_accessed_tbs {
+            let total: usize = addr_accessed_tbs.iter().map(|v| v.len()).sum();
+            let mut merged = FxHashSet::with_capacity_and_hasher(total, Default::default());
             for addrs in addr_accessed_tbs {
                 merged.extend(addrs.iter().copied());
             }
+            merged
         } else {
             panic!("invalid type");
         }
-        merged
     }
 
     /// Splits a total count `num_shards` into up to `num_provers` non-empty parts, distributing as evenly as possible.

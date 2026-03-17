@@ -477,88 +477,97 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         ),
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
-        let addr_accessed = shard_ctx.get_addr_accessed();
+        use tracing::info_span;
+
+        let addr_accessed = info_span!("get_addr_accessed").in_scope(|| {
+            shard_ctx.get_addr_accessed()
+        });
 
         // GPU EC records: convert raw bytes to ShardRamInput (EC points already computed on GPU)
         // Partition into writes and reads to maintain the ordering invariant required by
         // ShardRamCircuit::assign_instances (writes first, reads after).
         let (gpu_ec_writes, gpu_ec_reads): (Vec<_>, Vec<_>) =
-            if shard_ctx.has_gpu_ec_records() {
-                gpu_ec_records_to_shard_ram_inputs::<E>(&shard_ctx.gpu_ec_records)
-                    .into_iter()
-                    .partition(|input| input.record.is_to_write_set)
-            } else {
-                (vec![], vec![])
-            };
+            info_span!("gpu_ec_convert", n = shard_ctx.gpu_ec_records.len() / 104).in_scope(|| {
+                if shard_ctx.has_gpu_ec_records() {
+                    gpu_ec_records_to_shard_ram_inputs::<E>(&shard_ctx.gpu_ec_records)
+                        .into_iter()
+                        .partition(|input| input.record.is_to_write_set)
+                } else {
+                    (vec![], vec![])
+                }
+            });
 
         // Collect cross-shard records (filter only, no EC computation yet)
-        let first_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> =
-            if shard_ctx.is_first_shard() {
-                final_mem
-                    .par_iter()
-                    .filter(|(_, range, _)| range.is_none())
-                    .flat_map(|(mem_name, _, final_mem)| {
-                        final_mem.par_iter().filter_map(|mem_record| {
-                            let (waddr, addr) = Self::mem_addresses(mem_record);
-                            Self::make_cross_shard_record(
-                                mem_name,
-                                mem_record,
-                                waddr,
-                                addr,
-                                shard_ctx,
-                                &addr_accessed,
-                            )
+        let (write_record_pairs, read_record_pairs) = info_span!("collect_records").in_scope(|| {
+            let first_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> =
+                if shard_ctx.is_first_shard() {
+                    final_mem
+                        .par_iter()
+                        .filter(|(_, range, _)| range.is_none())
+                        .flat_map(|(mem_name, _, final_mem)| {
+                            final_mem.par_iter().filter_map(|mem_record| {
+                                let (waddr, addr) = Self::mem_addresses(mem_record);
+                                Self::make_cross_shard_record(
+                                    mem_name,
+                                    mem_record,
+                                    waddr,
+                                    addr,
+                                    shard_ctx,
+                                    &addr_accessed,
+                                )
+                            })
                         })
+                        .collect()
+                } else {
+                    vec![]
+                };
+
+            let current_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> = final_mem
+                .par_iter()
+                .filter(|(_, range, _)| range.is_some())
+                .flat_map(|(mem_name, range, final_mem)| {
+                    let range = range.as_ref().unwrap();
+                    final_mem.par_iter().filter_map(|mem_record| {
+                        let (waddr, addr) = Self::mem_addresses(mem_record);
+                        if !range.contains(&addr) {
+                            return None;
+                        }
+                        Self::make_cross_shard_record(
+                            mem_name,
+                            mem_record,
+                            waddr,
+                            addr,
+                            shard_ctx,
+                            &addr_accessed,
+                        )
                     })
-                    .collect()
-            } else {
-                vec![]
-            };
-
-        let current_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> = final_mem
-            .par_iter()
-            .filter(|(_, range, _)| range.is_some())
-            .flat_map(|(mem_name, range, final_mem)| {
-                let range = range.as_ref().unwrap();
-                final_mem.par_iter().filter_map(|mem_record| {
-                    let (waddr, addr) = Self::mem_addresses(mem_record);
-                    if !range.contains(&addr) {
-                        return None;
-                    }
-                    Self::make_cross_shard_record(
-                        mem_name,
-                        mem_record,
-                        waddr,
-                        addr,
-                        shard_ctx,
-                        &addr_accessed,
-                    )
                 })
-            })
-            .collect();
+                .collect();
 
-        // Collect write_records and read_records as (ShardRamRecord, name) pairs
-        let write_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
-            .write_records()
-            .iter()
-            .flat_map(|records| {
-                records.iter().map(|(vma, record)| {
-                    ((vma, record, true).into(), "current_shard_external_write")
+            let write_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
+                .write_records()
+                .iter()
+                .flat_map(|records| {
+                    records.iter().map(|(vma, record)| {
+                        ((vma, record, true).into(), "current_shard_external_write")
+                    })
                 })
-            })
-            .chain(first_shard_access_later_recs)
-            .chain(current_shard_access_later_recs)
-            .collect();
+                .chain(first_shard_access_later_recs)
+                .chain(current_shard_access_later_recs)
+                .collect();
 
-        let read_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
-            .read_records()
-            .iter()
-            .flat_map(|records| {
-                records.iter().map(|(vma, record)| {
-                    ((vma, record, false).into(), "current_shard_external_read")
+            let read_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
+                .read_records()
+                .iter()
+                .flat_map(|records| {
+                    records.iter().map(|(vma, record)| {
+                        ((vma, record, false).into(), "current_shard_external_read")
+                    })
                 })
-            })
-            .collect();
+                .collect();
+
+            (write_record_pairs, read_record_pairs)
+        });
 
         // Compute EC points: GPU path (fast) or CPU fallback
         let global_input = {
@@ -663,29 +672,32 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
         assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
-        let circuit_inputs = global_input
-            .par_chunks(shard_ctx.max_num_cross_shard_accesses)
-            .map(|shard_accesses| {
-                let witness = ShardRamCircuit::assign_instances(
-                    config,
-                    cs.zkvm_v1_css.num_witin as usize,
-                    cs.zkvm_v1_css.num_structural_witin as usize,
-                    self.combined_lk_mlt.as_ref().unwrap(),
-                    shard_accesses,
-                )?;
-                let num_reads = shard_accesses
-                    .par_iter()
-                    .filter(|access| access.record.is_to_write_set)
-                    .count();
-                let num_writes = shard_accesses.len() - num_reads;
+        let n_global = global_input.len();
+        let circuit_inputs = info_span!("shard_ram_assign_instances", n = n_global).in_scope(|| {
+            global_input
+                .par_chunks(shard_ctx.max_num_cross_shard_accesses)
+                .map(|shard_accesses| {
+                    let witness = ShardRamCircuit::assign_instances(
+                        config,
+                        cs.zkvm_v1_css.num_witin as usize,
+                        cs.zkvm_v1_css.num_structural_witin as usize,
+                        self.combined_lk_mlt.as_ref().unwrap(),
+                        shard_accesses,
+                    )?;
+                    let num_reads = shard_accesses
+                        .par_iter()
+                        .filter(|access| access.record.is_to_write_set)
+                        .count();
+                    let num_writes = shard_accesses.len() - num_reads;
 
-                Ok(ChipInput::new(
-                    ShardRamCircuit::<E>::name(),
-                    witness,
-                    vec![num_reads, num_writes],
-                ))
-            })
-            .collect::<Result<Vec<_>, ZKVMError>>()?;
+                    Ok(ChipInput::new(
+                        ShardRamCircuit::<E>::name(),
+                        witness,
+                        vec![num_reads, num_writes],
+                    ))
+                })
+                .collect::<Result<Vec<_>, ZKVMError>>()
+        })?;
         // set num_read, num_write as separate instance
         assert!(
             self.witnesses
@@ -915,39 +927,53 @@ fn gpu_ec_records_to_shard_ram_inputs<E: ExtensionField>(
     use gkr_iop::RAMType;
     use p3::field::FieldAlgebra;
 
-    // GpuShardRamRecord layout (104 bytes, 8-byte aligned):
-    //   addr: u32 (0), ram_type: u32 (4), value: u32 (8), _pad: u32 (12),
-    //   shard: u64 (16), local_clk: u64 (24), global_clk: u64 (32),
-    //   is_to_write_set: u32 (40), nonce: u32 (44),
-    //   point_x: [u32;7] (48..76), point_y: [u32;7] (76..104)
-
     assert!(raw.len() % GPU_SHARD_RAM_RECORD_SIZE == 0);
     let count = raw.len() / GPU_SHARD_RAM_RECORD_SIZE;
 
-    (0..count).map(|i| {
+    // Reinterpret raw bytes as GpuShardRamRecord slice (zero-copy).
+    // GpuShardRamRecord is #[repr(C)], 104 bytes, 8-byte aligned.
+    #[cfg(feature = "gpu")]
+    let as_gpu_record = |i: usize| -> &ceno_gpu::common::witgen_types::GpuShardRamRecord {
+        use ceno_gpu::common::witgen_types::GpuShardRamRecord;
         let base = i * GPU_SHARD_RAM_RECORD_SIZE;
-        let r = &raw[base..base + GPU_SHARD_RAM_RECORD_SIZE];
+        let ptr = raw[base..].as_ptr() as *const GpuShardRamRecord;
+        unsafe { &*ptr }
+    };
 
-        let addr = u32::from_le_bytes(r[0..4].try_into().unwrap());
-        let ram_type_val = u32::from_le_bytes(r[4..8].try_into().unwrap());
-        let value = u32::from_le_bytes(r[8..12].try_into().unwrap());
-        let shard = u64::from_le_bytes(r[16..24].try_into().unwrap());
-        let local_clk = u64::from_le_bytes(r[24..32].try_into().unwrap());
-        let global_clk = u64::from_le_bytes(r[32..40].try_into().unwrap());
-        let is_to_write_set = u32::from_le_bytes(r[40..44].try_into().unwrap()) != 0;
-        let nonce = u32::from_le_bytes(r[44..48].try_into().unwrap());
+    (0..count).map(|i| {
+        #[cfg(feature = "gpu")]
+        let (addr, ram_type_val, value, shard, local_clk, global_clk, is_to_write_set, nonce, point_x, point_y) = {
+            let g = as_gpu_record(i);
+            (g.addr, g.ram_type, g.value, g.shard, g.local_clk, g.global_clk,
+             g.is_to_write_set != 0, g.nonce, g.point_x, g.point_y)
+        };
+
+        #[cfg(not(feature = "gpu"))]
+        let (addr, ram_type_val, value, shard, local_clk, global_clk, is_to_write_set, nonce, point_x, point_y) = {
+            let base = i * GPU_SHARD_RAM_RECORD_SIZE;
+            let r = &raw[base..base + GPU_SHARD_RAM_RECORD_SIZE];
+            let addr = u32::from_le_bytes(r[0..4].try_into().unwrap());
+            let ram_type_val = u32::from_le_bytes(r[4..8].try_into().unwrap());
+            let value = u32::from_le_bytes(r[8..12].try_into().unwrap());
+            let shard = u64::from_le_bytes(r[16..24].try_into().unwrap());
+            let local_clk = u64::from_le_bytes(r[24..32].try_into().unwrap());
+            let global_clk = u64::from_le_bytes(r[32..40].try_into().unwrap());
+            let is_to_write_set = u32::from_le_bytes(r[40..44].try_into().unwrap()) != 0;
+            let nonce = u32::from_le_bytes(r[44..48].try_into().unwrap());
+            let mut px = [0u32; 7];
+            let mut py = [0u32; 7];
+            for j in 0..7 {
+                px[j] = u32::from_le_bytes(r[48 + j*4..52 + j*4].try_into().unwrap());
+                py[j] = u32::from_le_bytes(r[76 + j*4..80 + j*4].try_into().unwrap());
+            }
+            (addr, ram_type_val, value, shard, local_clk, global_clk, is_to_write_set, nonce, px, py)
+        };
 
         let mut point_x_arr = [E::BaseField::ZERO; 7];
         let mut point_y_arr = [E::BaseField::ZERO; 7];
         for j in 0..7 {
-            let xoff = 48 + j * 4;
-            let yoff = 76 + j * 4;
-            point_x_arr[j] = E::BaseField::from_canonical_u32(
-                u32::from_le_bytes(r[xoff..xoff+4].try_into().unwrap())
-            );
-            point_y_arr[j] = E::BaseField::from_canonical_u32(
-                u32::from_le_bytes(r[yoff..yoff+4].try_into().unwrap())
-            );
+            point_x_arr[j] = E::BaseField::from_canonical_u32(point_x[j]);
+            point_y_arr[j] = E::BaseField::from_canonical_u32(point_y[j]);
         }
 
         let record = ShardRamRecord {

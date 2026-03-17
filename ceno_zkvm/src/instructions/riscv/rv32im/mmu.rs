@@ -199,16 +199,20 @@ impl<E: ExtensionField> MmuConfig<E> {
         .filter(|(_, _, record)| !record.is_empty())
         .collect_vec();
 
-        witness.assign_table_circuit::<LocalFinalCircuit<E>>(
-            cs,
-            &self.local_final_circuit,
-            &(shard_ctx, all_records.as_slice()),
-        )?;
-        witness.assign_shared_circuit(
-            cs,
-            &(shard_ctx, all_records.as_slice()),
-            &self.ram_bus_circuit,
-        )?;
+        tracing::info_span!("local_final_circuit").in_scope(|| {
+            witness.assign_table_circuit::<LocalFinalCircuit<E>>(
+                cs,
+                &self.local_final_circuit,
+                &(shard_ctx, all_records.as_slice()),
+            )
+        })?;
+        tracing::info_span!("shared_circuit").in_scope(|| {
+            witness.assign_shared_circuit(
+                cs,
+                &(shard_ctx, all_records.as_slice()),
+                &self.ram_bus_circuit,
+            )
+        })?;
         Ok(())
     }
 
