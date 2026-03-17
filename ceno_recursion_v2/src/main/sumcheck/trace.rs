@@ -54,8 +54,7 @@ impl RowMajorChip<F> for MainSumcheckTraceGenerator {
             return Some(RowMajorMatrix::new(trace, width));
         }
 
-        let zero_challenge: [F; D_EF] =
-            EF::ZERO.as_basis_coefficients_slice().try_into().unwrap();
+        let zero_challenge: [F; D_EF] = EF::ZERO.as_basis_coefficients_slice().try_into().unwrap();
         let mut row_offset = 0;
 
         for record in records.iter() {
@@ -86,21 +85,14 @@ impl RowMajorChip<F> for MainSumcheckTraceGenerator {
                     .get(round_idx)
                     .map(|round| round.evaluations)
                     .unwrap_or([EF::ZERO; 3]);
-                cols.ev1 = evals[0]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap();
-                cols.ev2 = evals[1]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap();
-                cols.ev3 = evals[2]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap();
+                cols.ev1 = evals[0].as_basis_coefficients_slice().try_into().unwrap();
+                cols.ev2 = evals[1].as_basis_coefficients_slice().try_into().unwrap();
+                cols.ev3 = evals[2].as_basis_coefficients_slice().try_into().unwrap();
 
-                let claim_in_basis: [F; D_EF] =
-                    claim_value.as_basis_coefficients_slice().try_into().unwrap();
+                let claim_in_basis: [F; D_EF] = claim_value
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap();
                 cols.claim_in = claim_in_basis;
                 cols.claim_out = claim_in_basis;
 

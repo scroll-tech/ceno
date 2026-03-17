@@ -1,34 +1,35 @@
-use core::{cmp::min, iter::zip};
+use core::cmp::min;
 use std::borrow::BorrowMut;
 
 use openvm_circuit_primitives::encoder::Encoder;
 use openvm_stark_backend::{
-    air_builders::symbolic::{symbolic_variable::Entry, SymbolicExpressionNode},
-    keygen::types::MultiStarkVerifyingKey,
-    poly_common::{eval_eq_uni_at_one, Squarable},
+    air_builders::symbolic::{SymbolicExpressionNode, symbolic_variable::Entry},
+    poly_common::{Squarable, eval_eq_uni_at_one},
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField32, TwoAdicField};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, TwoAdicField};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use strum::EnumCount;
 
 use crate::{
     batch_constraint::expr_eval::symbolic_expression::air::{
-        CachedSymbolicExpressionColumns, NodeKind, SingleMainSymbolicExpressionColumns,
-        ENCODER_MAX_DEGREE,
+        CachedSymbolicExpressionColumns, ENCODER_MAX_DEGREE, NodeKind,
+        SingleMainSymbolicExpressionColumns,
     },
-    system::Preflight,
+    system::{Preflight, RecursionField, RecursionVk, convert_vk_from_zkvm},
     tracegen::RowMajorChip,
-    utils::{interaction_length, MultiVecWithBounds},
+    utils::{MultiVecWithBounds, interaction_length},
 };
+use ceno_zkvm::structs::ComposedConstrainSystem;
+use multilinear_extensions::{Expression, Fixed};
 
 pub struct SymbolicExpressionTraceGenerator {
     pub max_num_proofs: usize,
 }
 
 pub struct SymbolicExpressionCtx<'a> {
-    pub vk: &'a MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
+    pub vk: &'a RecursionVk,
     pub preflights: &'a [&'a Preflight],
     pub expr_evals: &'a MultiVecWithBounds<EF, 2>,
 }
@@ -42,7 +43,8 @@ impl RowMajorChip<F> for SymbolicExpressionTraceGenerator {
         ctx: &Self::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
-        let child_vk = ctx.vk;
+        let child_vk = convert_vk_from_zkvm(ctx.vk);
+        let child_vk = child_vk.as_ref();
         let preflights = ctx.preflights;
         let max_num_proofs = self.max_num_proofs;
         let expr_evals = ctx.expr_evals;
@@ -226,7 +228,13 @@ impl RowMajorChip<F> for SymbolicExpressionTraceGenerator {
 
                 let mut node_idx = constraints.nodes.len();
                 for unused_var in &vk.unused_variables {
-                    if matches!(unused_var.entry, Entry::Permutation { .. } | Entry::Public | Entry::Challenge | Entry::Exposed) {
+                    if matches!(
+                        unused_var.entry,
+                        Entry::Permutation { .. }
+                            | Entry::Public
+                            | Entry::Challenge
+                            | Entry::Exposed
+                    ) {
                         continue;
                     }
                     let mut args = [F::ZERO; 2 * D_EF];
@@ -300,177 +308,182 @@ pub struct CachedTraceRecord {
     pub records: Vec<CachedRecord>,
 }
 
-pub fn build_cached_trace_record(
-    child_vk: &MultiStarkVerifyingKey<BabyBearPoseidon2Config>,
-) -> CachedTraceRecord {
-    let mut fanout_per_air = Vec::with_capacity(child_vk.inner.per_air.len());
-    for vk in &child_vk.inner.per_air {
-        let nodes = &vk.symbolic_constraints.constraints.nodes;
-        let mut fanout = vec![0usize; nodes.len()];
-        for node in nodes.iter() {
-            match node {
-                SymbolicExpressionNode::Add { left_idx, right_idx, .. }
-                | SymbolicExpressionNode::Sub { left_idx, right_idx, .. }
-                | SymbolicExpressionNode::Mul { left_idx, right_idx, .. } => {
-                    fanout[*left_idx] += 1;
-                    fanout[*right_idx] += 1;
-                }
-                SymbolicExpressionNode::Neg { idx, .. } => fanout[*idx] += 1,
-                _ => {}
-            }
-        }
-        for interaction in vk.symbolic_constraints.interactions.iter() {
-            fanout[interaction.count] += 1;
-            for &node_idx in &interaction.message {
-                fanout[node_idx] += 1;
-            }
-        }
-        fanout_per_air.push(fanout);
-    }
-
-    let mut records = vec![];
-    for (air_idx, (vk, fanout_per_node)) in
-        zip(child_vk.inner.per_air.iter(), fanout_per_air.into_iter()).enumerate()
-    {
-        let constraints = &vk.symbolic_constraints.constraints;
-        let constraint_idxs = &constraints.constraint_idx;
-        let mut j = 0;
-
-        for (node_idx, (node, &fanout)) in
-            zip(constraints.nodes.iter(), fanout_per_node.iter()).enumerate()
-        {
-            if j < constraint_idxs.len() && constraint_idxs[j] < node_idx {
-                j += 1;
-            }
-            let is_constraint = j < constraint_idxs.len() && constraint_idxs[j] == node_idx;
-            let mut record = CachedRecord {
-                kind: NodeKind::Constant,
-                air_idx,
-                node_idx,
-                attrs: [0; 3],
-                is_constraint,
-                constraint_idx: if !is_constraint { 0 } else { j },
-                fanout,
-            };
-            match node {
-                SymbolicExpressionNode::Variable(var) => {
-                    record.attrs[0] = var.index;
-                    match var.entry {
-                        Entry::Preprocessed { offset } => {
-                            record.kind = NodeKind::VarPreprocessed;
-                            record.attrs[1] = 1;
-                            record.attrs[2] = offset;
-                        }
-                        Entry::Main { part_index, offset } => {
-                            record.kind = NodeKind::VarMain;
-                            record.attrs[1] = vk.dag_main_part_index_to_commit_index(part_index);
-                            record.attrs[2] = offset;
-                        }
-                        Entry::Permutation { .. } => unreachable!(),
-                        Entry::Public => {
-                            record.kind = NodeKind::VarPublicValue;
-                        }
-                        Entry::Challenge | Entry::Exposed => unreachable!(),
-                    }
-                }
-                SymbolicExpressionNode::IsFirstRow => record.kind = NodeKind::SelIsFirst,
-                SymbolicExpressionNode::IsLastRow => record.kind = NodeKind::SelIsLast,
-                SymbolicExpressionNode::IsTransition => record.kind = NodeKind::SelIsTransition,
-                SymbolicExpressionNode::Constant(val) => {
-                    record.kind = NodeKind::Constant;
-                    record.attrs[0] = val.as_canonical_u32() as usize;
-                }
-                SymbolicExpressionNode::Add { left_idx, right_idx, .. } => {
-                    record.kind = NodeKind::Add;
-                    record.attrs[0] = *left_idx;
-                    record.attrs[1] = *right_idx;
-                }
-                SymbolicExpressionNode::Sub { left_idx, right_idx, .. } => {
-                    record.kind = NodeKind::Sub;
-                    record.attrs[0] = *left_idx;
-                    record.attrs[1] = *right_idx;
-                }
-                SymbolicExpressionNode::Neg { idx, .. } => {
-                    record.kind = NodeKind::Neg;
-                    record.attrs[0] = *idx;
-                }
-                SymbolicExpressionNode::Mul { left_idx, right_idx, .. } => {
-                    record.kind = NodeKind::Mul;
-                    record.attrs[0] = *left_idx;
-                    record.attrs[1] = *right_idx;
-                }
-            };
-            records.push(record);
-        }
-
-        for (interaction_idx, interaction) in
-            vk.symbolic_constraints.interactions.iter().enumerate()
-        {
-            records.push(CachedRecord {
-                kind: NodeKind::InteractionMult,
-                air_idx,
-                node_idx: interaction_idx,
-                attrs: [interaction.count, 0, 0],
-                is_constraint: false,
-                constraint_idx: 0,
-                fanout: 0,
-            });
-            for (idx_in_message, &node_idx) in interaction.message.iter().enumerate() {
-                records.push(CachedRecord {
-                    kind: NodeKind::InteractionMsgComp,
-                    air_idx,
-                    node_idx: interaction_idx,
-                    attrs: [node_idx, idx_in_message, 0],
-                    is_constraint: false,
-                    constraint_idx: 0,
-                    fanout: 0,
-                });
-            }
-            records.push(CachedRecord {
-                kind: NodeKind::InteractionBusIndex,
-                air_idx,
-                node_idx: interaction_idx,
-                attrs: [interaction.bus_index as usize, 0, 0],
-                is_constraint: false,
-                constraint_idx: 0,
-                fanout: 0,
-            });
-        }
-
-        let mut node_idx = constraints.nodes.len();
-        for unused_var in &vk.unused_variables {
-            let record = match unused_var.entry {
-                Entry::Preprocessed { offset } => CachedRecord {
-                    kind: NodeKind::VarPreprocessed,
-                    air_idx,
-                    node_idx,
-                    attrs: [unused_var.index, 1, offset],
-                    is_constraint: false,
-                    constraint_idx: 0,
-                    fanout: 0,
-                },
-                Entry::Main { part_index, offset } => {
-                    let part = vk.dag_main_part_index_to_commit_index(part_index);
-                    CachedRecord {
-                        kind: NodeKind::VarMain,
-                        air_idx,
-                        node_idx,
-                        attrs: [unused_var.index, part, offset],
-                        is_constraint: false,
-                        constraint_idx: 0,
-                        fanout: 0,
-                    }
-                }
-                Entry::Permutation { .. } | Entry::Public | Entry::Challenge | Entry::Exposed => {
-                    continue;
-                }
-            };
-            node_idx += 1;
-            records.push(record);
+pub fn build_cached_trace_record(child_vk: &RecursionVk) -> CachedTraceRecord {
+    let mut records = Vec::new();
+    for (&air_idx, circuit_name) in &child_vk.circuit_index_to_name {
+        let Some(circuit_vk) = child_vk.circuit_vks.get(circuit_name) else {
+            continue;
+        };
+        let Some(gkr) = circuit_vk.cs.gkr_circuit.as_ref() else {
+            continue;
+        };
+        let Some(layer) = gkr.layers.first() else {
+            continue;
+        };
+        let counts = Counts::from_css(&circuit_vk.cs);
+        let offsets = Offsets::new(&counts);
+        let mut builder = AirBuilder::new(&mut records, air_idx);
+        push_base_nodes(&mut builder, &counts, &offsets);
+        for (constraint_idx, expr) in layer.exprs.iter().enumerate() {
+            let root_idx = build_expression_nodes(expr, &mut builder, &offsets);
+            builder.mark_constraint(root_idx, constraint_idx);
         }
     }
 
     CachedTraceRecord { records }
+}
+
+fn push_base_nodes(builder: &mut AirBuilder<'_>, counts: &Counts, offsets: &Offsets) {
+    for local in 0..counts.num_witin {
+        let global = offsets.witin + local;
+        builder.push(NodeKind::WitIn, [global, local, 0]);
+    }
+    for local in 0..counts.num_structural_witin {
+        let global = offsets.structural + local;
+        builder.push(NodeKind::StructuralWitIn, [global, local, 0]);
+    }
+    for local in 0..counts.num_fixed {
+        let global = offsets.fixed + local;
+        builder.push(NodeKind::Fixed, [global, local, 0]);
+    }
+    for local in 0..counts.num_instance {
+        let global = offsets.instance + local;
+        builder.push(NodeKind::Instance, [global, local, 0]);
+    }
+}
+
+struct Counts {
+    num_witin: usize,
+    num_structural_witin: usize,
+    num_fixed: usize,
+    num_instance: usize,
+}
+
+impl Counts {
+    fn from_css<E: ff_ext::ExtensionField>(cs: &ComposedConstrainSystem<E>) -> Self {
+        let css = &cs.zkvm_v1_css;
+        Self {
+            num_witin: css.num_witin as usize,
+            num_structural_witin: css.num_structural_witin as usize,
+            num_fixed: css.num_fixed,
+            num_instance: css.instance_openings.len(),
+        }
+    }
+}
+
+struct Offsets {
+    witin: usize,
+    structural: usize,
+    fixed: usize,
+    instance: usize,
+}
+
+impl Offsets {
+    fn new(counts: &Counts) -> Self {
+        let witin = 0;
+        let structural = witin + counts.num_witin;
+        let fixed = structural + counts.num_structural_witin;
+        let instance = fixed + counts.num_fixed;
+        Self {
+            witin,
+            structural,
+            fixed,
+            instance,
+        }
+    }
+}
+
+struct AirBuilder<'a> {
+    records: &'a mut Vec<CachedRecord>,
+    air_idx: usize,
+    air_start: usize,
+    next_local_idx: usize,
+}
+
+impl<'a> AirBuilder<'a> {
+    fn new(records: &'a mut Vec<CachedRecord>, air_idx: usize) -> Self {
+        let air_start = records.len();
+        Self {
+            records,
+            air_idx,
+            air_start,
+            next_local_idx: 0,
+        }
+    }
+
+    fn push(&mut self, kind: NodeKind, attrs: [usize; 3]) -> usize {
+        let node_idx = self.next_local_idx;
+        self.next_local_idx += 1;
+        self.records.push(CachedRecord {
+            kind,
+            air_idx: self.air_idx,
+            node_idx,
+            attrs,
+            is_constraint: false,
+            constraint_idx: 0,
+            fanout: 0,
+        });
+        node_idx
+    }
+
+    fn bump_fanout(&mut self, local_idx: usize) {
+        let global_idx = self.air_start + local_idx;
+        if let Some(record) = self.records.get_mut(global_idx) {
+            record.fanout = record.fanout.saturating_add(1);
+        }
+    }
+
+    fn mark_constraint(&mut self, local_idx: usize, constraint_idx: usize) {
+        let global_idx = self.air_start + local_idx;
+        if let Some(record) = self.records.get_mut(global_idx) {
+            record.is_constraint = true;
+            record.constraint_idx = constraint_idx;
+        }
+    }
+}
+
+fn build_expression_nodes(
+    expr: &Expression<RecursionField>,
+    builder: &mut AirBuilder<'_>,
+    offsets: &Offsets,
+) -> usize {
+    match expr {
+        Expression::WitIn(id) => offsets.witin + (*id as usize),
+        Expression::StructuralWitIn(id, _) => offsets.structural + (*id as usize),
+        Expression::Fixed(Fixed(idx)) => offsets.fixed + *idx,
+        Expression::Instance(instance) | Expression::InstanceScalar(instance) => {
+            offsets.instance + instance.0
+        }
+        Expression::Constant(_) => builder.push(NodeKind::Constant, [0, 0, 0]),
+        Expression::Challenge(ch_id, pow, _, _) => {
+            builder.push(NodeKind::Constant, [*ch_id as usize, *pow, 1])
+        }
+        Expression::Sum(left, right) => {
+            let left_idx = build_expression_nodes(left, builder, offsets);
+            let right_idx = build_expression_nodes(right, builder, offsets);
+            builder.bump_fanout(left_idx);
+            builder.bump_fanout(right_idx);
+            builder.push(NodeKind::Add, [left_idx, right_idx, 0])
+        }
+        Expression::Product(left, right) => {
+            let left_idx = build_expression_nodes(left, builder, offsets);
+            let right_idx = build_expression_nodes(right, builder, offsets);
+            builder.bump_fanout(left_idx);
+            builder.bump_fanout(right_idx);
+            builder.push(NodeKind::Mul, [left_idx, right_idx, 0])
+        }
+        Expression::ScaledSum(x, a, b) => {
+            let mul_left = build_expression_nodes(a, builder, offsets);
+            let mul_right = build_expression_nodes(x, builder, offsets);
+            builder.bump_fanout(mul_left);
+            builder.bump_fanout(mul_right);
+            let mul_idx = builder.push(NodeKind::Mul, [mul_left, mul_right, 0]);
+            let b_idx = build_expression_nodes(b, builder, offsets);
+            builder.bump_fanout(mul_idx);
+            builder.bump_fanout(b_idx);
+            builder.push(NodeKind::Add, [mul_idx, b_idx, 0])
+        }
+    }
 }
 
 pub fn generate_symbolic_expr_cached_trace(

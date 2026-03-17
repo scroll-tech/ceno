@@ -19,7 +19,8 @@ use crate::{
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        RecursionProof, RecursionVk, TraceGenModule, convert_vk_from_zkvm, frame::MultiStarkVkeyFrame,
+        RecursionProof, RecursionVk, TraceGenModule, convert_vk_from_zkvm,
+        frame::MultiStarkVkeyFrame,
     },
     tracegen::RowMajorChip,
 };
@@ -113,18 +114,20 @@ impl ProofShapeModule {
             .per_air
             .iter()
             .zip(rwlk_counts.into_iter())
-            .map(|(avk, (num_read_count, num_write_count, num_logup_count))| AirMetadata {
-                is_required: avk.is_required,
-                num_public_values: avk.params.num_public_values,
-                num_interactions: avk.num_interactions,
-                main_width: avk.params.width.common_main,
-                cached_widths: avk.params.width.cached_mains.clone(),
-                num_read_count,
-                num_write_count,
-                num_logup_count,
-                preprocessed_width: avk.params.width.preprocessed,
-                preprocessed_data: avk.preprocessed_data.clone(),
-            })
+            .map(
+                |(avk, (num_read_count, num_write_count, num_logup_count))| AirMetadata {
+                    is_required: avk.is_required,
+                    num_public_values: avk.params.num_public_values,
+                    num_interactions: avk.num_interactions,
+                    main_width: avk.params.width.common_main,
+                    cached_widths: avk.params.width.cached_mains.clone(),
+                    num_read_count,
+                    num_write_count,
+                    num_logup_count,
+                    preprocessed_width: avk.params.width.preprocessed,
+                    preprocessed_data: avk.preprocessed_data.clone(),
+                },
+            )
             .collect_vec();
 
         let range_bus = bus_inventory.range_checker_bus;
@@ -162,10 +165,7 @@ impl ProofShapeModule {
     }
 }
 
-fn extract_rwlk_counts(
-    child_vk: &RecursionVk,
-    expected_len: usize,
-) -> Vec<(usize, usize, usize)> {
+fn extract_rwlk_counts(child_vk: &RecursionVk, expected_len: usize) -> Vec<(usize, usize, usize)> {
     (0..expected_len)
         .map(|idx| {
             child_vk

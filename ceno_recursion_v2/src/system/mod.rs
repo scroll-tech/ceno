@@ -143,7 +143,9 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::ProofShape(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
-            TraceModuleRef::Main(module) => module.run_preflight(child_vk, proof, preflight, sponge),
+            TraceModuleRef::Main(module) => {
+                module.run_preflight(child_vk, proof, preflight, sponge)
+            }
             TraceModuleRef::Gkr(module) => module.run_preflight(child_vk, proof, preflight, sponge),
             TraceModuleRef::Transcript(_) => {
                 panic!("Transcript module does not participate in preflight")
@@ -189,13 +191,9 @@ impl<'a> TraceModuleRef<'a> {
                 ),
                 required_heights,
             ),
-            TraceModuleRef::Main(module) => module.generate_proving_ctxs(
-                child_vk,
-                proofs,
-                preflights,
-                &(),
-                required_heights,
-            ),
+            TraceModuleRef::Main(module) => {
+                module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
+            }
             TraceModuleRef::Gkr(module) => module.generate_proving_ctxs(
                 child_vk,
                 proofs,
@@ -249,7 +247,11 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             config.continuations_enabled,
         );
         let main_module = MainModule::new(&mut bus_idx_manager, bus_inventory.clone());
-        let gkr = GkrModule::new(child_vk.as_ref(), &mut bus_idx_manager, bus_inventory.clone());
+        let gkr = GkrModule::new(
+            child_vk.as_ref(),
+            &mut bus_idx_manager,
+            bus_inventory.clone(),
+        );
 
         VerifierSubCircuit {
             bus_inventory,

@@ -12,9 +12,8 @@ use recursion_circuit::subairs::nested_for_loop::{NestedForLoopIoCols, NestedFor
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::bus::{
-    MainBus, MainExpressionClaimBus, MainExpressionClaimMessage, MainMessage,
-    MainSumcheckInputBus, MainSumcheckInputMessage, MainSumcheckOutputBus,
-    MainSumcheckOutputMessage,
+    MainBus, MainExpressionClaimBus, MainExpressionClaimMessage, MainMessage, MainSumcheckInputBus,
+    MainSumcheckInputMessage, MainSumcheckOutputBus, MainSumcheckOutputMessage,
 };
 
 #[repr(C)]

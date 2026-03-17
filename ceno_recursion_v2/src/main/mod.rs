@@ -5,13 +5,13 @@ mod trace;
 use std::sync::Arc;
 
 use ceno_zkvm::scheme::ZKVMChipProof;
-use eyre::{bail, eyre, Result};
+use eyre::{Result, bail, eyre};
 use openvm_cpu_backend::CpuBackend;
+use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
     prover::AirProvingContext,
 };
-use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
@@ -91,8 +91,7 @@ impl MainModule {
                         );
                     }
                     let claim = input_layer_claim(chip_proof);
-                    let mut ts =
-                        ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
+                    let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
                     record_main_transcript(&mut ts, chip_idx, chip_proof);
 
                     let main_record = MainRecord {

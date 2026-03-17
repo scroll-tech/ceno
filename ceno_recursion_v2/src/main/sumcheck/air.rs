@@ -115,17 +115,12 @@ where
             .when(is_transition_round.clone())
             .assert_eq(next.round, local.round.clone() + AB::Expr::ONE);
 
-        builder
-            .when(is_transition_round.clone())
-            .assert_eq(
-                next.tidx,
-                local.tidx.clone().into() + AB::Expr::from_usize(4 * D_EF),
-            );
-
-        assert_one_ext(
-            &mut builder.when(local.is_first_round.clone()),
-            local.eq_in,
+        builder.when(is_transition_round.clone()).assert_eq(
+            next.tidx,
+            local.tidx.clone().into() + AB::Expr::from_usize(4 * D_EF),
         );
+
+        assert_one_ext(&mut builder.when(local.is_first_round.clone()), local.eq_in);
         let eq_out = update_eq(local.eq_in, local.prev_challenge, local.challenge);
         assert_array_eq(
             &mut builder.when(local.is_enabled.clone()),
@@ -222,11 +217,7 @@ where
     )
 }
 
-fn update_eq<F, FA>(
-    eq_in: [F; D_EF],
-    prev_challenge: [F; D_EF],
-    challenge: [F; D_EF],
-) -> [FA; D_EF]
+fn update_eq<F, FA>(eq_in: [F; D_EF], prev_challenge: [F; D_EF], challenge: [F; D_EF]) -> [FA; D_EF]
 where
     F: Into<FA> + Copy,
     FA: PrimeCharacteristicRing,

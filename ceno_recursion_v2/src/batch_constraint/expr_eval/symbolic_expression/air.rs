@@ -3,12 +3,12 @@ use std::borrow::Borrow;
 
 use openvm_circuit_primitives::{encoder::Encoder, utils::assert_array_eq};
 use openvm_stark_backend::{
-    air_builders::PartitionedAirBuilder, interaction::InteractionBuilder, BaseAirWithPublicValues,
-    PartitionedBaseAir,
+    BaseAirWithPublicValues, PartitionedBaseAir, air_builders::PartitionedAirBuilder,
+    interaction::InteractionBuilder,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
-use p3_field::{extension::BinomiallyExtendable, Field, PrimeCharacteristicRing};
+use p3_field::{Field, PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 use strum::{EnumCount, IntoEnumIterator};
@@ -37,25 +37,26 @@ pub const ENCODER_MAX_DEGREE: u32 = 2;
 
 #[derive(Debug, Clone, Copy, EnumIter, EnumCount)]
 pub enum NodeKind {
-    VarPreprocessed = 0,
-    VarMain = 1,
-    VarPublicValue = 2,
-    SelIsFirst = 3,
-    SelIsLast = 4,
-    SelIsTransition = 5,
-    Constant = 6,
-    Add = 7,
-    Sub = 8,
-    Neg = 9,
-    Mul = 10,
-    InteractionMult = 11,
-    InteractionMsgComp = 12,
-    InteractionBusIndex = 13,
+    WitIn = 0,
+    StructuralWitIn = 1,
+    Fixed = 2,
+    Instance = 3,
+    SelIsFirst = 4,
+    SelIsLast = 5,
+    SelIsTransition = 6,
+    Constant = 7,
+    Add = 8,
+    Sub = 9,
+    Neg = 10,
+    Mul = 11,
+    InteractionMult = 12,
+    InteractionMsgComp = 13,
+    InteractionBusIndex = 14,
 }
 
 impl Default for NodeKind {
     fn default() -> Self {
-        NodeKind::VarPreprocessed
+        NodeKind::WitIn
     }
 }
 
@@ -161,12 +162,22 @@ where
                 NodeKind::Neg,
                 NodeKind::InteractionMult,
                 NodeKind::InteractionMsgComp,
+                NodeKind::WitIn,
+                NodeKind::StructuralWitIn,
+                NodeKind::Fixed,
+                NodeKind::Instance,
             ]
             .map(|x| x as usize),
         );
         let is_arg1_node_idx = enc.contains_flag::<AB>(
             &flags,
-            &[NodeKind::Add, NodeKind::Sub, NodeKind::Mul].map(|x| x as usize),
+            &[
+                NodeKind::Add,
+                NodeKind::Sub,
+                NodeKind::Mul,
+                NodeKind::InteractionMsgComp,
+            ]
+            .map(|x| x as usize),
         );
 
         for (proof_idx, (&cols, &next_cols)) in main_cols.iter().zip(&next_main_cols).enumerate() {
@@ -180,9 +191,8 @@ where
             let next_proof_present = next_slot_state.clone()
                 * (AB::Expr::from_u8(3) - next_slot_state)
                 * AB::F::TWO.inverse();
-            let air_present = slot_state.clone()
-                * (slot_state.clone() - AB::Expr::ONE)
-                * AB::F::TWO.inverse();
+            let air_present =
+                slot_state.clone() * (slot_state.clone() - AB::Expr::ONE) * AB::F::TWO.inverse();
 
             let arg_ef0: [AB::Var; D_EF] = cols.args[..D_EF].try_into().unwrap();
             let arg_ef1: [AB::Var; D_EF] = cols.args[D_EF..2 * D_EF].try_into().unwrap();
@@ -207,15 +217,16 @@ where
                     NodeKind::Neg => scalar_subtract_ext_field::<AB::Expr>(AB::Expr::ZERO, arg_ef0),
                     NodeKind::Mul => ext_field_multiply::<AB::Expr>(arg_ef0, arg_ef1),
                     NodeKind::Constant => base_to_ext(cached_cols.attrs[0]),
-                    NodeKind::VarPublicValue => base_to_ext(cols.args[0]),
+                    NodeKind::Instance => base_to_ext(cols.args[0]),
                     NodeKind::SelIsFirst => ext_field_multiply(arg_ef0, arg_ef1),
                     NodeKind::SelIsLast => ext_field_multiply(arg_ef0, arg_ef1),
                     NodeKind::SelIsTransition => scalar_subtract_ext_field(
                         AB::Expr::ONE,
                         ext_field_multiply(arg_ef0, arg_ef1),
                     ),
-                    NodeKind::VarPreprocessed
-                    | NodeKind::VarMain
+                    NodeKind::WitIn
+                    | NodeKind::StructuralWitIn
+                    | NodeKind::Fixed
                     | NodeKind::InteractionMult
                     | NodeKind::InteractionMsgComp => arg_ef0.map(Into::into),
                     NodeKind::InteractionBusIndex => {
@@ -261,7 +272,7 @@ where
 
             let is_var = enc.contains_flag::<AB>(
                 &flags,
-                &[NodeKind::VarMain, NodeKind::VarPreprocessed].map(|x| x as usize),
+                &[NodeKind::WitIn, NodeKind::StructuralWitIn, NodeKind::Fixed].map(|x| x as usize),
             );
             self.column_claims_bus.receive(
                 builder,
@@ -283,8 +294,7 @@ where
                     pv_idx: cached_cols.attrs[0],
                     value: cols.args[0],
                 },
-                enc.get_flag_expr::<AB>(NodeKind::VarPublicValue as usize, &flags)
-                    * air_present.clone(),
+                enc.get_flag_expr::<AB>(NodeKind::Instance as usize, &flags) * air_present.clone(),
             );
             self.air_shape_bus.lookup_key(
                 builder,

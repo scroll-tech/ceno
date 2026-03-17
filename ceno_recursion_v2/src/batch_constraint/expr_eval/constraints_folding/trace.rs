@@ -1,15 +1,13 @@
 use std::borrow::BorrowMut;
 
-use itertools::Itertools;
-use openvm_stark_backend::keygen::types::MultiStarkVerifyingKey0;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 
 use crate::{
     batch_constraint::expr_eval::constraints_folding::air::ConstraintsFoldingCols,
-    system::Preflight,
+    system::{Preflight, RecursionVk},
     tracegen::RowMajorChip,
     utils::{MultiProofVecVec, MultiVecWithBounds},
 };
@@ -33,15 +31,28 @@ pub(crate) struct ConstraintsFoldingBlob {
 
 impl ConstraintsFoldingBlob {
     pub fn new(
-        vk: &MultiStarkVerifyingKey0<BabyBearPoseidon2Config>,
+        child_vk: &RecursionVk,
         expr_evals: &MultiVecWithBounds<EF, 2>,
         preflights: &[&Preflight],
     ) -> Self {
-        let constraints = vk
-            .per_air
-            .iter()
-            .map(|vk| vk.symbolic_constraints.constraints.constraint_idx.clone())
-            .collect_vec();
+        let mut max_air_idx = 0usize;
+        for key in child_vk.circuit_index_to_name.keys().copied() {
+            max_air_idx = max_air_idx.max(key);
+        }
+        let mut constraints = vec![Vec::<usize>::new(); max_air_idx + 1];
+        for (&air_idx, name) in &child_vk.circuit_index_to_name {
+            let expr_len = child_vk
+                .circuit_vks
+                .get(name)
+                .and_then(|vk| vk.cs.gkr_circuit.as_ref())
+                .and_then(|circuit| circuit.layers.get(0))
+                .map(|layer| layer.exprs.len())
+                .unwrap_or_default();
+            if air_idx >= constraints.len() {
+                constraints.resize(air_idx + 1, vec![]);
+            }
+            constraints[air_idx] = (0..expr_len).collect();
+        }
 
         let mut records = MultiProofVecVec::new();
         let mut folded = MultiProofVecVec::new();
@@ -79,8 +90,9 @@ impl ConstraintsFoldingBlob {
                         value,
                     });
                 }
-                let n_lift = v.log_height.saturating_sub(vk.params.l_skip);
-                let n = v.log_height as isize - vk.params.l_skip as isize;
+                let l_skip = preflight.proof_shape.l_skip;
+                let n_lift = v.log_height.saturating_sub(l_skip);
+                let n = v.log_height as isize - l_skip as isize;
                 folded.push((
                     n,
                     folded_claim * preflight.batch_constraint.eq_ns_frontloaded[n_lift],
@@ -186,15 +198,15 @@ impl RowMajorChip<F> for ConstraintsFoldingTraceGenerator {
 #[cfg(feature = "cuda")]
 pub(in crate::batch_constraint) mod cuda {
     use openvm_circuit_primitives::cuda_abi::UInt2;
-    use openvm_cuda_backend::{base::DeviceMatrix, GpuBackend};
+    use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix};
     use openvm_cuda_common::{copy::MemCopyH2D, d_buffer::DeviceBuffer};
     use openvm_stark_backend::prover::AirProvingContext;
 
     use super::*;
     use crate::{
         batch_constraint::cuda_abi::{
-            constraints_folding_tracegen, constraints_folding_tracegen_temp_bytes, AffineFpExt,
-            FpExtWithTidx,
+            AffineFpExt, FpExtWithTidx, constraints_folding_tracegen,
+            constraints_folding_tracegen_temp_bytes,
         },
         cuda::{preflight::PreflightGpu, vk::VerifyingKeyGpu},
         tracegen::ModuleChip,

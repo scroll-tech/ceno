@@ -9,7 +9,7 @@ use p3_maybe_rayon::prelude::*;
 use super::ExpressionClaimCols;
 use crate::{
     primitives::pow::PowerCheckerCpuTraceGenerator,
-    system::{Preflight, POW_CHECKER_HEIGHT},
+    system::{POW_CHECKER_HEIGHT, Preflight},
     tracegen::RowMajorChip,
     utils::MultiProofVecVec,
 };

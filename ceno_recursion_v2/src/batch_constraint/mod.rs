@@ -7,13 +7,13 @@ use openvm_stark_backend::{
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::F;
 
-use crate::system::{RecursionVk, convert_vk_from_zkvm};
+use crate::system::RecursionVk;
 
-pub mod expression_claim;
 pub mod expr_eval;
+pub mod expression_claim;
 pub mod bus {
-    pub use recursion_circuit::batch_constraint::bus::*;
     use p3_field::PrimeCharacteristicRing;
+    pub use recursion_circuit::batch_constraint::bus::*;
 
     #[repr(u8)]
     #[derive(Debug, Copy, Clone)]
@@ -33,8 +33,7 @@ pub mod bus {
 pub use expr_eval::CachedTraceRecord;
 
 pub fn cached_trace_record(child_vk: &RecursionVk) -> CachedTraceRecord {
-    let child_vk = convert_vk_from_zkvm(child_vk);
-    expr_eval::symbolic_expression::build_cached_trace_record(child_vk.as_ref())
+    expr_eval::symbolic_expression::build_cached_trace_record(child_vk)
 }
 
 pub fn commit_child_vk<E, SC>(

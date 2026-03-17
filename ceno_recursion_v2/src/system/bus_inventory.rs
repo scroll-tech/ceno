@@ -1,7 +1,7 @@
 use recursion_circuit::{
     bus::{
-        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage, BatchConstraintModuleBus,
-        CachedCommitBus, CachedCommitBusMessage, ColumnClaimsBus,
+        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage,
+        BatchConstraintModuleBus, CachedCommitBus, CachedCommitBusMessage, ColumnClaimsBus,
         CommitmentsBus, CommitmentsBusMessage, ConstraintSumcheckRandomnessBus,
         ConstraintsFoldingInputBus, ConstraintsFoldingInputMessage, DagCommitBus, EqNegBaseRandBus,
         EqNegResultBus, EqNsNLogupMaxBus, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
@@ -20,11 +20,10 @@ use recursion_circuit::{
 use crate::bus::{
     CachedCommitBus as LocalCachedCommitBus, CommitmentsBus as LocalCommitmentsBus,
     ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
-    FractionFolderInputBus as LocalFractionFolderInputBus, GkrModuleBus, MainBus,
-    MainExpressionClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus,
-    HyperdimBus as LocalHyperdimBus, LiftedHeightsBus as LocalLiftedHeightsBus,
-    NLiftBus as LocalNLiftBus, PublicValuesBus as LocalPublicValuesBus,
-    TranscriptBus as LocalTranscriptBus,
+    FractionFolderInputBus as LocalFractionFolderInputBus, GkrModuleBus,
+    HyperdimBus as LocalHyperdimBus, LiftedHeightsBus as LocalLiftedHeightsBus, MainBus,
+    MainExpressionClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
+    PublicValuesBus as LocalPublicValuesBus, TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]

@@ -277,8 +277,7 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                             .as_basis_coefficients_slice()
                             .try_into()
                             .unwrap();
-                        cols.num_read_count =
-                            F::from_usize(record.read_count_at(layer_idx).max(1));
+                        cols.num_read_count = F::from_usize(record.read_count_at(layer_idx).max(1));
                         cols.num_write_count =
                             F::from_usize(record.write_count_at(layer_idx).max(1));
                         cols.num_logup_count =

@@ -575,9 +575,9 @@ pub(crate) fn build_gkr_blob(
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
             if let Some(chip_proof) = chip_instances.first() {
                 has_chip = true;
-                let pf_entry = chip_preflight_entries
-                    .next()
-                    .ok_or_else(|| eyre::eyre!("missing GKR preflight entry for chip {chip_idx}"))?;
+                let pf_entry = chip_preflight_entries.next().ok_or_else(|| {
+                    eyre::eyre!("missing GKR preflight entry for chip {chip_idx}")
+                })?;
                 if pf_entry.chip_idx != chip_idx {
                     return Err(eyre::eyre!(
                         "gkr preflight chip mismatch (expected {}, found {})",

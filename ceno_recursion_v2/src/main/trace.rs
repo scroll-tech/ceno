@@ -93,7 +93,11 @@ fn fill_main_cols(record: &MainRecord, cols: &mut MainCols<F>, is_new_pair: bool
     cols.is_first_idx = F::from_bool(is_new_pair);
     cols.is_first = F::ONE;
     cols.tidx = F::from_usize(record.tidx);
-    let claim_basis: [F; D_EF] = record.claim.as_basis_coefficients_slice().try_into().unwrap();
+    let claim_basis: [F; D_EF] = record
+        .claim
+        .as_basis_coefficients_slice()
+        .try_into()
+        .unwrap();
     cols.claim_in = claim_basis;
     cols.claim_out = claim_basis;
 }
