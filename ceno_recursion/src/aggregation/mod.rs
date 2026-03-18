@@ -342,6 +342,8 @@ impl CenoAggregationProver {
                 .into_iter()
                 .map(|input| {
                     internal_node_idx += 1;
+                    self.precheck_internal_input(&input, internal_node_idx, internal_node_height);
+
                     let internal_proof = SingleSegmentVmProver::prove(
                         &mut self.internal_prover,
                         input.write(),
@@ -379,6 +381,112 @@ impl CenoAggregationProver {
         // TODO: generate root proof from last internal proof
 
         proofs.pop().unwrap()
+    }
+
+    fn precheck_internal_input(
+        &self,
+        input: &InternalVmVerifierInput<SC>,
+        internal_node_idx: i32,
+        internal_node_height: i32,
+    ) {
+        let do_child_verify = std::env::var("CENO_DEBUG_VERIFY_CHILD_STARK")
+            .ok()
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            // Default to verifying child proofs on the first internal layer only.
+            .unwrap_or(internal_node_height == 0);
+
+        println!(
+            "Aggregation - Precheck internal node (idx: {:?}) at height {:?}: {} child proofs",
+            internal_node_idx,
+            internal_node_height,
+            input.proofs.len()
+        );
+
+        let mut prev_final_pc = None;
+        let mut first_app_commit = None;
+
+        for (proof_idx, proof) in input.proofs.iter().enumerate() {
+            assert!(
+                proof.per_air.len() > PUBLIC_VALUES_AIR_ID,
+                "internal precheck: proof {} missing PUBLIC_VALUES AIR",
+                proof_idx
+            );
+            assert!(
+                proof.per_air.len() > CONNECTOR_AIR_ID,
+                "internal precheck: proof {} missing CONNECTOR AIR",
+                proof_idx
+            );
+
+            let connector_air = &proof.per_air[CONNECTOR_AIR_ID];
+            let vm_connector = &connector_air.public_values;
+            assert!(
+                vm_connector.len() >= 4,
+                "internal precheck: proof {} has malformed vm connector pv len {}",
+                proof_idx,
+                vm_connector.len()
+            );
+
+            let pvs: &VmVerifierPvs<_> =
+                proof.per_air[PUBLIC_VALUES_AIR_ID].public_values[..VmVerifierPvs::<u8>::width()]
+                    .borrow();
+
+            if let Some(prev) = prev_final_pc {
+                assert_eq!(
+                    prev, pvs.connector.initial_pc,
+                    "internal precheck: connector chain break at child {}",
+                    proof_idx
+                );
+            }
+            prev_final_pc = Some(pvs.connector.final_pc);
+
+            if let Some(app_commit) = first_app_commit {
+                assert_eq!(
+                    app_commit, pvs.app_commit,
+                    "internal precheck: app_commit mismatch at child {}",
+                    proof_idx
+                );
+            } else {
+                first_app_commit = Some(pvs.app_commit);
+            }
+
+            println!(
+                "Aggregation -   child {} vm_connector=[init:{:?}, final:{:?}, exit:{:?}, term:{:?}] agg_connector=[init:{:?}, final:{:?}, exit:{:?}, term:{:?}]",
+                proof_idx,
+                vm_connector[0],
+                vm_connector[1],
+                vm_connector[2],
+                vm_connector[3],
+                pvs.connector.initial_pc,
+                pvs.connector.final_pc,
+                pvs.connector.exit_code,
+                pvs.connector.is_terminate
+            );
+
+            if do_child_verify {
+                let program_commit = proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref();
+                let internal_commit: &[_; CHUNK] = &self.vk.internal_commit.into();
+
+                if program_commit == internal_commit {
+                    let e = BabyBearPoseidon2Engine::new(self.vk.internal_fri_params);
+                    e.verify(&self.vk.internal_vm_vk, proof)
+                        .unwrap_or_else(|err| {
+                            panic!(
+                                "internal precheck: child {} failed internal-vk verify: {:?}",
+                                proof_idx, err
+                            )
+                        });
+                } else {
+                    let e = BabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
+                    e.verify(&self.vk.leaf_vm_vk, proof)
+                        .unwrap_or_else(|err| {
+                            panic!(
+                                "internal precheck: child {} failed leaf-vk verify: {:?}",
+                                proof_idx, err
+                            )
+                        });
+                }
+            }
+        }
     }
 }
 
