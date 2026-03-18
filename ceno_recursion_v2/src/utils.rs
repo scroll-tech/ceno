@@ -2,7 +2,7 @@ use std::ops::Index;
 
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::interaction::Interaction;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{CHUNK, D_EF, F, poseidon2_perm};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{CHUNK, D_EF, DIGEST_SIZE, F, poseidon2_perm};
 use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_symmetric::Permutation;
@@ -239,6 +239,19 @@ pub fn poseidon2_hash_slice(vals: &[F]) -> ([F; CHUNK], Vec<[F; POSEIDON2_WIDTH]
         perm.permute_mut(&mut state);
     }
     (state[..CHUNK].try_into().unwrap(), pre_states)
+}
+
+pub fn digests_to_poseidon2_input<T: Clone>(
+    x: [T; DIGEST_SIZE],
+    y: [T; DIGEST_SIZE],
+) -> [T; POSEIDON2_WIDTH] {
+    core::array::from_fn(|i| {
+        if i < DIGEST_SIZE {
+            x[i].clone()
+        } else {
+            y[i - DIGEST_SIZE].clone()
+        }
+    })
 }
 
 pub fn poseidon2_hash_slice_with_states(

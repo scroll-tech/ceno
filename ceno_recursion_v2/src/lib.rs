@@ -1,4 +1,6 @@
 pub mod batch_constraint;
+pub mod bn254;
+pub mod circuit;
 pub mod continuation;
 pub mod gkr;
 pub mod main;

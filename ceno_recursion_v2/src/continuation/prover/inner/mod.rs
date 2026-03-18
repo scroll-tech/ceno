@@ -21,7 +21,7 @@ use crate::system::{
     AggregationSubCircuit, RecursionField, RecursionVk, VerifierConfig, VerifierExternalData,
     VerifierTraceGen,
 };
-use continuations_v2::circuit::{
+use crate::circuit::{
     Circuit,
     inner::{InnerCircuit, InnerTraceGen, ProofsType},
 };

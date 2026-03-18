@@ -1,7 +1,7 @@
-use continuations_v2::{SC, circuit::inner::InnerTraceGenImpl};
+use continuations_v2::SC;
 use openvm_cpu_backend::CpuBackend;
 
-use crate::system::VerifierSubCircuit;
+use crate::{circuit::inner::InnerTraceGenImpl, system::VerifierSubCircuit};
 
 mod inner;
 
