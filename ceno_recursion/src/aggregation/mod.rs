@@ -300,8 +300,49 @@ impl CenoAggregationProver {
                     aggregation_start_timestamp.elapsed()
                 );
 
+                // debug: print leaf input structure before proving
+                println!(
+                    "Aggregation - Leaf input (idx: {}): shard_id={}, is_last={}, raw_pi_outer={}, chip_proofs={}, pi_evals={}",
+                    proof_idx, p.proof.shard_id, p.is_last,
+                    p.proof.raw_pi.len(), p.proof.chip_proofs.len(), p.proof.pi_evals.len()
+                );
+                for (pi_i, pi_row) in p.proof.raw_pi.iter().enumerate() {
+                    let pi_head = pi_row.len().min(4);
+                    println!(
+                        "Aggregation -   raw_pi[{}]: len={} head={:?}",
+                        pi_i, pi_row.len(), &pi_row[..pi_head]
+                    );
+                }
+                println!(
+                    "Aggregation -   pc_vals: INIT_PC_IDX={} val={:?}, END_PC_IDX={} val={:?}, EXIT_CODE_IDX={} val={:?}",
+                    INIT_PC_IDX,
+                    p.proof.raw_pi.get(INIT_PC_IDX).and_then(|v| v.first()).copied(),
+                    END_PC_IDX,
+                    p.proof.raw_pi.get(END_PC_IDX).and_then(|v| v.first()).copied(),
+                    EXIT_CODE_IDX,
+                    p.proof.raw_pi.get(EXIT_CODE_IDX).and_then(|v| v.first()).copied(),
+                );
+
                 let mut witness_stream: Vec<Vec<F>> = Vec::new();
                 witness_stream.extend(p.write());
+
+                // debug: witness stats + clone for CPU reprove in failure path
+                {
+                    let seg_lens: Vec<usize> = witness_stream.iter().map(|s| s.len()).collect();
+                    let total_felts: usize = seg_lens.iter().sum();
+                    let seg_lens_disp = if seg_lens.len() > 30 {
+                        format!("first_10={:?}...last_5={:?}(total_segs={})",
+                            &seg_lens[..10], &seg_lens[seg_lens.len()-5..], seg_lens.len())
+                    } else {
+                        format!("{:?}", seg_lens)
+                    };
+                    println!(
+                        "Aggregation - Leaf witness (idx: {}): num_segs={} total_felts={} seg_lens={}",
+                        proof_idx, witness_stream.len(), total_felts, seg_lens_disp
+                    );
+                }
+                #[cfg(feature = "gpu")]
+                let witness_stream_for_cpu = witness_stream.clone();
 
                 let leaf_proof = SingleSegmentVmProver::prove(
                     &mut self.leaf_prover,
@@ -349,6 +390,32 @@ impl CenoAggregationProver {
                             &expected_leaf_program_commit,
                             &self.vk.leaf_fri_params,
                         );
+
+                        // Attempt CPU reprove with the identical witness stream to isolate GPU prover vs. input bug.
+                        // If CPU prove succeeds (and CPU verify of CPU proof passes), the GPU prover is the culprit.
+                        // If CPU prove also fails, the witness/input itself is malformed.
+                        println!("Aggregation - Attempting CPU leaf reprove (idx: {})...", proof_idx);
+                        let cpu_reprove_msg: String = match new_local_prover::<CpuBabyBearPoseidon2Engine, NativeBuilder>(
+                            NativeBuilder::default(),
+                            &self.pk.leaf_vm_pk,
+                            self.pk.leaf_committed_exe.exe.clone(),
+                        ) {
+                            Err(e) => format!("cpu_prover_init_err={:?}", e),
+                            Ok(mut cpu_prover) => match SingleSegmentVmProver::prove(
+                                &mut cpu_prover,
+                                witness_stream_for_cpu,
+                                VM_MAX_TRACE_HEIGHTS,
+                            ) {
+                                Err(e) => format!("cpu_prove_err={:?}", e),
+                                Ok(cpu_proof) => {
+                                    let cpu_e = CpuBabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
+                                    let cpu_vfy = cpu_e.verify(&self.vk.leaf_vm_vk, &cpu_proof);
+                                    format!("cpu_prove=Ok cpu_verify_of_cpu_proof={:?}", cpu_vfy)
+                                }
+                            },
+                        };
+                        println!("Aggregation - CPU reprove result (idx: {}): {}", proof_idx, cpu_reprove_msg);
+
                         panic!(
                             "leaf proof generation produced invalid proof at idx {}: gpu_verify={:?}, cpu_verify={:?}",
                             proof_idx, gpu_verify_err, cpu_verify_res
