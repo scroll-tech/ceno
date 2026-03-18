@@ -5,7 +5,7 @@ use continuations_v2::SC;
 use eyre::Result;
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_stark_backend::{
-    StarkEngine, SystemParams,
+    StarkEngine,
     keygen::types::{MultiStarkProvingKey, MultiStarkVerifyingKey},
     proof::Proof,
     prover::{CommittedTraceData, DeviceMultiStarkProvingKey, ProverBackend, ProvingContext},
@@ -27,6 +27,8 @@ use continuations_v2::circuit::{
 pub use continuations_v2::prover::ChildVkKind;
 use continuations_v2::prover::debug_constraints;
 use openvm_stark_backend::prover::DeviceDataTransporter;
+
+pub use openvm_stark_backend::SystemParams;
 
 /// Forked inner prover that will bridge Ceno ZKVM proofs with OpenVM recursion.
 pub struct InnerAggregationProver<

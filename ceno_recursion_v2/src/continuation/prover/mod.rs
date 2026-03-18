@@ -4,6 +4,7 @@ use openvm_cpu_backend::CpuBackend;
 use crate::system::VerifierSubCircuit;
 
 mod inner;
+
 pub use inner::*;
 
 pub type InnerCpuProver<const MAX_NUM_PROOFS: usize> =

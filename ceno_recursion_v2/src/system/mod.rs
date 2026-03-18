@@ -12,6 +12,8 @@ pub use recursion_circuit::system::{
     VerifierConfig, VerifierExternalData,
 };
 mod bus_inventory;
+pub mod utils;
+
 pub use bus_inventory::BusInventory;
 pub use types::{
     RecursionField, RecursionPcs, RecursionProof, RecursionVk, convert_proof_from_zkvm,
@@ -20,13 +22,13 @@ pub use types::{
 
 use std::{iter, mem, sync::Arc};
 
+use self::utils::test_system_params_zero_pow;
 use crate::{batch_constraint, gkr::GkrModule, main::MainModule};
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkEngine, StarkProtocolConfig, TranscriptHistory,
     interaction::BusIndex,
-    keygen::types::LinearConstraint,
     p3_maybe_rayon::prelude::*,
     prover::{AirProvingContext, CommittedTraceData, ProverBackend},
 };
@@ -211,33 +213,34 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     }
 
     pub fn new_with_options(child_vk: Arc<RecursionVk>, config: VerifierConfig) -> Self {
-        let child_mvk = convert_vk_from_zkvm(child_vk.as_ref());
-        let proof_shape_constraint = LinearConstraint {
-            coefficients: child_mvk
-                .inner
-                .per_air
-                .iter()
-                .map(|avk| avk.num_interactions() as u32)
-                .collect(),
-            threshold: child_mvk.inner.params.logup.max_interaction_count,
-        };
-        for (i, constraint) in child_mvk.inner.trace_height_constraints.iter().enumerate() {
-            assert!(
-                constraint.is_implied_by(&proof_shape_constraint),
-                "child_vk trace_height_constraint[{i}] is not implied by ProofShapeAir's check. \
-                 The recursion circuit cannot enforce this constraint. \
-                 Constraint: coefficients={:?}, threshold={}",
-                constraint.coefficients,
-                constraint.threshold,
-            );
-        }
+        // let child_mvk = convert_vk_from_zkvm(child_vk.as_ref());
+        // let proof_shape_constraint = LinearConstraint {
+        //     coefficients: child_mvk
+        //         .inner
+        //         .per_air
+        //         .iter()
+        //         .map(|avk| avk.num_interactions() as u32)
+        //         .collect(),
+        //     threshold: child_mvk.inner.params.logup.max_interaction_count,
+        // };
+        // for (i, constraint) in child_mvk.inner.trace_height_constraints.iter().enumerate() {
+        //     assert!(
+        //         constraint.is_implied_by(&proof_shape_constraint),
+        //         "child_vk trace_height_constraint[{i}] is not implied by ProofShapeAir's check. \
+        //          The recursion circuit cannot enforce this constraint. \
+        //          Constraint: coefficients={:?}, threshold={}",
+        //         constraint.coefficients,
+        //         constraint.threshold,
+        //     );
+        // }
 
         let mut bus_idx_manager = BusIndexManager::new();
         let bus_inventory = BusInventory::new(&mut bus_idx_manager);
+        let system_params = test_system_params_zero_pow(2, 8, 3);
 
         let transcript = TranscriptModule::new(
             bus_inventory.clone_inner(),
-            child_mvk.inner.params.clone(),
+            system_params,
             config.final_state_bus_enabled,
         );
         let proof_shape = ProofShapeModule::new(

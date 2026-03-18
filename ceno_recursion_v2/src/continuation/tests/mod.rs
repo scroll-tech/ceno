@@ -1,11 +1,13 @@
 #[cfg(test)]
 mod prover_integration {
-    use crate::continuation::prover::{ChildVkKind, InnerCpuProver};
+    use crate::{
+        continuation::prover::{ChildVkKind, InnerCpuProver},
+        system::utils::test_system_params_zero_pow,
+    };
     use bincode;
     use ceno_zkvm::{scheme::ZKVMProof, structs::ZKVMVerifyingKey};
     use eyre::Result;
     use mpcs::{Basefold, BasefoldRSParams};
-    use openvm_stark_backend::SystemParams;
     use openvm_stark_sdk::{
         config::baby_bear_poseidon2::{BabyBearPoseidon2CpuEngine, DuplexSponge},
         p3_baby_bear::BabyBear,
@@ -30,7 +32,7 @@ mod prover_integration {
                 .expect("deserialize vk file");
 
         const MAX_NUM_PROOFS: usize = 4;
-        let system_params = placeholder_system_params();
+        let system_params = test_system_params_zero_pow(2, 8, 3);
         let leaf_prover = InnerCpuProver::<MAX_NUM_PROOFS>::new::<Engine>(
             Arc::new(child_vk),
             system_params,
@@ -40,9 +42,5 @@ mod prover_integration {
 
         let _leaf_proof = leaf_prover.agg_prove_no_def::<Engine>(&zkvm_proofs, ChildVkKind::App)?;
         Ok(())
-    }
-
-    fn placeholder_system_params() -> SystemParams {
-        unimplemented!("derive actual SystemParams for the inner prover")
     }
 }
