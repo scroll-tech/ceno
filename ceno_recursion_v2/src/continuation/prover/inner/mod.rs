@@ -4,13 +4,13 @@ use ceno_zkvm::scheme::ZKVMProof;
 use continuations_v2::SC;
 use eyre::Result;
 use mpcs::{Basefold, BasefoldRSParams};
+use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     StarkEngine,
     keygen::types::{MultiStarkProvingKey, MultiStarkVerifyingKey},
     proof::Proof,
     prover::{CommittedTraceData, DeviceMultiStarkProvingKey, ProverBackend, ProvingContext},
 };
-use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
     DIGEST_SIZE, Digest, EF, F, default_duplex_sponge_recorder,
 };

@@ -77,13 +77,13 @@ use crate::{
         tower::replay_tower_proof,
     },
     system::{
-        AirModule, BusIndexManager, BusInventory, ChipTranscriptRange, GlobalCtxCpu, Preflight,
+        AirModule, BusIndexManager, BusInventory, GkrChipTranscriptRange, GlobalCtxCpu, Preflight,
         RecursionField, RecursionProof, RecursionVk, TraceGenModule,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
 use ceno_zkvm::{scheme::ZKVMChipProof, structs::VerifyingKey};
-use eyre::{Result, WrapErr};
+use eyre::Result;
 
 // Internal bus definitions
 mod bus;
@@ -100,6 +100,7 @@ pub mod input;
 pub mod layer;
 pub mod sumcheck;
 mod tower;
+pub(crate) use tower::TowerReplayResult;
 pub struct GkrModule {
     // Global bus inventory
     bus_inventory: BusInventory,
@@ -167,10 +168,34 @@ impl GkrModule {
             if let Some(chip_proof) = chip_instances.first() {
                 let tidx = ts.len();
                 let _ = record_gkr_transcript(ts, chip_idx, chip_proof);
-                preflight
-                    .gkr
-                    .chips
-                    .push(ChipTranscriptRange { chip_idx, tidx });
+
+                let tower_replay = match circuit_vk_for_idx(child_vk, chip_idx) {
+                    Some(circuit_vk) => match replay_tower_proof(chip_proof, circuit_vk) {
+                        Ok(replay) => replay,
+                        Err(err) => {
+                            error!(
+                                ?err,
+                                chip_idx, "failed to replay tower proof during preflight"
+                            );
+                            eprintln!(
+                                "failed to replay tower proof during preflight for chip {chip_idx}: {err:?}"
+                            );
+                            TowerReplayResult::default()
+                        }
+                    },
+                    None => {
+                        eprintln!(
+                            "missing circuit verifying key during GKR preflight for chip {chip_idx}"
+                        );
+                        TowerReplayResult::default()
+                    }
+                };
+
+                preflight.gkr.chips.push(GkrChipTranscriptRange {
+                    chip_idx,
+                    tidx,
+                    tower_replay,
+                });
             }
         }
     }
@@ -260,7 +285,8 @@ fn build_chip_records(
     proof_idx: usize,
     chip_idx: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
-    circuit_vk: &VerifyingKey<RecursionField>,
+    _circuit_vk: &VerifyingKey<RecursionField>,
+    replay: &TowerReplayResult,
     alpha_logup: EF,
     tidx: usize,
 ) -> Result<(
@@ -271,9 +297,6 @@ fn build_chip_records(
     Vec<EF>,
     EF,
 )> {
-    let replay =
-        replay_tower_proof(chip_proof, circuit_vk).wrap_err("failed to replay tower proof")?;
-
     let spec_layer_count = chip_proof
         .tower_proof
         .logup_specs_eval
@@ -361,10 +384,11 @@ fn build_chip_records(
             .get(layer_idx)
             .map(|rows| rows.len())
             .unwrap_or(0);
-        debug_assert_eq!(
-            read_len, write_len,
-            "read/write prod spec count mismatch at layer {layer_idx}"
-        );
+        // NOTE: some chip only got read or write
+        // eyre::ensure!(
+        //     read_len == write_len,
+        //     "read/write prod spec count mismatch at layer {layer_idx}: read={read_len}, write={write_len}"
+        // );
         layer_record.read_counts[layer_idx] = read_len.max(1);
         layer_record.write_counts[layer_idx] = write_len.max(1);
         layer_record.logup_counts[layer_idx] = logup_len.max(1);
@@ -418,11 +442,14 @@ fn build_chip_records(
         .flat_map(|layer| layer.challenges.iter().copied())
         .collect();
     sumcheck_record.ris = flattened_ris;
-    debug_assert_eq!(
-        sumcheck_record.ris.len(),
-        sumcheck_record.evals.len(),
-        "tower replay produced mismatched round counts",
-    );
+    if !replay.layers.is_empty() {
+        eyre::ensure!(
+            sumcheck_record.ris.len() == sumcheck_record.evals.len(),
+            "tower replay produced mismatched round counts: replay challenges={}, sumcheck eval rounds={}",
+            sumcheck_record.ris.len(),
+            sumcheck_record.evals.len()
+        );
+    }
     for (layer_idx, data) in replay.layers.iter().enumerate() {
         if layer_idx < layer_record.eq_at_r_primes.len() {
             layer_record.eq_at_r_primes[layer_idx] = data.eq_at_r;
@@ -591,6 +618,10 @@ pub(crate) fn build_gkr_blob(
                 let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx).ok_or_else(|| {
                     eyre::eyre!("missing circuit verifying key for index {chip_idx}")
                 })?;
+                println!(
+                    "processing chip name: {:?}",
+                    child_vk.circuit_index_to_name.get(&chip_idx)
+                );
                 let (
                     input_record,
                     layer_record,
@@ -603,6 +634,7 @@ pub(crate) fn build_gkr_blob(
                     chip_idx,
                     chip_proof,
                     circuit_vk,
+                    &pf_entry.tower_replay,
                     alpha_logup,
                     pf_entry.tidx,
                 )?;

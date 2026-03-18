@@ -2,6 +2,8 @@ use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::TranscriptLog;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{EF, F};
 
+use crate::gkr::TowerReplayResult;
+
 /// Placeholder types mirroring upstream recursion preflight records.
 /// These will be populated with real transcript metadata once the
 /// ZKVM bridge is fully implemented.
@@ -32,7 +34,14 @@ pub struct MainPreflight {
 
 #[derive(Clone, Debug, Default)]
 pub struct GkrPreflight {
-    pub chips: Vec<ChipTranscriptRange>,
+    pub chips: Vec<GkrChipTranscriptRange>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct GkrChipTranscriptRange {
+    pub chip_idx: usize,
+    pub tidx: usize,
+    pub tower_replay: TowerReplayResult,
 }
 
 #[derive(Clone, Debug, Default)]

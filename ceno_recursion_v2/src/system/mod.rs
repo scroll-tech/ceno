@@ -4,8 +4,8 @@ mod types;
 
 pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
-    BatchConstraintPreflight, ChipTranscriptRange, GkrPreflight, MainPreflight, Preflight,
-    ProofShapePreflight,
+    BatchConstraintPreflight, ChipTranscriptRange, GkrChipTranscriptRange, GkrPreflight,
+    MainPreflight, Preflight, ProofShapePreflight,
 };
 pub use recursion_circuit::system::{
     AggregationSubCircuit, AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule,
