@@ -291,6 +291,19 @@ impl CenoAggregationProver {
                 )
                 .expect("leaf proof generation failed");
 
+                // Debug safety net: catch invalid leaf proofs at generation time.
+                // If this fails, the issue is in proving (or backend), not in
+                // internal-input chunking/serialization.
+                let leaf_engine = BabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
+                leaf_engine
+                    .verify(&self.vk.leaf_vm_vk, &leaf_proof)
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "leaf proof generation produced invalid proof at idx {}: {:?}",
+                            proof_idx, err
+                        )
+                    });
+
                 // _debug: export
                 let file =
                     File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
