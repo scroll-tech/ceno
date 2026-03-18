@@ -10,8 +10,7 @@ but is forked so we can swap in ZKVM verifying keys (`RecursionVk`).
 - `RecursionVk = ZKVMVerifyingKey<RecursionField, RecursionPcs>` replaces the upstream `MultiStarkVerifyingKey` so
   future traits accept ZKVM proofs/VKs natively.
 - `RecursionProof = ZKVMProof<RecursionField, RecursionPcs>` is the canonical proof type exposed to modules;
-  `convert_proof_from_zkvm` is the shim that turns it into OpenVM's `Proof<BabyBearPoseidon2Config>` right before legacy
-  logic runs.
+  `convert_proof_from_zkvm` / `convert_vk_from_zkvm` are bridge placeholders and currently `unimplemented!()`.
 
 ## Preflight Records (`src/system/preflight.rs`)
 
@@ -49,11 +48,9 @@ Responsibilities:
 1. `new(child_vk, config) -> Self`: build the recursive subcircuit using the child verifying key and the user-provided
    `VerifierConfig`.
 2. `commit_child_vk(engine, child_vk)`: write commitments for the child verifying key into the proof transcript.
-3. `cached_trace_record(child_vk)`: return the global cached-trace metadata used to skip regeneration when proofs
-   repeat.
-4. `generate_proving_ctxs(...)`: orchestrate per-module trace generation (transcript, proof shape, GKR, batch
-   constraint) and collect `AirProvingContext`s, possibly using cached shared traces.
-5. `generate_proving_ctxs_base(...)`: helper that synthesizes a default `VerifierExternalData` (empty poseidon/range
+3. `generate_proving_ctxs(...)`: orchestrate per-module trace generation (transcript, proof shape, main, GKR), run
+   preflights, and collect `AirProvingContext`s.
+4. `generate_proving_ctxs_base(...)`: helper that synthesizes a default `VerifierExternalData` (empty poseidon/range
    inputs, no required heights) and calls the trait method.
 
 The trait is generic over both the prover backend (`PB`) and the Stark protocol configuration (`SC`), enabling CPU/GPU
@@ -67,42 +64,48 @@ Fields capture the stateful modules that participate in recursive verification:
 - `bus_idx_manager: BusIndexManager`: allocator used when wiring modules.
 - `transcript: TranscriptModule`: handles Fiat–Shamir transcript operations across the entire recursion proof.
 - `proof_shape: ProofShapeModule`: enforces child trace metadata (see `proof_shape_spec.md`).
+- `main_module: MainModule`: validates main-module constraints and participates in tracegen orchestration.
 - `gkr: GkrModule`: verifies the GKR proof emitted by the child STARK (see `docs/gkr_air_spec.md`).
-- `batch_constraint: BatchConstraintModule`: enforces batched polynomial constraints tying transcript data to concrete
-  AIRs.
 
 ### Trait Implementation Status
 
-- All trait methods (`new`, `commit_child_vk`, `cached_trace_record`, `generate_proving_ctxs`,
-  `AggregationSubCircuit::airs/next_bus_idx`) are currently `unimplemented!()` placeholders because the ZKVM refactor is
-  still in progress. The struct exists so copied modules compile and we can iteratively fill in logic.
+- `VerifierTraceGen` is implemented for CPU: `new`, `commit_child_vk`, `generate_proving_ctxs`, and
+  `generate_proving_ctxs_base` are active.
+- `AggregationSubCircuit` methods `airs`, `bus_inventory`, `next_bus_idx`, and `max_num_proofs` are active.
+- Remaining placeholders are bridge converters in `src/system/types.rs` (`convert_proof_from_zkvm`,
+  `convert_vk_from_zkvm`) and selected module internals that are intentionally stubbed while wiring stabilizes.
 
 ## AggregationSubCircuit Impl
 
-- `airs()` will eventually return a vector of `AirRef`s covering the transcript module, proof-shape submodule,
-  batch-constraint module, and GKR submodule. Keeping the method stubbed allows the rest of the crate to reference it
-  while we port logic.
-- `bus_inventory()` already returns a reference to the internal inventory so upstream orchestration code can inspect bus
-  handles.
-- `next_bus_idx()` will source fresh bus IDs via `BusIndexManager`; currently stubbed.
-- `max_num_proofs()` is functional and returns the const generic bound used by aggregation provers.
+- `airs()` returns a full list of `AirRef`s from transcript, proof-shape, main, GKR, plus power-checker and
+  exp-bits-len AIRs.
+- `bus_inventory()` returns a reference to the internal inventory so orchestration code can inspect bus handles.
+- `next_bus_idx()` returns the current allocator cursor via `BusIndexManager`.
+- `max_num_proofs()` returns the const generic bound used by aggregation provers.
 
 ## How Modules Fit Together
 
 1. **TranscriptModule** absorbs all Fiat–Shamir sampling/observations (PoW, alpha, lambda, mu, sumcheck evaluations).
    Other modules refer to transcript locations via shared tidx counters.
-2. **ProofShapeModule** reads the child proof metadata and emits bus messages for GKR and batch-constraint modules (
+2. **ProofShapeModule** reads the child proof metadata and emits bus messages for downstream modules (
    height summaries, cached commitments, public values, etc.).
-3. **GkrModule** consumes those messages plus the child GKR proof to verify the folding of claims (see separate spec).
-4. **BatchConstraintModule** checks algebraic constraints across all AIRs (e.g., Poseidon compression tables, sumcheck
-   gadgets) using the same buses.
+3. **MainModule** enforces core verifier constraints linked to transcript/proof-shape outputs.
+4. **GkrModule** consumes those messages plus the child GKR proof to verify the folding of claims (see separate spec).
 5. **VerifierSubCircuit** orchestrates these modules: it shares `BusInventory`, ensures every module gets consistent
    handles, and sequences trace generation so transcript state advances consistently.
+
+## Current Semantics Note
+
+- The older system-level implication check relating child trace-height constraints to a
+  `sum(num_interactions * lifted_height) < max_interaction_count` bound is currently commented out in
+  `VerifierSubCircuit::new_with_options`.
+- In the current ProofShape AIR, hyperdim is unsigned (`n = log_height`, `n_sign_bit = 0`) and
+  `AirShapeProperty::NumInteractions` is emitted as `0`.
 
 ## Pending Work / Notes
 
 - ZKVM proof objects now flow through every CPU tracegen module; `VerifierSubCircuit::commit_child_vk` still needs
-  adapters that hash the ZKVM verifying key into the transcript before we can run end-to-end.
+  end-to-end bridge converters (`convert_proof_from_zkvm` / `convert_vk_from_zkvm`) are still pending.
 - Bus wiring currently happens upstream; replicating it locally may require copying additional files if upstream keeps
   types `pub(crate)`.
 - All module constructors should remain aligned with upstream layout to minimize future rebase conflicts; prefer small

@@ -15,10 +15,12 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
 
 ### Key Fields
 
-- `per_air: Vec<AirMetadata>`: records whether each AIR is required, its widths, cached commitments, number of
-  interactions, and the expected read/write/log lookup counts (`num_read_count`, `num_write_count`, `num_logup_count`)
-  used by the GKR module.
-- `l_skip`, `max_interaction_count`, `commit_mult`: parameters derived from the child VK/config.
+- `per_air: Vec<AirMetadata>`: built from `RecursionVk.circuit_vks` in circuit-index order; currently stores
+  `is_required = false`, `num_public_values = instance_openings().len()`, placeholder widths (`main_width = 0`,
+  `cached_widths = vec![0; max_cached]`), and read/write/log lookup counts (`num_read_count`, `num_write_count`,
+  `num_logup_count`) used by the GKR checks.
+- Cached/commit parameters are currently fixed in `ProofShapeModule::new`: `min_cached_idx = 0`, `max_cached = 2`,
+  `commit_mult = 100`.
 - `idx_encoder`: enforces permutation ordering between `idx` (VK order) and `sorted_idx` (runtime order).
 - Bus handles: power/range checker, proof-shape permutation, starting tidx, number of public values, GKR module,
   air-shape, expression-claim, fraction-folder, hyperdim lookup, lifted heights, commitments, transcript, n_lift, cached
@@ -26,8 +28,8 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
 
 ### Tracegen Flow
 
-1. Build `ProofShapeChip::<4,8>` (CPU) / GPU equivalent, parameterized by `l_skip`, cached-commit bounds, and
-   range/power checker handles.
+1. Build `ProofShapeChip::<4,8>` (CPU) / GPU equivalent, parameterized by cached-commit bounds and range/power checker
+   handles.
 2. Gather context (`StandardTracegenCtx`) of `(vk, proofs, preflights)` and produce row-major traces for both ProofShape
    and PublicValues airs.
 3. Preflight builder (`Preflight::populate_proof_shape`) collects sorted trace metadata, starting tidx values, cached
@@ -45,10 +47,11 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
 
 | Group                       | Columns                                                                              | Notes                                                                                                         |
 |-----------------------------|--------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Row selectors               | `proof_idx`, `is_valid`, `is_first`, `is_last`, `is_present`, `is_dummy` (implied)   | Manage per-proof iteration and summary row detection.                                                         |
-| Ordering & metadata         | `idx`, `sorted_idx`, `log_height`, `height`, `n_sign_bit`, `need_rot`, `num_present` | Track VK ordering vs runtime order, enforce height monotonicity, rotation requirements.                       |
+| Row selectors               | `proof_idx`, `is_valid`, `is_first`, `is_last`, `is_present`                          | Manage per-proof iteration and summary row detection.                                                         |
+| Ordering & metadata         | `idx`, `sorted_idx`, `log_height`, `height`, `need_rot`, `num_present`                | Track VK ordering vs runtime order, enforce height monotonicity, rotation requirements.                       |
 | Transcript anchors          | `starting_tidx`, `starting_cidx`                                                     | Anchor where per-air transcript reads start; exported via buses.                                              |
-| Interaction counters        | `total_interactions_limbs[NUM_LIMBS]`, `msb_limb_idx`, auxiliary comparison columns  | Accumulate `Σ num_interactions * max(height, 2^l_skip)` and enforce `< max_interaction_count` on summary row. 
+| Height decomposition        | `height_limbs[NUM_LIMBS]`                                                             | Enforce limb decomposition/range checks for `height`.                                                          |
+| Hyperdim summary            | `n_max`, `is_n_max_greater`, `num_air_id_lookups`, `num_columns`                     | Track max `log_height` across present AIRs and auxiliary per-air lookup counts.                               |
 | Cached commit bookkeeping   | `cached_idx_flags`, `cached_idx_value`, `cached_commits`                             | Track how many cached columns exist and their transcript tidx positions.                                      |
 | Bookkeeping for permutation | Encoder-specific subcolumns (idx flags) verifying sorted order.                      
 
@@ -59,16 +62,14 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
 - **Permutation**: `ProofShapePermutationBus` enforces that runtime order (`sorted_idx`) is a permutation of VK order (
   `idx`). `idx_encoder` ensures only one row per column and enforces boolean flags.
 - **Trace heights**: Range checker ensures `log_height` is monotonically non-increasing; when `is_present = 1`,
-  `height = 2^{log_height}`. Hyperdim bus encodes `|log_height - l_skip|` plus sign bit for lifted height computation.
-- **Interaction sum**: Each row adds `num_interactions * lifted_height` into limb accumulators. On the summary row (
-  `is_last`), the limb comparison enforces `< max_interaction_count` via the stored most-significant non-zero limb index
-  and `n_sign_bit`.
+  `height = 2^{log_height}`. Hyperdim bus uses unsigned `n = log_height` (`n_abs = n`, `n_sign_bit = 0`).
 - **Rotation/caching**: Rows with `need_rot = 1` record rotation requirements on `CommitmentsBus` and `CachedCommitBus`.
   `starting_cidx`/`starting_tidx` communicate the first column/ transcript offset for each AIR.
 - **Expression lookups**: `ExpressionClaimNMaxBus`, `FractionFolderInputBus`, and `NLiftBus` mirror the computed
-  `n_logup`, `n_max`, and `lifted_height` metadata so batch constraint and fraction-folder modules can cross-check
+  `n_logup`, `n_max`, and `n_lift = log_height` metadata so batch constraint and fraction-folder modules can cross-check
   expectations. `AirShapeBus` exposes additional per-AIR properties (`NumRead`, `NumWrite`, `NumLk`) so GKR AIRs can
-  enforce that their runtime layer counts match the verifying-key declarations.
+  enforce that their runtime layer counts match the verifying-key declarations. `NumInteractions` is currently emitted as
+  `0` in this AIR.
 
 ### Bus Interactions
 
@@ -85,7 +86,6 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
 
 On the row with `is_last = 1`, additional checks happen:
 
-- Compare `total_interactions` limbs against `max_interaction_count`.
 - Emit final `n_logup/n_max` via `ExpressionClaimNMaxBus` and `NLiftBus`.
 - Update `ProofShapePreflight` fields in the transcript (tracked via tidx) so future recursion layers know where
   ProofShape stopped reading.
@@ -119,9 +119,9 @@ On the row with `is_last = 1`, additional checks happen:
 
 ## Trace Generators
 
-- `ProofShapeChip::<NUM_LIMBS, LIMB_BITS>` (CPU) / `ProofShapeChipGpu` (CUDA) build traces by iterating proofs,
-  computing `sorted_trace_vdata`, and populating the AIR columns; they also write cached commitments and transcript
-  cursors into per-proof scratch space.
+- `ProofShapeChip::<NUM_LIMBS, LIMB_BITS>` (CPU) and module-level tracegen wiring are currently placeholders in this
+  branch, producing zero-filled traces with the requested height while AIR wiring stabilizes.
+- `ProofShapeChipGpu`/CUDA ABI wrappers remain available behind feature gates.
 - `PublicValuesTraceGenerator` walks each proof’s `public_values` arrays, emits `(proof_idx, air_idx, pv_idx)` rows,
   pads to powers of two, and records transcript progression.
 - CUDA ABI wrappers (`cuda_abi.rs`) expose raw tracegen entry points for GPU builds.
@@ -129,6 +129,6 @@ On the row with `is_last = 1`, additional checks happen:
 ## Preflight & Metadata
 
 - `ProofShapePreflight` stores the sorted trace metadata, per-air transcript anchors (`starting_tidx`), cached commit
-  tidx list, and summary scalars (`n_logup`, `n_max`, `l_skip`).
+  tidx list, and summary scalars (`n_logup`, `n_max`).
 - During transcript preflight (`ProofShapeModule::preflight`), the module replays transcript interactions (observing
   cached commitments, sampling challenges) and writes the preflight struct for later modules (e.g., GKR) to consume.
