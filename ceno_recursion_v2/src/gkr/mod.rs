@@ -688,6 +688,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             Ok(blob) => blob,
             Err(err) => {
                 error!(?err, "failed to build GKR trace blob");
+                eprintln!("failed to build GKR trace blob: {err:?}");
                 return None;
             }
         };

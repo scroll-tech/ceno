@@ -130,6 +130,15 @@ enum TraceModuleRef<'a> {
 }
 
 impl<'a> TraceModuleRef<'a> {
+    fn name(self) -> &'static str {
+        match self {
+            TraceModuleRef::Transcript(_) => "Transcript",
+            TraceModuleRef::ProofShape(_) => "ProofShape",
+            TraceModuleRef::Main(_) => "Main",
+            TraceModuleRef::Gkr(_) => "Gkr",
+        }
+    }
+
     #[tracing::instrument(name = "wrapper.run_preflight", level = "trace", skip_all)]
     fn run_preflight<TS>(
         self,
@@ -384,7 +393,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         let (module_required, power_checker_required, exp_bits_len_required) =
             self.split_required_heights(external_data.required_heights);
 
-        let modules = vec![
+        let modules = [
             TraceModuleRef::Transcript(&self.transcript),
             TraceModuleRef::ProofShape(&self.proof_shape),
             TraceModuleRef::Main(&self.main_module),
@@ -408,6 +417,15 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
                 )
             })
             .collect::<Vec<_>>();
+
+        for (module, module_ctxs) in modules.into_iter().zip(ctxs_by_module.iter()) {
+            if module_ctxs.is_none() {
+                eprintln!(
+                    "subcircuit_generate_proving_ctxs: module {} returned None",
+                    module.name()
+                );
+            }
+        }
 
         let ctxs_by_module: Vec<Vec<AirProvingContext<CpuBackend<SC>>>> =
             ctxs_by_module.into_iter().collect::<Option<Vec<_>>>()?;
