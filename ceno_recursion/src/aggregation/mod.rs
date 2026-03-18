@@ -90,6 +90,8 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     16777216, 2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
 
+use std::fs::File;
+
 pub struct CenoAggregationProver {
     pub base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
@@ -290,9 +292,9 @@ impl CenoAggregationProver {
                 .expect("leaf proof generation failed");
 
                 // _debug: export
-                // let file =
-                //     File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
-                // bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
+                let file =
+                    File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
+                bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
 
                 println!(
                     "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}, public values: {:?}",
@@ -425,6 +427,25 @@ impl CenoLeafVmVerifierConfig {
             builder.assign(&stark_pvs.connector.initial_pc, init_pc);
             builder.assign(&stark_pvs.connector.final_pc, end_pc);
             builder.assign(&stark_pvs.connector.exit_code, exit_code);
+            // Internal aggregation asserts connector chaining on this field.
+            builder
+                .if_eq(ceno_leaf_input.is_last, Usize::from(1))
+                .then_or_else(
+                    |builder| {
+                        builder.assign(&stark_pvs.connector.is_terminate, F::ONE);
+                    },
+                    |builder| {
+                        builder.assign(&stark_pvs.connector.is_terminate, F::ZERO);
+                    },
+                );
+
+            // Keep remaining committed PVs deterministic until real memory/public-values
+            // commitments are wired through this custom leaf program.
+            for i in 0..DIGEST_SIZE {
+                builder.assign(&stark_pvs.memory.initial_root[i], F::ZERO);
+                builder.assign(&stark_pvs.memory.final_root[i], F::ZERO);
+                builder.assign(&stark_pvs.public_values_commit[i], F::ZERO);
+            }
 
             // TODO: assign shard_ec_sum to stark_pvs.shard_ec_sum
 
@@ -830,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
@@ -843,7 +864,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need to generate proof first"]
+    // #[ignore = "need to generate proof first"]
     pub fn test_internal_aggregation() {
         let stack_size = 256 * 1024 * 1024;
 
