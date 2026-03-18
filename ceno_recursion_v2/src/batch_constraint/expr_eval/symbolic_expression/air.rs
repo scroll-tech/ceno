@@ -32,7 +32,7 @@ use crate::{
     },
 };
 
-pub const NUM_FLAGS: usize = 4;
+pub const NUM_FLAGS: usize = 5;
 pub const ENCODER_MAX_DEGREE: u32 = 2;
 
 #[derive(Debug, Clone, Copy, EnumIter, EnumCount)]

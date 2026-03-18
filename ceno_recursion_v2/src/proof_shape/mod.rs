@@ -19,8 +19,7 @@ use crate::{
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        RecursionProof, RecursionVk, TraceGenModule, convert_vk_from_zkvm,
-        frame::MultiStarkVkeyFrame,
+        RecursionProof, RecursionVk, TraceGenModule,
     },
     tracegen::RowMajorChip,
 };
@@ -42,7 +41,6 @@ mod cuda_abi;
 pub struct AirMetadata {
     is_required: bool,
     num_public_values: usize,
-    num_interactions: usize,
     main_width: usize,
     cached_widths: Vec<usize>,
     num_read_count: usize,
@@ -55,11 +53,6 @@ pub struct AirMetadata {
 pub struct ProofShapeModule {
     // Verifying key fields
     per_air: Vec<AirMetadata>,
-    l_skip: usize,
-    /// Threshold from the child VK used by [`ProofShapeAir`] on the summary row:
-    /// `sum_i(num_interactions[i] * lifted_height[i]) < max_interaction_count`,
-    /// with `lifted_height[i] = max(trace_height[i], 2^l_skip)`.
-    max_interaction_count: u32,
 
     // Buses (inventory for external, others are internal)
     bus_inventory: BusInventory,
@@ -87,55 +80,19 @@ impl ProofShapeModule {
         bus_inventory: BusInventory,
         continuations_enabled: bool,
     ) -> Self {
-        let openvm_vk = convert_vk_from_zkvm(child_vk);
-        let mvk_frame: MultiStarkVkeyFrame = openvm_vk.as_ref().into();
-        let idx_encoder = Arc::new(Encoder::new(mvk_frame.per_air.len(), 2, true));
+        let num_airs = child_vk.circuit_vks.len();
+        let idx_encoder = Arc::new(Encoder::new(num_airs, 2, true));
 
-        let rwlk_counts = extract_rwlk_counts(child_vk, mvk_frame.per_air.len());
+        let min_cached_idx = 0;
+        let _min_cached = 1;
+        let max_cached = 2;
 
-        let (min_cached_idx, min_cached) = mvk_frame
-            .per_air
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, avk)| avk.params.width.cached_mains.len())
-            .map(|(idx, avk)| (idx, avk.params.width.cached_mains.len()))
-            .unwrap();
-        let mut max_cached = mvk_frame
-            .per_air
-            .iter()
-            .map(|avk| avk.params.width.cached_mains.len())
-            .max()
-            .unwrap();
-        if min_cached == max_cached {
-            max_cached += 1;
-        }
-
-        let per_air = mvk_frame
-            .per_air
-            .iter()
-            .zip(rwlk_counts.into_iter())
-            .map(
-                |(avk, (num_read_count, num_write_count, num_logup_count))| AirMetadata {
-                    is_required: avk.is_required,
-                    num_public_values: avk.params.num_public_values,
-                    num_interactions: avk.num_interactions,
-                    main_width: avk.params.width.common_main,
-                    cached_widths: avk.params.width.cached_mains.clone(),
-                    num_read_count,
-                    num_write_count,
-                    num_logup_count,
-                    preprocessed_width: avk.params.width.preprocessed,
-                    preprocessed_data: avk.preprocessed_data.clone(),
-                },
-            )
-            .collect_vec();
+        let per_air = extract_air_metadata_from_vk(child_vk, max_cached);
 
         let range_bus = bus_inventory.range_checker_bus;
         let pow_bus = bus_inventory.power_checker_bus;
         Self {
             per_air,
-            l_skip: mvk_frame.params.l_skip,
-            max_interaction_count: mvk_frame.params.logup.max_interaction_count,
             bus_inventory,
             range_bus,
             pow_bus,
@@ -145,7 +102,7 @@ impl ProofShapeModule {
             idx_encoder,
             min_cached_idx,
             max_cached,
-            commit_mult: mvk_frame.params.whir.rounds.first().unwrap().num_queries,
+            commit_mult: 100,
             continuations_enabled,
         }
     }
@@ -184,6 +141,35 @@ fn extract_rwlk_counts(child_vk: &RecursionVk, expected_len: usize) -> Vec<(usiz
         .collect()
 }
 
+fn extract_air_metadata_from_vk(child_vk: &RecursionVk, max_cached: usize) -> Vec<AirMetadata> {
+    let rwlk_counts = extract_rwlk_counts(child_vk, child_vk.circuit_vks.len());
+    (0..child_vk.circuit_vks.len())
+        .map(|idx| {
+            let (num_read_count, num_write_count, num_logup_count) =
+                rwlk_counts.get(idx).copied().unwrap_or((0, 0, 0));
+
+            let num_public_values = child_vk
+                .circuit_index_to_name
+                .get(&idx)
+                .and_then(|name| child_vk.circuit_vks.get(name))
+                .map(|circuit_vk| circuit_vk.get_cs().instance_openings().len())
+                .unwrap_or(0);
+
+            AirMetadata {
+                is_required: false,
+                num_public_values,
+                main_width: 0,
+                cached_widths: vec![0; max_cached],
+                num_read_count,
+                num_write_count,
+                num_logup_count,
+                preprocessed_width: None,
+                preprocessed_data: None,
+            }
+        })
+        .collect_vec()
+}
+
 impl AirModule for ProofShapeModule {
     fn num_airs(&self) -> usize {
         3
@@ -192,11 +178,9 @@ impl AirModule for ProofShapeModule {
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
         let proof_shape_air = ProofShapeAir::<4, 8> {
             per_air: self.per_air.clone(),
-            l_skip: self.l_skip,
             min_cached_idx: self.min_cached_idx,
             max_cached: self.max_cached,
             commit_mult: self.commit_mult,
-            max_interaction_count: self.max_interaction_count,
             idx_encoder: self.idx_encoder.clone(),
             range_bus: self.range_bus,
             pow_bus: self.pow_bus,
@@ -281,12 +265,6 @@ fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
 enum ProofShapeModuleChip {
     ProofShape(proof_shape::ProofShapeChip<4, 8>),
     PublicValues,
-}
-
-impl ProofShapeModuleChip {
-    fn index(&self) -> usize {
-        ProofShapeModuleChipDiscriminants::from(self) as usize
-    }
 }
 
 impl RowMajorChip<F> for ProofShapeModuleChip {

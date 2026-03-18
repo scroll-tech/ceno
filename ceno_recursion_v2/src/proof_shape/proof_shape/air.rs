@@ -1,17 +1,17 @@
-use std::{array::from_fn, borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, sync::Arc};
 
 use itertools::fold;
 use openvm_circuit_primitives::{
     SubAir,
     encoder::Encoder,
-    utils::{and, not, or, select},
+    utils::{and, not, or},
 };
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
@@ -51,8 +51,6 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     ///
     /// Has a special use on summary row (when `is_last`).
     pub log_height: F,
-    /// When `is_present`, constrained to equal `log_height - l_skip < 0 ? 1 : 0`.
-    pub n_sign_bit: F,
     /// Whether this AIR needs rotation openings.
     pub need_rot: F,
 
@@ -72,25 +70,11 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     // Number of present AIRs so far
     pub num_present: F,
 
-    // The total number of interactions over all traces needs to fit in a single field element,
-    // so we assume that it only requires INTERACTIONS_LIMBS (4) limbs to store.
-    //
-    // To constrain the correctness of n_logup, we ensure that `total_interactions_limbs` has
-    // _exactly_ `CELLS_LIMBS * LIMB_BITS - (l_skip + n_logup)` leading zeroes. We do this by
-    // a) recording the most significant non-zero limb i and b) making sure
-    // total_interaction_limbs[i] * 2^{the number of remaining leading zeroes} is within [0,
-    // 256).
-    //
-    // To constrain that the total number of interactions over all traces is less than the
-    // max interactions set in the vk, we record the most significant limb at which the max
-    // limb decomposition and total_interactions_limbs differ. The difference between those
-    // two limbs is then range checked to be within [1, 256).
-    pub lifted_height_limbs: [F; NUM_LIMBS],
-    pub num_interactions_limbs: [F; NUM_LIMBS],
-    pub total_interactions_limbs: [F; NUM_LIMBS],
+    /// Limb decomposition of `height` used for range/decomposition checks.
+    pub height_limbs: [F; NUM_LIMBS],
 
     /// The maximum hypercube dimension across all present AIR traces, or zero.
-    /// Computed as max(0, n0, n1, ...) where ni = log_height_i - l_skip for each present trace.
+    /// Computed as max(0, n0, n1, ...) where ni = log_height_i for each present trace.
     pub n_max: F,
     pub is_n_max_greater: F,
 
@@ -104,46 +88,16 @@ pub struct ProofShapeVarCols<'a, F> {
     pub cached_commits: &'a [[F; DIGEST_SIZE]], // [[F; DIGEST_SIZE]; MAX_CACHED]
 }
 
-pub struct ProofShapeVarColsMut<'a, F> {
-    pub idx_flags: &'a mut [F],                     // [F; IDX_FLAGS]
-    pub cached_commits: &'a mut [[F; DIGEST_SIZE]], // [[F; DIGEST_SIZE]; MAX_CACHED]
-}
-
 /// AIR for verifying the proof shape (trace heights, widths, commitments) of a child proof
 /// within the recursion circuit.
 ///
-/// ## Trace-height Constraint Enforcement
-///
-/// The verifier must enforce the child VK's linear trace-height constraints.
-///
-/// ```text
-/// total_interactions = sum_i(num_interactions[i] * lifted_height[i])
-/// ```
-///
-/// where `lifted_height[i] = max(trace_height[i], 2^l_skip)`.
-///
-/// This AIR accumulates `total_interactions` across rows and, on the summary (`is_last`) row,
-/// constrains:
-///
-/// ```text
-/// total_interactions < max_interaction_count
-/// ```
-///
-/// The bound is enforced via a limb-decomposed comparison (see `eval` on `is_last`).
-///
-/// [`VerifierSubCircuit::new_with_options`] also asserts at verifier-circuit construction time
-/// that every `LinearConstraint` in the child VK's `trace_height_constraints` is implied by this
-/// bound. Otherwise, construction fails.
+/// The AIR enforces per-AIR shape consistency and forwards metadata to downstream buses.
 pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     // Parameters derived from vk
     pub per_air: Vec<AirMetadata>,
-    pub l_skip: usize,
     pub min_cached_idx: usize,
     pub max_cached: usize,
     pub commit_mult: usize,
-    /// Threshold for the in-circuit summary-row check:
-    /// `sum_i(num_interactions[i] * lifted_height[i]) < max_interaction_count`.
-    pub max_interaction_count: u32,
 
     // Primitives
     pub idx_encoder: Arc<Encoder>,
@@ -288,16 +242,11 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // VK FIELD SELECTION
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let mut num_interactions_per_row = [AB::Expr::ZERO; NUM_LIMBS];
-
         // Select values for TranscriptBus
         let mut is_required = AB::Expr::ZERO;
         let mut is_min_cached = AB::Expr::ZERO;
         let mut has_preprocessed = AB::Expr::ZERO;
         let mut cached_present = vec![AB::Expr::ZERO; self.max_cached];
-
-        // Select values for AirShapeBus
-        let mut num_interactions = AB::Expr::ZERO;
 
         // Select values for LiftedHeightsBus
         let mut main_common_width = AB::Expr::ZERO;
@@ -329,18 +278,6 @@ where
             }
             num_pvs += is_current_air.clone() * AB::F::from_usize(air_data.num_public_values);
 
-            // Select number of interactions for use later in the AIR and constrain that the
-            // num_interactions_per_row limb decomposition is correct.
-            num_interactions +=
-                is_current_air.clone() * AB::F::from_usize(air_data.num_interactions);
-
-            for (i, &limb) in decompose_f::<AB::F, NUM_LIMBS, LIMB_BITS>(air_data.num_interactions)
-                .iter()
-                .enumerate()
-            {
-                num_interactions_per_row[i] += is_current_air.clone() * limb;
-            }
-
             if air_data.is_required {
                 is_required += is_current_air.clone();
                 when_current.assert_one(local.is_present);
@@ -353,9 +290,7 @@ where
             if let Some(preprocessed) = &air_data.preprocessed_data {
                 when_current.assert_eq(
                     local.log_height,
-                    AB::Expr::from_usize(
-                        self.l_skip.wrapping_add_signed(preprocessed.hypercube_dim),
-                    ),
+                    AB::Expr::from_usize(0usize.wrapping_add_signed(preprocessed.hypercube_dim)),
                 );
                 has_preprocessed += is_current_air.clone();
 
@@ -515,7 +450,7 @@ where
             AirShapeBusMessage {
                 sort_idx: local.sorted_idx.into(),
                 property_idx: AirShapeProperty::NumInteractions.to_field(),
-                value: num_interactions,
+                value: AB::Expr::ZERO,
             },
             local.is_present,
         );
@@ -563,11 +498,9 @@ where
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // HYPERDIM (SIGNED N) LOOKUP
+        // HYPERDIM LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let l_skip = AB::F::from_usize(self.l_skip);
-        let n = local.log_height.into() - l_skip;
-        builder.assert_bool(local.n_sign_bit);
+        let n = local.log_height.into();
         builder.assert_bool(local.need_rot);
         builder
             .when(not(local.is_present))
@@ -575,11 +508,8 @@ where
         builder
             .when(not(local.is_present))
             .assert_zero(local.num_columns);
-        let n_abs = select(local.n_sign_bit, -n.clone(), n.clone());
-        // We range check `n_abs` is in `[0, 32)`.
-        // We constrain `n = n_sign_bit ? -n_abs : n_abs` and `n := log_height - l_skip`.
-        // This implies `log_height - l_skip` is in `(-32, 32)` and `n_abs` is its absolute value.
-        // We further use PowerCheckerBus below to range check that `log_height` is in `[0, 32)`.
+        let n_abs = n.clone();
+        // We range check n in [0, 32).
         self.range_bus.lookup_key(
             builder,
             RangeCheckerBusMessage {
@@ -595,7 +525,7 @@ where
             HyperdimBusMessage {
                 sort_idx: local.sorted_idx.into(),
                 n_abs: n_abs.clone(),
-                n_sign_bit: local.n_sign_bit.into(),
+                n_sign_bit: AB::Expr::ZERO,
             },
             local.is_present * (local.num_air_id_lookups + AB::F::ONE),
         );
@@ -603,14 +533,6 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // LIFTED HEIGHTS LOOKUP + STACKING COMMITMENTS
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // lifted_height = max(2^log_height, 2^l_skip)
-        let lifted_height = select(
-            local.n_sign_bit,
-            AB::F::from_usize(1 << self.l_skip),
-            local.height,
-        );
-        let log_lifted_height = not(local.n_sign_bit) * n_abs.clone() + l_skip;
-
         self.pow_bus.lookup_key(
             builder,
             PowerCheckerBusMessage {
@@ -628,8 +550,8 @@ where
                 part_idx: AB::Expr::ZERO,
                 commit_idx: AB::Expr::ZERO,
                 hypercube_dim: n.clone(),
-                lifted_height: lifted_height.clone(),
-                log_lifted_height: log_lifted_height.clone(),
+                lifted_height: local.height.into(),
+                log_lifted_height: local.log_height.into(),
             },
             local.is_present * main_common_width,
         );
@@ -647,8 +569,8 @@ where
                 part_idx: cidx_offset.clone() + AB::F::ONE,
                 commit_idx: cidx_offset.clone() + local.starting_cidx,
                 hypercube_dim: n.clone(),
-                lifted_height: lifted_height.clone(),
-                log_lifted_height: log_lifted_height.clone(),
+                lifted_height: local.height.into(),
+                log_lifted_height: local.log_height.into(),
             },
             local.is_present * preprocessed_stacked_width,
         );
@@ -674,8 +596,8 @@ where
                     part_idx: cidx_offset.clone() + AB::F::ONE,
                     commit_idx: cidx_offset.clone() + local.starting_cidx,
                     hypercube_dim: n.clone(),
-                    lifted_height: lifted_height.clone(),
-                    log_lifted_height: log_lifted_height.clone(),
+                    lifted_height: local.height.into(),
+                    log_lifted_height: local.log_height.into(),
                 },
                 local.is_present * cached_widths[cached_idx].clone(),
             );
@@ -738,90 +660,22 @@ where
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // INTERACTIONS + GKR MESSAGE
+        // HEIGHT + GKR MESSAGE
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // Constrain that height decomposition is correct. Note we constrained the width
-        // decomposition to be correct above.
         builder.when(local.is_valid).assert_eq(
             fold(
-                local.lifted_height_limbs.iter().enumerate(),
+                local.height_limbs.iter().enumerate(),
                 AB::Expr::ZERO,
                 |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
             ),
-            lifted_height,
+            local.height,
         );
 
         for i in 0..NUM_LIMBS {
             self.range_bus.lookup_key(
                 builder,
                 RangeCheckerBusMessage {
-                    value: local.lifted_height_limbs[i].into(),
-                    max_bits: AB::Expr::from_usize(LIMB_BITS),
-                },
-                local.is_valid,
-            );
-        }
-
-        // Constrain that num_interactions = height * num_interactions_per_row
-        let mut carry = vec![AB::Expr::ZERO; NUM_LIMBS * 2];
-        let carry_divide = AB::F::from_u32(1 << LIMB_BITS).inverse();
-
-        for (i, &height_limb) in local.lifted_height_limbs.iter().enumerate() {
-            for (j, interactions_limb) in num_interactions_per_row.iter().enumerate() {
-                carry[i + j] += height_limb * interactions_limb.clone();
-            }
-        }
-
-        for i in 0..2 * NUM_LIMBS {
-            if i != 0 {
-                let prev = carry[i - 1].clone();
-                carry[i] += prev;
-            }
-            carry[i] = AB::Expr::from(carry_divide)
-                * (carry[i].clone()
-                    - if i < NUM_LIMBS {
-                        local.num_interactions_limbs[i].into()
-                    } else {
-                        AB::Expr::ZERO
-                    });
-            if i < NUM_LIMBS - 1 {
-                self.range_bus.lookup_key(
-                    builder,
-                    RangeCheckerBusMessage {
-                        value: carry[i].clone(),
-                        max_bits: AB::Expr::from_usize(LIMB_BITS),
-                    },
-                    local.is_valid,
-                );
-            } else {
-                builder.when(local.is_valid).assert_zero(carry[i].clone());
-            }
-        }
-
-        // Constrain total number of interactions is added correctly. For induction, we must also
-        // constrain that the initial total number of interactions is zero.
-        local.total_interactions_limbs.iter().for_each(|x| {
-            builder.when(local.is_first).assert_zero(*x);
-        });
-
-        for i in 0..NUM_LIMBS {
-            carry[i] = AB::Expr::from(carry_divide)
-                * (local.num_interactions_limbs[i].into() + local.total_interactions_limbs[i]
-                    - next.total_interactions_limbs[i]
-                    + if i > 0 {
-                        carry[i - 1].clone()
-                    } else {
-                        AB::Expr::ZERO
-                    });
-            if i < NUM_LIMBS - 1 {
-                builder.when(local.is_valid).assert_bool(carry[i].clone());
-            } else {
-                builder.when(local.is_valid).assert_zero(carry[i].clone());
-            }
-            self.range_bus.lookup_key(
-                builder,
-                RangeCheckerBusMessage {
-                    value: next.total_interactions_limbs[i].into(),
+                    value: local.height_limbs[i].into(),
                     max_bits: AB::Expr::from_usize(LIMB_BITS),
                 },
                 local.is_valid,
@@ -845,68 +699,11 @@ where
             .when(next.is_last)
             .assert_zero(local.sorted_idx - AB::F::from_usize(self.per_air.len() - 1));
 
-        // Constrain that n_logup is correct, i.e. that there are CELLS_LIMBS * LIMB_BITS - n_logup
-        // leading zeroes in total_interactions_limbs. Because we only do this on the is_last row,
-        // we can reuse several of our columns to save space.
-        //
-        // We mark the most significant non-zero limb of local.total_interactions_limbs using the
-        // non_zero_marker column array defined below, and the remaining number of leading 0 bits
-        // needed within the limb using msb_limb_zero_bits_exp. Column limb_to_range_check is used
-        // to store the value of the most significant limb to range check.
-        let non_zero_marker = local.lifted_height_limbs;
-        let limb_to_range_check = local.height;
-        let msb_limb_zero_bits_exp = local.log_height;
-        let mut prefix = AB::Expr::ZERO;
-        let mut expected_limb_to_range_check = AB::Expr::ZERO;
-        let mut msb_limb_zero_bits = AB::Expr::ZERO;
-
-        for i in (0..NUM_LIMBS).rev() {
-            prefix += non_zero_marker[i].into();
-            expected_limb_to_range_check += local.total_interactions_limbs[i] * non_zero_marker[i];
-            msb_limb_zero_bits += non_zero_marker[i] * AB::F::from_usize((i + 1) * LIMB_BITS);
-
-            builder.when(local.is_last).assert_bool(non_zero_marker[i]);
-            builder
-                .when(not::<AB::Expr>(prefix.clone()) * local.is_last)
-                .assert_zero(local.total_interactions_limbs[i]);
-            builder
-                .when(local.total_interactions_limbs[i] * local.is_last)
-                .assert_one(prefix.clone());
-        }
-
-        builder.when(local.is_last).assert_bool(prefix.clone());
-        builder
-            .when(local.is_last)
-            .assert_eq(limb_to_range_check, expected_limb_to_range_check);
-        msb_limb_zero_bits -= n_logup + prefix * AB::F::from_usize(self.l_skip);
-
-        self.pow_bus.lookup_key(
-            builder,
-            PowerCheckerBusMessage {
-                log: msb_limb_zero_bits,
-                exp: msb_limb_zero_bits_exp.into(),
-            },
-            local.is_last,
-        );
-
-        self.range_bus.lookup_key(
-            builder,
-            RangeCheckerBusMessage {
-                value: limb_to_range_check * msb_limb_zero_bits_exp,
-                max_bits: AB::Expr::from_usize(LIMB_BITS),
-            },
-            local.is_last,
-        );
-
         // Constrain n_max on each row. Also constrain that local.is_n_max_greater is one when
         // n_max is greater than n_logup, and zero otherwise.
         builder
             .when(local.is_first)
-            .assert_eq(local.n_max, not(local.n_sign_bit) * n_abs);
-        builder
-            .when(local.is_first)
-            .when(local.n_sign_bit)
-            .assert_zero(local.n_max);
+            .assert_eq(local.n_max, n_abs.clone());
         builder
             .when(local.is_valid)
             .assert_eq(local.n_max, next.n_max);
@@ -948,8 +745,7 @@ where
             local.proof_idx,
             NLiftMessage {
                 air_idx: local.idx.into(),
-                n_lift: (local.log_height - AB::Expr::from_usize(self.l_skip))
-                    * (AB::Expr::ONE - local.n_sign_bit),
+                n_lift: local.log_height.into(),
             },
             local.is_present,
         );
@@ -963,65 +759,7 @@ where
             },
             local.is_last,
         );
-
-        // Summary-row trace-height bound:
-        //   total_interactions < max_interaction_count
-        // where `total_interactions` is already accumulated in `total_interactions_limbs`.
-        //
-        // `max_interaction_count` is decomposed into limbs. Trace generation sets `diff_marker`
-        // to the most-significant differing limb (one-hot). We range-check:
-        //   selected_delta - 1
-        // where
-        //   selected_delta =
-        //     sum_i(diff_marker[i] * (max_interactions[i] - total_interactions_limbs[i])).
-        // This forces `selected_delta` into [1, 2^LIMB_BITS), proving strict inequality.
-        let diff_marker = local.num_interactions_limbs;
-
-        let max_interactions =
-            decompose_f::<AB::Expr, NUM_LIMBS, LIMB_BITS>(self.max_interaction_count as usize);
-        let mut prefix = AB::Expr::ZERO;
-        let mut diff_val = AB::Expr::ZERO;
-
-        for i in (0..NUM_LIMBS).rev() {
-            prefix += diff_marker[i].into();
-            diff_val += diff_marker[i].into()
-                * (max_interactions[i].clone() - local.total_interactions_limbs[i]);
-
-            builder.when(local.is_last).assert_bool(diff_marker[i]);
-            builder
-                .when(not::<AB::Expr>(prefix.clone()) * local.is_last)
-                .assert_zero(local.total_interactions_limbs[i]);
-            builder
-                .when(local.total_interactions_limbs[i] * local.is_last)
-                .assert_one(prefix.clone());
-        }
-
-        builder.when(local.is_last).assert_one(prefix.clone());
-        self.range_bus.lookup_key(
-            builder,
-            RangeCheckerBusMessage {
-                value: diff_val - AB::Expr::ONE,
-                max_bits: AB::Expr::from_usize(LIMB_BITS),
-            },
-            local.is_last,
-        );
     }
-}
-
-pub(super) fn decompose_f<
-    F: PrimeCharacteristicRing,
-    const LIMBS: usize,
-    const LIMB_BITS: usize,
->(
-    value: usize,
-) -> [F; LIMBS] {
-    from_fn(|i| F::from_usize((value >> (i * LIMB_BITS)) & ((1 << LIMB_BITS) - 1)))
-}
-
-pub(super) fn decompose_usize<const LIMBS: usize, const LIMB_BITS: usize>(
-    value: usize,
-) -> [usize; LIMBS] {
-    from_fn(|i| (value >> (i * LIMB_BITS)) & ((1 << LIMB_BITS) - 1))
 }
 
 pub(super) fn borrow_var_cols<F>(
@@ -1042,26 +780,6 @@ pub(super) fn borrow_var_cols<F>(
 
     ProofShapeVarCols {
         idx_flags: &slice[flags_idx..cached_commits_idx],
-        cached_commits,
-    }
-}
-
-pub(super) fn borrow_var_cols_mut<F>(
-    slice: &mut [F],
-    idx_flags: usize,
-    max_cached: usize,
-) -> ProofShapeVarColsMut<'_, F> {
-    let flags_idx = 0;
-    let cached_commits_idx = flags_idx + idx_flags;
-
-    let cached_commits =
-        &mut slice[cached_commits_idx..cached_commits_idx + max_cached * DIGEST_SIZE];
-    let cached_commits: &mut [[F; DIGEST_SIZE]] = unsafe {
-        std::slice::from_raw_parts_mut(cached_commits.as_ptr() as *mut [F; DIGEST_SIZE], max_cached)
-    };
-
-    ProofShapeVarColsMut {
-        idx_flags: &mut slice[flags_idx..cached_commits_idx],
         cached_commits,
     }
 }
