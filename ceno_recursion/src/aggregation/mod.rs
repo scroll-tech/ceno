@@ -329,6 +329,15 @@ impl CenoAggregationProver {
                 // internal-input chunking/serialization.
                 let leaf_engine = BabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
                 if let Err(gpu_verify_err) = leaf_engine.verify(&self.vk.leaf_vm_vk, &leaf_proof) {
+                    println!(
+                        "{}",
+                        leaf_air_debug_inline_snapshot(
+                            proof_idx,
+                            &leaf_proof,
+                            &expected_leaf_program_commit,
+                            &self.vk.leaf_fri_params,
+                        )
+                    );
                     #[cfg(feature = "gpu")]
                     {
                         // Cross-check with CPU verifier to isolate GPU prover vs GPU verifier issues.
@@ -662,6 +671,60 @@ fn maybe_export_leaf_air_debug_snapshot(
     }
 
     println!("Aggregation - exported leaf AIR debug snapshot: {}", path);
+}
+
+fn leaf_air_debug_inline_snapshot(
+    proof_idx: usize,
+    proof: &Proof<SC>,
+    expected_leaf_program_commit: &Com<SC>,
+    leaf_fri_params: &FriParameters,
+) -> String {
+    let mut s = String::new();
+    let sample = 16usize;
+
+    s.push_str("Aggregation - LEAF AIR INLINE SNAPSHOT START\n");
+    s.push_str(&format!("proof_idx={}\n", proof_idx));
+    s.push_str(&format!("gpu_feature={}\n", cfg!(feature = "gpu")));
+    s.push_str(&format!("leaf_fri_params={:?}\n", leaf_fri_params));
+    s.push_str(&format!(
+        "expected_leaf_program_commit={:?}\n",
+        expected_leaf_program_commit
+    ));
+    s.push_str(&format!(
+        "proof_program_commit={:?}\n",
+        proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref()
+    ));
+    s.push_str(&format!("num_airs={}\n", proof.per_air.len()));
+
+    for (slot, air) in proof.per_air.iter().enumerate() {
+        let head_len = air.public_values.len().min(sample);
+        s.push_str(&format!(
+            "air[{}]: air_id={}, pv_len={}, pv_head({})={:?}\n",
+            slot,
+            air.air_id,
+            air.public_values.len(),
+            head_len,
+            &air.public_values[..head_len]
+        ));
+    }
+
+    if proof.per_air.len() > CONNECTOR_AIR_ID {
+        let connector_air = &proof.per_air[CONNECTOR_AIR_ID];
+        s.push_str(&format!(
+            "connector_air(air_id={})_pv={:?}\n",
+            connector_air.air_id, connector_air.public_values
+        ));
+    }
+    if proof.per_air.len() > PUBLIC_VALUES_AIR_ID {
+        let pv_air = &proof.per_air[PUBLIC_VALUES_AIR_ID];
+        s.push_str(&format!(
+            "public_values_air(air_id={})_pv={:?}\n",
+            pv_air.air_id, pv_air.public_values
+        ));
+    }
+
+    s.push_str("Aggregation - LEAF AIR INLINE SNAPSHOT END");
+    s
 }
 
 /// Config to generate leaf VM verifier program.
