@@ -8,6 +8,8 @@ use ceno_zkvm::{
     structs::ZKVMVerifyingKey,
 };
 use ff_ext::BabyBearExt4;
+#[cfg(feature = "gpu")]
+use gkr_iop::gpu::gpu_prover::{CudaHal as _, get_cuda_hal};
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{
     arch::{
@@ -344,12 +346,35 @@ impl CenoAggregationProver {
                 #[cfg(feature = "gpu")]
                 let witness_stream_for_cpu = witness_stream.clone();
 
+                let leaf_prove_start = Instant::now();
+
                 let leaf_proof = SingleSegmentVmProver::prove(
                     &mut self.leaf_prover,
                     witness_stream,
                     VM_MAX_TRACE_HEIGHTS,
                 )
                 .expect("leaf proof generation failed");
+
+                println!(
+                    "Aggregation - Leaf prove returned (idx: {}) after {:?}",
+                    proof_idx,
+                    leaf_prove_start.elapsed()
+                );
+
+                #[cfg(feature = "gpu")]
+                {
+                    let sync_start = Instant::now();
+                    let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL for leaf sync");
+                    cuda_hal
+                        .inner()
+                        .synchronize()
+                        .expect("CUDA synchronize failed after leaf proof generation");
+                    println!(
+                        "Aggregation - Leaf GPU synchronize complete (idx: {}) after {:?}",
+                        proof_idx,
+                        sync_start.elapsed()
+                    );
+                }
 
                 println!(
                     "Aggregation - Leaf proof program commit (idx: {:?}): {:?}",
