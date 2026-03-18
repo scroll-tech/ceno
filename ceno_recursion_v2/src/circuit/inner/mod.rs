@@ -11,6 +11,9 @@ pub mod app {
     };
 }
 
+pub mod verifier;
+pub mod vm_pvs;
+
 mod trace;
 pub use trace::*;
 

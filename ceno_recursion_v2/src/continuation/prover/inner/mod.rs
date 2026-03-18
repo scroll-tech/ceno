@@ -11,11 +11,9 @@ use openvm_stark_backend::{
     proof::Proof,
     prover::{CommittedTraceData, DeviceMultiStarkProvingKey, ProverBackend, ProvingContext},
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    DIGEST_SIZE, Digest, EF, F, default_duplex_sponge_recorder,
-};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{Digest, EF, F, default_duplex_sponge_recorder};
 use p3_field::PrimeCharacteristicRing;
-use verify_stark::pvs::{DagCommit, DeferralPvs};
+use verify_stark::pvs::DeferralPvs;
 
 use crate::system::{
     AggregationSubCircuit, RecursionField, RecursionVk, VerifierConfig, VerifierExternalData,
@@ -185,27 +183,17 @@ where
             _ => (&self.child_vk, self.child_vk_pcs_data.clone()),
         };
         let child_is_app = matches!(child_vk_kind, ChildVkKind::App);
-        let child_dag_commit = DagCommit {
-            cached_commit: child_vk_pcs_data.commitment,
-            vk_pre_hash: [F::ZERO; DIGEST_SIZE],
-        };
 
-        // TODO unlock pre-context for internal to work
-        // let SubCircuitTraceData {
-        //     air_proving_ctxs,
-        //     poseidon2_compress_inputs,
-        //     poseidon2_permute_inputs,
-        // } = self
-        //     .agg_node_tracegen
-        //     .generate_pre_verifier_subcircuit_ctxs(
-        //         &vm_proofs,
-        //         proofs_type,
-        //         absent_trace_pvs,
-        //         child_is_app,
-        //         child_dag_commit,
-        //     );
+        let (pre_ctxs, poseidon2_compress_inputs) = self
+            .agg_node_tracegen
+            .generate_pre_verifier_subcircuit_ctxs(
+                proofs,
+                proofs_type,
+                absent_trace_pvs,
+                child_is_app,
+                child_vk_pcs_data.commitment,
+            );
 
-        let poseidon2_compress_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
         let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
         let range_check_inputs = vec![];
         let mut external_data = VerifierExternalData {
@@ -228,17 +216,17 @@ where
             )
             .expect("verifier sub-circuit ctx generation");
 
-        // TODO unlock post-context for internal to work
-        // let post_ctxs = self
-        //     .agg_node_tracegen
-        //     .generate_post_verifier_subcircuit_ctxs(&vm_proofs, proofs_type, child_is_app);
+        let post_ctxs = self
+            .agg_node_tracegen
+            .generate_post_verifier_subcircuit_ctxs(proofs, proofs_type, child_is_app);
 
         ProvingContext {
-            // per_trace: air_proving_ctxs
-            //     .into_iter()
-            //     .chain(subcircuit_ctxs)
-            //     .chain(post_ctxs)
-            per_trace: subcircuit_ctxs.into_iter().enumerate().collect(),
+            per_trace: pre_ctxs
+                .into_iter()
+                .chain(subcircuit_ctxs)
+                .chain(post_ctxs)
+                .enumerate()
+                .collect(),
         }
     }
 
