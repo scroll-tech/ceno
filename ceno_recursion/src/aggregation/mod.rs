@@ -26,6 +26,10 @@ use openvm_continuations::{
         internal::types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
     },
 };
+#[cfg(feature = "gpu")]
+use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
+#[cfg(feature = "gpu")]
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine as CpuBabyBearPoseidon2Engine;
 use openvm_native_circuit::{NativeBuilder, NativeConfig};
 use openvm_native_compiler::{
     asm::AsmBuilder,
@@ -43,10 +47,11 @@ use openvm_stark_backend::{
     config::{Com, StarkGenericConfig},
     engine::StarkEngine,
 };
+#[cfg(not(feature = "gpu"))]
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
 use openvm_stark_sdk::{
     config::{
-        FriParameters,
-        baby_bear_poseidon2::{BabyBearPoseidon2Config, BabyBearPoseidon2Engine},
+        FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Config,
         fri_params::standard_fri_params_with_100_bits_conjectured_security,
     },
     engine::StarkFriEngine,
@@ -55,7 +60,7 @@ use openvm_stark_sdk::{
 };
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, sync::Arc, time::Instant};
+use std::{borrow::Borrow, io::Write, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use openvm_circuit::{
     arch::{
@@ -255,6 +260,7 @@ impl CenoAggregationProver {
         base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
     ) -> VmStarkProof<SC> {
         let aggregation_start_timestamp = Instant::now();
+        let expected_leaf_program_commit = self.pk.leaf_committed_exe.get_program_commit();
 
         println!(
             "Aggregation - Config fingerprint: gpu_feature={}, num_children_internal={}",
@@ -263,7 +269,7 @@ impl CenoAggregationProver {
         );
         println!(
             "Aggregation - Program commits: leaf={:?}, internal={:?}",
-            self.pk.leaf_committed_exe.get_program_commit(),
+            expected_leaf_program_commit,
             self.pk.internal_committed_exe.get_program_commit()
         );
         println!(
@@ -310,18 +316,43 @@ impl CenoAggregationProver {
                     leaf_proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref()
                 );
 
+                maybe_log_leaf_air_summary(proof_idx, &leaf_proof);
+                maybe_export_leaf_air_debug_snapshot(
+                    proof_idx,
+                    &leaf_proof,
+                    &expected_leaf_program_commit,
+                    &self.vk.leaf_fri_params,
+                );
+
                 // Debug safety net: catch invalid leaf proofs at generation time.
                 // If this fails, the issue is in proving (or backend), not in
                 // internal-input chunking/serialization.
                 let leaf_engine = BabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
-                leaf_engine
-                    .verify(&self.vk.leaf_vm_vk, &leaf_proof)
-                    .unwrap_or_else(|err| {
+                if let Err(gpu_verify_err) = leaf_engine.verify(&self.vk.leaf_vm_vk, &leaf_proof) {
+                    #[cfg(feature = "gpu")]
+                    {
+                        // Cross-check with CPU verifier to isolate GPU prover vs GPU verifier issues.
+                        let cpu_engine = CpuBabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
+                        let cpu_verify_res = cpu_engine.verify(&self.vk.leaf_vm_vk, &leaf_proof);
+                        maybe_export_leaf_air_debug_snapshot(
+                            proof_idx,
+                            &leaf_proof,
+                            &expected_leaf_program_commit,
+                            &self.vk.leaf_fri_params,
+                        );
+                        panic!(
+                            "leaf proof generation produced invalid proof at idx {}: gpu_verify={:?}, cpu_verify={:?}",
+                            proof_idx, gpu_verify_err, cpu_verify_res
+                        );
+                    }
+                    #[cfg(not(feature = "gpu"))]
+                    {
                         panic!(
                             "leaf proof generation produced invalid proof at idx {}: {:?}",
-                            proof_idx, err
-                        )
-                    });
+                            proof_idx, gpu_verify_err
+                        );
+                    }
+                }
 
                 // _debug: export
                 let file =
@@ -520,6 +551,117 @@ impl CenoAggregationProver {
             }
         }
     }
+}
+
+fn env_flag_default_off(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn maybe_log_leaf_air_summary(proof_idx: usize, proof: &Proof<SC>) {
+    println!(
+        "Aggregation - Leaf AIR summary (idx: {}): num_airs={}",
+        proof_idx,
+        proof.per_air.len()
+    );
+    for (slot, air) in proof.per_air.iter().enumerate() {
+        println!(
+            "Aggregation -   air slot {} -> air_id={}, pv_len={}",
+            slot,
+            air.air_id,
+            air.public_values.len()
+        );
+    }
+}
+
+fn maybe_export_leaf_air_debug_snapshot(
+    proof_idx: usize,
+    proof: &Proof<SC>,
+    expected_leaf_program_commit: &Com<SC>,
+    leaf_fri_params: &FriParameters,
+) {
+    let export_dir = std::env::var("CENO_LEAF_AIR_DEBUG_DIR")
+        .unwrap_or_else(|_| "leaf_air_debug".to_string());
+    if let Err(err) = std::fs::create_dir_all(&export_dir) {
+        eprintln!(
+            "Aggregation - failed to create leaf AIR debug dir '{}': {:?}",
+            export_dir, err
+        );
+        return;
+    }
+
+    let path = format!("{}/leaf_air_debug_{:03}.txt", export_dir, proof_idx);
+    let mut file = match std::fs::File::create(&path) {
+        Ok(f) => f,
+        Err(err) => {
+            eprintln!(
+                "Aggregation - failed to create leaf AIR debug file '{}': {:?}",
+                path, err
+            );
+            return;
+        }
+    };
+
+    let _ = writeln!(file, "gpu_feature={}", cfg!(feature = "gpu"));
+    let _ = writeln!(file, "proof_idx={}", proof_idx);
+    let _ = writeln!(file, "leaf_fri_params={:?}", leaf_fri_params);
+    let _ = writeln!(
+        file,
+        "expected_leaf_program_commit={:?}",
+        expected_leaf_program_commit
+    );
+    let _ = writeln!(
+        file,
+        "proof_program_commit={:?}",
+        proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref()
+    );
+    let _ = writeln!(file, "num_airs={}", proof.per_air.len());
+
+    let full_pv = env_flag_default_off("CENO_LEAF_AIR_DEBUG_FULL_PV");
+    let sample = 16usize;
+    for (slot, air) in proof.per_air.iter().enumerate() {
+        let _ = writeln!(
+            file,
+            "air[{}]: air_id={}, pv_len={}",
+            slot,
+            air.air_id,
+            air.public_values.len()
+        );
+        if full_pv {
+            let _ = writeln!(file, "air[{}].pv={:?}", slot, air.public_values);
+        } else {
+            let head_len = air.public_values.len().min(sample);
+            let _ = writeln!(
+                file,
+                "air[{}].pv_head({})={:?}",
+                slot,
+                head_len,
+                &air.public_values[..head_len]
+            );
+        }
+    }
+
+    if proof.per_air.len() > CONNECTOR_AIR_ID {
+        let connector_air = &proof.per_air[CONNECTOR_AIR_ID];
+        let _ = writeln!(
+            file,
+            "connector_air(air_id={})_pv={:?}",
+            connector_air.air_id,
+            connector_air.public_values
+        );
+    }
+    if proof.per_air.len() > PUBLIC_VALUES_AIR_ID {
+        let pv_air = &proof.per_air[PUBLIC_VALUES_AIR_ID];
+        let _ = writeln!(
+            file,
+            "public_values_air(air_id={})_pv={:?}",
+            pv_air.air_id,
+            pv_air.public_values
+        );
+    }
+
+    println!("Aggregation - exported leaf AIR debug snapshot: {}", path);
 }
 
 /// Config to generate leaf VM verifier program.
