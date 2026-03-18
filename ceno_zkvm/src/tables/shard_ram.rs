@@ -692,7 +692,9 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
         let num_rows_padded = 2 * n;
 
         // 1. Convert ShardRamInput → GpuShardRamRecord
-        let gpu_records: Vec<GpuShardRamRecord> = steps
+        let gpu_records: Vec<GpuShardRamRecord> = tracing::info_span!(
+            "gpu_shard_ram_pack_records", n = steps.len()
+        ).in_scope(|| steps
             .iter()
             .map(|step| {
                 let r = &step.record;
@@ -715,7 +717,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
                 }
                 rec
             })
-            .collect();
+            .collect());
 
         // 2. Extract column map
         let col_map = crate::instructions::riscv::gpu::shard_ram::extract_shard_ram_column_map(
@@ -723,7 +725,12 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
         );
 
         // 3. GPU Phase 1: per-row assignment
-        let (gpu_witness, gpu_structural) = hal
+        let (gpu_witness, gpu_structural) = tracing::info_span!(
+            "gpu_shard_ram_per_row",
+            n = steps.len(),
+            num_rows_padded,
+            num_witin,
+        ).in_scope(|| hal
             .witgen_shard_ram_per_row(
                 &col_map,
                 &gpu_records,
@@ -737,139 +744,151 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
                 ZKVMError::InvalidWitness(
                     format!("GPU shard_ram per-row kernel failed: {e}").into(),
                 )
-            })?;
+            }))?;
 
         // 4. GPU Phase 2: EC binary tree
-        let col_offsets = col_map.to_flat();
-        let gpu_cols = hal.alloc_u32_from_host(&col_offsets, None).map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU alloc col offsets failed: {e}").into())
-        })?;
+        let witness_buf = tracing::info_span!(
+            "gpu_shard_ram_ec_tree", n
+        ).in_scope(|| -> Result<_, ZKVMError> {
+            let col_offsets = col_map.to_flat();
+            let gpu_cols = hal.alloc_u32_from_host(&col_offsets, None).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU alloc col offsets failed: {e}").into())
+            })?;
 
-        // Build initial layer points (padded to n) using BB (BabyBear) directly
-        let mut init_x = vec![BB::ZERO; n * 7];
-        let mut init_y = vec![BB::ZERO; n * 7];
-        for (i, step) in steps.iter().enumerate() {
-            for j in 0..7 {
-                // E::BaseField == BB at runtime (checked above), safe to transmute
-                init_x[i * 7 + j] =
-                    unsafe { *(&step.ec_point.point.x.0[j] as *const E::BaseField as *const BB) };
-                init_y[i * 7 + j] =
-                    unsafe { *(&step.ec_point.point.y.0[j] as *const E::BaseField as *const BB) };
-            }
-        }
-
-        let mut cur_x = hal.alloc_elems_from_host(&init_x, None).map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU alloc init_x failed: {e}").into())
-        })?;
-        let mut cur_y = hal.alloc_elems_from_host(&init_y, None).map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU alloc init_y failed: {e}").into())
-        })?;
-
-        let mut witness_buf = gpu_witness.device_buffer;
-        let mut offset = num_rows_padded / 2; // n
-        let mut current_layer_len = n;
-
-        loop {
-            if current_layer_len <= 1 {
-                break;
+            // Build initial layer points (padded to n) using BB (BabyBear) directly
+            let mut init_x = vec![BB::ZERO; n * 7];
+            let mut init_y = vec![BB::ZERO; n * 7];
+            for (i, step) in steps.iter().enumerate() {
+                for j in 0..7 {
+                    // E::BaseField == BB at runtime (checked above), safe to transmute
+                    init_x[i * 7 + j] =
+                        unsafe { *(&step.ec_point.point.x.0[j] as *const E::BaseField as *const BB) };
+                    init_y[i * 7 + j] =
+                        unsafe { *(&step.ec_point.point.y.0[j] as *const E::BaseField as *const BB) };
+                }
             }
 
-            let (next_x, next_y) = hal
-                .shard_ram_ec_tree_layer(
-                    &gpu_cols,
-                    &cur_x,
-                    &cur_y,
-                    &mut witness_buf,
-                    current_layer_len,
-                    offset,
-                    num_rows_padded,
-                    None,
-                )
-                .map_err(|e| {
-                    ZKVMError::InvalidWitness(
-                        format!("GPU EC tree layer failed: {e}").into(),
+            let mut cur_x = hal.alloc_elems_from_host(&init_x, None).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU alloc init_x failed: {e}").into())
+            })?;
+            let mut cur_y = hal.alloc_elems_from_host(&init_y, None).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU alloc init_y failed: {e}").into())
+            })?;
+
+            let mut witness_buf = gpu_witness.device_buffer;
+            let mut offset = num_rows_padded / 2; // n
+            let mut current_layer_len = n;
+
+            loop {
+                if current_layer_len <= 1 {
+                    break;
+                }
+
+                let (next_x, next_y) = hal
+                    .shard_ram_ec_tree_layer(
+                        &gpu_cols,
+                        &cur_x,
+                        &cur_y,
+                        &mut witness_buf,
+                        current_layer_len,
+                        offset,
+                        num_rows_padded,
+                        None,
                     )
-                })?;
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(
+                            format!("GPU EC tree layer failed: {e}").into(),
+                        )
+                    })?;
 
-            current_layer_len /= 2;
-            offset += current_layer_len;
-            cur_x = next_x;
-            cur_y = next_y;
-        }
+                current_layer_len /= 2;
+                offset += current_layer_len;
+                cur_x = next_x;
+                cur_y = next_y;
+            }
+
+            Ok(witness_buf)
+        })?;
 
         // 5. GPU transpose: column-major → row-major + D2H
-        let wit_num_rows = num_rows_padded;
-        let wit_num_cols = num_witin;
-        let mut rmm_buf = hal
-            .alloc_elems_on_device(wit_num_rows * wit_num_cols, false, None)
-            .map_err(|e| {
-                ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
-            })?;
-        matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
-            &hal.inner,
-            &mut rmm_buf,
-            &witness_buf,
-            wit_num_rows,
-            wit_num_cols,
-        )
-        .map_err(|e| ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into()))?;
-
-        let gpu_wit_data: Vec<BB> = rmm_buf.to_vec().map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU D2H wit failed: {e}").into())
-        })?;
-        let wit_data: Vec<E::BaseField> = unsafe {
-            let mut data = std::mem::ManuallyDrop::new(gpu_wit_data);
-            Vec::from_raw_parts(
-                data.as_mut_ptr() as *mut E::BaseField,
-                data.len(),
-                data.capacity(),
+        let (wit_data, struct_data) = tracing::info_span!(
+            "gpu_shard_ram_transpose_d2h", num_rows_padded, num_witin,
+        ).in_scope(|| -> Result<_, ZKVMError> {
+            let wit_num_rows = num_rows_padded;
+            let wit_num_cols = num_witin;
+            let mut rmm_buf = hal
+                .alloc_elems_on_device(wit_num_rows * wit_num_cols, false, None)
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
+                })?;
+            matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+                &hal.inner,
+                &mut rmm_buf,
+                &witness_buf,
+                wit_num_rows,
+                wit_num_cols,
             )
-        };
+            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into()))?;
 
-        let struct_num_cols = num_structural_witin;
-        let mut struct_rmm_buf = hal
-            .alloc_elems_on_device(wit_num_rows * struct_num_cols, false, None)
-            .map_err(|e| {
-                ZKVMError::InvalidWitness(
-                    format!("GPU alloc for struct transpose failed: {e}").into(),
+            let gpu_wit_data: Vec<BB> = rmm_buf.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU D2H wit failed: {e}").into())
+            })?;
+            let wit_data: Vec<E::BaseField> = unsafe {
+                let mut data = std::mem::ManuallyDrop::new(gpu_wit_data);
+                Vec::from_raw_parts(
+                    data.as_mut_ptr() as *mut E::BaseField,
+                    data.len(),
+                    data.capacity(),
                 )
-            })?;
-        matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
-            &hal.inner,
-            &mut struct_rmm_buf,
-            &gpu_structural.device_buffer,
-            wit_num_rows,
-            struct_num_cols,
-        )
-        .map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU struct transpose failed: {e}").into())
-        })?;
+            };
 
-        let gpu_struct_data: Vec<BB> = struct_rmm_buf.to_vec().map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU D2H struct failed: {e}").into())
-        })?;
-        let struct_data: Vec<E::BaseField> = unsafe {
-            let mut data = std::mem::ManuallyDrop::new(gpu_struct_data);
-            Vec::from_raw_parts(
-                data.as_mut_ptr() as *mut E::BaseField,
-                data.len(),
-                data.capacity(),
+            let struct_num_cols = num_structural_witin;
+            let mut struct_rmm_buf = hal
+                .alloc_elems_on_device(wit_num_rows * struct_num_cols, false, None)
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(
+                        format!("GPU alloc for struct transpose failed: {e}").into(),
+                    )
+                })?;
+            matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+                &hal.inner,
+                &mut struct_rmm_buf,
+                &gpu_structural.device_buffer,
+                wit_num_rows,
+                struct_num_cols,
             )
-        };
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU struct transpose failed: {e}").into())
+            })?;
+
+            let gpu_struct_data: Vec<BB> = struct_rmm_buf.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU D2H struct failed: {e}").into())
+            })?;
+            let struct_data: Vec<E::BaseField> = unsafe {
+                let mut data = std::mem::ManuallyDrop::new(gpu_struct_data);
+                Vec::from_raw_parts(
+                    data.as_mut_ptr() as *mut E::BaseField,
+                    data.len(),
+                    data.capacity(),
+                )
+            };
+
+            Ok((wit_data, struct_data))
+        })?;
 
         let raw_witin = witness::RowMajorMatrix::new_by_values(
             wit_data,
-            wit_num_cols,
+            num_witin,
             InstancePaddingStrategy::Default,
         );
         let raw_structural_witin = witness::RowMajorMatrix::new_by_values(
             struct_data,
-            struct_num_cols,
+            num_structural_witin,
             InstancePaddingStrategy::Default,
         );
 
-        tracing::debug!(
-            "GPU shard_ram assign_instances: {} records, {} padded rows",
+        tracing::info!(
+            "GPU shard_ram assign_instances done: {} records, {} padded rows",
             steps.len(),
             num_rows_padded
         );
