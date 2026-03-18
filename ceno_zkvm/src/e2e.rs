@@ -1507,6 +1507,15 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     )
             }).unwrap();
 
+            // Flush shared EC/addr buffers from GPU after all opcode circuits are done.
+            // This batch-D2Hs accumulated EC records and addr_accessed into shard_ctx.
+            #[cfg(feature = "gpu")]
+            info_span!("flush_shared_ec").in_scope(|| {
+                crate::instructions::riscv::gpu::witgen_gpu::flush_shared_ec_buffers(
+                    &mut shard_ctx,
+                )
+            }).unwrap();
+
             // Free GPU shard_steps cache after all opcode circuits are done.
             #[cfg(feature = "gpu")]
             {

@@ -173,6 +173,14 @@ pub fn invalidate_shard_steps_cache() {
 struct ShardMetadataCache {
     shard_id: usize,
     device_bufs: ShardDeviceBuffers,
+    /// Shared EC record buffer (owns the GPU memory, pointer stored in device_bufs).
+    shared_ec_buf: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
+    /// Shared EC record count buffer (single u32 counter).
+    shared_ec_count: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
+    /// Shared addr_accessed buffer (u32 word addresses).
+    shared_addr_buf: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
+    /// Shared addr_accessed count buffer (single u32 counter).
+    shared_addr_count: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
 }
 
 thread_local! {
@@ -188,6 +196,7 @@ thread_local! {
 fn ensure_shard_metadata_cached(
     hal: &CudaHalBB31,
     shard_ctx: &ShardContext,
+    n_total_steps: usize,
 ) -> Result<(), ZKVMError> {
     let shard_id = shard_ctx.shard_id;
     SHARD_META_CACHE.with(|cache| {
@@ -208,6 +217,10 @@ fn ensure_shard_metadata_cached(
                 prev_shard_heap_range: _,
                 prev_shard_hint_range: _,
                 gpu_ec_shard_id: _,
+                shared_ec_out_ptr: _,
+                shared_ec_count_ptr: _,
+                shared_addr_out_ptr: _,
+                shared_addr_count_ptr: _,
             } = c.device_bufs;
             next_access_packed
         });
@@ -308,6 +321,42 @@ fn ensure_shard_metadata_cached(
             shard_id,
         );
 
+        // Allocate shared EC/addr compact buffers for this shard.
+        // Each step produces up to 3 EC records and 3 addr_accessed entries.
+        // These buffers persist across all kernel invocations within the shard.
+        let ec_capacity = n_total_steps * 4; // extra headroom
+        let ec_u32s = ec_capacity * 26; // 26 u32s per GpuShardRamRecord (104 bytes)
+        let addr_capacity = n_total_steps * 4;
+
+        let shared_ec_buf = hal
+            .alloc_u32_zeroed(ec_u32s, None)
+            .map_err(|e| ZKVMError::InvalidWitness(format!("shared_ec_buf alloc: {e}").into()))?;
+        let shared_ec_count = hal
+            .alloc_u32_zeroed(1, None)
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("shared_ec_count alloc: {e}").into())
+            })?;
+        let shared_addr_buf = hal
+            .alloc_u32_zeroed(addr_capacity, None)
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("shared_addr_buf alloc: {e}").into())
+            })?;
+        let shared_addr_count = hal
+            .alloc_u32_zeroed(1, None)
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("shared_addr_count alloc: {e}").into())
+            })?;
+
+        let shared_ec_out_ptr = shared_ec_buf.device_ptr() as u64;
+        let shared_ec_count_ptr = shared_ec_count.device_ptr() as u64;
+        let shared_addr_out_ptr = shared_addr_buf.device_ptr() as u64;
+        let shared_addr_count_ptr = shared_addr_count.device_ptr() as u64;
+
+        tracing::info!(
+            "[GPU shard] shard_id={}: shared buffers allocated: ec_capacity={}, addr_capacity={}",
+            shard_id, ec_capacity, addr_capacity,
+        );
+
         *cache = Some(ShardMetadataCache {
             shard_id,
             device_bufs: ShardDeviceBuffers {
@@ -317,7 +366,15 @@ fn ensure_shard_metadata_cached(
                 prev_shard_heap_range: pshr_device,
                 prev_shard_hint_range: pshi_device,
                 gpu_ec_shard_id: Some(shard_id as u64),
+                shared_ec_out_ptr,
+                shared_ec_count_ptr,
+                shared_addr_out_ptr,
+                shared_addr_count_ptr,
             },
+            shared_ec_buf: Some(shared_ec_buf),
+            shared_ec_count: Some(shared_ec_count),
+            shared_addr_buf: Some(shared_addr_buf),
+            shared_addr_count: Some(shared_addr_count),
         });
         Ok(())
     })
@@ -337,6 +394,77 @@ pub fn invalidate_shard_meta_cache() {
     SHARD_META_CACHE.with(|cache| {
         *cache.borrow_mut() = None;
     });
+}
+
+/// Batch D2H of shared EC records and addr_accessed buffers after all kernel invocations.
+///
+/// Called once per shard after all opcode `gpu_assign_instances_inner` calls complete.
+/// Transfers accumulated EC records and addresses from shared GPU buffers into `shard_ctx`.
+pub fn flush_shared_ec_buffers(shard_ctx: &mut ShardContext) -> Result<(), ZKVMError> {
+    SHARD_META_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        let c = cache.as_ref().ok_or_else(|| {
+            ZKVMError::InvalidWitness("shard metadata not cached".into())
+        })?;
+
+        // D2H EC record count
+        let ec_count_buf = c.shared_ec_count.as_ref().ok_or_else(|| {
+            ZKVMError::InvalidWitness("shared_ec_count not allocated".into())
+        })?;
+        let ec_count_vec: Vec<u32> = ec_count_buf.to_vec().map_err(|e| {
+            ZKVMError::InvalidWitness(format!("shared_ec_count D2H: {e}").into())
+        })?;
+        let ec_count = ec_count_vec[0] as usize;
+
+        if ec_count > 0 {
+            // D2H EC records (only the active portion)
+            let ec_buf = c.shared_ec_buf.as_ref().unwrap();
+            let ec_u32s = ec_count * 26; // 26 u32s per GpuShardRamRecord
+            let raw_u32: Vec<u32> = ec_buf.to_vec_n(ec_u32s).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("shared_ec_buf D2H: {e}").into())
+            })?;
+            let raw_bytes = unsafe {
+                std::slice::from_raw_parts(
+                    raw_u32.as_ptr() as *const u8,
+                    raw_u32.len() * 4,
+                )
+            };
+            tracing::info!(
+                "[GPU shard] flush_shared_ec_buffers: {} EC records, {:.2} MB",
+                ec_count,
+                raw_bytes.len() as f64 / (1024.0 * 1024.0),
+            );
+            shard_ctx.extend_gpu_ec_records_raw(raw_bytes);
+        }
+
+        // D2H addr_accessed count
+        let addr_count_buf = c.shared_addr_count.as_ref().ok_or_else(|| {
+            ZKVMError::InvalidWitness("shared_addr_count not allocated".into())
+        })?;
+        let addr_count_vec: Vec<u32> = addr_count_buf.to_vec().map_err(|e| {
+            ZKVMError::InvalidWitness(format!("shared_addr_count D2H: {e}").into())
+        })?;
+        let addr_count = addr_count_vec[0] as usize;
+
+        if addr_count > 0 {
+            let addr_buf = c.shared_addr_buf.as_ref().unwrap();
+            let addrs: Vec<u32> = addr_buf.to_vec_n(addr_count).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("shared_addr_buf D2H: {e}").into())
+            })?;
+            tracing::info!(
+                "[GPU shard] flush_shared_ec_buffers: {} addr_accessed, {:.2} MB",
+                addr_count,
+                addr_count as f64 * 4.0 / (1024.0 * 1024.0),
+            );
+            let mut forked = shard_ctx.get_forked();
+            let thread_ctx = &mut forked[0];
+            for &addr in &addrs {
+                thread_ctx.push_addr_accessed(WordAddr(addr));
+            }
+        }
+
+        Ok(())
+    })
 }
 
 /// CPU-side lightweight scan of GPU-produced RAM record slots.
@@ -622,7 +750,11 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             gpu_lk_counters_to_multiplicity(gpu_lk_counters.unwrap())
         })?;
 
-        if gpu_compact_ec.is_some() && kind_has_verified_shard(kind) {
+        if gpu_compact_ec.is_none() && gpu_compact_addr.is_none() && kind_has_verified_shard(kind) {
+            // Shared buffer path: EC records + addr_accessed accumulated on device
+            // in shared buffers across all kernel invocations. Skip per-kernel D2H.
+            // Data will be consumed in batch by assign_shared_circuit.
+        } else if gpu_compact_ec.is_some() && kind_has_verified_shard(kind) {
             // GPU EC path: compact records already have EC points computed on device.
             // D2H only the active records (much smaller than full N*3 slot buffer).
             info_span!("gpu_ec_shard").in_scope(|| {
@@ -839,7 +971,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     let (fetch_base_pc, fetch_num_slots) = compute_fetch_params(shard_steps, step_indices);
 
     // Ensure shard metadata is cached for GPU shard records (shared across all kernel kinds)
-    info_span!("ensure_shard_meta").in_scope(|| ensure_shard_metadata_cached(hal, shard_ctx))?;
+    info_span!("ensure_shard_meta")
+        .in_scope(|| ensure_shard_metadata_cached(hal, shard_ctx, shard_steps.len()))?;
 
     match kind {
         GpuWitgenKind::Add => {
