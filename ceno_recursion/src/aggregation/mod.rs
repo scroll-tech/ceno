@@ -26,8 +26,6 @@ use openvm_continuations::{
         internal::types::{InternalVmVerifierInput, InternalVmVerifierPvs, VmStarkProof},
     },
 };
-#[cfg(feature = "gpu")]
-use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
 use openvm_native_circuit::{NativeBuilder, NativeConfig};
 use openvm_native_compiler::{
     asm::AsmBuilder,
@@ -45,11 +43,10 @@ use openvm_stark_backend::{
     config::{Com, StarkGenericConfig},
     engine::StarkEngine,
 };
-#[cfg(not(feature = "gpu"))]
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine;
 use openvm_stark_sdk::{
     config::{
-        FriParameters, baby_bear_poseidon2::BabyBearPoseidon2Config,
+        FriParameters,
+        baby_bear_poseidon2::{BabyBearPoseidon2Config, BabyBearPoseidon2Engine},
         fri_params::standard_fri_params_with_100_bits_conjectured_security,
     },
     engine::StarkFriEngine,
@@ -259,6 +256,22 @@ impl CenoAggregationProver {
     ) -> VmStarkProof<SC> {
         let aggregation_start_timestamp = Instant::now();
 
+        println!(
+            "Aggregation - Config fingerprint: gpu_feature={}, num_children_internal={}",
+            cfg!(feature = "gpu"),
+            DEFAULT_NUM_CHILDREN_INTERNAL
+        );
+        println!(
+            "Aggregation - Program commits: leaf={:?}, internal={:?}",
+            self.pk.leaf_committed_exe.get_program_commit(),
+            self.pk.internal_committed_exe.get_program_commit()
+        );
+        println!(
+            "Aggregation - FRI params: leaf={:?}, internal={:?}",
+            self.vk.leaf_fri_params,
+            self.vk.internal_fri_params
+        );
+
         // Construct zkvm proof input
         let zkvm_proof_inputs: Vec<ZKVMProofInput> = base_proofs
             .into_iter()
@@ -290,6 +303,12 @@ impl CenoAggregationProver {
                     VM_MAX_TRACE_HEIGHTS,
                 )
                 .expect("leaf proof generation failed");
+
+                println!(
+                    "Aggregation - Leaf proof program commit (idx: {:?}): {:?}",
+                    proof_idx,
+                    leaf_proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref()
+                );
 
                 // Debug safety net: catch invalid leaf proofs at generation time.
                 // If this fails, the issue is in proving (or backend), not in
