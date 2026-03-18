@@ -10,17 +10,19 @@ use openvm_stark_backend::{
     proof::Proof,
     prover::{CommittedTraceData, DeviceMultiStarkProvingKey, ProverBackend, ProvingContext},
 };
+use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    Digest, EF, F, default_duplex_sponge_recorder,
+    DIGEST_SIZE, Digest, EF, F, default_duplex_sponge_recorder,
 };
+use p3_field::PrimeCharacteristicRing;
 use verify_stark::pvs::{DagCommit, DeferralPvs};
 
 use crate::system::{
     AggregationSubCircuit, RecursionField, RecursionVk, VerifierConfig, VerifierExternalData,
-    VerifierTraceGen, convert_vk_from_zkvm,
+    VerifierTraceGen,
 };
 use continuations_v2::circuit::{
-    Circuit, SubCircuitTraceData,
+    Circuit,
     inner::{InnerCircuit, InnerTraceGen, ProofsType},
 };
 
@@ -176,8 +178,6 @@ where
     ) -> ProvingContext<PB> {
         assert!(proofs.len() <= self.circuit.verifier_circuit.max_num_proofs());
 
-        let vm_proofs = Self::materialize_vm_proofs(proofs);
-
         let (child_vk, child_vk_pcs_data) = match child_vk_kind {
             ChildVkKind::RecursiveSelf => {
                 unimplemented!("RecursiveSelf proving is not wired for RecursionVk yet")
@@ -185,26 +185,28 @@ where
             _ => (&self.child_vk, self.child_vk_pcs_data.clone()),
         };
         let child_is_app = matches!(child_vk_kind, ChildVkKind::App);
-        let openvm_child_vk = convert_vk_from_zkvm(child_vk);
         let child_dag_commit = DagCommit {
             cached_commit: child_vk_pcs_data.commitment,
-            vk_pre_hash: openvm_child_vk.pre_hash,
+            vk_pre_hash: [F::ZERO; DIGEST_SIZE],
         };
 
-        let SubCircuitTraceData {
-            air_proving_ctxs,
-            poseidon2_compress_inputs,
-            poseidon2_permute_inputs,
-        } = self
-            .agg_node_tracegen
-            .generate_pre_verifier_subcircuit_ctxs(
-                &vm_proofs,
-                proofs_type,
-                absent_trace_pvs,
-                child_is_app,
-                child_dag_commit,
-            );
+        // TODO unlock pre-context for internal to work
+        // let SubCircuitTraceData {
+        //     air_proving_ctxs,
+        //     poseidon2_compress_inputs,
+        //     poseidon2_permute_inputs,
+        // } = self
+        //     .agg_node_tracegen
+        //     .generate_pre_verifier_subcircuit_ctxs(
+        //         &vm_proofs,
+        //         proofs_type,
+        //         absent_trace_pvs,
+        //         child_is_app,
+        //         child_dag_commit,
+        //     );
 
+        let poseidon2_compress_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
+        let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
         let range_check_inputs = vec![];
         let mut external_data = VerifierExternalData {
             poseidon2_compress_inputs: &poseidon2_compress_inputs,
@@ -225,24 +227,19 @@ where
                 default_duplex_sponge_recorder(),
             )
             .expect("verifier sub-circuit ctx generation");
-        let post_ctxs = self
-            .agg_node_tracegen
-            .generate_post_verifier_subcircuit_ctxs(&vm_proofs, proofs_type, child_is_app);
+
+        // TODO unlock post-context for internal to work
+        // let post_ctxs = self
+        //     .agg_node_tracegen
+        //     .generate_post_verifier_subcircuit_ctxs(&vm_proofs, proofs_type, child_is_app);
 
         ProvingContext {
-            per_trace: air_proving_ctxs
-                .into_iter()
-                .chain(subcircuit_ctxs)
-                .chain(post_ctxs)
-                .enumerate()
-                .collect(),
+            // per_trace: air_proving_ctxs
+            //     .into_iter()
+            //     .chain(subcircuit_ctxs)
+            //     .chain(post_ctxs)
+            per_trace: subcircuit_ctxs.into_iter().enumerate().collect(),
         }
-    }
-
-    fn materialize_vm_proofs(
-        _proofs: &[ZKVMProof<RecursionField, Basefold<RecursionField, BasefoldRSParams>>],
-    ) -> Vec<Proof<SC>> {
-        unimplemented!("Bridge ZKVMProof -> Proof<SC> conversion is not implemented yet");
     }
 
     pub fn get_vk(&self) -> Arc<MultiStarkVerifyingKey<SC>> {

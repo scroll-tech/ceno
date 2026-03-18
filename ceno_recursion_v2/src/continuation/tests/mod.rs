@@ -32,7 +32,7 @@ mod prover_integration {
                 .expect("deserialize vk file");
 
         const MAX_NUM_PROOFS: usize = 4;
-        let system_params = test_system_params_zero_pow(2, 8, 3);
+        let system_params = test_system_params_zero_pow(5, 16, 3);
         let leaf_prover = InnerCpuProver::<MAX_NUM_PROOFS>::new::<Engine>(
             Arc::new(child_vk),
             system_params,
