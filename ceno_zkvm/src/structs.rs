@@ -479,6 +479,22 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     ) -> Result<(), ZKVMError> {
         use tracing::info_span;
 
+        // Try the full GPU pipeline: keep data on device, minimal CPU roundtrips.
+        // Falls back to the traditional path on failure.
+        #[cfg(feature = "gpu")]
+        {
+            let gpu_result = self.try_assign_shared_circuit_gpu(
+                cs, shard_ctx, final_mem, config,
+            );
+            match gpu_result {
+                Ok(true) => return Ok(()),  // GPU pipeline succeeded
+                Ok(false) => {}             // GPU pipeline unavailable, fall through
+                Err(e) => {
+                    tracing::warn!("GPU full pipeline failed, falling back: {e:?}");
+                }
+            }
+        }
+
         let addr_accessed = info_span!("get_addr_accessed").in_scope(|| {
             shard_ctx.get_addr_accessed_sorted()
         });
@@ -704,6 +720,255 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         );
 
         Ok(())
+    }
+
+    /// Full GPU pipeline for assign_shared_circuit: keep data on device, minimal CPU roundtrips.
+    ///
+    /// Returns Ok(true) if successful, Ok(false) if unavailable (no shared device buffers).
+    #[cfg(feature = "gpu")]
+    fn try_assign_shared_circuit_gpu(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &ShardContext,
+        final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
+        config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
+    ) -> Result<bool, ZKVMError> {
+        use crate::instructions::riscv::gpu::witgen_gpu::{
+            gpu_batch_continuation_ec_on_device, take_shared_device_buffers,
+        };
+        use ceno_gpu::Buffer;
+        use gkr_iop::gpu::get_cuda_hal;
+        use tracing::info_span;
+
+        // 1. Take shared device buffers (if available)
+        let mut shared = match take_shared_device_buffers() {
+            Some(s) => s,
+            None => return Ok(false),
+        };
+
+        let hal = match get_cuda_hal() {
+            Ok(h) => h,
+            Err(_) => return Ok(false),
+        };
+
+        tracing::info!("[GPU full pipeline] starting device-resident assign_shared_circuit");
+
+        // 2. D2H the EC count and addr count
+        let ec_count = {
+            let cv: Vec<u32> = shared.ec_count.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("shared_ec_count D2H: {e}").into())
+            })?;
+            cv[0] as usize
+        };
+        let addr_count = {
+            let cv: Vec<u32> = shared.addr_count.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("shared_addr_count D2H: {e}").into())
+            })?;
+            cv[0] as usize
+        };
+
+        tracing::info!(
+            "[GPU full pipeline] shared buffers: {} EC records, {} addr_accessed",
+            ec_count, addr_count,
+        );
+
+        // 3. GPU sort addr_accessed + dedup, then D2H sorted unique addrs
+        let addr_accessed: Vec<WordAddr> = if addr_count > 0 {
+            info_span!("gpu_sort_addr").in_scope(|| {
+                let (deduped, unique_count) = hal
+                    .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(format!("GPU sort addr: {e}").into())
+                    })?;
+                if unique_count == 0 {
+                    return Ok::<Vec<WordAddr>, ZKVMError>(vec![]);
+                }
+                // GPU-sorted + CPU-deduped; convert to WordAddr
+                let addrs: Vec<WordAddr> = deduped.into_iter().map(WordAddr).collect();
+                tracing::info!(
+                    "[GPU full pipeline] sorted {} addrs → {} unique",
+                    addr_count, unique_count,
+                );
+                Ok(addrs)
+            })?
+        } else {
+            vec![]
+        };
+
+        // 4. CPU collect_records (24ms, uses sorted unique addrs)
+        let (write_record_pairs, read_record_pairs) = info_span!("collect_records").in_scope(|| {
+            // This is the same logic as the existing path
+            let first_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> =
+                if shard_ctx.is_first_shard() {
+                    final_mem
+                        .par_iter()
+                        .filter(|(_, range, _)| range.is_none())
+                        .flat_map(|(mem_name, _, final_mem)| {
+                            final_mem.par_iter().filter_map(|mem_record| {
+                                let (waddr, addr) = Self::mem_addresses(mem_record);
+                                Self::make_cross_shard_record(
+                                    mem_name,
+                                    mem_record,
+                                    waddr,
+                                    addr,
+                                    shard_ctx,
+                                    &addr_accessed,
+                                )
+                            })
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                };
+
+            let current_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> = final_mem
+                .par_iter()
+                .filter(|(_, range, _)| range.is_some())
+                .flat_map(|(mem_name, range, final_mem)| {
+                    let range = range.as_ref().unwrap();
+                    final_mem.par_iter().filter_map(|mem_record| {
+                        let (waddr, addr) = Self::mem_addresses(mem_record);
+                        if !range.contains(&addr) {
+                            return None;
+                        }
+                        Self::make_cross_shard_record(
+                            mem_name,
+                            mem_record,
+                            waddr,
+                            addr,
+                            shard_ctx,
+                            &addr_accessed,
+                        )
+                    })
+                })
+                .collect();
+
+            let write_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
+                .write_records()
+                .iter()
+                .flat_map(|records| {
+                    records.iter().map(|(vma, record)| {
+                        ((vma, record, true).into(), "current_shard_external_write")
+                    })
+                })
+                .chain(first_shard_access_later_recs)
+                .chain(current_shard_access_later_recs)
+                .collect();
+
+            let read_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
+                .read_records()
+                .iter()
+                .flat_map(|records| {
+                    records.iter().map(|(vma, record)| {
+                        ((vma, record, false).into(), "current_shard_external_read")
+                    })
+                })
+                .collect();
+
+            (write_record_pairs, read_record_pairs)
+        });
+
+        // 5. GPU batch EC on device for continuation records (25ms, results stay on GPU)
+        let (cont_ec_buf, cont_n_writes, cont_n_reads) =
+            info_span!("gpu_batch_ec_on_device").in_scope(|| {
+                gpu_batch_continuation_ec_on_device(&write_record_pairs, &read_record_pairs)
+            })?;
+        let cont_total = cont_n_writes + cont_n_reads;
+
+        tracing::info!(
+            "[GPU full pipeline] batch EC on device: {} writes + {} reads = {} continuation records",
+            cont_n_writes, cont_n_reads, cont_total,
+        );
+
+        // 6. GPU merge shared_ec + batch_ec, then partition by is_to_write_set
+        let (partitioned_buf, num_writes, total_records) =
+            info_span!("gpu_merge_partition").in_scope(|| {
+                hal.merge_and_partition_records(
+                    &shared.ec_buf,
+                    ec_count,
+                    &cont_ec_buf,
+                    cont_total,
+                    None,
+                )
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(format!("GPU merge+partition: {e}").into())
+                })
+            })?;
+
+        tracing::info!(
+            "[GPU full pipeline] merged+partitioned: {} total ({} writes, {} reads)",
+            total_records, num_writes, total_records - num_writes,
+        );
+
+        // 7. GPU assign_instances from device buffer (chunked by max_cross_shard)
+        assert!(self.combined_lk_mlt.is_some());
+        let cs_inner = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let num_witin = cs_inner.zkvm_v1_css.num_witin as usize;
+        let num_structural_witin = cs_inner.zkvm_v1_css.num_structural_witin as usize;
+        let max_chunk = shard_ctx.max_num_cross_shard_accesses;
+
+        // Record sizes needed for chunking
+        let record_u32s = std::mem::size_of::<ceno_gpu::common::witgen_types::GpuShardRamRecord>() / 4;
+
+        let circuit_inputs = info_span!("shard_ram_assign_from_device", n = total_records)
+            .in_scope(|| {
+                // Process chunks sequentially (each chunk uses GPU exclusively)
+                let mut inputs = Vec::new();
+                let mut records_offset = 0usize;
+                let mut writes_remaining = num_writes;
+
+                while records_offset < total_records {
+                    let chunk_size = max_chunk.min(total_records - records_offset);
+                    let chunk_writes = writes_remaining.min(chunk_size);
+                    writes_remaining = writes_remaining.saturating_sub(chunk_size);
+
+                    // Create a view into the partitioned buffer for this chunk.
+                    // SAFETY: chunk_buf borrows from partitioned_buf and is dropped
+                    // at the end of each loop iteration, before partitioned_buf goes
+                    // out of scope. The 'static lifetime is required by the HAL API.
+                    let chunk_byte_start = records_offset * record_u32s * 4;
+                    let chunk_byte_end = (records_offset + chunk_size) * record_u32s * 4;
+                    let chunk_view = partitioned_buf.as_slice_range(chunk_byte_start..chunk_byte_end);
+                    let chunk_buf: ceno_gpu::common::buffer::BufferImpl<'static, u32> =
+                        unsafe { std::mem::transmute(ceno_gpu::common::buffer::BufferImpl::<u32>::new_from_view(chunk_view)) };
+
+                    let witness = ShardRamCircuit::<E>::try_gpu_assign_instances_from_device(
+                        config,
+                        num_witin,
+                        num_structural_witin,
+                        &chunk_buf,
+                        chunk_size,
+                        chunk_writes,
+                    )?;
+
+                    let witness = witness.ok_or_else(|| {
+                        ZKVMError::InvalidWitness("GPU shard_ram from_device returned None".into())
+                    })?;
+
+                    let num_reads = chunk_size - chunk_writes;
+                    inputs.push(ChipInput::new(
+                        ShardRamCircuit::<E>::name(),
+                        witness,
+                        vec![chunk_writes, num_reads],
+                    ));
+
+                    records_offset += chunk_size;
+                }
+                Ok::<_, ZKVMError>(inputs)
+            })?;
+
+        assert!(
+            self.witnesses
+                .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
+                .is_none()
+        );
+
+        tracing::info!(
+            "[GPU full pipeline] assign_shared_circuit complete: {} total records",
+            total_records,
+        );
+
+        Ok(true)
     }
 
     pub fn get_witnesses_name_instance(&self) -> Vec<(String, Vec<usize>)> {

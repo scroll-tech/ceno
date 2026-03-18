@@ -396,21 +396,100 @@ pub fn invalidate_shard_meta_cache() {
     });
 }
 
+/// Take ownership of shared EC and addr_accessed device buffers from the cache.
+///
+/// Returns (shared_ec_buf, ec_count, shared_addr_buf, addr_count) or None if unavailable.
+/// The cache is invalidated after this call — must be called at most once per shard.
+pub fn take_shared_device_buffers() -> Option<SharedDeviceBufferSet> {
+    SHARD_META_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let c = cache.as_mut()?;
+
+        let ec_buf = c.shared_ec_buf.take()?;
+        let ec_count = c.shared_ec_count.take()?;
+        let addr_buf = c.shared_addr_buf.take()?;
+        let addr_count = c.shared_addr_count.take()?;
+
+        Some(SharedDeviceBufferSet {
+            ec_buf,
+            ec_count,
+            addr_buf,
+            addr_count,
+        })
+    })
+}
+
+/// Shared device buffers taken from the shard metadata cache.
+pub struct SharedDeviceBufferSet {
+    pub ec_buf: ceno_gpu::common::buffer::BufferImpl<'static, u32>,
+    pub ec_count: ceno_gpu::common::buffer::BufferImpl<'static, u32>,
+    pub addr_buf: ceno_gpu::common::buffer::BufferImpl<'static, u32>,
+    pub addr_count: ceno_gpu::common::buffer::BufferImpl<'static, u32>,
+}
+
+/// Batch compute EC points for continuation records, keeping results on device.
+///
+/// Returns (device_buf_as_u32, num_records) where the device buffer contains
+/// GpuShardRamRecord entries with EC points computed.
+pub fn gpu_batch_continuation_ec_on_device(
+    write_records: &[(crate::tables::ShardRamRecord, &'static str)],
+    read_records: &[(crate::tables::ShardRamRecord, &'static str)],
+) -> Result<(ceno_gpu::common::buffer::BufferImpl<'static, u32>, usize, usize), ZKVMError> {
+    use gkr_iop::gpu::get_cuda_hal;
+
+    let hal = get_cuda_hal().map_err(|e| {
+        ZKVMError::InvalidWitness(format!("GPU not available for batch EC: {e}").into())
+    })?;
+
+    let n_writes = write_records.len();
+    let n_reads = read_records.len();
+    let total = n_writes + n_reads;
+    if total == 0 {
+        let empty = hal.alloc_u32_zeroed(1, None).map_err(|e| {
+            ZKVMError::InvalidWitness(format!("alloc: {e}").into())
+        })?;
+        return Ok((empty, 0, 0));
+    }
+
+    // Convert to GpuShardRamRecord format (writes first, reads after)
+    let mut gpu_records: Vec<GpuShardRamRecord> = Vec::with_capacity(total);
+    for (rec, _name) in write_records.iter().chain(read_records.iter()) {
+        gpu_records.push(shard_ram_record_to_gpu(rec));
+    }
+
+    // GPU batch EC, results stay on device
+    let (device_buf, _count) = info_span!("gpu_batch_ec_on_device", n = total).in_scope(|| {
+        hal.batch_continuation_ec_on_device(&gpu_records, None)
+    }).map_err(|e| {
+        ZKVMError::InvalidWitness(format!("GPU batch EC on device failed: {e}").into())
+    })?;
+
+    Ok((device_buf, n_writes, n_reads))
+}
+
 /// Batch D2H of shared EC records and addr_accessed buffers after all kernel invocations.
 ///
 /// Called once per shard after all opcode `gpu_assign_instances_inner` calls complete.
 /// Transfers accumulated EC records and addresses from shared GPU buffers into `shard_ctx`.
+///
+/// If the shared buffers have already been taken by `take_shared_device_buffers`
+/// (for the full GPU pipeline), this is a no-op.
 pub fn flush_shared_ec_buffers(shard_ctx: &mut ShardContext) -> Result<(), ZKVMError> {
     SHARD_META_CACHE.with(|cache| {
         let cache = cache.borrow();
-        let c = cache.as_ref().ok_or_else(|| {
-            ZKVMError::InvalidWitness("shard metadata not cached".into())
-        })?;
+        let c = match cache.as_ref() {
+            Some(c) => c,
+            None => return Ok(()), // cache already invalidated — no-op
+        };
 
-        // D2H EC record count
-        let ec_count_buf = c.shared_ec_count.as_ref().ok_or_else(|| {
-            ZKVMError::InvalidWitness("shared_ec_count not allocated".into())
-        })?;
+        // If buffers have been taken by take_shared_device_buffers, skip D2H
+        let ec_count_buf = match c.shared_ec_count.as_ref() {
+            Some(b) => b,
+            None => {
+                tracing::debug!("[GPU shard] flush_shared_ec_buffers: buffers already taken, no-op");
+                return Ok(());
+            }
+        };
         let ec_count_vec: Vec<u32> = ec_count_buf.to_vec().map_err(|e| {
             ZKVMError::InvalidWitness(format!("shared_ec_count D2H: {e}").into())
         })?;
