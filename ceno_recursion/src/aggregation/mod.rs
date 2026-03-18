@@ -851,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
         let stack_size = 256 * 1024 * 1024; // 64 MB
 
@@ -864,7 +864,7 @@ mod tests {
     }
 
     #[test]
-    // #[ignore = "need to generate proof first"]
+    #[ignore = "need to generate proof first"]
     pub fn test_internal_aggregation() {
         let stack_size = 256 * 1024 * 1024;
 
