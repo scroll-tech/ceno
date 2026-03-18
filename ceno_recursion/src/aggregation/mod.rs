@@ -391,30 +391,15 @@ impl CenoAggregationProver {
                             &self.vk.leaf_fri_params,
                         );
 
-                        // Attempt CPU reprove with the identical witness stream to isolate GPU prover vs. input bug.
-                        // If CPU prove succeeds (and CPU verify of CPU proof passes), the GPU prover is the culprit.
-                        // If CPU prove also fails, the witness/input itself is malformed.
-                        println!("Aggregation - Attempting CPU leaf reprove (idx: {})...", proof_idx);
-                        let cpu_reprove_msg: String = match new_local_prover::<CpuBabyBearPoseidon2Engine, NativeBuilder>(
-                            NativeBuilder::default(),
-                            &self.pk.leaf_vm_pk,
-                            self.pk.leaf_committed_exe.exe.clone(),
-                        ) {
-                            Err(e) => format!("cpu_prover_init_err={:?}", e),
-                            Ok(mut cpu_prover) => match SingleSegmentVmProver::prove(
-                                &mut cpu_prover,
-                                witness_stream_for_cpu,
-                                VM_MAX_TRACE_HEIGHTS,
-                            ) {
-                                Err(e) => format!("cpu_prove_err={:?}", e),
-                                Ok(cpu_proof) => {
-                                    let cpu_e = CpuBabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
-                                    let cpu_vfy = cpu_e.verify(&self.vk.leaf_vm_vk, &cpu_proof);
-                                    format!("cpu_prove=Ok cpu_verify_of_cpu_proof={:?}", cpu_vfy)
-                                }
-                            },
-                        };
-                        println!("Aggregation - CPU reprove result (idx: {}): {}", proof_idx, cpu_reprove_msg);
+                        // Dump witness stream content so we can inspect what was fed to the GPU prover.
+                        println!("Aggregation - Witness stream dump (idx: {}) num_segs={}:", proof_idx, witness_stream_for_cpu.len());
+                        for (si, seg) in witness_stream_for_cpu.iter().enumerate().take(40) {
+                            let head = seg.len().min(8);
+                            println!("  seg[{}]: len={} head={:?}", si, seg.len(), &seg[..head]);
+                        }
+                        if witness_stream_for_cpu.len() > 40 {
+                            println!("  ...(truncated, {} total segs)", witness_stream_for_cpu.len());
+                        }
 
                         panic!(
                             "leaf proof generation produced invalid proof at idx {}: gpu_verify={:?}, cpu_verify={:?}",
