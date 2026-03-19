@@ -20,6 +20,9 @@ pub struct Preflight {
 pub struct ProofShapePreflight {
     pub sorted_trace_vdata: Vec<(usize, TraceVData)>,
     pub l_skip: usize,
+    pub fork_start_tidx: usize,
+    pub alpha_tidx: usize,
+    pub beta_tidx: usize,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -40,6 +43,7 @@ pub struct TowerPreflight {
 #[derive(Clone, Debug, Default)]
 pub struct TowerChipTranscriptRange {
     pub chip_idx: usize,
+    pub instance_idx: usize,
     pub tidx: usize,
     pub tower_replay: TowerReplayResult,
 }
@@ -56,6 +60,7 @@ pub struct BatchConstraintPreflight {
 #[derive(Clone, Debug, Default)]
 pub struct ChipTranscriptRange {
     pub chip_idx: usize,
+    pub instance_idx: usize,
     pub tidx: usize,
 }
 

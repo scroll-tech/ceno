@@ -21,7 +21,7 @@ use crate::{
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        RecursionProof, RecursionVk, TraceGenModule,
+        RecursionProof, RecursionVk, TraceGenModule, TraceVData,
     },
     tracegen::RowMajorChip,
 };
@@ -119,8 +119,54 @@ impl ProofShapeModule {
     ) where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
-        let _ = (self, child_vk, proof, preflight);
-        ts.observe(F::ZERO);
+        let _ = self;
+
+        // Verifier preprocess: absorb raw public input polynomials.
+        for raw_pi in &proof.raw_pi {
+            for &value in raw_pi {
+                ts.observe(value);
+            }
+        }
+
+        // Build per-air shape metadata from present chip proofs.
+        let mut sorted_trace_vdata = proof
+            .chip_proofs
+            .iter()
+            .map(|(&chip_idx, chip_instances)| {
+                let num_instances: usize = chip_instances
+                    .iter()
+                    .flat_map(|instance| instance.num_instances.iter())
+                    .copied()
+                    .sum();
+                let padded = num_instances.max(1).next_power_of_two();
+                let log_height = padded.ilog2() as usize;
+                (chip_idx, TraceVData { log_height })
+            })
+            .collect_vec();
+        sorted_trace_vdata.sort_by_key(|(air_idx, v)| (usize::MAX - v.log_height, *air_idx));
+        preflight.proof_shape.sorted_trace_vdata = sorted_trace_vdata;
+        preflight.proof_shape.l_skip = 0;
+
+        // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
+        for (&chip_idx, chip_instances) in &proof.chip_proofs {
+            ts.observe(F::from_usize(chip_idx));
+            for num_instance in chip_instances
+                .iter()
+                .flat_map(|instance| &instance.num_instances)
+            {
+                ts.observe(F::from_usize(*num_instance));
+            }
+        }
+
+        // TODO(recursion-proof-bridge): absorb fixed/witness commitments once the local
+        // preflight bridge can encode PCS commitments into the Fiat-Shamir transcript.
+        preflight.proof_shape.alpha_tidx = ts.len();
+        let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+        preflight.proof_shape.beta_tidx = ts.len();
+        let _beta = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+        preflight.proof_shape.fork_start_tidx = ts.len();
+
+        let _ = child_vk;
     }
 
     fn placeholder_air_widths(&self) -> Vec<usize> {

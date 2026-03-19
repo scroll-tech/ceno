@@ -166,7 +166,7 @@ impl TowerModule {
     {
         let _ = (self, child_vk);
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            if let Some(chip_proof) = chip_instances.first() {
+            for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
                 let tidx = ts.len();
                 let _ = record_gkr_transcript(ts, chip_idx, chip_proof);
 
@@ -194,6 +194,7 @@ impl TowerModule {
 
                 preflight.gkr.chips.push(TowerChipTranscriptRange {
                     chip_idx,
+                    instance_idx,
                     tidx,
                     tower_replay,
                 });
@@ -601,16 +602,20 @@ pub(crate) fn build_gkr_blob(
         let mut has_chip = false;
         let mut chip_preflight_entries = preflight.gkr.chips.iter();
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            if let Some(chip_proof) = chip_instances.first() {
+            for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
                 has_chip = true;
                 let pf_entry = chip_preflight_entries.next().ok_or_else(|| {
-                    eyre::eyre!("missing GKR preflight entry for chip {chip_idx}")
+                    eyre::eyre!(
+                        "missing GKR preflight entry for chip {chip_idx} instance {instance_idx}"
+                    )
                 })?;
-                if pf_entry.chip_idx != chip_idx {
+                if pf_entry.chip_idx != chip_idx || pf_entry.instance_idx != instance_idx {
                     return Err(eyre::eyre!(
-                        "tower preflight chip mismatch (expected {}, found {})",
+                        "tower preflight chip mismatch (expected ({}, {}), found ({}, {}))",
                         chip_idx,
-                        pf_entry.chip_idx
+                        instance_idx,
+                        pf_entry.chip_idx,
+                        pf_entry.instance_idx
                     ));
                 }
                 let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);

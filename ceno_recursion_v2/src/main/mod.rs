@@ -78,16 +78,20 @@ impl MainModule {
             let mut chip_pf_iter = preflight.main.chips.iter();
             let mut saw_chip = false;
             for (&chip_idx, chip_instances) in &proof.chip_proofs {
-                if let Some(chip_proof) = chip_instances.first() {
+                for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
                     saw_chip = true;
                     let pf_entry = chip_pf_iter
                         .next()
-                        .ok_or_else(|| eyre!("missing main preflight entry for chip {chip_idx}"))?;
-                    if pf_entry.chip_idx != chip_idx {
+                        .ok_or_else(|| eyre!(
+                            "missing main preflight entry for chip {chip_idx} instance {instance_idx}"
+                        ))?;
+                    if pf_entry.chip_idx != chip_idx || pf_entry.instance_idx != instance_idx {
                         bail!(
-                            "main preflight chip mismatch: expected {}, got {}",
+                            "main preflight chip mismatch: expected ({}, {}), got ({}, {})",
                             chip_idx,
-                            pf_entry.chip_idx
+                            instance_idx,
+                            pf_entry.chip_idx,
+                            pf_entry.instance_idx
                         );
                     }
                     let claim = input_layer_claim(chip_proof);
@@ -163,13 +167,14 @@ impl MainModule {
     {
         let _ = (self, child_vk);
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            if let Some(chip_proof) = chip_instances.first() {
+            for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
                 let tidx = ts.len();
                 record_main_transcript(ts, chip_idx, chip_proof);
-                preflight
-                    .main
-                    .chips
-                    .push(ChipTranscriptRange { chip_idx, tidx });
+                preflight.main.chips.push(ChipTranscriptRange {
+                    chip_idx,
+                    instance_idx,
+                    tidx,
+                });
             }
         }
     }
