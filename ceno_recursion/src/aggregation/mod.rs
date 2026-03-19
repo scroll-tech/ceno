@@ -8,8 +8,6 @@ use ceno_zkvm::{
     structs::ZKVMVerifyingKey,
 };
 use ff_ext::BabyBearExt4;
-#[cfg(feature = "gpu")]
-use gkr_iop::gpu::gpu_prover::{CudaHal as _, get_cuda_hal};
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{
     arch::{
@@ -30,8 +28,6 @@ use openvm_continuations::{
 };
 #[cfg(feature = "gpu")]
 use openvm_cuda_backend::engine::GpuBabyBearPoseidon2Engine as BabyBearPoseidon2Engine;
-#[cfg(feature = "gpu")]
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Engine as CpuBabyBearPoseidon2Engine;
 use openvm_native_circuit::{NativeBuilder, NativeConfig};
 use openvm_native_compiler::{
     asm::AsmBuilder,
@@ -62,7 +58,7 @@ use openvm_stark_sdk::{
 };
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, io::Write, sync::Arc, time::Instant};
+use std::{borrow::Borrow, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use openvm_circuit::{
     arch::{
@@ -93,9 +89,6 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 16777216, 2097152,
     16777216, 2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
-
-use std::fs::File;
-
 pub struct CenoAggregationProver {
     pub base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
@@ -262,23 +255,6 @@ impl CenoAggregationProver {
         base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
     ) -> VmStarkProof<SC> {
         let aggregation_start_timestamp = Instant::now();
-        let expected_leaf_program_commit = self.pk.leaf_committed_exe.get_program_commit();
-
-        println!(
-            "Aggregation - Config fingerprint: gpu_feature={}, num_children_internal={}",
-            cfg!(feature = "gpu"),
-            DEFAULT_NUM_CHILDREN_INTERNAL
-        );
-        println!(
-            "Aggregation - Program commits: leaf={:?}, internal={:?}",
-            expected_leaf_program_commit,
-            self.pk.internal_committed_exe.get_program_commit()
-        );
-        println!(
-            "Aggregation - FRI params: leaf={:?}, internal={:?}",
-            self.vk.leaf_fri_params,
-            self.vk.internal_fri_params
-        );
 
         // Construct zkvm proof input
         let zkvm_proof_inputs: Vec<ZKVMProofInput> = base_proofs
@@ -302,51 +278,8 @@ impl CenoAggregationProver {
                     aggregation_start_timestamp.elapsed()
                 );
 
-                // debug: print leaf input structure before proving
-                println!(
-                    "Aggregation - Leaf input (idx: {}): shard_id={}, is_last={}, raw_pi_outer={}, chip_proofs={}, pi_evals={}",
-                    proof_idx, p.proof.shard_id, p.is_last,
-                    p.proof.raw_pi.len(), p.proof.chip_proofs.len(), p.proof.pi_evals.len()
-                );
-                for (pi_i, pi_row) in p.proof.raw_pi.iter().enumerate() {
-                    let pi_head = pi_row.len().min(4);
-                    println!(
-                        "Aggregation -   raw_pi[{}]: len={} head={:?}",
-                        pi_i, pi_row.len(), &pi_row[..pi_head]
-                    );
-                }
-                println!(
-                    "Aggregation -   pc_vals: INIT_PC_IDX={} val={:?}, END_PC_IDX={} val={:?}, EXIT_CODE_IDX={} val={:?}",
-                    INIT_PC_IDX,
-                    p.proof.raw_pi.get(INIT_PC_IDX).and_then(|v| v.first()).copied(),
-                    END_PC_IDX,
-                    p.proof.raw_pi.get(END_PC_IDX).and_then(|v| v.first()).copied(),
-                    EXIT_CODE_IDX,
-                    p.proof.raw_pi.get(EXIT_CODE_IDX).and_then(|v| v.first()).copied(),
-                );
-
                 let mut witness_stream: Vec<Vec<F>> = Vec::new();
                 witness_stream.extend(p.write());
-
-                // debug: witness stats + clone for CPU reprove in failure path
-                {
-                    let seg_lens: Vec<usize> = witness_stream.iter().map(|s| s.len()).collect();
-                    let total_felts: usize = seg_lens.iter().sum();
-                    let seg_lens_disp = if seg_lens.len() > 30 {
-                        format!("first_10={:?}...last_5={:?}(total_segs={})",
-                            &seg_lens[..10], &seg_lens[seg_lens.len()-5..], seg_lens.len())
-                    } else {
-                        format!("{:?}", seg_lens)
-                    };
-                    println!(
-                        "Aggregation - Leaf witness (idx: {}): num_segs={} total_felts={} seg_lens={}",
-                        proof_idx, witness_stream.len(), total_felts, seg_lens_disp
-                    );
-                }
-                #[cfg(feature = "gpu")]
-                let witness_stream_for_cpu = witness_stream.clone();
-
-                let leaf_prove_start = Instant::now();
 
                 let leaf_proof = SingleSegmentVmProver::prove(
                     &mut self.leaf_prover,
@@ -356,94 +289,10 @@ impl CenoAggregationProver {
                 .expect("leaf proof generation failed");
 
                 println!(
-                    "Aggregation - Leaf prove returned (idx: {}) after {:?}",
-                    proof_idx,
-                    leaf_prove_start.elapsed()
-                );
-
-                #[cfg(feature = "gpu")]
-                {
-                    let sync_start = Instant::now();
-                    let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL for leaf sync");
-                    cuda_hal
-                        .inner()
-                        .synchronize()
-                        .expect("CUDA synchronize failed after leaf proof generation");
-                    println!(
-                        "Aggregation - Leaf GPU synchronize complete (idx: {}) after {:?}",
-                        proof_idx,
-                        sync_start.elapsed()
-                    );
-                }
-
-                println!(
                     "Aggregation - Leaf proof program commit (idx: {:?}): {:?}",
                     proof_idx,
                     leaf_proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref()
                 );
-
-                maybe_log_leaf_air_summary(proof_idx, &leaf_proof);
-                maybe_export_leaf_air_debug_snapshot(
-                    proof_idx,
-                    &leaf_proof,
-                    &expected_leaf_program_commit,
-                    &self.vk.leaf_fri_params,
-                );
-
-                // Debug safety net: catch invalid leaf proofs at generation time.
-                // If this fails, the issue is in proving (or backend), not in
-                // internal-input chunking/serialization.
-                let leaf_engine = BabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
-                if let Err(gpu_verify_err) = leaf_engine.verify(&self.vk.leaf_vm_vk, &leaf_proof) {
-                    println!(
-                        "{}",
-                        leaf_air_debug_inline_snapshot(
-                            proof_idx,
-                            &leaf_proof,
-                            &expected_leaf_program_commit,
-                            &self.vk.leaf_fri_params,
-                        )
-                    );
-                    #[cfg(feature = "gpu")]
-                    {
-                        // Cross-check with CPU verifier to isolate GPU prover vs GPU verifier issues.
-                        let cpu_engine = CpuBabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
-                        let cpu_verify_res = cpu_engine.verify(&self.vk.leaf_vm_vk, &leaf_proof);
-                        maybe_export_leaf_air_debug_snapshot(
-                            proof_idx,
-                            &leaf_proof,
-                            &expected_leaf_program_commit,
-                            &self.vk.leaf_fri_params,
-                        );
-
-                        // Dump witness stream content so we can inspect what was fed to the GPU prover.
-                        println!("Aggregation - Witness stream dump (idx: {}) num_segs={}:", proof_idx, witness_stream_for_cpu.len());
-                        for (si, seg) in witness_stream_for_cpu.iter().enumerate().take(40) {
-                            let head = seg.len().min(8);
-                            println!("  seg[{}]: len={} head={:?}", si, seg.len(), &seg[..head]);
-                        }
-                        if witness_stream_for_cpu.len() > 40 {
-                            println!("  ...(truncated, {} total segs)", witness_stream_for_cpu.len());
-                        }
-
-                        panic!(
-                            "leaf proof generation produced invalid proof at idx {}: gpu_verify={:?}, cpu_verify={:?}",
-                            proof_idx, gpu_verify_err, cpu_verify_res
-                        );
-                    }
-                    #[cfg(not(feature = "gpu"))]
-                    {
-                        panic!(
-                            "leaf proof generation produced invalid proof at idx {}: {:?}",
-                            proof_idx, gpu_verify_err
-                        );
-                    }
-                }
-
-                // _debug: export
-                let file =
-                    File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
-                bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
 
                 println!(
                     "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}, public values: {:?}",
@@ -491,7 +340,6 @@ impl CenoAggregationProver {
                 .into_iter()
                 .map(|input| {
                     internal_node_idx += 1;
-                    self.precheck_internal_input(&input, internal_node_idx, internal_node_height);
 
                     let internal_proof = SingleSegmentVmProver::prove(
                         &mut self.internal_prover,
@@ -531,277 +379,6 @@ impl CenoAggregationProver {
 
         proofs.pop().unwrap()
     }
-
-    fn precheck_internal_input(
-        &self,
-        input: &InternalVmVerifierInput<SC>,
-        internal_node_idx: i32,
-        internal_node_height: i32,
-    ) {
-        let do_child_verify = std::env::var("CENO_DEBUG_VERIFY_CHILD_STARK")
-            .ok()
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            // Default to verifying child proofs on the first internal layer only.
-            .unwrap_or(internal_node_height == 0);
-
-        println!(
-            "Aggregation - Precheck internal node (idx: {:?}) at height {:?}: {} child proofs",
-            internal_node_idx,
-            internal_node_height,
-            input.proofs.len()
-        );
-
-        let mut prev_final_pc = None;
-        let mut first_app_commit = None;
-
-        for (proof_idx, proof) in input.proofs.iter().enumerate() {
-            assert!(
-                proof.per_air.len() > PUBLIC_VALUES_AIR_ID,
-                "internal precheck: proof {} missing PUBLIC_VALUES AIR",
-                proof_idx
-            );
-            assert!(
-                proof.per_air.len() > CONNECTOR_AIR_ID,
-                "internal precheck: proof {} missing CONNECTOR AIR",
-                proof_idx
-            );
-
-            let connector_air = &proof.per_air[CONNECTOR_AIR_ID];
-            let vm_connector = &connector_air.public_values;
-            assert!(
-                vm_connector.len() >= 4,
-                "internal precheck: proof {} has malformed vm connector pv len {}",
-                proof_idx,
-                vm_connector.len()
-            );
-
-            let pvs: &VmVerifierPvs<_> =
-                proof.per_air[PUBLIC_VALUES_AIR_ID].public_values[..VmVerifierPvs::<u8>::width()]
-                    .borrow();
-
-            if let Some(prev) = prev_final_pc {
-                assert_eq!(
-                    prev, pvs.connector.initial_pc,
-                    "internal precheck: connector chain break at child {}",
-                    proof_idx
-                );
-            }
-            prev_final_pc = Some(pvs.connector.final_pc);
-
-            if let Some(app_commit) = first_app_commit {
-                assert_eq!(
-                    app_commit, pvs.app_commit,
-                    "internal precheck: app_commit mismatch at child {}",
-                    proof_idx
-                );
-            } else {
-                first_app_commit = Some(pvs.app_commit);
-            }
-
-            println!(
-                "Aggregation -   child {} vm_connector=[init:{:?}, final:{:?}, exit:{:?}, term:{:?}] agg_connector=[init:{:?}, final:{:?}, exit:{:?}, term:{:?}]",
-                proof_idx,
-                vm_connector[0],
-                vm_connector[1],
-                vm_connector[2],
-                vm_connector[3],
-                pvs.connector.initial_pc,
-                pvs.connector.final_pc,
-                pvs.connector.exit_code,
-                pvs.connector.is_terminate
-            );
-
-            if do_child_verify {
-                let program_commit = proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref();
-                let internal_commit: &[_; CHUNK] = &self.vk.internal_commit.into();
-
-                if program_commit == internal_commit {
-                    let e = BabyBearPoseidon2Engine::new(self.vk.internal_fri_params);
-                    e.verify(&self.vk.internal_vm_vk, proof)
-                        .unwrap_or_else(|err| {
-                            panic!(
-                                "internal precheck: child {} failed internal-vk verify: {:?}",
-                                proof_idx, err
-                            )
-                        });
-                } else {
-                    let e = BabyBearPoseidon2Engine::new(self.vk.leaf_fri_params);
-                    e.verify(&self.vk.leaf_vm_vk, proof)
-                        .unwrap_or_else(|err| {
-                            panic!(
-                                "internal precheck: child {} failed leaf-vk verify: {:?}",
-                                proof_idx, err
-                            )
-                        });
-                }
-            }
-        }
-    }
-}
-
-fn env_flag_default_off(name: &str) -> bool {
-    std::env::var(name)
-        .ok()
-        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-}
-
-fn maybe_log_leaf_air_summary(proof_idx: usize, proof: &Proof<SC>) {
-    println!(
-        "Aggregation - Leaf AIR summary (idx: {}): num_airs={}",
-        proof_idx,
-        proof.per_air.len()
-    );
-    for (slot, air) in proof.per_air.iter().enumerate() {
-        println!(
-            "Aggregation -   air slot {} -> air_id={}, pv_len={}",
-            slot,
-            air.air_id,
-            air.public_values.len()
-        );
-    }
-}
-
-fn maybe_export_leaf_air_debug_snapshot(
-    proof_idx: usize,
-    proof: &Proof<SC>,
-    expected_leaf_program_commit: &Com<SC>,
-    leaf_fri_params: &FriParameters,
-) {
-    let export_dir = std::env::var("CENO_LEAF_AIR_DEBUG_DIR")
-        .unwrap_or_else(|_| "leaf_air_debug".to_string());
-    if let Err(err) = std::fs::create_dir_all(&export_dir) {
-        eprintln!(
-            "Aggregation - failed to create leaf AIR debug dir '{}': {:?}",
-            export_dir, err
-        );
-        return;
-    }
-
-    let path = format!("{}/leaf_air_debug_{:03}.txt", export_dir, proof_idx);
-    let mut file = match std::fs::File::create(&path) {
-        Ok(f) => f,
-        Err(err) => {
-            eprintln!(
-                "Aggregation - failed to create leaf AIR debug file '{}': {:?}",
-                path, err
-            );
-            return;
-        }
-    };
-
-    let _ = writeln!(file, "gpu_feature={}", cfg!(feature = "gpu"));
-    let _ = writeln!(file, "proof_idx={}", proof_idx);
-    let _ = writeln!(file, "leaf_fri_params={:?}", leaf_fri_params);
-    let _ = writeln!(
-        file,
-        "expected_leaf_program_commit={:?}",
-        expected_leaf_program_commit
-    );
-    let _ = writeln!(
-        file,
-        "proof_program_commit={:?}",
-        proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref()
-    );
-    let _ = writeln!(file, "num_airs={}", proof.per_air.len());
-
-    let full_pv = env_flag_default_off("CENO_LEAF_AIR_DEBUG_FULL_PV");
-    let sample = 16usize;
-    for (slot, air) in proof.per_air.iter().enumerate() {
-        let _ = writeln!(
-            file,
-            "air[{}]: air_id={}, pv_len={}",
-            slot,
-            air.air_id,
-            air.public_values.len()
-        );
-        if full_pv {
-            let _ = writeln!(file, "air[{}].pv={:?}", slot, air.public_values);
-        } else {
-            let head_len = air.public_values.len().min(sample);
-            let _ = writeln!(
-                file,
-                "air[{}].pv_head({})={:?}",
-                slot,
-                head_len,
-                &air.public_values[..head_len]
-            );
-        }
-    }
-
-    if proof.per_air.len() > CONNECTOR_AIR_ID {
-        let connector_air = &proof.per_air[CONNECTOR_AIR_ID];
-        let _ = writeln!(
-            file,
-            "connector_air(air_id={})_pv={:?}",
-            connector_air.air_id,
-            connector_air.public_values
-        );
-    }
-    if proof.per_air.len() > PUBLIC_VALUES_AIR_ID {
-        let pv_air = &proof.per_air[PUBLIC_VALUES_AIR_ID];
-        let _ = writeln!(
-            file,
-            "public_values_air(air_id={})_pv={:?}",
-            pv_air.air_id,
-            pv_air.public_values
-        );
-    }
-
-    println!("Aggregation - exported leaf AIR debug snapshot: {}", path);
-}
-
-fn leaf_air_debug_inline_snapshot(
-    proof_idx: usize,
-    proof: &Proof<SC>,
-    expected_leaf_program_commit: &Com<SC>,
-    leaf_fri_params: &FriParameters,
-) -> String {
-    let mut s = String::new();
-    let sample = 16usize;
-
-    s.push_str("Aggregation - LEAF AIR INLINE SNAPSHOT START\n");
-    s.push_str(&format!("proof_idx={}\n", proof_idx));
-    s.push_str(&format!("gpu_feature={}\n", cfg!(feature = "gpu")));
-    s.push_str(&format!("leaf_fri_params={:?}\n", leaf_fri_params));
-    s.push_str(&format!(
-        "expected_leaf_program_commit={:?}\n",
-        expected_leaf_program_commit
-    ));
-    s.push_str(&format!(
-        "proof_program_commit={:?}\n",
-        proof.commitments.main_trace[PROGRAM_CACHED_TRACE_INDEX].as_ref()
-    ));
-    s.push_str(&format!("num_airs={}\n", proof.per_air.len()));
-
-    for (slot, air) in proof.per_air.iter().enumerate() {
-        let head_len = air.public_values.len().min(sample);
-        s.push_str(&format!(
-            "air[{}]: air_id={}, pv_len={}, pv_head({})={:?}\n",
-            slot,
-            air.air_id,
-            air.public_values.len(),
-            head_len,
-            &air.public_values[..head_len]
-        ));
-    }
-
-    if proof.per_air.len() > CONNECTOR_AIR_ID {
-        let connector_air = &proof.per_air[CONNECTOR_AIR_ID];
-        s.push_str(&format!(
-            "connector_air(air_id={})_pv={:?}\n",
-            connector_air.air_id, connector_air.public_values
-        ));
-    }
-    if proof.per_air.len() > PUBLIC_VALUES_AIR_ID {
-        let pv_air = &proof.per_air[PUBLIC_VALUES_AIR_ID];
-        s.push_str(&format!(
-            "public_values_air(air_id={})_pv={:?}\n",
-            pv_air.air_id, pv_air.public_values
-        ));
-    }
-
-    s.push_str("Aggregation - LEAF AIR INLINE SNAPSHOT END");
-    s
 }
 
 /// Config to generate leaf VM verifier program.
