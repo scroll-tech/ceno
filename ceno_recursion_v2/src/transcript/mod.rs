@@ -2,11 +2,8 @@ use core::borrow::BorrowMut;
 use std::sync::Arc;
 
 use openvm_cpu_backend::CpuBackend;
-use openvm_poseidon2_air::{Poseidon2Config, Poseidon2SubChip, POSEIDON2_WIDTH};
-use openvm_stark_backend::{
-    AirRef, StarkProtocolConfig, SystemParams,
-    prover::AirProvingContext,
-};
+use openvm_poseidon2_air::{POSEIDON2_WIDTH, Poseidon2Config, Poseidon2SubChip};
+use openvm_stark_backend::{AirRef, StarkProtocolConfig, SystemParams, prover::AirProvingContext};
 use openvm_stark_sdk::{
     config::baby_bear_poseidon2::{F, poseidon2_perm},
     p3_baby_bear::Poseidon2BabyBear,
@@ -19,11 +16,13 @@ use p3_symmetric::Permutation;
 use crate::system::{
     AirModule, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
 };
-use recursion_circuit::system::BusInventory;
-use recursion_circuit::transcript::{
-    merkle_verify::{MerkleVerifyAir, MerkleVerifyCols},
-    poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols},
-    transcript::{TranscriptAir, TranscriptCols},
+use recursion_circuit::{
+    system::BusInventory,
+    transcript::{
+        merkle_verify::{MerkleVerifyAir, MerkleVerifyCols},
+        poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols},
+        transcript::{TranscriptAir, TranscriptCols},
+    },
 };
 
 // Should be 1 when 3 <= max_constraint_degree < 7.
@@ -139,7 +138,10 @@ impl TranscriptModule {
                 cols.prev_state = prev_poseidon_state;
 
                 if is_sample {
-                    debug_assert_eq!(cols.prev_state[CHUNK - 1], preflight.transcript.values()[tidx]);
+                    debug_assert_eq!(
+                        cols.prev_state[CHUNK - 1],
+                        preflight.transcript.values()[tidx]
+                    );
                 } else {
                     cols.prev_state[0] = preflight.transcript.values()[tidx];
                 }
@@ -352,7 +354,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
             for (i, row) in poseidon_trace.chunks_exact_mut(poseidon2_width).enumerate() {
                 let inner_off = i * inner_width;
-                row[..inner_width].copy_from_slice(&inner_trace.values[inner_off..inner_off + inner_width]);
+                row[..inner_width]
+                    .copy_from_slice(&inner_trace.values[inner_off..inner_off + inner_width]);
                 let cols: &mut Poseidon2Cols<F, SBOX_REGISTERS> = row.borrow_mut();
                 let count = poseidon_counts.get(i).copied().unwrap_or_default();
                 cols.permute_mult = F::from_u32(count.perm);
@@ -368,4 +371,3 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         ])
     }
 }
-

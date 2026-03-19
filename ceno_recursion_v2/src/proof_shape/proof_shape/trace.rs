@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use openvm_circuit_primitives::encoder::Encoder;
 use openvm_stark_backend::keygen::types::MultiStarkVerifyingKey;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    BabyBearPoseidon2Config, DIGEST_SIZE, F,
-};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 

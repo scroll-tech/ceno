@@ -35,11 +35,9 @@ use openvm_stark_backend::{
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
-use recursion_circuit::{
-    primitives::{
-        exp_bits_len::{ExpBitsLenAir, ExpBitsLenTraceGenerator},
-        pow::{PowerCheckerAir, PowerCheckerCpuTraceGenerator},
-    },
+use recursion_circuit::primitives::{
+    exp_bits_len::{ExpBitsLenAir, ExpBitsLenTraceGenerator},
+    pow::{PowerCheckerAir, PowerCheckerCpuTraceGenerator},
 };
 use tracing::Span;
 
@@ -176,18 +174,16 @@ impl<'a> TraceModuleRef<'a> {
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         match self {
-            TraceModuleRef::Transcript(module) => {
-                module.generate_proving_ctxs(
-                    child_vk,
-                    proofs,
-                    preflights,
-                    &(
-                        external_data.poseidon2_permute_inputs.as_slice(),
-                        external_data.poseidon2_compress_inputs.as_slice(),
-                    ),
-                    required_heights,
-                )
-            }
+            TraceModuleRef::Transcript(module) => module.generate_proving_ctxs(
+                child_vk,
+                proofs,
+                preflights,
+                &(
+                    external_data.poseidon2_permute_inputs.as_slice(),
+                    external_data.poseidon2_compress_inputs.as_slice(),
+                ),
+                required_heights,
+            ),
             TraceModuleRef::ProofShape(module) => module.generate_proving_ctxs(
                 child_vk,
                 proofs,
@@ -483,4 +479,3 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
         MAX_NUM_PROOFS
     }
 }
-
