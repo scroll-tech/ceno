@@ -14,15 +14,12 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_symmetric::Permutation;
 
 use crate::system::{
-    AirModule, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
+    AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
 };
-use recursion_circuit::{
-    system::BusInventory,
-    transcript::{
-        merkle_verify::{MerkleVerifyAir, MerkleVerifyCols},
-        poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols},
-        transcript::{TranscriptAir, TranscriptCols},
-    },
+use recursion_circuit::transcript::{
+    merkle_verify::{MerkleVerifyAir, MerkleVerifyCols},
+    poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols},
+    transcript::{TranscriptAir, TranscriptCols},
 };
 
 // Should be 1 when 3 <= max_constraint_degree < 7.

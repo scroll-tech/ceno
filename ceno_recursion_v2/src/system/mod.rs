@@ -8,8 +8,8 @@ pub use preflight::{
     TowerChipTranscriptRange, TowerPreflight,
 };
 pub use recursion_circuit::system::{
-    AggregationSubCircuit, AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule,
-    VerifierConfig, VerifierExternalData,
+    AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule, VerifierConfig,
+    VerifierExternalData,
 };
 mod bus_inventory;
 pub mod utils;
@@ -49,6 +49,17 @@ impl GlobalTraceGenCtx for GlobalCtxCpu {
     type ChildVerifyingKey = RecursionVk;
     type MultiProof = [RecursionProof];
     type PreflightRecords = [Preflight];
+}
+
+/// Local fork of AggregationSubCircuit so ceno modules depend on local BusInventory.
+pub trait AggregationSubCircuit {
+    fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>>;
+
+    fn bus_inventory(&self) -> &BusInventory;
+
+    fn next_bus_idx(&self) -> BusIndex;
+
+    fn max_num_proofs(&self) -> usize;
 }
 
 pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
@@ -242,7 +253,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let system_params = test_system_params_zero_pow(2, 8, 3);
 
         let transcript = TranscriptModule::new(
-            bus_inventory.clone_inner(),
+            bus_inventory.clone(),
             system_params,
             config.final_state_bus_enabled,
         );
@@ -469,8 +480,8 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
             .collect()
     }
 
-    fn bus_inventory(&self) -> &recursion_circuit::system::BusInventory {
-        self.bus_inventory.inner()
+    fn bus_inventory(&self) -> &BusInventory {
+        &self.bus_inventory
     }
 
     fn next_bus_idx(&self) -> BusIndex {

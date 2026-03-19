@@ -49,5 +49,4 @@ mod prover_integration {
     fn byte_to_mb(byte_size: u64) -> f64 {
         byte_size as f64 / (1024.0 * 1024.0)
     }
-
 }

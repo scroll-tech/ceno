@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use openvm_stark_backend::{AirRef, StarkProtocolConfig};
-use recursion_circuit::{prelude::F, system::AggregationSubCircuit};
+use recursion_circuit::prelude::F;
 use verify_stark::pvs::{DEF_PVS_AIR_ID, DeferralPvs, VM_PVS_AIR_ID, VmPvs};
 
 use crate::{
     bn254::CommitBytes,
     circuit::{Circuit, inner::bus::PvsAirConsistencyBus},
+    system::AggregationSubCircuit,
 };
 
 pub mod app {
