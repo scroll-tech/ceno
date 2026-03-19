@@ -58,7 +58,7 @@ use openvm_stark_sdk::{
 };
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 use openvm_circuit::{
     arch::{
@@ -89,6 +89,7 @@ const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
     4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 16777216, 2097152,
     16777216, 2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
+
 pub struct CenoAggregationProver {
     pub base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
@@ -254,6 +255,8 @@ impl CenoAggregationProver {
         &mut self,
         base_proofs: Vec<ZKVMProof<BabyBearExt4, Basefold<E, BasefoldRSParams>>>,
     ) -> VmStarkProof<SC> {
+        let aggregation_start_timestamp = Instant::now();
+
         // Construct zkvm proof input
         let zkvm_proof_inputs: Vec<ZKVMProofInput> = base_proofs
             .into_iter()
@@ -268,16 +271,37 @@ impl CenoAggregationProver {
 
         let leaf_proofs = leaf_inputs
             .iter()
-            .map(|p| {
+            .enumerate()
+            .map(|(proof_idx, p)| {
+                println!(
+                    "Aggregation - Start leaf proof (idx: {:?}) at: {:?}",
+                    proof_idx,
+                    aggregation_start_timestamp.elapsed()
+                );
+
                 let mut witness_stream: Vec<Vec<F>> = Vec::new();
                 witness_stream.extend(p.write());
 
-                SingleSegmentVmProver::prove(
+                let leaf_proof = SingleSegmentVmProver::prove(
                     &mut self.leaf_prover,
                     witness_stream,
                     VM_MAX_TRACE_HEIGHTS,
                 )
-                .expect("leaf proof generation failed")
+                .expect("leaf proof generation failed");
+
+                // _debug: export
+                // let file =
+                //     File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
+                // bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
+
+                println!(
+                    "Aggregation - Completed leaf proof (idx: {:?}) at: {:?}, public values: {:?}",
+                    proof_idx,
+                    aggregation_start_timestamp.elapsed(),
+                    leaf_proof.per_air[PUBLIC_VALUES_AIR_ID].public_values,
+                );
+
+                leaf_proof
             })
             .collect::<Vec<_>>();
 
@@ -294,8 +318,15 @@ impl CenoAggregationProver {
     /// Aggregate leaf (or internal) proofs into a single root internal proof
     /// via a binary tree of internal proving rounds.
     pub fn aggregate_internal_proofs(&mut self, leaf_proofs: Vec<Proof<SC>>) -> Proof<SC> {
+        let start = Instant::now();
+        let mut internal_node_idx = -1;
         let mut internal_node_height = 0;
         let mut proofs = leaf_proofs;
+
+        println!(
+            "Aggregation - Start internal aggregation at: {:?}",
+            start.elapsed()
+        );
 
         // We will always generate at least one internal proof, even if there is only one leaf
         // proof, in order to shrink the proof size
@@ -308,18 +339,40 @@ impl CenoAggregationProver {
             let layer_proofs: Vec<Proof<_>> = internal_inputs
                 .into_iter()
                 .map(|input| {
-                    SingleSegmentVmProver::prove(
+                    internal_node_idx += 1;
+                    let internal_proof = SingleSegmentVmProver::prove(
                         &mut self.internal_prover,
                         input.write(),
                         VM_MAX_TRACE_HEIGHTS,
                     )
-                    .expect("internal proof generation failed")
+                    .expect("internal proof generation failed");
+
+                    println!(
+                        "Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}",
+                        internal_node_idx,
+                        internal_node_height,
+                        start.elapsed()
+                    );
+
+                    // _debug: export
+                    // let file = File::create(format!(
+                    // "internal_proof_{:?}_height_{:?}.bin",
+                    // internal_node_idx, internal_node_height
+                    // ))
+                    // .expect("Create export proof file");
+                    // bincode::serialize_into(file, &internal_proof).expect("failed to serialize internal proof");
+                    internal_proof
                 })
                 .collect();
 
             proofs = layer_proofs;
             internal_node_height += 1;
         }
+        println!(
+            "Aggregation - Completed internal aggregation at: {:?}",
+            start.elapsed()
+        );
+        println!("Aggregation - Final height: {:?}", internal_node_height);
 
         // TODO: generate root proof from last internal proof
 

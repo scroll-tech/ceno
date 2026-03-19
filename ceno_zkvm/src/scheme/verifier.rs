@@ -246,7 +246,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.read_challenge().elements,
             transcript.read_challenge().elements,
         ];
-
         tracing::debug!(
             "{shard_id}th shard challenges in verifier: {:?}",
             challenges
