@@ -14,7 +14,7 @@ pub struct PreflightGpu {
     pub cpu: Preflight,
     pub transcript: TranscriptLog,
     pub proof_shape: ProofShapePreflightGpu,
-    pub gkr: GkrPreflightGpu,
+    pub gkr: TowerPreflightGpu,
     pub batch_constraint: BatchConstraintPreflightGpu,
     pub stacking: StackingPreflightGpu,
     pub whir: WhirPreflightGpu,
@@ -42,7 +42,7 @@ pub struct ProofShapePreflightGpu {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct GkrPreflightGpu {
+pub struct TowerPreflightGpu {
     _dummy: usize,
 }
 
@@ -103,8 +103,8 @@ impl PreflightGpu {
         }
     }
 
-    fn gkr(_preflight: &Preflight) -> GkrPreflightGpu {
-        GkrPreflightGpu { _dummy: 0 }
+    fn gkr(_preflight: &Preflight) -> TowerPreflightGpu {
+        TowerPreflightGpu { _dummy: 0 }
     }
 
     fn batch_constraint(_preflight: &Preflight) -> BatchConstraintPreflightGpu {

@@ -5,11 +5,11 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::GkrLayerSumcheckCols;
+use super::TowerLayerSumcheckCols;
 use crate::tracegen::RowMajorChip;
 
 #[derive(Default, Debug, Clone)]
-pub struct GkrSumcheckRecord {
+pub struct TowerSumcheckRecord {
     pub proof_idx: usize,
     pub tidx: usize,
     pub evals: Vec<[EF; 3]>,
@@ -17,7 +17,7 @@ pub struct GkrSumcheckRecord {
     pub claims: Vec<EF>,
 }
 
-impl GkrSumcheckRecord {
+impl TowerSumcheckRecord {
     #[inline]
     pub fn num_layers(&self) -> usize {
         self.claims.len()
@@ -59,11 +59,11 @@ impl GkrSumcheckRecord {
     }
 }
 
-pub struct GkrSumcheckTraceGenerator;
+pub struct TowerSumcheckTraceGenerator;
 
-impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
+impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
     // (gkr_sumcheck_records, mus)
-    type Ctx<'a> = (&'a [GkrSumcheckRecord], &'a [Vec<EF>]);
+    type Ctx<'a> = (&'a [TowerSumcheckRecord], &'a [Vec<EF>]);
 
     #[tracing::instrument(level = "trace", skip_all)]
     fn generate_trace(
@@ -74,7 +74,7 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
         let (gkr_sumcheck_records, mus) = ctx;
         debug_assert_eq!(gkr_sumcheck_records.len(), mus.len());
 
-        let width = GkrLayerSumcheckCols::<F>::width();
+        let width = TowerLayerSumcheckCols::<F>::width();
 
         // Calculate rows per proof
         let rows_per_proof: Vec<usize> = gkr_sumcheck_records
@@ -122,7 +122,7 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
                 if total_rounds == 0 {
                     debug_assert_eq!(proof_trace.len(), width);
                     let row_data = &mut proof_trace[..width];
-                    let cols: &mut GkrLayerSumcheckCols<F> = row_data.borrow_mut();
+                    let cols: &mut TowerLayerSumcheckCols<F> = row_data.borrow_mut();
                     cols.is_enabled = F::ONE;
                     cols.tidx = F::from_usize(D_EF);
                     cols.proof_idx = F::from_usize(record.proof_idx);
@@ -144,7 +144,7 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
                 let mut row_iter = proof_trace.chunks_mut(width);
 
                 for layer_idx in 0..num_layers {
-                    let layer_rounds = GkrSumcheckRecord::layer_rounds(layer_idx);
+                    let layer_rounds = TowerSumcheckRecord::layer_rounds(layer_idx);
                     let layer_idx_value = layer_idx + 1;
                     let is_last_layer = layer_idx == num_layers.saturating_sub(1);
 
@@ -154,7 +154,7 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
                     for round_in_layer in 0..layer_rounds {
                         let challenge = record.ris[global_round_idx];
                         let evals = record.evals[global_round_idx];
-                        let prev_challenge = GkrSumcheckRecord::prev_challenge(
+                        let prev_challenge = TowerSumcheckRecord::prev_challenge(
                             layer_idx,
                             round_in_layer,
                             mus_for_proof,
@@ -192,7 +192,7 @@ impl RowMajorChip<F> for GkrSumcheckTraceGenerator {
                         let eq_out_base: [F; D_EF] =
                             eq_out.as_basis_coefficients_slice().try_into().unwrap();
 
-                        let cols: &mut GkrLayerSumcheckCols<F> =
+                        let cols: &mut TowerLayerSumcheckCols<F> =
                             row_iter.next().unwrap().borrow_mut();
                         cols.is_enabled = F::ONE;
                         cols.proof_idx = F::from_usize(record.proof_idx);

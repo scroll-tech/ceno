@@ -12,18 +12,19 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{AirShapeBus, AirShapeBusMessage},
-    gkr::{
-        GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage,
+    proof_shape::bus::AirShapeProperty,
+    tower::{
+        TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage,
         bus::{
-            GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage,
-            GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage,
-            GkrLogupLayerChallengeMessage, GkrProdLayerChallengeMessage, GkrProdReadClaimBus,
-            GkrProdReadClaimInputBus, GkrProdSumClaimMessage, GkrProdWriteClaimBus,
-            GkrProdWriteClaimInputBus, GkrSumcheckInputBus, GkrSumcheckInputMessage,
-            GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
+            TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus,
+            TowerLayerOutputMessage, TowerLogupClaimBus, TowerLogupClaimInputBus,
+            TowerLogupClaimMessage, TowerLogupLayerChallengeMessage,
+            TowerProdLayerChallengeMessage, TowerProdReadClaimBus, TowerProdReadClaimInputBus,
+            TowerProdSumClaimMessage, TowerProdWriteClaimBus, TowerProdWriteClaimInputBus,
+            TowerSumcheckInputBus, TowerSumcheckInputMessage, TowerSumcheckOutputBus,
+            TowerSumcheckOutputMessage,
         },
     },
-    proof_shape::bus::AirShapeProperty,
 };
 
 use recursion_circuit::{
@@ -34,7 +35,7 @@ use recursion_circuit::{
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
-pub struct GkrLayerCols<T> {
+pub struct TowerLayerCols<T> {
     /// Whether the current row is enabled (i.e. not padding)
     pub is_enabled: T,
     pub proof_idx: T,
@@ -71,7 +72,7 @@ pub struct GkrLayerCols<T> {
     pub num_write_count: T,
     pub num_logup_count: T,
 
-    /// Received from GkrLayerSumcheckAir
+    /// Received from TowerLayerSumcheckAir
     pub eq_at_r_prime: [T; D_EF],
 
     pub r0_claim: [T; D_EF],
@@ -79,35 +80,35 @@ pub struct GkrLayerCols<T> {
     pub q0_claim: [T; D_EF],
 }
 
-/// The GkrLayerAir handles layer-to-layer transitions in the GKR protocol
-pub struct GkrLayerAir {
+/// The TowerLayerAir handles layer-to-layer transitions in the GKR protocol
+pub struct TowerLayerAir {
     // External buses
     pub transcript_bus: TranscriptBus,
     pub air_shape_bus: AirShapeBus,
     // Internal buses
-    pub layer_input_bus: GkrLayerInputBus,
-    pub layer_output_bus: GkrLayerOutputBus,
-    pub sumcheck_input_bus: GkrSumcheckInputBus,
-    pub sumcheck_output_bus: GkrSumcheckOutputBus,
-    pub sumcheck_challenge_bus: GkrSumcheckChallengeBus,
-    pub prod_read_claim_input_bus: GkrProdReadClaimInputBus,
-    pub prod_read_claim_bus: GkrProdReadClaimBus,
-    pub prod_write_claim_input_bus: GkrProdWriteClaimInputBus,
-    pub prod_write_claim_bus: GkrProdWriteClaimBus,
-    pub logup_claim_input_bus: GkrLogupClaimInputBus,
-    pub logup_claim_bus: GkrLogupClaimBus,
+    pub layer_input_bus: TowerLayerInputBus,
+    pub layer_output_bus: TowerLayerOutputBus,
+    pub sumcheck_input_bus: TowerSumcheckInputBus,
+    pub sumcheck_output_bus: TowerSumcheckOutputBus,
+    pub sumcheck_challenge_bus: TowerSumcheckChallengeBus,
+    pub prod_read_claim_input_bus: TowerProdReadClaimInputBus,
+    pub prod_read_claim_bus: TowerProdReadClaimBus,
+    pub prod_write_claim_input_bus: TowerProdWriteClaimInputBus,
+    pub prod_write_claim_bus: TowerProdWriteClaimBus,
+    pub logup_claim_input_bus: TowerLogupClaimInputBus,
+    pub logup_claim_bus: TowerLogupClaimBus,
 }
 
-impl<F: Field> BaseAir<F> for GkrLayerAir {
+impl<F: Field> BaseAir<F> for TowerLayerAir {
     fn width(&self) -> usize {
-        GkrLayerCols::<F>::width()
+        TowerLayerCols::<F>::width()
     }
 }
 
-impl<F: Field> BaseAirWithPublicValues<F> for GkrLayerAir {}
-impl<F: Field> PartitionedBaseAir<F> for GkrLayerAir {}
+impl<F: Field> BaseAirWithPublicValues<F> for TowerLayerAir {}
+impl<F: Field> PartitionedBaseAir<F> for TowerLayerAir {}
 
-impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrLayerAir
+impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerLayerAir
 where
     <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
 {
@@ -117,8 +118,8 @@ where
             main.row_slice(0).expect("window should have two elements"),
             main.row_slice(1).expect("window should have two elements"),
         );
-        let local: &GkrLayerCols<AB::Var> = (*local).borrow();
-        let next: &GkrLayerCols<AB::Var> = (*next).borrow();
+        let local: &TowerLayerCols<AB::Var> = (*local).borrow();
+        let next: &TowerLayerCols<AB::Var> = (*next).borrow();
 
         ///////////////////////////////////////////////////////////////////////
         // Boolean Constraints
@@ -256,7 +257,7 @@ where
         self.prod_read_claim_input_bus.send(
             builder,
             local.proof_idx,
-            GkrProdLayerChallengeMessage {
+            TowerProdLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: tidx_for_claims.clone(),
@@ -270,7 +271,7 @@ where
         self.prod_write_claim_input_bus.send(
             builder,
             local.proof_idx,
-            GkrProdLayerChallengeMessage {
+            TowerProdLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: tidx_for_claims.clone(),
@@ -284,7 +285,7 @@ where
         self.logup_claim_input_bus.send(
             builder,
             local.proof_idx,
-            GkrLogupLayerChallengeMessage {
+            TowerLogupLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: tidx_for_claims.clone(),
@@ -297,7 +298,7 @@ where
         self.prod_read_claim_bus.receive(
             builder,
             local.proof_idx,
-            GkrProdSumClaimMessage {
+            TowerProdSumClaimMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: local.read_claim.map(Into::into),
@@ -309,7 +310,7 @@ where
         self.prod_write_claim_bus.receive(
             builder,
             local.proof_idx,
-            GkrProdSumClaimMessage {
+            TowerProdSumClaimMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: local.write_claim.map(Into::into),
@@ -321,7 +322,7 @@ where
         self.logup_claim_bus.receive(
             builder,
             local.proof_idx,
-            GkrLogupClaimMessage {
+            TowerLogupClaimMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: local.logup_claim.map(Into::into),
@@ -348,12 +349,12 @@ where
             local.q0_claim,
         );
 
-        // 1. GkrLayerInputBus
+        // 1. TowerLayerInputBus
         // 1a. Receive GKR layers input
         self.layer_input_bus.receive(
             builder,
             local.proof_idx,
-            GkrLayerInputMessage {
+            TowerLayerInputMessage {
                 idx: local.idx.into(),
                 tidx: local.tidx.into(),
                 r0_claim: local.r0_claim.map(Into::into),
@@ -362,12 +363,12 @@ where
             },
             local.is_first_air_idx * is_not_dummy.clone(),
         );
-        // 2. GkrLayerOutputBus
+        // 2. TowerLayerOutputBus
         // 2a. Send GKR input layer claims back
         self.layer_output_bus.send(
             builder,
             local.proof_idx,
-            GkrLayerOutputMessage {
+            TowerLayerOutputMessage {
                 idx: local.idx.into(),
                 tidx: tidx_end,
                 layer_idx_end: local.layer_idx.into(),
@@ -377,13 +378,13 @@ where
             },
             is_last.clone() * is_not_dummy.clone(),
         );
-        // 3. GkrSumcheckInputBus
+        // 3. TowerSumcheckInputBus
         // 3a. Send claim to sumcheck
         // only send sumcheck on non root layer
         self.sumcheck_input_bus.send(
             builder,
             local.proof_idx,
-            GkrSumcheckInputMessage {
+            TowerSumcheckInputMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 is_last_layer: is_last.clone(),
@@ -392,7 +393,7 @@ where
             },
             is_non_root_layer.clone() * is_not_dummy.clone(),
         );
-        // 3. GkrSumcheckOutputBus
+        // 3. TowerSumcheckOutputBus
         // 3a. Receive sumcheck results
         let prime_fold = ext_field_add::<AB::Expr>(local.read_claim_prime, local.write_claim_prime);
         let sumcheck_claim_out = ext_field_multiply::<AB::Expr>(
@@ -402,7 +403,7 @@ where
         self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
-            GkrSumcheckOutputMessage {
+            TowerSumcheckOutputMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: tidx_after_sumcheck.clone(),
@@ -411,12 +412,12 @@ where
             },
             is_non_root_layer.clone() * is_not_dummy.clone(),
         );
-        // 4. GkrSumcheckChallengeBus
+        // 4. TowerSumcheckChallengeBus
         // 4a. Send challenge mu
         self.sumcheck_challenge_bus.send(
             builder,
             local.proof_idx,
-            GkrSumcheckChallengeMessage {
+            TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 sumcheck_round: AB::Expr::ZERO,

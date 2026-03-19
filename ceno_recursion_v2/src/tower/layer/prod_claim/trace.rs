@@ -5,22 +5,22 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::GkrProdSumCheckClaimCols;
+use super::TowerProdSumCheckClaimCols;
 use crate::{
-    gkr::{GkrTowerEvalRecord, interpolate_pair, layer::trace::GkrLayerRecord},
+    tower::{TowerTowerEvalRecord, interpolate_pair, layer::trace::TowerLayerRecord},
     tracegen::RowMajorChip,
 };
 
-pub struct GkrProdReadSumCheckClaimTraceGenerator;
-pub struct GkrProdWriteSumCheckClaimTraceGenerator;
+pub struct TowerProdReadSumCheckClaimTraceGenerator;
+pub struct TowerProdWriteSumCheckClaimTraceGenerator;
 
 type ProdTraceCtx<'a> = (
-    &'a [GkrLayerRecord],
-    &'a [GkrTowerEvalRecord],
+    &'a [TowerLayerRecord],
+    &'a [TowerTowerEvalRecord],
     &'a [Vec<EF>],
 );
 
-fn prod_rows_for_record(record: &GkrLayerRecord, is_write: bool) -> usize {
+fn prod_rows_for_record(record: &TowerLayerRecord, is_write: bool) -> usize {
     if record.layer_count() == 0 {
         1
     } else {
@@ -38,13 +38,13 @@ fn prod_rows_for_record(record: &GkrLayerRecord, is_write: bool) -> usize {
 
 #[allow(clippy::too_many_arguments)]
 fn generate_prod_trace(
-    records: &[GkrLayerRecord],
-    towers: &[GkrTowerEvalRecord],
+    records: &[TowerLayerRecord],
+    towers: &[TowerTowerEvalRecord],
     mus_records: &[Vec<EF>],
     is_write: bool,
     required_height: Option<usize>,
 ) -> Option<RowMajorMatrix<F>> {
-    let width = GkrProdSumCheckClaimCols::<F>::width();
+    let width = TowerProdSumCheckClaimCols::<F>::width();
     let rows_per_proof: Vec<usize> = records
         .iter()
         .map(|record| prod_rows_for_record(record, is_write))
@@ -80,7 +80,7 @@ fn generate_prod_trace(
             if record.layer_count() == 0 {
                 debug_assert_eq!(chunk.len(), width);
                 let row_data = &mut chunk[..width];
-                let cols: &mut GkrProdSumCheckClaimCols<F> = row_data.borrow_mut();
+                let cols: &mut TowerProdSumCheckClaimCols<F> = row_data.borrow_mut();
                 cols.is_enabled = F::ONE;
                 cols.is_first_layer = F::ONE;
                 cols.is_first = F::ONE;
@@ -153,7 +153,7 @@ fn generate_prod_trace(
                     let row = chunk_iter
                         .next()
                         .expect("chunk should have enough rows for layer");
-                    let cols: &mut GkrProdSumCheckClaimCols<F> = row.borrow_mut();
+                    let cols: &mut TowerProdSumCheckClaimCols<F> = row.borrow_mut();
                     let is_real = row_in_layer < active_rows.len();
                     let pair = if is_real {
                         active_rows[row_in_layer]
@@ -211,7 +211,7 @@ fn generate_prod_trace(
     Some(RowMajorMatrix::new(trace, width))
 }
 
-impl RowMajorChip<F> for GkrProdReadSumCheckClaimTraceGenerator {
+impl RowMajorChip<F> for TowerProdReadSumCheckClaimTraceGenerator {
     type Ctx<'a> = ProdTraceCtx<'a>;
 
     #[tracing::instrument(level = "trace", skip_all)]
@@ -225,7 +225,7 @@ impl RowMajorChip<F> for GkrProdReadSumCheckClaimTraceGenerator {
     }
 }
 
-impl RowMajorChip<F> for GkrProdWriteSumCheckClaimTraceGenerator {
+impl RowMajorChip<F> for TowerProdWriteSumCheckClaimTraceGenerator {
     type Ctx<'a> = ProdTraceCtx<'a>;
 
     #[tracing::instrument(level = "trace", skip_all)]

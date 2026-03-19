@@ -5,14 +5,14 @@
 //! random point. This is done through a layer-by-layer recursive reduction, where each layer uses a
 //! sumcheck protocol.
 //!
-//! The GKR Air Module verifies the [`GkrProof`](openvm_stark_backend::proof::GkrProof) struct and
+//! The GKR Air Module verifies the [`TowerProof`](openvm_stark_backend::proof::TowerProof) struct and
 //! consists of four AIRs:
 //!
-//! 1. **GkrInputAir** - Handles initial setup, coordinates other AIRs, and sends final claims to
+//! 1. **TowerInputAir** - Handles initial setup, coordinates other AIRs, and sends final claims to
 //!    batch constraint module
-//! 2. **GkrLayerAir** - Manages layer-by-layer GKR reduction (verifies
+//! 2. **TowerLayerAir** - Manages layer-by-layer GKR reduction (verifies
 //!    [`verify_gkr`](openvm_stark_backend::verifier::fractional_sumcheck_gkr::verify_gkr))
-//! 3. **GkrLayerSumcheckAir** - Executes sumcheck protocol for each layer (verifies
+//! 3. **TowerLayerSumcheckAir** - Executes sumcheck protocol for each layer (verifies
 //!    [`verify_gkr_sumcheck`](openvm_stark_backend::verifier::fractional_sumcheck_gkr::verify_gkr_sumcheck))
 //!
 //! ## Architecture
@@ -21,28 +21,28 @@
 //!                                ┌─────────────────┐
 //!                                │                 │───────────────────► TranscriptBus
 //!                                │                 │
-//!  GkrModuleBus ────────────────►│   GkrInputAir   │───────────────────► ExpBitsLenBus
+//!  TowerModuleBus ────────────────►│   TowerInputAir   │───────────────────► ExpBitsLenBus
 //!                                │                 │
 //!                                │                 │───────────────────► BatchConstraintModuleBus
 //!                                └─────────────────┘
 //!                                      ┆      ▲
 //!                                      ┆      ┆
-//!                     GkrLayerInputBus ┆      ┆ GkrLayerOutputBus
+//!                     TowerLayerInputBus ┆      ┆ TowerLayerOutputBus
 //!                                      ┆      ┆
 //!                                      ▼      ┆
 //!                             ┌─────────────────────────┐
 //!                             │                         │──────────────► TranscriptBus
-//!   ┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│       GkrLayerAir       │
+//!   ┌┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│       TowerLayerAir       │
 //!   ┆                         │                         │──────────────► XiRandomnessBus
 //!   ┆                         └─────────────────────────┘
 //!   ┆                                  ┆      ▲
 //!   ┆                                  ┆      ┆
-//!   ┆              GkrSumcheckInputBus ┆      ┆ GkrSumcheckOutputBus
+//!   ┆              TowerSumcheckInputBus ┆      ┆ TowerSumcheckOutputBus
 //!   ┆                                  ┆      ┆
 //!   ┆                                  ▼      ┆
-//!   ┆ GkrSumcheckChallengeBus ┌─────────────────────────┐
+//!   ┆ TowerSumcheckChallengeBus ┌─────────────────────────┐
 //!   ┆┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄│                         │──────────────► TranscriptBus
-//!   ┆                         │   GkrLayerSumcheckAir   │
+//!   ┆                         │   TowerLayerSumcheckAir   │
 //!   └┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄►│                         │──────────────► XiRandomnessBus
 //!                             └─────────────────────────┘
 //! ```
@@ -64,21 +64,21 @@ use strum::EnumCount;
 use tracing::error;
 
 use crate::{
-    gkr::{
-        bus::{GkrLayerInputBus, GkrLayerOutputBus},
-        input::{GkrInputAir, GkrInputRecord, GkrInputTraceGenerator},
-        layer::{
-            GkrLayerAir, GkrLayerRecord, GkrLayerTraceGenerator, GkrLogupSumCheckClaimAir,
-            GkrLogupSumCheckClaimTraceGenerator, GkrProdReadSumCheckClaimAir,
-            GkrProdReadSumCheckClaimTraceGenerator, GkrProdWriteSumCheckClaimAir,
-            GkrProdWriteSumCheckClaimTraceGenerator,
-        },
-        sumcheck::{GkrLayerSumcheckAir, GkrSumcheckRecord, GkrSumcheckTraceGenerator},
-        tower::replay_tower_proof,
-    },
     system::{
-        AirModule, BusIndexManager, BusInventory, GkrChipTranscriptRange, GlobalCtxCpu, Preflight,
-        RecursionField, RecursionProof, RecursionVk, TraceGenModule,
+        AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, Preflight, RecursionField,
+        RecursionProof, RecursionVk, TowerChipTranscriptRange, TraceGenModule,
+    },
+    tower::{
+        bus::{TowerLayerInputBus, TowerLayerOutputBus},
+        input::{TowerInputAir, TowerInputRecord, TowerInputTraceGenerator},
+        layer::{
+            TowerLayerAir, TowerLayerRecord, TowerLayerTraceGenerator, TowerLogupSumCheckClaimAir,
+            TowerLogupSumCheckClaimTraceGenerator, TowerProdReadSumCheckClaimAir,
+            TowerProdReadSumCheckClaimTraceGenerator, TowerProdWriteSumCheckClaimAir,
+            TowerProdWriteSumCheckClaimTraceGenerator,
+        },
+        sumcheck::{TowerLayerSumcheckAir, TowerSumcheckRecord, TowerSumcheckTraceGenerator},
+        tower::replay_tower_proof,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
@@ -88,11 +88,12 @@ use eyre::Result;
 // Internal bus definitions
 mod bus;
 pub use bus::{
-    GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupLayerChallengeMessage,
-    GkrProdLayerChallengeMessage, GkrProdReadClaimBus, GkrProdReadClaimInputBus,
-    GkrProdSumClaimMessage, GkrProdWriteClaimBus, GkrProdWriteClaimInputBus,
-    GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage, GkrSumcheckInputBus,
-    GkrSumcheckInputMessage, GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
+    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage,
+    TowerLogupLayerChallengeMessage, TowerProdLayerChallengeMessage, TowerProdReadClaimBus,
+    TowerProdReadClaimInputBus, TowerProdSumClaimMessage, TowerProdWriteClaimBus,
+    TowerProdWriteClaimInputBus, TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage,
+    TowerSumcheckInputBus, TowerSumcheckInputMessage, TowerSumcheckOutputBus,
+    TowerSumcheckOutputMessage,
 };
 
 // Sub-modules for different AIRs
@@ -101,54 +102,54 @@ pub mod layer;
 pub mod sumcheck;
 mod tower;
 pub(crate) use tower::TowerReplayResult;
-pub struct GkrModule {
+pub struct TowerModule {
     // Global bus inventory
     bus_inventory: BusInventory,
     // Module buses
-    layer_input_bus: GkrLayerInputBus,
-    layer_output_bus: GkrLayerOutputBus,
-    sumcheck_input_bus: GkrSumcheckInputBus,
-    sumcheck_output_bus: GkrSumcheckOutputBus,
-    sumcheck_challenge_bus: GkrSumcheckChallengeBus,
-    prod_read_claim_input_bus: GkrProdReadClaimInputBus,
-    prod_read_claim_bus: GkrProdReadClaimBus,
-    prod_write_claim_input_bus: GkrProdWriteClaimInputBus,
-    prod_write_claim_bus: GkrProdWriteClaimBus,
-    logup_claim_input_bus: GkrLogupClaimInputBus,
-    logup_claim_bus: GkrLogupClaimBus,
+    layer_input_bus: TowerLayerInputBus,
+    layer_output_bus: TowerLayerOutputBus,
+    sumcheck_input_bus: TowerSumcheckInputBus,
+    sumcheck_output_bus: TowerSumcheckOutputBus,
+    sumcheck_challenge_bus: TowerSumcheckChallengeBus,
+    prod_read_claim_input_bus: TowerProdReadClaimInputBus,
+    prod_read_claim_bus: TowerProdReadClaimBus,
+    prod_write_claim_input_bus: TowerProdWriteClaimInputBus,
+    prod_write_claim_bus: TowerProdWriteClaimBus,
+    logup_claim_input_bus: TowerLogupClaimInputBus,
+    logup_claim_bus: TowerLogupClaimBus,
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct GkrTowerEvalRecord {
+pub(crate) struct TowerTowerEvalRecord {
     pub(crate) read_layers: Vec<Vec<[EF; 2]>>,
     pub(crate) write_layers: Vec<Vec<[EF; 2]>>,
     pub(crate) logup_layers: Vec<Vec<[EF; 4]>>,
 }
 
-struct GkrBlobCpu {
-    input_records: Vec<GkrInputRecord>,
-    layer_records: Vec<GkrLayerRecord>,
-    tower_records: Vec<GkrTowerEvalRecord>,
-    sumcheck_records: Vec<GkrSumcheckRecord>,
+struct TowerBlobCpu {
+    input_records: Vec<TowerInputRecord>,
+    layer_records: Vec<TowerLayerRecord>,
+    tower_records: Vec<TowerTowerEvalRecord>,
+    sumcheck_records: Vec<TowerSumcheckRecord>,
     mus_records: Vec<Vec<EF>>,
     q0_claims: Vec<EF>,
 }
 
-impl GkrModule {
+impl TowerModule {
     pub fn new(_vk: &RecursionVk, b: &mut BusIndexManager, bus_inventory: BusInventory) -> Self {
-        GkrModule {
+        TowerModule {
             bus_inventory,
-            layer_input_bus: GkrLayerInputBus::new(b.new_bus_idx()),
-            layer_output_bus: GkrLayerOutputBus::new(b.new_bus_idx()),
-            sumcheck_input_bus: GkrSumcheckInputBus::new(b.new_bus_idx()),
-            sumcheck_output_bus: GkrSumcheckOutputBus::new(b.new_bus_idx()),
-            sumcheck_challenge_bus: GkrSumcheckChallengeBus::new(b.new_bus_idx()),
-            prod_read_claim_input_bus: GkrProdReadClaimInputBus::new(b.new_bus_idx()),
-            prod_read_claim_bus: GkrProdReadClaimBus::new(b.new_bus_idx()),
-            prod_write_claim_input_bus: GkrProdWriteClaimInputBus::new(b.new_bus_idx()),
-            prod_write_claim_bus: GkrProdWriteClaimBus::new(b.new_bus_idx()),
-            logup_claim_input_bus: GkrLogupClaimInputBus::new(b.new_bus_idx()),
-            logup_claim_bus: GkrLogupClaimBus::new(b.new_bus_idx()),
+            layer_input_bus: TowerLayerInputBus::new(b.new_bus_idx()),
+            layer_output_bus: TowerLayerOutputBus::new(b.new_bus_idx()),
+            sumcheck_input_bus: TowerSumcheckInputBus::new(b.new_bus_idx()),
+            sumcheck_output_bus: TowerSumcheckOutputBus::new(b.new_bus_idx()),
+            sumcheck_challenge_bus: TowerSumcheckChallengeBus::new(b.new_bus_idx()),
+            prod_read_claim_input_bus: TowerProdReadClaimInputBus::new(b.new_bus_idx()),
+            prod_read_claim_bus: TowerProdReadClaimBus::new(b.new_bus_idx()),
+            prod_write_claim_input_bus: TowerProdWriteClaimInputBus::new(b.new_bus_idx()),
+            prod_write_claim_bus: TowerProdWriteClaimBus::new(b.new_bus_idx()),
+            logup_claim_input_bus: TowerLogupClaimInputBus::new(b.new_bus_idx()),
+            logup_claim_bus: TowerLogupClaimBus::new(b.new_bus_idx()),
         }
     }
 
@@ -191,7 +192,7 @@ impl GkrModule {
                     }
                 };
 
-                preflight.gkr.chips.push(GkrChipTranscriptRange {
+                preflight.gkr.chips.push(TowerChipTranscriptRange {
                     chip_idx,
                     tidx,
                     tower_replay,
@@ -290,10 +291,10 @@ fn build_chip_records(
     alpha_logup: EF,
     tidx: usize,
 ) -> Result<(
-    GkrInputRecord,
-    GkrLayerRecord,
-    GkrTowerEvalRecord,
-    GkrSumcheckRecord,
+    TowerInputRecord,
+    TowerLayerRecord,
+    TowerTowerEvalRecord,
+    TowerSumcheckRecord,
     Vec<EF>,
     EF,
 )> {
@@ -343,13 +344,13 @@ fn build_chip_records(
         }
     }
 
-    let tower_record = GkrTowerEvalRecord {
+    let tower_record = TowerTowerEvalRecord {
         read_layers,
         write_layers,
         logup_layers,
     };
 
-    let mut layer_record = GkrLayerRecord {
+    let mut layer_record = TowerLayerRecord {
         proof_idx,
         idx: chip_idx,
         tidx: 0,
@@ -406,7 +407,7 @@ fn build_chip_records(
         .map(|claim| claim[0])
         .unwrap_or(EF::ZERO);
 
-    let mut sumcheck_record = GkrSumcheckRecord {
+    let mut sumcheck_record = TowerSumcheckRecord {
         proof_idx,
         tidx: 0,
         evals: Vec::new(),
@@ -428,7 +429,7 @@ fn build_chip_records(
         .copied()
         .unwrap_or(EF::ZERO);
 
-    let input_record = GkrInputRecord {
+    let input_record = TowerInputRecord {
         proof_idx,
         idx: chip_idx,
         tidx,
@@ -498,21 +499,21 @@ fn build_chip_records(
     ))
 }
 
-impl AirModule for GkrModule {
+impl AirModule for TowerModule {
     fn num_airs(&self) -> usize {
-        GkrModuleChipDiscriminants::COUNT
+        TowerModuleChipDiscriminants::COUNT
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
-        let gkr_input_air = GkrInputAir {
-            gkr_module_bus: self.bus_inventory.gkr_module_bus,
+        let gkr_input_air = TowerInputAir {
+            tower_module_bus: self.bus_inventory.tower_module_bus,
             main_bus: self.bus_inventory.main_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
         };
 
-        let gkr_layer_air = GkrLayerAir {
+        let gkr_layer_air = TowerLayerAir {
             transcript_bus: self.bus_inventory.transcript_bus,
             air_shape_bus: self.bus_inventory.air_shape_bus,
             layer_input_bus: self.layer_input_bus,
@@ -528,25 +529,25 @@ impl AirModule for GkrModule {
             logup_claim_bus: self.logup_claim_bus,
         };
 
-        let gkr_prod_read_sum_air = GkrProdReadSumCheckClaimAir {
+        let gkr_prod_read_sum_air = TowerProdReadSumCheckClaimAir {
             transcript_bus: self.bus_inventory.transcript_bus,
             prod_claim_input_bus: self.prod_read_claim_input_bus,
             prod_claim_bus: self.prod_read_claim_bus,
         };
 
-        let gkr_prod_write_sum_air = GkrProdWriteSumCheckClaimAir {
+        let gkr_prod_write_sum_air = TowerProdWriteSumCheckClaimAir {
             transcript_bus: self.bus_inventory.transcript_bus,
             prod_claim_input_bus: self.prod_write_claim_input_bus,
             prod_claim_bus: self.prod_write_claim_bus,
         };
 
-        let gkr_logup_sum_air = GkrLogupSumCheckClaimAir {
+        let gkr_logup_sum_air = TowerLogupSumCheckClaimAir {
             transcript_bus: self.bus_inventory.transcript_bus,
             logup_claim_input_bus: self.logup_claim_input_bus,
             logup_claim_bus: self.logup_claim_bus,
         };
 
-        let gkr_sumcheck_air = GkrLayerSumcheckAir::new(
+        let gkr_sumcheck_air = TowerLayerSumcheckAir::new(
             self.bus_inventory.transcript_bus,
             self.bus_inventory.xi_randomness_bus,
             self.sumcheck_input_bus,
@@ -565,7 +566,7 @@ impl AirModule for GkrModule {
     }
 }
 
-impl GkrModule {
+impl TowerModule {
     #[tracing::instrument(skip_all)]
     fn generate_blob(
         &self,
@@ -573,7 +574,7 @@ impl GkrModule {
         proofs: &[RecursionProof],
         preflights: &[Preflight],
         exp_bits_len_gen: &ExpBitsLenTraceGenerator,
-    ) -> Result<GkrBlobCpu> {
+    ) -> Result<TowerBlobCpu> {
         let _ = (self, preflights, exp_bits_len_gen);
         build_gkr_blob(child_vk, proofs, preflights)
     }
@@ -583,7 +584,7 @@ pub(crate) fn build_gkr_blob(
     child_vk: &RecursionVk,
     proofs: &[RecursionProof],
     preflights: &[Preflight],
-) -> Result<GkrBlobCpu> {
+) -> Result<TowerBlobCpu> {
     let mut input_records = Vec::new();
     let mut layer_records = Vec::new();
     let mut tower_records = Vec::new();
@@ -607,7 +608,7 @@ pub(crate) fn build_gkr_blob(
                 })?;
                 if pf_entry.chip_idx != chip_idx {
                     return Err(eyre::eyre!(
-                        "gkr preflight chip mismatch (expected {}, found {})",
+                        "tower preflight chip mismatch (expected {}, found {})",
                         chip_idx,
                         pf_entry.chip_idx
                     ));
@@ -648,17 +649,17 @@ pub(crate) fn build_gkr_blob(
         }
 
         if !has_chip {
-            input_records.push(GkrInputRecord {
+            input_records.push(TowerInputRecord {
                 proof_idx,
                 ..Default::default()
             });
-            layer_records.push(GkrLayerRecord {
+            layer_records.push(TowerLayerRecord {
                 idx: 0,
                 proof_idx,
                 ..Default::default()
             });
-            tower_records.push(GkrTowerEvalRecord::default());
-            sumcheck_records.push(GkrSumcheckRecord {
+            tower_records.push(TowerTowerEvalRecord::default());
+            sumcheck_records.push(TowerSumcheckRecord {
                 proof_idx,
                 ..Default::default()
             });
@@ -668,15 +669,15 @@ pub(crate) fn build_gkr_blob(
     }
 
     if input_records.is_empty() {
-        input_records.push(GkrInputRecord::default());
-        layer_records.push(GkrLayerRecord::default());
-        sumcheck_records.push(GkrSumcheckRecord::default());
-        tower_records.push(GkrTowerEvalRecord::default());
+        input_records.push(TowerInputRecord::default());
+        layer_records.push(TowerLayerRecord::default());
+        sumcheck_records.push(TowerSumcheckRecord::default());
+        tower_records.push(TowerTowerEvalRecord::default());
         mus_records.push(vec![]);
         q0_claims.push(EF::ZERO);
     }
 
-    Ok(GkrBlobCpu {
+    Ok(TowerBlobCpu {
         input_records,
         layer_records,
         tower_records,
@@ -704,7 +705,7 @@ where
     FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts)
 }
 
-impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>> for GkrModule {
+impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>> for TowerModule {
     type ModuleSpecificCtx<'a> = ExpBitsLenTraceGenerator;
 
     #[tracing::instrument(skip_all)]
@@ -725,12 +726,12 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             }
         };
         let chips = [
-            GkrModuleChip::Input,
-            GkrModuleChip::Layer,
-            GkrModuleChip::ProdReadClaim,
-            GkrModuleChip::ProdWriteClaim,
-            GkrModuleChip::LogupClaim,
-            GkrModuleChip::LayerSumcheck,
+            TowerModuleChip::Input,
+            TowerModuleChip::Layer,
+            TowerModuleChip::ProdReadClaim,
+            TowerModuleChip::ProdWriteClaim,
+            TowerModuleChip::LogupClaim,
+            TowerModuleChip::LayerSumcheck,
         ];
 
         let span = tracing::Span::current();
@@ -754,7 +755,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 #[derive(strum_macros::Display, strum::EnumDiscriminants)]
 #[strum_discriminants(derive(strum_macros::EnumCount))]
 #[strum_discriminants(repr(usize))]
-enum GkrModuleChip {
+enum TowerModuleChip {
     Input,
     Layer,
     ProdReadClaim,
@@ -763,14 +764,14 @@ enum GkrModuleChip {
     LayerSumcheck,
 }
 
-impl GkrModuleChip {
+impl TowerModuleChip {
     fn index(&self) -> usize {
-        GkrModuleChipDiscriminants::from(self) as usize
+        TowerModuleChipDiscriminants::from(self) as usize
     }
 }
 
-impl RowMajorChip<F> for GkrModuleChip {
-    type Ctx<'a> = GkrBlobCpu;
+impl RowMajorChip<F> for TowerModuleChip {
+    type Ctx<'a> = TowerBlobCpu;
 
     #[tracing::instrument(
         name = "wrapper.generate_trace",
@@ -783,27 +784,27 @@ impl RowMajorChip<F> for GkrModuleChip {
         blob: &Self::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
-        use GkrModuleChip::*;
+        use TowerModuleChip::*;
         match self {
-            Input => GkrInputTraceGenerator
+            Input => TowerInputTraceGenerator
                 .generate_trace(&(&blob.input_records, &blob.q0_claims), required_height),
-            Layer => GkrLayerTraceGenerator.generate_trace(
+            Layer => TowerLayerTraceGenerator.generate_trace(
                 &(&blob.layer_records, &blob.mus_records, &blob.q0_claims),
                 required_height,
             ),
-            ProdReadClaim => GkrProdReadSumCheckClaimTraceGenerator.generate_trace(
+            ProdReadClaim => TowerProdReadSumCheckClaimTraceGenerator.generate_trace(
                 &(&blob.layer_records, &blob.tower_records, &blob.mus_records),
                 required_height,
             ),
-            ProdWriteClaim => GkrProdWriteSumCheckClaimTraceGenerator.generate_trace(
+            ProdWriteClaim => TowerProdWriteSumCheckClaimTraceGenerator.generate_trace(
                 &(&blob.layer_records, &blob.tower_records, &blob.mus_records),
                 required_height,
             ),
-            LogupClaim => GkrLogupSumCheckClaimTraceGenerator.generate_trace(
+            LogupClaim => TowerLogupSumCheckClaimTraceGenerator.generate_trace(
                 &(&blob.layer_records, &blob.tower_records, &blob.mus_records),
                 required_height,
             ),
-            LayerSumcheck => GkrSumcheckTraceGenerator.generate_trace(
+            LayerSumcheck => TowerSumcheckTraceGenerator.generate_trace(
                 &(&blob.sumcheck_records, &blob.mus_records),
                 required_height,
             ),
@@ -821,7 +822,7 @@ mod cuda_tracegen {
         tracegen::cuda::generate_gpu_proving_ctx,
     };
 
-    impl TraceGenModule<GlobalCtxGpu, GpuBackend> for GkrModule {
+    impl TraceGenModule<GlobalCtxGpu, GpuBackend> for TowerModule {
         type ModuleSpecificCtx<'a> = ExpBitsLenTraceGenerator;
 
         #[tracing::instrument(skip_all)]
@@ -852,12 +853,12 @@ mod cuda_tracegen {
             };
 
             let chips = [
-                GkrModuleChip::Input,
-                GkrModuleChip::Layer,
-                GkrModuleChip::ProdReadClaim,
-                GkrModuleChip::ProdWriteClaim,
-                GkrModuleChip::LogupClaim,
-                GkrModuleChip::LayerSumcheck,
+                TowerModuleChip::Input,
+                TowerModuleChip::Layer,
+                TowerModuleChip::ProdReadClaim,
+                TowerModuleChip::ProdWriteClaim,
+                TowerModuleChip::LogupClaim,
+                TowerModuleChip::LayerSumcheck,
             ];
 
             chips

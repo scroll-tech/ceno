@@ -14,7 +14,8 @@ but is forked so we can swap in ZKVM verifying keys (`RecursionVk`).
 
 ## Preflight Records (`src/system/preflight.rs`)
 
-- Local fork of the upstream `Preflight`/`ProofShapePreflight`/`GkrPreflight` structs so we can evolve transcript layout
+- Local fork of the upstream `Preflight`/`ProofShapePreflight`/`TowerPreflight` structs so we can evolve transcript
+  layout
   and bookkeeping independently of OpenVM.
 - Only the fields that current modules need are mirrored (trace metadata, tidx checkpoints, transcript log, Poseidon
   inputs). Additional upstream functionality stays commented out until required.
@@ -65,7 +66,7 @@ Fields capture the stateful modules that participate in recursive verification:
 - `transcript: TranscriptModule`: handles Fiat–Shamir transcript operations across the entire recursion proof.
 - `proof_shape: ProofShapeModule`: enforces child trace metadata (see `proof_shape_spec.md`).
 - `main_module: MainModule`: validates main-module constraints and participates in tracegen orchestration.
-- `gkr: GkrModule`: verifies the GKR proof emitted by the child STARK (see `docs/gkr_air_spec.md`).
+- `gkr: TowerModule`: verifies the GKR proof emitted by the child STARK (see `docs/gkr_air_spec.md`).
 
 ### Trait Implementation Status
 
@@ -90,7 +91,7 @@ Fields capture the stateful modules that participate in recursive verification:
 2. **ProofShapeModule** reads the child proof metadata and emits bus messages for downstream modules (
    height summaries, cached commitments, public values, etc.).
 3. **MainModule** enforces core verifier constraints linked to transcript/proof-shape outputs.
-4. **GkrModule** consumes those messages plus the child GKR proof to verify the folding of claims (see separate spec).
+4. **TowerModule** consumes those messages plus the child GKR proof to verify the folding of claims (see separate spec).
 5. **VerifierSubCircuit** orchestrates these modules: it shares `BusInventory`, ensures every module gets consistent
    handles, and sequences trace generation so transcript state advances consistently.
 

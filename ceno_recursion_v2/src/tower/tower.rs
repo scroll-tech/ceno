@@ -77,7 +77,7 @@ pub fn replay_tower_proof(
         "logup spec mismatch"
     );
 
-    let mut transcript = BasicTranscript::<RecursionField>::new(b"ceno-recursion-gkr-tower");
+    let mut transcript = BasicTranscript::<RecursionField>::new(b"ceno-recursion-tower-tower");
     let log2_num_fanin = ceil_log2(NUM_FANIN);
 
     let mut alpha_pows = get_challenge_pows(num_prod_spec + num_logup_spec * 2, &mut transcript);

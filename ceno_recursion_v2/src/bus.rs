@@ -12,13 +12,13 @@ pub use upstream::{
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
-pub struct GkrModuleMessage<T> {
+pub struct TowerModuleMessage<T> {
     pub idx: T,
     pub tidx: T,
     pub n_logup: T,
 }
 
-define_typed_per_proof_permutation_bus!(GkrModuleBus, GkrModuleMessage);
+define_typed_per_proof_permutation_bus!(TowerModuleBus, TowerModuleMessage);
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]

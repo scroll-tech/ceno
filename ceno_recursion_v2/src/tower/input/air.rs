@@ -1,8 +1,10 @@
 use core::borrow::Borrow;
 
 use crate::{
-    bus::{GkrModuleBus, GkrModuleMessage, MainBus, MainMessage, TranscriptBus},
-    gkr::bus::{GkrLayerInputBus, GkrLayerInputMessage, GkrLayerOutputBus, GkrLayerOutputMessage},
+    bus::{MainBus, MainMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus},
+    tower::bus::{
+        TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus, TowerLayerOutputMessage,
+    },
 };
 use openvm_circuit_primitives::{
     SubAir,
@@ -24,7 +26,7 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
-pub struct GkrInputCols<T> {
+pub struct TowerInputCols<T> {
     /// Whether the current row is enabled (i.e. not padding)
     pub is_enabled: T,
 
@@ -53,34 +55,34 @@ pub struct GkrInputCols<T> {
     pub layer_output_mu: [T; D_EF],
 }
 
-/// The GkrInputAir handles reading and passing the GkrInput
-pub struct GkrInputAir {
+/// The TowerInputAir handles reading and passing the TowerInput
+pub struct TowerInputAir {
     // Buses
-    pub gkr_module_bus: GkrModuleBus,
+    pub tower_module_bus: TowerModuleBus,
     pub main_bus: MainBus,
     pub transcript_bus: TranscriptBus,
-    pub layer_input_bus: GkrLayerInputBus,
-    pub layer_output_bus: GkrLayerOutputBus,
+    pub layer_input_bus: TowerLayerInputBus,
+    pub layer_output_bus: TowerLayerOutputBus,
 }
 
-impl<F: Field> BaseAir<F> for GkrInputAir {
+impl<F: Field> BaseAir<F> for TowerInputAir {
     fn width(&self) -> usize {
-        GkrInputCols::<F>::width()
+        TowerInputCols::<F>::width()
     }
 }
 
-impl<F: Field> BaseAirWithPublicValues<F> for GkrInputAir {}
-impl<F: Field> PartitionedBaseAir<F> for GkrInputAir {}
+impl<F: Field> BaseAirWithPublicValues<F> for TowerInputAir {}
+impl<F: Field> PartitionedBaseAir<F> for TowerInputAir {}
 
-impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
+impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let (local, next) = (
             main.row_slice(0).expect("window should have two elements"),
             main.row_slice(1).expect("window should have two elements"),
         );
-        let local: &GkrInputCols<AB::Var> = (*local).borrow();
-        let next: &GkrInputCols<AB::Var> = (*next).borrow();
+        let local: &TowerInputCols<AB::Var> = (*local).borrow();
+        let next: &TowerInputCols<AB::Var> = (*next).borrow();
 
         ///////////////////////////////////////////////////////////////////////
         // Proof Index Constraints
@@ -156,12 +158,12 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
                 * num_layers.clone()
                 * (num_layers.clone() + AB::Expr::TWO)
                 * AB::Expr::from_usize(2 * D_EF);
-        // 1. GkrLayerInputBus
-        // 1a. Send input to GkrLayerAir
+        // 1. TowerLayerInputBus
+        // 1a. Send input to TowerLayerAir
         self.layer_input_bus.send(
             builder,
             local.proof_idx,
-            GkrLayerInputMessage {
+            TowerLayerInputMessage {
                 idx: local.idx.into(),
                 // Skip q0_claim
                 tidx: (tidx_after_alpha_beta + AB::Expr::from_usize(D_EF))
@@ -172,12 +174,12 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
             },
             local.is_enabled * has_interactions.clone(),
         );
-        // 2. GkrLayerOutputBus
-        // 2a. Receive input layer claim from GkrLayerAir
+        // 2. TowerLayerOutputBus
+        // 2a. Receive input layer claim from TowerLayerAir
         self.layer_output_bus.receive(
             builder,
             local.proof_idx,
-            GkrLayerOutputMessage {
+            TowerLayerOutputMessage {
                 idx: local.idx.into(),
                 tidx: tidx_after_gkr_layers.clone(),
                 layer_idx_end: num_layers.clone() - AB::Expr::ONE,
@@ -191,12 +193,12 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrInputAir {
         // External Interactions
         ///////////////////////////////////////////////////////////////////////
 
-        // 1. GkrModuleBus
+        // 1. TowerModuleBus
         // 1a. Receive initial GKR module message on first layer
-        self.gkr_module_bus.receive(
+        self.tower_module_bus.receive(
             builder,
             local.proof_idx,
-            GkrModuleMessage {
+            TowerModuleMessage {
                 idx: local.idx.into(),
                 tidx: local.tidx.into(),
                 n_logup: local.n_logup.into(),

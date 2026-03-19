@@ -10,8 +10,9 @@ use p3_field::{Field, PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::gkr::bus::{
-    GkrLogupClaimBus, GkrLogupClaimInputBus, GkrLogupClaimMessage, GkrLogupLayerChallengeMessage,
+use crate::tower::bus::{
+    TowerProdLayerChallengeMessage, TowerProdReadClaimBus, TowerProdReadClaimInputBus,
+    TowerProdSumClaimMessage, TowerProdWriteClaimBus, TowerProdWriteClaimInputBus,
 };
 use recursion_circuit::{
     bus::TranscriptBus,
@@ -21,7 +22,7 @@ use recursion_circuit::{
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
-pub struct GkrLogupSumCheckClaimCols<T> {
+pub struct TowerProdSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
@@ -36,50 +37,58 @@ pub struct GkrLogupSumCheckClaimCols<T> {
     pub lambda: [T; D_EF],
     pub lambda_prime: [T; D_EF],
     pub mu: [T; D_EF],
-
     pub p_xi_0: [T; D_EF],
     pub p_xi_1: [T; D_EF],
-    pub q_xi_0: [T; D_EF],
-    pub q_xi_1: [T; D_EF],
     pub p_xi: [T; D_EF],
-    pub q_xi: [T; D_EF],
-
     pub pow_lambda: [T; D_EF],
     pub pow_lambda_prime: [T; D_EF],
     pub acc_sum: [T; D_EF],
-    pub acc_p_cross: [T; D_EF],
-    pub acc_q_cross: [T; D_EF],
-    pub num_logup_count: T,
+    pub acc_sum_prime: [T; D_EF],
+    pub num_prod_count: T,
 }
 
-pub struct GkrLogupSumCheckClaimAir {
+pub struct TowerProdSumCheckClaimAir<IB, OB> {
     pub transcript_bus: TranscriptBus,
-    pub logup_claim_input_bus: GkrLogupClaimInputBus,
-    pub logup_claim_bus: GkrLogupClaimBus,
+    pub prod_claim_input_bus: IB,
+    pub prod_claim_bus: OB,
 }
 
-impl<F: Field> BaseAir<F> for GkrLogupSumCheckClaimAir {
+pub type TowerProdReadSumCheckClaimAir =
+    TowerProdSumCheckClaimAir<TowerProdReadClaimInputBus, TowerProdReadClaimBus>;
+pub type TowerProdWriteSumCheckClaimAir =
+    TowerProdSumCheckClaimAir<TowerProdWriteClaimInputBus, TowerProdWriteClaimBus>;
+
+impl<F: Field, IB: Sync, OB: Sync> BaseAir<F> for TowerProdSumCheckClaimAir<IB, OB> {
     fn width(&self) -> usize {
-        GkrLogupSumCheckClaimCols::<F>::width()
+        TowerProdSumCheckClaimCols::<F>::width()
     }
 }
 
-impl<F: Field> BaseAirWithPublicValues<F> for GkrLogupSumCheckClaimAir {}
-impl<F: Field> PartitionedBaseAir<F> for GkrLogupSumCheckClaimAir {}
-
-impl<AB> Air<AB> for GkrLogupSumCheckClaimAir
-where
-    AB: AirBuilder + InteractionBuilder,
-    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+impl<F: Field, IB: Sync, OB: Sync> BaseAirWithPublicValues<F>
+    for TowerProdSumCheckClaimAir<IB, OB>
 {
-    fn eval(&self, builder: &mut AB) {
+}
+impl<F: Field, IB: Sync, OB: Sync> PartitionedBaseAir<F> for TowerProdSumCheckClaimAir<IB, OB> {}
+
+impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
+    fn eval_core<AB, Recv, Send>(
+        &self,
+        builder: &mut AB,
+        mut recv_challenge: Recv,
+        mut send_claim: Send,
+    ) where
+        AB: AirBuilder + InteractionBuilder,
+        <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+        Recv: FnMut(&IB, &mut AB, AB::Var, TowerProdLayerChallengeMessage<AB::Expr>, AB::Expr),
+        Send: FnMut(&OB, &mut AB, AB::Var, TowerProdSumClaimMessage<AB::Expr>, AB::Expr),
+    {
         let main = builder.main();
         let (local_row, next_row) = (
             main.row_slice(0).expect("window should have two elements"),
             main.row_slice(1).expect("window should have two elements"),
         );
-        let local: &GkrLogupSumCheckClaimCols<AB::Var> = (*local_row).borrow();
-        let next: &GkrLogupSumCheckClaimCols<AB::Var> = (*next_row).borrow();
+        let local: &TowerProdSumCheckClaimCols<AB::Var> = (*local_row).borrow();
+        let next: &TowerProdSumCheckClaimCols<AB::Var> = (*next_row).borrow();
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_first_layer);
@@ -106,8 +115,8 @@ where
         let is_transition = LoopSubAir::local_is_transition(next.is_enabled, next.is_first);
         let is_last_layer_row =
             LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first);
-        let stay_in_layer = AB::Expr::ONE - is_transition.clone();
         let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
+        let stay_in_layer = AB::Expr::ONE - is_transition.clone();
 
         builder
             .when(local.is_first)
@@ -127,10 +136,7 @@ where
             .assert_eq(next.index_id, local.index_id + AB::Expr::ONE);
         builder
             .when(is_last_layer_row.clone() * is_not_dummy.clone())
-            .assert_eq(
-                local.index_id + AB::Expr::ONE,
-                local.num_logup_count.clone(),
-            );
+            .assert_eq(local.index_id + AB::Expr::ONE, local.num_prod_count.clone());
 
         assert_zeros(
             &mut builder.when(local.is_first * is_not_dummy.clone()),
@@ -138,11 +144,7 @@ where
         );
         assert_zeros(
             &mut builder.when(local.is_first * is_not_dummy.clone()),
-            local.acc_p_cross.map(Into::into),
-        );
-        assert_zeros(
-            &mut builder.when(local.is_first * is_not_dummy.clone()),
-            local.acc_q_cross.map(Into::into),
+            local.acc_sum_prime.map(Into::into),
         );
         builder
             .when(local.is_first * is_not_dummy.clone())
@@ -161,62 +163,43 @@ where
                 .assert_zero(limb);
         }
 
-        let delta_p = ext_field_subtract::<AB::Expr>(local.p_xi_1, local.p_xi_0);
+        let delta = ext_field_subtract::<AB::Expr>(local.p_xi_1, local.p_xi_0);
         let expected_p_xi =
-            ext_field_add::<AB::Expr>(local.p_xi_0, ext_field_multiply(delta_p, local.mu));
+            ext_field_add::<AB::Expr>(local.p_xi_0, ext_field_multiply(delta, local.mu));
         assert_array_eq(builder, local.p_xi, expected_p_xi);
 
-        let delta_q = ext_field_subtract::<AB::Expr>(local.q_xi_1, local.q_xi_0);
-        let expected_q_xi =
-            ext_field_add::<AB::Expr>(local.q_xi_0, ext_field_multiply(delta_q, local.mu));
-        assert_array_eq(builder, local.q_xi, expected_q_xi);
-
-        let (p_cross_term, q_cross_term) =
-            compute_recursive_relations(local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1);
-
-        let lambda = local.lambda.map(Into::into);
         let pow_lambda = local.pow_lambda.map(Into::into);
-        let combined = ext_field_add::<AB::Expr>(
-            local.p_xi,
-            ext_field_multiply::<AB::Expr>(lambda.clone(), local.q_xi),
-        );
-        let contribution = ext_field_multiply::<AB::Expr>(pow_lambda.clone(), combined);
+        let contribution = ext_field_multiply::<AB::Expr>(local.p_xi, pow_lambda.clone());
         let acc_sum_with_cur = ext_field_add::<AB::Expr>(local.acc_sum, contribution);
         let acc_sum_export = acc_sum_with_cur.clone();
+
+        let prime_product = ext_field_multiply::<AB::Expr>(local.p_xi_0, local.p_xi_1);
+        let pow_lambda_prime = local.pow_lambda_prime.map(Into::into);
+        let prime_contribution =
+            ext_field_multiply::<AB::Expr>(pow_lambda_prime.clone(), prime_product);
+        let acc_sum_prime_with_cur =
+            ext_field_add::<AB::Expr>(local.acc_sum_prime, prime_contribution);
+        let acc_sum_prime_export = acc_sum_prime_with_cur.clone();
 
         assert_array_eq(
             &mut builder.when(stay_in_layer.clone()),
             next.acc_sum,
             acc_sum_with_cur,
         );
+        assert_array_eq(
+            &mut builder.when(stay_in_layer.clone()),
+            next.acc_sum_prime,
+            acc_sum_prime_with_cur,
+        );
+
+        let lambda = local.lambda.map(Into::into);
         let pow_lambda_next = ext_field_multiply::<AB::Expr>(pow_lambda, lambda.clone());
         assert_array_eq(
             &mut builder.when(stay_in_layer.clone()),
             next.pow_lambda,
             pow_lambda_next,
         );
-
-        let pow_lambda_prime = local.pow_lambda_prime.map(Into::into);
         let lambda_prime = local.lambda_prime.map(Into::into);
-        let acc_p_with_cur = ext_field_add::<AB::Expr>(
-            local.acc_p_cross,
-            ext_field_multiply::<AB::Expr>(pow_lambda_prime.clone(), p_cross_term),
-        );
-        assert_array_eq(
-            &mut builder.when(stay_in_layer.clone()),
-            next.acc_p_cross,
-            acc_p_with_cur.clone(),
-        );
-        let scaled_q_term = ext_field_multiply::<AB::Expr>(
-            ext_field_multiply::<AB::Expr>(pow_lambda_prime.clone(), lambda_prime.clone()),
-            q_cross_term,
-        );
-        let acc_q_with_cur = ext_field_add::<AB::Expr>(local.acc_q_cross, scaled_q_term);
-        assert_array_eq(
-            &mut builder.when(stay_in_layer.clone()),
-            next.acc_q_cross,
-            acc_q_with_cur.clone(),
-        );
         let pow_lambda_prime_next =
             ext_field_multiply::<AB::Expr>(pow_lambda_prime, lambda_prime.clone());
         assert_array_eq(
@@ -225,62 +208,75 @@ where
             pow_lambda_prime_next,
         );
 
-        self.logup_claim_input_bus.receive(
+        recv_challenge(
+            &self.prod_claim_input_bus,
             builder,
             local.proof_idx,
-            GkrLogupLayerChallengeMessage {
+            TowerProdLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into(),
-                lambda: lambda.clone(),
+                lambda,
                 lambda_prime: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
             },
             local.is_first_layer * is_not_dummy.clone(),
         );
 
-        self.logup_claim_bus.send(
+        send_claim(
+            &self.prod_claim_bus,
             builder,
             local.proof_idx,
-            GkrLogupClaimMessage {
+            TowerProdSumClaimMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: acc_sum_export.map(Into::into),
-                lambda_prime_claim: acc_q_with_cur.map(Into::into),
-                num_logup_count: local.num_logup_count.into(),
+                lambda_prime_claim: acc_sum_prime_export.map(Into::into),
+                num_prod_count: local.num_prod_count.into(),
             },
             is_last_layer_row * is_not_dummy.clone(),
         );
 
         let mut tidx = local.tidx.into();
-        for claim in [local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1] {
-            self.transcript_bus.observe_ext(
-                builder,
-                local.proof_idx,
-                tidx.clone(),
-                claim,
-                local.is_enabled * is_not_dummy.clone(),
-            );
-            tidx += AB::Expr::from_usize(D_EF);
-        }
+        self.transcript_bus.observe_ext(
+            builder,
+            local.proof_idx,
+            tidx.clone(),
+            local.p_xi_0,
+            local.is_enabled * is_not_dummy.clone(),
+        );
+        tidx += AB::Expr::from_usize(D_EF);
+        self.transcript_bus.observe_ext(
+            builder,
+            local.proof_idx,
+            tidx,
+            local.p_xi_1,
+            local.is_enabled * is_not_dummy,
+        );
     }
 }
 
-fn compute_recursive_relations<F, FA>(
-    p_xi_0: [F; D_EF],
-    q_xi_0: [F; D_EF],
-    p_xi_1: [F; D_EF],
-    q_xi_1: [F; D_EF],
-) -> ([FA; D_EF], [FA; D_EF])
-where
-    F: Into<FA> + Copy,
-    FA: PrimeCharacteristicRing,
-    FA::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
-{
-    let p_cross_term = ext_field_add::<FA>(
-        ext_field_multiply::<FA>(p_xi_0, q_xi_1),
-        ext_field_multiply::<FA>(p_xi_1, q_xi_0),
-    );
-    let q_cross_term = ext_field_multiply::<FA>(q_xi_0, q_xi_1);
-    (p_cross_term, q_cross_term)
+macro_rules! impl_prod_sum_air {
+    ($ty:ty) => {
+        impl<AB> Air<AB> for $ty
+        where
+            AB: AirBuilder + InteractionBuilder,
+            <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+        {
+            fn eval(&self, builder: &mut AB) {
+                self.eval_core(
+                    builder,
+                    |bus, builder, proof_idx, msg, mult| {
+                        bus.receive(builder, proof_idx, msg, mult);
+                    },
+                    |bus, builder, proof_idx, msg, mult| {
+                        bus.send(builder, proof_idx, msg, mult);
+                    },
+                );
+            }
+        }
+    };
 }
+
+impl_prod_sum_air!(TowerProdReadSumCheckClaimAir);
+impl_prod_sum_air!(TowerProdWriteSumCheckClaimAir);

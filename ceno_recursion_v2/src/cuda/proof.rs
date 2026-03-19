@@ -7,7 +7,7 @@ use super::{to_device_or_nullptr, types::PublicValueData};
 pub struct ProofGpu {
     pub cpu: RecursionProof,
     pub proof_shape: ProofShapeProofGpu,
-    pub gkr: GkrProofGpu,
+    pub gkr: TowerProofGpu,
     pub batch_constraint: BatchConstraintProofGpu,
     pub stacking: StackingProofGpu,
     pub whir: WhirProofGpu,
@@ -17,7 +17,7 @@ pub struct ProofShapeProofGpu {
     pub public_values: DeviceBuffer<PublicValueData>,
 }
 
-pub struct GkrProofGpu {
+pub struct TowerProofGpu {
     _dummy: usize,
 }
 
@@ -52,8 +52,8 @@ impl ProofGpu {
         }
     }
 
-    fn gkr(_proof: &RecursionProof) -> GkrProofGpu {
-        GkrProofGpu { _dummy: 0 }
+    fn gkr(_proof: &RecursionProof) -> TowerProofGpu {
+        TowerProofGpu { _dummy: 0 }
     }
 
     fn batch_constraint(_proof: &RecursionProof) -> BatchConstraintProofGpu {

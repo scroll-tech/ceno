@@ -5,17 +5,17 @@ use crate::define_typed_per_proof_permutation_bus;
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrXiSamplerMessage<T> {
+pub struct TowerXiSamplerMessage<T> {
     pub idx: T,
     pub tidx: T,
 }
 
-define_typed_per_proof_permutation_bus!(GkrXiSamplerBus, GkrXiSamplerMessage);
+define_typed_per_proof_permutation_bus!(TowerXiSamplerBus, TowerXiSamplerMessage);
 
-/// Message sent from GkrInputAir to GkrLayerAir
+/// Message sent from TowerInputAir to TowerLayerAir
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrLayerInputMessage<T> {
+pub struct TowerLayerInputMessage<T> {
     pub idx: T,
     pub tidx: T,
     pub r0_claim: [T; D_EF],
@@ -23,12 +23,12 @@ pub struct GkrLayerInputMessage<T> {
     pub q0_claim: [T; D_EF],
 }
 
-define_typed_per_proof_permutation_bus!(GkrLayerInputBus, GkrLayerInputMessage);
+define_typed_per_proof_permutation_bus!(TowerLayerInputBus, TowerLayerInputMessage);
 
-/// Message sent from GkrInputAir to GkrLayerAir
+/// Message sent from TowerInputAir to TowerLayerAir
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrLayerOutputMessage<T> {
+pub struct TowerLayerOutputMessage<T> {
     pub idx: T,
     pub tidx: T,
     pub layer_idx_end: T,
@@ -37,11 +37,11 @@ pub struct GkrLayerOutputMessage<T> {
     pub mu: [T; D_EF],
 }
 
-define_typed_per_proof_permutation_bus!(GkrLayerOutputBus, GkrLayerOutputMessage);
+define_typed_per_proof_permutation_bus!(TowerLayerOutputBus, TowerLayerOutputMessage);
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrProdLayerChallengeMessage<T> {
+pub struct TowerProdLayerChallengeMessage<T> {
     pub idx: T,
     pub layer_idx: T,
     pub tidx: T,
@@ -50,12 +50,15 @@ pub struct GkrProdLayerChallengeMessage<T> {
     pub mu: [T; D_EF],
 }
 
-define_typed_per_proof_permutation_bus!(GkrProdReadClaimInputBus, GkrProdLayerChallengeMessage);
-define_typed_per_proof_permutation_bus!(GkrProdWriteClaimInputBus, GkrProdLayerChallengeMessage);
+define_typed_per_proof_permutation_bus!(TowerProdReadClaimInputBus, TowerProdLayerChallengeMessage);
+define_typed_per_proof_permutation_bus!(
+    TowerProdWriteClaimInputBus,
+    TowerProdLayerChallengeMessage
+);
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrProdSumClaimMessage<T> {
+pub struct TowerProdSumClaimMessage<T> {
     pub idx: T,
     pub layer_idx: T,
     pub lambda_claim: [T; D_EF],
@@ -63,12 +66,12 @@ pub struct GkrProdSumClaimMessage<T> {
     pub num_prod_count: T,
 }
 
-define_typed_per_proof_permutation_bus!(GkrProdReadClaimBus, GkrProdSumClaimMessage);
-define_typed_per_proof_permutation_bus!(GkrProdWriteClaimBus, GkrProdSumClaimMessage);
+define_typed_per_proof_permutation_bus!(TowerProdReadClaimBus, TowerProdSumClaimMessage);
+define_typed_per_proof_permutation_bus!(TowerProdWriteClaimBus, TowerProdSumClaimMessage);
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrLogupLayerChallengeMessage<T> {
+pub struct TowerLogupLayerChallengeMessage<T> {
     pub idx: T,
     pub layer_idx: T,
     pub tidx: T,
@@ -77,11 +80,11 @@ pub struct GkrLogupLayerChallengeMessage<T> {
     pub mu: [T; D_EF],
 }
 
-define_typed_per_proof_permutation_bus!(GkrLogupClaimInputBus, GkrLogupLayerChallengeMessage);
+define_typed_per_proof_permutation_bus!(TowerLogupClaimInputBus, TowerLogupLayerChallengeMessage);
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrLogupClaimMessage<T> {
+pub struct TowerLogupClaimMessage<T> {
     pub idx: T,
     pub layer_idx: T,
     pub lambda_claim: [T; D_EF],
@@ -89,12 +92,12 @@ pub struct GkrLogupClaimMessage<T> {
     pub num_logup_count: T,
 }
 
-define_typed_per_proof_permutation_bus!(GkrLogupClaimBus, GkrLogupClaimMessage);
+define_typed_per_proof_permutation_bus!(TowerLogupClaimBus, TowerLogupClaimMessage);
 
-/// Message sent from GkrLayerAir to GkrLayerSumcheckAir
+/// Message sent from TowerLayerAir to TowerLayerSumcheckAir
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrSumcheckInputMessage<T> {
+pub struct TowerSumcheckInputMessage<T> {
     /// Module index within the proof
     pub idx: T,
     /// GKR layer index
@@ -106,12 +109,12 @@ pub struct GkrSumcheckInputMessage<T> {
     pub claim: [T; D_EF],
 }
 
-define_typed_per_proof_permutation_bus!(GkrSumcheckInputBus, GkrSumcheckInputMessage);
+define_typed_per_proof_permutation_bus!(TowerSumcheckInputBus, TowerSumcheckInputMessage);
 
-/// Message sent from GkrLayerSumcheckAir to GkrLayerAir
+/// Message sent from TowerLayerSumcheckAir to TowerLayerAir
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrSumcheckOutputMessage<T> {
+pub struct TowerSumcheckOutputMessage<T> {
     /// Module index within the proof
     pub idx: T,
     /// GKR layer index
@@ -124,12 +127,12 @@ pub struct GkrSumcheckOutputMessage<T> {
     pub eq_at_r_prime: [T; D_EF],
 }
 
-define_typed_per_proof_permutation_bus!(GkrSumcheckOutputBus, GkrSumcheckOutputMessage);
+define_typed_per_proof_permutation_bus!(TowerSumcheckOutputBus, TowerSumcheckOutputMessage);
 
 /// Message for passing challenges between consecutive sumcheck sub-rounds
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct GkrSumcheckChallengeMessage<T> {
+pub struct TowerSumcheckChallengeMessage<T> {
     /// Module index within the proof
     pub idx: T,
     /// GKR layer index
@@ -140,4 +143,4 @@ pub struct GkrSumcheckChallengeMessage<T> {
     pub challenge: [T; D_EF],
 }
 
-define_typed_per_proof_permutation_bus!(GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage);
+define_typed_per_proof_permutation_bus!(TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage);

@@ -202,7 +202,7 @@ impl AirModule for ProofShapeModule {
             num_pvs_bus: self.num_pvs_bus,
             fraction_folder_input_bus: self.bus_inventory.fraction_folder_input_bus,
             expression_claim_n_max_bus: self.bus_inventory.expression_claim_n_max_bus,
-            gkr_module_bus: self.bus_inventory.gkr_module_bus,
+            tower_module_bus: self.bus_inventory.tower_module_bus,
             air_shape_bus: self.bus_inventory.air_shape_bus,
             hyperdim_bus: self.bus_inventory.hyperdim_bus,
             lifted_heights_bus: self.bus_inventory.lifted_heights_bus,

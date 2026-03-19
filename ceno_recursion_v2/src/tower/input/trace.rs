@@ -1,6 +1,6 @@
 use core::borrow::BorrowMut;
 
-use super::GkrInputCols;
+use super::TowerInputCols;
 use crate::tracegen::RowMajorChip;
 use openvm_circuit_primitives::{TraceSubRowGenerator, is_zero::IsZeroSubAir};
 use openvm_stark_backend::p3_maybe_rayon::prelude::*;
@@ -9,7 +9,7 @@ use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
 #[derive(Debug, Clone, Default)]
-pub struct GkrInputRecord {
+pub struct TowerInputRecord {
     pub proof_idx: usize,
     pub idx: usize,
     pub tidx: usize,
@@ -18,11 +18,11 @@ pub struct GkrInputRecord {
     pub input_layer_claim: EF,
 }
 
-pub struct GkrInputTraceGenerator;
+pub struct TowerInputTraceGenerator;
 
-impl RowMajorChip<F> for GkrInputTraceGenerator {
+impl RowMajorChip<F> for TowerInputTraceGenerator {
     // (gkr_input_records, q0_claims)
-    type Ctx<'a> = (&'a [GkrInputRecord], &'a [EF]);
+    type Ctx<'a> = (&'a [TowerInputRecord], &'a [EF]);
 
     #[tracing::instrument(level = "trace", skip_all)]
     fn generate_trace(
@@ -33,7 +33,7 @@ impl RowMajorChip<F> for GkrInputTraceGenerator {
         let (gkr_input_records, q0_claims) = ctx;
         debug_assert_eq!(gkr_input_records.len(), q0_claims.len());
 
-        let width = GkrInputCols::<F>::width();
+        let width = TowerInputCols::<F>::width();
 
         // Each record generates exactly 1 row
         let num_valid_rows = gkr_input_records.len();
@@ -54,7 +54,7 @@ impl RowMajorChip<F> for GkrInputTraceGenerator {
             .par_chunks_mut(width)
             .zip(gkr_input_records.par_iter().zip(q0_claims.par_iter()))
             .for_each(|(row_data, (record, q0_claim))| {
-                let cols: &mut GkrInputCols<F> = row_data.borrow_mut();
+                let cols: &mut TowerInputCols<F> = row_data.borrow_mut();
 
                 cols.is_enabled = F::ONE;
                 cols.proof_idx = F::from_usize(record.proof_idx);

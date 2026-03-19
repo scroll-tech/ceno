@@ -45,15 +45,15 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
 
 ### Column Groups
 
-| Group                       | Columns                                                                              | Notes                                                                                                         |
-|-----------------------------|--------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------|
-| Row selectors               | `proof_idx`, `is_valid`, `is_first`, `is_last`, `is_present`                          | Manage per-proof iteration and summary row detection.                                                         |
-| Ordering & metadata         | `idx`, `sorted_idx`, `log_height`, `height`, `need_rot`, `num_present`                | Track VK ordering vs runtime order, enforce height monotonicity, rotation requirements.                       |
-| Transcript anchors          | `starting_tidx`, `starting_cidx`                                                     | Anchor where per-air transcript reads start; exported via buses.                                              |
-| Height decomposition        | `height_limbs[NUM_LIMBS]`                                                             | Enforce limb decomposition/range checks for `height`.                                                          |
-| Hyperdim summary            | `n_max`, `is_n_max_greater`, `num_air_id_lookups`, `num_columns`                     | Track max `log_height` across present AIRs and auxiliary per-air lookup counts.                               |
-| Cached commit bookkeeping   | `cached_idx_flags`, `cached_idx_value`, `cached_commits`                             | Track how many cached columns exist and their transcript tidx positions.                                      |
-| Bookkeeping for permutation | Encoder-specific subcolumns (idx flags) verifying sorted order.                      
+| Group                       | Columns                                                                | Notes                                                                                   |
+|-----------------------------|------------------------------------------------------------------------|-----------------------------------------------------------------------------------------|
+| Row selectors               | `proof_idx`, `is_valid`, `is_first`, `is_last`, `is_present`           | Manage per-proof iteration and summary row detection.                                   |
+| Ordering & metadata         | `idx`, `sorted_idx`, `log_height`, `height`, `need_rot`, `num_present` | Track VK ordering vs runtime order, enforce height monotonicity, rotation requirements. |
+| Transcript anchors          | `starting_tidx`, `starting_cidx`                                       | Anchor where per-air transcript reads start; exported via buses.                        |
+| Height decomposition        | `height_limbs[NUM_LIMBS]`                                              | Enforce limb decomposition/range checks for `height`.                                   |
+| Hyperdim summary            | `n_max`, `is_n_max_greater`, `num_air_id_lookups`, `num_columns`       | Track max `log_height` across present AIRs and auxiliary per-air lookup counts.         |
+| Cached commit bookkeeping   | `cached_idx_flags`, `cached_idx_value`, `cached_commits`               | Track how many cached columns exist and their transcript tidx positions.                |
+| Bookkeeping for permutation | Encoder-specific subcolumns (idx flags) verifying sorted order.        
 
 ### Constraints Overview
 
@@ -68,7 +68,8 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
 - **Expression lookups**: `ExpressionClaimNMaxBus`, `FractionFolderInputBus`, and `NLiftBus` mirror the computed
   `n_logup`, `n_max`, and `n_lift = log_height` metadata so batch constraint and fraction-folder modules can cross-check
   expectations. `AirShapeBus` exposes additional per-AIR properties (`NumRead`, `NumWrite`, `NumLk`) so GKR AIRs can
-  enforce that their runtime layer counts match the verifying-key declarations. `NumInteractions` is currently emitted as
+  enforce that their runtime layer counts match the verifying-key declarations. `NumInteractions` is currently emitted
+  as
   `0` in this AIR.
 
 ### Bus Interactions
@@ -76,7 +77,7 @@ adapt it to Ceno’s ZKVM while keeping behavior aligned with OpenVM.
 - Sends on: `ProofShapePermutationBus`, `HyperdimBus`, `LiftedHeightsBus`, `CommitmentsBus`, `ExpressionClaimNMaxBus`,
   `FractionFolderInputBus`, `NLiftBus`, `StartingTidxBus`, `NumPublicValuesBus`, `CachedCommitBus` (if continuations
   enabled).
-- Receives from: `ProofShapePermutationBus` (VK order), `GkrModuleBus` (per-proof configuration), `AirShapeBus`
+- Receives from: `ProofShapePermutationBus` (VK order), `TowerModuleBus` (per-proof configuration), `AirShapeBus`
   (per-air property lookups, including the new `NumRead` / `NumWrite` / `NumLk` counters that downstream GKR AIRs
   enforce), `PowerCheckerBus` (for PoW enforcement), `RangeCheckerBus` (monotonic log heights),
   `TranscriptBus` (sample/observe tidx-aligned data), `CachedCommitBus` (continuations), `CommitmentsBus` (when reading

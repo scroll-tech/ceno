@@ -10,9 +10,9 @@ use p3_field::{Field, PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::gkr::bus::{
-    GkrSumcheckChallengeBus, GkrSumcheckChallengeMessage, GkrSumcheckInputBus,
-    GkrSumcheckInputMessage, GkrSumcheckOutputBus, GkrSumcheckOutputMessage,
+use crate::tower::bus::{
+    TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
+    TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
 };
 use recursion_circuit::{
     bus::{TranscriptBus, XiRandomnessBus, XiRandomnessMessage},
@@ -25,7 +25,7 @@ use recursion_circuit::{
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
-pub struct GkrLayerSumcheckCols<T> {
+pub struct TowerLayerSumcheckCols<T> {
     /// Whether the current row is enabled (i.e. not padding)
     pub is_enabled: T,
     pub proof_idx: T,
@@ -72,21 +72,21 @@ pub struct GkrLayerSumcheckCols<T> {
     pub eq_out: [T; D_EF],
 }
 
-pub struct GkrLayerSumcheckAir {
+pub struct TowerLayerSumcheckAir {
     pub transcript_bus: TranscriptBus,
     pub xi_randomness_bus: XiRandomnessBus,
-    pub sumcheck_input_bus: GkrSumcheckInputBus,
-    pub sumcheck_output_bus: GkrSumcheckOutputBus,
-    pub sumcheck_challenge_bus: GkrSumcheckChallengeBus,
+    pub sumcheck_input_bus: TowerSumcheckInputBus,
+    pub sumcheck_output_bus: TowerSumcheckOutputBus,
+    pub sumcheck_challenge_bus: TowerSumcheckChallengeBus,
 }
 
-impl GkrLayerSumcheckAir {
+impl TowerLayerSumcheckAir {
     pub fn new(
         transcript_bus: TranscriptBus,
         xi_randomness_bus: XiRandomnessBus,
-        sumcheck_input_bus: GkrSumcheckInputBus,
-        sumcheck_output_bus: GkrSumcheckOutputBus,
-        sumcheck_challenge_bus: GkrSumcheckChallengeBus,
+        sumcheck_input_bus: TowerSumcheckInputBus,
+        sumcheck_output_bus: TowerSumcheckOutputBus,
+        sumcheck_challenge_bus: TowerSumcheckChallengeBus,
     ) -> Self {
         Self {
             transcript_bus,
@@ -98,16 +98,16 @@ impl GkrLayerSumcheckAir {
     }
 }
 
-impl<F: Field> BaseAir<F> for GkrLayerSumcheckAir {
+impl<F: Field> BaseAir<F> for TowerLayerSumcheckAir {
     fn width(&self) -> usize {
-        GkrLayerSumcheckCols::<F>::width()
+        TowerLayerSumcheckCols::<F>::width()
     }
 }
 
-impl<F: Field> BaseAirWithPublicValues<F> for GkrLayerSumcheckAir {}
-impl<F: Field> PartitionedBaseAir<F> for GkrLayerSumcheckAir {}
+impl<F: Field> BaseAirWithPublicValues<F> for TowerLayerSumcheckAir {}
+impl<F: Field> PartitionedBaseAir<F> for TowerLayerSumcheckAir {}
 
-impl<AB: AirBuilder + InteractionBuilder> Air<AB> for GkrLayerSumcheckAir
+impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerLayerSumcheckAir
 where
     <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
 {
@@ -117,8 +117,8 @@ where
             main.row_slice(0).expect("window should have two elements"),
             main.row_slice(1).expect("window should have two elements"),
         );
-        let local: &GkrLayerSumcheckCols<AB::Var> = (*local).borrow();
-        let next: &GkrLayerSumcheckCols<AB::Var> = (*next).borrow();
+        let local: &TowerLayerSumcheckCols<AB::Var> = (*local).borrow();
+        let next: &TowerLayerSumcheckCols<AB::Var> = (*next).borrow();
 
         ///////////////////////////////////////////////////////////////////////
         // Boolean Constraints
@@ -216,12 +216,12 @@ where
 
         let is_not_dummy = AB::Expr::ONE - local.is_dummy;
 
-        // 1. GkrSumcheckInputBus
+        // 1. TowerSumcheckInputBus
         // 1a. Receive initial sumcheck input on first round
         self.sumcheck_input_bus.receive(
             builder,
             local.proof_idx,
-            GkrSumcheckInputMessage {
+            TowerSumcheckInputMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 is_last_layer: local.is_last_layer.into(),
@@ -230,12 +230,12 @@ where
             },
             local.is_first_round * is_not_dummy.clone(),
         );
-        // 2. GkrSumcheckOutputBus
-        // 2a. Send output back to GkrLayerAir on final round
+        // 2. TowerSumcheckOutputBus
+        // 2a. Send output back to TowerLayerAir on final round
         self.sumcheck_output_bus.send(
             builder,
             local.proof_idx,
-            GkrSumcheckOutputMessage {
+            TowerSumcheckOutputMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into() + AB::Expr::from_usize(4 * D_EF),
@@ -245,12 +245,12 @@ where
             is_last_round.clone() * is_not_dummy.clone(),
         );
 
-        // 3. GkrSumcheckChallengeBus
+        // 3. TowerSumcheckChallengeBus
         // 3a. Receive challenge from previous GKR layer_idx sumcheck
         self.sumcheck_challenge_bus.receive(
             builder,
             local.proof_idx,
-            GkrSumcheckChallengeMessage {
+            TowerSumcheckChallengeMessage {
                 idx: local.idx.clone().into(),
                 layer_idx: local.layer_idx - AB::Expr::ONE,
                 sumcheck_round: local.round.into(),
@@ -262,7 +262,7 @@ where
         self.sumcheck_challenge_bus.send(
             builder,
             local.proof_idx,
-            GkrSumcheckChallengeMessage {
+            TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 sumcheck_round: local.round.into() + AB::Expr::ONE,

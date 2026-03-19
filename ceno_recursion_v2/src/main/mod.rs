@@ -25,11 +25,11 @@ use self::{
 };
 use crate::{
     bus::{MainBus, MainExpressionClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus},
-    gkr::convert_logup_claim,
     system::{
         AirModule, BusIndexManager, BusInventory, ChipTranscriptRange, GlobalCtxCpu, Preflight,
         RecursionField, RecursionProof, RecursionVk, TraceGenModule,
     },
+    tower::convert_logup_claim,
     tracegen::{ModuleChip, RowMajorChip},
 };
 

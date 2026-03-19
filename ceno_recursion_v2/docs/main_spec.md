@@ -1,21 +1,21 @@
 ## Main Module (`src/main`)
 
 The Main module bridges the reduced GKR claim into a “global” sumcheck AIR. It receives the
-`input_layer_claim` emitted by `GkrInputAir`, replays a one-layer sumcheck (currently a pass-through
+`input_layer_claim` emitted by `TowerInputAir`, replays a one-layer sumcheck (currently a pass-through
 check), and hands the resulting claim back to downstream modules.
 
 ### MainAir (`src/main/air.rs`)
 
-| Column          | Shape    | Description                                                                 |
-|-----------------|----------|-----------------------------------------------------------------------------|
-| `is_enabled`    | scalar   | Row selector. Disabled rows carry padding.                                  |
-| `proof_idx`     | scalar   | Outer loop counter shared with GKR inputs.                                  |
-| `idx`           | scalar   | Module index within the proof (matches `GkrInputAir`).                      |
-| `is_first_idx`  | scalar   | Flags the first row for each `(proof_idx, idx)` pair.                        |
-| `is_first`      | scalar   | Always `1` on real rows (there is a single row per `(proof_idx, idx)`).     |
-| `tidx`          | scalar   | Transcript cursor at which the Main claim applies.                          |
-| `claim_in`      | `[D_EF]` | The folded claim received from `GkrInputAir`.                               |
-| `claim_out`     | `[D_EF]` | The claim returned by `MainSumcheckAir` (expected to match `claim_in`).     |
+| Column         | Shape    | Description                                                             |
+|----------------|----------|-------------------------------------------------------------------------|
+| `is_enabled`   | scalar   | Row selector. Disabled rows carry padding.                              |
+| `proof_idx`    | scalar   | Outer loop counter shared with GKR inputs.                              |
+| `idx`          | scalar   | Module index within the proof (matches `TowerInputAir`).                |
+| `is_first_idx` | scalar   | Flags the first row for each `(proof_idx, idx)` pair.                   |
+| `is_first`     | scalar   | Always `1` on real rows (there is a single row per `(proof_idx, idx)`). |
+| `tidx`         | scalar   | Transcript cursor at which the Main claim applies.                      |
+| `claim_in`     | `[D_EF]` | The folded claim received from `TowerInputAir`.                         |
+| `claim_out`    | `[D_EF]` | The claim returned by `MainSumcheckAir` (expected to match `claim_in`). |
 
 #### Constraints
 
@@ -32,7 +32,7 @@ check), and hands the resulting claim back to downstream modules.
 
 #### Bus Interactions
 
-- **MainBus.receive** (from `GkrInputAir`): `(idx, tidx, claim_in)` on `is_first` rows.
+- **MainBus.receive** (from `TowerInputAir`): `(idx, tidx, claim_in)` on `is_first` rows.
 - **MainSumcheckInputBus.send**: forwards `(idx, tidx, claim_in)` on every enabled row.
 - **MainSumcheckOutputBus.receive**: ingests `(idx, claim_out)` (one message per `(proof_idx, idx)`
   because the sumcheck only emits on its `is_last_round`).
@@ -41,24 +41,24 @@ check), and hands the resulting claim back to downstream modules.
 
 ### MainSumcheckAir (`src/main/sumcheck`)
 
-| Column           | Shape    | Description                                                                 |
-|------------------|----------|-----------------------------------------------------------------------------|
-| `is_enabled`     | scalar   | Row selector.                                                               |
-| `proof_idx`      | scalar   | Matches the producer AIR.                                                   |
-| `idx`            | scalar   | Module index within the proof.                                              |
-| `is_first_idx`   | scalar   | Flags the first row for each `(proof_idx, idx)` pair.                        |
-| `is_first_round` | scalar   | Indicates the first round for the current `(proof_idx, idx)` block.         |
-| `is_last_round`  | scalar   | Marks the final round; used to gate the output message.                     |
-| `is_dummy`       | scalar   | Allows a placeholder row when `num_rounds = 0`.                             |
-| `round`          | scalar   | Round counter (starts at 0 and increments each sub-round).                  |
-| `tidx`           | scalar   | Transcript cursor for the current round (`+4·D_EF` per transition).         |
-| `ev1/ev2/ev3`    | `[D_EF]` | Sumcheck polynomial evaluations at 1/2/3.                                   |
-| `claim_in`       | `[D_EF]` | Claim entering the round.                                                   |
-| `claim_out`      | `[D_EF]` | Claim produced by cubic interpolation (fed into the next round).            |
-| `prev_challenge` | `[D_EF]` | The previous transcript challenge (ξ) used in the eq term.                  |
-| `challenge`      | `[D_EF]` | The round’s sampled challenge (rᵢ).                                         |
-| `eq_in`          | `[D_EF]` | Running eq evaluation prior to this round.                                  |
-| `eq_out`         | `[D_EF]` | Updated eq evaluation after applying the round challenge.                   |
+| Column           | Shape    | Description                                                         |
+|------------------|----------|---------------------------------------------------------------------|
+| `is_enabled`     | scalar   | Row selector.                                                       |
+| `proof_idx`      | scalar   | Matches the producer AIR.                                           |
+| `idx`            | scalar   | Module index within the proof.                                      |
+| `is_first_idx`   | scalar   | Flags the first row for each `(proof_idx, idx)` pair.               |
+| `is_first_round` | scalar   | Indicates the first round for the current `(proof_idx, idx)` block. |
+| `is_last_round`  | scalar   | Marks the final round; used to gate the output message.             |
+| `is_dummy`       | scalar   | Allows a placeholder row when `num_rounds = 0`.                     |
+| `round`          | scalar   | Round counter (starts at 0 and increments each sub-round).          |
+| `tidx`           | scalar   | Transcript cursor for the current round (`+4·D_EF` per transition). |
+| `ev1/ev2/ev3`    | `[D_EF]` | Sumcheck polynomial evaluations at 1/2/3.                           |
+| `claim_in`       | `[D_EF]` | Claim entering the round.                                           |
+| `claim_out`      | `[D_EF]` | Claim produced by cubic interpolation (fed into the next round).    |
+| `prev_challenge` | `[D_EF]` | The previous transcript challenge (ξ) used in the eq term.          |
+| `challenge`      | `[D_EF]` | The round’s sampled challenge (rᵢ).                                 |
+| `eq_in`          | `[D_EF]` | Running eq evaluation prior to this round.                          |
+| `eq_out`         | `[D_EF]` | Updated eq evaluation after applying the round challenge.           |
 
 #### Constraints
 

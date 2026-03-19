@@ -5,21 +5,21 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::GkrLogupSumCheckClaimCols;
+use super::TowerLogupSumCheckClaimCols;
 use crate::{
-    gkr::{GkrTowerEvalRecord, interpolate_pair, layer::trace::GkrLayerRecord},
+    tower::{TowerTowerEvalRecord, interpolate_pair, layer::trace::TowerLayerRecord},
     tracegen::RowMajorChip,
 };
 
-pub struct GkrLogupSumCheckClaimTraceGenerator;
+pub struct TowerLogupSumCheckClaimTraceGenerator;
 
 type LogupTraceCtx<'a> = (
-    &'a [GkrLayerRecord],
-    &'a [GkrTowerEvalRecord],
+    &'a [TowerLayerRecord],
+    &'a [TowerTowerEvalRecord],
     &'a [Vec<EF>],
 );
 
-fn logup_rows_for_record(record: &GkrLayerRecord) -> usize {
+fn logup_rows_for_record(record: &TowerLayerRecord) -> usize {
     if record.layer_count() == 0 {
         1
     } else {
@@ -29,7 +29,7 @@ fn logup_rows_for_record(record: &GkrLayerRecord) -> usize {
     }
 }
 
-impl RowMajorChip<F> for GkrLogupSumCheckClaimTraceGenerator {
+impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
     type Ctx<'a> = LogupTraceCtx<'a>;
 
     #[tracing::instrument(level = "trace", skip_all)]
@@ -39,7 +39,7 @@ impl RowMajorChip<F> for GkrLogupSumCheckClaimTraceGenerator {
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
         let (records, towers, mus_records) = ctx;
-        let width = GkrLogupSumCheckClaimCols::<F>::width();
+        let width = TowerLogupSumCheckClaimCols::<F>::width();
         let rows_per_proof: Vec<usize> = records.iter().map(logup_rows_for_record).collect();
         let num_valid_rows: usize = rows_per_proof.iter().sum();
         let height = if let Some(height) = required_height {
@@ -72,7 +72,7 @@ impl RowMajorChip<F> for GkrLogupSumCheckClaimTraceGenerator {
                 if record.layer_count() == 0 {
                     debug_assert_eq!(chunk.len(), width);
                     let row_data = &mut chunk[..width];
-                    let cols: &mut GkrLogupSumCheckClaimCols<F> = row_data.borrow_mut();
+                    let cols: &mut TowerLogupSumCheckClaimCols<F> = row_data.borrow_mut();
                     cols.is_enabled = F::ONE;
                     cols.is_first_layer = F::ONE;
                     cols.is_first = F::ONE;
@@ -139,7 +139,7 @@ impl RowMajorChip<F> for GkrLogupSumCheckClaimTraceGenerator {
                         let row = chunk_iter
                             .next()
                             .expect("chunk should have enough rows for layer");
-                        let cols: &mut GkrLogupSumCheckClaimCols<F> = row.borrow_mut();
+                        let cols: &mut TowerLogupSumCheckClaimCols<F> = row.borrow_mut();
                         let is_real = row_in_layer < logup_rows.len();
                         let quad = if is_real {
                             logup_rows[row_in_layer]

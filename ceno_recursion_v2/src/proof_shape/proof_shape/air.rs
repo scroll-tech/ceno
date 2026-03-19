@@ -19,9 +19,9 @@ use crate::{
     bus::{
         AirShapeBus, AirShapeBusMessage, CachedCommitBus, CachedCommitBusMessage, CommitmentsBus,
         CommitmentsBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
-        FractionFolderInputBus, FractionFolderInputMessage, GkrModuleBus, GkrModuleMessage,
-        HyperdimBus, HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus,
-        NLiftMessage, TranscriptBus, TranscriptBusMessage,
+        FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage,
+        LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus, NLiftMessage, TowerModuleBus,
+        TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{
         PowerCheckerBus, PowerCheckerBusMessage, RangeCheckerBus, RangeCheckerBusMessage,
@@ -110,7 +110,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub num_pvs_bus: NumPublicValuesBus,
 
     // Inter-module buses
-    pub gkr_module_bus: GkrModuleBus,
+    pub tower_module_bus: TowerModuleBus,
     pub air_shape_bus: AirShapeBus,
     pub expression_claim_n_max_bus: ExpressionClaimNMaxBus,
     pub fraction_folder_input_bus: FractionFolderInputBus,
@@ -718,10 +718,10 @@ where
             local.is_last,
         );
 
-        self.gkr_module_bus.send(
+        self.tower_module_bus.send(
             builder,
             local.proof_idx,
-            GkrModuleMessage {
+            TowerModuleMessage {
                 idx: local.idx.into(),
                 tidx: local.starting_tidx.into(),
                 n_logup: n_logup.into(),

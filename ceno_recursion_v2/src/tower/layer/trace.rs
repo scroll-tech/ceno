@@ -5,12 +5,12 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::GkrLayerCols;
+use super::TowerLayerCols;
 use crate::tracegen::RowMajorChip;
 
-/// Minimal record for parallel gkr layer trace generation
+/// Minimal record for parallel tower layer trace generation
 #[derive(Debug, Clone, Default)]
-pub struct GkrLayerRecord {
+pub struct TowerLayerRecord {
     pub proof_idx: usize,
     pub idx: usize,
     pub tidx: usize,
@@ -29,7 +29,7 @@ pub struct GkrLayerRecord {
     pub sumcheck_claims: Vec<EF>,
 }
 
-impl GkrLayerRecord {
+impl TowerLayerRecord {
     #[inline]
     pub(crate) fn layer_count(&self) -> usize {
         self.layer_claims.len()
@@ -140,11 +140,11 @@ impl GkrLayerRecord {
     }
 }
 
-pub struct GkrLayerTraceGenerator;
+pub struct TowerLayerTraceGenerator;
 
-impl RowMajorChip<F> for GkrLayerTraceGenerator {
+impl RowMajorChip<F> for TowerLayerTraceGenerator {
     // (gkr_layer_records, mus, q0_claims)
-    type Ctx<'a> = (&'a [GkrLayerRecord], &'a [Vec<EF>], &'a [EF]);
+    type Ctx<'a> = (&'a [TowerLayerRecord], &'a [Vec<EF>], &'a [EF]);
 
     #[tracing::instrument(level = "trace", skip_all)]
     fn generate_trace(
@@ -156,7 +156,7 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
         debug_assert_eq!(gkr_layer_records.len(), mus.len());
         debug_assert_eq!(gkr_layer_records.len(), q0_claims.len());
 
-        let width = GkrLayerCols::<F>::width();
+        let width = TowerLayerCols::<F>::width();
         let rows_per_proof: Vec<usize> = gkr_layer_records
             .iter()
             .map(|record| record.layer_count().max(1))
@@ -198,7 +198,7 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                 if record.layer_claims.is_empty() {
                     debug_assert_eq!(chunk.len(), width);
                     let row_data = &mut chunk[..width];
-                    let cols: &mut GkrLayerCols<F> = row_data.borrow_mut();
+                    let cols: &mut TowerLayerCols<F> = row_data.borrow_mut();
                     cols.is_enabled = F::ONE;
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
@@ -234,7 +234,7 @@ impl RowMajorChip<F> for GkrLayerTraceGenerator {
                     .take(record.layer_count())
                     .enumerate()
                     .for_each(|(layer_idx, row_data)| {
-                        let cols: &mut GkrLayerCols<F> = row_data.borrow_mut();
+                        let cols: &mut TowerLayerCols<F> = row_data.borrow_mut();
                         cols.is_enabled = F::ONE;
                         cols.is_dummy = F::ZERO;
                         cols.proof_idx = F::from_usize(record.proof_idx);

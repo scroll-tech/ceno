@@ -20,17 +20,17 @@ use recursion_circuit::{
 use crate::bus::{
     CachedCommitBus as LocalCachedCommitBus, CommitmentsBus as LocalCommitmentsBus,
     ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
-    FractionFolderInputBus as LocalFractionFolderInputBus, GkrModuleBus,
-    HyperdimBus as LocalHyperdimBus, LiftedHeightsBus as LocalLiftedHeightsBus, MainBus,
-    MainExpressionClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
-    PublicValuesBus as LocalPublicValuesBus, TranscriptBus as LocalTranscriptBus,
+    FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
+    LiftedHeightsBus as LocalLiftedHeightsBus, MainBus, MainExpressionClaimBus,
+    MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
+    PublicValuesBus as LocalPublicValuesBus, TowerModuleBus, TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
 pub struct BusInventory {
     inner: UpstreamBusInventory,
     pub transcript_bus: LocalTranscriptBus,
-    pub gkr_module_bus: GkrModuleBus,
+    pub tower_module_bus: TowerModuleBus,
     pub expression_claim_n_max_bus: LocalExpressionClaimNMaxBus,
     pub fraction_folder_input_bus: LocalFractionFolderInputBus,
     pub air_shape_bus: AirShapeBus,
@@ -59,7 +59,7 @@ impl BusInventory {
         let merkle_verify_bus = MerkleVerifyBus::new(b.new_bus_idx());
 
         let gkr_bus_idx = b.new_bus_idx();
-        let gkr_module_bus = GkrModuleBus::new(gkr_bus_idx);
+        let tower_module_bus = TowerModuleBus::new(gkr_bus_idx);
         let upstream_gkr_module_bus = recursion_circuit::bus::GkrModuleBus::new(gkr_bus_idx);
 
         let bc_module_bus = BatchConstraintModuleBus::new(b.new_bus_idx());
@@ -148,7 +148,7 @@ impl BusInventory {
         Self {
             inner,
             transcript_bus,
-            gkr_module_bus,
+            tower_module_bus: tower_module_bus,
             expression_claim_n_max_bus,
             fraction_folder_input_bus,
             air_shape_bus,

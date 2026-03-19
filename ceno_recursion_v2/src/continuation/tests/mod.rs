@@ -41,6 +41,13 @@ mod prover_integration {
         );
 
         let _leaf_proof = leaf_prover.agg_prove_no_def::<Engine>(&zkvm_proofs, ChildVkKind::App)?;
+        let overall_size = bincode::serialized_size(&_leaf_proof).expect("serialization error");
+        println!("proof size {:.2}mb.", byte_to_mb(overall_size));
         Ok(())
     }
+
+    fn byte_to_mb(byte_size: u64) -> f64 {
+        byte_size as f64 / (1024.0 * 1024.0)
+    }
+
 }

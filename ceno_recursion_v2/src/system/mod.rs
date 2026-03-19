@@ -4,8 +4,8 @@ mod types;
 
 pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
-    BatchConstraintPreflight, ChipTranscriptRange, GkrChipTranscriptRange, GkrPreflight,
-    MainPreflight, Preflight, ProofShapePreflight,
+    BatchConstraintPreflight, ChipTranscriptRange, MainPreflight, Preflight, ProofShapePreflight,
+    TowerChipTranscriptRange, TowerPreflight,
 };
 pub use recursion_circuit::system::{
     AggregationSubCircuit, AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule,
@@ -23,7 +23,7 @@ pub use types::{
 use std::{iter, mem, sync::Arc};
 
 use self::utils::test_system_params_zero_pow;
-use crate::{batch_constraint, gkr::GkrModule, main::MainModule, transcript::TranscriptModule};
+use crate::{batch_constraint, main::MainModule, tower::TowerModule, transcript::TranscriptModule};
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
@@ -115,7 +115,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
     pub(crate) transcript: TranscriptModule,
     pub(crate) proof_shape: ProofShapeModule,
     pub(crate) main_module: MainModule,
-    pub(crate) gkr: GkrModule,
+    pub(crate) gkr: TowerModule,
 }
 
 #[derive(Copy, Clone)]
@@ -123,7 +123,7 @@ enum TraceModuleRef<'a> {
     Transcript(&'a TranscriptModule),
     ProofShape(&'a ProofShapeModule),
     Main(&'a MainModule),
-    Gkr(&'a GkrModule),
+    Tower(&'a TowerModule),
 }
 
 impl<'a> TraceModuleRef<'a> {
@@ -132,7 +132,7 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::Transcript(_) => "Transcript",
             TraceModuleRef::ProofShape(_) => "ProofShape",
             TraceModuleRef::Main(_) => "Main",
-            TraceModuleRef::Gkr(_) => "Gkr",
+            TraceModuleRef::Tower(_) => "Tower",
         }
     }
 
@@ -154,7 +154,9 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::Main(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
-            TraceModuleRef::Gkr(module) => module.run_preflight(child_vk, proof, preflight, sponge),
+            TraceModuleRef::Tower(module) => {
+                module.run_preflight(child_vk, proof, preflight, sponge)
+            }
             TraceModuleRef::Transcript(_) => {
                 panic!("Transcript module does not participate in preflight")
             }
@@ -197,7 +199,7 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::Main(module) => {
                 module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
             }
-            TraceModuleRef::Gkr(module) => module.generate_proving_ctxs(
+            TraceModuleRef::Tower(module) => module.generate_proving_ctxs(
                 child_vk,
                 proofs,
                 preflights,
@@ -251,7 +253,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             config.continuations_enabled,
         );
         let main_module = MainModule::new(&mut bus_idx_manager, bus_inventory.clone());
-        let gkr = GkrModule::new(
+        let gkr = TowerModule::new(
             child_vk.as_ref(),
             &mut bus_idx_manager,
             bus_inventory.clone(),
@@ -283,7 +285,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let modules = [
             TraceModuleRef::ProofShape(&self.proof_shape),
             TraceModuleRef::Main(&self.main_module),
-            TraceModuleRef::Gkr(&self.gkr),
+            TraceModuleRef::Tower(&self.gkr),
         ];
         for module in modules {
             module.run_preflight(child_vk, proof, &mut preflight, &mut sponge);
@@ -389,7 +391,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             TraceModuleRef::Transcript(&self.transcript),
             TraceModuleRef::ProofShape(&self.proof_shape),
             TraceModuleRef::Main(&self.main_module),
-            TraceModuleRef::Gkr(&self.gkr),
+            TraceModuleRef::Tower(&self.gkr),
         ];
 
         let span = Span::current();

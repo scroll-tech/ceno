@@ -2,7 +2,7 @@ use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::TranscriptLog;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{EF, F};
 
-use crate::gkr::TowerReplayResult;
+use crate::tower::TowerReplayResult;
 
 /// Placeholder types mirroring upstream recursion preflight records.
 /// These will be populated with real transcript metadata once the
@@ -12,7 +12,7 @@ pub struct Preflight {
     pub transcript: TranscriptLog<F, PoseidonWord>,
     pub proof_shape: ProofShapePreflight,
     pub main: MainPreflight,
-    pub gkr: GkrPreflight,
+    pub gkr: TowerPreflight,
     pub batch_constraint: BatchConstraintPreflight,
 }
 
@@ -33,12 +33,12 @@ pub struct MainPreflight {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct GkrPreflight {
-    pub chips: Vec<GkrChipTranscriptRange>,
+pub struct TowerPreflight {
+    pub chips: Vec<TowerChipTranscriptRange>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct GkrChipTranscriptRange {
+pub struct TowerChipTranscriptRange {
     pub chip_idx: usize,
     pub tidx: usize,
     pub tower_replay: TowerReplayResult,
