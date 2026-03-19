@@ -3,7 +3,7 @@ use std::borrow::Borrow;
 use openvm_circuit::system::connector::DEFAULT_SUSPEND_EXIT_CODE;
 use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
-    interaction::InteractionBuilder, BaseAirWithPublicValues, PartitionedBaseAir,
+    BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
@@ -13,7 +13,7 @@ use recursion_circuit::bus::{
     CachedCommitBus, CachedCommitBusMessage, PublicValuesBus, PublicValuesBusMessage,
 };
 use stark_recursion_circuit_derive::AlignedBorrow;
-use verify_stark::pvs::{VmPvs, VM_PVS_AIR_ID};
+use verify_stark::pvs::{VM_PVS_AIR_ID, VmPvs};
 
 use crate::circuit::inner::{
     app::*,
@@ -64,10 +64,8 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         let local: &VmPvsCols<AB::Var> = (*base_local).borrow();
         let next: &VmPvsCols<AB::Var> = (*base_next).borrow();
 
-        /*
-         * If deferrals are enabled, this AIR expects an additional deferral_flag column. It
-         * can be either 0 or 2 here, and in the latter case there can only be one row.
-         */
+        // If deferrals are enabled, this AIR expects an additional deferral_flag column. It
+        // can be either 0 or 2 here, and in the latter case there can only be one row.
         let (deferral_flag, has_vm_pvs) = if self.deferral_enabled {
             debug_assert_eq!(def_local.len(), 1);
             debug_assert_eq!(next_local.len(), 1);
@@ -78,9 +76,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             (AB::Expr::ZERO, AB::Expr::ONE)
         };
 
-        /*
-         * Basic constraints for non-public value columns.
-         */
+        // Basic constraints for non-public value columns.
         // constrain all valid rows are at the beginning
         builder.assert_bool(local.is_valid);
         builder
@@ -120,11 +116,9 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .when(and(local.is_valid, next.is_valid))
             .assert_eq(local.has_verifier_pvs, next.has_verifier_pvs);
 
-        /*
-         * We first constrain segment adjacency, i.e. that rows in the trace are such that the
-         * first row is the (chronologically) first segment, and adjacent rows correspond to
-         * adjacent segments.
-         */
+        // We first constrain segment adjacency, i.e. that rows in the trace are such that the
+        // first row is the (chronologically) first segment, and adjacent rows correspond to
+        // adjacent segments.
         // constrain that is_terminate is the last valid proof
         builder.assert_bool(local.child_pvs.is_terminate);
         builder
@@ -151,12 +145,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             next.child_pvs.initial_root,
         );
 
-        /*
-         * We receive public values from ProofShapeModule to ensure the values being read here
-         * are correct. The leaf verifier reads public values from PROGRAM_AIR_ID,
-         * CONNECTOR_AIR_ID, and MERKLE_AID_ID while the internal verifier reads the full
-         * VmPvs from VM_PVS_AIR_ID.
-         */
+        // We receive public values from ProofShapeModule to ensure the values being read here
+        // are correct. The leaf verifier reads public values from PROGRAM_AIR_ID,
+        // CONNECTOR_AIR_ID, and MERKLE_AID_ID while the internal verifier reads the full
+        // VmPvs from VM_PVS_AIR_ID.
         let is_leaf = not(local.has_verifier_pvs);
         let is_internal = local.has_verifier_pvs;
 
@@ -264,10 +256,8 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             );
         }
 
-        /*
-         * At the leaf level, this AIR is responsible for receiving the cached trace commit
-         * program_commit.
-         */
+        // At the leaf level, this AIR is responsible for receiving the cached trace commit
+        // program_commit.
         self.cached_commit_bus.receive(
             builder,
             local.proof_idx,
@@ -279,9 +269,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             local.is_valid * is_leaf,
         );
 
-        /*
-         * We look up proof metadata from VerifierPvsAir here to ensure consistency on each row.
-         */
+        // We look up proof metadata from VerifierPvsAir here to ensure consistency on each row.
         self.pvs_air_consistency_bus.lookup_key(
             builder,
             local.proof_idx,
@@ -292,11 +280,9 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             local.is_valid,
         );
 
-        /*
-         * Finally, we need to constrain that the public values this AIR produces are consistent
-         * with the child's. Initial output pvs must match the first row, and final output pvs
-         * must match the last.
-         */
+        // Finally, we need to constrain that the public values this AIR produces are consistent
+        // with the child's. Initial output pvs must match the first row, and final output pvs
+        // must match the last.
         let &VmPvs::<_> {
             program_commit,
             initial_pc,
@@ -353,13 +339,11 @@ impl VmPvsAir {
     where
         AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues,
     {
-        /*
-         * Constrain that deferral_flag must be in {0, 1, 2}. If:
-         * - deferral_flag == 0: all proofs have VmPvs only, ignore deferral-related constraints
-         * - deferral_flag == 1: all proofs have DeferralPvs only, there should be no valid rows
-         *   and output public values should all be 0
-         * - deferral_flag == 2: there is a single child proof with both sets of pvs
-         */
+        // Constrain that deferral_flag must be in {0, 1, 2}. If:
+        // - deferral_flag == 0: all proofs have VmPvs only, ignore deferral-related constraints
+        // - deferral_flag == 1: all proofs have DeferralPvs only, there should be no valid rows
+        //   and output public values should all be 0
+        // - deferral_flag == 2: there is a single child proof with both sets of pvs
         builder.assert_tern(local_def_flag);
         builder.assert_eq(local_def_flag, next_def_flag);
 

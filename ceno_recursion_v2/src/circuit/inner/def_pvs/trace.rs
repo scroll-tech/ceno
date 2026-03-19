@@ -1,19 +1,20 @@
-use std::borrow::{Borrow, BorrowMut};
+use std::borrow::BorrowMut;
 
 use itertools::Itertools;
+use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
-use openvm_stark_backend::prover::{AirProvingContext, ColMajorMatrix, CpuBackend};
+use openvm_stark_backend::prover::AirProvingContext;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    poseidon2_compress_with_capacity, BabyBearPoseidon2Config, F,
+    BabyBearPoseidon2Config, DIGEST_SIZE, F, poseidon2_compress_with_capacity,
 };
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
-use verify_stark::pvs::{DeferralPvs, DEF_PVS_AIR_ID};
+use verify_stark::pvs::{DEF_PVS_AIR_ID, DeferralPvs};
 
 use crate::{
     circuit::{
         deferral::DEF_HOOK_PVS_AIR_ID,
-        inner::{def_pvs::air::DeferralPvsCols, ProofsType},
+        inner::{ProofsType, def_pvs::air::DeferralPvsCols},
     },
     system::RecursionProof,
     utils::digests_to_poseidon2_input,
@@ -72,13 +73,19 @@ pub fn generate_proving_ctx(
         cols.has_verifier_pvs = F::from_bool(!child_is_app);
         cols.single_present_is_right = F::from_bool(single_present_is_right);
 
-        let air_id = if child_is_app {
+        let _ = proof;
+        let _air_id = if child_is_app {
             DEF_HOOK_PVS_AIR_ID
         } else {
             DEF_PVS_AIR_ID
         };
-        let child_pvs: &DeferralPvs<_> = proof.public_values[air_id].as_slice().borrow();
-        cols.child_pvs = *child_pvs;
+        // TODO(recursion-proof-bridge): RecursionProof does not expose per-air public values yet.
+        // Use zeroed child deferral PVS until proof -> verifier-PVS extraction is implemented.
+        cols.child_pvs = DeferralPvs {
+            initial_acc_hash: [F::ZERO; DIGEST_SIZE],
+            final_acc_hash: [F::ZERO; DIGEST_SIZE],
+            depth: F::ZERO,
+        };
         child_pvs_vec.push(cols.child_pvs);
     }
 
@@ -127,7 +134,7 @@ pub fn generate_proving_ctx(
     (
         AirProvingContext {
             cached_mains: vec![],
-            common_main: ColMajorMatrix::from_row_major(&RowMajorMatrix::new(trace, width)),
+            common_main: RowMajorMatrix::new(trace, width),
             public_values,
         },
         poseidon2_inputs,

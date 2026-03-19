@@ -1,63 +1,130 @@
 ---
 name: ceno-recursion-principles
-description: Refactoring playbook for the `ceno_recursion_v2` crate when integrating OpenVM recursion components (system, continuation, provers) with Ceno-specific ZKVM proofs and verifying keys. Use when tasks mention ceno_recursion_v2 recursion system/prover changes, replacing MultiStark VKs with ZKVM VKs, copying OpenVM modules, or touching `ceno_recursion_v2/src/system` and `continuation/*`.
+description: Migration playbook for `ceno_recursion_v2` when integrating OpenVM recursion components with Ceno `RecursionProof`/`RecursionVk`. Focus on minimal forking, RecursionProof-first seams, preflight-owned replay, and strict placeholder/validation policy.
 ---
 
 # Ceno Recursion Principles
 
 ## Overview
 
-This skill captures the standing orders for evolving `ceno_recursion_v2`: reuse upstream OpenVM crates whenever possible, only fork modules that must diverge (e.g., to handle Ceno’s ZKVM proofs), and keep ZKVM <> OpenVM bridge logic localized.
+This skill captures the standing orders for evolving `ceno_recursion_v2`: reuse upstream OpenVM crates whenever possible, fork only where type boundaries force divergence, and keep ZKVM/OpenVM bridge logic at narrow seams.
 
 ## Quick Triggers
 
 Use this skill when:
 - Modifying `ceno_recursion_v2/src/system` or `src/continuation/**`
-- Replacing `Proof<SC>` inputs with `ZKVMProof<RecursionField, Basefold<…>>`
-- Swapping child verifying keys from `MultiStarkVerifyingKey<SC>` to `ZKVMVerifyingKey`
+- Replacing `Proof<SC>` flows with `RecursionProof`
+- Swapping child VK flows from `MultiStarkVerifyingKey<SC>` to `RecursionVk`
 - Copying/patching OpenVM modules (recursion/continuation) into the Ceno crate
-- Adding tests that deserialize `./src/imported/proof.bin`
+- Debugging trace/air mismatches during continuation proving
 
 ## Core Principles
 
-1. **Minimal Divergence** – Keep local copies only for code directly touched by the refactor. Everything else should import from upstream crates (e.g., `continuations_v2`, `recursion_circuit`, `openvm_*`). Remove local duplicates once upstream can be used again.
-2. **ZKVM Proof First** – New APIs accept `ZKVMProof<RecursionField, Basefold<RecursionField, BasefoldRSParams>>` instead of OpenVM `Proof<SC>`. Provide adapters (currently `unimplemented!()` or TODO stubs) that convert into OpenVM structures right before trace generation.
-3. **Recursion VK Alias** – Replace `Arc<MultiStarkVerifyingKey<SC>>` with `Arc<ZKVMVerifyingKey<RecursionField, Basefold<RecursionField, BasefoldRSParams>>>` wherever the “child VK” travels (constructors, traits, agg prover logic). Introduce a local alias (e.g., `type RecursionVk = ZKVMVerifyingKey<…>`) to keep signatures readable.
-4. **Trait Copy Rule** – Only fork upstream definitions when the child-VK type must change. For example, copy `VerifierTraceGen` locally (because it takes `MultiStarkVerifyingKey`), but keep using upstream `VerifierConfig`, `VerifierExternalData`, and `CachedTraceCtx` directly so we don’t duplicate logic unnecessarily.
-5. **Comment, Don’t Delete** – When slicing out unused functionality (compression/root/deferral), comment or `unimplemented!()` the sections you can’t finish yet so the call graph remains visible.
-6. **Mirror Private Upstream Shims** – If recursion modules need items that upstream marks `pub(crate)` (e.g., `system::frame` or `POW_CHECKER_HEIGHT`), copy the minimal shim into this crate so future diffs stay aligned while letting the fork compile.
+1. **Minimal Divergence** - Fork only the seam that must diverge. Keep upstream for AIRs/modules that do not require Ceno type changes.
+2. **RecursionProof First** - Public APIs in local forked modules should prefer `RecursionProof` and `RecursionVk` aliases over upstream `Proof<SC>` and `MultiStarkVerifyingKey`.
+3. **Bridge Locality** - Put conversion stubs and TODOs in bridge points (`system/types.rs`, local trace adapters), not spread across unrelated AIR logic.
+4. **Preflight Owns Replay** - Transcript/replay ordering is computed during preflight; later blob/trace generation should consume read-only replay data.
+5. **Placeholder Discipline** - Temporary mocked values are allowed only if shape-correct and tagged with explicit TODO ownership.
+6. **Invariant First** - Preserve count/order invariants (`airs()` vs `per_trace`) before semantic completeness.
+7. **Visible, Reversible Deltas** - Prefer small, reviewable patches and avoid broad upstream copy unless absolutely required.
+
+## Minimal Fork Decision Matrix
+
+Fork locally only when at least one applies:
+- Child proof/VK type at boundary must change to `RecursionProof`/`RecursionVk`.
+- Upstream item is private (`pub(crate)`) and needed in local integration path.
+- Upstream interface cannot inject Ceno-specific data without invasive changes.
+
+Do not fork when:
+- Change is only wiring/imports and can be done in local caller.
+- Upstream module already supports required behavior through existing interfaces.
+
+When forking, keep:
+- Original file/module layout for future diffability.
+- Fork scope minimal (single module seam first, then expand only if blocked).
 
 ## Workflow
 
-### 1. Identify Needed Forks
-- Search upstream `openvm/crates/recursion` + `continuations-v2` for `MultiStarkVerifyingKey`.
-- For each reference used by our code paths (“inner” continuation only right now), copy the minimal module into `ceno_recursion_v2/src/system` (mirror the original file layout).
-- Replace imports to point at the local versions before editing types.
+### 1. Establish Type Seams First
+- Confirm aliases in `src/system/types.rs` (`RecursionProof`, `RecursionVk`).
+- Update constructor/trait signatures at seam files before touching AIR internals.
 
-### 2. Introduce Recursion VK Alias
-- In `inner/mod.rs` (and any copied traits), add:
-  ```rust
-  type RecursionVk = ZKVMVerifyingKey<RecursionField, Basefold<RecursionField, BasefoldRSParams>>;
-  ```
-- Update struct fields, constructor args, and helper signatures to use `Arc<RecursionVk>`.
-- Where OpenVM still needs a `MultiStarkVerifyingKey<SC>`, create helper methods like `fn as_openvm_vk(&self) -> Arc<MultiStarkVerifyingKey<SC>>` that currently `unimplemented!()` until the translation exists.
+### 2. Keep AIR/Trace Ordering Consistent
+- Ensure `src/circuit/inner/mod.rs` `airs()` order exactly matches context order produced in `src/circuit/inner/trace.rs`.
+- If pre/post contexts are re-enabled, corresponding AIR entries must be present.
 
-### 3. Keep Upstream for Everything Else
-- Circuit/AIR definitions, tracegen impls, transcript modules, and GKR logic should stay imported from upstream crates unless the type change forces a local copy.
-- When copying files, preserve module paths (e.g., `system/mod.rs`, `system/verifier.rs`) so future diffs with upstream stay manageable.
+### 3. Placeholder Policy (Temporary)
+- If data is missing from `RecursionProof`, use deterministic zero mocks.
+- Add explicit comments: `TODO(recursion-proof-bridge): ...`.
+- Mocked traces must be width-correct for their AIR and satisfy basic row-0 invariants.
 
-### 4. Testing & Proof Artifacts
-- Unit/integration tests should load `Vec<ZKVMProof<…>>` from `./src/imported/proof.bin` (and `vk.bin` when needed) using `bincode::deserialize_from`.
-- Use the concrete engine alias `type E = BinomialExtensionField<BabyBear, 4>` / `type Engine = BabyBearPoseidon2CpuEngine<DuplexSponge>`.
-- Until the bridge is implemented, leave test bodies `#[ignore]` with `unimplemented!()` placeholders after deserialization.
+### 4. Replay Ownership Rule
+- Preflight computes and records transcript/replay ordering.
+- Blob/trace generation should consume replay records only (no hidden replay recomputation).
 
-### 5. Cargo Hygiene
-- Whenever new upstream crates are referenced (e.g., `verify-stark`, `continuations_v2` modules), add them to `ceno_recursion_v2/Cargo.toml` with the `develop-v2.0.0-beta` branch pin.
-- Run `cargo check -p ceno_recursion_v2` (since the crate is excluded from the root workspace) after each major type tweak.
+### 5. Validation Loop
+- Iterate with: `cargo check` -> target test -> capture first failing reason -> minimal fix.
+- Prefer turning panics into structured errors where possible for diagnosability.
+- Keep temporary diagnostics narrow and removable.
+
+### 6. Cargo/Test Hygiene
+- Run checks on `ceno_recursion_v2` after each nontrivial seam change.
+- Keep target regression test command handy:
+  - `RUST_MIN_STACK=33554432 RUST_BACKTRACE=1 cargo test -p ceno_recursion_v2 leaf_app_proof_round_trip_placeholder -- --nocapture`
+
+## Acceptance Checklist for Migration PRs
+
+Before continuing to next module, verify:
+- `airs().len()` and proving-context trace count match.
+- AIR ordering matches trace ordering (pre -> verifier -> post when enabled).
+- Any mocked data has `TODO(recursion-proof-bridge)` and clear ownership.
+- No new broad forks were introduced without matrix justification.
+- Current top blocker is explicitly identified by latest test/check run.
+
+## Reusable PR Checklist Template
+
+Copy this block into each migration PR description and mark each item as done or N/A with rationale.
+
+```markdown
+## Migration Checklist (ceno-recursion-principles)
+
+### Scope and Forking
+- [ ] Fork scope is minimal and justified by the decision matrix.
+- [ ] Upstream modules remain in use unless a concrete seam forces divergence.
+- [ ] Forked files preserve upstream layout for easier future sync.
+
+### Type Seams
+- [ ] New/updated public seams use `RecursionProof` / `RecursionVk` where applicable.
+- [ ] Bridge logic is localized (for example `src/system/types.rs` or local trace adapters).
+- [ ] No unrelated AIR/business logic was modified only to pass types through.
+
+### AIR and Trace Invariants
+- [ ] `airs()` order matches proving context order exactly.
+- [ ] `airs().len()` matches proving-trace count.
+- [ ] Re-enabled pre/post contexts have corresponding AIR entries.
+
+### Placeholder Policy
+- [ ] Any mocked value is deterministic and shape-correct.
+- [ ] Each mocked value has `TODO(recursion-proof-bridge): ...` with ownership.
+- [ ] Placeholder traces satisfy basic row-0 invariants for their AIR.
+
+### Replay Ownership
+- [ ] Replay/transcript ordering is computed in preflight.
+- [ ] Blob/trace generation consumes preflight replay records read-only.
+
+### Validation Evidence
+- [ ] `cargo check` run after the latest nontrivial seam change.
+- [ ] Target regression test run (or explicit blocker reason recorded).
+- [ ] Current top blocker (if any) is stated with file/path and first failing message.
+```
 
 ## Reference Paths
 
-- Local system overrides: `ceno_recursion_v2/src/system/**`
-- Continuation prover overrides: `ceno_recursion_v2/src/continuation/prover/**`
-- Upstream mirrors: `/home/wusm/.cargo/git/checkouts/openvm-*/ac85e71/crates/...`
-- Serialized artifact expectations: `./src/imported/proof.bin`, `./src/imported/vk.bin`
+- Skill source in repo: `skills/ceno-recursion-principles/SKILL.md`
+- Skill source in global codex dir: `~/.codex/skills/ceno-recursion-principles/SKILL.md`
+- Local seam hotspots:
+  - `src/system/types.rs`
+  - `src/circuit/inner/mod.rs`
+  - `src/circuit/inner/trace.rs`
+  - `src/continuation/prover/inner/mod.rs`
+  - `src/gkr/mod.rs`, `src/system/preflight/mod.rs`

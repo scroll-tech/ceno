@@ -2,7 +2,7 @@ use std::{array::from_fn, borrow::Borrow};
 
 use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
-    interaction::InteractionBuilder, BaseAirWithPublicValues, PartitionedBaseAir,
+    BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
@@ -17,13 +17,13 @@ use recursion_circuit::{
 };
 use stark_recursion_circuit_derive::AlignedBorrow;
 use verify_stark::pvs::{
-    VerifierBasePvs, VerifierDefPvs, CONSTRAINT_EVAL_AIR_ID, VERIFIER_PVS_AIR_ID,
+    CONSTRAINT_EVAL_AIR_ID, DagCommit, VERIFIER_PVS_AIR_ID, VerifierBasePvs, VerifierDefPvs,
 };
 
 use crate::{
     circuit::{
-        inner::bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
         CONSTRAINT_EVAL_CACHED_INDEX,
+        inner::bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
     },
     utils::digests_to_poseidon2_input,
 };
@@ -71,12 +71,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         let local: &VerifierPvsCols<AB::Var> = (*base_local).borrow();
         let next: &VerifierPvsCols<AB::Var> = (*base_next).borrow();
 
-        /*
-         * This AIR can optionally handle deferrals, the constraints for which are defined in
-         * function eval_deferrals. We expect dag_commit_cond to be a boolean value that is
-         * true iff local and next's app, leaf, and internal-for-leaf DAG commits should be
-         * constrained for equality.
-         */
+        // This AIR can optionally handle deferrals, the constraints for which are defined in
+        // function eval_deferrals. We expect dag_commit_cond to be a boolean value that is
+        // true iff local and next's app, leaf, and internal-for-leaf DAG commits should be
+        // constrained for equality.
         let (dag_commit_cond, deferral_flag, consistency_mult) = match self.deferral_config {
             VerifierDeferralConfig::Enabled { poseidon2_bus } => {
                 let def_local: &VerifierDeferralCols<AB::Var> = (*def_local).borrow();
@@ -93,9 +91,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             }
         };
 
-        /*
-         * Constrain basic features about the non-pvs columns.
-         */
+        // Constrain basic features about the non-pvs columns.
         builder.assert_bool(local.is_valid);
         builder.when_first_row().assert_one(local.is_valid);
         builder
@@ -113,17 +109,15 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .when(local.has_verifier_pvs)
             .assert_one(local.is_valid);
 
-        /*
-         * We constrain the consistency of verifier-specific public values. We can determine
-         * what layer a verifier is at using the has_verifier_pvs and internal_flag columns.
-         * There are several cases we cover:
-         * - has_verifier_pvs == 0: leaf verifier, app (or deferral circuit) children
-         * - has_verifier_pvs == 1 && internal_flag == 0: internal verifier with leaf children
-         * - has_verifier_pvs == 1 && internal_flag == 1: internal_for_leaf children
-         * - has_verifier_pvs == 1 && internal_flag == 2: internal_recursive children
-         *   - recursion_flag == 1: 2nd (i.e. index 1) internal_recursive layer
-         *   - recursion_flag == 1: 3rd internal_recursive layer or beyond
-         */
+        // We constrain the consistency of verifier-specific public values. We can determine
+        // what layer a verifier is at using the has_verifier_pvs and internal_flag columns.
+        // There are several cases we cover:
+        // - has_verifier_pvs == 0: leaf verifier, app (or deferral circuit) children
+        // - has_verifier_pvs == 1 && internal_flag == 0: internal verifier with leaf children
+        // - has_verifier_pvs == 1 && internal_flag == 1: internal_for_leaf children
+        // - has_verifier_pvs == 1 && internal_flag == 2: internal_recursive children
+        //   - recursion_flag == 1: 2nd (i.e. index 1) internal_recursive layer
+        //   - recursion_flag == 1: 3rd internal_recursive layer or beyond
         // constrain the verifier pvs flags and internal_recursive_dag_tommit are the same
         // across all valid rows
         let both_valid = and(local.is_valid, next.is_valid);
@@ -136,7 +130,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             next.child_pvs.recursion_flag,
         );
 
-        assert_array_eq(
+        assert_dag_commit_eq(
             &mut when_both_valid,
             local.child_pvs.internal_recursive_dag_commit,
             next.child_pvs.internal_recursive_dag_commit,
@@ -145,17 +139,17 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         // constrain the other commits are the same when needed
         let mut when_dag_compare = builder.when(dag_commit_cond);
 
-        assert_array_eq(
+        assert_dag_commit_eq(
             &mut when_dag_compare,
             local.child_pvs.app_dag_commit,
             next.child_pvs.app_dag_commit,
         );
-        assert_array_eq(
+        assert_dag_commit_eq(
             &mut when_dag_compare,
             local.child_pvs.leaf_dag_commit,
             next.child_pvs.leaf_dag_commit,
         );
-        assert_array_eq(
+        assert_dag_commit_eq(
             &mut when_dag_compare,
             local.child_pvs.internal_for_leaf_dag_commit,
             next.child_pvs.internal_for_leaf_dag_commit,
@@ -184,30 +178,28 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .when(is_leaf.clone())
             .assert_zero(local.child_pvs.internal_flag);
 
-        assert_zeros(
+        assert_dag_commit_unset(
             &mut builder.when(is_leaf.clone()),
             local.child_pvs.app_dag_commit,
         );
-        assert_zeros(
+        assert_dag_commit_unset(
             &mut builder.when(
                 (local.child_pvs.internal_flag - AB::F::ONE)
                     * (local.child_pvs.internal_flag - AB::F::TWO),
             ),
             local.child_pvs.leaf_dag_commit,
         );
-        assert_zeros(
+        assert_dag_commit_unset(
             &mut builder.when(local.child_pvs.internal_flag - AB::F::TWO),
             local.child_pvs.internal_for_leaf_dag_commit,
         );
-        assert_zeros(
+        assert_dag_commit_unset(
             &mut builder.when(local.child_pvs.recursion_flag - AB::F::TWO),
             local.child_pvs.internal_recursive_dag_commit,
         );
 
-        /*
-         * We need to receive public values from ProofShapeModule to ensure the values being read
-         * here are correct. This AIR will only read values if it's internal.
-         */
+        // We need to receive public values from ProofShapeModule to ensure the values being read
+        // here are correct. This AIR will only read values if it's internal.
         let verifier_pvs_id = AB::Expr::from_usize(VERIFIER_PVS_AIR_ID);
 
         for (pv_idx, value) in local.child_pvs.as_slice().iter().enumerate() {
@@ -223,11 +215,9 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             );
         }
 
-        /*
-         * We also need to receive cached commits from ProofShapeModule. Note that the
-         * app/deferral circuit cached commits are received in another AIR, so only the
-         * internal verifier will receive them here.
-         */
+        // We also need to receive cached commits from ProofShapeModule. Note that the
+        // app/deferral circuit cached commits are received in another AIR, so only the
+        // internal verifier will receive them here.
         let is_internal_flag_zero = (local.child_pvs.internal_flag - AB::F::ONE)
             * (local.child_pvs.internal_flag - AB::F::TWO)
             * AB::F::TWO.inverse();
@@ -239,10 +229,12 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             * local.child_pvs.recursion_flag
             * AB::F::TWO.inverse();
         let cached_commit = from_fn(|i| {
-            is_internal_flag_zero.clone() * local.child_pvs.app_dag_commit[i]
-                + is_internal_flag_one.clone() * local.child_pvs.leaf_dag_commit[i]
-                + is_recursion_flag_one.clone() * local.child_pvs.internal_for_leaf_dag_commit[i]
-                + is_recursion_flag_two.clone() * local.child_pvs.internal_recursive_dag_commit[i]
+            is_internal_flag_zero.clone() * local.child_pvs.app_dag_commit.cached_commit[i]
+                + is_internal_flag_one.clone() * local.child_pvs.leaf_dag_commit.cached_commit[i]
+                + is_recursion_flag_one.clone()
+                    * local.child_pvs.internal_for_leaf_dag_commit.cached_commit[i]
+                + is_recursion_flag_two.clone()
+                    * local.child_pvs.internal_recursive_dag_commit.cached_commit[i]
         });
 
         self.cached_commit_bus.receive(
@@ -256,10 +248,8 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             local.is_valid * is_internal,
         );
 
-        /*
-         * We provide proof metadata for lookup here to ensure consistency between AIRs that
-         * process public values.
-         */
+        // We provide proof metadata for lookup here to ensure consistency between AIRs that
+        // process public values.
         self.pvs_air_consistency_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
@@ -270,12 +260,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             local.is_valid * consistency_mult,
         );
 
-        /*
-         * Finally, we need to constrain that the public values this AIR produces are consistent
-         * with the child's. Note that we only impose constraints for layers below the current
-         * one - it is impossible for the current layer to know its own commit, and future layers
-         * will catch if we preemptively define a current or future verifier commit.
-         */
+        // Finally, we need to constrain that the public values this AIR produces are consistent
+        // with the child's. Note that we only impose constraints for layers below the current
+        // one - it is impossible for the current layer to know its own commit, and future layers
+        // will catch if we preemptively define a current or future verifier commit.
         let base_pvs_width = VerifierBasePvs::<AB::Var>::width();
         let &VerifierBasePvs::<_> {
             internal_flag,
@@ -307,7 +295,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .assert_eq(internal_flag, local.child_pvs.internal_flag + AB::F::ONE);
 
         // constrain app_dag_commit is set at all internal levels and matches the first row
-        assert_array_eq(
+        assert_dag_commit_eq(
             &mut builder.when_first_row().when(is_internal),
             local.child_pvs.app_dag_commit,
             app_dag_commit,
@@ -317,7 +305,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         builder
             .when(local.child_pvs.internal_flag)
             .assert_zero(internal_flag.into() - AB::F::TWO);
-        assert_array_eq(
+        assert_dag_commit_eq(
             &mut builder.when_first_row().when(local.child_pvs.internal_flag),
             local.child_pvs.leaf_dag_commit,
             leaf_dag_commit,
@@ -332,7 +320,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         builder
             .when(local.child_pvs.recursion_flag)
             .assert_eq(recursion_flag, AB::F::TWO);
-        assert_array_eq(
+        assert_dag_commit_eq(
             &mut builder
                 .when_first_row()
                 .when(local.child_pvs.recursion_flag),
@@ -341,7 +329,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         );
 
         // constrain verifier-specific pvs at internal_recursive levels after the second
-        assert_array_eq(
+        assert_dag_commit_eq(
             &mut builder.when(
                 local.child_pvs.recursion_flag * (local.child_pvs.recursion_flag - AB::F::ONE),
             ),
@@ -404,14 +392,12 @@ impl VerifierPvsAir {
     where
         AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues,
     {
-        /*
-         * The deferral_flag should be 0 if a proof has only VM public values defined, 1 if
-         * only deferral public values, and 2 if both. There are 4 valid cases:
-         * - All valid rows have deferral_flag == 0
-         * - All valid rows have deferral_flag == 1
-         * - There are exactly two rows with deferral_flag == row_idx
-         * - There is exactly one row with deferral_flag == 2
-         */
+        // The deferral_flag should be 0 if a proof has only VM public values defined, 1 if
+        // only deferral public values, and 2 if both. There are 4 valid cases:
+        // - All valid rows have deferral_flag == 0
+        // - All valid rows have deferral_flag == 1
+        // - There are exactly two rows with deferral_flag == row_idx
+        // - There is exactly one row with deferral_flag == 2
         let delta = def_next.child_pvs.deferral_flag - def_local.child_pvs.deferral_flag;
         builder.assert_tern(def_local.child_pvs.deferral_flag);
 
@@ -459,11 +445,9 @@ impl VerifierPvsAir {
             .when(delta.clone())
             .assert_one(def_next.is_last);
 
-        /*
-         * We also need to constrain the deferral-related public values. In particular, the
-         * def_hook_vk_commit should be defined exactly when internal_for_leaf_dag_commit
-         * is for deferral_flag == 1.
-         */
+        // We also need to constrain the deferral-related public values. In particular, the
+        // def_hook_vk_commit should be defined exactly when internal_for_leaf_dag_commit
+        // is for deferral_flag == 1.
         // constrain that delta == 1 only at some internal_recursive layer
         builder
             .when(delta.clone())
@@ -491,8 +475,8 @@ impl VerifierPvsAir {
             builder,
             Poseidon2CompressMessage {
                 input: digests_to_poseidon2_input(
-                    base_local.child_pvs.app_dag_commit,
-                    base_local.child_pvs.leaf_dag_commit,
+                    base_local.child_pvs.app_dag_commit.cached_commit,
+                    base_local.child_pvs.leaf_dag_commit.cached_commit,
                 ),
                 output: def_local.intermediate_def_vk_commit,
             },
@@ -504,17 +488,18 @@ impl VerifierPvsAir {
             Poseidon2CompressMessage {
                 input: digests_to_poseidon2_input(
                     def_local.intermediate_def_vk_commit,
-                    base_local.child_pvs.internal_for_leaf_dag_commit,
+                    base_local
+                        .child_pvs
+                        .internal_for_leaf_dag_commit
+                        .cached_commit,
                 ),
                 output: def_local.child_pvs.def_hook_vk_commit,
             },
             is_def_hook_vk_defined,
         );
 
-        /*
-         * We need to receive dedeferral-specific public values from ProofShapeModule to
-         * ensure the values being read are correct.
-         */
+        // We need to receive dedeferral-specific public values from ProofShapeModule to
+        // ensure the values being read are correct.
         let verifier_pvs_id = AB::Expr::from_usize(VERIFIER_PVS_AIR_ID);
         let pvs_offset = VerifierBasePvs::<AB::Var>::width();
 
@@ -531,10 +516,8 @@ impl VerifierPvsAir {
             );
         }
 
-        /*
-         * Finally, we need to constrain that the deferral-specific public values this AIR
-         * produces are consistent with the child's.
-         */
+        // Finally, we need to constrain that the deferral-specific public values this AIR
+        // produces are consistent with the child's.
         let &VerifierCombinedPvs::<_> {
             base: base_pvs,
             def: def_pvs,
@@ -581,7 +564,11 @@ impl VerifierPvsAir {
         poseidon2_bus.lookup_key(
             builder,
             Poseidon2CompressMessage {
-                input: digests_to_poseidon2_input(app_dag_commit, leaf_dag_commit).map(Into::into),
+                input: digests_to_poseidon2_input(
+                    app_dag_commit.cached_commit,
+                    leaf_dag_commit.cached_commit,
+                )
+                .map(Into::into),
                 output: def_local.intermediate_def_vk_commit.map(Into::into),
             },
             is_def_hook_vk_defined.clone(),
@@ -592,19 +579,17 @@ impl VerifierPvsAir {
             Poseidon2CompressMessage {
                 input: digests_to_poseidon2_input(
                     def_local.intermediate_def_vk_commit.map(Into::into),
-                    internal_for_leaf_dag_commit.map(Into::into),
+                    internal_for_leaf_dag_commit.cached_commit.map(Into::into),
                 ),
                 output: def_hook_vk_commit.map(Into::into),
             },
             is_def_hook_vk_defined,
         );
 
-        /*
-         * Finally, we need to generate some expressions for use in the outer constraints.
-         * dag_commit_cond is non-zero iff on a transition row and all deferral flags are
-         * the same, and consistency_mult is the number of lookups this AIR will receive
-         * on the PvsAirConsistencyBus.
-         */
+        // Finally, we need to generate some expressions for use in the outer constraints.
+        // dag_commit_cond is non-zero iff on a transition row and all deferral flags are
+        // the same, and consistency_mult is the number of lookups this AIR will receive
+        // on the PvsAirConsistencyBus.
         let dag_commit_cond =
             and(base_local.is_valid, not(def_local.is_last)) * (AB::Expr::ONE - delta);
         let deferral_flag = def_local.child_pvs.deferral_flag.into();
@@ -612,4 +597,23 @@ impl VerifierPvsAir {
 
         (dag_commit_cond, deferral_flag, consistency_mult)
     }
+}
+
+fn assert_dag_commit_eq<AB, I1, I2>(builder: &mut AB, left: DagCommit<I1>, right: DagCommit<I2>)
+where
+    AB: AirBuilder,
+    I1: Into<AB::Expr> + Copy,
+    I2: Into<AB::Expr> + Copy,
+{
+    assert_array_eq(builder, left.cached_commit, right.cached_commit);
+    assert_array_eq(builder, left.vk_pre_hash, right.vk_pre_hash);
+}
+
+fn assert_dag_commit_unset<AB, I>(builder: &mut AB, commit: DagCommit<I>)
+where
+    AB: AirBuilder,
+    I: Into<AB::Expr> + Copy,
+{
+    assert_zeros(builder, commit.cached_commit);
+    assert_zeros(builder, commit.vk_pre_hash);
 }

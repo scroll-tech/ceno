@@ -2,7 +2,7 @@ use std::{array::from_fn, borrow::Borrow};
 
 use openvm_circuit_primitives::utils::{assert_array_eq, not};
 use openvm_stark_backend::{
-    interaction::InteractionBuilder, BaseAirWithPublicValues, PartitionedBaseAir,
+    BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
@@ -15,14 +15,14 @@ use recursion_circuit::{
     prelude::DIGEST_SIZE,
 };
 use stark_recursion_circuit_derive::AlignedBorrow;
-use verify_stark::pvs::{DeferralPvs, CONSTRAINT_EVAL_AIR_ID, DEF_PVS_AIR_ID};
+use verify_stark::pvs::{CONSTRAINT_EVAL_AIR_ID, DEF_PVS_AIR_ID, DeferralPvs};
 
 use crate::{
     bn254::CommitBytes,
     circuit::{
+        CONSTRAINT_EVAL_CACHED_INDEX,
         deferral::DEF_HOOK_PVS_AIR_ID,
         inner::bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
-        CONSTRAINT_EVAL_CACHED_INDEX,
     },
     utils::digests_to_poseidon2_input,
 };
@@ -72,17 +72,15 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         let local: &DeferralPvsCols<AB::Var> = (*local).borrow();
         let next: &DeferralPvsCols<AB::Var> = (*next).borrow();
 
-        /*
-         * This AIR may have 1 or 2 rows. There are 4 valid 1-row cases:
-         * - deferral_flag == 0: child deferral pvs are unset
-         * - deferral_flag == 1 && proof_idx == 0: wrapping a deferral proof
-         * - deferral_flag == 1 && proof_idx == 1: combining a VM and deferral proof
-         * - deferral_flag == 2: wrapping a combined proof
-         *
-         * There are 2 valid 2-row cases, both with deferral_flag == 1:
-         * - Both child proofs are present
-         * - The first proof is present and the second is absent
-         */
+        // This AIR may have 1 or 2 rows. There are 4 valid 1-row cases:
+        // - deferral_flag == 0: child deferral pvs are unset
+        // - deferral_flag == 1 && proof_idx == 0: wrapping a deferral proof
+        // - deferral_flag == 1 && proof_idx == 1: combining a VM and deferral proof
+        // - deferral_flag == 2: wrapping a combined proof
+        //
+        // There are 2 valid 2-row cases, both with deferral_flag == 1:
+        // - Both child proofs are present
+        // - The first proof is present and the second is absent
         // constrain that when hash_pvs is set we have exactly 2 def rows
         builder.assert_bool(local.row_idx);
         builder.when_first_row().assert_zero(local.row_idx);
@@ -123,10 +121,8 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .when(local.single_present_is_right)
             .assert_one(local.is_present + next.is_present);
 
-        /*
-         * When deferral_flag is unset, there must be a single row with zeros for
-         * public values.
-         */
+        // When deferral_flag is unset, there must be a single row with zeros for
+        // public values.
         let mut when_flag_not_one = builder.when_ne(local.deferral_flag, AB::Expr::ONE);
         let mut when_invalid = when_flag_not_one.when_ne(local.deferral_flag, AB::Expr::TWO);
 
@@ -136,12 +132,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             when_invalid.assert_zero(*child_pv);
         }
 
-        /*
-         * If there are two rows and a proof is absent, it represents an accumulator
-         * Merkle subtree that has been left untouched. We constrain its initial and
-         * final accumulator hashes to be equal. Additionally, if there are two rows
-         * then the child_pvs depth should be equal.
-         */
+        // If there are two rows and a proof is absent, it represents an accumulator
+        // Merkle subtree that has been left untouched. We constrain its initial and
+        // final accumulator hashes to be equal. Additionally, if there are two rows
+        // then the child_pvs depth should be equal.
         assert_array_eq(
             &mut builder
                 .when(has_two_rows.clone())
@@ -154,11 +148,9 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .when(has_two_rows.clone())
             .assert_eq(local.child_pvs.depth, next.child_pvs.depth);
 
-        /*
-         * If this row is present then we need to receive the child public values
-         * from ProofShapeModule. At the hook level this is at DEF_HOOK_PVS_AIR_ID,
-         * at every other level it will be at DEF_PVS_AIR_ID.
-         */
+        // If this row is present then we need to receive the child public values
+        // from ProofShapeModule. At the hook level this is at DEF_HOOK_PVS_AIR_ID,
+        // at every other level it will be at DEF_PVS_AIR_ID.
         let def_pvs_air_idx = AB::Expr::from_usize(DEF_PVS_AIR_ID) * local.has_verifier_pvs
             + AB::Expr::from_usize(DEF_HOOK_PVS_AIR_ID) * not(local.has_verifier_pvs);
         for (pv_idx, value) in local.child_pvs.as_slice().iter().enumerate() {
@@ -174,10 +166,8 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             );
         }
 
-        /*
-         * We look up proof metadata from VerifierPvsAir here to ensure consistency
-         * on each row.
-         */
+        // We look up proof metadata from VerifierPvsAir here to ensure consistency
+        // on each row.
         self.pvs_air_consistency_bus.lookup_key(
             builder,
             local.proof_idx,
@@ -188,11 +178,9 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             local.is_present,
         );
 
-        /*
-         * If this row corresponds to a direct deferral hook circuit child (i.e.
-         * has_verifier_pvs == 0), receive the child's cached trace commit and
-         * constrain it to an expected constant.
-         */
+        // If this row corresponds to a direct deferral hook circuit child (i.e.
+        // has_verifier_pvs == 0), receive the child's cached trace commit and
+        // constrain it to an expected constant.
         let expected_def_hook_commit =
             <CommitBytes as Into<[u32; DIGEST_SIZE]>>::into(self.expected_def_hook_commit);
         self.cached_commit_bus.receive(
@@ -206,12 +194,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             local.is_present * not(local.has_verifier_pvs),
         );
 
-        /*
-         * Finally, we constrain the public values to be consistent with the
-         * child's. If there is one row then the pvs are simply passed through.
-         * If there are two, then initial_acc_hash and final_acc_hash are
-         * combined and depth is incremented by 1.
-         */
+        // Finally, we constrain the public values to be consistent with the
+        // child's. If there is one row then the pvs are simply passed through.
+        // If there are two, then initial_acc_hash and final_acc_hash are
+        // combined and depth is incremented by 1.
         let &DeferralPvs::<_> {
             initial_acc_hash,
             final_acc_hash,

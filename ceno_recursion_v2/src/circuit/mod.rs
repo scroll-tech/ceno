@@ -18,4 +18,3 @@ impl<SC: StarkProtocolConfig<F = F>, C: Circuit<SC>> Circuit<SC> for Arc<C> {
         self.as_ref().airs()
     }
 }
-

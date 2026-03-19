@@ -51,4 +51,3 @@ impl From<CommitBytes> for [u32; DIGEST_SIZE] {
         })
     }
 }
-

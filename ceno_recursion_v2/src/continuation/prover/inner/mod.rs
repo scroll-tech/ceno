@@ -11,17 +11,21 @@ use openvm_stark_backend::{
     proof::Proof,
     prover::{CommittedTraceData, DeviceMultiStarkProvingKey, ProverBackend, ProvingContext},
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{Digest, EF, F, default_duplex_sponge_recorder};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{
+    Digest, EF, F, default_duplex_sponge_recorder,
+};
 use p3_field::PrimeCharacteristicRing;
 use verify_stark::pvs::DeferralPvs;
 
-use crate::system::{
-    AggregationSubCircuit, RecursionField, RecursionVk, VerifierConfig, VerifierExternalData,
-    VerifierTraceGen,
-};
-use crate::circuit::{
-    Circuit,
-    inner::{InnerCircuit, InnerTraceGen, ProofsType},
+use crate::{
+    circuit::{
+        Circuit,
+        inner::{InnerCircuit, InnerTraceGen, ProofsType},
+    },
+    system::{
+        AggregationSubCircuit, RecursionField, RecursionVk, VerifierConfig, VerifierExternalData,
+        VerifierTraceGen,
+    },
 };
 
 pub use continuations_v2::prover::ChildVkKind;

@@ -1,4 +1,4 @@
 interface:
   display_name: "Ceno Recursion"
-  short_description: "Guidelines for Ceno recursion refactors"
-  default_prompt: "Follow the Ceno recursion refactor principles."
+  short_description: "Migration playbook for Ceno recursion module forks"
+  default_prompt: "Follow ceno-recursion-principles: minimal fork matrix, RecursionProof-first seams, preflight-owned replay, TODO-tagged placeholder policy, and air/trace ordering invariants."
