@@ -6,6 +6,7 @@ pub mod gkr;
 pub mod main;
 pub mod proof_shape;
 pub mod system;
+pub mod transcript;
 pub mod tracegen;
 pub mod utils;
 

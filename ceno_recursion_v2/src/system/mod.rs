@@ -23,7 +23,7 @@ pub use types::{
 use std::{iter, mem, sync::Arc};
 
 use self::utils::test_system_params_zero_pow;
-use crate::{batch_constraint, gkr::GkrModule, main::MainModule};
+use crate::{batch_constraint, gkr::GkrModule, main::MainModule, transcript::TranscriptModule};
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
@@ -40,7 +40,6 @@ use recursion_circuit::{
         exp_bits_len::{ExpBitsLenAir, ExpBitsLenTraceGenerator},
         pow::{PowerCheckerAir, PowerCheckerCpuTraceGenerator},
     },
-    transcript::TranscriptModule,
 };
 use tracing::Span;
 
@@ -178,18 +177,15 @@ impl<'a> TraceModuleRef<'a> {
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         match self {
             TraceModuleRef::Transcript(module) => {
-                let air_count = required_heights
-                    .map(|heights| heights.len())
-                    .unwrap_or_else(|| module.num_airs());
-                Some(
-                    (0..air_count)
-                        .map(|idx| {
-                            let height = required_heights
-                                .and_then(|heights| heights.get(idx).copied())
-                                .unwrap_or(1);
-                            zero_air_ctx(height)
-                        })
-                        .collect(),
+                module.generate_proving_ctxs(
+                    child_vk,
+                    proofs,
+                    preflights,
+                    &(
+                        external_data.poseidon2_permute_inputs.as_slice(),
+                        external_data.poseidon2_compress_inputs.as_slice(),
+                    ),
+                    required_heights,
                 )
             }
             TraceModuleRef::ProofShape(module) => module.generate_proving_ctxs(
