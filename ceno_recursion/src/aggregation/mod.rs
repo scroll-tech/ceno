@@ -319,6 +319,7 @@ impl CenoAggregationProver {
     /// via a binary tree of internal proving rounds.
     pub fn aggregate_internal_proofs(&mut self, leaf_proofs: Vec<Proof<SC>>) -> Proof<SC> {
         let start = Instant::now();
+
         let mut internal_node_idx = -1;
         let mut internal_node_height = 0;
         let mut proofs = leaf_proofs;
@@ -327,7 +328,6 @@ impl CenoAggregationProver {
             "Aggregation - Start internal aggregation at: {:?}",
             start.elapsed()
         );
-
         // We will always generate at least one internal proof, even if there is only one leaf
         // proof, in order to shrink the proof size
         while proofs.len() > 1 || internal_node_height == 0 {
