@@ -23,7 +23,12 @@ pub use types::{
 use std::{iter, mem, sync::Arc};
 
 use self::utils::test_system_params_zero_pow;
-use crate::{batch_constraint, main::MainModule, tower::TowerModule, transcript::TranscriptModule};
+use crate::{
+    batch_constraint::{self, BatchConstraintModule},
+    main::MainModule,
+    tower::TowerModule,
+    transcript::TranscriptModule,
+};
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
@@ -42,6 +47,7 @@ use recursion_circuit::primitives::{
 use tracing::Span;
 
 pub const POW_CHECKER_HEIGHT: usize = 32;
+
 /// Local override of the upstream CPU tracegen context so modules accept ZKVM proofs.
 pub struct GlobalCtxCpu;
 
@@ -127,6 +133,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
     pub(crate) proof_shape: ProofShapeModule,
     pub(crate) main_module: MainModule,
     pub(crate) gkr: TowerModule,
+    pub(crate) batch_constraint: BatchConstraintModule,
 }
 
 #[derive(Copy, Clone)]
@@ -135,6 +142,7 @@ enum TraceModuleRef<'a> {
     ProofShape(&'a ProofShapeModule),
     Main(&'a MainModule),
     Tower(&'a TowerModule),
+    BatchConstraint(&'a BatchConstraintModule),
 }
 
 impl<'a> TraceModuleRef<'a> {
@@ -144,6 +152,7 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::ProofShape(_) => "ProofShape",
             TraceModuleRef::Main(_) => "Main",
             TraceModuleRef::Tower(_) => "Tower",
+            TraceModuleRef::BatchConstraint(_) => "BatchConstraint",
         }
     }
 
@@ -166,6 +175,9 @@ impl<'a> TraceModuleRef<'a> {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
             TraceModuleRef::Tower(module) => {
+                module.run_preflight(child_vk, proof, preflight, sponge)
+            }
+            TraceModuleRef::BatchConstraint(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
             TraceModuleRef::Transcript(_) => {
@@ -217,6 +229,9 @@ impl<'a> TraceModuleRef<'a> {
                 exp_bits_len_gen,
                 required_heights,
             ),
+            TraceModuleRef::BatchConstraint(module) => {
+                module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
+            }
         }
     }
 }
@@ -269,6 +284,11 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             &mut bus_idx_manager,
             bus_inventory.clone(),
         );
+        let batch_constraint = BatchConstraintModule::new(
+            &mut bus_idx_manager,
+            bus_inventory.clone(),
+            MAX_NUM_PROOFS,
+        );
 
         VerifierSubCircuit {
             bus_inventory,
@@ -277,6 +297,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             proof_shape,
             main_module,
             gkr,
+            batch_constraint,
         }
     }
 
@@ -295,8 +316,11 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let mut preflight = Preflight::default();
         let modules = [
             TraceModuleRef::ProofShape(&self.proof_shape),
-            TraceModuleRef::Main(&self.main_module),
             TraceModuleRef::Tower(&self.gkr),
+            TraceModuleRef::Main(&self.main_module),
+            // TODO(batch-constraint): uncomment after fixing SymbolicExpressionAir trace/preprocessed
+            // shape assumptions that currently trigger SymbolicEvaluator OOB in release tests.
+            // TraceModuleRef::BatchConstraint(&self.batch_constraint),
         ];
         for module in modules {
             module.run_preflight(child_vk, proof, &mut preflight, &mut sponge);
@@ -312,9 +336,9 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     ) -> (Vec<Option<&'a [usize]>>, Option<usize>, Option<usize>) {
         let t_n = self.transcript.num_airs();
         let ps_n = self.proof_shape.num_airs();
-        let main_n = self.main_module.num_airs();
         let gkr_n = self.gkr.num_airs();
-        let module_air_counts = [t_n, ps_n, main_n, gkr_n];
+        let main_n = self.main_module.num_airs();
+        let module_air_counts = [t_n, ps_n, gkr_n, main_n];
 
         let Some(heights) = required_heights else {
             return (vec![None; module_air_counts.len()], None, None);
@@ -401,8 +425,10 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         let modules = [
             TraceModuleRef::Transcript(&self.transcript),
             TraceModuleRef::ProofShape(&self.proof_shape),
-            TraceModuleRef::Main(&self.main_module),
             TraceModuleRef::Tower(&self.gkr),
+            TraceModuleRef::Main(&self.main_module),
+            // TODO(batch-constraint): re-enable once batch tracegen/preflight alignment is fixed.
+            // TraceModuleRef::BatchConstraint(&self.batch_constraint),
         ];
 
         let span = Span::current();
@@ -471,8 +497,10 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
         iter::empty()
             .chain(self.transcript.airs())
             .chain(self.proof_shape.airs())
-            .chain(self.main_module.airs())
             .chain(self.gkr.airs())
+            .chain(self.main_module.airs())
+            // TODO(batch-constraint): re-chain batch AIRs after BatchConstraintModule is stable.
+            // .chain(self.batch_constraint.airs())
             .chain([
                 Arc::new(power_checker_air) as AirRef<_>,
                 Arc::new(exp_bits_len_air) as AirRef<_>,
