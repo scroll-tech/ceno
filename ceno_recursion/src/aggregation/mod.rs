@@ -272,14 +272,12 @@ impl CenoAggregationProver {
                 let mut witness_stream: Vec<Vec<F>> = Vec::new();
                 witness_stream.extend(p.write());
 
-                let leaf_proof = SingleSegmentVmProver::prove(
+                SingleSegmentVmProver::prove(
                     &mut self.leaf_prover,
                     witness_stream,
                     VM_MAX_TRACE_HEIGHTS,
                 )
-                .expect("leaf proof generation failed");
-
-                leaf_proof
+                .expect("leaf proof generation failed")
             })
             .collect::<Vec<_>>();
 
@@ -310,13 +308,12 @@ impl CenoAggregationProver {
             let layer_proofs: Vec<Proof<_>> = internal_inputs
                 .into_iter()
                 .map(|input| {
-                    let internal_proof = SingleSegmentVmProver::prove(
+                    SingleSegmentVmProver::prove(
                         &mut self.internal_prover,
                         input.write(),
                         VM_MAX_TRACE_HEIGHTS,
                     )
-                    .expect("internal proof generation failed");
-                    internal_proof
+                    .expect("internal proof generation failed")
                 })
                 .collect();
 
