@@ -62,3 +62,10 @@ cuda = [
     "dep:openvm-cuda-common",
 ]
 default = []
+
+[patch."https://github.com/openvm-org/stark-backend.git"]
+openvm-stark-backend = { git = "https://github.com/hero78119/stark-backend.git", branch = "develop-v2", default-features = false }
+openvm-stark-sdk = { git = "https://github.com/hero78119/stark-backend.git", branch = "develop-v2" }
+openvm-cuda-backend = { git = "https://github.com/hero78119/stark-backend.git", branch = "develop-v2", optional = true }
+openvm-cuda-common = { git = "https://github.com/hero78119/stark-backend.git", branch = "develop-v2", optional = true }
+openvm-cpu-backend = { git = "https://github.com/hero78119/stark-backend.git", branch = "develop-v2", default-features = false }
