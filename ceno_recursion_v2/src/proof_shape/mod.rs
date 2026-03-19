@@ -7,7 +7,9 @@ use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
     keygen::types::VerifierSinglePreprocessedData, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, Digest, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{
+    BabyBearPoseidon2Config, DIGEST_SIZE, Digest, F,
+};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -26,7 +28,7 @@ use crate::{
 use recursion_circuit::primitives::{
     bus::{PowerCheckerBus, RangeCheckerBus},
     pow::PowerCheckerCpuTraceGenerator,
-    range::RangeCheckerAir,
+    range::{RangeCheckerAir, RangeCheckerCols},
 };
 
 pub mod bus;
@@ -119,6 +121,17 @@ impl ProofShapeModule {
     {
         let _ = (self, child_vk, proof, preflight);
         ts.observe(F::ZERO);
+    }
+
+    fn placeholder_air_widths(&self) -> Vec<usize> {
+        let proof_shape_width = proof_shape::ProofShapeCols::<u8, 4>::width()
+            + self.idx_encoder.width()
+            + self.max_cached * DIGEST_SIZE;
+        let pvs_width = pvs::PublicValuesCols::<u8>::width();
+        let range_width = RangeCheckerCols::<u8>::width();
+        // TODO(recursion-proof-bridge): replace proof-shape module placeholder contexts with
+        // real tracegen so RangeCheckerAir rows are semantically valid, not only width-correct.
+        vec![proof_shape_width, pvs_width, range_width]
     }
 }
 
@@ -235,6 +248,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         let _ = (child_vk, proofs, preflights, ctx);
+        let widths = self.placeholder_air_widths();
         let num_airs = required_heights
             .map(|heights| heights.len())
             .unwrap_or_else(|| self.num_airs());
@@ -244,7 +258,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                     let height = required_heights
                         .and_then(|heights| heights.get(idx).copied())
                         .unwrap_or(1);
-                    zero_air_ctx(height)
+                    let width = widths.get(idx).copied().unwrap_or(1);
+                    zero_air_ctx(height, width)
                 })
                 .collect(),
         )
@@ -253,9 +268,11 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
 fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
     height: usize,
+    width: usize,
 ) -> AirProvingContext<CpuBackend<SC>> {
     let rows = height.max(1);
-    let matrix = RowMajorMatrix::new(vec![F::ZERO; rows], 1);
+    let cols = width.max(1);
+    let matrix = RowMajorMatrix::new(vec![F::ZERO; rows * cols], cols);
     AirProvingContext::simple_no_pis(matrix)
 }
 
@@ -281,9 +298,13 @@ impl RowMajorChip<F> for ProofShapeModuleChip {
         ctx: &Self::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
-        let _ = (self, ctx);
+        let _ = ctx;
         let rows = required_height.unwrap_or(1).max(1);
-        Some(RowMajorMatrix::new(vec![F::ZERO; rows], 1))
+        let width = match self {
+            ProofShapeModuleChip::ProofShape(chip) => chip.placeholder_width(),
+            ProofShapeModuleChip::PublicValues => pvs::PublicValuesCols::<u8>::width(),
+        };
+        Some(RowMajorMatrix::new(vec![F::ZERO; rows * width], width))
     }
 }
 
@@ -309,6 +330,7 @@ mod cuda_tracegen {
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
             let _ = (child_vk, proofs, preflights);
+            let widths = self.placeholder_air_widths();
             let air_count = required_heights
                 .map(|heights| heights.len())
                 .unwrap_or_else(|| self.num_airs());
@@ -318,16 +340,18 @@ mod cuda_tracegen {
                         let height = required_heights
                             .and_then(|heights| heights.get(idx).copied())
                             .unwrap_or(1);
-                        zero_gpu_ctx(height)
+                        let width = widths.get(idx).copied().unwrap_or(1);
+                        zero_gpu_ctx(height, width)
                     })
                     .collect(),
             )
         }
     }
 
-    fn zero_gpu_ctx(height: usize) -> AirProvingContext<GpuBackend> {
+    fn zero_gpu_ctx(height: usize, width: usize) -> AirProvingContext<GpuBackend> {
         let rows = height.max(1);
-        let trace = DeviceMatrix::with_capacity(rows, 1);
+        let cols = width.max(1);
+        let trace = DeviceMatrix::with_capacity(rows, cols);
         AirProvingContext::simple_no_pis(trace)
     }
 }

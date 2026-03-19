@@ -3,6 +3,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
+    proof_shape::pvs::PublicValuesCols,
     system::{Preflight, RecursionProof},
     tracegen::RowMajorChip,
 };
@@ -19,6 +20,7 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
         let rows = required_height.unwrap_or(1).max(1);
-        Some(RowMajorMatrix::new(vec![F::ZERO; rows], 1))
+        let width = PublicValuesCols::<u8>::width();
+        Some(RowMajorMatrix::new(vec![F::ZERO; rows * width], width))
     }
 }

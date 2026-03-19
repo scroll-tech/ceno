@@ -34,7 +34,7 @@ use openvm_stark_backend::{
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::Matrix;
 use recursion_circuit::{
     primitives::{
         exp_bits_len::{ExpBitsLenAir, ExpBitsLenTraceGenerator},
@@ -430,9 +430,15 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             return None;
         }
         let power_height = power_checker_required.unwrap_or(POW_CHECKER_HEIGHT);
-        ctx_per_trace.push(zero_air_ctx(power_height));
-        let exp_bits_height = exp_bits_len_required.unwrap_or(1);
-        ctx_per_trace.push(zero_air_ctx(exp_bits_height));
+        let power_trace = power_checker_gen.generate_trace_row_major();
+        if power_trace.height() != power_height {
+            return None;
+        }
+        ctx_per_trace.push(AirProvingContext::simple_no_pis(power_trace));
+
+        let exp_bits_height = exp_bits_len_required;
+        let exp_bits_trace = exp_bits_len_gen.generate_trace_row_major(exp_bits_height)?;
+        ctx_per_trace.push(AirProvingContext::simple_no_pis(exp_bits_trace));
         Some(ctx_per_trace)
     }
 }
@@ -478,10 +484,3 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
     }
 }
 
-fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
-    height: usize,
-) -> AirProvingContext<CpuBackend<SC>> {
-    let rows = height.max(1);
-    let matrix = RowMajorMatrix::new(vec![F::ZERO; rows], 1);
-    AirProvingContext::simple_no_pis(matrix)
-}
