@@ -241,6 +241,23 @@ impl<
                     / (1024.0 * 1024.0)
             );
 
+            for (trace_idx, rmm) in &wits_rmms {
+                let bytes = rmm.values.len() * std::mem::size_of::<E::BaseField>();
+                let gib = bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+                let circuit_name = name_and_instances
+                    .get(*trace_idx)
+                    .map(|(name, _)| name.as_str())
+                    .unwrap_or("<unknown>");
+                println!(
+                    "[wits_rmms] trace_idx={} circuit={} num_instances={} elements={} size={:.6} GiB",
+                    trace_idx,
+                    circuit_name,
+                    rmm.num_instances(),
+                    rmm.values.len(),
+                    gib
+                );
+            }
+
             // Build trace index map: maps circuit enum index -> trace index in pcs_data.
             // BTreeMap iterates in key order, so trace indices match insertion order.
             // GPU uses this for deferred witness extraction; CPU ignores it.
