@@ -56,7 +56,7 @@ use witness::next_pow2_instance_padding;
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
-pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
+pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = u32::MAX as usize;
 // define a relative small number to make first shard handle much less instruction
 /// The polynomial commitment scheme kind
 #[derive(

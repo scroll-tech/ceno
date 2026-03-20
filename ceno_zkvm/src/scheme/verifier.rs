@@ -222,10 +222,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // write (circuit_idx, num_instance) to transcript
-        for (circuit_idx, proofs) in vm_proof.chip_proofs.iter() {
+        for (circuit_idx, proof) in vm_proof.chip_proofs.iter() {
             transcript.append_field_element(&E::BaseField::from_canonical_u32(*circuit_idx as u32));
             // length of proof.num_instances will be constrained in verify_chip_proof
-            for num_instance in proofs.iter().flat_map(|proof| &proof.num_instances) {
+            for num_instance in &proof.num_instances {
                 transcript.append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
             }
         }
@@ -259,8 +259,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut shard_ec_sum = SepticPoint::<E::BaseField>::default();
 
         // check num proofs
-        let mut num_proofs = 0;
-        for (index, proofs) in &vm_proof.chip_proofs {
+        let num_proofs = vm_proof.chip_proofs.len();
+        for index in vm_proof.chip_proofs.keys() {
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
             if shard_id > 0 && circuit_vk.get_cs().with_omc_init_only() {
@@ -269,13 +269,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .into(),
                 ));
             }
-            if shard_id == 0 && circuit_vk.get_cs().with_omc_init_only() && proofs.len() != 1 {
-                return Err(ZKVMError::InvalidProof(
-                    format!("{shard_id}th shard first shard got > 1 omc dynamic table init",)
-                        .into(),
-                ));
-            }
-            num_proofs += proofs.len();
         }
 
         // fork transcript to support chip concurrently proved
@@ -283,7 +276,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         for ((index, proof), transcript) in vm_proof
             .chip_proofs
             .iter()
-            .flat_map(|(index, proofs)| iter::repeat_n(index, proofs.len()).zip(proofs))
             .zip_eq(forked_transcripts.iter_mut())
         {
             let num_instance: usize = proof.num_instances.iter().sum();
