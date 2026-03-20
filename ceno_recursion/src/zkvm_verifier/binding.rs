@@ -68,7 +68,7 @@ pub struct ZKVMProofInputVariable<C: Config> {
     pub raw_pi: Array<C, Array<C, Felt<C::F>>>,
     pub raw_pi_num_variables: Array<C, Var<C::N>>,
     pub pi_evals: Array<C, Ext<C::F, C::EF>>,
-    pub chip_proofs: Array<C, Array<C, ZKVMChipProofInputVariable<C>>>,
+    pub chip_proofs: Array<C, ZKVMChipProofInputVariable<C>>,
     pub max_num_var: Var<C::N>,
     pub max_width: Var<C::N>,
     pub witin_commit: BasefoldCommitmentVariable<C>,
@@ -92,7 +92,7 @@ pub(crate) struct ZKVMProofInput {
     pub raw_pi: Vec<Vec<F>>,
     // Evaluation of raw_pi.
     pub pi_evals: Vec<E>,
-    pub chip_proofs: BTreeMap<usize, ZKVMChipProofs>,
+    pub chip_proofs: BTreeMap<usize, ZKVMChipProofInput>,
     pub witin_commit: BasefoldCommitment,
     pub opening_proof: BasefoldProof,
 }
@@ -135,22 +135,16 @@ impl ZKVMProofInput {
             chip_proofs: zkvm_proof
                 .chip_proofs
                 .into_iter()
-                .map(|(chip_idx, proofs)| {
+                .map(|(chip_idx, proof)| {
                     let (num_witin, num_fixed) = *chip_witin_num_vars
                         .get(&chip_idx)
                         .expect("num_witin data should exist");
                     (
                         chip_idx,
-                        proofs
-                            .into_iter()
-                            .map(|proof| {
-                                ZKVMChipProofInput::from((chip_idx, proof, num_witin, num_fixed))
-                            })
-                            .collect::<Vec<ZKVMChipProofInput>>()
-                            .into(),
+                        ZKVMChipProofInput::from((chip_idx, proof, num_witin, num_fixed)),
                     )
                 })
-                .collect::<BTreeMap<usize, ZKVMChipProofs>>(),
+                .collect::<BTreeMap<usize, ZKVMChipProofInput>>(),
             witin_commit: zkvm_proof.witin_commit.into(),
             opening_proof: zkvm_proof.opening_proof.into(),
         }
@@ -166,7 +160,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let raw_pi_num_variables = Vec::<usize>::read(builder);
         let pi_evals = Vec::<E>::read(builder);
         builder.cycle_tracker_start("read chip proofs");
-        let chip_proofs = Vec::<ZKVMChipProofs>::read(builder);
+        let chip_proofs = Vec::<ZKVMChipProofInput>::read(builder);
         builder.cycle_tracker_end("read chip proofs");
         let max_num_var = usize::read(builder);
         let max_width = usize::read(builder);
@@ -202,28 +196,24 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .collect();
         let witin_num_vars = self
             .chip_proofs
-            .iter()
-            .flat_map(|(_, proofs)| proofs.iter())
+            .values()
             .filter(|proof| proof.num_witin > 0)
             .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
-            .iter()
-            .flat_map(|(_, proofs)| proofs.iter())
+            .values()
             .map(|proof| proof.wits_in_evals.len().max(1))
             .collect::<Vec<_>>();
         let fixed_num_vars = self
             .chip_proofs
-            .iter()
-            .flat_map(|(_, proofs)| proofs.iter())
+            .values()
             .filter(|proof| !proof.fixed_in_evals.is_empty())
             .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
-            .iter()
-            .flat_map(|(_, proofs)| proofs.iter())
+            .values()
             .filter(|proof| !proof.fixed_in_evals.is_empty())
             .map(|proof| proof.fixed_in_evals.len())
             .collect::<Vec<_>>();
@@ -261,8 +251,8 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         stream.extend(raw_pi_num_variables.write());
         stream.extend(self.pi_evals.write());
         stream.extend(vec![vec![F::from_canonical_usize(self.chip_proofs.len())]]);
-        for proofs in self.chip_proofs.values() {
-            stream.extend(proofs.write());
+        for proof in self.chip_proofs.values() {
+            stream.extend(proof.write());
         }
         stream.extend(<usize as Hintable<InnerConfig>>::write(&max_num_var));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&max_width));
@@ -403,35 +393,6 @@ pub struct ZKVMChipProofInput {
 }
 
 impl VecAutoHintable for ZKVMChipProofInput {}
-
-/// wrapper struct to allow us implement VecAutoHintable
-pub struct ZKVMChipProofs(Vec<ZKVMChipProofInput>);
-
-impl From<Vec<ZKVMChipProofInput>> for ZKVMChipProofs {
-    fn from(v: Vec<ZKVMChipProofInput>) -> Self {
-        Self(v)
-    }
-}
-
-impl VecAutoHintable for ZKVMChipProofs {}
-
-impl ZKVMChipProofs {
-    pub fn iter(&self) -> std::slice::Iter<'_, ZKVMChipProofInput> {
-        self.0.iter()
-    }
-}
-
-impl Hintable<InnerConfig> for ZKVMChipProofs {
-    type HintVariable = Array<InnerConfig, ZKVMChipProofInputVariable<InnerConfig>>;
-
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        Vec::<ZKVMChipProofInput>::read(builder)
-    }
-
-    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
-        self.0.write()
-    }
-}
 
 impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
     fn from(d: (usize, ZKVMChipProof<E>, usize, usize)) -> Self {
