@@ -240,6 +240,11 @@ mod tests {
             .unwrap()
             .expect("GPU path should be available");
 
+        crate::instructions::riscv::gpu::device_cache::flush_shared_ec_buffers(
+            &mut shard_ctx_full_gpu,
+        )
+        .unwrap();
+
         assert_eq!(gpu_rmms[0].values(), cpu_rmms[0].values());
         assert_eq!(flatten_lk(&gpu_lkm), flatten_lk(&cpu_lkm));
         assert_eq!(
