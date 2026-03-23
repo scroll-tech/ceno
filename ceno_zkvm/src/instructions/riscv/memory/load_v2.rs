@@ -45,7 +45,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     type InstructionConfig = LoadConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = matches!(I::INST_KIND, InsnKind::LW);
+    const GPU_SIDE_EFFECTS: bool = matches!(
+        I::INST_KIND,
+        InsnKind::LW | InsnKind::LB | InsnKind::LBU | InsnKind::LH | InsnKind::LHU
+    );
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
