@@ -221,6 +221,8 @@ fn ensure_shard_metadata_cached(
                 shared_ec_count_ptr: _,
                 shared_addr_out_ptr: _,
                 shared_addr_count_ptr: _,
+                shared_ec_capacity: _,
+                shared_addr_capacity: _,
             } = c.device_bufs;
             next_access_packed
         });
@@ -322,11 +324,16 @@ fn ensure_shard_metadata_cached(
         );
 
         // Allocate shared EC/addr compact buffers for this shard.
-        // Each step produces up to 3 EC records and 3 addr_accessed entries.
-        // These buffers persist across all kernel invocations within the shard.
-        let ec_capacity = n_total_steps * 4; // extra headroom
+        //
+        // EC records: cross-shard only (sparse subset of RAM ops).
+        //   104 bytes each (26 u32s). Cap at 16M entries ≈ 1.6 GB.
+        // Addr records: every gpu_send() emits one (dense).
+        //   4 bytes each (1 u32). Cap at 256M entries ≈ 1 GB.
+        let max_ops_per_step = 52u64; // keccak worst case
+        let total_ops_estimate = n_total_steps as u64 * max_ops_per_step;
+        let ec_capacity = total_ops_estimate.min(16 * 1024 * 1024) as usize;
         let ec_u32s = ec_capacity * 26; // 26 u32s per GpuShardRamRecord (104 bytes)
-        let addr_capacity = n_total_steps * 4;
+        let addr_capacity = total_ops_estimate.min(256 * 1024 * 1024) as usize;
 
         let shared_ec_buf = hal
             .alloc_u32_zeroed(ec_u32s, None)
@@ -370,6 +377,8 @@ fn ensure_shard_metadata_cached(
                 shared_ec_count_ptr,
                 shared_addr_out_ptr,
                 shared_addr_count_ptr,
+                shared_ec_capacity: ec_capacity as u32,
+                shared_addr_capacity: addr_capacity as u32,
             },
             shared_ec_buf: Some(shared_ec_buf),
             shared_ec_count: Some(shared_ec_count),
@@ -494,6 +503,15 @@ pub fn flush_shared_ec_buffers(shard_ctx: &mut ShardContext) -> Result<(), ZKVME
             ZKVMError::InvalidWitness(format!("shared_ec_count D2H: {e}").into())
         })?;
         let ec_count = ec_count_vec[0] as usize;
+        let ec_capacity = c.device_bufs.shared_ec_capacity as usize;
+
+        assert!(
+            ec_count <= ec_capacity,
+            "GPU shared EC buffer overflow: count={} > capacity={}. \
+             Increase ec_capacity in ensure_shard_metadata_cached.",
+            ec_count,
+            ec_capacity,
+        );
 
         if ec_count > 0 {
             // D2H EC records (only the active portion)
@@ -524,6 +542,14 @@ pub fn flush_shared_ec_buffers(shard_ctx: &mut ShardContext) -> Result<(), ZKVME
             ZKVMError::InvalidWitness(format!("shared_addr_count D2H: {e}").into())
         })?;
         let addr_count = addr_count_vec[0] as usize;
+        let addr_capacity = c.device_bufs.shared_addr_capacity as usize;
+
+        assert!(
+            addr_count <= addr_capacity,
+            "GPU shared addr buffer overflow: count={} > capacity={}",
+            addr_count,
+            addr_capacity,
+        );
 
         if addr_count > 0 {
             let addr_buf = c.shared_addr_buf.as_ref().unwrap();
@@ -998,7 +1024,7 @@ type LkResult = ceno_gpu::common::witgen_types::GpuLookupCountersResult<LkBuf>;
 type CompactEcBuf = ceno_gpu::common::witgen_types::CompactEcResult<RamBuf>;
 
 /// Compute fetch counter parameters from step data.
-fn compute_fetch_params(
+pub(crate) fn compute_fetch_params(
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
 ) -> (u32, usize) {
@@ -2618,7 +2644,7 @@ fn gpu_shard_ram_record_to_ec_point<E: ExtensionField>(
     }
 }
 
-fn gpu_lk_counters_to_multiplicity(counters: LkResult) -> Result<Multiplicity<u64>, ZKVMError> {
+pub(crate) fn gpu_lk_counters_to_multiplicity(counters: LkResult) -> Result<Multiplicity<u64>, ZKVMError> {
     let mut tables: [FxHashMap<u64, usize>; 8] = Default::default();
 
     // Dynamic: D2H + direct FxHashMap construction (no LkMultiplicity)
@@ -2829,6 +2855,8 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     let lk_multiplicity = info_span!("gpu_lk_d2h")
         .in_scope(|| gpu_lk_counters_to_multiplicity(gpu_result.lk_counters))?;
 
+    // Debug LK comparison is done in the unit test instead.
+
     // Step 7: Handle compact EC records (shared buffer path)
     if gpu_result.compact_ec.is_none() && gpu_result.compact_addr.is_none() {
         // Shared buffer path: EC records + addr_accessed accumulated on device
@@ -2960,7 +2988,8 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
             .sel_all
             .sparse_indices();
 
-        for instance_chunk in raw_structural.iter_mut() {
+        // Only set selectors for real instances, not padding ones.
+        for instance_chunk in raw_structural.iter_mut().take(num_instances) {
             // instance_chunk is a &mut [F] of size 32 * num_structural_witin
             for &idx in sel_first_indices {
                 instance_chunk[idx * num_structural_witin + sel_first_id] =

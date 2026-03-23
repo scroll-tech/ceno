@@ -2,6 +2,7 @@ use crate::{
     CENO_PLATFORM, InsnKind, Instruction, Platform, Program, StepRecord, VMState, encode_rv32,
     encode_rv32u,
     syscalls::{KECCAK_PERMUTE, SyscallWitness},
+    tracer::FullTracerConfig,
 };
 use anyhow::Result;
 
@@ -24,7 +25,13 @@ pub fn keccak_step() -> (StepRecord, Vec<Instruction>, Vec<SyscallWitness>) {
         instructions.clone(),
         Default::default(),
     );
-    let mut vm = VMState::new(CENO_PLATFORM.clone(), program.into());
+    let mut vm: VMState = VMState::new_with_tracer_config(
+        CENO_PLATFORM.clone(),
+        program.into(),
+        FullTracerConfig {
+            max_step_shard: 10,
+        },
+    );
     vm.iter_until_halt().collect::<Result<Vec<_>>>().unwrap();
     let steps = vm.tracer().recorded_steps();
     let syscall_witnesses = vm.tracer().syscall_witnesses().to_vec();
