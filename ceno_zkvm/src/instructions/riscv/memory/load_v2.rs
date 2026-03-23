@@ -264,32 +264,23 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        match I::INST_KIND {
-            InsnKind::LW => {
-                let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-                let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-                let mut sink =
-                    unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-                config
-                    .im_insn
-                    .collect_side_effects(&mut sink, shard_ctx_view, step);
+        // Side effects (shard send/addr) are identical for all load types (LW/LH/LB/LHU/LBU).
+        // Sub-word extraction only affects LK emissions, handled separately by GPU kernel.
+        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
+        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
+        let mut sink =
+            unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
+        config
+            .im_insn
+            .collect_side_effects(&mut sink, shard_ctx_view, step);
 
-                let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
-                let unaligned_addr =
-                    ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
-                config
-                    .memory_addr
-                    .collect_side_effects(&mut sink, unaligned_addr.into());
-                Ok(())
-            }
-            _ => Err(ZKVMError::InvalidWitness(
-                format!(
-                    "lightweight side effects not implemented for {:?}",
-                    I::INST_KIND
-                )
-                .into(),
-            )),
-        }
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
+        let unaligned_addr =
+            ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
+        config
+            .memory_addr
+            .collect_side_effects(&mut sink, unaligned_addr.into());
+        Ok(())
     }
 
     fn collect_shard_side_effects_instance(
@@ -298,21 +289,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        match I::INST_KIND {
-            InsnKind::LW => {
-                config
-                    .im_insn
-                    .collect_shard_effects(shard_ctx, lk_multiplicity, step);
-                Ok(())
-            }
-            _ => Err(ZKVMError::InvalidWitness(
-                format!(
-                    "shard-only side effects not implemented for {:?}",
-                    I::INST_KIND
-                )
-                .into(),
-            )),
-        }
+        config
+            .im_insn
+            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
+        Ok(())
     }
 
     #[cfg(feature = "gpu")]

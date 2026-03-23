@@ -71,6 +71,7 @@ pub enum GpuWitgenKind {
     #[cfg(feature = "u16limb_circuit")]
     Div(u32), // 0=DIV, 1=DIVU, 2=REM, 3=REMU
     Lw,
+    Keccak,
 }
 
 /// Cached shard_steps device buffer with metadata for logging.
@@ -702,6 +703,8 @@ fn kind_has_verified_shard(kind: GpuWitgenKind) -> bool {
         | GpuWitgenKind::LoadSub { .. }
         | GpuWitgenKind::Mul(_)
         | GpuWitgenKind::Div(_) => true,
+        // Keccak has its own dispatch path, never enters try_gpu_assign_instances.
+        GpuWitgenKind::Keccak => false,
         #[cfg(not(feature = "u16limb_circuit"))]
         _ => false,
     }
@@ -1793,6 +1796,9 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 })
             })
         }
+        GpuWitgenKind::Keccak => {
+            unreachable!("keccak uses gpu_assign_keccak_instances, not try_gpu_assign_instances")
+        }
     }
 }
 
@@ -1858,6 +1864,7 @@ fn kind_tag(kind: GpuWitgenKind) -> &'static str {
         GpuWitgenKind::Mul(_) => "mul",
         #[cfg(feature = "u16limb_circuit")]
         GpuWitgenKind::Div(_) => "div",
+        GpuWitgenKind::Keccak => "keccak",
     }
 }
 
@@ -1917,6 +1924,8 @@ fn kind_has_verified_lk(kind: GpuWitgenKind) -> bool {
         GpuWitgenKind::Mul(_) => true,
         #[cfg(feature = "u16limb_circuit")]
         GpuWitgenKind::Div(_) => true,
+        // Keccak has its own dispatch path with its own LK handling.
+        GpuWitgenKind::Keccak => false,
         #[cfg(not(feature = "u16limb_circuit"))]
         _ => false,
     }
@@ -3009,7 +3018,131 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
         raw_structural
     });
 
+    // Debug comparisons (activated by env vars)
+    debug_compare_keccak::<E>(
+        config,
+        shard_ctx,
+        num_witin,
+        num_structural_witin,
+        steps,
+        step_indices,
+        &lk_multiplicity,
+        &raw_witin,
+    )?;
+
     Ok(([raw_witin, raw_structural], lk_multiplicity))
+}
+
+/// Debug comparison for keccak GPU witgen.
+/// Runs the CPU path and compares LK / witness / shard side effects.
+///
+/// Activated by CENO_GPU_DEBUG_COMPARE_LK, CENO_GPU_DEBUG_COMPARE_WITNESS,
+/// or CENO_GPU_DEBUG_COMPARE_SHARD environment variables.
+#[cfg(feature = "gpu")]
+fn debug_compare_keccak<E: ExtensionField>(
+    config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
+    shard_ctx: &ShardContext,
+    num_witin: usize,
+    num_structural_witin: usize,
+    steps: &[StepRecord],
+    step_indices: &[StepIndex],
+    gpu_lk: &Multiplicity<u64>,
+    gpu_witin: &RowMajorMatrix<E::BaseField>,
+) -> Result<(), ZKVMError> {
+    let want_lk = std::env::var_os("CENO_GPU_DEBUG_COMPARE_LK").is_some();
+    let want_witness = std::env::var_os("CENO_GPU_DEBUG_COMPARE_WITNESS").is_some();
+    let want_shard = std::env::var_os("CENO_GPU_DEBUG_COMPARE_SHARD").is_some();
+
+    if !want_lk && !want_witness && !want_shard {
+        return Ok(());
+    }
+
+    // Guard against recursion: is_gpu_witgen_disabled() uses OnceLock so env var
+    // manipulation doesn't work. Use a thread-local flag instead.
+    thread_local! {
+        static IN_DEBUG_COMPARE: Cell<bool> = const { Cell::new(false) };
+    }
+    if IN_DEBUG_COMPARE.with(|f| f.get()) {
+        return Ok(());
+    }
+    IN_DEBUG_COMPARE.with(|f| f.set(true));
+
+    tracing::info!("[GPU keccak debug] running CPU baseline for comparison");
+
+    // Run CPU path via assign_instances. The IN_DEBUG_COMPARE guard prevents
+    // gpu_assign_keccak_instances from calling debug_compare_keccak again,
+    // so it will produce the GPU result, which is then returned without
+    // re-entering this function. We need assign_instances (not cpu_assign_instances)
+    // because keccak has rotation matrices and 3 structural columns.
+    //
+    // To force the CPU path, we use is_force_cpu_path() by setting the env var.
+    let mut cpu_ctx = shard_ctx.new_empty_like();
+    let (cpu_rmms, cpu_lk) = {
+        use crate::instructions::riscv::ecall::keccak::KeccakInstruction;
+        // Set force-CPU flag so gpu_assign_keccak_instances returns None
+        set_force_cpu_path(true);
+        let result = <KeccakInstruction<E> as crate::instructions::Instruction<E>>::assign_instances(
+            config,
+            &mut cpu_ctx,
+            num_witin,
+            num_structural_witin,
+            steps,
+            step_indices,
+        );
+        set_force_cpu_path(false);
+        IN_DEBUG_COMPARE.with(|f| f.set(false));
+        result?
+    };
+
+    let kind = GpuWitgenKind::Keccak;
+
+    if want_lk {
+        tracing::info!("[GPU keccak debug] comparing LK multiplicities");
+        log_lk_diff(kind, &cpu_lk, gpu_lk);
+    }
+
+    if want_witness {
+        let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_WITNESS_LIMIT")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(32);
+        let cpu_witin = &cpu_rmms[0];
+        let gpu_vals = gpu_witin.values();
+        let cpu_vals = cpu_witin.values();
+        let mut diffs = 0usize;
+        for (i, (g, c)) in gpu_vals.iter().zip(cpu_vals.iter()).enumerate() {
+            if g != c {
+                if diffs < limit {
+                    let row = i / num_witin;
+                    let col = i % num_witin;
+                    tracing::error!(
+                        "[GPU keccak witness] row={} col={} gpu={:?} cpu={:?}",
+                        row, col, g, c
+                    );
+                }
+                diffs += 1;
+            }
+        }
+        if diffs == 0 {
+            tracing::info!("[GPU keccak debug] witness matrices match ({} elements)", gpu_vals.len());
+        } else {
+            tracing::error!("[GPU keccak debug] witness mismatch: {} diffs out of {}", diffs, gpu_vals.len());
+        }
+    }
+
+    if want_shard {
+        // Note: keccak uses shared EC/addr buffers that are accumulated on-device
+        // and only flushed to shard_ctx in flush_shared_ec_buffers() after ALL
+        // opcode circuits complete. At this point shard_ctx.get_addr_accessed()
+        // is expected to be empty — the data is still on GPU.
+        let cpu_addr = cpu_ctx.get_addr_accessed();
+        tracing::info!(
+            "[GPU keccak shard] CPU addr_accessed count={} (GPU uses shared buffer, flushed later)",
+            cpu_addr.len()
+        );
+    }
+
+    Ok(())
 }
 
 /// Convert GPU device buffer (column-major) to RowMajorMatrix via GPU transpose + D2H copy.
