@@ -49,4 +49,12 @@ pub mod shard_ram;
 #[cfg(feature = "gpu")]
 pub mod colmap_base;
 #[cfg(feature = "gpu")]
+pub mod debug_compare;
+#[cfg(feature = "gpu")]
+pub mod gpu_config;
+#[cfg(feature = "gpu")]
+pub mod d2h;
+#[cfg(feature = "gpu")]
+pub mod device_cache;
+#[cfg(feature = "gpu")]
 pub mod witgen_gpu;
