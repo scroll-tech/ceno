@@ -1020,7 +1020,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     raw_structural.padding_by_strategy();
 
     // Step 4: Transpose (column-major → row-major) on GPU, then D2H copy to RowMajorMatrix
-    let mut raw_witin = info_span!("transpose_d2h").in_scope(|| {
+    let mut raw_witin = info_span!("transpose_d2h", rows = total_instances, cols = num_witin).in_scope(|| {
         gpu_witness_to_rmm::<E>(
             hal,
             gpu_witness,
@@ -2965,7 +2965,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     }
 
     // Step 8: Transpose GPU witness (column-major -> row-major) + D2H
-    let raw_witin = info_span!("transpose_d2h").in_scope(|| {
+    let raw_witin = info_span!("transpose_d2h", rows = num_padded_rows, cols = num_witin).in_scope(|| {
         let mut rmm_buffer = hal
             .alloc_elems_on_device(num_padded_rows * num_witin, false, None)
             .map_err(|e| {
