@@ -8,6 +8,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_shard, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
@@ -18,13 +19,6 @@ use crate::{
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
-
-#[cfg(feature = "gpu")]
-use crate::tables::RMMCollections;
-#[cfg(feature = "gpu")]
-use ceno_emul::StepIndex;
-#[cfg(feature = "gpu")]
-use gkr_iop::utils::lk_multiplicity::Multiplicity;
 
 /// This trait defines a logic instruction, connecting an instruction type to a lookup table.
 pub trait LogicOp {
@@ -102,53 +96,14 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         Ok(())
     }
 
-    fn collect_shard_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config
-            .r_insn
-            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
-        Ok(())
-    }
+    impl_collect_shard!(r_insn);
 
-    #[cfg(feature = "gpu")]
-    fn assign_instances(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_steps: &[StepRecord],
-        step_indices: &[StepIndex],
-    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
-        use crate::instructions::riscv::gpu::witgen_gpu;
-        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-            witgen_gpu::GpuWitgenKind::LogicR(match I::INST_KIND {
-                InsnKind::AND => 0,
-                InsnKind::OR => 1,
-                InsnKind::XOR => 2,
-                kind => unreachable!("unsupported logic GPU kind: {kind:?}"),
-            }),
-        )? {
-            return Ok(result);
-        }
-        crate::instructions::cpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-        )
-    }
+    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::LogicR(match I::INST_KIND {
+        InsnKind::AND => 0,
+        InsnKind::OR => 1,
+        InsnKind::XOR => 2,
+        kind => unreachable!("unsupported logic GPU kind: {kind:?}"),
+    }));
 }
 
 /// This config implements R-Instructions that represent registers values as 4 * u8.

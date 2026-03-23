@@ -4,6 +4,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
+    impl_collect_shard, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig},
@@ -15,13 +16,6 @@ use crate::{
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
 use std::marker::PhantomData;
-
-#[cfg(feature = "gpu")]
-use crate::tables::RMMCollections;
-#[cfg(feature = "gpu")]
-use ceno_emul::StepIndex;
-#[cfg(feature = "gpu")]
-use gkr_iop::utils::lk_multiplicity::Multiplicity;
 
 pub struct SetLessThanInstruction<E, I>(PhantomData<(E, I)>);
 
@@ -151,51 +145,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
         Ok(())
     }
 
-    fn collect_shard_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config
-            .r_insn
-            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
-        Ok(())
-    }
+    impl_collect_shard!(r_insn);
 
-    #[cfg(feature = "gpu")]
-    fn assign_instances(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_steps: &[StepRecord],
-        step_indices: &[StepIndex],
-    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), crate::error::ZKVMError> {
-        use crate::instructions::riscv::gpu::witgen_gpu;
-        let is_signed = match I::INST_KIND {
-            InsnKind::SLT => 1u32,
-            InsnKind::SLTU => 0u32,
-            _ => unreachable!(),
-        };
-        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-            witgen_gpu::GpuWitgenKind::Slt(is_signed),
-        )? {
-            return Ok(result);
-        }
-        crate::instructions::cpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-        )
-    }
+    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Slt(match I::INST_KIND {
+        InsnKind::SLT => 1u32,
+        InsnKind::SLTU => 0u32,
+        _ => unreachable!(),
+    }));
 }

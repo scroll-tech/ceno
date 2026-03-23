@@ -229,3 +229,104 @@ pub fn full_step_indices(steps: &[StepRecord]) -> Vec<StepIndex> {
     (0..steps.len()).collect()
 }
 
+// ---------------------------------------------------------------------------
+// Macros to reduce per-chip boilerplate
+// ---------------------------------------------------------------------------
+
+/// Implement `collect_shard_side_effects_instance` by delegating to
+/// `config.$field.collect_shard_effects(shard_ctx, lk_multiplicity, step)`.
+///
+/// Every chip's implementation is identical except for the config field name
+/// (`r_insn`, `i_insn`, `b_insn`, `s_insn`, `j_insn`, `im_insn`).
+///
+/// Usage inside `impl Instruction<E> for MyChip`:
+/// ```ignore
+/// impl_collect_shard!(r_insn);
+/// ```
+#[macro_export]
+macro_rules! impl_collect_shard {
+    ($field:ident) => {
+        fn collect_shard_side_effects_instance(
+            config: &Self::InstructionConfig,
+            shard_ctx: &mut $crate::e2e::ShardContext,
+            lk_multiplicity: &mut $crate::witness::LkMultiplicity,
+            step: &ceno_emul::StepRecord,
+        ) -> Result<(), $crate::error::ZKVMError> {
+            config
+                .$field
+                .collect_shard_effects(shard_ctx, lk_multiplicity, step);
+            Ok(())
+        }
+    };
+}
+
+/// Implement the `#[cfg(feature = "gpu")] fn assign_instances` override that:
+/// 1. Computes `Option<GpuWitgenKind>` from `$kind_expr`
+/// 2. Tries `try_gpu_assign_instances` → returns on success
+/// 3. Falls back to `cpu_assign_instances`
+///
+/// Usage inside `impl Instruction<E> for MyChip`:
+/// ```ignore
+/// // Single kind (always GPU):
+/// impl_gpu_assign!(GpuWitgenKind::Lui);
+///
+/// // Match expression → Option<GpuWitgenKind>:
+/// impl_gpu_assign!(match I::INST_KIND {
+///     InsnKind::ADD => Some(GpuWitgenKind::Add),
+///     InsnKind::SUB => Some(GpuWitgenKind::Sub),
+///     _ => None,
+/// });
+/// ```
+#[macro_export]
+macro_rules! impl_gpu_assign {
+    // Match/block → Option<GpuWitgenKind>
+    (match $($rest:tt)*) => {
+        $crate::impl_gpu_assign!(@ match $($rest)*);
+    };
+    // Single kind — always use GPU
+    ($kind:expr) => {
+        $crate::impl_gpu_assign!(@ Some($kind));
+    };
+    (@ $kind_expr:expr) => {
+        #[cfg(feature = "gpu")]
+        fn assign_instances(
+            config: &Self::InstructionConfig,
+            shard_ctx: &mut $crate::e2e::ShardContext,
+            num_witin: usize,
+            num_structural_witin: usize,
+            shard_steps: &[ceno_emul::StepRecord],
+            step_indices: &[ceno_emul::StepIndex],
+        ) -> Result<
+            (
+                $crate::tables::RMMCollections<E::BaseField>,
+                gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
+            ),
+            $crate::error::ZKVMError,
+        > {
+            use $crate::instructions::riscv::gpu::witgen_gpu;
+            let gpu_kind: Option<witgen_gpu::GpuWitgenKind> = $kind_expr;
+            if let Some(kind) = gpu_kind {
+                if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+                    config,
+                    shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    shard_steps,
+                    step_indices,
+                    kind,
+                )? {
+                    return Ok(result);
+                }
+            }
+            $crate::instructions::cpu_assign_instances::<E, Self>(
+                config,
+                shard_ctx,
+                num_witin,
+                num_structural_witin,
+                shard_steps,
+                step_indices,
+            )
+        }
+    };
+}
+

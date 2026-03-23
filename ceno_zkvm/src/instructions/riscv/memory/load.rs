@@ -4,6 +4,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::SignedExtendConfig,
+    impl_collect_shard, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -253,54 +254,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         Ok(())
     }
 
-    fn collect_shard_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config
-            .im_insn
-            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
-        Ok(())
-    }
+    impl_collect_shard!(im_insn);
 
-    #[cfg(feature = "gpu")]
-    fn assign_instances(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut crate::e2e::ShardContext,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_steps: &[StepRecord],
-        step_indices: &[ceno_emul::StepIndex],
-    ) -> Result<
-        (
-            crate::tables::RMMCollections<E::BaseField>,
-            gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
-        ),
-        crate::error::ZKVMError,
-    > {
-        use crate::instructions::riscv::gpu::witgen_gpu;
-        if I::INST_KIND == InsnKind::LW {
-            if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
-                config,
-                shard_ctx,
-                num_witin,
-                num_structural_witin,
-                shard_steps,
-                step_indices,
-                witgen_gpu::GpuWitgenKind::Lw,
-            )? {
-                return Ok(result);
-            }
-        }
-        crate::instructions::cpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-        )
-    }
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::LW => Some(witgen_gpu::GpuWitgenKind::Lw),
+        _ => None,
+    });
 }

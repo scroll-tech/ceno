@@ -1,8 +1,7 @@
 use crate::e2e::ShardContext;
-#[cfg(feature = "gpu")]
-use crate::tables::RMMCollections;
 /// constrain implementation follow from https://github.com/openvm-org/openvm/blob/main/extensions/rv32im/circuit/src/shift/core.rs
 use crate::{
+    impl_collect_shard, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -20,11 +19,7 @@ use crate::{
     utils::{split_to_limb, split_to_u8},
 };
 use ceno_emul::InsnKind;
-#[cfg(feature = "gpu")]
-use ceno_emul::StepIndex;
 use ff_ext::{ExtensionField, FieldInto};
-#[cfg(feature = "gpu")]
-use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
 use p3::field::{Field, FieldAlgebra};
@@ -440,54 +435,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         Ok(())
     }
 
-    fn collect_shard_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut crate::witness::LkMultiplicity,
-        step: &ceno_emul::StepRecord,
-    ) -> Result<(), crate::error::ZKVMError> {
-        config
-            .r_insn
-            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
-        Ok(())
-    }
+    impl_collect_shard!(r_insn);
 
-    #[cfg(feature = "gpu")]
-    fn assign_instances(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_steps: &[ceno_emul::StepRecord],
-        step_indices: &[StepIndex],
-    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), crate::error::ZKVMError> {
-        use crate::instructions::riscv::gpu::witgen_gpu;
-        let shift_kind = match I::INST_KIND {
-            InsnKind::SLL => 0u32,
-            InsnKind::SRL => 1u32,
-            InsnKind::SRA => 2u32,
-            _ => unreachable!(),
-        };
-        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-            witgen_gpu::GpuWitgenKind::ShiftR(shift_kind),
-        )? {
-            return Ok(result);
-        }
-        crate::instructions::cpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-        )
-    }
+    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::ShiftR(match I::INST_KIND {
+        InsnKind::SLL => 0u32,
+        InsnKind::SRL => 1u32,
+        InsnKind::SRA => 2u32,
+        _ => unreachable!(),
+    }));
 }
 
 pub struct ShiftImmConfig<E: ExtensionField> {
@@ -619,54 +574,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         Ok(())
     }
 
-    fn collect_shard_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut crate::witness::LkMultiplicity,
-        step: &ceno_emul::StepRecord,
-    ) -> Result<(), crate::error::ZKVMError> {
-        config
-            .i_insn
-            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
-        Ok(())
-    }
+    impl_collect_shard!(i_insn);
 
-    #[cfg(feature = "gpu")]
-    fn assign_instances(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_steps: &[ceno_emul::StepRecord],
-        step_indices: &[StepIndex],
-    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), crate::error::ZKVMError> {
-        use crate::instructions::riscv::gpu::witgen_gpu;
-        let shift_kind = match I::INST_KIND {
-            InsnKind::SLLI => 0u32,
-            InsnKind::SRLI => 1u32,
-            InsnKind::SRAI => 2u32,
-            _ => unreachable!(),
-        };
-        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-            witgen_gpu::GpuWitgenKind::ShiftI(shift_kind),
-        )? {
-            return Ok(result);
-        }
-        crate::instructions::cpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-        )
-    }
+    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::ShiftI(match I::INST_KIND {
+        InsnKind::SLLI => 0u32,
+        InsnKind::SRLI => 1u32,
+        InsnKind::SRAI => 2u32,
+        _ => unreachable!(),
+    }));
 }
 
 fn run_shift<const NUM_LIMBS: usize, const LIMB_BITS: usize>(

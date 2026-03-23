@@ -14,6 +14,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_shard, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::constants::LIMB_BITS,
@@ -382,58 +383,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         })
     }
 
-    #[cfg(feature = "gpu")]
-    fn assign_instances(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_steps: &[StepRecord],
-        step_indices: &[ceno_emul::StepIndex],
-    ) -> Result<
-        (
-            crate::tables::RMMCollections<E::BaseField>,
-            gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
-        ),
-        ZKVMError,
-    > {
-        use crate::instructions::riscv::gpu::witgen_gpu;
-        let div_kind = match I::INST_KIND {
-            InsnKind::DIV => 0u32,
-            InsnKind::DIVU => 1u32,
-            InsnKind::REM => 2u32,
-            InsnKind::REMU => 3u32,
-            _ => {
-                return crate::instructions::cpu_assign_instances::<E, Self>(
-                    config,
-                    shard_ctx,
-                    num_witin,
-                    num_structural_witin,
-                    shard_steps,
-                    step_indices,
-                );
-            }
-        };
-        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-            witgen_gpu::GpuWitgenKind::Div(div_kind),
-        )? {
-            return Ok(result);
-        }
-        crate::instructions::cpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-        )
-    }
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::DIV => Some(witgen_gpu::GpuWitgenKind::Div(0u32)),
+        InsnKind::DIVU => Some(witgen_gpu::GpuWitgenKind::Div(1u32)),
+        InsnKind::REM => Some(witgen_gpu::GpuWitgenKind::Div(2u32)),
+        InsnKind::REMU => Some(witgen_gpu::GpuWitgenKind::Div(3u32)),
+        _ => None,
+    });
 
     fn assign_instance(
         config: &Self::InstructionConfig,
@@ -675,17 +631,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         Ok(())
     }
 
-    fn collect_shard_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config
-            .r_insn
-            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
-        Ok(())
-    }
+    impl_collect_shard!(r_insn);
 }
 
 #[derive(Debug, Eq, PartialEq)]

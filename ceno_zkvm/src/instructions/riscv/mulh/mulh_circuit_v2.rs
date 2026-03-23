@@ -1,6 +1,7 @@
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
+    impl_collect_shard, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -23,13 +24,6 @@ use witness::set_val;
 use crate::e2e::ShardContext;
 use itertools::Itertools;
 use std::{array, marker::PhantomData};
-
-#[cfg(feature = "gpu")]
-use crate::tables::RMMCollections;
-#[cfg(feature = "gpu")]
-use ceno_emul::StepIndex;
-#[cfg(feature = "gpu")]
-use gkr_iop::utils::lk_multiplicity::Multiplicity;
 
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
@@ -433,64 +427,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         Ok(())
     }
 
-    fn collect_shard_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config
-            .r_insn
-            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
-        Ok(())
-    }
+    impl_collect_shard!(r_insn);
 
-    #[cfg(feature = "gpu")]
-    fn assign_instances(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_steps: &[StepRecord],
-        step_indices: &[StepIndex],
-    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
-        use crate::instructions::riscv::gpu::witgen_gpu;
-        let mul_kind = match I::INST_KIND {
-            InsnKind::MUL => 0u32,
-            InsnKind::MULH => 1u32,
-            InsnKind::MULHU => 2u32,
-            InsnKind::MULHSU => 3u32,
-            _ => {
-                return crate::instructions::cpu_assign_instances::<E, Self>(
-                    config,
-                    shard_ctx,
-                    num_witin,
-                    num_structural_witin,
-                    shard_steps,
-                    step_indices,
-                );
-            }
-        };
-        if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-            witgen_gpu::GpuWitgenKind::Mul(mul_kind),
-        )? {
-            return Ok(result);
-        }
-        crate::instructions::cpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-        )
-    }
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::MUL => Some(witgen_gpu::GpuWitgenKind::Mul(0u32)),
+        InsnKind::MULH => Some(witgen_gpu::GpuWitgenKind::Mul(1u32)),
+        InsnKind::MULHU => Some(witgen_gpu::GpuWitgenKind::Mul(2u32)),
+        InsnKind::MULHSU => Some(witgen_gpu::GpuWitgenKind::Mul(3u32)),
+        _ => None,
+    });
 }
 
 fn run_mulh<const NUM_LIMBS: usize, const LIMB_BITS: usize>(

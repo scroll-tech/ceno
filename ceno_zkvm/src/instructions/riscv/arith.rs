@@ -2,6 +2,7 @@ use std::marker::PhantomData;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
+    impl_collect_shard, impl_gpu_assign,
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
@@ -15,13 +16,6 @@ use crate::{
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
-
-#[cfg(feature = "gpu")]
-use crate::tables::RMMCollections;
-#[cfg(feature = "gpu")]
-use ceno_emul::StepIndex;
-#[cfg(feature = "gpu")]
-use gkr_iop::utils::lk_multiplicity::Multiplicity;
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]
@@ -177,56 +171,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         Ok(())
     }
 
-    fn collect_shard_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        config
-            .r_insn
-            .collect_shard_effects(shard_ctx, lk_multiplicity, step);
-        Ok(())
-    }
+    impl_collect_shard!(r_insn);
 
-    #[cfg(feature = "gpu")]
-    fn assign_instances(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_steps: &[StepRecord],
-        step_indices: &[StepIndex],
-    ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
-        use crate::instructions::riscv::gpu::witgen_gpu;
-        let gpu_kind = match I::INST_KIND {
-            InsnKind::ADD => Some(witgen_gpu::GpuWitgenKind::Add),
-            InsnKind::SUB => Some(witgen_gpu::GpuWitgenKind::Sub),
-            _ => None,
-        };
-        if let Some(kind) = gpu_kind {
-            if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
-                config,
-                shard_ctx,
-                num_witin,
-                num_structural_witin,
-                shard_steps,
-                step_indices,
-                kind,
-            )? {
-                return Ok(result);
-            }
-        }
-        // Fallback to CPU path
-        crate::instructions::cpu_assign_instances::<E, Self>(
-            config,
-            shard_ctx,
-            num_witin,
-            num_structural_witin,
-            shard_steps,
-            step_indices,
-        )
-    }
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::ADD => Some(witgen_gpu::GpuWitgenKind::Add),
+        InsnKind::SUB => Some(witgen_gpu::GpuWitgenKind::Sub),
+        _ => None,
+    });
 }
 
 #[cfg(test)]
