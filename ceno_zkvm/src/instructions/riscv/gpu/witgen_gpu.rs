@@ -477,6 +477,34 @@ pub fn gpu_batch_continuation_ec_on_device(
     Ok((device_buf, n_writes, n_reads))
 }
 
+/// Read the current shared addr count from device (single u32 D2H).
+/// Used by debug comparison to snapshot count before/after a kernel.
+#[cfg(feature = "gpu")]
+fn read_shared_addr_count() -> usize {
+    SHARD_META_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        let c = cache.as_ref().expect("shard metadata not cached");
+        let buf = c.shared_addr_count.as_ref().expect("shared_addr_count not allocated");
+        let v: Vec<u32> = buf.to_vec().expect("shared_addr_count D2H failed");
+        v[0] as usize
+    })
+}
+
+/// Read a range of addr entries [start..end) from the shared addr buffer.
+#[cfg(feature = "gpu")]
+fn read_shared_addr_range(start: usize, end: usize) -> Vec<u32> {
+    if start >= end {
+        return Vec::new();
+    }
+    SHARD_META_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        let c = cache.as_ref().expect("shard metadata not cached");
+        let buf = c.shared_addr_buf.as_ref().expect("shared_addr_buf not allocated");
+        let all: Vec<u32> = buf.to_vec_n(end).expect("shared_addr_buf D2H failed");
+        all[start..end].to_vec()
+    })
+}
+
 /// Batch D2H of shared EC records and addr_accessed buffers after all kernel invocations.
 ///
 /// Called once per shard after all opcode `gpu_assign_instances_inner` calls complete.
@@ -2746,6 +2774,10 @@ pub fn gpu_assign_keccak_instances<E: ExtensionField>(
     if is_gpu_witgen_disabled() || is_force_cpu_path() {
         return Ok(None);
     }
+    // CENO_GPU_DISABLE_KECCAK=1 → fall back to CPU keccak witgen
+    if std::env::var_os("CENO_GPU_DISABLE_KECCAK").is_some() {
+        return Ok(None);
+    }
 
     // GPU only supports BabyBear field
     if std::any::TypeId::of::<E::BaseField>()
@@ -2839,6 +2871,13 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     info_span!("ensure_shard_meta")
         .in_scope(|| ensure_shard_metadata_cached(hal, shard_ctx, steps.len()))?;
 
+    // Snapshot shared addr count before kernel (for debug comparison)
+    let addr_count_before = if std::env::var_os("CENO_GPU_DEBUG_COMPARE_SHARD").is_some() {
+        read_shared_addr_count()
+    } else {
+        0
+    };
+
     // Step 5: Launch GPU kernel
     let gpu_result = info_span!("gpu_kernel").in_scope(|| {
         with_cached_shard_meta(|shard_bufs| {
@@ -2859,6 +2898,18 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
             })
         })
     })?;
+
+    // D2H keccak's addr entries from shared buffer (delta since before kernel)
+    let gpu_keccak_addrs = if std::env::var_os("CENO_GPU_DEBUG_COMPARE_SHARD").is_some() {
+        let addr_count_after = read_shared_addr_count();
+        if addr_count_after > addr_count_before {
+            read_shared_addr_range(addr_count_before, addr_count_after)
+        } else {
+            Vec::new()
+        }
+    } else {
+        Vec::new()
+    };
 
     // Step 6: Collect LK multiplicity
     let lk_multiplicity = info_span!("gpu_lk_d2h")
@@ -3028,6 +3079,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
         step_indices,
         &lk_multiplicity,
         &raw_witin,
+        &gpu_keccak_addrs,
     )?;
 
     Ok(([raw_witin, raw_structural], lk_multiplicity))
@@ -3048,6 +3100,7 @@ fn debug_compare_keccak<E: ExtensionField>(
     step_indices: &[StepIndex],
     gpu_lk: &Multiplicity<u64>,
     gpu_witin: &RowMajorMatrix<E::BaseField>,
+    gpu_addrs: &[u32],
 ) -> Result<(), ZKVMError> {
     let want_lk = std::env::var_os("CENO_GPU_DEBUG_COMPARE_LK").is_some();
     let want_witness = std::env::var_os("CENO_GPU_DEBUG_COMPARE_WITNESS").is_some();
@@ -3131,15 +3184,48 @@ fn debug_compare_keccak<E: ExtensionField>(
     }
 
     if want_shard {
-        // Note: keccak uses shared EC/addr buffers that are accumulated on-device
-        // and only flushed to shard_ctx in flush_shared_ec_buffers() after ALL
-        // opcode circuits complete. At this point shard_ctx.get_addr_accessed()
-        // is expected to be empty — the data is still on GPU.
+        // Compare addr_accessed: GPU entries were D2H'd from the shared buffer
+        // delta (before/after kernel launch) and passed in as gpu_addrs.
         let cpu_addr = cpu_ctx.get_addr_accessed();
-        tracing::info!(
-            "[GPU keccak shard] CPU addr_accessed count={} (GPU uses shared buffer, flushed later)",
-            cpu_addr.len()
-        );
+        let gpu_addr_set: rustc_hash::FxHashSet<WordAddr> =
+            gpu_addrs.iter().map(|&a| WordAddr(a)).collect();
+
+        if cpu_addr.len() != gpu_addr_set.len() {
+            tracing::error!(
+                "[GPU keccak shard] addr_accessed count mismatch: cpu={} gpu={}",
+                cpu_addr.len(), gpu_addr_set.len()
+            );
+        }
+        let mut missing_from_gpu = 0usize;
+        let mut extra_in_gpu = 0usize;
+        let limit = 16usize;
+        for addr in &cpu_addr {
+            if !gpu_addr_set.contains(addr) {
+                if missing_from_gpu < limit {
+                    tracing::error!("[GPU keccak shard] addr {} in CPU but not GPU", addr.0);
+                }
+                missing_from_gpu += 1;
+            }
+        }
+        for &addr in gpu_addrs {
+            if !cpu_addr.contains(&WordAddr(addr)) {
+                if extra_in_gpu < limit {
+                    tracing::error!("[GPU keccak shard] addr {} in GPU but not CPU", addr);
+                }
+                extra_in_gpu += 1;
+            }
+        }
+        if missing_from_gpu == 0 && extra_in_gpu == 0 {
+            tracing::info!(
+                "[GPU keccak shard] addr_accessed matches: {} entries",
+                cpu_addr.len()
+            );
+        } else {
+            tracing::error!(
+                "[GPU keccak shard] addr_accessed diff: missing_from_gpu={} extra_in_gpu={}",
+                missing_from_gpu, extra_in_gpu
+            );
+        }
     }
 
     Ok(())
