@@ -1,6 +1,6 @@
 mod bitwise_keccakf;
 mod fptower;
-mod lookup_keccakf;
+pub(crate) mod lookup_keccakf;
 mod sha256;
 mod uint256;
 mod utils;

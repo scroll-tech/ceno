@@ -2,7 +2,7 @@ mod fptower_fp;
 mod fptower_fp2_add;
 mod fptower_fp2_mul;
 mod halt;
-mod keccak;
+pub(crate) mod keccak;
 mod sha_extend;
 mod uint256;
 mod weierstrass_add;

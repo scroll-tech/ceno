@@ -44,10 +44,10 @@ use crate::{
 #[derive(Debug)]
 pub struct EcallKeccakConfig<E: ExtensionField> {
     pub layout: KeccakLayout<E>,
-    vm_state: StateInOut<E>,
-    ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    mem_rw: Vec<WriteMEM>,
+    pub(crate) vm_state: StateInOut<E>,
+    pub(crate) ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
+    pub(crate) state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    pub(crate) mem_rw: Vec<WriteMEM>,
 }
 
 /// KeccakInstruction can handle any instruction and produce its side-effects.
@@ -178,6 +178,21 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         steps: &[StepRecord],
         step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        #[cfg(feature = "gpu")]
+        {
+            use crate::instructions::riscv::gpu::witgen_gpu::gpu_assign_keccak_instances;
+            if let Some(result) = gpu_assign_keccak_instances::<E>(
+                config,
+                shard_ctx,
+                num_witin,
+                num_structural_witin,
+                steps,
+                step_indices,
+            )? {
+                return Ok(result);
+            }
+        }
+
         let mut lk_multiplicity = LkMultiplicity::default();
         if step_indices.is_empty() {
             return Ok((

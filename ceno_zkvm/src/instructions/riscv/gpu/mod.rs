@@ -43,6 +43,8 @@ pub mod sub;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
 pub mod sw;
 #[cfg(feature = "gpu")]
+pub mod keccak;
+#[cfg(feature = "gpu")]
 pub mod shard_ram;
 #[cfg(feature = "gpu")]
 pub mod witgen_gpu;
