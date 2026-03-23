@@ -8,11 +8,11 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
-        side_effects::{CpuSideEffectSink, emit_logic_u8_ops},
+        side_effects::emit_logic_u8_ops,
     },
     structs::ProgramParams,
     utils::split_to_u8,
@@ -77,24 +77,14 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         config.assign_instance(instance, shard_ctx, lk_multiplicity, step)
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config.collect_side_effects(&mut sink, shard_ctx_view, step);
+    impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
         emit_logic_u8_ops::<I::OpsTable>(
-            &mut sink,
+            sink,
             step.rs1().unwrap().value as u64,
             step.rs2().unwrap().value as u64,
             4,
         );
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(r_insn);
 

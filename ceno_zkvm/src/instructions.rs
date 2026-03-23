@@ -233,6 +233,50 @@ pub fn full_step_indices(steps: &[StepRecord]) -> Vec<StepIndex> {
 // Macros to reduce per-chip boilerplate
 // ---------------------------------------------------------------------------
 
+/// Implement `collect_side_effects_instance` with a common prologue
+/// (create `CpuSideEffectSink`, dispatch to `config.$field.collect_side_effects`)
+/// and a chip-specific body for additional LK ops.
+///
+/// The closure receives `(sink, step, config, ctx)`:
+/// - `sink: &mut CpuSideEffectSink` — emit LK ops and send events
+/// - `step: &StepRecord` — current step
+/// - `config: &Self::InstructionConfig` — circuit config (for sub-configs)
+/// - `ctx: &ShardContext` — read-only shard context
+///
+/// Usage inside `impl Instruction<E> for MyChip`:
+/// ```ignore
+/// impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
+///     emit_u16_limbs(sink, step.rd().unwrap().value.after);
+/// });
+/// ```
+#[macro_export]
+macro_rules! impl_collect_side_effects {
+    ($field:ident, |$sink:ident, $step:ident, $config:ident, $ctx:ident| $body:block) => {
+        fn collect_side_effects_instance(
+            config: &Self::InstructionConfig,
+            shard_ctx: &mut $crate::e2e::ShardContext,
+            lk_multiplicity: &mut $crate::witness::LkMultiplicity,
+            step: &ceno_emul::StepRecord,
+        ) -> Result<(), $crate::error::ZKVMError> {
+            let shard_ctx_ptr = shard_ctx as *mut $crate::e2e::ShardContext;
+            let _ctx = unsafe { &*shard_ctx_ptr };
+            let mut _sink_val = unsafe {
+                $crate::instructions::side_effects::CpuSideEffectSink::from_raw(
+                    shard_ctx_ptr,
+                    lk_multiplicity,
+                )
+            };
+            config.$field.collect_side_effects(&mut _sink_val, _ctx, step);
+            let $sink = &mut _sink_val;
+            let $step = step;
+            let $config = config;
+            let $ctx = _ctx;
+            $body
+            Ok(())
+        }
+    };
+}
+
 /// Implement `collect_shard_side_effects_instance` by delegating to
 /// `config.$field.collect_shard_effects(shard_ctx, lk_multiplicity, step)`.
 ///

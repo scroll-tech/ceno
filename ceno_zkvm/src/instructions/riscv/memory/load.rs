@@ -4,13 +4,12 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::SignedExtendConfig,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
             RIVInstruction, constants::UInt, im_insn::IMInstructionConfig, insn_base::MemAddr,
         },
-        side_effects::CpuSideEffectSink,
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -231,28 +230,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink =
-            unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .im_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(im_insn, |sink, step, config, _ctx| {
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let unaligned_addr =
             ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
         config
             .memory_addr
-            .collect_side_effects(&mut sink, unaligned_addr.into());
-        Ok(())
-    }
+            .collect_side_effects(sink, unaligned_addr.into());
+    });
 
     impl_collect_shard!(im_insn);
 

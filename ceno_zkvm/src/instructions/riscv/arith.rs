@@ -2,13 +2,13 @@ use std::marker::PhantomData;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
-        side_effects::{CpuSideEffectSink, emit_u16_limbs},
+        side_effects::emit_u16_limbs,
     },
     structs::ProgramParams,
     uint::Value,
@@ -144,32 +144,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .r_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
         match I::INST_KIND {
             InsnKind::ADD => {
-                emit_u16_limbs(&mut sink, step.rd().unwrap().value.after);
+                emit_u16_limbs(sink, step.rd().unwrap().value.after);
             }
             InsnKind::SUB => {
-                emit_u16_limbs(&mut sink, step.rd().unwrap().value.after);
-                emit_u16_limbs(&mut sink, step.rs1().unwrap().value);
+                emit_u16_limbs(sink, step.rd().unwrap().value.after);
+                emit_u16_limbs(sink, step.rs1().unwrap().value);
             }
             _ => unreachable!("Unsupported instruction kind"),
         }
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(r_insn);
 

@@ -6,14 +6,14 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
             constants::{UINT_BYTE_LIMBS, UInt8},
             i_insn::IInstructionConfig,
         },
-        side_effects::{CpuSideEffectSink, emit_const_range_op},
+        side_effects::emit_const_range_op,
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -118,26 +118,12 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &ceno_emul::StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .i_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(i_insn, |sink, step, _config, _ctx| {
         let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
         for val in rd_written.iter().skip(1) {
-            emit_const_range_op(&mut sink, *val as u64, 8);
+            emit_const_range_op(sink, *val as u64, 8);
         }
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(i_insn);
 

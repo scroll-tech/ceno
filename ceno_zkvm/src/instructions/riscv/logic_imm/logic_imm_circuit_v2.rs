@@ -9,7 +9,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -17,7 +17,7 @@ use crate::{
             i_insn::IInstructionConfig,
             logic_imm::LogicOp,
         },
-        side_effects::{CpuSideEffectSink, emit_logic_u8_ops},
+        side_effects::emit_logic_u8_ops,
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -129,19 +129,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         config.assign_instance(instance, shard_ctx, lkm, step)
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .i_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(i_insn, |sink, step, _config, _ctx| {
         let rs1_lo = step.rs1().unwrap().value & LIMB_MASK;
         let rs1_hi = (step.rs1().unwrap().value >> LIMB_BITS) & LIMB_MASK;
         let imm_lo = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32 & LIMB_MASK;
@@ -149,10 +137,9 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
             >> LIMB_BITS)
             & LIMB_MASK;
 
-        emit_logic_u8_ops::<I::OpsTable>(&mut sink, rs1_lo.into(), imm_lo.into(), 2);
-        emit_logic_u8_ops::<I::OpsTable>(&mut sink, rs1_hi.into(), imm_hi.into(), 2);
-        Ok(())
-    }
+        emit_logic_u8_ops::<I::OpsTable>(sink, rs1_lo.into(), imm_lo.into(), 2);
+        emit_logic_u8_ops::<I::OpsTable>(sink, rs1_hi.into(), imm_hi.into(), 2);
+    });
 
     impl_collect_shard!(i_insn);
 

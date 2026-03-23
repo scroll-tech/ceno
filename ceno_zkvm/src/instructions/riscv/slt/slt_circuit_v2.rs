@@ -4,11 +4,11 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig},
-        side_effects::{CpuSideEffectSink, emit_uint_limbs_lt_ops},
+        side_effects::emit_uint_limbs_lt_ops,
     },
     structs::ProgramParams,
     witness::LkMultiplicity,
@@ -118,32 +118,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lkm: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lkm) };
-        config
-            .r_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
         let rs1_value = Value::new_unchecked(step.rs1().unwrap().value);
         let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
         let rs1_limbs = rs1_value.as_u16_limbs();
         let rs2_limbs = rs2_value.as_u16_limbs();
         emit_uint_limbs_lt_ops(
-            &mut sink,
+            sink,
             matches!(I::INST_KIND, InsnKind::SLT),
             &rs1_limbs,
             &rs2_limbs,
         );
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(r_insn);
 

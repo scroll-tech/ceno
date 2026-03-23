@@ -4,7 +4,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -12,7 +12,7 @@ use crate::{
             constants::{UINT_LIMBS, UInt},
             i_insn::IInstructionConfig,
         },
-        side_effects::{CpuSideEffectSink, emit_uint_limbs_lt_ops},
+        side_effects::emit_uint_limbs_lt_ops,
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},
@@ -138,31 +138,17 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lkm: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lkm) };
-        config
-            .i_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(i_insn, |sink, step, _config, _ctx| {
         let rs1_value = Value::new_unchecked(step.rs1().unwrap().value);
         let rs1_limbs = rs1_value.as_u16_limbs();
         let imm_sign_extend = imm_sign_extend(true, step.insn().imm as i16);
         emit_uint_limbs_lt_ops(
-            &mut sink,
+            sink,
             matches!(I::INST_KIND, InsnKind::SLTI),
             &rs1_limbs,
             &imm_sign_extend,
         );
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(i_insn);
 

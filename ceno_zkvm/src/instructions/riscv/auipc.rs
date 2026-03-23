@@ -6,7 +6,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -14,7 +14,7 @@ use crate::{
             i_insn::IInstructionConfig,
         },
         side_effects::{
-            CpuSideEffectSink, LkOp, SideEffectSink, emit_byte_decomposition_ops,
+            LkOp, SideEffectSink, emit_byte_decomposition_ops,
             emit_const_range_op,
         },
     },
@@ -193,27 +193,15 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &ceno_emul::StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .i_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(i_insn, |sink, step, config, _ctx| {
         let rd_written = split_to_u8(step.rd().unwrap().value.after);
-        emit_byte_decomposition_ops(&mut sink, &rd_written);
+        emit_byte_decomposition_ops(sink, &rd_written);
 
         let pc = split_to_u8(step.pc().before.0);
         // Only iterate over the middle limbs that have witness columns (pc_limbs has UINT_BYTE_LIMBS-2 elements).
         // The MSB limb is range-checked via XOR below, the LSB is shared with rd_written[0].
         for val in pc.iter().skip(1).take(config.pc_limbs.len()) {
-            emit_const_range_op(&mut sink, *val as u64, 8);
+            emit_const_range_op(sink, *val as u64, 8);
         }
 
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32;
@@ -221,7 +209,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             .into_iter()
             .take(config.imm_limbs.len())
         {
-            emit_const_range_op(&mut sink, val as u64, 8);
+            emit_const_range_op(sink, val as u64, 8);
         }
 
         let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1);
@@ -231,9 +219,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
             a: pc[3],
             b: additional_bits as u8,
         });
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(i_insn);
 

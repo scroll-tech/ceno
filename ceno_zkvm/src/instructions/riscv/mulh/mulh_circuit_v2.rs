@@ -1,7 +1,7 @@
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -9,7 +9,7 @@ use crate::{
             constants::{LIMB_BITS, UINT_LIMBS, UInt},
             r_insn::RInstructionConfig,
         },
-        side_effects::{CpuSideEffectSink, LkOp, SideEffectSink},
+        side_effects::{LkOp, SideEffectSink},
     },
     structs::ProgramParams,
     uint::Value,
@@ -332,23 +332,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
+    impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
         let rs1 = step.rs1().unwrap().value;
         let rs1_val = Value::new_unchecked(rs1);
         let rs2 = step.rs2().unwrap().value;
         let rs2_val = Value::new_unchecked(rs2);
-
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .r_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
 
         let (rd_high, rd_low, carry, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
             I::INST_KIND,
@@ -423,9 +411,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             }
             _ => {}
         }
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(r_insn);
 

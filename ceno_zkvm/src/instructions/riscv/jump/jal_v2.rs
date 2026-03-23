@@ -6,14 +6,14 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
             constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             j_insn::JInstructionConfig,
         },
-        side_effects::{CpuSideEffectSink, LkOp, SideEffectSink, emit_byte_decomposition_ops},
+        side_effects::{LkOp, SideEffectSink, emit_byte_decomposition_ops},
     },
     structs::ProgramParams,
     utils::split_to_u8,
@@ -126,21 +126,9 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &ceno_emul::StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .j_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(j_insn, |sink, step, _config, _ctx| {
         let rd_written = split_to_u8(step.rd().unwrap().value.after);
-        emit_byte_decomposition_ops(&mut sink, &rd_written);
+        emit_byte_decomposition_ops(sink, &rd_written);
 
         let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1);
         let additional_bits =
@@ -149,9 +137,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
             a: rd_written[3],
             b: additional_bits as u8,
         });
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(j_insn);
 

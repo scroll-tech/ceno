@@ -1,7 +1,7 @@
 use crate::e2e::ShardContext;
 /// constrain implementation follow from https://github.com/openvm-org/openvm/blob/main/extensions/rv32im/circuit/src/shift/core.rs
 use crate::{
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -11,7 +11,7 @@ use crate::{
             r_insn::RInstructionConfig,
         },
         side_effects::{
-            CpuSideEffectSink, LkOp, SideEffectSink, emit_byte_decomposition_ops,
+            LkOp, SideEffectSink, emit_byte_decomposition_ops,
             emit_const_range_op,
         },
     },
@@ -410,30 +410,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &ShiftRTypeConfig<E>,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut crate::witness::LkMultiplicity,
-        step: &ceno_emul::StepRecord,
-    ) -> Result<(), crate::error::ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .r_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(r_insn, |sink, step, config, _ctx| {
         let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
-        emit_byte_decomposition_ops(&mut sink, &rd_written);
+        emit_byte_decomposition_ops(sink, &rd_written);
         config.shift_base_config.collect_side_effects(
-            &mut sink,
+            sink,
             I::INST_KIND,
             step.rs1().unwrap().value,
             step.rs2().unwrap().value,
         );
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(r_insn);
 
@@ -549,30 +535,16 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &ShiftImmConfig<E>,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut crate::witness::LkMultiplicity,
-        step: &ceno_emul::StepRecord,
-    ) -> Result<(), crate::error::ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .i_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(i_insn, |sink, step, config, _ctx| {
         let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
-        emit_byte_decomposition_ops(&mut sink, &rd_written);
+        emit_byte_decomposition_ops(sink, &rd_written);
         config.shift_base_config.collect_side_effects(
-            &mut sink,
+            sink,
             I::INST_KIND,
             step.rs1().unwrap().value,
             step.insn().imm as i16 as u16 as u32,
         );
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(i_insn);
 

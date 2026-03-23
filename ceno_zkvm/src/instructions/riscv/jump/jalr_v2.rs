@@ -7,7 +7,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -15,7 +15,7 @@ use crate::{
             i_insn::IInstructionConfig,
             insn_base::{MemAddr, ReadRS1, StateInOut, WriteRD},
         },
-        side_effects::{CpuSideEffectSink, emit_const_range_op},
+        side_effects::emit_const_range_op,
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -193,30 +193,16 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &ceno_emul::StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .i_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(i_insn, |sink, step, config, _ctx| {
         let rd_value = Value::new_unchecked(step.rd().unwrap().value.after);
         let rd_limb = rd_value.as_u16_limbs();
-        emit_const_range_op(&mut sink, rd_limb[0] as u64, 16);
-        emit_const_range_op(&mut sink, rd_limb[1] as u64, PC_BITS - 16);
+        emit_const_range_op(sink, rd_limb[0] as u64, 16);
+        emit_const_range_op(sink, rd_limb[1] as u64, PC_BITS - 16);
 
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let jump_pc = step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32);
-        config.jump_pc_addr.collect_side_effects(&mut sink, jump_pc);
-
-        Ok(())
-    }
+        config.jump_pc_addr.collect_side_effects(sink, jump_pc);
+    });
 
     impl_collect_shard!(i_insn);
 

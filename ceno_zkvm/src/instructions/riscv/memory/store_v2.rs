@@ -3,7 +3,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -13,7 +13,7 @@ use crate::{
             memory::gadget::MemWordUtil,
             s_insn::SInstructionConfig,
         },
-        side_effects::{CpuSideEffectSink, emit_const_range_op, emit_u16_limbs},
+        side_effects::{emit_const_range_op, emit_u16_limbs},
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -176,26 +176,14 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .s_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
-        emit_u16_limbs(&mut sink, step.memory_op().unwrap().value.before);
+    impl_collect_side_effects!(s_insn, |sink, step, config, _ctx| {
+        emit_u16_limbs(sink, step.memory_op().unwrap().value.before);
 
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
         config
             .memory_addr
-            .collect_side_effects(&mut sink, addr.into());
+            .collect_side_effects(sink, addr.into());
 
         if N_ZEROS == 0 {
             let memory_op = step.memory_op().unwrap();
@@ -205,15 +193,13 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
             let rs2_limb = rs2_value.as_u16_limbs()[0];
 
             for byte in prev_limb.to_le_bytes() {
-                emit_const_range_op(&mut sink, byte as u64, 8);
+                emit_const_range_op(sink, byte as u64, 8);
             }
             for byte in rs2_limb.to_le_bytes() {
-                emit_const_range_op(&mut sink, byte as u64, 8);
+                emit_const_range_op(sink, byte as u64, 8);
             }
         }
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(s_insn);
 

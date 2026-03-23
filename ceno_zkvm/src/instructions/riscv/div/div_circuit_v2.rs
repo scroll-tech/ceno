@@ -14,11 +14,11 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::constants::LIMB_BITS,
-        side_effects::{CpuSideEffectSink, LkOp, SideEffectSink, emit_u16_limbs},
+        side_effects::{LkOp, SideEffectSink, emit_u16_limbs},
     },
     structs::ProgramParams,
     uint::Value,
@@ -538,19 +538,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lkm: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lkm) };
-        config
-            .r_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-
+    impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
         let dividend = step.rs1().unwrap().value;
         let divisor = step.rs2().unwrap().value;
         let dividend_value = Value::new_unchecked(dividend);
@@ -562,8 +550,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let (quotient, remainder, dividend_sign, divisor_sign, quotient_sign, case) =
             run_divrem(signed, &u32_to_limbs(&dividend), &u32_to_limbs(&divisor));
 
-        emit_u16_limbs(&mut sink, limbs_to_u32(&quotient));
-        emit_u16_limbs(&mut sink, limbs_to_u32(&remainder));
+        emit_u16_limbs(sink, limbs_to_u32(&quotient));
+        emit_u16_limbs(sink, limbs_to_u32(&remainder));
 
         let carries = run_mul_carries(
             signed,
@@ -627,9 +615,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         } else {
             sink.emit_lk(LkOp::DynamicRange { value: 0, bits: 16 });
         }
-
-        Ok(())
-    }
+    });
 
     impl_collect_shard!(r_insn);
 }

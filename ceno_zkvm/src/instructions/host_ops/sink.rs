@@ -36,6 +36,26 @@ impl<'ctx, 'shard, 'lk> CpuSideEffectSink<'ctx, 'shard, 'lk> {
     }
 }
 
+/// Create a `CpuSideEffectSink` and an immutable view of `ShardContext`,
+/// then pass both to the closure `f`.
+///
+/// This encapsulates the raw-pointer trick needed to hold `&mut ShardContext`
+/// (inside the sink, for writes) and `&ShardContext` (for reads like
+/// `aligned_prev_ts`) simultaneously.
+///
+/// # Safety
+/// Safe to call — the unsafety is internal and bounded by the closure lifetime.
+pub fn with_cpu_sink<'a, R>(
+    shard_ctx: &'a mut ShardContext<'a>,
+    lk: &'a mut LkMultiplicity,
+    f: impl FnOnce(&mut CpuSideEffectSink<'a, 'a, 'a>, &ShardContext) -> R,
+) -> R {
+    let ptr = shard_ctx as *mut ShardContext;
+    let view = unsafe { &*ptr };
+    let mut sink = unsafe { CpuSideEffectSink::from_raw(ptr, lk) };
+    f(&mut sink, view)
+}
+
 impl SideEffectSink for CpuSideEffectSink<'_, '_, '_> {
     fn emit_lk(&mut self, op: LkOp) {
         for (table, key) in op.encode_all() {

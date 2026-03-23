@@ -3,11 +3,11 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_gpu_assign,
+    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
-        side_effects::{CpuSideEffectSink, emit_u16_limbs},
+        side_effects::emit_u16_limbs,
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},
@@ -109,21 +109,9 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         Ok(())
     }
 
-    fn collect_side_effects_instance(
-        config: &Self::InstructionConfig,
-        shard_ctx: &mut ShardContext,
-        lk_multiplicity: &mut LkMultiplicity,
-        step: &StepRecord,
-    ) -> Result<(), ZKVMError> {
-        let shard_ctx_ptr = shard_ctx as *mut ShardContext;
-        let shard_ctx_view = unsafe { &*shard_ctx_ptr };
-        let mut sink = unsafe { CpuSideEffectSink::from_raw(shard_ctx_ptr, lk_multiplicity) };
-        config
-            .i_insn
-            .collect_side_effects(&mut sink, shard_ctx_view, step);
-        emit_u16_limbs(&mut sink, step.rd().unwrap().value.after);
-        Ok(())
-    }
+    impl_collect_side_effects!(i_insn, |sink, step, _config, _ctx| {
+        emit_u16_limbs(sink, step.rd().unwrap().value.after);
+    });
 
     impl_collect_shard!(i_insn);
 
