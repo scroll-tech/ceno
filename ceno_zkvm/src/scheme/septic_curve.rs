@@ -1203,9 +1203,12 @@ mod tests {
 
         let mut mismatches = 0;
         for (i, (input, gpu_rec)) in test_inputs.iter().zip(gpu_results.iter()).enumerate() {
-            // Build CPU ShardRamRecord and compute EC point
+            // Build CPU ShardRamRecord and compute EC point.
+            // GPU kernel treats slot.addr as word address and converts to byte address
+            // via `<< 2` for Memory type; Register type uses reg_id directly.
+            let addr = if input.ram_type == 2 { input.addr << 2 } else { input.addr };
             let cpu_record = ShardRamRecord {
-                addr: input.addr,
+                addr,
                 ram_type: if input.ram_type == 1 { RAMType::Register } else { RAMType::Memory },
                 value: input.value,
                 shard: input.shard,
