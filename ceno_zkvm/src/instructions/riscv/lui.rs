@@ -6,7 +6,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -118,14 +118,14 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
         Ok(())
     }
 
-    impl_collect_side_effects!(i_insn, |sink, step, _config, _ctx| {
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, _config, _ctx| {
         let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
         for val in rd_written.iter().skip(1) {
             emit_const_range_op(sink, *val as u64, 8);
         }
     });
 
-    impl_collect_shard!(i_insn);
+    impl_collect_shardram!(i_insn);
 
     impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Lui);
 }

@@ -3,7 +3,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
@@ -109,11 +109,11 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
         Ok(())
     }
 
-    impl_collect_side_effects!(i_insn, |sink, step, _config, _ctx| {
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, _config, _ctx| {
         emit_u16_limbs(sink, step.rd().unwrap().value.after);
     });
 
-    impl_collect_shard!(i_insn);
+    impl_collect_shardram!(i_insn);
 
     impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Addi);
 }

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
@@ -144,7 +144,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         Ok(())
     }
 
-    impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
         match I::INST_KIND {
             InsnKind::ADD => {
                 emit_u16_limbs(sink, step.rd().unwrap().value.after);
@@ -157,7 +157,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         }
     });
 
-    impl_collect_shard!(r_insn);
+    impl_collect_shardram!(r_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
         InsnKind::ADD => Some(witgen_gpu::GpuWitgenKind::Add),

@@ -4,7 +4,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::SignedExtendConfig,
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -258,7 +258,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         Ok(())
     }
 
-    impl_collect_side_effects!(im_insn, |sink, step, config, _ctx| {
+    impl_collect_lk_and_shardram!(im_insn, |sink, step, config, _ctx| {
         // Side effects (shard send/addr) are identical for all load types (LW/LH/LB/LHU/LBU).
         // Sub-word extraction only affects LK emissions, handled separately by GPU kernel.
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
@@ -266,10 +266,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
         config
             .memory_addr
-            .collect_side_effects(sink, unaligned_addr.into());
+            .emit_lk_and_shardram(sink, unaligned_addr.into());
     });
 
-    impl_collect_shard!(im_insn);
+    impl_collect_shardram!(im_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
         InsnKind::LW => Some(witgen_gpu::GpuWitgenKind::Lw),

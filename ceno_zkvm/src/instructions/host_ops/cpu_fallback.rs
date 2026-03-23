@@ -92,29 +92,29 @@ pub fn cpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
 ///
 /// This path deliberately avoids scratch witness buffers and calls only the
 /// instruction-specific side-effect collector.
-pub fn cpu_collect_side_effects<E: ExtensionField, I: Instruction<E>>(
+pub fn cpu_collect_lk_and_shardram<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,
     shard_ctx: &mut ShardContext,
     shard_steps: &[ceno_emul::StepRecord],
     step_indices: &[StepIndex],
 ) -> Result<Multiplicity<u64>, ZKVMError> {
-    cpu_collect_side_effects_inner::<E, I>(config, shard_ctx, shard_steps, step_indices, false)
+    cpu_collect_lk_shardram_inner::<E, I>(config, shard_ctx, shard_steps, step_indices, false)
 }
 
 /// CPU-side `send()` / `addr_accessed` collection for GPU-assisted lk paths.
 ///
 /// Implementations may still increment fetch multiplicity on CPU, but all other
 /// lookup multiplicities are expected to come from the GPU path.
-pub fn cpu_collect_shard_side_effects<E: ExtensionField, I: Instruction<E>>(
+pub fn cpu_collect_shardram<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,
     shard_ctx: &mut ShardContext,
     shard_steps: &[ceno_emul::StepRecord],
     step_indices: &[StepIndex],
 ) -> Result<Multiplicity<u64>, ZKVMError> {
-    cpu_collect_side_effects_inner::<E, I>(config, shard_ctx, shard_steps, step_indices, true)
+    cpu_collect_lk_shardram_inner::<E, I>(config, shard_ctx, shard_steps, step_indices, true)
 }
 
-fn cpu_collect_side_effects_inner<E: ExtensionField, I: Instruction<E>>(
+fn cpu_collect_lk_shardram_inner<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,
     shard_ctx: &mut ShardContext,
     shard_steps: &[ceno_emul::StepRecord],
@@ -143,14 +143,14 @@ fn cpu_collect_side_effects_inner<E: ExtensionField, I: Instruction<E>>(
                 .copied()
                 .map(|step_idx| {
                     if shard_only {
-                        I::collect_shard_side_effects_instance(
+                        I::collect_shardram(
                             config,
                             &mut shard_ctx,
                             &mut lk_multiplicity,
                             &shard_steps[step_idx],
                         )
                     } else {
-                        I::collect_side_effects_instance(
+                        I::collect_lk_and_shardram(
                             config,
                             &mut shard_ctx,
                             &mut lk_multiplicity,

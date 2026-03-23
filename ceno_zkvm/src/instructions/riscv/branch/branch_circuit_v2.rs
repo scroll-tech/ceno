@@ -4,7 +4,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -209,7 +209,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
         Ok(())
     }
 
-    impl_collect_side_effects!(b_insn, |sink, step, _config, _ctx| {
+    impl_collect_lk_and_shardram!(b_insn, |sink, step, _config, _ctx| {
         if !matches!(I::INST_KIND, InsnKind::BEQ | InsnKind::BNE) {
             let rs1_value = Value::new_unchecked(step.rs1().unwrap().value);
             let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
@@ -224,7 +224,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
         }
     });
 
-    impl_collect_shard!(b_insn);
+    impl_collect_shardram!(b_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
         InsnKind::BEQ => Some(witgen_gpu::GpuWitgenKind::BranchEq(1)),

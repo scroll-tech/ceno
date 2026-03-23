@@ -143,7 +143,7 @@ impl<E: ExtensionField> ReadRS1<E> {
         Ok(())
     }
 
-    pub fn collect_side_effects(
+    pub fn emit_lk_and_shardram(
         &self,
         sink: &mut impl SideEffectSink,
         shard_ctx: &ShardContext,
@@ -170,7 +170,7 @@ impl<E: ExtensionField> ReadRS1<E> {
         sink.touch_addr(op.addr);
     }
 
-    pub fn collect_shard_effects(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
         let op = step.rs1().expect("rs1 op");
         shard_ctx.record_send_without_touch(
             RAMType::Register,
@@ -252,7 +252,7 @@ impl<E: ExtensionField> ReadRS2<E> {
         Ok(())
     }
 
-    pub fn collect_side_effects(
+    pub fn emit_lk_and_shardram(
         &self,
         sink: &mut impl SideEffectSink,
         shard_ctx: &ShardContext,
@@ -279,7 +279,7 @@ impl<E: ExtensionField> ReadRS2<E> {
         sink.touch_addr(op.addr);
     }
 
-    pub fn collect_shard_effects(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
         let op = step.rs2().expect("rs2 op");
         shard_ctx.record_send_without_touch(
             RAMType::Register,
@@ -379,7 +379,7 @@ impl<E: ExtensionField> WriteRD<E> {
         Ok(())
     }
 
-    pub fn collect_op_side_effects(
+    pub fn emit_op_lk_and_shardram(
         &self,
         sink: &mut impl SideEffectSink,
         shard_ctx: &ShardContext,
@@ -406,22 +406,22 @@ impl<E: ExtensionField> WriteRD<E> {
         sink.touch_addr(op.addr);
     }
 
-    pub fn collect_side_effects(
+    pub fn emit_lk_and_shardram(
         &self,
         sink: &mut impl SideEffectSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {
         let op = step.rd().expect("rd op");
-        self.collect_op_side_effects(sink, shard_ctx, step.cycle(), &op)
+        self.emit_op_lk_and_shardram(sink, shard_ctx, step.cycle(), &op)
     }
 
-    pub fn collect_shard_effects(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
         let op = step.rd().expect("rd op");
-        self.collect_op_shard_effects(shard_ctx, step.cycle(), &op)
+        self.emit_op_shardram(shard_ctx, step.cycle(), &op)
     }
 
-    pub fn collect_op_shard_effects(
+    pub fn emit_op_shardram(
         &self,
         shard_ctx: &mut ShardContext,
         cycle: Cycle,
@@ -505,7 +505,7 @@ impl<E: ExtensionField> ReadMEM<E> {
         Ok(())
     }
 
-    pub fn collect_side_effects(
+    pub fn emit_lk_and_shardram(
         &self,
         sink: &mut impl SideEffectSink,
         shard_ctx: &ShardContext,
@@ -532,7 +532,7 @@ impl<E: ExtensionField> ReadMEM<E> {
         sink.touch_addr(op.addr);
     }
 
-    pub fn collect_shard_effects(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
         let op = step.memory_op().expect("memory op");
         shard_ctx.record_send_without_touch(
             RAMType::Memory,
@@ -619,7 +619,7 @@ impl WriteMEM {
         Ok(())
     }
 
-    pub fn collect_op_side_effects(
+    pub fn emit_op_lk_and_shardram(
         &self,
         sink: &mut impl SideEffectSink,
         shard_ctx: &ShardContext,
@@ -646,22 +646,22 @@ impl WriteMEM {
         sink.touch_addr(op.addr);
     }
 
-    pub fn collect_side_effects(
+    pub fn emit_lk_and_shardram(
         &self,
         sink: &mut impl SideEffectSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {
         let op = step.memory_op().expect("memory op");
-        self.collect_op_side_effects(sink, shard_ctx, step.cycle(), &op)
+        self.emit_op_lk_and_shardram(sink, shard_ctx, step.cycle(), &op)
     }
 
-    pub fn collect_shard_effects(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
         let op = step.memory_op().expect("memory op");
-        self.collect_op_shard_effects(shard_ctx, step.cycle(), &op)
+        self.emit_op_shardram(shard_ctx, step.cycle(), &op)
     }
 
-    pub fn collect_op_shard_effects(
+    pub fn emit_op_shardram(
         &self,
         shard_ctx: &mut ShardContext,
         cycle: Cycle,
@@ -828,7 +828,7 @@ impl<E: ExtensionField> MemAddr<E> {
         Ok(())
     }
 
-    pub fn collect_side_effects(&self, sink: &mut impl SideEffectSink, addr: Word) {
+    pub fn emit_lk_and_shardram(&self, sink: &mut impl SideEffectSink, addr: Word) {
         let mid_u14 = ((addr & 0xffff) >> Self::N_LOW_BITS) as u16;
         sink.emit_lk(LkOp::AssertU14 { value: mid_u14 });
 

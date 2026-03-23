@@ -17,7 +17,7 @@ use witness::RowMajorMatrix;
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::{Instruction, cpu_collect_shard_side_effects, cpu_collect_side_effects},
+    instructions::{Instruction, cpu_collect_shardram, cpu_collect_lk_and_shardram},
 };
 
 use super::witgen_gpu::{GpuWitgenKind, set_force_cpu_path};
@@ -173,11 +173,11 @@ pub(crate) fn debug_compare_shard_side_effects<E: ExtensionField, I: Instruction
     }
 
     let mut cpu_ctx = shard_ctx.new_empty_like();
-    let _ = cpu_collect_side_effects::<E, I>(config, &mut cpu_ctx, shard_steps, step_indices)?;
+    let _ = cpu_collect_lk_and_shardram::<E, I>(config, &mut cpu_ctx, shard_steps, step_indices)?;
 
     let mut mixed_ctx = shard_ctx.new_empty_like();
     let _ =
-        cpu_collect_shard_side_effects::<E, I>(config, &mut mixed_ctx, shard_steps, step_indices)?;
+        cpu_collect_shardram::<E, I>(config, &mut mixed_ctx, shard_steps, step_indices)?;
 
     let cpu_addr = cpu_ctx.get_addr_accessed();
     let mixed_addr = mixed_ctx.get_addr_accessed();
@@ -207,7 +207,7 @@ pub(crate) fn debug_compare_shard_side_effects<E: ExtensionField, I: Instruction
 /// Compare GPU shard context vs CPU shard context, field by field.
 ///
 /// Both paths are independent and produce equivalent ShardContext state:
-///   CPU path:  cpu_collect_shard_side_effects -> addr_accessed + write_records + read_records
+///   CPU path:  cpu_collect_shardram -> addr_accessed + write_records + read_records
 ///   GPU path:  compact_records -> shard records (gpu_ec_records)
 ///              ram_slots WAS_SENT -> addr_accessed
 ///              (write_records and read_records stay empty for GPU EC kernels)
@@ -242,7 +242,7 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
 
     // ========== Build CPU shard context (independent, isolated) ==========
     let mut cpu_ctx = shard_ctx.new_empty_like();
-    if let Err(e) = cpu_collect_shard_side_effects::<E, I>(
+    if let Err(e) = cpu_collect_shardram::<E, I>(
         config, &mut cpu_ctx, shard_steps, step_indices,
     ) {
         tracing::error!("[GPU EC debug] kind={kind:?} CPU shard side effects failed: {e:?}");

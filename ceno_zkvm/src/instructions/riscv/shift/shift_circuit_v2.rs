@@ -1,7 +1,7 @@
 use crate::e2e::ShardContext;
 /// constrain implementation follow from https://github.com/openvm-org/openvm/blob/main/extensions/rv32im/circuit/src/shift/core.rs
 use crate::{
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -211,7 +211,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         })
     }
 
-    pub fn collect_side_effects(
+    pub fn emit_lk_and_shardram(
         &self,
         sink: &mut impl SideEffectSink,
         kind: InsnKind,
@@ -410,10 +410,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         Ok(())
     }
 
-    impl_collect_side_effects!(r_insn, |sink, step, config, _ctx| {
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, config, _ctx| {
         let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
         emit_byte_decomposition_ops(sink, &rd_written);
-        config.shift_base_config.collect_side_effects(
+        config.shift_base_config.emit_lk_and_shardram(
             sink,
             I::INST_KIND,
             step.rs1().unwrap().value,
@@ -421,7 +421,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         );
     });
 
-    impl_collect_shard!(r_insn);
+    impl_collect_shardram!(r_insn);
 
     impl_gpu_assign!(witgen_gpu::GpuWitgenKind::ShiftR(match I::INST_KIND {
         InsnKind::SLL => 0u32,
@@ -535,10 +535,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         Ok(())
     }
 
-    impl_collect_side_effects!(i_insn, |sink, step, config, _ctx| {
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, config, _ctx| {
         let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
         emit_byte_decomposition_ops(sink, &rd_written);
-        config.shift_base_config.collect_side_effects(
+        config.shift_base_config.emit_lk_and_shardram(
             sink,
             I::INST_KIND,
             step.rs1().unwrap().value,
@@ -546,7 +546,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         );
     });
 
-    impl_collect_shard!(i_insn);
+    impl_collect_shardram!(i_insn);
 
     impl_gpu_assign!(witgen_gpu::GpuWitgenKind::ShiftI(match I::INST_KIND {
         InsnKind::SLLI => 0u32,

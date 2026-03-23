@@ -37,7 +37,7 @@ pub(crate) type CompactEcBuf = ceno_gpu::common::witgen_types::CompactEcResult<R
 /// CPU-side lightweight scan of GPU-produced RAM record slots.
 ///
 /// Reconstructs BTreeMap read/write records and addr_accessed from the GPU output,
-/// replacing the previous `collect_shard_side_effects()` CPU loop.
+/// replacing the previous `collect_shardram()` CPU loop.
 pub(crate) fn gpu_collect_shard_records(
     shard_ctx: &mut ShardContext,
     slots: &[GpuRamRecordSlot],

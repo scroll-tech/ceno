@@ -20,8 +20,8 @@ mod tests {
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         e2e::ShardContext,
         instructions::{
-            Instruction, cpu_assign_instances, cpu_collect_shard_side_effects,
-            cpu_collect_side_effects,
+            Instruction, cpu_assign_instances, cpu_collect_shardram,
+            cpu_collect_lk_and_shardram,
             riscv::{
                 AddInstruction, JalInstruction, JalrInstruction, LwInstruction, SbInstruction,
                 branch::{BeqInstruction, BltInstruction},
@@ -67,7 +67,7 @@ mod tests {
 
         let mut collect_ctx = ShardContext::default();
         let actual_lk =
-            cpu_collect_side_effects::<E, I>(config, &mut collect_ctx, steps, &indices).unwrap();
+            cpu_collect_lk_and_shardram::<E, I>(config, &mut collect_ctx, steps, &indices).unwrap();
 
         assert_eq!(flatten_lk(&expected_lk), flatten_lk(&actual_lk));
         assert_eq!(
@@ -105,7 +105,7 @@ mod tests {
 
         let mut collect_ctx = ShardContext::default();
         let actual_lk =
-            cpu_collect_shard_side_effects::<E, I>(config, &mut collect_ctx, steps, &indices)
+            cpu_collect_shardram::<E, I>(config, &mut collect_ctx, steps, &indices)
                 .unwrap();
 
         assert_eq!(

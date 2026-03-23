@@ -3,7 +3,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -176,14 +176,14 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         Ok(())
     }
 
-    impl_collect_side_effects!(s_insn, |sink, step, config, _ctx| {
+    impl_collect_lk_and_shardram!(s_insn, |sink, step, config, _ctx| {
         emit_u16_limbs(sink, step.memory_op().unwrap().value.before);
 
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
         config
             .memory_addr
-            .collect_side_effects(sink, addr.into());
+            .emit_lk_and_shardram(sink, addr.into());
 
         if N_ZEROS == 0 {
             let memory_op = step.memory_op().unwrap();
@@ -201,7 +201,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
         }
     });
 
-    impl_collect_shard!(s_insn);
+    impl_collect_shardram!(s_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
         InsnKind::SW => Some(witgen_gpu::GpuWitgenKind::Sw),

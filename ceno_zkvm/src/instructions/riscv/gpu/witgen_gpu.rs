@@ -26,7 +26,7 @@ use super::gpu_config::{
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::{Instruction, cpu_collect_shard_side_effects, cpu_collect_side_effects},
+    instructions::{Instruction, cpu_collect_shardram, cpu_collect_lk_and_shardram},
     tables::RMMCollections,
     witness::LkMultiplicity,
 };
@@ -326,7 +326,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
         } else {
             // CPU: collect shard records only (send/addr_accessed).
             info_span!("cpu_shard_records").in_scope(|| {
-                let _ = collect_shard_side_effects::<E, I>(config, shard_ctx, shard_steps, step_indices)?;
+                let _ = collect_shardram::<E, I>(config, shard_ctx, shard_steps, step_indices)?;
                 Ok::<(), ZKVMError>(())
             })?;
         }
@@ -334,7 +334,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     } else {
         // GPU LK counters missing or unverified — fall back to full CPU side effects
         info_span!("cpu_side_effects").in_scope(|| {
-            collect_side_effects::<E, I>(config, shard_ctx, shard_steps, step_indices)
+            collect_lk_and_shardram::<E, I>(config, shard_ctx, shard_steps, step_indices)
         })?
     };
     debug_compare_final_lk::<E, I>(config, shard_ctx, num_witin, num_structural_witin, shard_steps, step_indices, kind, &lk_multiplicity)?;
@@ -1156,22 +1156,22 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
 
 /// CPU-side loop to collect side effects only (shard_ctx.send, lk_multiplicity).
 /// Runs assign_instance with a scratch buffer per thread.
-fn collect_side_effects<E: ExtensionField, I: Instruction<E>>(
+fn collect_lk_and_shardram<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,
     shard_ctx: &mut ShardContext,
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
 ) -> Result<Multiplicity<u64>, ZKVMError> {
-    cpu_collect_side_effects::<E, I>(config, shard_ctx, shard_steps, step_indices)
+    cpu_collect_lk_and_shardram::<E, I>(config, shard_ctx, shard_steps, step_indices)
 }
 
-fn collect_shard_side_effects<E: ExtensionField, I: Instruction<E>>(
+fn collect_shardram<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,
     shard_ctx: &mut ShardContext,
     shard_steps: &[StepRecord],
     step_indices: &[StepIndex],
 ) -> Result<Multiplicity<u64>, ZKVMError> {
-    cpu_collect_shard_side_effects::<E, I>(config, shard_ctx, shard_steps, step_indices)
+    cpu_collect_shardram::<E, I>(config, shard_ctx, shard_steps, step_indices)
 }
 
 /// GPU dispatch entry point for keccak ecall witness generation.

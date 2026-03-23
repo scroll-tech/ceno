@@ -8,7 +8,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
@@ -77,7 +77,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         config.assign_instance(instance, shard_ctx, lk_multiplicity, step)
     }
 
-    impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
         emit_logic_u8_ops::<I::OpsTable>(
             sink,
             step.rs1().unwrap().value as u64,
@@ -86,7 +86,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         );
     });
 
-    impl_collect_shard!(r_insn);
+    impl_collect_shardram!(r_insn);
 
     impl_gpu_assign!(witgen_gpu::GpuWitgenKind::LogicR(match I::INST_KIND {
         InsnKind::AND => 0,
@@ -154,12 +154,12 @@ impl<E: ExtensionField> LogicConfig<E> {
         Ok(())
     }
 
-    fn collect_side_effects(
+    fn emit_lk_and_shardram(
         &self,
         sink: &mut impl crate::instructions::side_effects::SideEffectSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {
-        self.r_insn.collect_side_effects(sink, shard_ctx, step);
+        self.r_insn.emit_lk_and_shardram(sink, shard_ctx, step);
     }
 }

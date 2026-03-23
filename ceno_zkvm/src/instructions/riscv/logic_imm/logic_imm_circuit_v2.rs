@@ -9,7 +9,7 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -129,7 +129,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         config.assign_instance(instance, shard_ctx, lkm, step)
     }
 
-    impl_collect_side_effects!(i_insn, |sink, step, _config, _ctx| {
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, _config, _ctx| {
         let rs1_lo = step.rs1().unwrap().value & LIMB_MASK;
         let rs1_hi = (step.rs1().unwrap().value >> LIMB_BITS) & LIMB_MASK;
         let imm_lo = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32 & LIMB_MASK;
@@ -141,7 +141,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
         emit_logic_u8_ops::<I::OpsTable>(sink, rs1_hi.into(), imm_hi.into(), 2);
     });
 
-    impl_collect_shard!(i_insn);
+    impl_collect_shardram!(i_insn);
 
     impl_gpu_assign!(witgen_gpu::GpuWitgenKind::LogicI(match I::INST_KIND {
         InsnKind::ANDI => 0,

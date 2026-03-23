@@ -25,7 +25,7 @@ pub mod host_ops;
 /// Backward-compatible re-export: old `side_effects` path still works.
 pub use host_ops as side_effects;
 
-pub use host_ops::{cpu_assign_instances, cpu_collect_shard_side_effects, cpu_collect_side_effects};
+pub use host_ops::{cpu_assign_instances, cpu_collect_lk_and_shardram, cpu_collect_shardram};
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
@@ -104,7 +104,7 @@ pub trait Instruction<E: ExtensionField> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError>;
 
-    fn collect_side_effects_instance(
+    fn collect_lk_and_shardram(
         _config: &Self::InstructionConfig,
         _shard_ctx: &mut ShardContext,
         _lk_multiplicity: &mut LkMultiplicity,
@@ -119,7 +119,7 @@ pub trait Instruction<E: ExtensionField> {
         ))
     }
 
-    fn collect_shard_side_effects_instance(
+    fn collect_shardram(
         _config: &Self::InstructionConfig,
         _shard_ctx: &mut ShardContext,
         _lk_multiplicity: &mut LkMultiplicity,
@@ -233,8 +233,8 @@ pub fn full_step_indices(steps: &[StepRecord]) -> Vec<StepIndex> {
 // Macros to reduce per-chip boilerplate
 // ---------------------------------------------------------------------------
 
-/// Implement `collect_side_effects_instance` with a common prologue
-/// (create `CpuSideEffectSink`, dispatch to `config.$field.collect_side_effects`)
+/// Implement `collect_lk_and_shardram` with a common prologue
+/// (create `CpuSideEffectSink`, dispatch to `config.$field.emit_lk_and_shardram`)
 /// and a chip-specific body for additional LK ops.
 ///
 /// The closure receives `(sink, step, config, ctx)`:
@@ -245,14 +245,14 @@ pub fn full_step_indices(steps: &[StepRecord]) -> Vec<StepIndex> {
 ///
 /// Usage inside `impl Instruction<E> for MyChip`:
 /// ```ignore
-/// impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
+/// impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
 ///     emit_u16_limbs(sink, step.rd().unwrap().value.after);
 /// });
 /// ```
 #[macro_export]
-macro_rules! impl_collect_side_effects {
+macro_rules! impl_collect_lk_and_shardram {
     ($field:ident, |$sink:ident, $step:ident, $config:ident, $ctx:ident| $body:block) => {
-        fn collect_side_effects_instance(
+        fn collect_lk_and_shardram(
             config: &Self::InstructionConfig,
             shard_ctx: &mut $crate::e2e::ShardContext,
             lk_multiplicity: &mut $crate::witness::LkMultiplicity,
@@ -266,7 +266,7 @@ macro_rules! impl_collect_side_effects {
                     lk_multiplicity,
                 )
             };
-            config.$field.collect_side_effects(&mut _sink_val, _ctx, step);
+            config.$field.emit_lk_and_shardram(&mut _sink_val, _ctx, step);
             let $sink = &mut _sink_val;
             let $step = step;
             let $config = config;
@@ -277,20 +277,20 @@ macro_rules! impl_collect_side_effects {
     };
 }
 
-/// Implement `collect_shard_side_effects_instance` by delegating to
-/// `config.$field.collect_shard_effects(shard_ctx, lk_multiplicity, step)`.
+/// Implement `collect_shardram` by delegating to
+/// `config.$field.emit_shardram(shard_ctx, lk_multiplicity, step)`.
 ///
 /// Every chip's implementation is identical except for the config field name
 /// (`r_insn`, `i_insn`, `b_insn`, `s_insn`, `j_insn`, `im_insn`).
 ///
 /// Usage inside `impl Instruction<E> for MyChip`:
 /// ```ignore
-/// impl_collect_shard!(r_insn);
+/// impl_collect_shardram!(r_insn);
 /// ```
 #[macro_export]
-macro_rules! impl_collect_shard {
+macro_rules! impl_collect_shardram {
     ($field:ident) => {
-        fn collect_shard_side_effects_instance(
+        fn collect_shardram(
             config: &Self::InstructionConfig,
             shard_ctx: &mut $crate::e2e::ShardContext,
             lk_multiplicity: &mut $crate::witness::LkMultiplicity,
@@ -298,7 +298,7 @@ macro_rules! impl_collect_shard {
         ) -> Result<(), $crate::error::ZKVMError> {
             config
                 .$field
-                .collect_shard_effects(shard_ctx, lk_multiplicity, step);
+                .emit_shardram(shard_ctx, lk_multiplicity, step);
             Ok(())
         }
     };

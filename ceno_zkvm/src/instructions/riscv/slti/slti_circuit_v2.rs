@@ -4,7 +4,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -138,7 +138,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         Ok(())
     }
 
-    impl_collect_side_effects!(i_insn, |sink, step, _config, _ctx| {
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, _config, _ctx| {
         let rs1_value = Value::new_unchecked(step.rs1().unwrap().value);
         let rs1_limbs = rs1_value.as_u16_limbs();
         let imm_sign_extend = imm_sign_extend(true, step.insn().imm as i16);
@@ -150,7 +150,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         );
     });
 
-    impl_collect_shard!(i_insn);
+    impl_collect_shardram!(i_insn);
 
     impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Slti(match I::INST_KIND {
         InsnKind::SLTI => 1u32,

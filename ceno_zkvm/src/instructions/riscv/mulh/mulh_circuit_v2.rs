@@ -1,7 +1,7 @@
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
-    impl_collect_shard, impl_collect_side_effects, impl_gpu_assign,
+    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -332,7 +332,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         Ok(())
     }
 
-    impl_collect_side_effects!(r_insn, |sink, step, _config, _ctx| {
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
         let rs1 = step.rs1().unwrap().value;
         let rs1_val = Value::new_unchecked(rs1);
         let rs2 = step.rs2().unwrap().value;
@@ -413,7 +413,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         }
     });
 
-    impl_collect_shard!(r_insn);
+    impl_collect_shardram!(r_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
         InsnKind::MUL => Some(witgen_gpu::GpuWitgenKind::Mul(0u32)),

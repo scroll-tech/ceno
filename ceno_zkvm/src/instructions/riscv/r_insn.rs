@@ -85,7 +85,7 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         Ok(())
     }
 
-    pub fn collect_side_effects(
+    pub fn emit_lk_and_shardram(
         &self,
         sink: &mut impl SideEffectSink,
         shard_ctx: &ShardContext,
@@ -94,20 +94,20 @@ impl<E: ExtensionField> RInstructionConfig<E> {
         sink.emit_lk(LkOp::Fetch {
             pc: step.pc().before.0,
         });
-        self.rs1.collect_side_effects(sink, shard_ctx, step);
-        self.rs2.collect_side_effects(sink, shard_ctx, step);
-        self.rd.collect_side_effects(sink, shard_ctx, step);
+        self.rs1.emit_lk_and_shardram(sink, shard_ctx, step);
+        self.rs2.emit_lk_and_shardram(sink, shard_ctx, step);
+        self.rd.emit_lk_and_shardram(sink, shard_ctx, step);
     }
 
-    pub fn collect_shard_effects(
+    pub fn emit_shardram(
         &self,
         shard_ctx: &mut ShardContext,
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) {
         lk_multiplicity.fetch(step.pc().before.0);
-        self.rs1.collect_shard_effects(shard_ctx, step);
-        self.rs2.collect_shard_effects(shard_ctx, step);
-        self.rd.collect_shard_effects(shard_ctx, step);
+        self.rs1.emit_shardram(shard_ctx, step);
+        self.rs2.emit_shardram(shard_ctx, step);
+        self.rd.emit_shardram(shard_ctx, step);
     }
 }
