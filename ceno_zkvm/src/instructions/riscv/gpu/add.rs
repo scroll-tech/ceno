@@ -1,6 +1,7 @@
 use ceno_gpu::common::witgen_types::AddColumnMap;
 use ff_ext::ExtensionField;
 
+use super::colmap_base::{extract_carries, extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
 use crate::instructions::riscv::arith::ArithConfig;
 
 /// Extract column map from a constructed ArithConfig (ADD variant).
@@ -11,75 +12,14 @@ pub fn extract_add_column_map<E: ExtensionField>(
     config: &ArithConfig<E>,
     num_witin: usize,
 ) -> AddColumnMap {
-    // StateInOut
-    let pc = config.r_insn.vm_state.pc.id as u32;
-    let ts = config.r_insn.vm_state.ts.id as u32;
+    let (pc, ts) = extract_state(&config.r_insn.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.r_insn.rs1);
+    let (rs2_id, rs2_prev_ts, rs2_lt_diff) = extract_rs2(&config.r_insn.rs2);
+    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&config.r_insn.rd);
 
-    // ReadRS1
-    let rs1_id = config.r_insn.rs1.id.id as u32;
-    let rs1_prev_ts = config.r_insn.rs1.prev_ts.id as u32;
-    let rs1_lt_diff: [u32; 2] = {
-        let diffs = &config.r_insn.rs1.lt_cfg.0.diff;
-        assert_eq!(diffs.len(), 2, "Expected 2 AssertLt diff limbs for RS1");
-        [diffs[0].id as u32, diffs[1].id as u32]
-    };
-
-    // ReadRS2
-    let rs2_id = config.r_insn.rs2.id.id as u32;
-    let rs2_prev_ts = config.r_insn.rs2.prev_ts.id as u32;
-    let rs2_lt_diff: [u32; 2] = {
-        let diffs = &config.r_insn.rs2.lt_cfg.0.diff;
-        assert_eq!(diffs.len(), 2, "Expected 2 AssertLt diff limbs for RS2");
-        [diffs[0].id as u32, diffs[1].id as u32]
-    };
-
-    // WriteRD
-    let rd_id = config.r_insn.rd.id.id as u32;
-    let rd_prev_ts = config.r_insn.rd.prev_ts.id as u32;
-    let rd_prev_val: [u32; 2] = {
-        let limbs = config
-            .r_insn
-            .rd
-            .prev_value
-            .wits_in()
-            .expect("WriteRD prev_value should have WitIn limbs");
-        assert_eq!(limbs.len(), 2, "Expected 2 prev_value limbs");
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
-    let rd_lt_diff: [u32; 2] = {
-        let diffs = &config.r_insn.rd.lt_cfg.0.diff;
-        assert_eq!(diffs.len(), 2, "Expected 2 AssertLt diff limbs for RD");
-        [diffs[0].id as u32, diffs[1].id as u32]
-    };
-
-    // Arithmetic: rs1/rs2 u16 limbs
-    let rs1_limbs: [u32; 2] = {
-        let limbs = config
-            .rs1_read
-            .wits_in()
-            .expect("rs1_read should have WitIn limbs");
-        assert_eq!(limbs.len(), 2, "Expected 2 rs1_read limbs");
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
-    let rs2_limbs: [u32; 2] = {
-        let limbs = config
-            .rs2_read
-            .wits_in()
-            .expect("rs2_read should have WitIn limbs");
-        assert_eq!(limbs.len(), 2, "Expected 2 rs2_read limbs");
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
-
-    // rd carries
-    let rd_carries: [u32; 2] = {
-        let carries = config
-            .rd_written
-            .carries
-            .as_ref()
-            .expect("rd_written should have carries");
-        assert_eq!(carries.len(), 2, "Expected 2 rd_written carries");
-        [carries[0].id as u32, carries[1].id as u32]
-    };
+    let rs1_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs1_read, "rs1_read");
+    let rs2_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs2_read, "rs2_read");
+    let rd_carries = extract_carries::<E, 2, _, _>(&config.rd_written, "rd_written");
 
     AddColumnMap {
         pc,
@@ -191,22 +131,7 @@ mod tests {
         let col_map = extract_add_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
 
-        // All column IDs should be unique and within range
-        for (i, &col) in flat.iter().enumerate() {
-            assert!(
-                (col as usize) < col_map.num_cols as usize,
-                "Column {} (index {}) out of range: {} >= {}",
-                i,
-                col,
-                col,
-                col_map.num_cols
-            );
-        }
-        // Check uniqueness
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
+        crate::instructions::riscv::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]

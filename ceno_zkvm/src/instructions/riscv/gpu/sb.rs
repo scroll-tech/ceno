@@ -1,6 +1,9 @@
 use ceno_gpu::common::witgen_types::SbColumnMap;
 use ff_ext::ExtensionField;
 
+use super::colmap_base::{
+    extract_rs1, extract_rs2, extract_state, extract_uint_limbs, extract_write_mem,
+};
 use crate::instructions::riscv::memory::store_v2::StoreConfig;
 
 /// Extract column map from a constructed StoreConfig (SB variant, N_ZEROS=0).
@@ -10,66 +13,17 @@ pub fn extract_sb_column_map<E: ExtensionField>(
 ) -> SbColumnMap {
     let sm = &config.s_insn;
 
-    // StateInOut (not branching)
-    let pc = sm.vm_state.pc.id as u32;
-    let ts = sm.vm_state.ts.id as u32;
+    let (pc, ts) = extract_state(&sm.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&sm.rs1);
+    let (rs2_id, rs2_prev_ts, rs2_lt_diff) = extract_rs2(&sm.rs2);
+    let (mem_prev_ts, mem_lt_diff) = extract_write_mem(&sm.mem_write);
 
-    // ReadRS1
-    let rs1_id = sm.rs1.id.id as u32;
-    let rs1_prev_ts = sm.rs1.prev_ts.id as u32;
-    let rs1_lt_diff: [u32; 2] = {
-        let d = &sm.rs1.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    // ReadRS2
-    let rs2_id = sm.rs2.id.id as u32;
-    let rs2_prev_ts = sm.rs2.prev_ts.id as u32;
-    let rs2_lt_diff: [u32; 2] = {
-        let d = &sm.rs2.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    // WriteMEM
-    let mem_prev_ts = sm.mem_write.prev_ts.id as u32;
-    let mem_lt_diff: [u32; 2] = {
-        let d = &sm.mem_write.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    // Store-specific
-    let rs1_limbs: [u32; 2] = {
-        let l = config.rs1_read.wits_in().expect("rs1_read WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let rs2_limbs: [u32; 2] = {
-        let l = config.rs2_read.wits_in().expect("rs2_read WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
+    let rs1_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs1_read, "rs1_read");
+    let rs2_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs2_read, "rs2_read");
     let imm = config.imm.id as u32;
     let imm_sign = config.imm_sign.id as u32;
-    let prev_mem_val: [u32; 2] = {
-        let l = config
-            .prev_memory_value
-            .wits_in()
-            .expect("prev_memory_value WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let mem_addr: [u32; 2] = {
-        let l = config
-            .memory_addr
-            .addr
-            .wits_in()
-            .expect("memory_addr WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
+    let prev_mem_val = extract_uint_limbs::<E, 2, _, _>(&config.prev_memory_value, "prev_memory_value");
+    let mem_addr = extract_uint_limbs::<E, 2, _, _>(&config.memory_addr.addr, "memory_addr");
 
     // SB-specific: 2 low_bits (bit_0, bit_1)
     assert_eq!(
@@ -145,21 +99,7 @@ mod tests {
 
         let col_map = extract_sb_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-
-        for (i, &col) in flat.iter().enumerate() {
-            assert!(
-                (col as usize) < col_map.num_cols as usize,
-                "Column {} (index {}) out of range: {} >= {}",
-                i,
-                col,
-                col,
-                col_map.num_cols
-            );
-        }
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
+        crate::instructions::riscv::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]

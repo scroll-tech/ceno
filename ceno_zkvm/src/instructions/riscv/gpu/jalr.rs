@@ -1,6 +1,9 @@
 use ceno_gpu::common::witgen_types::JalrColumnMap;
 use ff_ext::ExtensionField;
 
+use super::colmap_base::{
+    extract_rd, extract_rs1, extract_state_branching, extract_uint_limbs, extract_wit_ids,
+};
 use crate::instructions::riscv::jump::jalr_v2::JalrConfig;
 
 /// Extract column map from a constructed JalrConfig.
@@ -10,64 +13,15 @@ pub fn extract_jalr_column_map<E: ExtensionField>(
 ) -> JalrColumnMap {
     let im = &config.i_insn;
 
-    // StateInOut (branching=true → has next_pc)
-    let pc = im.vm_state.pc.id as u32;
-    let next_pc = im.vm_state.next_pc.expect("JALR must have next_pc").id as u32;
-    let ts = im.vm_state.ts.id as u32;
+    let (pc, next_pc, ts) = extract_state_branching(&im.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&im.rs1);
+    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&im.rd);
 
-    // ReadRS1
-    let rs1_id = im.rs1.id.id as u32;
-    let rs1_prev_ts = im.rs1.prev_ts.id as u32;
-    let rs1_lt_diff: [u32; 2] = {
-        let d = &im.rs1.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    // WriteRD
-    let rd_id = im.rd.id.id as u32;
-    let rd_prev_ts = im.rd.prev_ts.id as u32;
-    let rd_prev_val: [u32; 2] = {
-        let l = im.rd.prev_value.wits_in().expect("rd prev_value WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let rd_lt_diff: [u32; 2] = {
-        let d = &im.rd.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    // JALR-specific: rs1 u16 limbs
-    let rs1_limbs: [u32; 2] = {
-        let l = config.rs1_read.wits_in().expect("rs1_read WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-
-    // imm, imm_sign
+    let rs1_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs1_read, "rs1_read");
     let imm = config.imm.id as u32;
     let imm_sign = config.imm_sign.id as u32;
-
-    // jump_pc_addr: MemAddr has addr (UInt = 2 limbs) + low_bits (Vec<WitIn>)
-    let jump_pc_addr: [u32; 2] = {
-        let l = config
-            .jump_pc_addr
-            .addr
-            .wits_in()
-            .expect("jump_pc_addr WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let jump_pc_addr_bit: [u32; 2] = {
-        let bits = &config.jump_pc_addr.low_bits;
-        assert_eq!(
-            bits.len(),
-            2,
-            "JALR MemAddr with n_zeros=0 must have 2 low_bits"
-        );
-        [bits[0].id as u32, bits[1].id as u32]
-    };
+    let jump_pc_addr = extract_uint_limbs::<E, 2, _, _>(&config.jump_pc_addr.addr, "jump_pc_addr");
+    let jump_pc_addr_bit = extract_wit_ids::<2>(&config.jump_pc_addr.low_bits, "jump_pc_addr low_bits");
 
     // rd_high
     let rd_high = config.rd_high.id as u32;
@@ -114,21 +68,7 @@ mod tests {
 
         let col_map = extract_jalr_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-
-        for (i, &col) in flat.iter().enumerate() {
-            assert!(
-                (col as usize) < col_map.num_cols as usize,
-                "Column {} (index {}) out of range: {} >= {}",
-                i,
-                col,
-                col,
-                col_map.num_cols
-            );
-        }
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
+        crate::instructions::riscv::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]

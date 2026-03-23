@@ -1,6 +1,7 @@
 use ceno_gpu::common::witgen_types::DivColumnMap;
 use ff_ext::ExtensionField;
 
+use super::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
 use crate::instructions::riscv::div::div_circuit_v2::DivRemConfig;
 
 /// Extract column map from a constructed DivRemConfig.
@@ -9,62 +10,15 @@ pub fn extract_div_column_map<E: ExtensionField>(
     config: &DivRemConfig<E>,
     num_witin: usize,
 ) -> DivColumnMap {
-    let r = &config.r_insn;
+    let (pc, ts) = extract_state(&config.r_insn.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.r_insn.rs1);
+    let (rs2_id, rs2_prev_ts, rs2_lt_diff) = extract_rs2(&config.r_insn.rs2);
+    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&config.r_insn.rd);
 
-    // R-type base
-    let pc = r.vm_state.pc.id as u32;
-    let ts = r.vm_state.ts.id as u32;
-
-    let rs1_id = r.rs1.id.id as u32;
-    let rs1_prev_ts = r.rs1.prev_ts.id as u32;
-    let rs1_lt_diff: [u32; 2] = {
-        let d = &r.rs1.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    let rs2_id = r.rs2.id.id as u32;
-    let rs2_prev_ts = r.rs2.prev_ts.id as u32;
-    let rs2_lt_diff: [u32; 2] = {
-        let d = &r.rs2.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    let rd_id = r.rd.id.id as u32;
-    let rd_prev_ts = r.rd.prev_ts.id as u32;
-    let rd_prev_val: [u32; 2] = {
-        let l = r.rd.prev_value.wits_in().expect("rd prev_value WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let rd_lt_diff: [u32; 2] = {
-        let d = &r.rd.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    // Div-specific: operand limbs
-    let dividend: [u32; 2] = {
-        let l = config.dividend.wits_in().expect("dividend WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let divisor: [u32; 2] = {
-        let l = config.divisor.wits_in().expect("divisor WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let quotient: [u32; 2] = {
-        let l = config.quotient.wits_in().expect("quotient WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let remainder: [u32; 2] = {
-        let l = config.remainder.wits_in().expect("remainder WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
+    let dividend = extract_uint_limbs::<E, 2, _, _>(&config.dividend, "dividend");
+    let divisor = extract_uint_limbs::<E, 2, _, _>(&config.divisor, "divisor");
+    let quotient = extract_uint_limbs::<E, 2, _, _>(&config.quotient, "quotient");
+    let remainder = extract_uint_limbs::<E, 2, _, _>(&config.remainder, "remainder");
 
     // Sign/control bits
     let dividend_sign = config.dividend_sign.id as u32;
@@ -84,15 +38,7 @@ pub fn extract_div_column_map<E: ExtensionField>(
     // sign_xor
     let sign_xor = config.sign_xor.id as u32;
 
-    // remainder_prime
-    let remainder_prime: [u32; 2] = {
-        let l = config
-            .remainder_prime
-            .wits_in()
-            .expect("remainder_prime WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
+    let remainder_prime = extract_uint_limbs::<E, 2, _, _>(&config.remainder_prime, "remainder_prime");
 
     // lt_marker
     let lt_marker: [u32; 2] = [config.lt_marker[0].id as u32, config.lt_marker[1].id as u32];

@@ -1,6 +1,7 @@
 use ceno_gpu::common::witgen_types::MulColumnMap;
 use ff_ext::ExtensionField;
 
+use super::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
 use crate::instructions::riscv::mulh::mulh_circuit_v2::MulhConfig;
 
 /// Extract column map from a constructed MulhConfig.
@@ -10,52 +11,13 @@ pub fn extract_mul_column_map<E: ExtensionField>(
     num_witin: usize,
     mul_kind: u32,
 ) -> MulColumnMap {
-    let r = &config.r_insn;
+    let (pc, ts) = extract_state(&config.r_insn.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.r_insn.rs1);
+    let (rs2_id, rs2_prev_ts, rs2_lt_diff) = extract_rs2(&config.r_insn.rs2);
+    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&config.r_insn.rd);
 
-    // R-type base
-    let pc = r.vm_state.pc.id as u32;
-    let ts = r.vm_state.ts.id as u32;
-
-    let rs1_id = r.rs1.id.id as u32;
-    let rs1_prev_ts = r.rs1.prev_ts.id as u32;
-    let rs1_lt_diff: [u32; 2] = {
-        let d = &r.rs1.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    let rs2_id = r.rs2.id.id as u32;
-    let rs2_prev_ts = r.rs2.prev_ts.id as u32;
-    let rs2_lt_diff: [u32; 2] = {
-        let d = &r.rs2.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    let rd_id = r.rd.id.id as u32;
-    let rd_prev_ts = r.rd.prev_ts.id as u32;
-    let rd_prev_val: [u32; 2] = {
-        let l = r.rd.prev_value.wits_in().expect("rd prev_value WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let rd_lt_diff: [u32; 2] = {
-        let d = &r.rd.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    // Mul-specific
-    let rs1_limbs: [u32; 2] = {
-        let l = config.rs1_read.wits_in().expect("rs1_read WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
-    let rs2_limbs: [u32; 2] = {
-        let l = config.rs2_read.wits_in().expect("rs2_read WitIns");
-        assert_eq!(l.len(), 2);
-        [l[0].id as u32, l[1].id as u32]
-    };
+    let rs1_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs1_read, "rs1_read");
+    let rs2_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs2_read, "rs2_read");
     let rd_low: [u32; 2] = [config.rd_low[0].id as u32, config.rd_low[1].id as u32];
 
     // MULH/MULHU/MULHSU have rd_high + extensions

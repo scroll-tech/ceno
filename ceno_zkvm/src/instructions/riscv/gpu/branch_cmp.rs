@@ -1,6 +1,7 @@
 use ceno_gpu::common::witgen_types::BranchCmpColumnMap;
 use ff_ext::ExtensionField;
 
+use super::colmap_base::{extract_rs1, extract_rs2, extract_state_branching, extract_uint_limbs};
 use crate::instructions::riscv::branch::branch_circuit_v2::BranchConfig;
 
 /// Extract column map from a constructed BranchConfig (BLT/BGE/BLTU/BGEU variant).
@@ -8,16 +9,8 @@ pub fn extract_branch_cmp_column_map<E: ExtensionField>(
     config: &BranchConfig<E>,
     num_witin: usize,
 ) -> BranchCmpColumnMap {
-    let rs1_limbs: [u32; 2] = {
-        let limbs = config.read_rs1.wits_in().expect("rs1 WitIn");
-        assert_eq!(limbs.len(), 2);
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
-    let rs2_limbs: [u32; 2] = {
-        let limbs = config.read_rs2.wits_in().expect("rs2 WitIn");
-        assert_eq!(limbs.len(), 2);
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
+    let rs1_limbs = extract_uint_limbs::<E, 2, _, _>(&config.read_rs1, "read_rs1");
+    let rs2_limbs = extract_uint_limbs::<E, 2, _, _>(&config.read_rs2, "read_rs2");
 
     let lt_config = config.uint_lt_config.as_ref().unwrap();
     let cmp_lt = lt_config.cmp_lt.id as u32;
@@ -29,26 +22,9 @@ pub fn extract_branch_cmp_column_map<E: ExtensionField>(
     ];
     let diff_val = lt_config.diff_val.id as u32;
 
-    let pc = config.b_insn.vm_state.pc.id as u32;
-    let next_pc = config.b_insn.vm_state.next_pc.unwrap().id as u32;
-    let ts = config.b_insn.vm_state.ts.id as u32;
-
-    let rs1_id = config.b_insn.rs1.id.id as u32;
-    let rs1_prev_ts = config.b_insn.rs1.prev_ts.id as u32;
-    let rs1_lt_diff: [u32; 2] = {
-        let d = &config.b_insn.rs1.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
-    let rs2_id = config.b_insn.rs2.id.id as u32;
-    let rs2_prev_ts = config.b_insn.rs2.prev_ts.id as u32;
-    let rs2_lt_diff: [u32; 2] = {
-        let d = &config.b_insn.rs2.lt_cfg.0.diff;
-        assert_eq!(d.len(), 2);
-        [d[0].id as u32, d[1].id as u32]
-    };
-
+    let (pc, next_pc, ts) = extract_state_branching(&config.b_insn.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.b_insn.rs1);
+    let (rs2_id, rs2_prev_ts, rs2_lt_diff) = extract_rs2(&config.b_insn.rs2);
     let imm = config.b_insn.imm.id as u32;
 
     BranchCmpColumnMap {
@@ -94,21 +70,7 @@ mod tests {
 
         let col_map = extract_branch_cmp_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-
-        for (i, &col) in flat.iter().enumerate() {
-            assert!(
-                (col as usize) < col_map.num_cols as usize,
-                "Column {} (index {}) out of range: {} >= {}",
-                i,
-                col,
-                col,
-                col_map.num_cols
-            );
-        }
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
+        crate::instructions::riscv::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]

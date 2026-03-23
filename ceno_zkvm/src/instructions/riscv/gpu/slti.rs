@@ -1,6 +1,7 @@
 use ceno_gpu::common::witgen_types::SltiColumnMap;
 use ff_ext::ExtensionField;
 
+use super::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
 use crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmConfig;
 
 /// Extract column map from a constructed SetLessThanImmConfig (SLTI/SLTIU).
@@ -8,16 +9,7 @@ pub fn extract_slti_column_map<E: ExtensionField>(
     config: &SetLessThanImmConfig<E>,
     num_witin: usize,
 ) -> SltiColumnMap {
-    // rs1_read: UInt (2 u16 limbs)
-    let rs1_limbs: [u32; 2] = {
-        let limbs = config
-            .rs1_read
-            .wits_in()
-            .expect("rs1_read should have WitIn limbs");
-        assert_eq!(limbs.len(), 2);
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
-
+    let rs1_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs1_read, "rs1_read");
     let imm = config.imm.id as u32;
     let imm_sign = config.imm_sign.id as u32;
 
@@ -31,35 +23,9 @@ pub fn extract_slti_column_map<E: ExtensionField>(
     ];
     let diff_val = config.uint_lt_config.diff_val.id as u32;
 
-    // I-type base: StateInOut + ReadRS1 + WriteRD
-    let pc = config.i_insn.vm_state.pc.id as u32;
-    let ts = config.i_insn.vm_state.ts.id as u32;
-
-    let rs1_id = config.i_insn.rs1.id.id as u32;
-    let rs1_prev_ts = config.i_insn.rs1.prev_ts.id as u32;
-    let rs1_lt_diff: [u32; 2] = {
-        let diffs = &config.i_insn.rs1.lt_cfg.0.diff;
-        assert_eq!(diffs.len(), 2);
-        [diffs[0].id as u32, diffs[1].id as u32]
-    };
-
-    let rd_id = config.i_insn.rd.id.id as u32;
-    let rd_prev_ts = config.i_insn.rd.prev_ts.id as u32;
-    let rd_prev_val: [u32; 2] = {
-        let limbs = config
-            .i_insn
-            .rd
-            .prev_value
-            .wits_in()
-            .expect("WriteRD prev_value should have WitIn limbs");
-        assert_eq!(limbs.len(), 2);
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
-    let rd_lt_diff: [u32; 2] = {
-        let diffs = &config.i_insn.rd.lt_cfg.0.diff;
-        assert_eq!(diffs.len(), 2);
-        [diffs[0].id as u32, diffs[1].id as u32]
-    };
+    let (pc, ts) = extract_state(&config.i_insn.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.i_insn.rs1);
+    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&config.i_insn.rd);
 
     SltiColumnMap {
         rs1_limbs,
@@ -104,21 +70,7 @@ mod tests {
 
         let col_map = extract_slti_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-
-        for (i, &col) in flat.iter().enumerate() {
-            assert!(
-                (col as usize) < col_map.num_cols as usize,
-                "Column {} (index {}) out of range: {} >= {}",
-                i,
-                col,
-                col,
-                col_map.num_cols
-            );
-        }
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
+        crate::instructions::riscv::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]

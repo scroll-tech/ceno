@@ -47,4 +47,6 @@ pub mod keccak;
 #[cfg(feature = "gpu")]
 pub mod shard_ram;
 #[cfg(feature = "gpu")]
+pub mod colmap_base;
+#[cfg(feature = "gpu")]
 pub mod witgen_gpu;

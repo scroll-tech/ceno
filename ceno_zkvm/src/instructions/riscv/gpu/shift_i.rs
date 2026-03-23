@@ -1,6 +1,7 @@
 use ceno_gpu::common::witgen_types::ShiftIColumnMap;
 use ff_ext::ExtensionField;
 
+use super::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
 use crate::instructions::riscv::shift::shift_circuit_v2::ShiftImmConfig;
 
 /// Extract column map from a constructed ShiftImmConfig (I-type: SLLI/SRLI/SRAI).
@@ -8,61 +9,12 @@ pub fn extract_shift_i_column_map<E: ExtensionField>(
     config: &ShiftImmConfig<E>,
     num_witin: usize,
 ) -> ShiftIColumnMap {
-    // StateInOut
-    let pc = config.i_insn.vm_state.pc.id as u32;
-    let ts = config.i_insn.vm_state.ts.id as u32;
+    let (pc, ts) = extract_state(&config.i_insn.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.i_insn.rs1);
+    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&config.i_insn.rd);
 
-    // ReadRS1
-    let rs1_id = config.i_insn.rs1.id.id as u32;
-    let rs1_prev_ts = config.i_insn.rs1.prev_ts.id as u32;
-    let rs1_lt_diff: [u32; 2] = {
-        let diffs = &config.i_insn.rs1.lt_cfg.0.diff;
-        assert_eq!(diffs.len(), 2);
-        [diffs[0].id as u32, diffs[1].id as u32]
-    };
-
-    // WriteRD
-    let rd_id = config.i_insn.rd.id.id as u32;
-    let rd_prev_ts = config.i_insn.rd.prev_ts.id as u32;
-    let rd_prev_val: [u32; 2] = {
-        let limbs = config
-            .i_insn
-            .rd
-            .prev_value
-            .wits_in()
-            .expect("rd prev_value WitIns");
-        assert_eq!(limbs.len(), 2);
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
-    let rd_lt_diff: [u32; 2] = {
-        let diffs = &config.i_insn.rd.lt_cfg.0.diff;
-        assert_eq!(diffs.len(), 2);
-        [diffs[0].id as u32, diffs[1].id as u32]
-    };
-
-    // UInt8 byte limbs
-    let rs1_bytes: [u32; 4] = {
-        let l = config.rs1_read.wits_in().expect("rs1_read WitIns");
-        assert_eq!(l.len(), 4);
-        [
-            l[0].id as u32,
-            l[1].id as u32,
-            l[2].id as u32,
-            l[3].id as u32,
-        ]
-    };
-    let rd_bytes: [u32; 4] = {
-        let l = config.rd_written.wits_in().expect("rd_written WitIns");
-        assert_eq!(l.len(), 4);
-        [
-            l[0].id as u32,
-            l[1].id as u32,
-            l[2].id as u32,
-            l[3].id as u32,
-        ]
-    };
-
-    // Immediate
+    let rs1_bytes = extract_uint_limbs::<E, 4, _, _>(&config.rs1_read, "rs1_read");
+    let rd_bytes = extract_uint_limbs::<E, 4, _, _>(&config.rd_written, "rd_written");
     let imm = config.imm.id as u32;
 
     // ShiftBase
@@ -120,21 +72,7 @@ mod tests {
 
         let col_map = extract_shift_i_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-
-        for (i, &col) in flat.iter().enumerate() {
-            assert!(
-                (col as usize) < col_map.num_cols as usize,
-                "Column {} (index {}) out of range: {} >= {}",
-                i,
-                col,
-                col,
-                col_map.num_cols
-            );
-        }
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
+        crate::instructions::riscv::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]
