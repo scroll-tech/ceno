@@ -5,7 +5,7 @@ use super::binding::{
 use crate::{
     arithmetics::{
         PolyEvaluator, UniPolyExtrapolator, arr_product, assert_ext_arr_eq,
-        build_eq_x_r_vec_sequential, challenger_multi_observe, concat,
+        build_eq_x_r_vec_sequential, challenger_hint_observe, challenger_multi_observe, concat,
         dot_product as ext_dot_product, eq_eval, eq_eval_less_or_equal_than,
         eval_ceno_expr_with_instance, eval_wellform_address_vec, gen_alpha_pows, mask_arr, reverse,
     },
@@ -635,6 +635,10 @@ pub fn verify_chip_proof<C: Config>(
     let num_fanin: Usize<C::N> = Usize::from(NUM_FANIN);
     let num_prod_spec: Usize<C::N> =
         builder.eval(chip_proof.r_out_evals_len.clone() + chip_proof.w_out_evals_len.clone());
+
+    // bind read/write/lookup out evals into transcript before deriving tower challenges
+    challenger_hint_observe(builder, challenger, &chip_proof.rw_out_evals);
+    challenger_hint_observe(builder, challenger, &chip_proof.lk_out_evals);
 
     builder.cycle_tracker_start(format!("verify tower proof for opcode {circuit_name}",).as_str());
     let (_, record_evals, logup_p_evals, logup_q_evals, prod_out_evals, logup_out_evals) =

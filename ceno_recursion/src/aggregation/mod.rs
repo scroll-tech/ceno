@@ -425,6 +425,25 @@ impl CenoLeafVmVerifierConfig {
             builder.assign(&stark_pvs.connector.initial_pc, init_pc);
             builder.assign(&stark_pvs.connector.final_pc, end_pc);
             builder.assign(&stark_pvs.connector.exit_code, exit_code);
+            // Internal aggregation asserts connector chaining on this field.
+            builder
+                .if_eq(ceno_leaf_input.is_last, Usize::from(1))
+                .then_or_else(
+                    |builder| {
+                        builder.assign(&stark_pvs.connector.is_terminate, F::ONE);
+                    },
+                    |builder| {
+                        builder.assign(&stark_pvs.connector.is_terminate, F::ZERO);
+                    },
+                );
+
+            // Keep remaining committed PVs deterministic until real memory/public-values
+            // commitments are wired through this custom leaf program.
+            for i in 0..DIGEST_SIZE {
+                builder.assign(&stark_pvs.memory.initial_root[i], F::ZERO);
+                builder.assign(&stark_pvs.memory.final_root[i], F::ZERO);
+                builder.assign(&stark_pvs.public_values_commit[i], F::ZERO);
+            }
 
             // TODO: assign shard_ec_sum to stark_pvs.shard_ec_sum
 
@@ -826,7 +845,6 @@ mod tests {
 
         let leaf_proofs = vec![leaf_proof_0, leaf_proof_1];
         let _root_proof = agg_prover.aggregate_internal_proofs(leaf_proofs);
-        println!("Internal aggregation completed successfully");
     }
 
     #[test]
