@@ -14,15 +14,8 @@ use crate::{
         hash::HashVariable,
         query_phase::PointAndEvalsVariable,
         utils::pow_2,
+        verifier::batch_verify,
     },
-};
-// use crate::basefold_verifier::verifier::batch_verify;
-use crate::{
-    arithmetics::{
-        arr_product, build_eq_x_r_vec_sequential, concat, dot_product as ext_dot_product,
-        eq_eval_less_or_equal_than, exts_to_felts, gen_alpha_pows, nested_product,
-    },
-    basefold_verifier::verifier::batch_verify,
     tower_verifier::{
         binding::{PointAndEvalVariable, PointVariable},
         program::{iop_verifier_state_verify, verify_tower_proof},
