@@ -149,8 +149,6 @@ where
     AB::F: PrimeField32,
 {
     fn eval(&self, builder: &mut AB) {
-    /* debug block: Step 1 placeholder - all constraints deferred pending trace implementation */
-    /*
         let main = builder.main();
 
         let (local, next) = (
@@ -761,9 +759,6 @@ where
             },
             local.is_last,
         );
-    */
-    #[allow(unused_variables)]
-    let _ = &builder;
     }
 }
 
