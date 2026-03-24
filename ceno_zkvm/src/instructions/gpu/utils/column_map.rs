@@ -156,7 +156,7 @@ pub fn extract_wit_ids<const N: usize>(wits: &[WitIn], label: &str) -> [u32; N] 
 }
 
 // ---------------------------------------------------------------------------
-// Test helper
+// Test helpers
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -172,3 +172,40 @@ pub fn validate_column_map(flat: &[u32], num_cols: u32) {
         assert!(seen.insert(col), "Duplicate column ID: {col}");
     }
 }
+
+/// Generate a `test_extract_*_column_map` test that:
+/// 1. Constructs the circuit via `$Instruction::construct_circuit`
+/// 2. Extracts the column map via `$extract_fn`
+/// 3. Validates all column IDs are in-range and unique
+///
+/// Usage:
+/// ```ignore
+/// test_colmap!(test_extract_add_column_map, AddInstruction, extract_add_column_map);
+/// // Multi-variant (e.g. div/divu/rem/remu sharing one extractor):
+/// test_colmap!(test_extract_divu_column_map, DivuInstruction, extract_div_column_map);
+/// ```
+#[cfg(test)]
+macro_rules! test_colmap {
+    ($test_name:ident, $Instruction:ty, $extract_fn:ident) => {
+        #[test]
+        fn $test_name() {
+            let mut cs = crate::circuit_builder::ConstraintSystem::<E>::new(|| stringify!($test_name));
+            let mut cb = crate::circuit_builder::CircuitBuilder::new(&mut cs);
+            let config = <$Instruction as crate::instructions::Instruction<E>>::construct_circuit(
+                &mut cb,
+                &crate::structs::ProgramParams::default(),
+            )
+            .unwrap();
+            let col_map = $extract_fn(&config, cb.cs.num_witin as usize);
+            let flat = col_map.to_flat();
+            crate::instructions::gpu::utils::column_map::validate_column_map(
+                &flat,
+                col_map.num_cols,
+            );
+        }
+    };
+}
+
+#[cfg(test)]
+pub(crate) use test_colmap;
+

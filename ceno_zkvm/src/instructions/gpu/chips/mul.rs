@@ -2,7 +2,7 @@ use ceno_gpu::common::witgen::types::MulColumnMap;
 use ff_ext::ExtensionField;
 
 use crate::instructions::{
-    gpu::utils::colmap_base::{
+    gpu::utils::column_map::{
         extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs,
     },
     riscv::mulh::mulh_circuit_v2::MulhConfig,
@@ -13,7 +13,6 @@ use crate::instructions::{
 pub fn extract_mul_column_map<E: ExtensionField>(
     config: &MulhConfig<E>,
     num_witin: usize,
-    mul_kind: u32,
 ) -> MulColumnMap {
     let (pc, ts) = extract_state(&config.r_insn.vm_state);
     let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.r_insn.rs1);
@@ -24,19 +23,14 @@ pub fn extract_mul_column_map<E: ExtensionField>(
     let rs2_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs2_read, "rs2_read");
     let rd_low: [u32; 2] = [config.rd_low[0].id as u32, config.rd_low[1].id as u32];
 
-    // MULH/MULHU/MULHSU have rd_high + extensions
-    let (rd_high, rs1_ext, rs2_ext) = if mul_kind != 0 {
-        let h = config
-            .rd_high
-            .as_ref()
-            .expect("MULH variants must have rd_high");
-        (
+    // MULH/MULHU/MULHSU have rd_high + extensions; MUL does not.
+    let (rd_high, rs1_ext, rs2_ext) = match config.rd_high.as_ref() {
+        Some(h) => (
             Some([h[0].id as u32, h[1].id as u32]),
             Some(config.rs1_ext.expect("MULH variants must have rs1_ext").id as u32),
             Some(config.rs2_ext.expect("MULH variants must have rs2_ext").id as u32),
-        )
-    } else {
-        (None, None, None)
+        ),
+        None => (None, None, None),
     };
 
     MulColumnMap {
@@ -77,72 +71,17 @@ mod tests {
 
     type E = BabyBearExt4;
 
-    fn test_column_map_validity(col_map: &MulColumnMap) {
-        let (n_entries, flat) = col_map.to_flat();
-        for (i, &col) in flat[..n_entries].iter().enumerate() {
-            assert!(
-                (col as usize) < col_map.num_cols as usize,
-                "Column {} (index {}) out of range: {} >= {}",
-                i,
-                col,
-                col,
-                col_map.num_cols
-            );
-        }
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat[..n_entries] {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
-    }
-
-    #[test]
-    fn test_extract_mul_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_mul");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            MulInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_mul_column_map(&config, cb.cs.num_witin as usize, 0);
-        test_column_map_validity(&col_map);
-        assert!(col_map.rd_high.is_none());
-    }
-
-    #[test]
-    fn test_extract_mulh_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_mulh");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            MulhInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_mul_column_map(&config, cb.cs.num_witin as usize, 1);
-        test_column_map_validity(&col_map);
-        assert!(col_map.rd_high.is_some());
-    }
-
-    #[test]
-    fn test_extract_mulhu_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_mulhu");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            MulhuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_mul_column_map(&config, cb.cs.num_witin as usize, 2);
-        test_column_map_validity(&col_map);
-        assert!(col_map.rd_high.is_some());
-    }
-
-    #[test]
-    fn test_extract_mulhsu_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_mulhsu");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            MulhsuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_mul_column_map(&config, cb.cs.num_witin as usize, 3);
-        test_column_map_validity(&col_map);
-        assert!(col_map.rd_high.is_some());
-    }
+    use crate::instructions::gpu::utils::column_map::test_colmap;
+    test_colmap!(test_extract_mul_column_map, MulInstruction<E>, extract_mul_column_map);
+    test_colmap!(test_extract_mulh_column_map, MulhInstruction<E>, extract_mul_column_map);
+    test_colmap!(test_extract_mulhu_column_map, MulhuInstruction<E>, extract_mul_column_map);
+    test_colmap!(test_extract_mulhsu_column_map, MulhsuInstruction<E>, extract_mul_column_map);
 
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_mul_correctness() {
         use crate::e2e::ShardContext;
+        use crate::instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq;
         use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
@@ -291,7 +230,7 @@ mod tests {
             let cpu_witness = &cpu_rmms[0];
 
             // GPU path
-            let col_map = extract_mul_column_map(&config, num_witin, mul_kind);
+            let col_map = extract_mul_column_map(&config, num_witin);
             let shard_ctx_gpu = ShardContext::default();
             let shard_offset = shard_ctx_gpu.current_shard_offset_cycle();
             let steps_bytes: &[u8] = unsafe {
@@ -319,26 +258,7 @@ mod tests {
 
             let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
                 gpu_result.witness.device_buffer.to_vec().unwrap();
-            let cpu_data = cpu_witness.values();
-            assert_eq!(gpu_data.len(), cpu_data.len(), "{}: Size mismatch", name);
-
-            let mut mismatches = 0;
-            for row in 0..n {
-                for c in 0..num_witin {
-                    let gpu_val = gpu_data[c * n + row];
-                    let cpu_val = cpu_data[row * num_witin + c];
-                    if gpu_val != cpu_val {
-                        if mismatches < 10 {
-                            eprintln!(
-                                "{}: Mismatch at row={}, col={}: GPU={:?}, CPU={:?}",
-                                name, row, c, gpu_val, cpu_val
-                            );
-                        }
-                        mismatches += 1;
-                    }
-                }
-            }
-            assert_eq!(mismatches, 0, "{}: Found {} mismatches", name, mismatches);
+            assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
             eprintln!("{} GPU vs CPU: PASS ({} instances)", name, n);
         }
     }

@@ -2,7 +2,7 @@ use ceno_gpu::common::witgen::types::AddiColumnMap;
 use ff_ext::ExtensionField;
 
 use crate::instructions::{
-    gpu::utils::colmap_base::{
+    gpu::utils::column_map::{
         extract_carries, extract_rd, extract_rs1, extract_state, extract_uint_limbs,
     },
     riscv::arith_imm::arith_imm_circuit_v2::InstructionConfig,
@@ -54,22 +54,14 @@ mod tests {
 
     type E = BabyBearExt4;
 
-    #[test]
-    fn test_extract_addi_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_addi");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            AddiInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-
-        let col_map = extract_addi_column_map(&config, cb.cs.num_witin as usize);
-        let flat = col_map.to_flat();
-        crate::instructions::gpu::utils::colmap_base::validate_column_map(&flat, col_map.num_cols);
-    }
+    use crate::instructions::gpu::utils::column_map::test_colmap;
+    test_colmap!(test_extract_addi_column_map, AddiInstruction<E>, extract_addi_column_map);
 
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_addi_correctness() {
         use crate::e2e::ShardContext;
+        use crate::instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq;
         use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
@@ -142,25 +134,6 @@ mod tests {
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
             gpu_result.witness.device_buffer.to_vec().unwrap();
-        let cpu_data = cpu_witness.values();
-        assert_eq!(gpu_data.len(), cpu_data.len(), "Size mismatch");
-
-        let mut mismatches = 0;
-        for row in 0..n {
-            for c in 0..num_witin {
-                let gpu_val = gpu_data[c * n + row];
-                let cpu_val = cpu_data[row * num_witin + c];
-                if gpu_val != cpu_val {
-                    if mismatches < 10 {
-                        eprintln!(
-                            "Mismatch at row={}, col={}: GPU={:?}, CPU={:?}",
-                            row, c, gpu_val, cpu_val
-                        );
-                    }
-                    mismatches += 1;
-                }
-            }
-        }
-        assert_eq!(mismatches, 0, "Found {} mismatches", mismatches);
+        assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
     }
 }

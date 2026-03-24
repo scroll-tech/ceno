@@ -14,11 +14,13 @@ pub use lk_ops::*;
 pub use sink::*;
 
 #[cfg(feature = "gpu")]
-pub mod colmap_base;
+pub mod column_map;
 #[cfg(feature = "gpu")]
 pub mod d2h;
 #[cfg(feature = "gpu")]
 pub mod debug_compare;
+#[cfg(test)]
+pub mod test_helpers;
 
 #[cfg(test)]
 mod tests {

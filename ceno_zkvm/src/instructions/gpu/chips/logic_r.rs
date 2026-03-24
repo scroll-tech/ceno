@@ -2,7 +2,7 @@ use ceno_gpu::common::witgen::types::LogicRColumnMap;
 use ff_ext::ExtensionField;
 
 use crate::instructions::{
-    gpu::utils::colmap_base::{
+    gpu::utils::column_map::{
         extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs,
     },
     riscv::logic::logic_circuit::LogicConfig,
@@ -54,52 +54,17 @@ mod tests {
 
     type E = BabyBearExt4;
 
-    fn flatten_records(
-        records: &[std::collections::BTreeMap<ceno_emul::WordAddr, crate::e2e::RAMRecord>],
-    ) -> Vec<(ceno_emul::WordAddr, u64, u64, usize)> {
-        records
-            .iter()
-            .flat_map(|table| {
-                table
-                    .iter()
-                    .map(|(addr, record)| (*addr, record.prev_cycle, record.cycle, record.shard_id))
-            })
-            .collect()
-    }
-
-    fn flatten_lk(
-        multiplicity: &gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
-    ) -> Vec<Vec<(u64, usize)>> {
-        multiplicity
-            .iter()
-            .map(|table| {
-                let mut entries = table
-                    .iter()
-                    .map(|(key, count)| (*key, *count))
-                    .collect::<Vec<_>>();
-                entries.sort_unstable();
-                entries
-            })
-            .collect()
-    }
-
-    #[test]
-    fn test_extract_logic_r_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_logic_r");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            AndInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-
-        let col_map = extract_logic_r_column_map(&config, cb.cs.num_witin as usize);
-        let flat = col_map.to_flat();
-
-        crate::instructions::gpu::utils::colmap_base::validate_column_map(&flat, col_map.num_cols);
-    }
+    use crate::instructions::gpu::utils::column_map::test_colmap;
+    test_colmap!(test_extract_logic_r_column_map, AndInstruction<E>, extract_logic_r_column_map);
 
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_logic_r_correctness() {
         use crate::e2e::ShardContext;
+        use crate::instructions::gpu::dispatch;
+        use crate::instructions::gpu::utils::test_helpers::{
+            assert_full_gpu_pipeline, assert_witness_colmajor_eq,
+        };
         use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
@@ -194,56 +159,17 @@ mod tests {
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
             gpu_result.witness.device_buffer.to_vec().unwrap();
-        let cpu_data = cpu_witness.values();
-        assert_eq!(gpu_data.len(), cpu_data.len(), "Size mismatch");
+        assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
 
-        let mut mismatches = 0;
-        for row in 0..n {
-            for c in 0..num_witin {
-                let gpu_val = gpu_data[c * n + row];
-                let cpu_val = cpu_data[row * num_witin + c];
-                if gpu_val != cpu_val {
-                    if mismatches < 10 {
-                        eprintln!(
-                            "Mismatch at row={}, col={}: GPU={:?}, CPU={:?}",
-                            row, c, gpu_val, cpu_val
-                        );
-                    }
-                    mismatches += 1;
-                }
-            }
-        }
-        assert_eq!(mismatches, 0, "Found {} mismatches", mismatches);
-
-        let mut shard_ctx_full_gpu = ShardContext::default();
-        let (gpu_rmms, gpu_lkm) =
-            crate::instructions::gpu::dispatch::try_gpu_assign_instances::<E, AndInstruction<E>>(
-                &config,
-                &mut shard_ctx_full_gpu,
-                num_witin,
-                num_structural_witin,
-                &steps,
-                &indices,
-                crate::instructions::gpu::dispatch::GpuWitgenKind::LogicR(0),
-            )
-            .unwrap()
-            .expect("GPU path should be available");
-
-        crate::instructions::gpu::cache::flush_shared_ec_buffers(&mut shard_ctx_full_gpu).unwrap();
-
-        assert_eq!(gpu_rmms[0].values(), cpu_rmms[0].values());
-        assert_eq!(flatten_lk(&gpu_lkm), flatten_lk(&cpu_lkm));
-        assert_eq!(
-            shard_ctx_full_gpu.get_addr_accessed(),
-            shard_ctx.get_addr_accessed()
-        );
-        assert_eq!(
-            flatten_records(shard_ctx_full_gpu.read_records()),
-            flatten_records(shard_ctx.read_records())
-        );
-        assert_eq!(
-            flatten_records(shard_ctx_full_gpu.write_records()),
-            flatten_records(shard_ctx.write_records())
+        assert_full_gpu_pipeline::<E, AndInstruction<E>>(
+            &config,
+            &steps,
+            dispatch::GpuWitgenKind::LogicR(0),
+            &cpu_rmms,
+            &cpu_lkm,
+            &shard_ctx,
+            num_witin,
+            num_structural_witin,
         );
     }
 }

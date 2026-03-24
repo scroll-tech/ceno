@@ -1100,15 +1100,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 &*(config as *const I::InstructionConfig
                     as *const crate::instructions::riscv::memory::load_v2::LoadConfig<E>)
             };
-            let is_byte = load_width == 8;
-            let is_signed_bool = is_signed != 0;
             let col_map = info_span!("col_map").in_scope(|| {
-                super::chips::load_sub::extract_load_sub_column_map(
-                    load_config,
-                    num_witin,
-                    is_byte,
-                    is_signed_bool,
-                )
+                super::chips::load_sub::extract_load_sub_column_map(load_config, num_witin)
             });
             let mem_max_bits = load_config.memory_addr.max_bits as u32;
             info_span!("hal_witgen_load_sub").in_scope(|| {
@@ -1146,7 +1139,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::mulh::mulh_circuit_v2::MulhConfig<E>)
             };
             let col_map = info_span!("col_map").in_scope(|| {
-                super::chips::mul::extract_mul_column_map(mul_config, num_witin, mul_kind)
+                super::chips::mul::extract_mul_column_map(mul_config, num_witin)
             });
             info_span!("hal_witgen_mul").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {

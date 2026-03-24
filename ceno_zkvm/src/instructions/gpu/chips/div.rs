@@ -2,7 +2,7 @@ use ceno_gpu::common::witgen::types::DivColumnMap;
 use ff_ext::ExtensionField;
 
 use crate::instructions::{
-    gpu::utils::colmap_base::{
+    gpu::utils::column_map::{
         extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs,
     },
     riscv::div::div_circuit_v2::DivRemConfig,
@@ -99,68 +99,17 @@ mod tests {
 
     type E = BabyBearExt4;
 
-    fn test_column_map_validity(col_map: &DivColumnMap) {
-        let (n_entries, flat) = col_map.to_flat();
-        for (i, &col) in flat[..n_entries].iter().enumerate() {
-            assert!(
-                (col as usize) < col_map.num_cols as usize,
-                "Column {} (index {}) out of range: {} >= {}",
-                i,
-                col,
-                col,
-                col_map.num_cols
-            );
-        }
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat[..n_entries] {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
-    }
-
-    #[test]
-    fn test_extract_div_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_div");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            DivInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_div_column_map(&config, cb.cs.num_witin as usize);
-        test_column_map_validity(&col_map);
-    }
-
-    #[test]
-    fn test_extract_divu_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_divu");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            DivuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_div_column_map(&config, cb.cs.num_witin as usize);
-        test_column_map_validity(&col_map);
-    }
-
-    #[test]
-    fn test_extract_rem_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_rem");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            RemInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_div_column_map(&config, cb.cs.num_witin as usize);
-        test_column_map_validity(&col_map);
-    }
-
-    #[test]
-    fn test_extract_remu_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_remu");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            RemuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_div_column_map(&config, cb.cs.num_witin as usize);
-        test_column_map_validity(&col_map);
-    }
+    use crate::instructions::gpu::utils::column_map::test_colmap;
+    test_colmap!(test_extract_div_column_map, DivInstruction<E>, extract_div_column_map);
+    test_colmap!(test_extract_divu_column_map, DivuInstruction<E>, extract_div_column_map);
+    test_colmap!(test_extract_rem_column_map, RemInstruction<E>, extract_div_column_map);
+    test_colmap!(test_extract_remu_column_map, RemuInstruction<E>, extract_div_column_map);
 
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_div_correctness() {
         use crate::e2e::ShardContext;
+        use crate::instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq;
         use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
@@ -359,26 +308,7 @@ mod tests {
 
             let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
                 gpu_result.witness.device_buffer.to_vec().unwrap();
-            let cpu_data = cpu_witness.values();
-            assert_eq!(gpu_data.len(), cpu_data.len(), "{}: Size mismatch", name);
-
-            let mut mismatches = 0;
-            for row in 0..n {
-                for c in 0..num_witin {
-                    let gpu_val = gpu_data[c * n + row];
-                    let cpu_val = cpu_data[row * num_witin + c];
-                    if gpu_val != cpu_val {
-                        if mismatches < 10 {
-                            eprintln!(
-                                "{}: Mismatch at row={}, col={}: GPU={:?}, CPU={:?}",
-                                name, row, c, gpu_val, cpu_val
-                            );
-                        }
-                        mismatches += 1;
-                    }
-                }
-            }
-            assert_eq!(mismatches, 0, "{}: Found {} mismatches", name, mismatches);
+            assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
             eprintln!("{} GPU vs CPU: PASS ({} instances)", name, n);
         }
     }

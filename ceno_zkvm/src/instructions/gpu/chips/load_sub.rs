@@ -2,7 +2,7 @@ use ceno_gpu::common::witgen::types::LoadSubColumnMap;
 use ff_ext::ExtensionField;
 
 use crate::instructions::{
-    gpu::utils::colmap_base::{
+    gpu::utils::column_map::{
         extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs,
     },
     riscv::memory::load_v2::LoadConfig,
@@ -12,8 +12,6 @@ use crate::instructions::{
 pub fn extract_load_sub_column_map<E: ExtensionField>(
     config: &LoadConfig<E>,
     num_witin: usize,
-    is_byte: bool,   // true for LB/LBU
-    is_signed: bool, // true for LH/LB
 ) -> LoadSubColumnMap {
     let im = &config.im_insn;
 
@@ -28,14 +26,13 @@ pub fn extract_load_sub_column_map<E: ExtensionField>(
     let mem_addr = extract_uint_limbs::<E, 2, _, _>(&config.memory_addr.addr, "memory_addr");
     let mem_read = extract_uint_limbs::<E, 2, _, _>(&config.memory_read, "memory_read");
 
-    // Sub-word specific: addr_bit_1 (all sub-word loads have at least 1 low_bit)
+    // Infer variant from config: LB/LBU have 2 low_bits, LH/LHU have 1.
     let low_bits = &config.memory_addr.low_bits;
+    let is_byte = low_bits.len() == 2;
+
     let addr_bit_1 = if is_byte {
-        // LB/LBU: 2 low_bits, [0]=bit_0, [1]=bit_1
-        assert_eq!(low_bits.len(), 2, "LB/LBU should have 2 low_bits");
         low_bits[1].id as u32
     } else {
-        // LH/LHU: 1 low_bit, [0]=bit_1
         assert_eq!(low_bits.len(), 1, "LH/LHU should have 1 low_bit");
         low_bits[0].id as u32
     };
@@ -61,16 +58,8 @@ pub fn extract_load_sub_column_map<E: ExtensionField>(
         (None, None, None)
     };
 
-    // Signed: msb
-    let msb = if is_signed {
-        let sec = config
-            .signed_extend_config
-            .as_ref()
-            .expect("signed loads must have signed_extend_config");
-        Some(sec.msb().id as u32)
-    } else {
-        None
-    };
+    // Signed loads have signed_extend_config
+    let msb = config.signed_extend_config.as_ref().map(|sec| sec.msb().id as u32);
 
     LoadSubColumnMap {
         pc,
@@ -114,78 +103,17 @@ mod tests {
 
     type E = BabyBearExt4;
 
-    fn test_column_map_validity(col_map: &LoadSubColumnMap) {
-        let (n_entries, flat) = col_map.to_flat();
-        for (i, &col) in flat[..n_entries].iter().enumerate() {
-            assert!(
-                (col as usize) < col_map.num_cols as usize,
-                "Column {} (index {}) out of range: {} >= {}",
-                i,
-                col,
-                col,
-                col_map.num_cols
-            );
-        }
-        let mut seen = std::collections::HashSet::new();
-        for &col in &flat[..n_entries] {
-            assert!(seen.insert(col), "Duplicate column ID: {}", col);
-        }
-    }
-
-    #[test]
-    fn test_extract_lh_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_lh");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            LhInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_load_sub_column_map(&config, cb.cs.num_witin as usize, false, true);
-        test_column_map_validity(&col_map);
-        assert!(col_map.msb.is_some());
-        assert!(col_map.addr_bit_0.is_none());
-    }
-
-    #[test]
-    fn test_extract_lhu_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_lhu");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            LhuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_load_sub_column_map(&config, cb.cs.num_witin as usize, false, false);
-        test_column_map_validity(&col_map);
-        assert!(col_map.msb.is_none());
-        assert!(col_map.addr_bit_0.is_none());
-    }
-
-    #[test]
-    fn test_extract_lb_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_lb");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            LbInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_load_sub_column_map(&config, cb.cs.num_witin as usize, true, true);
-        test_column_map_validity(&col_map);
-        assert!(col_map.msb.is_some());
-        assert!(col_map.addr_bit_0.is_some());
-        assert!(col_map.target_byte.is_some());
-    }
-
-    #[test]
-    fn test_extract_lbu_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_lbu");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let config =
-            LbuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
-        let col_map = extract_load_sub_column_map(&config, cb.cs.num_witin as usize, true, false);
-        test_column_map_validity(&col_map);
-        assert!(col_map.msb.is_none());
-        assert!(col_map.addr_bit_0.is_some());
-        assert!(col_map.target_byte.is_some());
-    }
+    use crate::instructions::gpu::utils::column_map::test_colmap;
+    test_colmap!(test_extract_lh_column_map, LhInstruction<E>, extract_load_sub_column_map);
+    test_colmap!(test_extract_lhu_column_map, LhuInstruction<E>, extract_load_sub_column_map);
+    test_colmap!(test_extract_lb_column_map, LbInstruction<E>, extract_load_sub_column_map);
+    test_colmap!(test_extract_lbu_column_map, LbuInstruction<E>, extract_load_sub_column_map);
 
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_load_sub_correctness() {
         use crate::e2e::ShardContext;
+        use crate::instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq;
         use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, WordAddr, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
@@ -340,7 +268,7 @@ mod tests {
             let cpu_witness = &cpu_rmms[0];
 
             // GPU path
-            let col_map = extract_load_sub_column_map(&config, num_witin, is_byte, is_signed);
+            let col_map = extract_load_sub_column_map(&config, num_witin);
             let shard_ctx_gpu = ShardContext::default();
             let shard_offset = shard_ctx_gpu.current_shard_offset_cycle();
             let steps_bytes: &[u8] = unsafe {
@@ -372,26 +300,7 @@ mod tests {
 
             let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
                 gpu_result.witness.device_buffer.to_vec().unwrap();
-            let cpu_data = cpu_witness.values();
-            assert_eq!(gpu_data.len(), cpu_data.len(), "{}: Size mismatch", name);
-
-            let mut mismatches = 0;
-            for row in 0..n {
-                for c in 0..num_witin {
-                    let gpu_val = gpu_data[c * n + row];
-                    let cpu_val = cpu_data[row * num_witin + c];
-                    if gpu_val != cpu_val {
-                        if mismatches < 10 {
-                            eprintln!(
-                                "{}: Mismatch at row={}, col={}: GPU={:?}, CPU={:?}",
-                                name, row, c, gpu_val, cpu_val
-                            );
-                        }
-                        mismatches += 1;
-                    }
-                }
-            }
-            assert_eq!(mismatches, 0, "{}: Found {} mismatches", name, mismatches);
+            assert_witness_colmajor_eq(&gpu_data, cpu_witness.values(), n, num_witin);
             eprintln!("{} GPU vs CPU: PASS ({} instances)", name, n);
         }
     }
