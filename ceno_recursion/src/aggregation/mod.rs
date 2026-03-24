@@ -86,9 +86,10 @@ pub const INTERNAL_LOG_BLOWUP: usize = 2;
 pub const ROOT_LOG_BLOWUP: usize = 3;
 pub const SBOX_SIZE: usize = 7;
 const VM_MAX_TRACE_HEIGHTS: &[u32] = &[
-    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 2097152, 16777216,
-    2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
+    4194304, 4, 128, 2097152, 8388608, 4194304, 262144, 8388608, 16777216, 16777216, 2097152,
+    16777216, 2097152, 8388608, 262144, 2097152, 1048576, 4194304, 1048576, 262144,
 ];
+
 pub struct CenoAggregationProver {
     pub base_vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>,
     pub leaf_prover: VmInstance<BabyBearPoseidon2Engine, NativeBuilder>,
@@ -290,7 +291,7 @@ impl CenoAggregationProver {
 
                 // _debug: export
                 // let file =
-                // File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
+                //     File::create(format!("leaf_proof_{:?}.bin", proof_idx)).expect("Create export proof file");
                 // bincode::serialize_into(file, &leaf_proof).expect("failed to serialize leaf proof");
 
                 println!(
@@ -304,14 +305,28 @@ impl CenoAggregationProver {
             })
             .collect::<Vec<_>>();
 
-        // Aggregate tree to root proof
+        // Aggregate leaf proofs into a single internal proof via binary tree
+        let root_inner = self.aggregate_internal_proofs(leaf_proofs);
+
+        // Export e2e stark proof (used in verify_e2e_stark_proof)
+        VmStarkProof {
+            inner: root_inner,
+            user_public_values,
+        }
+    }
+
+    /// Aggregate leaf (or internal) proofs into a single root internal proof
+    /// via a binary tree of internal proving rounds.
+    pub fn aggregate_internal_proofs(&mut self, leaf_proofs: Vec<Proof<SC>>) -> Proof<SC> {
+        let start = Instant::now();
+
         let mut internal_node_idx = -1;
         let mut internal_node_height = 0;
         let mut proofs = leaf_proofs;
 
         println!(
             "Aggregation - Start internal aggregation at: {:?}",
-            aggregation_start_timestamp.elapsed()
+            start.elapsed()
         );
         // We will always generate at least one internal proof, even if there is only one leaf
         // proof, in order to shrink the proof size
@@ -321,7 +336,6 @@ impl CenoAggregationProver {
                 &proofs,
                 DEFAULT_NUM_CHILDREN_INTERNAL,
             );
-
             let layer_proofs: Vec<Proof<_>> = internal_inputs
                 .into_iter()
                 .map(|input| {
@@ -337,7 +351,7 @@ impl CenoAggregationProver {
                         "Aggregation - Completed internal node (idx: {:?}) at height {:?}: {:?}",
                         internal_node_idx,
                         internal_node_height,
-                        aggregation_start_timestamp.elapsed()
+                        start.elapsed()
                     );
 
                     // _debug: export
@@ -356,17 +370,13 @@ impl CenoAggregationProver {
         }
         println!(
             "Aggregation - Completed internal aggregation at: {:?}",
-            aggregation_start_timestamp.elapsed()
+            start.elapsed()
         );
         println!("Aggregation - Final height: {:?}", internal_node_height);
 
         // TODO: generate root proof from last internal proof
 
-        // Export e2e stark proof (used in verify_e2e_stark_proof)
-        VmStarkProof {
-            inner: proofs.pop().unwrap(),
-            user_public_values,
-        }
+        proofs.pop().unwrap()
     }
 }
 
@@ -415,6 +425,25 @@ impl CenoLeafVmVerifierConfig {
             builder.assign(&stark_pvs.connector.initial_pc, init_pc);
             builder.assign(&stark_pvs.connector.final_pc, end_pc);
             builder.assign(&stark_pvs.connector.exit_code, exit_code);
+            // Internal aggregation asserts connector chaining on this field.
+            builder
+                .if_eq(ceno_leaf_input.is_last, Usize::from(1))
+                .then_or_else(
+                    |builder| {
+                        builder.assign(&stark_pvs.connector.is_terminate, F::ONE);
+                    },
+                    |builder| {
+                        builder.assign(&stark_pvs.connector.is_terminate, F::ZERO);
+                    },
+                );
+
+            // Keep remaining committed PVs deterministic until real memory/public-values
+            // commitments are wired through this custom leaf program.
+            for i in 0..DIGEST_SIZE {
+                builder.assign(&stark_pvs.memory.initial_root[i], F::ZERO);
+                builder.assign(&stark_pvs.memory.final_root[i], F::ZERO);
+                builder.assign(&stark_pvs.public_values_commit[i], F::ZERO);
+            }
 
             // TODO: assign shard_ec_sum to stark_pvs.shard_ec_sum
 
@@ -693,6 +722,7 @@ pub fn verify_proofs(
 
         let fri_params = standard_fri_params_with_100_bits_conjectured_security(1);
         let vb = NativeBuilder::default();
+
         air_test_impl::<BabyBearPoseidon2Engine, _>(
             fri_params,
             vb,
@@ -703,6 +733,13 @@ pub fn verify_proofs(
             true,
         )
         .unwrap();
+
+        // _debug
+        // let engine = BabyBearPoseidon2Engine::new(fri_params);
+        // let (mut vm, pk) = VirtualMachine::new_with_keygen(engine, vb, config).expect("create vm");
+        // let vk = pk.get_vk();
+        // vm.verify(&vk, &proofs)
+        //     .expect("segment proofs should verify");
     }
 }
 
@@ -710,7 +747,7 @@ pub fn verify_proofs(
 mod tests {
     use super::verify_e2e_stark_proof;
     use crate::{
-        aggregation::{CenoAggregationProver, verify_proofs},
+        aggregation::{CenoAggregationProver, SC, verify_proofs},
         zkvm_verifier::binding::E,
     };
     use ceno_zkvm::{
@@ -719,6 +756,7 @@ mod tests {
         structs::ZKVMVerifyingKey,
     };
     use mpcs::{Basefold, BasefoldRSParams};
+    use openvm_stark_backend::proof::Proof;
     use openvm_stark_sdk::{config::setup_tracing_with_log_level, p3_bn254_fr::Bn254Fr};
     use p3::field::FieldAlgebra;
     use std::fs::File;
@@ -785,6 +823,30 @@ mod tests {
         verify(zkvm_proofs.clone(), &verifier).expect("Verification failed");
     }
 
+    pub fn internal_aggregation_inner_thread() {
+        setup_tracing_with_log_level(tracing::Level::WARN);
+
+        let vk_path = "./src/imported/vk.bin";
+        let vk: ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>> =
+            bincode::deserialize_from(File::open(vk_path).expect("Failed to open vk file"))
+                .expect("Failed to deserialize vk file");
+
+        let mut agg_prover = CenoAggregationProver::from_base_vk(vk);
+
+        // Load exported leaf proofs
+        let leaf_proof_0: Proof<SC> = bincode::deserialize_from(
+            File::open("./leaf_proof_0.bin").expect("Failed to open leaf_proof_0.bin"),
+        )
+        .expect("Failed to deserialize leaf_proof_0");
+        let leaf_proof_1: Proof<SC> = bincode::deserialize_from(
+            File::open("./leaf_proof_1.bin").expect("Failed to open leaf_proof_1.bin"),
+        )
+        .expect("Failed to deserialize leaf_proof_1");
+
+        let leaf_proofs = vec![leaf_proof_0, leaf_proof_1];
+        let _root_proof = agg_prover.aggregate_internal_proofs(leaf_proofs);
+    }
+
     #[test]
     #[ignore = "need to generate proof first"]
     pub fn test_aggregation() {
@@ -793,6 +855,19 @@ mod tests {
         let handler = std::thread::Builder::new()
             .stack_size(stack_size)
             .spawn(aggregation_inner_thread)
+            .expect("Failed to spawn thread");
+
+        handler.join().expect("Thread panicked");
+    }
+
+    #[test]
+    #[ignore = "need to generate proof first"]
+    pub fn test_internal_aggregation() {
+        let stack_size = 256 * 1024 * 1024;
+
+        let handler = std::thread::Builder::new()
+            .stack_size(stack_size)
+            .spawn(internal_aggregation_inner_thread)
             .expect("Failed to spawn thread");
 
         handler.join().expect("Thread panicked");

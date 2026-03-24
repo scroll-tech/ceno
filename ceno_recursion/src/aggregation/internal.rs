@@ -96,9 +96,7 @@ impl<C: Config> NonLeafVerifierVariables<C> {
             let proof = builder.get(proofs, i);
             assert_required_air_for_agg_vm_present(builder, &proof);
             let proof_vm_pvs = self.verify_internal_or_leaf_verifier_proof(builder, &proof);
-
             assert_single_segment_vm_exit_successfully(builder, &proof);
-
             builder.if_eq(i, RVar::zero()).then_or_else(
                 |builder| {
                     builder.assign(&pvs.app_commit, proof_vm_pvs.vm_verifier_pvs.app_commit);
