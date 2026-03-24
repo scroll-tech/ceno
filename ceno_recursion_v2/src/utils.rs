@@ -1,11 +1,24 @@
 use std::ops::Index;
 
+use ff_ext::{BabyBearExt4, ExtensionField as CenoExtensionField, SmallField};
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::interaction::Interaction;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{CHUNK, D_EF, DIGEST_SIZE, F, poseidon2_perm};
+use openvm_stark_backend::FiatShamirTranscript;
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_symmetric::Permutation;
+
+pub fn transcript_observe_label<TS>(transcript: &mut TS, label: &[u8])
+where
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
+{
+    let label_f = <BabyBearExt4 as CenoExtensionField>::BaseField::bytes_to_field_elements(label);
+    for elem in label_f {
+        transcript.observe(elem);
+    }
+}
 
 pub fn base_to_ext<FA>(x: impl Into<FA>) -> [FA; D_EF]
 where
