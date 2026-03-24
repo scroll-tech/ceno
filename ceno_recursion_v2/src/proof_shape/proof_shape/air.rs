@@ -11,21 +11,19 @@ use openvm_stark_backend::{
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirShapeBus, AirShapeBusMessage, CachedCommitBus, CachedCommitBusMessage, CommitmentsBus,
+        AirShapeBus, AirShapeBusMessage, CachedCommitBus, CommitmentsBus,
         CommitmentsBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
         FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage,
         LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus, NLiftMessage, TowerModuleBus,
         TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
     },
-    primitives::bus::{
-        PowerCheckerBus, PowerCheckerBusMessage, RangeCheckerBus, RangeCheckerBusMessage,
-    },
+    primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
         AirMetadata,
         bus::{
@@ -47,7 +45,7 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     // loop: proof_idx -> idx (air idx)
     pub idx: F,
     pub sorted_idx: F,
-    /// Represents log2 trace height when `is_present`.
+    /// Represents `log2(next_pow_2(height))` when `is_present`.
     ///
     /// Has a special use on summary row (when `is_last`).
     pub log_height: F,
@@ -62,7 +60,7 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     // from the transcript.
     pub is_present: F,
 
-    /// Will be constrained to be `2^log_height` when `is_present`.
+    /// Lifted trace height (`2^log_height`) used in downstream lookups when `is_present`.
     ///
     /// Has a special use on summary row (when `is_last`).
     pub height: F,
@@ -102,7 +100,6 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     // Primitives
     pub idx_encoder: Arc<Encoder>,
     pub range_bus: RangeCheckerBus,
-    pub pow_bus: PowerCheckerBus,
 
     // Internal buses
     pub permutation_bus: ProofShapePermutationBus,
@@ -164,7 +161,7 @@ where
         );
         let local: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*local)[..const_width].borrow();
         let next: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*next)[..const_width].borrow();
-        let n_logup = local.starting_cidx;
+        let n = local.log_height.into();
 
         self.idx_encoder.eval(builder, localv.idx_flags);
 
@@ -287,7 +284,7 @@ where
                 is_min_cached += is_current_air.clone();
             }
 
-            assert!(air_data.preprocessed_data.is_none);
+            assert!(air_data.preprocessed_data.is_none());
             if let Some(preprocessed) = &air_data.preprocessed_data {
                 when_current.assert_eq(
                     local.log_height,
@@ -475,7 +472,7 @@ where
                 value: num_read_count.clone(),
             },
             // each layer lookup once if current air was present
-            local.is_present * n_logup,
+            local.is_present * n.clone(),
         );
         self.air_shape_bus.add_key_with_lookups(
             builder,
@@ -485,7 +482,7 @@ where
                 property_idx: AirShapeProperty::NumWrite.to_field(),
                 value: num_write_count.clone(),
             },
-            local.is_present * n_logup,
+            local.is_present * n.clone(),
         );
         self.air_shape_bus.add_key_with_lookups(
             builder,
@@ -495,13 +492,12 @@ where
                 property_idx: AirShapeProperty::NumLk.to_field(),
                 value: num_logup_count,
             },
-            local.is_present * n_logup,
+            local.is_present * n.clone(),
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HYPERDIM LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let n = local.log_height.into();
         builder.assert_bool(local.need_rot);
         builder
             .when(not(local.is_present))
@@ -509,12 +505,11 @@ where
         builder
             .when(not(local.is_present))
             .assert_zero(local.num_columns);
-        let n_abs = n.clone();
         // We range check n in [0, 32).
         self.range_bus.lookup_key(
             builder,
             RangeCheckerBusMessage {
-                value: n_abs.clone(),
+                value: n.clone(),
                 max_bits: AB::Expr::from_usize(5),
             },
             local.is_present,
@@ -525,7 +520,7 @@ where
             local.proof_idx,
             HyperdimBusMessage {
                 sort_idx: local.sorted_idx.into(),
-                n_abs: n_abs.clone(),
+                n_abs: n.clone(),
                 n_sign_bit: AB::Expr::ZERO,
             },
             local.is_present * (local.num_air_id_lookups + AB::F::ONE),
@@ -534,13 +529,10 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // LIFTED HEIGHTS LOOKUP + STACKING COMMITMENTS
         ///////////////////////////////////////////////////////////////////////////////////////////
-        self.pow_bus.lookup_key(
-            builder,
-            PowerCheckerBusMessage {
-                log: local.log_height.into(),
-                exp: local.height.into(),
-            },
-            local.is_present,
+        let raw_height = fold(
+            local.height_limbs.iter().enumerate(),
+            AB::Expr::ZERO,
+            |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
         );
 
         self.lifted_heights_bus.add_key_with_lookups(
@@ -558,9 +550,10 @@ where
         );
 
         // cidx start from 1
-        builder
-            .when(and(local.is_first, local.is_valid))
-            .assert_one(local.starting_cidx);
+        // TODO(starting-cidx): starting_cidx flow is intentionally disabled in local fork.
+        // builder
+        //     .when(and(local.is_first, local.is_valid))
+        //     .assert_one(local.starting_cidx);
         // let mut cidx_offset = AB::Expr::ZERO;
 
         // NOTE: this is non used if preprocessed_stacked_width == 0
@@ -591,7 +584,8 @@ where
         // );
         // cidx_offset still be 0
         // cidx_offset += has_preprocessed.clone();
-        let mut cidx_offset = AB::Expr::ZERO;
+        // TODO(starting-cidx): re-enable if/when commit-index stacking flow is restored.
+        // let mut cidx_offset = AB::Expr::ZERO;
 
         // (0..self.max_cached).for_each(|cached_idx| {
         //     self.lifted_heights_bus.add_key_with_lookups(
@@ -636,9 +630,10 @@ where
         //     // );
         // });
 
-        builder
-            .when(and(local.is_valid, not(next.is_last)))
-            .assert_eq(local.starting_cidx + cidx_offset, next.starting_cidx);
+        // TODO(starting-cidx): disabled alongside local starting_cidx removal.
+        // builder
+        //     .when(and(local.is_valid, not(next.is_last)))
+        //     .assert_eq(local.starting_cidx + cidx_offset, next.starting_cidx);
 
         self.commitments_bus.add_key_with_lookups(
             builder,
@@ -668,15 +663,6 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HEIGHT + GKR MESSAGE
         ///////////////////////////////////////////////////////////////////////////////////////////
-        builder.when(local.is_valid).assert_eq(
-            fold(
-                local.height_limbs.iter().enumerate(),
-                AB::Expr::ZERO,
-                |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
-            ),
-            local.height,
-        );
-
         for i in 0..NUM_LIMBS {
             self.range_bus.lookup_key(
                 builder,
@@ -709,7 +695,7 @@ where
         // n_max is greater than n_logup, and zero otherwise.
         builder
             .when(local.is_first)
-            .assert_eq(local.n_max, n_abs.clone());
+            .assert_eq(local.n_max, n.clone());
         builder
             .when(local.is_valid)
             .assert_eq(local.n_max, next.n_max);
@@ -718,7 +704,8 @@ where
         self.range_bus.lookup_key(
             builder,
             RangeCheckerBusMessage {
-                value: (local.n_max - n_logup) * (local.is_n_max_greater * AB::F::TWO - AB::F::ONE),
+                value: (local.n_max - n.clone())
+                    * (local.is_n_max_greater * AB::F::TWO - AB::F::ONE),
                 max_bits: AB::Expr::from_usize(5),
             },
             local.is_last,
@@ -730,7 +717,7 @@ where
             TowerModuleMessage {
                 idx: local.idx.into(),
                 tidx: local.starting_tidx.into(),
-                n_logup: n_logup.into(),
+                n_logup: n,
             },
             local.is_last,
         );

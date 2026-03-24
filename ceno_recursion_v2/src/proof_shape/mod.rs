@@ -26,7 +26,7 @@ use crate::{
     tracegen::RowMajorChip,
 };
 use recursion_circuit::primitives::{
-    bus::{PowerCheckerBus, RangeCheckerBus},
+    bus::RangeCheckerBus,
     pow::PowerCheckerCpuTraceGenerator,
     range::{RangeCheckerAir, RangeCheckerCols},
 };
@@ -59,7 +59,6 @@ pub struct ProofShapeModule {
     // Buses (inventory for external, others are internal)
     bus_inventory: BusInventory,
     range_bus: RangeCheckerBus,
-    pow_bus: PowerCheckerBus,
     permutation_bus: ProofShapePermutationBus,
     starting_tidx_bus: StartingTidxBus,
     num_pvs_bus: NumPublicValuesBus,
@@ -92,12 +91,10 @@ impl ProofShapeModule {
         let per_air = extract_air_metadata_from_vk(child_vk, max_cached);
 
         let range_bus = bus_inventory.range_checker_bus;
-        let pow_bus = bus_inventory.power_checker_bus;
         Self {
             per_air,
             bus_inventory,
             range_bus,
-            pow_bus,
             permutation_bus: ProofShapePermutationBus::new(b.new_bus_idx()),
             starting_tidx_bus: StartingTidxBus::new(b.new_bus_idx()),
             num_pvs_bus: NumPublicValuesBus::new(b.new_bus_idx()),
@@ -242,7 +239,6 @@ impl AirModule for ProofShapeModule {
             commit_mult: self.commit_mult,
             idx_encoder: self.idx_encoder.clone(),
             range_bus: self.range_bus,
-            pow_bus: self.pow_bus,
             permutation_bus: self.permutation_bus,
             starting_tidx_bus: self.starting_tidx_bus,
             num_pvs_bus: self.num_pvs_bus,
