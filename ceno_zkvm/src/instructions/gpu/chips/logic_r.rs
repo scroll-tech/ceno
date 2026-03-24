@@ -1,8 +1,12 @@
 use ceno_gpu::common::witgen::types::LogicRColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
-use crate::instructions::riscv::logic::logic_circuit::LogicConfig;
+use crate::instructions::{
+    gpu::utils::colmap_base::{
+        extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs,
+    },
+    riscv::logic::logic_circuit::LogicConfig,
+};
 
 /// Extract column map from a constructed LogicConfig (R-type: AND/OR/XOR).
 pub fn extract_logic_r_column_map<E: ExtensionField>(
@@ -173,8 +177,19 @@ mod tests {
         };
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-        let gpu_result = hal.witgen
-            .witgen_logic_r(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, 0, None, None)
+        let gpu_result = hal
+            .witgen
+            .witgen_logic_r(
+                &col_map,
+                &gpu_records,
+                &indices_u32,
+                shard_offset,
+                0,
+                0,
+                0,
+                None,
+                None,
+            )
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
@@ -202,10 +217,7 @@ mod tests {
 
         let mut shard_ctx_full_gpu = ShardContext::default();
         let (gpu_rmms, gpu_lkm) =
-            crate::instructions::gpu::dispatch::try_gpu_assign_instances::<
-                E,
-                AndInstruction<E>,
-            >(
+            crate::instructions::gpu::dispatch::try_gpu_assign_instances::<E, AndInstruction<E>>(
                 &config,
                 &mut shard_ctx_full_gpu,
                 num_witin,
@@ -217,10 +229,7 @@ mod tests {
             .unwrap()
             .expect("GPU path should be available");
 
-        crate::instructions::gpu::cache::flush_shared_ec_buffers(
-            &mut shard_ctx_full_gpu,
-        )
-        .unwrap();
+        crate::instructions::gpu::cache::flush_shared_ec_buffers(&mut shard_ctx_full_gpu).unwrap();
 
         assert_eq!(gpu_rmms[0].values(), cpu_rmms[0].values());
         assert_eq!(flatten_lk(&gpu_lkm), flatten_lk(&cpu_lkm));

@@ -2,14 +2,11 @@ use std::marker::PhantomData;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::{
-        Instruction,
-        gpu::utils::emit_u16_limbs,
-    },
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
+    instructions::{Instruction, gpu::utils::emit_u16_limbs},
     structs::ProgramParams,
     uint::Value,
     witness::LkMultiplicity,

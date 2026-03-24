@@ -1,24 +1,23 @@
-pub mod utils;
+#[cfg(feature = "gpu")]
+#[cfg(feature = "gpu")]
+pub mod cache;
 pub mod chips;
 #[cfg(feature = "gpu")]
 #[cfg(feature = "gpu")]
 #[cfg(feature = "gpu")]
 pub mod config;
 #[cfg(feature = "gpu")]
-#[cfg(feature = "gpu")]
-pub mod cache;
-#[cfg(feature = "gpu")]
 pub mod dispatch;
+pub mod utils;
 
 #[cfg(test)]
 mod tests {
-    use super::utils::*;
+
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         e2e::ShardContext,
         instructions::{
-            Instruction, cpu_assign_instances, cpu_collect_shardram,
-            cpu_collect_lk_and_shardram,
+            Instruction, cpu_assign_instances, cpu_collect_lk_and_shardram, cpu_collect_shardram,
             riscv::{
                 AddInstruction, JalInstruction, JalrInstruction, LwInstruction, SbInstruction,
                 branch::{BeqInstruction, BltInstruction},
@@ -32,7 +31,6 @@ mod tests {
             },
         },
         structs::ProgramParams,
-        witness::LkMultiplicity,
     };
     use ceno_emul::{
         ByteAddr, Change, InsnKind, PC_STEP_SIZE, ReadOp, StepRecord, WordAddr, WriteOp,
@@ -102,8 +100,7 @@ mod tests {
 
         let mut collect_ctx = ShardContext::default();
         let actual_lk =
-            cpu_collect_shardram::<E, I>(config, &mut collect_ctx, steps, &indices)
-                .unwrap();
+            cpu_collect_shardram::<E, I>(config, &mut collect_ctx, steps, &indices).unwrap();
 
         assert_eq!(
             expected_lk[LookupTable::Instruction as usize],
@@ -171,12 +168,12 @@ mod tests {
                 let rd = 2 + i;
                 let rs1 = 8 + i;
                 let rs2 = 16 + i;
-                let lhs = 10 + i as u32;
-                let rhs = 100 + i as u32;
+                let lhs = 10 + i;
+                let rhs = 100 + i;
                 let insn = encode_rv32(InsnKind::ADD, rs1, rs2, rd, 0);
                 StepRecord::new_r_instruction(
                     4 + (i as u64) * 4,
-                    ByteAddr(0x1000 + i as u32 * 4),
+                    ByteAddr(0x1000 + i * 4),
                     insn,
                     lhs,
                     rhs,
@@ -205,12 +202,12 @@ mod tests {
                 let rd = 2 + i;
                 let rs1 = 8 + i;
                 let rs2 = 16 + i;
-                let lhs = 0xdead_0000 | i as u32;
-                let rhs = 0x00ff_ff00 | ((i as u32) << 8);
+                let lhs = 0xdead_0000 | i;
+                let rhs = 0x00ff_ff00 | (i << 8);
                 let insn = encode_rv32(InsnKind::AND, rs1, rs2, rd, 0);
                 StepRecord::new_r_instruction(
                     4 + (i as u64) * 4,
-                    ByteAddr(0x2000 + i as u32 * 4),
+                    ByteAddr(0x2000 + i * 4),
                     insn,
                     lhs,
                     rhs,
@@ -239,12 +236,12 @@ mod tests {
                 let rd = 2 + i;
                 let rs1 = 8 + i;
                 let rs2 = 16 + i;
-                let lhs = 10 + i as u32;
-                let rhs = 100 + i as u32;
+                let lhs = 10 + i;
+                let rhs = 100 + i;
                 let insn = encode_rv32(InsnKind::ADD, rs1, rs2, rd, 0);
                 StepRecord::new_r_instruction(
                     84 + (i as u64) * 4,
-                    ByteAddr(0x5000 + i as u32 * 4),
+                    ByteAddr(0x5000 + i * 4),
                     insn,
                     lhs,
                     rhs,
@@ -273,12 +270,12 @@ mod tests {
                 let rd = 2 + i;
                 let rs1 = 8 + i;
                 let rs2 = 16 + i;
-                let lhs = 0xdead_0000 | i as u32;
-                let rhs = 0x00ff_ff00 | ((i as u32) << 8);
+                let lhs = 0xdead_0000 | i;
+                let rhs = 0x00ff_ff00 | (i << 8);
                 let insn = encode_rv32(InsnKind::AND, rs1, rs2, rd, 0);
                 StepRecord::new_r_instruction(
                     100 + (i as u64) * 4,
-                    ByteAddr(0x5100 + i as u32 * 4),
+                    ByteAddr(0x5100 + i * 4),
                     insn,
                     lhs,
                     rhs,
@@ -306,10 +303,10 @@ mod tests {
             .map(|i| {
                 let rd = 2 + i;
                 let rs1 = 8 + i;
-                let rs1_val = 0x1000u32 + (i as u32) * 16;
+                let rs1_val = 0x1000u32 + i * 16;
                 let imm = (i as i32) * 4 - 4;
                 let mem_addr = rs1_val.wrapping_add_signed(imm);
-                let mem_val = 0xabc0_0000 | i as u32;
+                let mem_val = 0xabc0_0000 | i;
                 let insn = encode_rv32(InsnKind::LW, rs1, 0, rd, imm);
                 let mem_read = ReadOp {
                     addr: WordAddr::from(ByteAddr(mem_addr)),
@@ -318,7 +315,7 @@ mod tests {
                 };
                 StepRecord::new_im_instruction(
                     4 + (i as u64) * 4,
-                    ByteAddr(0x3000 + i as u32 * 4),
+                    ByteAddr(0x3000 + i * 4),
                     insn,
                     rs1_val,
                     Change::new(0, mem_val),
@@ -346,10 +343,10 @@ mod tests {
             .map(|i| {
                 let rd = 2 + i;
                 let rs1 = 8 + i;
-                let rs1_val = 0x1400u32 + (i as u32) * 16;
+                let rs1_val = 0x1400u32 + i * 16;
                 let imm = (i as i32) * 4 - 4;
                 let mem_addr = rs1_val.wrapping_add_signed(imm);
-                let mem_val = 0xabd0_0000 | i as u32;
+                let mem_val = 0xabd0_0000 | i;
                 let insn = encode_rv32(InsnKind::LW, rs1, 0, rd, imm);
                 let mem_read = ReadOp {
                     addr: WordAddr::from(ByteAddr(mem_addr)),
@@ -358,7 +355,7 @@ mod tests {
                 };
                 StepRecord::new_im_instruction(
                     116 + (i as u64) * 4,
-                    ByteAddr(0x5200 + i as u32 * 4),
+                    ByteAddr(0x5200 + i * 4),
                     insn,
                     rs1_val,
                     Change::new(0, mem_val),

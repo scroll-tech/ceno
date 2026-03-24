@@ -1,8 +1,10 @@
 use ceno_gpu::common::witgen::types::ShiftIColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
-use crate::instructions::riscv::shift::shift_circuit_v2::ShiftImmConfig;
+use crate::instructions::{
+    gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs},
+    riscv::shift::shift_circuit_v2::ShiftImmConfig,
+};
 
 /// Extract column map from a constructed ShiftImmConfig (I-type: SLLI/SRLI/SRAI).
 pub fn extract_shift_i_column_map<E: ExtensionField>(
@@ -150,8 +152,19 @@ mod tests {
         };
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-        let gpu_result = hal.witgen
-            .witgen_shift_i(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, 0, None, None)
+        let gpu_result = hal
+            .witgen
+            .witgen_shift_i(
+                &col_map,
+                &gpu_records,
+                &indices_u32,
+                shard_offset,
+                0,
+                0,
+                0,
+                None,
+                None,
+            )
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

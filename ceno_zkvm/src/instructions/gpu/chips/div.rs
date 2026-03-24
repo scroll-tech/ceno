@@ -1,8 +1,12 @@
 use ceno_gpu::common::witgen::types::DivColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
-use crate::instructions::riscv::div::div_circuit_v2::DivRemConfig;
+use crate::instructions::{
+    gpu::utils::colmap_base::{
+        extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs,
+    },
+    riscv::div::div_circuit_v2::DivRemConfig,
+};
 
 /// Extract column map from a constructed DivRemConfig.
 /// div_kind: 0=DIV, 1=DIVU, 2=REM, 3=REMU
@@ -38,7 +42,8 @@ pub fn extract_div_column_map<E: ExtensionField>(
     // sign_xor
     let sign_xor = config.sign_xor.id as u32;
 
-    let remainder_prime = extract_uint_limbs::<E, 2, _, _>(&config.remainder_prime, "remainder_prime");
+    let remainder_prime =
+        extract_uint_limbs::<E, 2, _, _>(&config.remainder_prime, "remainder_prime");
 
     // lt_marker
     let lt_marker: [u32; 2] = [config.lt_marker[0].id as u32, config.lt_marker[1].id as u32];
@@ -337,7 +342,8 @@ mod tests {
             };
             let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
             let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-            let gpu_result = hal.witgen
+            let gpu_result = hal
+                .witgen
                 .witgen_div(
                     &col_map,
                     &gpu_records,

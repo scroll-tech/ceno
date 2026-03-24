@@ -101,8 +101,7 @@ mod tests {
             ShardRamCircuit::<E>::build_gkr_iop_circuit(&mut cb, &ProgramParams::default())
                 .unwrap();
 
-        let col_map =
-            extract_shard_ram_column_map(&config, cb.cs.num_witin as usize);
+        let col_map = extract_shard_ram_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
 
         // Basic columns should be in range

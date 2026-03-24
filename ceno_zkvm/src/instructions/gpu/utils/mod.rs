@@ -2,16 +2,16 @@
 //!
 //! Contains lookup/shard lk_shardram collection abstractions and CPU fallback paths.
 
-mod lk_ops;
-mod sink;
 mod emit;
 mod fallback;
+mod lk_ops;
+mod sink;
 
 // Re-export all public types for convenience
-pub use lk_ops::*;
-pub use sink::*;
 pub use emit::*;
 pub use fallback::*;
+pub use lk_ops::*;
+pub use sink::*;
 
 #[cfg(feature = "gpu")]
 pub mod colmap_base;
@@ -19,7 +19,6 @@ pub mod colmap_base;
 pub mod d2h;
 #[cfg(feature = "gpu")]
 pub mod debug_compare;
-
 
 #[cfg(test)]
 mod tests {

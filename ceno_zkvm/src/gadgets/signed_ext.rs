@@ -44,6 +44,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
         self.msb.expr()
     }
 
+    #[allow(dead_code)] // used by GPU column map extraction (cfg gated)
     pub(crate) fn msb(&self) -> WitIn {
         self.msb
     }

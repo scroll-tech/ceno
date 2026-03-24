@@ -12,8 +12,7 @@ mod tracer;
 pub use tracer::{
     Change, FullTracer, FullTracerConfig, LatestAccesses, MemOp, NextAccessPair, NextCycleAccess,
     PackedNextAccessEntry, PreflightTracer, PreflightTracerConfig, ReadOp, ShardPlanBuilder,
-    StepCellExtractor, StepIndex,
-    StepRecord, Tracer, WriteOp,
+    StepCellExtractor, StepIndex, StepRecord, Tracer, WriteOp,
 };
 
 mod vm_state;

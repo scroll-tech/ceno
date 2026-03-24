@@ -19,9 +19,8 @@ use rayon::{
 };
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
-pub mod riscv;
 pub mod gpu;
-
+pub mod riscv;
 
 pub use gpu::utils::{cpu_assign_instances, cpu_collect_lk_and_shardram, cpu_collect_shardram};
 
@@ -371,4 +370,3 @@ macro_rules! impl_gpu_assign {
         }
     };
 }
-

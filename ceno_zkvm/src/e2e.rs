@@ -24,10 +24,9 @@ use crate::{
 };
 use ceno_emul::{
     Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, IterAddresses,
-    NextCycleAccess, PackedNextAccessEntry, Platform, PreflightTracer, PreflightTracerConfig, Program,
-    RegIdx,
-    StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
-    WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
+    NextCycleAccess, PackedNextAccessEntry, Platform, PreflightTracer, PreflightTracerConfig,
+    Program, RegIdx, StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer,
+    VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
 #[cfg(feature = "gpu")]
 use ceno_gpu::CudaHal;
@@ -230,9 +229,7 @@ impl<'a> Default for ShardContext<'a> {
             num_shards: 1,
             max_cycle: Cycle::MAX,
             addr_future_accesses: Arc::new(Default::default()),
-            sorted_next_accesses: Arc::new(SortedNextAccesses {
-                packed: vec![],
-            }),
+            sorted_next_accesses: Arc::new(SortedNextAccesses { packed: vec![] }),
             addr_accessed_tbs: Either::Left(vec![Vec::new(); max_threads]),
             read_records_tbs: Either::Left(
                 (0..max_threads)
@@ -735,9 +732,7 @@ impl Default for ShardContextBuilder {
         ShardContextBuilder {
             cur_shard_id: 0,
             addr_future_accesses: Arc::new(Default::default()),
-            sorted_next_accesses: Arc::new(SortedNextAccesses {
-                packed: vec![],
-            }),
+            sorted_next_accesses: Arc::new(SortedNextAccesses { packed: vec![] }),
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
             prev_shard_hint_range: vec![],
@@ -760,35 +755,37 @@ impl ShardContextBuilder {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
 
-        let sorted_next_accesses =
-            info_span!("next_access_presort").in_scope(|| {
-                let source = std::env::var("CENO_NEXT_ACCESS_SOURCE").unwrap_or_default();
-                let mut entries = if source == "hashmap" {
-                    tracing::info!("[next-access presort] converting from HashMap");
-                    info_span!("next_access_from_hashmap").in_scope(|| {
-                        let mut entries = Vec::new();
-                        for (cycle, pairs) in addr_future_accesses.iter() {
-                            for &(addr, next_cycle) in pairs.iter() {
-                                entries.push(PackedNextAccessEntry::new(*cycle, addr.0, next_cycle));
-                            }
+        let sorted_next_accesses = info_span!("next_access_presort").in_scope(|| {
+            let source = std::env::var("CENO_NEXT_ACCESS_SOURCE").unwrap_or_default();
+            let mut entries = if source == "hashmap" {
+                tracing::info!("[next-access presort] converting from HashMap");
+                info_span!("next_access_from_hashmap").in_scope(|| {
+                    let mut entries = Vec::new();
+                    for (cycle, pairs) in addr_future_accesses.iter() {
+                        for &(addr, next_cycle) in pairs.iter() {
+                            entries.push(PackedNextAccessEntry::new(*cycle, addr.0, next_cycle));
                         }
-                        entries
-                    })
-                } else {
-                    tracing::info!(
-                        "[next-access presort] using preflight-appended vec ({} entries)",
-                        next_accesses_vec.len()
-                    );
-                    next_accesses_vec
-                };
-                let len = entries.len();
-                info_span!("next_access_par_sort", n = len).in_scope(|| {
-                    entries.par_sort_unstable();
-                });
-                tracing::info!("[next-access presort] sorted {} entries ({:.2} MB)",
-                    len, len * 16 / (1024 * 1024));
-                Arc::new(SortedNextAccesses { packed: entries })
+                    }
+                    entries
+                })
+            } else {
+                tracing::info!(
+                    "[next-access presort] using preflight-appended vec ({} entries)",
+                    next_accesses_vec.len()
+                );
+                next_accesses_vec
+            };
+            let len = entries.len();
+            info_span!("next_access_par_sort", n = len).in_scope(|| {
+                entries.par_sort_unstable();
             });
+            tracing::info!(
+                "[next-access presort] sorted {} entries ({:.2} MB)",
+                len,
+                len * 16 / (1024 * 1024)
+            );
+            Arc::new(SortedNextAccesses { packed: entries })
+        });
 
         ShardContextBuilder {
             cur_shard_id: 0,
@@ -2267,28 +2264,31 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
 }
 
 fn clone_debug_shard_ctx(src: &ShardContext) -> ShardContext<'static> {
-    let mut cloned = ShardContext::default();
-    cloned.shard_id = src.shard_id;
-    cloned.num_shards = src.num_shards;
-    cloned.max_cycle = src.max_cycle;
-    cloned.addr_future_accesses = src.addr_future_accesses.clone();
-    cloned.sorted_next_accesses = src.sorted_next_accesses.clone();
-    cloned.cur_shard_cycle_range = src.cur_shard_cycle_range.clone();
-    cloned.expected_inst_per_shard = src.expected_inst_per_shard;
-    cloned.max_num_cross_shard_accesses = src.max_num_cross_shard_accesses;
-    cloned.prev_shard_cycle_range = src.prev_shard_cycle_range.clone();
-    cloned.prev_shard_heap_range = src.prev_shard_heap_range.clone();
-    cloned.prev_shard_hint_range = src.prev_shard_hint_range.clone();
-    cloned.platform = src.platform.clone();
-    cloned.shard_heap_addr_range = src.shard_heap_addr_range.clone();
-    cloned.shard_hint_addr_range = src.shard_hint_addr_range.clone();
-    cloned.syscall_witnesses = src.syscall_witnesses.clone();
-    cloned
+    ShardContext {
+        shard_id: src.shard_id,
+        num_shards: src.num_shards,
+        max_cycle: src.max_cycle,
+        addr_future_accesses: src.addr_future_accesses.clone(),
+        sorted_next_accesses: src.sorted_next_accesses.clone(),
+        cur_shard_cycle_range: src.cur_shard_cycle_range.clone(),
+        expected_inst_per_shard: src.expected_inst_per_shard,
+        max_num_cross_shard_accesses: src.max_num_cross_shard_accesses,
+        prev_shard_cycle_range: src.prev_shard_cycle_range.clone(),
+        prev_shard_heap_range: src.prev_shard_heap_range.clone(),
+        prev_shard_hint_range: src.prev_shard_hint_range.clone(),
+        platform: src.platform.clone(),
+        shard_heap_addr_range: src.shard_heap_addr_range.clone(),
+        shard_hint_addr_range: src.shard_hint_addr_range.clone(),
+        syscall_witnesses: src.syscall_witnesses.clone(),
+        ..Default::default()
+    }
 }
+
+type FlatRecord = (u32, u64, u64, u64, u64, Option<u32>, u32, usize);
 
 fn flatten_ram_records(
     records: &[BTreeMap<WordAddr, RAMRecord>],
-) -> Vec<(u32, u64, u64, u64, u64, Option<u32>, u32, usize)> {
+) -> Vec<FlatRecord> {
     let mut flat = Vec::new();
     for table in records {
         for (addr, record) in table {
@@ -2350,18 +2350,21 @@ fn log_combined_lk_diff<E: ExtensionField>(
     let gpu_combined = gpu_witness.combined_lk_mlt().expect("gpu combined_lk_mlt");
 
     let table_names = [
-        "Dynamic", "DoubleU8", "And", "Or", "Xor", "Ltu", "Pow", "Instruction",
+        "Dynamic",
+        "DoubleU8",
+        "And",
+        "Or",
+        "Xor",
+        "Ltu",
+        "Pow",
+        "Instruction",
     ];
 
     let mut total_diffs = 0usize;
     for (table_idx, (cpu_table, gpu_table)) in
         cpu_combined.iter().zip(gpu_combined.iter()).enumerate()
     {
-        let mut keys: Vec<u64> = cpu_table
-            .keys()
-            .chain(gpu_table.keys())
-            .copied()
-            .collect();
+        let mut keys: Vec<u64> = cpu_table.keys().chain(gpu_table.keys()).copied().collect();
         keys.sort_unstable();
         keys.dedup();
 

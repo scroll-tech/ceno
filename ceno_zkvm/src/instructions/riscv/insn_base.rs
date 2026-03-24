@@ -13,7 +13,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
-    instructions::gpu::utils::{LkOp, SendEvent, LkShardramSink, emit_assert_lt_ops},
+    instructions::gpu::utils::{LkOp, LkShardramSink, SendEvent, emit_assert_lt_ops},
     structs::RAMType,
     uint::Value,
     witness::{LkMultiplicity, set_val},
@@ -421,12 +421,7 @@ impl<E: ExtensionField> WriteRD<E> {
         self.emit_op_shardram(shard_ctx, step.cycle(), &op)
     }
 
-    pub fn emit_op_shardram(
-        &self,
-        shard_ctx: &mut ShardContext,
-        cycle: Cycle,
-        op: &WriteOp,
-    ) {
+    pub fn emit_op_shardram(&self, shard_ctx: &mut ShardContext, cycle: Cycle, op: &WriteOp) {
         shard_ctx.record_send_without_touch(
             RAMType::Register,
             op.addr,
@@ -661,12 +656,7 @@ impl WriteMEM {
         self.emit_op_shardram(shard_ctx, step.cycle(), &op)
     }
 
-    pub fn emit_op_shardram(
-        &self,
-        shard_ctx: &mut ShardContext,
-        cycle: Cycle,
-        op: &WriteOp,
-    ) {
+    pub fn emit_op_shardram(&self, shard_ctx: &mut ShardContext, cycle: Cycle, op: &WriteOp) {
         shard_ctx.record_send_without_touch(
             RAMType::Memory,
             op.addr,

@@ -8,11 +8,11 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
-        riscv::{constants::UInt8, r_insn::RInstructionConfig},
         gpu::utils::emit_logic_u8_ops,
+        riscv::{constants::UInt8, r_insn::RInstructionConfig},
     },
     structs::ProgramParams,
     utils::split_to_u8,
@@ -152,14 +152,5 @@ impl<E: ExtensionField> LogicConfig<E> {
         self.rd_written.assign_limbs(instance, &rd_written);
 
         Ok(())
-    }
-
-    fn emit_lk_and_shardram(
-        &self,
-        sink: &mut impl crate::instructions::gpu::utils::LkShardramSink,
-        shard_ctx: &ShardContext,
-        step: &StepRecord,
-    ) {
-        self.r_insn.emit_lk_and_shardram(sink, shard_ctx, step);
     }
 }

@@ -4,15 +4,15 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_uint_limbs_lt_ops,
         riscv::{
             RIVInstruction,
             b_insn::BInstructionConfig,
             constants::{UINT_LIMBS, UInt},
         },
-        gpu::utils::emit_uint_limbs_lt_ops,
     },
     structs::ProgramParams,
     witness::LkMultiplicity,
@@ -218,8 +218,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
             emit_uint_limbs_lt_ops(
                 sink,
                 matches!(I::INST_KIND, InsnKind::BLT | InsnKind::BGE),
-                &rs1_limbs,
-                &rs2_limbs,
+                rs1_limbs,
+                rs2_limbs,
             );
         }
     });

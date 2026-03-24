@@ -30,7 +30,9 @@ pub fn extract_state<E: ExtensionField>(vm: &StateInOut<E>) -> (u32, u32) {
 pub fn extract_state_branching<E: ExtensionField>(vm: &StateInOut<E>) -> (u32, u32, u32) {
     (
         vm.pc.id as u32,
-        vm.next_pc.expect("branching StateInOut must have next_pc").id as u32,
+        vm.next_pc
+            .expect("branching StateInOut must have next_pc")
+            .id as u32,
         vm.ts.id as u32,
     )
 }
@@ -95,7 +97,12 @@ pub fn extract_write_mem(mem: &WriteMEM) -> (u32, [u32; 2]) {
 #[inline]
 pub fn extract_lt_diff(lt: &AssertLtConfig) -> [u32; 2] {
     let d = &lt.0.diff;
-    assert_eq!(d.len(), 2, "Expected 2 AssertLt diff limbs, got {}", d.len());
+    assert_eq!(
+        d.len(),
+        2,
+        "Expected 2 AssertLt diff limbs, got {}",
+        d.len()
+    );
     [d[0].id as u32, d[1].id as u32]
 }
 
@@ -105,8 +112,15 @@ pub fn extract_uint_limbs<E: ExtensionField, const N: usize, const M: usize, con
     u: &UIntLimbs<M, C, E>,
     label: &str,
 ) -> [u32; N] {
-    let limbs = u.wits_in().unwrap_or_else(|| panic!("{label} should have WitIn limbs"));
-    assert_eq!(limbs.len(), N, "Expected {N} limbs for {label}, got {}", limbs.len());
+    let limbs = u
+        .wits_in()
+        .unwrap_or_else(|| panic!("{label} should have WitIn limbs"));
+    assert_eq!(
+        limbs.len(),
+        N,
+        "Expected {N} limbs for {label}, got {}",
+        limbs.len()
+    );
     std::array::from_fn(|i| limbs[i].id as u32)
 }
 
@@ -120,7 +134,12 @@ pub fn extract_carries<E: ExtensionField, const N: usize, const M: usize, const 
         .carries
         .as_ref()
         .unwrap_or_else(|| panic!("{label} should have carries"));
-    assert_eq!(carries.len(), N, "Expected {N} carries for {label}, got {}", carries.len());
+    assert_eq!(
+        carries.len(),
+        N,
+        "Expected {N} carries for {label}, got {}",
+        carries.len()
+    );
     std::array::from_fn(|i| carries[i].id as u32)
 }
 

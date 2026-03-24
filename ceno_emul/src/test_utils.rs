@@ -28,9 +28,7 @@ pub fn keccak_step() -> (StepRecord, Vec<Instruction>, Vec<SyscallWitness>) {
     let mut vm: VMState = VMState::new_with_tracer_config(
         CENO_PLATFORM.clone(),
         program.into(),
-        FullTracerConfig {
-            max_step_shard: 10,
-        },
+        FullTracerConfig { max_step_shard: 10 },
     );
     vm.iter_until_halt().collect::<Result<Vec<_>>>().unwrap();
     let steps = vm.tracer().recorded_steps();

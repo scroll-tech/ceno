@@ -10,9 +10,7 @@ use rayon::{
 };
 use witness::RowMajorMatrix;
 
-use crate::{
-    e2e::ShardContext, error::ZKVMError, tables::RMMCollections, witness::LkMultiplicity,
-};
+use crate::{e2e::ShardContext, error::ZKVMError, tables::RMMCollections, witness::LkMultiplicity};
 
 use crate::instructions::Instruction;
 
@@ -24,13 +22,7 @@ pub fn cpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
     num_structural_witin: usize,
     shard_steps: &[ceno_emul::StepRecord],
     step_indices: &[StepIndex],
-) -> Result<
-    (
-        RMMCollections<E::BaseField>,
-        Multiplicity<u64>,
-    ),
-    ZKVMError,
-> {
+) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     assert!(num_structural_witin == 0 || num_structural_witin == 1);
     let num_structural_witin = num_structural_witin.max(1);
 

@@ -1,8 +1,12 @@
 use ceno_gpu::common::witgen::types::MulColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
-use crate::instructions::riscv::mulh::mulh_circuit_v2::MulhConfig;
+use crate::instructions::{
+    gpu::utils::colmap_base::{
+        extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs,
+    },
+    riscv::mulh::mulh_circuit_v2::MulhConfig,
+};
 
 /// Extract column map from a constructed MulhConfig.
 /// mul_kind: 0=MUL, 1=MULH, 2=MULHU, 3=MULHSU
@@ -298,7 +302,8 @@ mod tests {
             };
             let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
             let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-            let gpu_result = hal.witgen
+            let gpu_result = hal
+                .witgen
                 .witgen_mul(
                     &col_map,
                     &gpu_records,

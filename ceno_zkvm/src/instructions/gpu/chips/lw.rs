@@ -1,7 +1,9 @@
 use ceno_gpu::common::witgen::types::LwColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs};
+use crate::instructions::gpu::utils::colmap_base::{
+    extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs,
+};
 
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::instructions::riscv::memory::load::LoadConfig;
@@ -195,8 +197,19 @@ mod tests {
         };
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-        let gpu_result = hal.witgen
-            .witgen_lw(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, 0, None, None)
+        let gpu_result = hal
+            .witgen
+            .witgen_lw(
+                &col_map,
+                &gpu_records,
+                &indices_u32,
+                shard_offset,
+                0,
+                0,
+                0,
+                None,
+                None,
+            )
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =
@@ -225,10 +238,7 @@ mod tests {
 
         let mut shard_ctx_full_gpu = ShardContext::default();
         let (gpu_rmms, gpu_lkm) =
-            crate::instructions::gpu::dispatch::try_gpu_assign_instances::<
-                E,
-                LwInstruction,
-            >(
+            crate::instructions::gpu::dispatch::try_gpu_assign_instances::<E, LwInstruction>(
                 &config,
                 &mut shard_ctx_full_gpu,
                 num_witin,
@@ -240,10 +250,7 @@ mod tests {
             .unwrap()
             .expect("GPU path should be available");
 
-        crate::instructions::gpu::cache::flush_shared_ec_buffers(
-            &mut shard_ctx_full_gpu,
-        )
-        .unwrap();
+        crate::instructions::gpu::cache::flush_shared_ec_buffers(&mut shard_ctx_full_gpu).unwrap();
 
         assert_eq!(gpu_rmms[0].values(), cpu_rmms[0].values());
         assert_eq!(flatten_lk(&gpu_lkm), flatten_lk(&cpu_lkm));

@@ -4,8 +4,8 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     instructions::{
-        riscv::insn_base::{ReadRS1, ReadRS2, StateInOut, WriteMEM},
         gpu::utils::{LkOp, LkShardramSink},
+        riscv::insn_base::{ReadRS1, ReadRS2, StateInOut, WriteMEM},
     },
     tables::InsnRecord,
     witness::LkMultiplicity,

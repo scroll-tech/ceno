@@ -1,10 +1,12 @@
 use ceno_gpu::common::witgen::types::JalrColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{
-    extract_rd, extract_rs1, extract_state_branching, extract_uint_limbs, extract_wit_ids,
+use crate::instructions::{
+    gpu::utils::colmap_base::{
+        extract_rd, extract_rs1, extract_state_branching, extract_uint_limbs, extract_wit_ids,
+    },
+    riscv::jump::jalr_v2::JalrConfig,
 };
-use crate::instructions::riscv::jump::jalr_v2::JalrConfig;
 
 /// Extract column map from a constructed JalrConfig.
 pub fn extract_jalr_column_map<E: ExtensionField>(
@@ -21,7 +23,8 @@ pub fn extract_jalr_column_map<E: ExtensionField>(
     let imm = config.imm.id as u32;
     let imm_sign = config.imm_sign.id as u32;
     let jump_pc_addr = extract_uint_limbs::<E, 2, _, _>(&config.jump_pc_addr.addr, "jump_pc_addr");
-    let jump_pc_addr_bit = extract_wit_ids::<2>(&config.jump_pc_addr.low_bits, "jump_pc_addr low_bits");
+    let jump_pc_addr_bit =
+        extract_wit_ids::<2>(&config.jump_pc_addr.low_bits, "jump_pc_addr low_bits");
 
     // rd_high
     let rd_high = config.rd_high.id as u32;
@@ -133,8 +136,18 @@ mod tests {
         };
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-        let gpu_result = hal.witgen
-            .witgen_jalr(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, None, None)
+        let gpu_result = hal
+            .witgen
+            .witgen_jalr(
+                &col_map,
+                &gpu_records,
+                &indices_u32,
+                shard_offset,
+                0,
+                0,
+                None,
+                None,
+            )
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

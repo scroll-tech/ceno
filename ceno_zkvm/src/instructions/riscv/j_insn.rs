@@ -7,8 +7,8 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     instructions::{
-        riscv::insn_base::{StateInOut, WriteRD},
         gpu::utils::{LkOp, LkShardramSink},
+        riscv::insn_base::{StateInOut, WriteRD},
     },
     tables::InsnRecord,
     witness::LkMultiplicity,

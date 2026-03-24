@@ -1,8 +1,12 @@
 use ceno_gpu::common::witgen::types::AddiColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{extract_carries, extract_rd, extract_rs1, extract_state, extract_uint_limbs};
-use crate::instructions::riscv::arith_imm::arith_imm_circuit_v2::InstructionConfig;
+use crate::instructions::{
+    gpu::utils::colmap_base::{
+        extract_carries, extract_rd, extract_rs1, extract_state, extract_uint_limbs,
+    },
+    riscv::arith_imm::arith_imm_circuit_v2::InstructionConfig,
+};
 
 /// Extract column map from a constructed InstructionConfig (ADDI v2).
 pub fn extract_addi_column_map<E: ExtensionField>(
@@ -122,8 +126,18 @@ mod tests {
         };
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-        let gpu_result = hal.witgen
-            .witgen_addi(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, None, None)
+        let gpu_result = hal
+            .witgen
+            .witgen_addi(
+                &col_map,
+                &gpu_records,
+                &indices_u32,
+                shard_offset,
+                0,
+                0,
+                None,
+                None,
+            )
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

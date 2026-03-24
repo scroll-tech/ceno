@@ -124,10 +124,9 @@ pub(crate) fn kind_has_verified_shard(kind: GpuWitgenKind) -> bool {
         return false;
     }
     match kind {
-        GpuWitgenKind::Add
-        | GpuWitgenKind::Sub
-        | GpuWitgenKind::LogicR(_)
-        | GpuWitgenKind::Lw => true,
+        GpuWitgenKind::Add | GpuWitgenKind::Sub | GpuWitgenKind::LogicR(_) | GpuWitgenKind::Lw => {
+            true
+        }
         #[cfg(feature = "u16limb_circuit")]
         GpuWitgenKind::LogicI(_)
         | GpuWitgenKind::Addi

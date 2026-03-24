@@ -17,7 +17,7 @@ use witness::RowMajorMatrix;
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::{Instruction, cpu_collect_shardram, cpu_collect_lk_and_shardram},
+    instructions::{Instruction, cpu_collect_lk_and_shardram, cpu_collect_shardram},
 };
 
 use crate::instructions::gpu::dispatch::{GpuWitgenKind, set_force_cpu_path};
@@ -51,7 +51,11 @@ pub(crate) fn debug_compare_final_lk<E: ExtensionField, I: Instruction<E>>(
     Ok(())
 }
 
-pub(crate) fn log_lk_diff(kind: GpuWitgenKind, cpu_lk: &Multiplicity<u64>, actual_lk: &Multiplicity<u64>) {
+pub(crate) fn log_lk_diff(
+    kind: GpuWitgenKind,
+    cpu_lk: &Multiplicity<u64>,
+    actual_lk: &Multiplicity<u64>,
+) {
     let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_LK_LIMIT")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -176,8 +180,7 @@ pub(crate) fn debug_compare_shardram<E: ExtensionField, I: Instruction<E>>(
     let _ = cpu_collect_lk_and_shardram::<E, I>(config, &mut cpu_ctx, shard_steps, step_indices)?;
 
     let mut mixed_ctx = shard_ctx.new_empty_like();
-    let _ =
-        cpu_collect_shardram::<E, I>(config, &mut mixed_ctx, shard_steps, step_indices)?;
+    let _ = cpu_collect_shardram::<E, I>(config, &mut mixed_ctx, shard_steps, step_indices)?;
 
     let cpu_addr = cpu_ctx.get_addr_accessed();
     let mixed_addr = mixed_ctx.get_addr_accessed();
@@ -231,8 +234,10 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
         return;
     }
 
-    use crate::scheme::septic_curve::{SepticExtension, SepticPoint};
-    use crate::tables::{ECPoint, ShardRamRecord};
+    use crate::{
+        scheme::septic_curve::{SepticExtension, SepticPoint},
+        tables::{ECPoint, ShardRamRecord},
+    };
     use ff_ext::{PoseidonField, SmallField};
 
     let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_EC_LIMIT")
@@ -242,9 +247,7 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
 
     // ========== Build CPU shard context (independent, isolated) ==========
     let mut cpu_ctx = shard_ctx.new_empty_like();
-    if let Err(e) = cpu_collect_shardram::<E, I>(
-        config, &mut cpu_ctx, shard_steps, step_indices,
-    ) {
+    if let Err(e) = cpu_collect_shardram::<E, I>(config, &mut cpu_ctx, shard_steps, step_indices) {
         tracing::error!("[GPU EC debug] kind={kind:?} CPU shardram records failed: {e:?}");
         return;
     }
@@ -287,7 +290,11 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
         .map(|g| {
             let rec = ShardRamRecord {
                 addr: g.addr,
-                ram_type: if g.ram_type == 1 { RAMType::Register } else { RAMType::Memory },
+                ram_type: if g.ram_type == 1 {
+                    RAMType::Register
+                } else {
+                    RAMType::Memory
+                },
                 value: g.value,
                 shard: g.shard,
                 local_clk: g.local_clk,
@@ -297,7 +304,10 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
             let x = SepticExtension(g.point_x.map(|v| E::BaseField::from_canonical_u32(v)));
             let y = SepticExtension(g.point_y.map(|v| E::BaseField::from_canonical_u32(v)));
             let point = SepticPoint::from_affine(x, y);
-            let ec = ECPoint::<E> { nonce: g.nonce, point };
+            let ec = ECPoint::<E> {
+                nonce: g.nonce,
+                point,
+            };
             (rec, ec)
         })
         .collect();
@@ -310,15 +320,28 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
         tracing::error!(
             "[GPU EC debug] kind={kind:?} ADDR_ACCESSED MISMATCH: cpu={} gpu={} \
              cpu_only={} gpu_only={}",
-            cpu_addr.len(), gpu_addr.len(), cpu_only.len(), gpu_only.len()
+            cpu_addr.len(),
+            gpu_addr.len(),
+            cpu_only.len(),
+            gpu_only.len()
         );
         for (i, addr) in cpu_only.iter().enumerate() {
-            if i >= limit { break; }
-            tracing::error!("[GPU EC debug] kind={kind:?} addr_accessed CPU-only: {}", addr.0);
+            if i >= limit {
+                break;
+            }
+            tracing::error!(
+                "[GPU EC debug] kind={kind:?} addr_accessed CPU-only: {}",
+                addr.0
+            );
         }
         for (i, addr) in gpu_only.iter().enumerate() {
-            if i >= limit { break; }
-            tracing::error!("[GPU EC debug] kind={kind:?} addr_accessed GPU-only: {}", addr.0);
+            if i >= limit {
+                break;
+            }
+            tracing::error!(
+                "[GPU EC debug] kind={kind:?} addr_accessed GPU-only: {}",
+                addr.0
+            );
         }
     }
 
@@ -328,21 +351,38 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
     if cpu_entries.len() != gpu_entries.len() {
         tracing::error!(
             "[GPU EC debug] kind={kind:?} RECORD COUNT MISMATCH: cpu={} gpu={}",
-            cpu_entries.len(), gpu_entries.len()
+            cpu_entries.len(),
+            gpu_entries.len()
         );
         let cpu_keys: std::collections::BTreeSet<_> = cpu_entries
-            .iter().map(|(r, _)| (r.addr, r.is_to_write_set)).collect();
+            .iter()
+            .map(|(r, _)| (r.addr, r.is_to_write_set))
+            .collect();
         let gpu_keys: std::collections::BTreeSet<_> = gpu_entries
-            .iter().map(|(r, _)| (r.addr, r.is_to_write_set)).collect();
+            .iter()
+            .map(|(r, _)| (r.addr, r.is_to_write_set))
+            .collect();
         let mut logged = 0usize;
         for key in cpu_keys.difference(&gpu_keys) {
-            if logged >= limit { break; }
-            tracing::error!("[GPU EC debug] kind={kind:?} CPU-only: addr={} is_write={}", key.0, key.1);
+            if logged >= limit {
+                break;
+            }
+            tracing::error!(
+                "[GPU EC debug] kind={kind:?} CPU-only: addr={} is_write={}",
+                key.0,
+                key.1
+            );
             logged += 1;
         }
         for key in gpu_keys.difference(&cpu_keys) {
-            if logged >= limit { break; }
-            tracing::error!("[GPU EC debug] kind={kind:?} GPU-only: addr={} is_write={}", key.0, key.1);
+            if logged >= limit {
+                break;
+            }
+            tracing::error!(
+                "[GPU EC debug] kind={kind:?} GPU-only: addr={} is_write={}",
+                key.0,
+                key.1
+            );
             logged += 1;
         }
     }
@@ -358,7 +398,9 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
             if gpu_dup_count <= limit {
                 tracing::error!(
                     "[GPU EC debug] kind={kind:?} GPU DUPLICATE: addr={} is_write={} ram_type={:?}",
-                    w[0].0.addr, w[0].0.is_to_write_set, w[0].0.ram_type
+                    w[0].0.addr,
+                    w[0].0.is_to_write_set,
+                    w[0].0.ram_type
                 );
             }
         }
@@ -382,7 +424,12 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
                 if record_mismatches < limit {
                     tracing::error!(
                         "[GPU EC debug] kind={kind:?} MISSING in GPU: addr={} is_write={} ram={:?} val={} shard={} clk={}",
-                        cr.addr, cr.is_to_write_set, cr.ram_type, cr.value, cr.shard, cr.global_clk
+                        cr.addr,
+                        cr.is_to_write_set,
+                        cr.ram_type,
+                        cr.value,
+                        cr.shard,
+                        cr.global_clk
                     );
                 }
                 record_mismatches += 1;
@@ -393,7 +440,12 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
                 if record_mismatches < limit {
                     tracing::error!(
                         "[GPU EC debug] kind={kind:?} EXTRA in GPU: addr={} is_write={} ram={:?} val={} shard={} clk={}",
-                        gr.addr, gr.is_to_write_set, gr.ram_type, gr.value, gr.shard, gr.global_clk
+                        gr.addr,
+                        gr.is_to_write_set,
+                        gr.ram_type,
+                        gr.value,
+                        gr.shard,
+                        gr.global_clk
                     );
                 }
                 record_mismatches += 1;
@@ -432,7 +484,9 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
             if ec_mismatches < limit {
                 tracing::error!(
                     "[GPU EC debug] kind={kind:?} addr={} nonce: cpu={} gpu={}",
-                    cr.addr, ce.nonce, ge.nonce
+                    cr.addr,
+                    ce.nonce,
+                    ge.nonce
                 );
             }
         }
@@ -443,7 +497,8 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
                 ec_diff = true;
                 if ec_mismatches < limit {
                     tracing::error!(
-                        "[GPU EC debug] kind={kind:?} addr={} x[{j}]: cpu={cv} gpu={gv}", cr.addr
+                        "[GPU EC debug] kind={kind:?} addr={} x[{j}]: cpu={cv} gpu={gv}",
+                        cr.addr
                     );
                 }
             }
@@ -455,7 +510,8 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
                 ec_diff = true;
                 if ec_mismatches < limit {
                     tracing::error!(
-                        "[GPU EC debug] kind={kind:?} addr={} y[{j}]: cpu={cv} gpu={gv}", cr.addr
+                        "[GPU EC debug] kind={kind:?} addr={} y[{j}]: cpu={cv} gpu={gv}",
+                        cr.addr
                     );
                 }
             }
@@ -475,7 +531,9 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
             let (cr, _) = &cpu_entries[ci];
             tracing::error!(
                 "[GPU EC debug] kind={kind:?} MISSING in GPU (tail): addr={} is_write={} val={}",
-                cr.addr, cr.is_to_write_set, cr.value
+                cr.addr,
+                cr.is_to_write_set,
+                cr.value
             );
         }
         record_mismatches += 1;
@@ -486,7 +544,9 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
             let (gr, _) = &gpu_entries[gi];
             tracing::error!(
                 "[GPU EC debug] kind={kind:?} EXTRA in GPU (tail): addr={} is_write={} val={}",
-                gr.addr, gr.is_to_write_set, gr.value
+                gr.addr,
+                gr.is_to_write_set,
+                gr.value
             );
         }
         record_mismatches += 1;
@@ -498,14 +558,18 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
     if addr_ok && record_mismatches == 0 && ec_mismatches == 0 && gpu_dup_count == 0 {
         tracing::info!(
             "[GPU EC debug] kind={kind:?} ALL MATCH: {} records, {} addr_accessed, EC points OK",
-            matched, cpu_addr.len()
+            matched,
+            cpu_addr.len()
         );
     } else {
         tracing::error!(
             "[GPU EC debug] kind={kind:?} MISMATCH: matched={matched} record_diffs={record_mismatches} \
              ec_diffs={ec_mismatches} gpu_dups={gpu_dup_count} addr_ok={addr_ok} \
              (cpu_records={} gpu_records={} cpu_addrs={} gpu_addrs={})",
-            cpu_entries.len(), gpu_entries.len(), cpu_addr.len(), gpu_addr.len()
+            cpu_entries.len(),
+            gpu_entries.len(),
+            cpu_addr.len(),
+            gpu_addr.len()
         );
     }
 }
@@ -631,14 +695,15 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
         use crate::instructions::riscv::ecall::keccak::KeccakInstruction;
         // Set force-CPU flag so gpu_assign_keccak_instances returns None
         set_force_cpu_path(true);
-        let result = <KeccakInstruction<E> as crate::instructions::Instruction<E>>::assign_instances(
-            config,
-            &mut cpu_ctx,
-            num_witin,
-            num_structural_witin,
-            steps,
-            step_indices,
-        );
+        let result =
+            <KeccakInstruction<E> as crate::instructions::Instruction<E>>::assign_instances(
+                config,
+                &mut cpu_ctx,
+                num_witin,
+                num_structural_witin,
+                steps,
+                step_indices,
+            );
         set_force_cpu_path(false);
         IN_DEBUG_COMPARE.with(|f| f.set(false));
         result?
@@ -667,16 +732,26 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
                     let col = i % num_witin;
                     tracing::error!(
                         "[GPU keccak witness] row={} col={} gpu={:?} cpu={:?}",
-                        row, col, g, c
+                        row,
+                        col,
+                        g,
+                        c
                     );
                 }
                 diffs += 1;
             }
         }
         if diffs == 0 {
-            tracing::info!("[GPU keccak debug] witness matrices match ({} elements)", gpu_vals.len());
+            tracing::info!(
+                "[GPU keccak debug] witness matrices match ({} elements)",
+                gpu_vals.len()
+            );
         } else {
-            tracing::error!("[GPU keccak debug] witness mismatch: {} diffs out of {}", diffs, gpu_vals.len());
+            tracing::error!(
+                "[GPU keccak debug] witness mismatch: {} diffs out of {}",
+                diffs,
+                gpu_vals.len()
+            );
         }
     }
 
@@ -690,7 +765,8 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
         if cpu_addr.len() != gpu_addr_set.len() {
             tracing::error!(
                 "[GPU keccak shard] addr_accessed count mismatch: cpu={} gpu={}",
-                cpu_addr.len(), gpu_addr_set.len()
+                cpu_addr.len(),
+                gpu_addr_set.len()
             );
         }
         let mut missing_from_gpu = 0usize;
@@ -720,7 +796,8 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
         } else {
             tracing::error!(
                 "[GPU keccak shard] addr_accessed diff: missing_from_gpu={} extra_in_gpu={}",
-                missing_from_gpu, extra_in_gpu
+                missing_from_gpu,
+                extra_in_gpu
             );
         }
     }

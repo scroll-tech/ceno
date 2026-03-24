@@ -6,14 +6,14 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::{LkOp, LkShardramSink, emit_byte_decomposition_ops},
         riscv::{
             constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             j_insn::JInstructionConfig,
         },
-        gpu::utils::{LkOp, LkShardramSink, emit_byte_decomposition_ops},
     },
     structs::ProgramParams,
     utils::split_to_u8,

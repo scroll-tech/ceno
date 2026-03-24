@@ -128,8 +128,11 @@ impl PartialEq for PackedNextAccessEntry {
 impl Ord for PackedNextAccessEntry {
     #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.cycles_hi, self.cycles_lo, self.addr)
-            .cmp(&(other.cycles_hi, other.cycles_lo, other.addr))
+        (self.cycles_hi, self.cycles_lo, self.addr).cmp(&(
+            other.cycles_hi,
+            other.cycles_lo,
+            other.addr,
+        ))
     }
 }
 
@@ -1241,7 +1244,13 @@ impl PreflightTracer {
         tracer
     }
 
-    pub fn into_shard_plan(self) -> (ShardPlanBuilder, NextCycleAccess, Vec<PackedNextAccessEntry>) {
+    pub fn into_shard_plan(
+        self,
+    ) -> (
+        ShardPlanBuilder,
+        NextCycleAccess,
+        Vec<PackedNextAccessEntry>,
+    ) {
         let Some(mut planner) = self.planner else {
             panic!("shard planner missing")
         };

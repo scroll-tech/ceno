@@ -9,15 +9,15 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_logic_u8_ops,
         riscv::{
             constants::{LIMB_BITS, LIMB_MASK, UInt8},
             i_insn::IInstructionConfig,
             logic_imm::LogicOp,
         },
-        gpu::utils::emit_logic_u8_ops,
     },
     structs::ProgramParams,
     tables::InsnRecord,

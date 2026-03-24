@@ -3,9 +3,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::{emit_const_range_op, emit_u16_limbs},
         riscv::{
             RIVInstruction,
             constants::{MEM_BITS, UInt},
@@ -13,7 +14,6 @@ use crate::{
             memory::gadget::MemWordUtil,
             s_insn::SInstructionConfig,
         },
-        gpu::utils::{emit_const_range_op, emit_u16_limbs},
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -181,9 +181,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
 
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
-        config
-            .memory_addr
-            .emit_lk_and_shardram(sink, addr.into());
+        config.memory_addr.emit_lk_and_shardram(sink, addr.into());
 
         if N_ZEROS == 0 {
             let memory_op = step.memory_op().unwrap();

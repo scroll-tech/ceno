@@ -1112,7 +1112,10 @@ impl<F: Field + FromUniformBytes> SepticJacobianPoint<F> {
 mod tests {
     use super::SepticExtension;
     use crate::scheme::septic_curve::{SepticJacobianPoint, SepticPoint};
-    use p3::{babybear::BabyBear, field::{Field, FieldAlgebra}};
+    use p3::{
+        babybear::BabyBear,
+        field::Field,
+    };
     use rand::thread_rng;
 
     type F = BabyBear;
@@ -1179,8 +1182,10 @@ mod tests {
     #[cfg(feature = "gpu")]
     fn test_gpu_ec_point_matches_cpu() {
         use crate::tables::{ECPoint, ShardRamRecord};
-        use ceno_gpu::bb31::test_impl::{TestEcInput, run_gpu_ec_test};
-        use ceno_gpu::bb31::CudaHalBB31;
+        use ceno_gpu::bb31::{
+            CudaHalBB31,
+            test_impl::{TestEcInput, run_gpu_ec_test},
+        };
         use ff_ext::{PoseidonField, SmallField};
         use gkr_iop::RAMType;
 
@@ -1189,14 +1194,70 @@ mod tests {
 
         // Test cases: various write/read, register/memory, edge cases
         let test_inputs = vec![
-            TestEcInput { addr: 5, ram_type: 1, value: 0x12345678, is_write: 1, shard: 1, global_clk: 100 },
-            TestEcInput { addr: 5, ram_type: 1, value: 0x12345678, is_write: 0, shard: 0, global_clk: 50 },
-            TestEcInput { addr: 0x80000, ram_type: 2, value: 0xDEADBEEF, is_write: 1, shard: 2, global_clk: 200 },
-            TestEcInput { addr: 0x80000, ram_type: 2, value: 0xDEADBEEF, is_write: 0, shard: 1, global_clk: 150 },
-            TestEcInput { addr: 0, ram_type: 1, value: 0, is_write: 1, shard: 0, global_clk: 1 },
-            TestEcInput { addr: 31, ram_type: 1, value: 0xFFFFFFFF, is_write: 0, shard: 3, global_clk: 999 },
-            TestEcInput { addr: 0x40000000, ram_type: 2, value: 42, is_write: 1, shard: 5, global_clk: 500000 },
-            TestEcInput { addr: 10, ram_type: 1, value: 1, is_write: 0, shard: 100, global_clk: 1000000 },
+            TestEcInput {
+                addr: 5,
+                ram_type: 1,
+                value: 0x12345678,
+                is_write: 1,
+                shard: 1,
+                global_clk: 100,
+            },
+            TestEcInput {
+                addr: 5,
+                ram_type: 1,
+                value: 0x12345678,
+                is_write: 0,
+                shard: 0,
+                global_clk: 50,
+            },
+            TestEcInput {
+                addr: 0x80000,
+                ram_type: 2,
+                value: 0xDEADBEEF,
+                is_write: 1,
+                shard: 2,
+                global_clk: 200,
+            },
+            TestEcInput {
+                addr: 0x80000,
+                ram_type: 2,
+                value: 0xDEADBEEF,
+                is_write: 0,
+                shard: 1,
+                global_clk: 150,
+            },
+            TestEcInput {
+                addr: 0,
+                ram_type: 1,
+                value: 0,
+                is_write: 1,
+                shard: 0,
+                global_clk: 1,
+            },
+            TestEcInput {
+                addr: 31,
+                ram_type: 1,
+                value: 0xFFFFFFFF,
+                is_write: 0,
+                shard: 3,
+                global_clk: 999,
+            },
+            TestEcInput {
+                addr: 0x40000000,
+                ram_type: 2,
+                value: 42,
+                is_write: 1,
+                shard: 5,
+                global_clk: 500000,
+            },
+            TestEcInput {
+                addr: 10,
+                ram_type: 1,
+                value: 1,
+                is_write: 0,
+                shard: 100,
+                global_clk: 1000000,
+            },
         ];
 
         let gpu_results = run_gpu_ec_test(&hal, &test_inputs);
@@ -1206,13 +1267,25 @@ mod tests {
             // Build CPU ShardRamRecord and compute EC point.
             // GPU kernel treats slot.addr as word address and converts to byte address
             // via `<< 2` for Memory type; Register type uses reg_id directly.
-            let addr = if input.ram_type == 2 { input.addr << 2 } else { input.addr };
+            let addr = if input.ram_type == 2 {
+                input.addr << 2
+            } else {
+                input.addr
+            };
             let cpu_record = ShardRamRecord {
                 addr,
-                ram_type: if input.ram_type == 1 { RAMType::Register } else { RAMType::Memory },
+                ram_type: if input.ram_type == 1 {
+                    RAMType::Register
+                } else {
+                    RAMType::Memory
+                },
                 value: input.value,
                 shard: input.shard,
-                local_clk: if input.is_write != 0 { input.global_clk } else { 0 },
+                local_clk: if input.is_write != 0 {
+                    input.global_clk
+                } else {
+                    0
+                },
                 global_clk: input.global_clk,
                 is_to_write_set: input.is_write != 0,
             };
@@ -1241,16 +1314,29 @@ mod tests {
             }
 
             if has_diff {
-                eprintln!("MISMATCH [{i}]: addr={} ram_type={} value={:#x} is_write={} shard={} clk={}",
-                    input.addr, input.ram_type, input.value, input.is_write, input.shard, input.global_clk);
+                eprintln!(
+                    "MISMATCH [{i}]: addr={} ram_type={} value={:#x} is_write={} shard={} clk={}",
+                    input.addr,
+                    input.ram_type,
+                    input.value,
+                    input.is_write,
+                    input.shard,
+                    input.global_clk
+                );
                 mismatches += 1;
             }
         }
 
-        assert_eq!(mismatches, 0,
+        assert_eq!(
+            mismatches,
+            0,
             "{mismatches}/{} test cases had GPU/CPU EC point mismatches",
-            test_inputs.len());
-        eprintln!("All {} GPU EC point test cases match CPU!", test_inputs.len());
+            test_inputs.len()
+        );
+        eprintln!(
+            "All {} GPU EC point test cases match CPU!",
+            test_inputs.len()
+        );
     }
 
     /// Verify GPU Poseidon2 permutation matches CPU on the exact sponge packing
@@ -1258,8 +1344,11 @@ mod tests {
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_poseidon2_sponge_matches_cpu() {
-        use ceno_gpu::bb31::test_impl::{run_gpu_poseidon2_sponge, SPONGE_WIDTH};
-        use ceno_gpu::bb31::CudaHalBB31;
+        use p3::field::FieldAlgebra;
+        use ceno_gpu::bb31::{
+            CudaHalBB31,
+            test_impl::{SPONGE_WIDTH, run_gpu_poseidon2_sponge},
+        };
         use ff_ext::{PoseidonField, SmallField};
         use p3::symmetric::Permutation;
 
@@ -1272,25 +1361,25 @@ mod tests {
             // Case 1: typical write record
             {
                 let mut s = [0u32; SPONGE_WIDTH];
-                s[0] = 5;               // addr
-                s[1] = 1;               // ram_type (Register)
-                s[2] = 0x5678;          // value lo16
-                s[3] = 0x1234;          // value hi16
-                s[4] = 1;               // shard
-                s[5] = 100;             // global_clk
-                s[6] = 0;               // nonce
+                s[0] = 5; // addr
+                s[1] = 1; // ram_type (Register)
+                s[2] = 0x5678; // value lo16
+                s[3] = 0x1234; // value hi16
+                s[4] = 1; // shard
+                s[5] = 100; // global_clk
+                s[6] = 0; // nonce
                 s
             },
             // Case 2: memory read, different values
             {
                 let mut s = [0u32; SPONGE_WIDTH];
                 s[0] = 0x80000;
-                s[1] = 2;               // Memory
+                s[1] = 2; // Memory
                 s[2] = 0xBEEF;
                 s[3] = 0xDEAD;
                 s[4] = 2;
                 s[5] = 200;
-                s[6] = 3;               // nonce=3
+                s[6] = 3; // nonce=3
                 s
             },
             // Case 3: all zeros (edge case)
@@ -1317,7 +1406,10 @@ mod tests {
             }
         }
 
-        assert_eq!(mismatches, 0, "{mismatches} Poseidon2 output elements differ between GPU and CPU");
+        assert_eq!(
+            mismatches, 0,
+            "{mismatches} Poseidon2 output elements differ between GPU and CPU"
+        );
         eprintln!("All {} Poseidon2 sponge test cases match!", count);
     }
 
@@ -1326,8 +1418,8 @@ mod tests {
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_septic_from_x_matches_cpu() {
-        use ceno_gpu::bb31::test_impl::run_gpu_septic_from_x;
-        use ceno_gpu::bb31::CudaHalBB31;
+        use p3::field::FieldAlgebra;
+        use ceno_gpu::bb31::{CudaHalBB31, test_impl::run_gpu_septic_from_x};
         use ff_ext::SmallField;
 
         let hal = CudaHalBB31::new(0).unwrap();
@@ -1336,7 +1428,9 @@ mod tests {
         // (ensures we get a mix of points-exist and points-don't-exist cases)
         let test_xs: Vec<[u32; 7]> = vec![
             // x from Poseidon2([5,1,0x5678,0x1234,1,100,0, 0..]) — known to have a point
-            [1594766074, 868528894, 1733778006, 1242721508, 1690833816, 1437202757, 1753525271],
+            [
+                1594766074, 868528894, 1733778006, 1242721508, 1690833816, 1437202757, 1753525271,
+            ],
             // Simple: x = [1,0,0,0,0,0,0]
             [1, 0, 0, 0, 0, 0, 0],
             // x = [0,0,0,0,0,0,0] (zero)
@@ -1344,7 +1438,9 @@ mod tests {
             // x = [42, 17, 999, 0, 0, 0, 0]
             [42, 17, 999, 0, 0, 0, 0],
             // Random-ish values
-            [1000000007, 123456789, 987654321, 111111111, 222222222, 333333333, 444444444],
+            [
+                1000000007, 123456789, 987654321, 111111111, 222222222, 333333333, 444444444,
+            ],
         ];
 
         let count = test_xs.len();
@@ -1380,8 +1476,10 @@ mod tests {
             }
         }
 
-        assert_eq!(mismatches, 0,
-            "{mismatches} septic_from_x results differ between GPU and CPU");
+        assert_eq!(
+            mismatches, 0,
+            "{mismatches} septic_from_x results differ between GPU and CPU"
+        );
         eprintln!("All {} septic_from_x test cases match!", count);
     }
 }

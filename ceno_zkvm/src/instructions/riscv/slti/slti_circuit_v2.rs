@@ -4,15 +4,15 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_uint_limbs_lt_ops,
         riscv::{
             RIVInstruction,
             constants::{UINT_LIMBS, UInt},
             i_insn::IInstructionConfig,
         },
-        gpu::utils::emit_uint_limbs_lt_ops,
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},
@@ -145,7 +145,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         emit_uint_limbs_lt_ops(
             sink,
             matches!(I::INST_KIND, InsnKind::SLTI),
-            &rs1_limbs,
+            rs1_limbs,
             &imm_sign_extend,
         );
     });

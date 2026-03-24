@@ -7,15 +7,15 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_const_range_op,
         riscv::{
             constants::{PC_BITS, UINT_LIMBS, UInt},
             i_insn::IInstructionConfig,
             insn_base::{MemAddr, ReadRS1, StateInOut, WriteRD},
         },
-        gpu::utils::emit_const_range_op,
     },
     structs::ProgramParams,
     tables::InsnRecord,

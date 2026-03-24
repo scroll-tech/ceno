@@ -1,18 +1,15 @@
 use crate::e2e::ShardContext;
 /// constrain implementation follow from https://github.com/openvm-org/openvm/blob/main/extensions/rv32im/circuit/src/shift/core.rs
 use crate::{
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::{LkOp, LkShardramSink, emit_byte_decomposition_ops, emit_const_range_op},
         riscv::{
             RIVInstruction,
             constants::{UINT_BYTE_LIMBS, UInt8},
             i_insn::IInstructionConfig,
             r_insn::RInstructionConfig,
-        },
-        gpu::utils::{
-            LkOp, LkShardramSink, emit_byte_decomposition_ops,
-            emit_const_range_op,
         },
     },
     structs::ProgramParams,

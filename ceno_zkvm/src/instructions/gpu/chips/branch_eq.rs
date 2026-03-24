@@ -1,8 +1,12 @@
 use ceno_gpu::common::witgen::types::BranchEqColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{extract_rs1, extract_rs2, extract_state_branching, extract_uint_limbs};
-use crate::instructions::riscv::branch::branch_circuit_v2::BranchConfig;
+use crate::instructions::{
+    gpu::utils::colmap_base::{
+        extract_rs1, extract_rs2, extract_state_branching, extract_uint_limbs,
+    },
+    riscv::branch::branch_circuit_v2::BranchConfig,
+};
 
 /// Extract column map from a constructed BranchConfig (BEQ/BNE variant).
 pub fn extract_branch_eq_column_map<E: ExtensionField>(
@@ -135,8 +139,19 @@ mod tests {
         };
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-        let gpu_result = hal.witgen
-            .witgen_branch_eq(&col_map, &gpu_records, &indices_u32, shard_offset, 1, 0, 0, None, None)
+        let gpu_result = hal
+            .witgen
+            .witgen_branch_eq(
+                &col_map,
+                &gpu_records,
+                &indices_u32,
+                shard_offset,
+                1,
+                0,
+                0,
+                None,
+                None,
+            )
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

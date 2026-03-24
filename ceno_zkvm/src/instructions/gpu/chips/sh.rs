@@ -1,10 +1,12 @@
 use ceno_gpu::common::witgen::types::ShColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{
-    extract_rs1, extract_rs2, extract_state, extract_uint_limbs, extract_write_mem,
+use crate::instructions::{
+    gpu::utils::colmap_base::{
+        extract_rs1, extract_rs2, extract_state, extract_uint_limbs, extract_write_mem,
+    },
+    riscv::memory::store_v2::StoreConfig,
 };
-use crate::instructions::riscv::memory::store_v2::StoreConfig;
 
 /// Extract column map from a constructed StoreConfig (SH variant, N_ZEROS=1).
 pub fn extract_sh_column_map<E: ExtensionField>(
@@ -22,7 +24,8 @@ pub fn extract_sh_column_map<E: ExtensionField>(
     let rs2_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs2_read, "rs2_read");
     let imm = config.imm.id as u32;
     let imm_sign = config.imm_sign.id as u32;
-    let prev_mem_val = extract_uint_limbs::<E, 2, _, _>(&config.prev_memory_value, "prev_memory_value");
+    let prev_mem_val =
+        extract_uint_limbs::<E, 2, _, _>(&config.prev_memory_value, "prev_memory_value");
     let mem_addr = extract_uint_limbs::<E, 2, _, _>(&config.memory_addr.addr, "memory_addr");
 
     // SH-specific: 1 low_bit (bit_1 for halfword select)
@@ -158,8 +161,19 @@ mod tests {
         };
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-        let gpu_result = hal.witgen
-            .witgen_sh(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, 0, None, None)
+        let gpu_result = hal
+            .witgen
+            .witgen_sh(
+                &col_map,
+                &gpu_records,
+                &indices_u32,
+                shard_offset,
+                0,
+                0,
+                0,
+                None,
+                None,
+            )
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

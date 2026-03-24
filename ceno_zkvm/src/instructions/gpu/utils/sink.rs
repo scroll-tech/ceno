@@ -18,6 +18,9 @@ pub struct CpuLkShardramSink<'ctx, 'shard, 'lk> {
 }
 
 impl<'ctx, 'shard, 'lk> CpuLkShardramSink<'ctx, 'shard, 'lk> {
+    /// # Safety
+    /// Caller must ensure `shard_ctx` points to a valid, live `ShardContext`
+    /// for the duration of the returned sink's lifetime.
     pub unsafe fn from_raw(
         shard_ctx: *mut ShardContext<'shard>,
         lk: &'lk mut LkMultiplicity,

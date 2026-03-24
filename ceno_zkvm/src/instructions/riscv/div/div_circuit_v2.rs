@@ -14,11 +14,11 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
-        riscv::constants::LIMB_BITS,
         gpu::utils::{LkOp, LkShardramSink, emit_u16_limbs},
+        riscv::constants::LIMB_BITS,
     },
     structs::ProgramParams,
     uint::Value,

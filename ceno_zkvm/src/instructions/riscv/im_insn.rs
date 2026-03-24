@@ -3,8 +3,8 @@ use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
     instructions::{
-        riscv::insn_base::{ReadMEM, ReadRS1, StateInOut, WriteRD},
         gpu::utils::{LkOp, LkShardramSink},
+        riscv::insn_base::{ReadMEM, ReadRS1, StateInOut, WriteRD},
     },
     tables::InsnRecord,
     witness::LkMultiplicity,

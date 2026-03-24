@@ -78,7 +78,7 @@ pub struct Poseidon2Config<
     const HALF_FULL_ROUNDS: usize,
     const PARTIAL_ROUNDS: usize,
 > {
-    pub(crate) p3_cols: Vec<WitIn>,                // columns in the plonky3-air
+    pub(crate) p3_cols: Vec<WitIn>, // columns in the plonky3-air
     pub(crate) post_linear_layer_cols: Vec<WitIn>, /* additional columns to hold the state after linear layers */
     constants: RoundConstants<E::BaseField, STATE_WIDTH, HALF_FULL_ROUNDS, PARTIAL_ROUNDS>,
 }

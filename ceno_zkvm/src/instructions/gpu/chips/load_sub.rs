@@ -1,8 +1,12 @@
 use ceno_gpu::common::witgen::types::LoadSubColumnMap;
 use ff_ext::ExtensionField;
 
-use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs};
-use crate::instructions::riscv::memory::load_v2::LoadConfig;
+use crate::instructions::{
+    gpu::utils::colmap_base::{
+        extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs,
+    },
+    riscv::memory::load_v2::LoadConfig,
+};
 
 /// Extract column map from a constructed LoadConfig for sub-word loads (LH/LHU/LB/LBU).
 pub fn extract_load_sub_column_map<E: ExtensionField>(
@@ -349,7 +353,8 @@ mod tests {
             let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
             let load_width: u32 = if is_byte { 8 } else { 16 };
             let is_signed_u32: u32 = if is_signed { 1 } else { 0 };
-            let gpu_result = hal.witgen
+            let gpu_result = hal
+                .witgen
                 .witgen_load_sub(
                     &col_map,
                     &gpu_records,

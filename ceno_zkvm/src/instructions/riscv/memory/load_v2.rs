@@ -4,7 +4,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::SignedExtendConfig,
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{

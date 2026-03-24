@@ -3,11 +3,11 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    impl_collect_shardram, impl_collect_lk_and_shardram, impl_gpu_assign,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
-        riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
         gpu::utils::emit_u16_limbs,
+        riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},

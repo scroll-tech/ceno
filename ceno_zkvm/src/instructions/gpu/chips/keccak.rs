@@ -23,7 +23,11 @@ pub fn extract_keccak_column_map<E: ExtensionField>(
     let ecall_prev_ts = config.ecall_id.prev_ts.id as u32;
     let ecall_lt_diff = {
         let diffs = &config.ecall_id.lt_cfg.0.diff;
-        assert_eq!(diffs.len(), 2, "Expected 2 AssertLt diff limbs for ecall_id");
+        assert_eq!(
+            diffs.len(),
+            2,
+            "Expected 2 AssertLt diff limbs for ecall_id"
+        );
         [diffs[0].id as u32, diffs[1].id as u32]
     };
 
@@ -55,7 +59,11 @@ pub fn extract_keccak_column_map<E: ExtensionField>(
     };
     let sptr_lt_diff = {
         let diffs = &config.state_ptr.0.lt_cfg.0.diff;
-        assert_eq!(diffs.len(), 2, "Expected 2 AssertLt diff limbs for state_ptr");
+        assert_eq!(
+            diffs.len(),
+            2,
+            "Expected 2 AssertLt diff limbs for state_ptr"
+        );
         [diffs[0].id as u32, diffs[1].id as u32]
     };
 
@@ -83,7 +91,8 @@ pub fn extract_keccak_column_map<E: ExtensionField>(
     #[cfg(debug_assertions)]
     {
         let base = keccak_base_col as usize;
-        let expected_size = std::mem::size_of::<crate::precompiles::lookup_keccakf::KeccakWitCols<u8>>();
+        let expected_size =
+            std::mem::size_of::<crate::precompiles::lookup_keccakf::KeccakWitCols<u8>>();
         // Check that the last keccak column is at base + expected_size - 1
         let last_rc = config.layout.layer_exprs.wits.rc.last().unwrap();
         assert_eq!(
@@ -288,7 +297,11 @@ mod tests {
         );
 
         let mut struct_mismatches = 0;
-        for (i, (g, c)) in gpu_struct_data.iter().zip(cpu_struct_data.iter()).enumerate() {
+        for (i, (g, c)) in gpu_struct_data
+            .iter()
+            .zip(cpu_struct_data.iter())
+            .enumerate()
+        {
             if g != c {
                 if struct_mismatches < 20 {
                     let row = i / num_structural_witin;
@@ -337,7 +350,10 @@ mod tests {
         eprintln!("Keccak LK: {} mismatches", lk_mismatches);
 
         assert_eq!(mismatches, 0, "GPU vs CPU witness mismatch");
-        assert_eq!(struct_mismatches, 0, "GPU vs CPU structural witness mismatch");
+        assert_eq!(
+            struct_mismatches, 0,
+            "GPU vs CPU structural witness mismatch"
+        );
         assert_eq!(lk_mismatches, 0, "GPU vs CPU LK multiplicity mismatch");
     }
 }
