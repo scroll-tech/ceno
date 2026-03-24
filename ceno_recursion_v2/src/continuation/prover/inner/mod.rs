@@ -25,7 +25,7 @@ use crate::{
         AggregationSubCircuit, RecursionField, RecursionVk, VerifierConfig, VerifierExternalData,
         VerifierTraceGen,
     },
-    utils::transcript_observe_label,
+    utils::{TranscriptLabel, transcript_observe_label},
 };
 
 pub use continuations_v2::prover::ChildVkKind;
@@ -209,7 +209,7 @@ where
         };
 
         let mut transcript = default_duplex_sponge_recorder();
-        transcript_observe_label(&mut transcript, b"riscv");
+        transcript_observe_label(&mut transcript, TranscriptLabel::Riscv.as_bytes());
         let subcircuit_ctxs = self
             .circuit
             .verifier_circuit

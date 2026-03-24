@@ -4,10 +4,12 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
-use verify_stark::pvs::VmPvs;
 
 use crate::{
-    circuit::inner::{ProofsType, vm_pvs::air::VmPvsCols},
+    circuit::inner::{
+        ProofsType,
+        vm_pvs::{VmPvs, air::VmPvsCols},
+    },
     system::RecursionProof,
 };
 
@@ -33,8 +35,7 @@ pub fn generate_proving_ctx(
         cols.is_valid = F::ONE;
         cols.is_last = F::ONE;
         cols.has_verifier_pvs = F::ZERO;
-        cols.child_pvs.is_terminate = F::ONE;
-        cols.child_pvs.exit_code = F::ZERO;
+        cols.child_pvs.exit_code = [F::ZERO; 2];
 
         if deferral_enabled {
             // deferral_flag for VmPvsAir is 0 or 2; choose 0 for the mocked VM-only case.
@@ -45,8 +46,7 @@ pub fn generate_proving_ctx(
     let trace = RowMajorMatrix::new(trace, width);
     let mut public_values = vec![F::ZERO; VmPvs::<u8>::width()];
     let pvs: &mut VmPvs<F> = public_values.as_mut_slice().borrow_mut();
-    pvs.is_terminate = F::ONE;
-    pvs.exit_code = F::ZERO;
+    pvs.exit_code = [F::ZERO; 2];
 
     AirProvingContext {
         cached_mains: vec![],

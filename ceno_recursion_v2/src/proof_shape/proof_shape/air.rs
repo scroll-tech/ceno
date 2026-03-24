@@ -32,6 +32,7 @@ use crate::{
         },
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
+    utils::TranscriptLabel,
 };
 
 #[repr(C)]
@@ -318,9 +319,11 @@ where
         // TRANSCRIPT OBSERVATIONS
         ///////////////////////////////////////////////////////////////////////////////////////////
         let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
-        builder
-            .when(is_first_idx.clone())
-            .assert_eq(local.starting_tidx, AB::Expr::from_usize(2 * DIGEST_SIZE));
+        // FIXME: simplify separators
+        builder.when(is_first_idx.clone()).assert_eq(
+            local.starting_tidx,
+            AB::Expr::from_usize(TranscriptLabel::Riscv.field_len()),
+        );
 
         self.starting_tidx_bus.receive(
             builder,

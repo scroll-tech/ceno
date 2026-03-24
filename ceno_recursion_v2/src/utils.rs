@@ -2,13 +2,42 @@ use std::ops::Index;
 
 use ff_ext::{BabyBearExt4, ExtensionField as CenoExtensionField, SmallField};
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
-use openvm_stark_backend::interaction::Interaction;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{CHUNK, D_EF, DIGEST_SIZE, F, poseidon2_perm};
-use openvm_stark_backend::FiatShamirTranscript;
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
+use openvm_stark_backend::{FiatShamirTranscript, interaction::Interaction};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{
+    BabyBearPoseidon2Config, CHUNK, D_EF, DIGEST_SIZE, F, poseidon2_perm,
+};
 use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_symmetric::Permutation;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TranscriptLabel {
+    Riscv,
+}
+
+impl TranscriptLabel {
+    pub fn as_bytes(self) -> &'static [u8] {
+        match self {
+            Self::Riscv => b"riscv",
+        }
+    }
+
+    pub fn bytes_len(self) -> usize {
+        label_bytes_len(self.as_bytes())
+    }
+
+    pub fn field_len(self) -> usize {
+        label_field_len(self.as_bytes())
+    }
+}
+
+pub fn label_bytes_len(label: &[u8]) -> usize {
+    label.len()
+}
+
+pub fn label_field_len(label: &[u8]) -> usize {
+    <BabyBearExt4 as CenoExtensionField>::BaseField::bytes_to_field_elements(label).len()
+}
 
 pub fn transcript_observe_label<TS>(transcript: &mut TS, label: &[u8])
 where

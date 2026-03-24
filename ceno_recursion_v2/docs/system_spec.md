@@ -95,6 +95,39 @@ Fields capture the stateful modules that participate in recursive verification:
 5. **VerifierSubCircuit** orchestrates these modules: it shares `BusInventory`, ensures every module gets consistent
    handles, and sequences trace generation so transcript state advances consistently.
 
+## Inner VM PVS AIR (Current Local Semantics)
+
+This repo now uses a **local fork** of VM public values under `src/circuit/inner/vm_pvs` instead of relying on
+`verify_stark::pvs::VmPvs`.
+
+### VmPvs Layout (`src/circuit/inner/vm_pvs/mod.rs`)
+
+Field order follows `ceno_zkvm::scheme::PublicValues` and includes local fixed-commit metadata:
+
+1. `fixed_commit: [F; DIGEST_SIZE]`
+2. `fixed_no_omc_init_commit: [F; DIGEST_SIZE]`
+3. `exit_code: [F; 2]`
+4. `init_pc`, `init_cycle`, `end_pc`, `end_cycle`
+5. `shard_id`, `heap_start_addr`, `heap_shard_len`, `hint_start_addr`, `hint_shard_len`
+6. `public_io: [F; 2]`
+7. `shard_rw_sum: [F; 2 * SEPTIC_EXTENSION_DEGREE]` with `SEPTIC_EXTENSION_DEGREE = 7`
+
+### VmPvsAir Behavior (`src/circuit/inner/vm_pvs/air.rs`)
+
+- Keeps row-shape constraints from upstream (`is_valid`, `is_last`, monotone proof index, optional deferral flag).
+- Segment adjacency now checks `end_pc -> next.init_pc` and `end_cycle -> next.init_cycle`.
+- For non-final valid rows, `exit_code` is constrained to `DEFAULT_SUSPEND_EXIT_CODE` split into 16-bit limbs:
+  low limb at index `0`, high limb at index `1`.
+- `PvsAirConsistencyBus::lookup_key` remains active on each valid row.
+- Output public values are constrained against `child_pvs` at first/last/valid rows using the new local `VmPvs`
+  fields (including both fixed commit arrays).
+
+### Temporary Mapping Status
+
+- All `self.public_values_bus.receive(...)` calls in `VmPvsAir` are intentionally commented out.
+- Cached-commit receive wiring in `VmPvsAir` is also still TODO.
+- This is expected during the current mapping migration; row/consistency/output constraints stay active.
+
 ## Current Semantics Note
 
 - The older system-level implication check relating child trace-height constraints to a
@@ -111,3 +144,5 @@ Fields capture the stateful modules that participate in recursive verification:
   types `pub(crate)`.
 - All module constructors should remain aligned with upstream layout to minimize future rebase conflicts; prefer small
   local wrappers over structural rewrites.
+- `VmPvsAir` currently documents and enforces the new local `VmPvs` shape, but bus-level public-value index mapping is
+  intentionally deferred until the final mapping table is provided.
