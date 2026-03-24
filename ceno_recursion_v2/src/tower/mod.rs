@@ -430,6 +430,8 @@ fn build_chip_records(
         .copied()
         .unwrap_or(EF::ZERO);
 
+    let layer_output_lambda = replay.layers.last().map(|layer| layer.lambda).unwrap_or(EF::ZERO);
+    let layer_output_mu = replay.layers.last().map(|layer| layer.mu).unwrap_or(EF::ZERO);
     let input_record = TowerInputRecord {
         proof_idx,
         idx: chip_idx,
@@ -437,6 +439,8 @@ fn build_chip_records(
         n_logup: layer_count,
         alpha_logup,
         input_layer_claim,
+        layer_output_lambda,
+        layer_output_mu,
     };
     let flattened_ris: Vec<EF> = replay
         .layers

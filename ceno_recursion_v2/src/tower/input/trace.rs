@@ -16,6 +16,8 @@ pub struct TowerInputRecord {
     pub n_logup: usize,
     pub alpha_logup: EF,
     pub input_layer_claim: EF,
+    pub layer_output_lambda: EF,
+    pub layer_output_mu: EF,
 }
 
 pub struct TowerInputTraceGenerator;
@@ -79,6 +81,16 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
                     .unwrap();
                 cols.input_layer_claim = record
                     .input_layer_claim
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap();
+                cols.layer_output_lambda = record
+                    .layer_output_lambda
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap();
+                cols.layer_output_mu = record
+                    .layer_output_mu
                     .as_basis_coefficients_slice()
                     .try_into()
                     .unwrap();

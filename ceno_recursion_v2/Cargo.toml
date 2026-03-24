@@ -1,3 +1,5 @@
+[workspace]
+
 [package]
 categories = ["cryptography", "zk", "blockchain", "ceno"]
 description = "Next-generation recursion circuits for Ceno built on OpenVM v2"

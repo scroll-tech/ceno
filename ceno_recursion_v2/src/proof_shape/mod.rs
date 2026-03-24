@@ -6,6 +6,7 @@ use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
     keygen::types::VerifierSinglePreprocessedData, prover::AirProvingContext,
+    p3_maybe_rayon::prelude::*,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
     BabyBearPoseidon2Config, DIGEST_SIZE, Digest, F,
@@ -23,13 +24,14 @@ use crate::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
         RecursionProof, RecursionVk, TraceGenModule, TraceVData,
     },
-    tracegen::RowMajorChip,
+    tracegen::{ModuleChip, RowMajorChip},
 };
 use recursion_circuit::primitives::{
     bus::{PowerCheckerBus, RangeCheckerBus},
     pow::PowerCheckerCpuTraceGenerator,
     range::{RangeCheckerAir, RangeCheckerCols},
 };
+use recursion_circuit::primitives::range::RangeCheckerCpuTraceGenerator;
 
 pub mod bus;
 #[allow(clippy::module_inception)]
@@ -146,6 +148,59 @@ impl ProofShapeModule {
         sorted_trace_vdata.sort_by_key(|(air_idx, v)| (usize::MAX - v.log_height, *air_idx));
         preflight.proof_shape.sorted_trace_vdata = sorted_trace_vdata;
         preflight.proof_shape.l_skip = 0;
+
+        let mut current_tidx = 2 * DIGEST_SIZE;
+        let mut starting_tidx = vec![0usize; child_vk.circuit_vks.len()];
+        let mut pvs_tidx = Vec::new();
+        let n_max = preflight
+            .proof_shape
+            .sorted_trace_vdata
+            .iter()
+            .map(|(_, vdata)| vdata.log_height)
+            .max()
+            .unwrap_or(0);
+
+        for air_idx in 0..child_vk.circuit_vks.len() {
+            let metadata = &self.per_air[air_idx];
+            let is_present = proof.chip_proofs.contains_key(&air_idx);
+            starting_tidx[air_idx] = current_tidx;
+
+            if !metadata.is_required {
+                current_tidx += 1;
+            }
+
+            if is_present {
+                if metadata.preprocessed_data.is_some() {
+                    current_tidx += DIGEST_SIZE;
+                } else {
+                    current_tidx += 1;
+                }
+
+                for cached_width in &metadata.cached_widths {
+                    if *cached_width != 0 {
+                        current_tidx += DIGEST_SIZE;
+                    }
+                }
+
+                if metadata.num_public_values != 0 {
+                    pvs_tidx.push(current_tidx);
+                    current_tidx += metadata.num_public_values;
+                }
+            }
+        }
+
+        preflight.proof_shape.starting_tidx = starting_tidx;
+        preflight.proof_shape.pvs_tidx = pvs_tidx;
+        preflight.proof_shape.post_tidx = current_tidx;
+        preflight.proof_shape.n_max = n_max;
+        preflight.proof_shape.n_logup = preflight
+            .gkr
+            .chips
+            .iter()
+            .filter(|entry| proof.chip_proofs.contains_key(&entry.chip_idx))
+            .map(|entry| entry.tower_replay.layers.len())
+            .max()
+            .unwrap_or(0);
 
         // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
@@ -293,22 +348,41 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         ctx: &<Self as TraceGenModule<GlobalCtxCpu, CpuBackend<SC>>>::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
-        let _ = (child_vk, proofs, preflights, ctx);
-        let widths = self.placeholder_air_widths();
-        let num_airs = required_heights
-            .map(|heights| heights.len())
-            .unwrap_or_else(|| self.num_airs());
-        Some(
-            (0..num_airs)
-                .map(|idx| {
-                    let height = required_heights
-                        .and_then(|heights| heights.get(idx).copied())
-                        .unwrap_or(1);
-                    let width = widths.get(idx).copied().unwrap_or(1);
-                    zero_air_ctx(height, width)
-                })
-                .collect(),
-        )
+        let pow_checker = &ctx.0;
+        let external_range_checks = ctx.1;
+
+        let range_checker = Arc::new(RangeCheckerCpuTraceGenerator::<8>::default());
+        let proof_shape = proof_shape::ProofShapeChip::<4, 8>::new(
+            self.idx_encoder.clone(),
+            self.min_cached_idx,
+            self.max_cached,
+            range_checker.clone(),
+            pow_checker.clone(),
+        );
+        let chips = [
+            ProofShapeModuleChip::ProofShape(proof_shape),
+            ProofShapeModuleChip::PublicValues,
+        ];
+        let ctx = (child_vk, proofs, preflights);
+        let mut ctxs: Vec<_> = chips
+            .par_iter()
+            .map(|chip| {
+                chip.generate_proving_ctx(
+                    &ctx,
+                    required_heights.and_then(|heights| heights.get(chip.index()).copied()),
+                )
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .collect::<Option<Vec<_>>>()?;
+
+        for &value in external_range_checks {
+            range_checker.add_count(value);
+        }
+        ctxs.push(AirProvingContext::simple_no_pis(
+            range_checker.generate_trace_row_major(),
+        ));
+        Some(ctxs)
     }
 }
 
@@ -330,6 +404,12 @@ enum ProofShapeModuleChip {
     PublicValues,
 }
 
+impl ProofShapeModuleChip {
+    fn index(&self) -> usize {
+        ProofShapeModuleChipDiscriminants::from(self) as usize
+    }
+}
+
 impl RowMajorChip<F> for ProofShapeModuleChip {
     type Ctx<'a> = (&'a RecursionVk, &'a [RecursionProof], &'a [Preflight]);
 
@@ -344,13 +424,11 @@ impl RowMajorChip<F> for ProofShapeModuleChip {
         ctx: &Self::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
-        let _ = ctx;
-        let rows = required_height.unwrap_or(1).max(1);
-        let width = match self {
-            ProofShapeModuleChip::ProofShape(chip) => chip.placeholder_width(),
-            ProofShapeModuleChip::PublicValues => pvs::PublicValuesCols::<u8>::width(),
-        };
-        Some(RowMajorMatrix::new(vec![F::ZERO; rows * width], width))
+        match self {
+            ProofShapeModuleChip::ProofShape(chip) => chip.generate_trace(ctx, required_height),
+            ProofShapeModuleChip::PublicValues => pvs::PublicValuesTraceGenerator
+                .generate_trace(ctx, required_height),
+        }
     }
 }
 
