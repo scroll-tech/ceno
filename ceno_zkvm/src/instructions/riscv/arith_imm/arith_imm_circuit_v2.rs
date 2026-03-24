@@ -7,7 +7,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
-        gpu::host_ops::emit_u16_limbs,
+        gpu::utils::emit_u16_limbs,
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},

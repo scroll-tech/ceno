@@ -17,7 +17,7 @@ use crate::{
             i_insn::IInstructionConfig,
             logic_imm::LogicOp,
         },
-        gpu::host_ops::emit_logic_u8_ops,
+        gpu::utils::emit_logic_u8_ops,
     },
     structs::ProgramParams,
     tables::InsnRecord,

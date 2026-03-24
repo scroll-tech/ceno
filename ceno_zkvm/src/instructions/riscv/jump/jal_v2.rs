@@ -13,7 +13,7 @@ use crate::{
             constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             j_insn::JInstructionConfig,
         },
-        gpu::host_ops::{LkOp, LkShardramSink, emit_byte_decomposition_ops},
+        gpu::utils::{LkOp, LkShardramSink, emit_byte_decomposition_ops},
     },
     structs::ProgramParams,
     utils::split_to_u8,

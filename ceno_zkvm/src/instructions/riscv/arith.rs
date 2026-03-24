@@ -8,7 +8,7 @@ use crate::{
     error::ZKVMError,
     instructions::{
         Instruction,
-        gpu::host_ops::emit_u16_limbs,
+        gpu::utils::emit_u16_limbs,
     },
     structs::ProgramParams,
     uint::Value,

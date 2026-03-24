@@ -12,7 +12,7 @@ use crate::{
             constants::{UINT_LIMBS, UInt},
             i_insn::IInstructionConfig,
         },
-        gpu::host_ops::emit_uint_limbs_lt_ops,
+        gpu::utils::emit_uint_limbs_lt_ops,
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},

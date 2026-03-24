@@ -13,7 +13,7 @@ use crate::{
             constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             i_insn::IInstructionConfig,
         },
-        gpu::host_ops::{
+        gpu::utils::{
             LkOp, LkShardramSink, emit_byte_decomposition_ops,
             emit_const_range_op,
         },

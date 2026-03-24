@@ -12,7 +12,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
-        gpu::host_ops::emit_logic_u8_ops,
+        gpu::utils::emit_logic_u8_ops,
     },
     structs::ProgramParams,
     utils::split_to_u8,
@@ -156,7 +156,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
     fn emit_lk_and_shardram(
         &self,
-        sink: &mut impl crate::instructions::gpu::host_ops::LkShardramSink,
+        sink: &mut impl crate::instructions::gpu::utils::LkShardramSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {

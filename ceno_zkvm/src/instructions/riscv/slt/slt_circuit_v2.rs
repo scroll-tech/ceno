@@ -8,7 +8,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig},
-        gpu::host_ops::emit_uint_limbs_lt_ops,
+        gpu::utils::emit_uint_limbs_lt_ops,
     },
     structs::ProgramParams,
     witness::LkMultiplicity,

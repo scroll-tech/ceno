@@ -12,7 +12,7 @@ use crate::{
             b_insn::BInstructionConfig,
             constants::{UINT_LIMBS, UInt},
         },
-        gpu::host_ops::emit_uint_limbs_lt_ops,
+        gpu::utils::emit_uint_limbs_lt_ops,
     },
     structs::ProgramParams,
     witness::LkMultiplicity,

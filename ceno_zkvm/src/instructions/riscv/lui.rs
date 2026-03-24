@@ -13,7 +13,7 @@ use crate::{
             constants::{UINT_BYTE_LIMBS, UInt8},
             i_insn::IInstructionConfig,
         },
-        gpu::host_ops::emit_const_range_op,
+        gpu::utils::emit_const_range_op,
     },
     structs::ProgramParams,
     tables::InsnRecord,

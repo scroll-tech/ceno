@@ -9,7 +9,7 @@ use crate::{
             constants::{LIMB_BITS, UINT_LIMBS, UInt},
             r_insn::RInstructionConfig,
         },
-        gpu::host_ops::{LkOp, LkShardramSink},
+        gpu::utils::{LkOp, LkShardramSink},
     },
     structs::ProgramParams,
     uint::Value,

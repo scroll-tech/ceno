@@ -15,7 +15,7 @@ use crate::{
             i_insn::IInstructionConfig,
             insn_base::{MemAddr, ReadRS1, StateInOut, WriteRD},
         },
-        gpu::host_ops::emit_const_range_op,
+        gpu::utils::emit_const_range_op,
     },
     structs::ProgramParams,
     tables::InsnRecord,

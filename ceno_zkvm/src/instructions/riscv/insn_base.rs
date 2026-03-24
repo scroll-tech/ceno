@@ -13,7 +13,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
-    instructions::gpu::host_ops::{LkOp, SendEvent, LkShardramSink, emit_assert_lt_ops},
+    instructions::gpu::utils::{LkOp, SendEvent, LkShardramSink, emit_assert_lt_ops},
     structs::RAMType,
     uint::Value,
     witness::{LkMultiplicity, set_val},

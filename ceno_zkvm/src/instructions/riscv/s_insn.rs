@@ -5,7 +5,7 @@ use crate::{
     error::ZKVMError,
     instructions::{
         riscv::insn_base::{ReadRS1, ReadRS2, StateInOut, WriteMEM},
-        gpu::host_ops::{LkOp, LkShardramSink},
+        gpu::utils::{LkOp, LkShardramSink},
     },
     tables::InsnRecord,
     witness::LkMultiplicity,

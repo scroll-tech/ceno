@@ -18,7 +18,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::constants::LIMB_BITS,
-        gpu::host_ops::{LkOp, LkShardramSink, emit_u16_limbs},
+        gpu::utils::{LkOp, LkShardramSink, emit_u16_limbs},
     },
     structs::ProgramParams,
     uint::Value,

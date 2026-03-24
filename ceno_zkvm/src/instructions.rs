@@ -23,7 +23,7 @@ pub mod riscv;
 pub mod gpu;
 
 
-pub use gpu::host_ops::{cpu_assign_instances, cpu_collect_lk_and_shardram, cpu_collect_shardram};
+pub use gpu::utils::{cpu_assign_instances, cpu_collect_lk_and_shardram, cpu_collect_shardram};
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
@@ -259,7 +259,7 @@ macro_rules! impl_collect_lk_and_shardram {
             let shard_ctx_ptr = shard_ctx as *mut $crate::e2e::ShardContext;
             let _ctx = unsafe { &*shard_ctx_ptr };
             let mut _sink_val = unsafe {
-                $crate::instructions::gpu::host_ops::CpuLkShardramSink::from_raw(
+                $crate::instructions::gpu::utils::CpuLkShardramSink::from_raw(
                     shard_ctx_ptr,
                     lk_multiplicity,
                 )

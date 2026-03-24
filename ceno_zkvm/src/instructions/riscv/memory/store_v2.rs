@@ -13,7 +13,7 @@ use crate::{
             memory::gadget::MemWordUtil,
             s_insn::SInstructionConfig,
         },
-        gpu::host_ops::{emit_const_range_op, emit_u16_limbs},
+        gpu::utils::{emit_const_range_op, emit_u16_limbs},
     },
     structs::ProgramParams,
     tables::InsnRecord,
