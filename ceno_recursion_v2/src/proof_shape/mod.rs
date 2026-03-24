@@ -15,7 +15,8 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     proof_shape::{
-        bus::{NumPublicValuesBus, ProofShapePermutationBus, StartingTidxBus},
+        bus::{CommitmentsBus, NumPublicValuesBus, ProofShapePermutationBus, StartingTidxBus},
+        commit::CommitAir,
         proof_shape::ProofShapeAir,
         pvs::PublicValuesAir,
     },
@@ -32,6 +33,7 @@ use recursion_circuit::primitives::{
 };
 
 pub mod bus;
+pub mod commit;
 #[allow(clippy::module_inception)]
 pub mod proof_shape;
 pub mod pvs;
@@ -60,6 +62,7 @@ pub struct ProofShapeModule {
     bus_inventory: BusInventory,
     range_bus: RangeCheckerBus,
     permutation_bus: ProofShapePermutationBus,
+    commitments_tidx_bus: CommitmentsBus,
     starting_tidx_bus: StartingTidxBus,
     num_pvs_bus: NumPublicValuesBus,
 
@@ -96,6 +99,7 @@ impl ProofShapeModule {
             bus_inventory,
             range_bus,
             permutation_bus: ProofShapePermutationBus::new(b.new_bus_idx()),
+            commitments_tidx_bus: CommitmentsBus::new(b.new_bus_idx()),
             starting_tidx_bus: StartingTidxBus::new(b.new_bus_idx()),
             num_pvs_bus: NumPublicValuesBus::new(b.new_bus_idx()),
             idx_encoder,
@@ -170,11 +174,12 @@ impl ProofShapeModule {
         let proof_shape_width = proof_shape::ProofShapeCols::<u8, 4>::width()
             + self.idx_encoder.width()
             + self.max_cached * DIGEST_SIZE;
+        let commit_width = commit::CommitAirCols::<u8>::width();
         let pvs_width = pvs::PublicValuesCols::<u8>::width();
         let range_width = RangeCheckerCols::<u8>::width();
         // TODO(recursion-proof-bridge): replace proof-shape module placeholder contexts with
         // real tracegen so RangeCheckerAir rows are semantically valid, not only width-correct.
-        vec![proof_shape_width, pvs_width, range_width]
+        vec![proof_shape_width, commit_width, pvs_width, range_width]
     }
 }
 
@@ -228,7 +233,7 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk, max_cached: usize) -> Ve
 
 impl AirModule for ProofShapeModule {
     fn num_airs(&self) -> usize {
-        3
+        4
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -240,6 +245,7 @@ impl AirModule for ProofShapeModule {
             idx_encoder: self.idx_encoder.clone(),
             range_bus: self.range_bus,
             permutation_bus: self.permutation_bus,
+            commitments_tidx_bus: self.commitments_tidx_bus,
             starting_tidx_bus: self.starting_tidx_bus,
             num_pvs_bus: self.num_pvs_bus,
             fraction_folder_input_bus: self.bus_inventory.fraction_folder_input_bus,
@@ -248,7 +254,7 @@ impl AirModule for ProofShapeModule {
             air_shape_bus: self.bus_inventory.air_shape_bus,
             hyperdim_bus: self.bus_inventory.hyperdim_bus,
             lifted_heights_bus: self.bus_inventory.lifted_heights_bus,
-            commitments_bus: self.bus_inventory.commitments_bus,
+            // commitments_bus: self.bus_inventory.commitments_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             n_lift_bus: self.bus_inventory.n_lift_bus,
             cached_commit_bus: self.bus_inventory.cached_commit_bus,
@@ -260,11 +266,16 @@ impl AirModule for ProofShapeModule {
             transcript_bus: self.bus_inventory.transcript_bus,
             continuations_enabled: self.continuations_enabled,
         };
+        let commit_air = CommitAir {
+            commitments_bus: self.commitments_tidx_bus,
+            transcript_bus: self.bus_inventory.transcript_bus,
+        };
         let range_checker = RangeCheckerAir::<8> {
             bus: self.range_bus,
         };
         vec![
             Arc::new(proof_shape_air) as AirRef<_>,
+            Arc::new(commit_air) as AirRef<_>,
             Arc::new(pvs_air) as AirRef<_>,
             Arc::new(range_checker) as AirRef<_>,
         ]

@@ -11,24 +11,24 @@ use openvm_stark_backend::{
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirShapeBus, AirShapeBusMessage, CachedCommitBus, CommitmentsBus,
-        CommitmentsBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
-        FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage,
-        LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus, NLiftMessage, TowerModuleBus,
-        TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
+        AirShapeBus, AirShapeBusMessage, CachedCommitBus, ExpressionClaimNMaxBus,
+        ExpressionClaimNMaxMessage, FractionFolderInputBus, FractionFolderInputMessage,
+        HyperdimBus, HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus,
+        NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
         AirMetadata,
         bus::{
-            AirShapeProperty, NumPublicValuesBus, NumPublicValuesMessage, ProofShapePermutationBus,
-            ProofShapePermutationMessage, StartingTidxBus, StartingTidxMessage,
+            AirShapeProperty, CommitmentsBus, CommitmentsBusMessage, NumPublicValuesBus,
+            NumPublicValuesMessage, ProofShapePermutationBus, ProofShapePermutationMessage,
+            StartingTidxBus, StartingTidxMessage,
         },
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
@@ -103,6 +103,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
 
     // Internal buses
     pub permutation_bus: ProofShapePermutationBus,
+    pub commitments_tidx_bus: CommitmentsBus,
     pub starting_tidx_bus: StartingTidxBus,
     pub num_pvs_bus: NumPublicValuesBus,
 
@@ -113,7 +114,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub fraction_folder_input_bus: FractionFolderInputBus,
     pub hyperdim_bus: HyperdimBus,
     pub lifted_heights_bus: LiftedHeightsBus,
-    pub commitments_bus: CommitmentsBus,
+    // pub commitments_bus: GlobalCommitmentsBus,
     pub transcript_bus: TranscriptBus,
     pub n_lift_bus: NLiftBus,
 
@@ -404,6 +405,16 @@ where
             local.is_valid,
         );
 
+        // One commit-row seed per proof: CommitAir consumes this tidx on is_first rows.
+        self.commitments_tidx_bus.send(
+            builder,
+            local.proof_idx,
+            CommitmentsBusMessage {
+                tidx: AB::Expr::ZERO,
+            },
+            and(local.is_first, local.is_valid),
+        );
+
         for didx in 0..DIGEST_SIZE {
             self.transcript_bus.receive(
                 builder,
@@ -634,17 +645,17 @@ where
         // builder
         //     .when(and(local.is_valid, not(next.is_last)))
         //     .assert_eq(local.starting_cidx + cidx_offset, next.starting_cidx);
-
-        self.commitments_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            CommitmentsBusMessage {
-                major_idx: AB::Expr::ZERO,
-                minor_idx: AB::Expr::ZERO,
-                commitment: localv.cached_commits[self.max_cached - 1].map(Into::into),
-            },
-            is_min_cached.clone() * local.is_valid * AB::Expr::from_usize(self.commit_mult),
-        );
+        //
+        // self.commitments_bus.add_key_with_lookups(
+        //     builder,
+        //     local.proof_idx,
+        //     GlobalCommitmentsBusMessage {
+        //         major_idx: AB::Expr::ZERO,
+        //         minor_idx: AB::Expr::ZERO,
+        //         commitment: localv.cached_commits[self.max_cached - 1].map(Into::into),
+        //     },
+        //     is_min_cached.clone() * local.is_valid * AB::Expr::from_usize(self.commit_mult),
+        // );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // NUM PUBLIC VALUES
