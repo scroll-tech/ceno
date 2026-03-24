@@ -25,9 +25,7 @@ pub fn assert_witness_colmajor_eq<F: std::fmt::Debug + PartialEq>(
             let cpu_val = &cpu_rowmajor[row * n_cols + col];
             if gpu_val != cpu_val {
                 if mismatches < 10 {
-                    eprintln!(
-                        "Mismatch at row={row}, col={col}: GPU={gpu_val:?}, CPU={cpu_val:?}"
-                    );
+                    eprintln!("Mismatch at row={row}, col={col}: GPU={gpu_val:?}, CPU={cpu_val:?}");
                 }
                 mismatches += 1;
             }
@@ -40,7 +38,10 @@ pub fn assert_witness_colmajor_eq<F: std::fmt::Debug + PartialEq>(
 /// witness, LK multiplicity, addr_accessed, and read/write records all match
 /// the CPU reference in `cpu_ctx`.
 #[cfg(test)]
-pub fn assert_full_gpu_pipeline<E: ff_ext::ExtensionField, I: crate::instructions::Instruction<E>>(
+pub fn assert_full_gpu_pipeline<
+    E: ff_ext::ExtensionField,
+    I: crate::instructions::Instruction<E>,
+>(
     config: &I::InstructionConfig,
     steps: &[ceno_emul::StepRecord],
     kind: crate::instructions::gpu::dispatch::GpuWitgenKind,
@@ -53,22 +54,25 @@ pub fn assert_full_gpu_pipeline<E: ff_ext::ExtensionField, I: crate::instruction
     let indices: Vec<usize> = (0..steps.len()).collect();
 
     let mut gpu_ctx = crate::e2e::ShardContext::default();
-    let (gpu_rmms, gpu_lkm) =
-        crate::instructions::gpu::dispatch::try_gpu_assign_instances::<E, I>(
-            config,
-            &mut gpu_ctx,
-            num_witin,
-            num_structural_witin,
-            steps,
-            &indices,
-            kind,
-        )
-        .unwrap()
-        .expect("GPU path should be available");
+    let (gpu_rmms, gpu_lkm) = crate::instructions::gpu::dispatch::try_gpu_assign_instances::<E, I>(
+        config,
+        &mut gpu_ctx,
+        num_witin,
+        num_structural_witin,
+        steps,
+        &indices,
+        kind,
+    )
+    .unwrap()
+    .expect("GPU path should be available");
 
     crate::instructions::gpu::cache::flush_shared_ec_buffers(&mut gpu_ctx).unwrap();
 
-    assert_eq!(gpu_rmms[0].values(), cpu_rmms[0].values(), "witness mismatch");
+    assert_eq!(
+        gpu_rmms[0].values(),
+        cpu_rmms[0].values(),
+        "witness mismatch"
+    );
     assert_eq!(
         flatten_lk_for_test(&gpu_lkm),
         flatten_lk_for_test(cpu_lkm),

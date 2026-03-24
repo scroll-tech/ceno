@@ -21,12 +21,10 @@ use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use super::{
-    config::{
-        is_gpu_witgen_disabled, is_kind_disabled,
-    },
+    config::{is_gpu_witgen_disabled, is_kind_disabled},
     utils::debug_compare::{
-        debug_compare_final_lk, debug_compare_shard_ec,
-        debug_compare_shardram, debug_compare_witness,
+        debug_compare_final_lk, debug_compare_shard_ec, debug_compare_shardram,
+        debug_compare_witness,
     },
 };
 use crate::{
@@ -42,44 +40,23 @@ pub enum GpuWitgenKind {
     Add,
     Sub,
     LogicR(u32), // 0=AND, 1=OR, 2=XOR
-    
     LogicI(u32), // 0=AND, 1=OR, 2=XOR
-    
     Addi,
-    
     Lui,
-    
     Auipc,
-    
     Jal,
-    
-    ShiftR(u32), // 0=SLL, 1=SRL, 2=SRA
-    
-    ShiftI(u32), // 0=SLLI, 1=SRLI, 2=SRAI
-    
-    Slt(u32), // 1=SLT(signed), 0=SLTU(unsigned)
-    
-    Slti(u32), // 1=SLTI(signed), 0=SLTIU(unsigned)
-    
-    BranchEq(u32), // 1=BEQ, 0=BNE
-    
+    ShiftR(u32),    // 0=SLL, 1=SRL, 2=SRA
+    ShiftI(u32),    // 0=SLLI, 1=SRLI, 2=SRAI
+    Slt(u32),       // 1=SLT(signed), 0=SLTU(unsigned)
+    Slti(u32),      // 1=SLTI(signed), 0=SLTIU(unsigned)
+    BranchEq(u32),  // 1=BEQ, 0=BNE
     BranchCmp(u32), // 1=signed (BLT/BGE), 0=unsigned (BLTU/BGEU)
-    
     Jalr,
-    
     Sw,
-    
     Sh,
-    
     Sb,
-    
-    LoadSub {
-        load_width: u32,
-        is_signed: u32,
-    },
-    
+    LoadSub { load_width: u32, is_signed: u32 },
     Mul(u32), // 0=MUL, 1=MULH, 2=MULHU, 3=MULHSU
-    
     Div(u32), // 0=DIV, 1=DIVU, 2=REM, 3=REMU
     Lw,
     Keccak,
@@ -95,7 +72,8 @@ pub use super::utils::d2h::gpu_batch_continuation_ec;
 use super::{
     cache::{
         ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,
-        upload_shard_steps_cached, with_cached_gpu_ctx, with_cached_shard_meta, with_cached_shard_steps,
+        upload_shard_steps_cached, with_cached_gpu_ctx, with_cached_shard_meta,
+        with_cached_shard_steps,
     },
     utils::d2h::{
         CompactEcBuf, LkResult, RamBuf, WitResult, gpu_collect_shard_records, gpu_compact_ec_d2h,
@@ -485,25 +463,25 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::add::extract_add_column_map(arith_config, num_witin));
             info_span!("hal_witgen_add").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_add(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_add(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_add failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_add failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
         GpuWitgenKind::Sub => {
@@ -515,25 +493,25 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::sub::extract_sub_column_map(arith_config, num_witin));
             info_span!("hal_witgen_sub").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_sub(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_sub(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_sub failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_sub failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
         GpuWitgenKind::LogicR(logic_kind) => {
@@ -546,29 +524,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             });
             info_span!("hal_witgen_logic_r").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_logic_r(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    logic_kind,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_logic_r(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                logic_kind,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_logic_r failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_logic_r failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::LogicI(logic_kind) => {
             let logic_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -579,29 +557,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             });
             info_span!("hal_witgen_logic_i").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_logic_i(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    logic_kind,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_logic_i(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                logic_kind,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_logic_i failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_logic_i failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Addi => {
             let addi_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -611,28 +589,28 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::addi::extract_addi_column_map(addi_config, num_witin));
             info_span!("hal_witgen_addi").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_addi(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_addi(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_addi failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_addi failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Lui => {
             let lui_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -642,28 +620,28 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::lui::extract_lui_column_map(lui_config, num_witin));
             info_span!("hal_witgen_lui").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_lui(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_lui(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_lui failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_lui failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Auipc => {
             let auipc_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -674,28 +652,28 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             });
             info_span!("hal_witgen_auipc").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_auipc(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_auipc(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_auipc failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_auipc failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Jal => {
             let jal_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -705,28 +683,28 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::jal::extract_jal_column_map(jal_config, num_witin));
             info_span!("hal_witgen_jal").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_jal(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_jal(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_jal failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_jal failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::ShiftR(shift_kind) => {
             let shift_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -739,29 +717,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             });
             info_span!("hal_witgen_shift_r").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_shift_r(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    shift_kind,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_shift_r(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                shift_kind,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_shift_r failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_shift_r failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::ShiftI(shift_kind) => {
             let shift_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -774,29 +752,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             });
             info_span!("hal_witgen_shift_i").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_shift_i(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    shift_kind,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_shift_i(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                shift_kind,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_shift_i failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_shift_i failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Slt(is_signed) => {
             let slt_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -806,29 +784,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::slt::extract_slt_column_map(slt_config, num_witin));
             info_span!("hal_witgen_slt").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_slt(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    is_signed,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_slt(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                is_signed,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_slt failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_slt failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Slti(is_signed) => {
             let slti_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -838,29 +816,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::slti::extract_slti_column_map(slti_config, num_witin));
             info_span!("hal_witgen_slti").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_slti(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    is_signed,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_slti(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                is_signed,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_slti failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_slti failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::BranchEq(is_beq) => {
             let branch_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -873,29 +851,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             });
             info_span!("hal_witgen_branch_eq").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_branch_eq(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    is_beq,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_branch_eq(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                is_beq,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_branch_eq failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_branch_eq failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::BranchCmp(is_signed) => {
             let branch_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -908,29 +886,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             });
             info_span!("hal_witgen_branch_cmp").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_branch_cmp(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    is_signed,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_branch_cmp(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                is_signed,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_branch_cmp failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_branch_cmp failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Jalr => {
             let jalr_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -940,28 +918,28 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::jalr::extract_jalr_column_map(jalr_config, num_witin));
             info_span!("hal_witgen_jalr").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_jalr(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_jalr(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_jalr failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_jalr failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Sw => {
             let sw_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -972,29 +950,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::sw::extract_sw_column_map(sw_config, num_witin));
             info_span!("hal_witgen_sw").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_sw(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    mem_max_bits,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_sw(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                mem_max_bits,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_sw failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_sw failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Sh => {
             let sh_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -1005,29 +983,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::sh::extract_sh_column_map(sh_config, num_witin));
             info_span!("hal_witgen_sh").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_sh(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    mem_max_bits,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_sh(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                mem_max_bits,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_sh failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_sh failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Sb => {
             let sb_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -1038,29 +1016,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::sb::extract_sb_column_map(sb_config, num_witin));
             info_span!("hal_witgen_sb").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_sb(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    mem_max_bits,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_sb(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                mem_max_bits,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_sb failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_sb failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::LoadSub {
             load_width,
             is_signed,
@@ -1075,64 +1053,63 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             let mem_max_bits = load_config.memory_addr.max_bits as u32;
             info_span!("hal_witgen_load_sub").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_load_sub(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    load_width,
-                                    is_signed,
-                                    mem_max_bits,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_load_sub(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                load_width,
+                                is_signed,
+                                mem_max_bits,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_load_sub failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_load_sub failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Mul(mul_kind) => {
             let mul_config = unsafe {
                 &*(config as *const I::InstructionConfig
                     as *const crate::instructions::riscv::mulh::mulh_circuit_v2::MulhConfig<E>)
             };
-            let col_map = info_span!("col_map").in_scope(|| {
-                super::chips::mul::extract_mul_column_map(mul_config, num_witin)
-            });
+            let col_map = info_span!("col_map")
+                .in_scope(|| super::chips::mul::extract_mul_column_map(mul_config, num_witin));
             info_span!("hal_witgen_mul").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_mul(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    mul_kind,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_mul(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                mul_kind,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_mul failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_mul failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
-        
+
         GpuWitgenKind::Div(div_kind) => {
             let div_config = unsafe {
                 &*(config as *const I::InstructionConfig
@@ -1142,30 +1119,29 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::div::extract_div_column_map(div_config, num_witin));
             info_span!("hal_witgen_div").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_div(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    div_kind,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_div(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                div_kind,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_div failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_div failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
         GpuWitgenKind::Lw => {
-            
             let load_config = unsafe {
                 &*(config as *const I::InstructionConfig
                     as *const crate::instructions::riscv::memory::load_v2::LoadConfig<E>)
@@ -1180,26 +1156,26 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                 .in_scope(|| super::chips::lw::extract_lw_column_map(load_config, num_witin));
             info_span!("hal_witgen_lw").in_scope(|| {
                 with_cached_gpu_ctx(|gpu_records, shard_bufs| {
-                        split_full!(
-                            hal.witgen
-                                .witgen_lw(
-                                    &col_map,
-                                    gpu_records,
-                                    &indices_u32,
-                                    shard_offset,
-                                    mem_max_bits,
-                                    fetch_base_pc,
-                                    fetch_num_slots,
-                                    None,
-                                    Some(shard_bufs),
+                    split_full!(
+                        hal.witgen
+                            .witgen_lw(
+                                &col_map,
+                                gpu_records,
+                                &indices_u32,
+                                shard_offset,
+                                mem_max_bits,
+                                fetch_base_pc,
+                                fetch_num_slots,
+                                None,
+                                Some(shard_bufs),
+                            )
+                            .map_err(|e| {
+                                ZKVMError::InvalidWitness(
+                                    format!("GPU witgen_lw failed: {e}").into(),
                                 )
-                                .map_err(|e| {
-                                    ZKVMError::InvalidWitness(
-                                        format!("GPU witgen_lw failed: {e}").into(),
-                                    )
-                                })
-                        )
-                    })
+                            })
+                    )
+                })
             })
         }
         GpuWitgenKind::Keccak => {
@@ -1207,5 +1183,3 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
         }
     }
 }
-
-

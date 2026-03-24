@@ -7,9 +7,12 @@ use crate::instructions::riscv::ecall::keccak::EcallKeccakConfig;
 
 use ceno_emul::SyscallWitness;
 
-use ceno_gpu::{Buffer, CudaHal, bb31::CudaHalBB31, common::transpose::matrix_transpose};
-use ceno_gpu::common::witgen::types::GpuShardRamRecord;
 use ceno_emul::WordAddr;
+use ceno_gpu::{
+    Buffer, CudaHal,
+    bb31::CudaHalBB31,
+    common::{transpose::matrix_transpose, witgen::types::GpuShardRamRecord},
+};
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::FieldAlgebra;
 use tracing::info_span;
@@ -18,14 +21,21 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
+    instructions::gpu::{
+        cache::{
+            ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,
+            with_cached_shard_meta,
+        },
+        config::{is_debug_compare_enabled, is_gpu_witgen_disabled, is_kind_disabled},
+        dispatch::{GpuWitgenKind, compute_fetch_params, is_force_cpu_path},
+        utils::{
+            d2h::{gpu_compact_ec_d2h, gpu_lk_counters_to_multiplicity},
+            debug_compare::debug_compare_keccak,
+        },
+    },
     tables::RMMCollections,
     witness::LkMultiplicity,
 };
-use crate::instructions::gpu::config::{is_gpu_witgen_disabled, is_kind_disabled, is_debug_compare_enabled};
-use crate::instructions::gpu::dispatch::{GpuWitgenKind, compute_fetch_params, is_force_cpu_path};
-use crate::instructions::gpu::cache::{ensure_shard_metadata_cached, with_cached_shard_meta, read_shared_addr_count, read_shared_addr_range};
-use crate::instructions::gpu::utils::d2h::{gpu_lk_counters_to_multiplicity, gpu_compact_ec_d2h};
-use crate::instructions::gpu::utils::debug_compare::debug_compare_keccak;
 
 /// Extract column map from a constructed EcallKeccakConfig.
 ///
@@ -291,17 +301,11 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     let rotation = KECCAK_ROUNDS_CEIL_LOG2; // = 5
 
     // Step 1: Extract column map
-    let col_map = info_span!("col_map")
-        .in_scope(|| extract_keccak_column_map(config, num_witin));
+    let col_map = info_span!("col_map").in_scope(|| extract_keccak_column_map(config, num_witin));
 
     // Step 2: Pack instances
-    let packed_instances = info_span!("pack_instances").in_scope(|| {
-        pack_keccak_instances(
-            steps,
-            step_indices,
-            &shard_ctx.syscall_witnesses,
-        )
-    });
+    let packed_instances = info_span!("pack_instances")
+        .in_scope(|| pack_keccak_instances(steps, step_indices, &shard_ctx.syscall_witnesses));
 
     // Step 3: Compute fetch params
     let (fetch_base_pc, fetch_num_slots) = compute_fetch_params(steps, step_indices);
@@ -701,4 +705,3 @@ mod tests {
         assert_eq!(lk_mismatches, 0, "GPU vs CPU LK multiplicity mismatch");
     }
 }
-

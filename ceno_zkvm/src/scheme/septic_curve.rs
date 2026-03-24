@@ -1112,10 +1112,7 @@ impl<F: Field + FromUniformBytes> SepticJacobianPoint<F> {
 mod tests {
     use super::SepticExtension;
     use crate::scheme::septic_curve::{SepticJacobianPoint, SepticPoint};
-    use p3::{
-        babybear::BabyBear,
-        field::Field,
-    };
+    use p3::{babybear::BabyBear, field::Field};
     use rand::thread_rng;
 
     type F = BabyBear;
@@ -1344,13 +1341,12 @@ mod tests {
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_poseidon2_sponge_matches_cpu() {
-        use p3::field::FieldAlgebra;
         use ceno_gpu::bb31::{
             CudaHalBB31,
             test_impl::{SPONGE_WIDTH, run_gpu_poseidon2_sponge},
         };
         use ff_ext::{PoseidonField, SmallField};
-        use p3::symmetric::Permutation;
+        use p3::{field::FieldAlgebra, symmetric::Permutation};
 
         let hal = CudaHalBB31::new(0).unwrap();
         let perm = F::get_default_perm();
@@ -1418,9 +1414,9 @@ mod tests {
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_septic_from_x_matches_cpu() {
-        use p3::field::FieldAlgebra;
         use ceno_gpu::bb31::{CudaHalBB31, test_impl::run_gpu_septic_from_x};
         use ff_ext::SmallField;
+        use p3::field::FieldAlgebra;
 
         let hal = CudaHalBB31::new(0).unwrap();
 

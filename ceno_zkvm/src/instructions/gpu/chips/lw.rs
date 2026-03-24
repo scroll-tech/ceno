@@ -101,15 +101,21 @@ mod tests {
     }
 
     use crate::instructions::gpu::utils::column_map::test_colmap;
-    test_colmap!(test_extract_lw_column_map, LwInstruction, extract_lw_column_map);
+    test_colmap!(
+        test_extract_lw_column_map,
+        LwInstruction,
+        extract_lw_column_map
+    );
 
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_lw_correctness() {
-        use crate::e2e::ShardContext;
-        use crate::instructions::gpu::dispatch;
-        use crate::instructions::gpu::utils::test_helpers::{
-            assert_full_gpu_pipeline, assert_witness_colmajor_eq,
+        use crate::{
+            e2e::ShardContext,
+            instructions::gpu::{
+                dispatch,
+                utils::test_helpers::{assert_full_gpu_pipeline, assert_witness_colmajor_eq},
+            },
         };
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 

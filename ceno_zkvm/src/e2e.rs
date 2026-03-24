@@ -1489,8 +1489,11 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 }
             }
 
+            #[cfg(feature = "gpu")]
             let debug_compare_e2e_shard =
                 crate::instructions::gpu::config::is_debug_compare_enabled();
+            #[cfg(not(feature = "gpu"))]
+            let debug_compare_e2e_shard = false;
             let debug_shard_ctx_template = debug_compare_e2e_shard.then(|| clone_debug_shard_ctx(&shard_ctx));
             info_span!("assign_opcode_circuits").in_scope(|| {
                 system_config
@@ -2277,9 +2280,7 @@ fn clone_debug_shard_ctx(src: &ShardContext) -> ShardContext<'static> {
 
 type FlatRecord = (u32, u64, u64, u64, u64, Option<u32>, u32, usize);
 
-fn flatten_ram_records(
-    records: &[BTreeMap<WordAddr, RAMRecord>],
-) -> Vec<FlatRecord> {
+fn flatten_ram_records(records: &[BTreeMap<WordAddr, RAMRecord>]) -> Vec<FlatRecord> {
     let mut flat = Vec::new();
     for table in records {
         for (addr, record) in table {

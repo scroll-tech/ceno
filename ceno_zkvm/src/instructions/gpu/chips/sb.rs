@@ -94,13 +94,18 @@ mod tests {
     type E = BabyBearExt4;
 
     use crate::instructions::gpu::utils::column_map::test_colmap;
-    test_colmap!(test_extract_sb_column_map, SbInstruction<E>, extract_sb_column_map);
+    test_colmap!(
+        test_extract_sb_column_map,
+        SbInstruction<E>,
+        extract_sb_column_map
+    );
 
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_sb_correctness() {
-        use crate::e2e::ShardContext;
-        use crate::instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq;
+        use crate::{
+            e2e::ShardContext, instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq,
+        };
         use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, WordAddr, WriteOp, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 

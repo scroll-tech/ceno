@@ -189,7 +189,8 @@ macro_rules! test_colmap {
     ($test_name:ident, $Instruction:ty, $extract_fn:ident) => {
         #[test]
         fn $test_name() {
-            let mut cs = crate::circuit_builder::ConstraintSystem::<E>::new(|| stringify!($test_name));
+            let mut cs =
+                crate::circuit_builder::ConstraintSystem::<E>::new(|| stringify!($test_name));
             let mut cb = crate::circuit_builder::CircuitBuilder::new(&mut cs);
             let config = <$Instruction as crate::instructions::Instruction<E>>::construct_circuit(
                 &mut cb,
@@ -208,4 +209,3 @@ macro_rules! test_colmap {
 
 #[cfg(test)]
 pub(crate) use test_colmap;
-

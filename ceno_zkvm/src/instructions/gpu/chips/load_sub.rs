@@ -59,7 +59,10 @@ pub fn extract_load_sub_column_map<E: ExtensionField>(
     };
 
     // Signed loads have signed_extend_config
-    let msb = config.signed_extend_config.as_ref().map(|sec| sec.msb().id as u32);
+    let msb = config
+        .signed_extend_config
+        .as_ref()
+        .map(|sec| sec.msb().id as u32);
 
     LoadSubColumnMap {
         pc,
@@ -104,16 +107,33 @@ mod tests {
     type E = BabyBearExt4;
 
     use crate::instructions::gpu::utils::column_map::test_colmap;
-    test_colmap!(test_extract_lh_column_map, LhInstruction<E>, extract_load_sub_column_map);
-    test_colmap!(test_extract_lhu_column_map, LhuInstruction<E>, extract_load_sub_column_map);
-    test_colmap!(test_extract_lb_column_map, LbInstruction<E>, extract_load_sub_column_map);
-    test_colmap!(test_extract_lbu_column_map, LbuInstruction<E>, extract_load_sub_column_map);
+    test_colmap!(
+        test_extract_lh_column_map,
+        LhInstruction<E>,
+        extract_load_sub_column_map
+    );
+    test_colmap!(
+        test_extract_lhu_column_map,
+        LhuInstruction<E>,
+        extract_load_sub_column_map
+    );
+    test_colmap!(
+        test_extract_lb_column_map,
+        LbInstruction<E>,
+        extract_load_sub_column_map
+    );
+    test_colmap!(
+        test_extract_lbu_column_map,
+        LbuInstruction<E>,
+        extract_load_sub_column_map
+    );
 
     #[test]
     #[cfg(feature = "gpu")]
     fn test_gpu_witgen_load_sub_correctness() {
-        use crate::e2e::ShardContext;
-        use crate::instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq;
+        use crate::{
+            e2e::ShardContext, instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq,
+        };
         use ceno_emul::{ByteAddr, Change, InsnKind, ReadOp, StepRecord, WordAddr, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
