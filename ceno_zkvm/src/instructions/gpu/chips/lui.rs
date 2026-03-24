@@ -1,29 +1,29 @@
-use ceno_gpu::common::witgen::types::AuipcColumnMap;
+use ceno_gpu::common::witgen::types::LuiColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
-use crate::instructions::riscv::auipc::AuipcConfig;
+use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_state};
+use crate::instructions::riscv::lui::LuiConfig;
 
-/// Extract column map from a constructed AuipcConfig.
-pub fn extract_auipc_column_map<E: ExtensionField>(
-    config: &AuipcConfig<E>,
+/// Extract column map from a constructed LuiConfig.
+pub fn extract_lui_column_map<E: ExtensionField>(
+    config: &LuiConfig<E>,
     num_witin: usize,
-) -> AuipcColumnMap {
+) -> LuiColumnMap {
     let im = &config.i_insn;
 
     let (pc, ts) = extract_state(&im.vm_state);
     let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&im.rs1);
     let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&im.rd);
 
-    let rd_bytes = extract_uint_limbs::<E, 4, _, _>(&config.rd_written, "rd_written");
-    let pc_limbs: [u32; 2] = [config.pc_limbs[0].id as u32, config.pc_limbs[1].id as u32];
-    let imm_limbs: [u32; 3] = [
-        config.imm_limbs[0].id as u32,
-        config.imm_limbs[1].id as u32,
-        config.imm_limbs[2].id as u32,
+    // LUI-specific: rd bytes (skip byte 0) + imm
+    let rd_bytes: [u32; 3] = [
+        config.rd_written[0].id as u32,
+        config.rd_written[1].id as u32,
+        config.rd_written[2].id as u32,
     ];
+    let imm = config.imm.id as u32;
 
-    AuipcColumnMap {
+    LuiColumnMap {
         pc,
         ts,
         rs1_id,
@@ -34,8 +34,7 @@ pub fn extract_auipc_column_map<E: ExtensionField>(
         rd_prev_val,
         rd_lt_diff,
         rd_bytes,
-        pc_limbs,
-        imm_limbs,
+        imm,
         num_cols: num_witin as u32,
     }
 }
@@ -45,7 +44,7 @@ mod tests {
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::auipc::AuipcInstruction},
+        instructions::{Instruction, riscv::lui::LuiInstruction},
         structs::ProgramParams,
     };
     use ff_ext::BabyBearExt4;
@@ -53,30 +52,30 @@ mod tests {
     type E = BabyBearExt4;
 
     #[test]
-    fn test_extract_auipc_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_auipc");
+    fn test_extract_lui_column_map() {
+        let mut cs = ConstraintSystem::<E>::new(|| "test_lui");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            AuipcInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            LuiInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
-        let col_map = extract_auipc_column_map(&config, cb.cs.num_witin as usize);
+        let col_map = extract_lui_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-        crate::instructions::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
+        crate::instructions::gpu::utils::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]
     #[cfg(feature = "gpu")]
-    fn test_gpu_witgen_auipc_correctness() {
+    fn test_gpu_witgen_lui_correctness() {
         use crate::e2e::ShardContext;
         use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
 
-        let mut cs = ConstraintSystem::<E>::new(|| "test_auipc_gpu");
+        let mut cs = ConstraintSystem::<E>::new(|| "test_lui_gpu");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            AuipcInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            LuiInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
         let num_witin = cb.cs.num_witin as usize;
         let num_structural_witin = cb.cs.num_structural_witin as usize;
 
@@ -84,11 +83,11 @@ mod tests {
         let steps: Vec<StepRecord> = (0..n)
             .map(|i| {
                 let imm_20bit = (i as i32) % 0x100000; // 0..0xfffff (20-bit)
-                let imm = imm_20bit << 12; // AUIPC immediate is upper 20 bits
-                let pc = ByteAddr(0x1000 + (i as u32) * 4);
-                let rd_after = pc.0.wrapping_add(imm as u32);
+                let imm = imm_20bit << 12; // LUI immediate is upper 20 bits
+                let rd_after = imm as u32;
                 let cycle = 4 + (i as u64) * 4;
-                let insn_code = encode_rv32(InsnKind::AUIPC, 0, 0, 4, imm);
+                let pc = ByteAddr(0x1000 + (i as u32) * 4);
+                let insn_code = encode_rv32(InsnKind::LUI, 0, 0, 4, imm);
                 StepRecord::new_i_instruction(
                     cycle,
                     Change::new(pc, pc + PC_STEP_SIZE),
@@ -102,7 +101,7 @@ mod tests {
         let indices: Vec<usize> = (0..n).collect();
 
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, AuipcInstruction<E>>(
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, LuiInstruction<E>>(
             &config,
             &mut shard_ctx,
             num_witin,
@@ -113,7 +112,7 @@ mod tests {
         .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
-        let col_map = extract_auipc_column_map(&config, num_witin);
+        let col_map = extract_lui_column_map(&config, num_witin);
         let shard_ctx_gpu = ShardContext::default();
         let shard_offset = shard_ctx_gpu.current_shard_offset_cycle();
         let steps_bytes: &[u8] = unsafe {
@@ -125,7 +124,7 @@ mod tests {
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         let gpu_result = hal.witgen
-            .witgen_auipc(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, None, None)
+            .witgen_lui(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, None, None)
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

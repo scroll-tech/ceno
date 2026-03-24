@@ -394,7 +394,7 @@ pub fn gpu_batch_continuation_ec_on_device(
     // Convert to GpuShardRamRecord format (writes first, reads after)
     let mut gpu_records: Vec<GpuShardRamRecord> = Vec::with_capacity(total);
     for (rec, _name) in write_records.iter().chain(read_records.iter()) {
-        gpu_records.push(super::d2h::shard_ram_record_to_gpu(rec));
+        gpu_records.push(super::utils::d2h::shard_ram_record_to_gpu(rec));
     }
 
     // GPU batch EC, results stay on device

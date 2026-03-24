@@ -1,29 +1,43 @@
-use ceno_gpu::common::witgen::types::JalColumnMap;
+use ceno_gpu::common::witgen::types::BranchEqColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{extract_rd, extract_state_branching, extract_uint_limbs};
-use crate::instructions::riscv::jump::jal_v2::JalConfig;
+use crate::instructions::gpu::utils::colmap_base::{extract_rs1, extract_rs2, extract_state_branching, extract_uint_limbs};
+use crate::instructions::riscv::branch::branch_circuit_v2::BranchConfig;
 
-/// Extract column map from a constructed JalConfig.
-pub fn extract_jal_column_map<E: ExtensionField>(
-    config: &JalConfig<E>,
+/// Extract column map from a constructed BranchConfig (BEQ/BNE variant).
+pub fn extract_branch_eq_column_map<E: ExtensionField>(
+    config: &BranchConfig<E>,
     num_witin: usize,
-) -> JalColumnMap {
-    let jm = &config.j_insn;
+) -> BranchEqColumnMap {
+    let rs1_limbs = extract_uint_limbs::<E, 2, _, _>(&config.read_rs1, "read_rs1");
+    let rs2_limbs = extract_uint_limbs::<E, 2, _, _>(&config.read_rs2, "read_rs2");
 
-    let (pc, next_pc, ts) = extract_state_branching(&jm.vm_state);
-    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&jm.rd);
-    let rd_bytes = extract_uint_limbs::<E, 4, _, _>(&config.rd_written, "rd_written");
+    let branch_taken = config.eq_branch_taken_bit.as_ref().unwrap().id as u32;
+    let diff_inv_marker: [u32; 2] = {
+        let markers = config.eq_diff_inv_marker.as_ref().unwrap();
+        [markers[0].id as u32, markers[1].id as u32]
+    };
 
-    JalColumnMap {
+    let (pc, next_pc, ts) = extract_state_branching(&config.b_insn.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.b_insn.rs1);
+    let (rs2_id, rs2_prev_ts, rs2_lt_diff) = extract_rs2(&config.b_insn.rs2);
+    let imm = config.b_insn.imm.id as u32;
+
+    BranchEqColumnMap {
+        rs1_limbs,
+        rs2_limbs,
+        branch_taken,
+        diff_inv_marker,
         pc,
         next_pc,
         ts,
-        rd_id,
-        rd_prev_ts,
-        rd_prev_val,
-        rd_lt_diff,
-        rd_bytes,
+        rs1_id,
+        rs1_prev_ts,
+        rs1_lt_diff,
+        rs2_id,
+        rs2_prev_ts,
+        rs2_lt_diff,
+        imm,
         num_cols: num_witin as u32,
     }
 }
@@ -33,7 +47,7 @@ mod tests {
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::jump::JalInstruction},
+        instructions::{Instruction, riscv::branch::BeqInstruction},
         structs::ProgramParams,
     };
     use ff_ext::BabyBearExt4;
@@ -41,48 +55,57 @@ mod tests {
     type E = BabyBearExt4;
 
     #[test]
-    fn test_extract_jal_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_jal");
+    fn test_extract_branch_eq_column_map() {
+        let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            JalInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            BeqInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
-        let col_map = extract_jal_column_map(&config, cb.cs.num_witin as usize);
+        let col_map = extract_branch_eq_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-        crate::instructions::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
+        crate::instructions::gpu::utils::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]
     #[cfg(feature = "gpu")]
-    fn test_gpu_witgen_jal_correctness() {
+    fn test_gpu_witgen_branch_eq_correctness() {
         use crate::e2e::ShardContext;
         use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
 
-        let mut cs = ConstraintSystem::<E>::new(|| "test_jal_gpu");
+        let mut cs = ConstraintSystem::<E>::new(|| "test_beq_gpu");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            JalInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            BeqInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
         let num_witin = cb.cs.num_witin as usize;
         let num_structural_witin = cb.cs.num_structural_witin as usize;
 
         let n = 1024;
+        let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, 8);
         let steps: Vec<StepRecord> = (0..n)
             .map(|i| {
+                let rs1 = ((i as u32) * 137) ^ 0xABCD;
+                let rs2 = if i % 3 == 0 {
+                    rs1
+                } else {
+                    ((i as u32) * 89) ^ 0x1234
+                };
+                let taken = rs1 == rs2;
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);
-                // JAL offset must be even; use small positive/negative offsets
-                let offset = (((i as i32) % 256) - 128) * 2; // even offsets
-                let new_pc = ByteAddr(pc.0.wrapping_add_signed(offset));
-                let rd_after: u32 = (pc + PC_STEP_SIZE).into();
+                let pc_after = if taken {
+                    ByteAddr(pc.0 + 8)
+                } else {
+                    pc + PC_STEP_SIZE
+                };
                 let cycle = 4 + (i as u64) * 4;
-                let insn_code = encode_rv32(InsnKind::JAL, 0, 0, 4, offset);
-                StepRecord::new_j_instruction(
+                StepRecord::new_b_instruction(
                     cycle,
-                    Change::new(pc, new_pc),
+                    Change::new(pc, pc_after),
                     insn_code,
-                    Change::new((i as u32) % 200, rd_after),
+                    rs1,
+                    rs2,
                     0,
                 )
             })
@@ -90,7 +113,7 @@ mod tests {
         let indices: Vec<usize> = (0..n).collect();
 
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, JalInstruction<E>>(
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, BeqInstruction<E>>(
             &config,
             &mut shard_ctx,
             num_witin,
@@ -101,7 +124,7 @@ mod tests {
         .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
-        let col_map = extract_jal_column_map(&config, num_witin);
+        let col_map = extract_branch_eq_column_map(&config, num_witin);
         let shard_ctx_gpu = ShardContext::default();
         let shard_offset = shard_ctx_gpu.current_shard_offset_cycle();
         let steps_bytes: &[u8] = unsafe {
@@ -113,7 +136,7 @@ mod tests {
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         let gpu_result = hal.witgen
-            .witgen_jal(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, None, None)
+            .witgen_branch_eq(&col_map, &gpu_records, &indices_u32, shard_offset, 1, 0, 0, None, None)
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

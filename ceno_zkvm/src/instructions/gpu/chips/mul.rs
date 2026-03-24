@@ -1,7 +1,7 @@
 use ceno_gpu::common::witgen::types::MulColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
+use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
 use crate::instructions::riscv::mulh::mulh_circuit_v2::MulhConfig;
 
 /// Extract column map from a constructed MulhConfig.

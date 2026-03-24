@@ -1,7 +1,7 @@
 use ceno_gpu::common::witgen::types::LogicRColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
+use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
 use crate::instructions::riscv::logic::logic_circuit::LogicConfig;
 
 /// Extract column map from a constructed LogicConfig (R-type: AND/OR/XOR).
@@ -89,7 +89,7 @@ mod tests {
         let col_map = extract_logic_r_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
 
-        crate::instructions::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
+        crate::instructions::gpu::utils::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]
@@ -202,7 +202,7 @@ mod tests {
 
         let mut shard_ctx_full_gpu = ShardContext::default();
         let (gpu_rmms, gpu_lkm) =
-            crate::instructions::gpu::witgen_gpu::try_gpu_assign_instances::<
+            crate::instructions::gpu::dispatch::try_gpu_assign_instances::<
                 E,
                 AndInstruction<E>,
             >(
@@ -212,12 +212,12 @@ mod tests {
                 num_structural_witin,
                 &steps,
                 &indices,
-                crate::instructions::gpu::witgen_gpu::GpuWitgenKind::LogicR(0),
+                crate::instructions::gpu::dispatch::GpuWitgenKind::LogicR(0),
             )
             .unwrap()
             .expect("GPU path should be available");
 
-        crate::instructions::gpu::device_cache::flush_shared_ec_buffers(
+        crate::instructions::gpu::cache::flush_shared_ec_buffers(
             &mut shard_ctx_full_gpu,
         )
         .unwrap();

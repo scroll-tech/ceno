@@ -416,10 +416,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
     impl_collect_shardram!(r_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
-        InsnKind::MUL => Some(witgen_gpu::GpuWitgenKind::Mul(0u32)),
-        InsnKind::MULH => Some(witgen_gpu::GpuWitgenKind::Mul(1u32)),
-        InsnKind::MULHU => Some(witgen_gpu::GpuWitgenKind::Mul(2u32)),
-        InsnKind::MULHSU => Some(witgen_gpu::GpuWitgenKind::Mul(3u32)),
+        InsnKind::MUL => Some(dispatch::GpuWitgenKind::Mul(0u32)),
+        InsnKind::MULH => Some(dispatch::GpuWitgenKind::Mul(1u32)),
+        InsnKind::MULHU => Some(dispatch::GpuWitgenKind::Mul(2u32)),
+        InsnKind::MULHSU => Some(dispatch::GpuWitgenKind::Mul(3u32)),
         _ => None,
     });
 }

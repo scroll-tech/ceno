@@ -219,7 +219,7 @@ mod tests {
         let step_indices: Vec<usize> = vec![0];
 
         // --- CPU path (force CPU via thread-local flag) ---
-        use super::super::witgen_gpu::set_force_cpu_path;
+        use crate::instructions::gpu::dispatch::set_force_cpu_path;
         set_force_cpu_path(true);
         let mut shard_ctx = ShardContext::default();
         shard_ctx.syscall_witnesses = std::sync::Arc::new(syscall_witnesses.clone());
@@ -237,7 +237,7 @@ mod tests {
         let cpu_structural = &cpu_rmms[1];
 
         // --- GPU path (full pipeline via gpu_assign_keccak_instances) ---
-        use super::super::witgen_gpu::gpu_assign_keccak_instances;
+        use crate::instructions::gpu::dispatch::gpu_assign_keccak_instances;
         let mut shard_ctx_gpu = ShardContext::default();
         shard_ctx_gpu.syscall_witnesses = std::sync::Arc::new(syscall_witnesses);
         let (gpu_rmms, gpu_lk) = gpu_assign_keccak_instances::<E>(

@@ -13,6 +13,13 @@ pub use sink::*;
 pub use emit::*;
 pub use fallback::*;
 
+#[cfg(feature = "gpu")]
+pub mod colmap_base;
+#[cfg(feature = "gpu")]
+pub mod d2h;
+#[cfg(feature = "gpu")]
+pub mod debug_compare;
+
 
 #[cfg(test)]
 mod tests {

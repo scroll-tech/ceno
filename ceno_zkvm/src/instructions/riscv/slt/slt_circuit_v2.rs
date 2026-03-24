@@ -133,7 +133,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
 
     impl_collect_shardram!(r_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Slt(match I::INST_KIND {
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Slt(match I::INST_KIND {
         InsnKind::SLT => 1u32,
         InsnKind::SLTU => 0u32,
         _ => unreachable!(),

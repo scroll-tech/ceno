@@ -206,5 +206,5 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
     impl_collect_shardram!(i_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Jalr);
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Jalr);
 }

@@ -16,11 +16,11 @@ use std::cell::Cell;
 use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
-use super::debug_compare::{
+use super::utils::debug_compare::{
     debug_compare_final_lk, debug_compare_keccak, debug_compare_shard_ec,
     debug_compare_shardram, debug_compare_witness,
 };
-use super::gpu_config::{
+use super::config::{
     is_gpu_witgen_disabled, is_kind_disabled, kind_has_verified_lk, kind_has_verified_shard,
 };
 use crate::{
@@ -80,17 +80,17 @@ pub enum GpuWitgenKind {
 }
 
 // Re-exports from device_cache module for external callers (e2e.rs, structs.rs).
-pub use super::device_cache::{
+pub use super::cache::{
     SharedDeviceBufferSet, flush_shared_ec_buffers, gpu_batch_continuation_ec_on_device,
     invalidate_shard_meta_cache, invalidate_shard_steps_cache, take_shared_device_buffers,
 };
 // Re-export for external callers (structs.rs).
-pub use super::d2h::gpu_batch_continuation_ec;
-use super::d2h::{
+pub use super::utils::d2h::gpu_batch_continuation_ec;
+use super::utils::d2h::{
     CompactEcBuf, LkResult, RamBuf, WitResult, gpu_collect_shard_records, gpu_compact_ec_d2h,
     gpu_lk_counters_to_multiplicity, gpu_witness_to_rmm,
 };
-use super::device_cache::{
+use super::cache::{
     ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,
     upload_shard_steps_cached, with_cached_shard_meta, with_cached_shard_steps,
 };
@@ -376,7 +376,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     Ok(([raw_witin, raw_structural], lk_multiplicity))
 }
 
-// Type aliases and D2H conversion functions live in super::d2h.
+// Type aliases and D2H conversion functions live in super::utils::d2h.
 
 /// Compute fetch counter parameters from step data.
 pub(crate) fn compute_fetch_params(
@@ -441,7 +441,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::arith::ArithConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::add::extract_add_column_map(arith_config, num_witin));
+                .in_scope(|| super::chips::add::extract_add_column_map(arith_config, num_witin));
             info_span!("hal_witgen_add").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -471,7 +471,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::arith::ArithConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::sub::extract_sub_column_map(arith_config, num_witin));
+                .in_scope(|| super::chips::sub::extract_sub_column_map(arith_config, num_witin));
             info_span!("hal_witgen_sub").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -501,7 +501,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::logic::logic_circuit::LogicConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::logic_r::extract_logic_r_column_map(logic_config, num_witin));
+                .in_scope(|| super::chips::logic_r::extract_logic_r_column_map(logic_config, num_witin));
             info_span!("hal_witgen_logic_r").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -533,7 +533,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::logic_imm::logic_imm_circuit_v2::LogicConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::logic_i::extract_logic_i_column_map(logic_config, num_witin));
+                .in_scope(|| super::chips::logic_i::extract_logic_i_column_map(logic_config, num_witin));
             info_span!("hal_witgen_logic_i").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -565,7 +565,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::arith_imm::arith_imm_circuit_v2::InstructionConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::addi::extract_addi_column_map(addi_config, num_witin));
+                .in_scope(|| super::chips::addi::extract_addi_column_map(addi_config, num_witin));
             info_span!("hal_witgen_addi").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -596,7 +596,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::lui::LuiConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::lui::extract_lui_column_map(lui_config, num_witin));
+                .in_scope(|| super::chips::lui::extract_lui_column_map(lui_config, num_witin));
             info_span!("hal_witgen_lui").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -625,7 +625,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::auipc::AuipcConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::auipc::extract_auipc_column_map(auipc_config, num_witin));
+                .in_scope(|| super::chips::auipc::extract_auipc_column_map(auipc_config, num_witin));
             info_span!("hal_witgen_auipc").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -656,7 +656,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::jump::jal_v2::JalConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::jal::extract_jal_column_map(jal_config, num_witin));
+                .in_scope(|| super::chips::jal::extract_jal_column_map(jal_config, num_witin));
             info_span!("hal_witgen_jal").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -687,7 +687,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     >)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::shift_r::extract_shift_r_column_map(shift_config, num_witin));
+                .in_scope(|| super::chips::shift_r::extract_shift_r_column_map(shift_config, num_witin));
             info_span!("hal_witgen_shift_r").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -721,7 +721,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     >)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::shift_i::extract_shift_i_column_map(shift_config, num_witin));
+                .in_scope(|| super::chips::shift_i::extract_shift_i_column_map(shift_config, num_witin));
             info_span!("hal_witgen_shift_i").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -753,7 +753,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::slt::slt_circuit_v2::SetLessThanConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::slt::extract_slt_column_map(slt_config, num_witin));
+                .in_scope(|| super::chips::slt::extract_slt_column_map(slt_config, num_witin));
             info_span!("hal_witgen_slt").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -785,7 +785,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::slti::extract_slti_column_map(slti_config, num_witin));
+                .in_scope(|| super::chips::slti::extract_slti_column_map(slti_config, num_witin));
             info_span!("hal_witgen_slti").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -819,7 +819,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     >)
             };
             let col_map = info_span!("col_map").in_scope(|| {
-                super::branch_eq::extract_branch_eq_column_map(branch_config, num_witin)
+                super::chips::branch_eq::extract_branch_eq_column_map(branch_config, num_witin)
             });
             info_span!("hal_witgen_branch_eq").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
@@ -854,7 +854,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     >)
             };
             let col_map = info_span!("col_map").in_scope(|| {
-                super::branch_cmp::extract_branch_cmp_column_map(branch_config, num_witin)
+                super::chips::branch_cmp::extract_branch_cmp_column_map(branch_config, num_witin)
             });
             info_span!("hal_witgen_branch_cmp").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
@@ -887,7 +887,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::jump::jalr_v2::JalrConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::jalr::extract_jalr_column_map(jalr_config, num_witin));
+                .in_scope(|| super::chips::jalr::extract_jalr_column_map(jalr_config, num_witin));
             info_span!("hal_witgen_jalr").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -917,7 +917,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             };
             let mem_max_bits = sw_config.memory_addr.max_bits as u32;
             let col_map = info_span!("col_map")
-                .in_scope(|| super::sw::extract_sw_column_map(sw_config, num_witin));
+                .in_scope(|| super::chips::sw::extract_sw_column_map(sw_config, num_witin));
             info_span!("hal_witgen_sw").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -948,7 +948,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             };
             let mem_max_bits = sh_config.memory_addr.max_bits as u32;
             let col_map = info_span!("col_map")
-                .in_scope(|| super::sh::extract_sh_column_map(sh_config, num_witin));
+                .in_scope(|| super::chips::sh::extract_sh_column_map(sh_config, num_witin));
             info_span!("hal_witgen_sh").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -979,7 +979,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             };
             let mem_max_bits = sb_config.memory_addr.max_bits as u32;
             let col_map = info_span!("col_map")
-                .in_scope(|| super::sb::extract_sb_column_map(sb_config, num_witin));
+                .in_scope(|| super::chips::sb::extract_sb_column_map(sb_config, num_witin));
             info_span!("hal_witgen_sb").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -1014,7 +1014,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             let is_byte = load_width == 8;
             let is_signed_bool = is_signed != 0;
             let col_map = info_span!("col_map").in_scope(|| {
-                super::load_sub::extract_load_sub_column_map(
+                super::chips::load_sub::extract_load_sub_column_map(
                     load_config,
                     num_witin,
                     is_byte,
@@ -1055,7 +1055,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::mulh::mulh_circuit_v2::MulhConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::mul::extract_mul_column_map(mul_config, num_witin, mul_kind));
+                .in_scope(|| super::chips::mul::extract_mul_column_map(mul_config, num_witin, mul_kind));
             info_span!("hal_witgen_mul").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -1087,7 +1087,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                     as *const crate::instructions::riscv::div::div_circuit_v2::DivRemConfig<E>)
             };
             let col_map = info_span!("col_map")
-                .in_scope(|| super::div::extract_div_column_map(div_config, num_witin));
+                .in_scope(|| super::chips::div::extract_div_column_map(div_config, num_witin));
             info_span!("hal_witgen_div").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -1125,7 +1125,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             };
             let mem_max_bits = load_config.memory_addr.max_bits as u32;
             let col_map = info_span!("col_map")
-                .in_scope(|| super::lw::extract_lw_column_map(load_config, num_witin));
+                .in_scope(|| super::chips::lw::extract_lw_column_map(load_config, num_witin));
             info_span!("hal_witgen_lw").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
@@ -1273,12 +1273,12 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
 
     // Step 1: Extract column map
     let col_map = info_span!("col_map")
-        .in_scope(|| super::keccak::extract_keccak_column_map(config, num_witin));
+        .in_scope(|| super::chips::keccak::extract_keccak_column_map(config, num_witin));
 
     // Step 2: Pack instances
     let packed_instances = info_span!("pack_instances")
         .in_scope(|| {
-            super::keccak::pack_keccak_instances(
+            super::chips::keccak::pack_keccak_instances(
                 steps,
                 step_indices,
                 &shard_ctx.syscall_witnesses,

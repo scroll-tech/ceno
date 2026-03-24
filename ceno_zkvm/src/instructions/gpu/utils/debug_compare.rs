@@ -20,7 +20,7 @@ use crate::{
     instructions::{Instruction, cpu_collect_shardram, cpu_collect_lk_and_shardram},
 };
 
-use super::witgen_gpu::{GpuWitgenKind, set_force_cpu_path};
+use crate::instructions::gpu::dispatch::{GpuWitgenKind, set_force_cpu_path};
 
 pub(crate) fn debug_compare_final_lk<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,

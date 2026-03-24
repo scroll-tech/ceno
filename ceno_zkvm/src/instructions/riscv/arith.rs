@@ -160,8 +160,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     impl_collect_shardram!(r_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
-        InsnKind::ADD => Some(witgen_gpu::GpuWitgenKind::Add),
-        InsnKind::SUB => Some(witgen_gpu::GpuWitgenKind::Sub),
+        InsnKind::ADD => Some(dispatch::GpuWitgenKind::Add),
+        InsnKind::SUB => Some(dispatch::GpuWitgenKind::Sub),
         _ => None,
     });
 }

@@ -115,5 +115,5 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
     impl_collect_shardram!(i_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Addi);
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Addi);
 }

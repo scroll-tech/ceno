@@ -127,7 +127,7 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
 
     impl_collect_shardram!(i_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Lui);
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Lui);
 }
 
 #[cfg(test)]

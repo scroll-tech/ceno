@@ -345,10 +345,10 @@ macro_rules! impl_gpu_assign {
             ),
             $crate::error::ZKVMError,
         > {
-            use $crate::instructions::gpu::witgen_gpu;
-            let gpu_kind: Option<witgen_gpu::GpuWitgenKind> = $kind_expr;
+            use $crate::instructions::gpu::dispatch;
+            let gpu_kind: Option<dispatch::GpuWitgenKind> = $kind_expr;
             if let Some(kind) = gpu_kind {
-                if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(
+                if let Some(result) = dispatch::try_gpu_assign_instances::<E, Self>(
                     config,
                     shard_ctx,
                     num_witin,

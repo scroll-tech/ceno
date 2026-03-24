@@ -204,9 +204,9 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     impl_collect_shardram!(s_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
-        InsnKind::SW => Some(witgen_gpu::GpuWitgenKind::Sw),
-        InsnKind::SH => Some(witgen_gpu::GpuWitgenKind::Sh),
-        InsnKind::SB => Some(witgen_gpu::GpuWitgenKind::Sb),
+        InsnKind::SW => Some(dispatch::GpuWitgenKind::Sw),
+        InsnKind::SH => Some(dispatch::GpuWitgenKind::Sh),
+        InsnKind::SB => Some(dispatch::GpuWitgenKind::Sb),
         _ => None,
     });
 }

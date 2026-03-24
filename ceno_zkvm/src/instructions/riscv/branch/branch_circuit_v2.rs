@@ -227,12 +227,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
     impl_collect_shardram!(b_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
-        InsnKind::BEQ => Some(witgen_gpu::GpuWitgenKind::BranchEq(1)),
-        InsnKind::BNE => Some(witgen_gpu::GpuWitgenKind::BranchEq(0)),
-        InsnKind::BLT => Some(witgen_gpu::GpuWitgenKind::BranchCmp(1)),
-        InsnKind::BGE => Some(witgen_gpu::GpuWitgenKind::BranchCmp(1)),
-        InsnKind::BLTU => Some(witgen_gpu::GpuWitgenKind::BranchCmp(0)),
-        InsnKind::BGEU => Some(witgen_gpu::GpuWitgenKind::BranchCmp(0)),
+        InsnKind::BEQ => Some(dispatch::GpuWitgenKind::BranchEq(1)),
+        InsnKind::BNE => Some(dispatch::GpuWitgenKind::BranchEq(0)),
+        InsnKind::BLT => Some(dispatch::GpuWitgenKind::BranchCmp(1)),
+        InsnKind::BGE => Some(dispatch::GpuWitgenKind::BranchCmp(1)),
+        InsnKind::BLTU => Some(dispatch::GpuWitgenKind::BranchCmp(0)),
+        InsnKind::BGEU => Some(dispatch::GpuWitgenKind::BranchCmp(0)),
         _ => unreachable!(),
     });
 }

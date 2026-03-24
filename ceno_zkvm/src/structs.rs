@@ -587,7 +587,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let global_input = {
             #[cfg(feature = "gpu")]
             let ec_result = {
-                use crate::instructions::gpu::witgen_gpu::gpu_batch_continuation_ec;
+                use crate::instructions::gpu::dispatch::gpu_batch_continuation_ec;
                 gpu_batch_continuation_ec::<E>(&write_record_pairs, &read_record_pairs)
                     .ok()
             };
@@ -733,7 +733,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<bool, ZKVMError> {
-        use crate::instructions::gpu::witgen_gpu::{
+        use crate::instructions::gpu::dispatch::{
             gpu_batch_continuation_ec_on_device, take_shared_device_buffers,
         };
         use ceno_gpu::Buffer;

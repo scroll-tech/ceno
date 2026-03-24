@@ -143,7 +143,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
 
     impl_collect_shardram!(i_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::LogicI(match I::INST_KIND {
+    impl_gpu_assign!(dispatch::GpuWitgenKind::LogicI(match I::INST_KIND {
         InsnKind::ANDI => 0,
         InsnKind::ORI => 1,
         InsnKind::XORI => 2,

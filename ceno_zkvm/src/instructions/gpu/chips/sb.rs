@@ -1,7 +1,7 @@
 use ceno_gpu::common::witgen::types::SbColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{
+use crate::instructions::gpu::utils::colmap_base::{
     extract_rs1, extract_rs2, extract_state, extract_uint_limbs, extract_write_mem,
 };
 use crate::instructions::riscv::memory::store_v2::StoreConfig;
@@ -99,7 +99,7 @@ mod tests {
 
         let col_map = extract_sb_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-        crate::instructions::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
+        crate::instructions::gpu::utils::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]

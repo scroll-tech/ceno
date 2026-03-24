@@ -272,20 +272,20 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     impl_collect_shardram!(im_insn);
 
     impl_gpu_assign!(match I::INST_KIND {
-        InsnKind::LW => Some(witgen_gpu::GpuWitgenKind::Lw),
-        InsnKind::LH => Some(witgen_gpu::GpuWitgenKind::LoadSub {
+        InsnKind::LW => Some(dispatch::GpuWitgenKind::Lw),
+        InsnKind::LH => Some(dispatch::GpuWitgenKind::LoadSub {
             load_width: 16,
             is_signed: 1,
         }),
-        InsnKind::LHU => Some(witgen_gpu::GpuWitgenKind::LoadSub {
+        InsnKind::LHU => Some(dispatch::GpuWitgenKind::LoadSub {
             load_width: 16,
             is_signed: 0,
         }),
-        InsnKind::LB => Some(witgen_gpu::GpuWitgenKind::LoadSub {
+        InsnKind::LB => Some(dispatch::GpuWitgenKind::LoadSub {
             load_width: 8,
             is_signed: 1,
         }),
-        InsnKind::LBU => Some(witgen_gpu::GpuWitgenKind::LoadSub {
+        InsnKind::LBU => Some(dispatch::GpuWitgenKind::LoadSub {
             load_width: 8,
             is_signed: 0,
         }),

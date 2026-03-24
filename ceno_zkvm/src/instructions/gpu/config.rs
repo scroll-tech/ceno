@@ -2,7 +2,7 @@
 /// environment-variable disable switches.
 ///
 /// Extracted from `witgen_gpu.rs` — pure code move, no behavioural changes.
-use super::witgen_gpu::GpuWitgenKind;
+use super::dispatch::GpuWitgenKind;
 
 pub(crate) fn kind_tag(kind: GpuWitgenKind) -> &'static str {
     match kind {

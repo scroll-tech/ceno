@@ -1,21 +1,22 @@
-use ceno_gpu::common::witgen::types::ShiftIColumnMap;
+use ceno_gpu::common::witgen::types::ShiftRColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
-use crate::instructions::riscv::shift::shift_circuit_v2::ShiftImmConfig;
+use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_rs2, extract_state, extract_uint_limbs};
+use crate::instructions::riscv::shift::shift_circuit_v2::ShiftRTypeConfig;
 
-/// Extract column map from a constructed ShiftImmConfig (I-type: SLLI/SRLI/SRAI).
-pub fn extract_shift_i_column_map<E: ExtensionField>(
-    config: &ShiftImmConfig<E>,
+/// Extract column map from a constructed ShiftRTypeConfig (R-type: SLL/SRL/SRA).
+pub fn extract_shift_r_column_map<E: ExtensionField>(
+    config: &ShiftRTypeConfig<E>,
     num_witin: usize,
-) -> ShiftIColumnMap {
-    let (pc, ts) = extract_state(&config.i_insn.vm_state);
-    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.i_insn.rs1);
-    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&config.i_insn.rd);
+) -> ShiftRColumnMap {
+    let (pc, ts) = extract_state(&config.r_insn.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.r_insn.rs1);
+    let (rs2_id, rs2_prev_ts, rs2_lt_diff) = extract_rs2(&config.r_insn.rs2);
+    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&config.r_insn.rd);
 
     let rs1_bytes = extract_uint_limbs::<E, 4, _, _>(&config.rs1_read, "rs1_read");
+    let rs2_bytes = extract_uint_limbs::<E, 4, _, _>(&config.rs2_read, "rs2_read");
     let rd_bytes = extract_uint_limbs::<E, 4, _, _>(&config.rd_written, "rd_written");
-    let imm = config.imm.id as u32;
 
     // ShiftBase
     let bit_shift_marker: [u32; 8] =
@@ -28,19 +29,22 @@ pub fn extract_shift_i_column_map<E: ExtensionField>(
     let bit_shift_carry: [u32; 4] =
         std::array::from_fn(|i| config.shift_base_config.bit_shift_carry[i].id as u32);
 
-    ShiftIColumnMap {
+    ShiftRColumnMap {
         pc,
         ts,
         rs1_id,
         rs1_prev_ts,
         rs1_lt_diff,
+        rs2_id,
+        rs2_prev_ts,
+        rs2_lt_diff,
         rd_id,
         rd_prev_ts,
         rd_prev_val,
         rd_lt_diff,
         rs1_bytes,
+        rs2_bytes,
         rd_bytes,
-        imm,
         bit_shift_marker,
         limb_shift_marker,
         bit_multiplier_left,
@@ -56,7 +60,7 @@ mod tests {
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::shift_imm::SlliInstruction},
+        instructions::{Instruction, riscv::shift::SllInstruction},
         structs::ProgramParams,
     };
     use ff_ext::BabyBearExt4;
@@ -64,30 +68,31 @@ mod tests {
     type E = BabyBearExt4;
 
     #[test]
-    fn test_extract_shift_i_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_shift_i");
+    fn test_extract_shift_r_column_map() {
+        let mut cs = ConstraintSystem::<E>::new(|| "test_shift_r");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            SlliInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            SllInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
-        let col_map = extract_shift_i_column_map(&config, cb.cs.num_witin as usize);
+        let col_map = extract_shift_r_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-        crate::instructions::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
+
+        crate::instructions::gpu::utils::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]
     #[cfg(feature = "gpu")]
-    fn test_gpu_witgen_shift_i_correctness() {
+    fn test_gpu_witgen_shift_r_correctness() {
         use crate::e2e::ShardContext;
-        use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
+        use ceno_emul::{ByteAddr, Change, InsnKind, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
 
-        let mut cs = ConstraintSystem::<E>::new(|| "test_shift_i_gpu");
+        let mut cs = ConstraintSystem::<E>::new(|| "test_shift_r_gpu");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            SlliInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            SllInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
         let num_witin = cb.cs.num_witin as usize;
         let num_structural_witin = cb.cs.num_structural_witin as usize;
 
@@ -105,21 +110,21 @@ mod tests {
         let n = 1024;
         let steps: Vec<StepRecord> = (0..n)
             .map(|i| {
-                let (rs1, shamt) = if i < EDGE_CASES.len() {
-                    let (r, s) = EDGE_CASES[i];
-                    (r, s as i32)
+                let (rs1, rs2) = if i < EDGE_CASES.len() {
+                    EDGE_CASES[i]
                 } else {
-                    ((i as u32).wrapping_mul(0x01010101), (i as i32) % 32)
+                    ((i as u32).wrapping_mul(0x01010101), (i as u32) % 32)
                 };
-                let rd_after = rs1 << (shamt as u32);
+                let rd_after = rs1 << (rs2 & 0x1F);
                 let cycle = 4 + (i as u64) * 4;
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);
-                let insn_code = encode_rv32(InsnKind::SLLI, 2, 0, 4, shamt);
-                StepRecord::new_i_instruction(
+                let insn_code = encode_rv32(InsnKind::SLL, 2, 3, 4, 0);
+                StepRecord::new_r_instruction(
                     cycle,
-                    Change::new(pc, pc + PC_STEP_SIZE),
+                    pc,
                     insn_code,
                     rs1,
+                    rs2,
                     Change::new((i as u32) % 200, rd_after),
                     0,
                 )
@@ -128,7 +133,7 @@ mod tests {
         let indices: Vec<usize> = (0..n).collect();
 
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, SlliInstruction<E>>(
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, SllInstruction<E>>(
             &config,
             &mut shard_ctx,
             num_witin,
@@ -139,7 +144,7 @@ mod tests {
         .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
-        let col_map = extract_shift_i_column_map(&config, num_witin);
+        let col_map = extract_shift_r_column_map(&config, num_witin);
         let shard_ctx_gpu = ShardContext::default();
         let shard_offset = shard_ctx_gpu.current_shard_offset_cycle();
         let steps_bytes: &[u8] = unsafe {
@@ -151,7 +156,7 @@ mod tests {
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         let gpu_result = hal.witgen
-            .witgen_shift_i(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, 0, None, None)
+            .witgen_shift_r(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, 0, None, None)
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

@@ -152,7 +152,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
 
     impl_collect_shardram!(i_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Slti(match I::INST_KIND {
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Slti(match I::INST_KIND {
         InsnKind::SLTI => 1u32,
         InsnKind::SLTIU => 0u32,
         _ => unreachable!(),

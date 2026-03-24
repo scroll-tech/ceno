@@ -1,7 +1,7 @@
 use ceno_gpu::common::witgen::types::LwColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs};
+use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs};
 
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::instructions::riscv::memory::load::LoadConfig;
@@ -225,7 +225,7 @@ mod tests {
 
         let mut shard_ctx_full_gpu = ShardContext::default();
         let (gpu_rmms, gpu_lkm) =
-            crate::instructions::gpu::witgen_gpu::try_gpu_assign_instances::<
+            crate::instructions::gpu::dispatch::try_gpu_assign_instances::<
                 E,
                 LwInstruction,
             >(
@@ -235,12 +235,12 @@ mod tests {
                 num_structural_witin,
                 &steps,
                 &indices,
-                crate::instructions::gpu::witgen_gpu::GpuWitgenKind::Lw,
+                crate::instructions::gpu::dispatch::GpuWitgenKind::Lw,
             )
             .unwrap()
             .expect("GPU path should be available");
 
-        crate::instructions::gpu::device_cache::flush_shared_ec_buffers(
+        crate::instructions::gpu::cache::flush_shared_ec_buffers(
             &mut shard_ctx_full_gpu,
         )
         .unwrap();

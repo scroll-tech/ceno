@@ -1,7 +1,7 @@
 use ceno_gpu::common::witgen::types::SltiColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
+use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
 use crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmConfig;
 
 /// Extract column map from a constructed SetLessThanImmConfig (SLTI/SLTIU).
@@ -70,7 +70,7 @@ mod tests {
 
         let col_map = extract_slti_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-        crate::instructions::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
+        crate::instructions::gpu::utils::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]

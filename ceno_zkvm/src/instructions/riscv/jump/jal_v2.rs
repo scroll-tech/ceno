@@ -141,5 +141,5 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
 
     impl_collect_shardram!(j_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Jal);
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Jal);
 }

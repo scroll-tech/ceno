@@ -384,10 +384,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     }
 
     impl_gpu_assign!(match I::INST_KIND {
-        InsnKind::DIV => Some(witgen_gpu::GpuWitgenKind::Div(0u32)),
-        InsnKind::DIVU => Some(witgen_gpu::GpuWitgenKind::Div(1u32)),
-        InsnKind::REM => Some(witgen_gpu::GpuWitgenKind::Div(2u32)),
-        InsnKind::REMU => Some(witgen_gpu::GpuWitgenKind::Div(3u32)),
+        InsnKind::DIV => Some(dispatch::GpuWitgenKind::Div(0u32)),
+        InsnKind::DIVU => Some(dispatch::GpuWitgenKind::Div(1u32)),
+        InsnKind::REM => Some(dispatch::GpuWitgenKind::Div(2u32)),
+        InsnKind::REMU => Some(dispatch::GpuWitgenKind::Div(3u32)),
         _ => None,
     });
 

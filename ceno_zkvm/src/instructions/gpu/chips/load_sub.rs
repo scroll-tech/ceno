@@ -1,7 +1,7 @@
 use ceno_gpu::common::witgen::types::LoadSubColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs};
+use crate::instructions::gpu::utils::colmap_base::{extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs};
 use crate::instructions::riscv::memory::load_v2::LoadConfig;
 
 /// Extract column map from a constructed LoadConfig for sub-word loads (LH/LHU/LB/LBU).

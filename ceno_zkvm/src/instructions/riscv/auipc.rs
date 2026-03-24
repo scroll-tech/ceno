@@ -223,7 +223,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
 
     impl_collect_shardram!(i_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::Auipc);
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Auipc);
 }
 
 #[cfg(test)]

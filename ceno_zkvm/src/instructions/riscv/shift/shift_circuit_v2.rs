@@ -423,7 +423,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
     impl_collect_shardram!(r_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::ShiftR(match I::INST_KIND {
+    impl_gpu_assign!(dispatch::GpuWitgenKind::ShiftR(match I::INST_KIND {
         InsnKind::SLL => 0u32,
         InsnKind::SRL => 1u32,
         InsnKind::SRA => 2u32,
@@ -548,7 +548,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
     impl_collect_shardram!(i_insn);
 
-    impl_gpu_assign!(witgen_gpu::GpuWitgenKind::ShiftI(match I::INST_KIND {
+    impl_gpu_assign!(dispatch::GpuWitgenKind::ShiftI(match I::INST_KIND {
         InsnKind::SLLI => 0u32,
         InsnKind::SRLI => 1u32,
         InsnKind::SRAI => 2u32,
