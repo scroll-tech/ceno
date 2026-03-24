@@ -4,7 +4,7 @@
 /// to validate correctness. Activated by environment variables:
 /// - CENO_GPU_DEBUG_COMPARE_LK: compare lookup multiplicities
 /// - CENO_GPU_DEBUG_COMPARE_WITNESS: compare witness matrices
-/// - CENO_GPU_DEBUG_COMPARE_SHARD: compare shard side effects
+/// - CENO_GPU_DEBUG_COMPARE_SHARD: compare shardram records
 /// - CENO_GPU_DEBUG_COMPARE_EC: compare EC points
 use ceno_emul::{StepIndex, StepRecord, WordAddr};
 use ceno_gpu::common::witgen::types::{GpuRamRecordSlot, GpuShardRamRecord};
@@ -161,7 +161,7 @@ pub(crate) fn debug_compare_witness<E: ExtensionField, I: Instruction<E>>(
     Ok(())
 }
 
-pub(crate) fn debug_compare_shard_side_effects<E: ExtensionField, I: Instruction<E>>(
+pub(crate) fn debug_compare_shardram<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,
     shard_ctx: &ShardContext,
     shard_steps: &[StepRecord],
@@ -245,7 +245,7 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
     if let Err(e) = cpu_collect_shardram::<E, I>(
         config, &mut cpu_ctx, shard_steps, step_indices,
     ) {
-        tracing::error!("[GPU EC debug] kind={kind:?} CPU shard side effects failed: {e:?}");
+        tracing::error!("[GPU EC debug] kind={kind:?} CPU shardram records failed: {e:?}");
         return;
     }
 
@@ -583,7 +583,7 @@ pub(crate) fn lookup_table_name(table_idx: usize) -> &'static str {
 }
 
 /// Debug comparison for keccak GPU witgen.
-/// Runs the CPU path and compares LK / witness / shard side effects.
+/// Runs the CPU path and compares LK / witness / shardram records.
 ///
 /// Activated by CENO_GPU_DEBUG_COMPARE_LK, CENO_GPU_DEBUG_COMPARE_WITNESS,
 /// or CENO_GPU_DEBUG_COMPARE_SHARD environment variables.

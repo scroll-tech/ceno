@@ -63,7 +63,7 @@ pub struct EcallUint256MulConfig<E: ExtensionField> {
     mem_rw: Vec<WriteMEM>,
 }
 
-/// Uint256MulInstruction can handle any instruction and produce its side-effects.
+/// Uint256MulInstruction can handle any instruction and produce its lk and shardram data.
 pub struct Uint256MulInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
@@ -372,7 +372,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
     }
 }
 
-/// Uint256InvInstruction can handle any instruction and produce its side-effects.
+/// Uint256InvInstruction can handle any instruction and produce its lk and shardram data.
 pub struct Uint256InvInstruction<E, P>(PhantomData<(E, P)>);
 
 pub struct Secp256K1EcallSpec;

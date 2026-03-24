@@ -10,8 +10,8 @@ use crate::{
             i_insn::IInstructionConfig,
             r_insn::RInstructionConfig,
         },
-        side_effects::{
-            LkOp, SideEffectSink, emit_byte_decomposition_ops,
+        gpu::host_ops::{
+            LkOp, LkShardramSink, emit_byte_decomposition_ops,
             emit_const_range_op,
         },
     },
@@ -213,7 +213,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
 
     pub fn emit_lk_and_shardram(
         &self,
-        sink: &mut impl SideEffectSink,
+        sink: &mut impl LkShardramSink,
         kind: InsnKind,
         b: u32,
         c: u32,
@@ -322,7 +322,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     type InstructionConfig = ShiftRTypeConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -445,7 +445,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     type InstructionConfig = ShiftImmConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]

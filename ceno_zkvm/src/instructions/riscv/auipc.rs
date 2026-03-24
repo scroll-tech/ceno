@@ -13,8 +13,8 @@ use crate::{
             constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             i_insn::IInstructionConfig,
         },
-        side_effects::{
-            LkOp, SideEffectSink, emit_byte_decomposition_ops,
+        gpu::host_ops::{
+            LkOp, LkShardramSink, emit_byte_decomposition_ops,
             emit_const_range_op,
         },
     },
@@ -44,7 +44,7 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     type InstructionConfig = AuipcConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::AUIPC]

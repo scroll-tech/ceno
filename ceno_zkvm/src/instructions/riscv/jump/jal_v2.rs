@@ -13,7 +13,7 @@ use crate::{
             constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             j_insn::JInstructionConfig,
         },
-        side_effects::{LkOp, SideEffectSink, emit_byte_decomposition_ops},
+        gpu::host_ops::{LkOp, LkShardramSink, emit_byte_decomposition_ops},
     },
     structs::ProgramParams,
     utils::split_to_u8,
@@ -46,7 +46,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     type InstructionConfig = JalConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::JAL]

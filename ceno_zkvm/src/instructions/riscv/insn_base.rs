@@ -13,7 +13,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
-    instructions::side_effects::{LkOp, SendEvent, SideEffectSink, emit_assert_lt_ops},
+    instructions::gpu::host_ops::{LkOp, SendEvent, LkShardramSink, emit_assert_lt_ops},
     structs::RAMType,
     uint::Value,
     witness::{LkMultiplicity, set_val},
@@ -145,7 +145,7 @@ impl<E: ExtensionField> ReadRS1<E> {
 
     pub fn emit_lk_and_shardram(
         &self,
-        sink: &mut impl SideEffectSink,
+        sink: &mut impl LkShardramSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {
@@ -254,7 +254,7 @@ impl<E: ExtensionField> ReadRS2<E> {
 
     pub fn emit_lk_and_shardram(
         &self,
-        sink: &mut impl SideEffectSink,
+        sink: &mut impl LkShardramSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {
@@ -381,7 +381,7 @@ impl<E: ExtensionField> WriteRD<E> {
 
     pub fn emit_op_lk_and_shardram(
         &self,
-        sink: &mut impl SideEffectSink,
+        sink: &mut impl LkShardramSink,
         shard_ctx: &ShardContext,
         cycle: Cycle,
         op: &WriteOp,
@@ -408,7 +408,7 @@ impl<E: ExtensionField> WriteRD<E> {
 
     pub fn emit_lk_and_shardram(
         &self,
-        sink: &mut impl SideEffectSink,
+        sink: &mut impl LkShardramSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {
@@ -507,7 +507,7 @@ impl<E: ExtensionField> ReadMEM<E> {
 
     pub fn emit_lk_and_shardram(
         &self,
-        sink: &mut impl SideEffectSink,
+        sink: &mut impl LkShardramSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {
@@ -621,7 +621,7 @@ impl WriteMEM {
 
     pub fn emit_op_lk_and_shardram(
         &self,
-        sink: &mut impl SideEffectSink,
+        sink: &mut impl LkShardramSink,
         shard_ctx: &ShardContext,
         cycle: Cycle,
         op: &WriteOp,
@@ -648,7 +648,7 @@ impl WriteMEM {
 
     pub fn emit_lk_and_shardram(
         &self,
-        sink: &mut impl SideEffectSink,
+        sink: &mut impl LkShardramSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {
@@ -828,7 +828,7 @@ impl<E: ExtensionField> MemAddr<E> {
         Ok(())
     }
 
-    pub fn emit_lk_and_shardram(&self, sink: &mut impl SideEffectSink, addr: Word) {
+    pub fn emit_lk_and_shardram(&self, sink: &mut impl LkShardramSink, addr: Word) {
         let mid_u14 = ((addr & 0xffff) >> Self::N_LOW_BITS) as u16;
         sink.emit_lk(LkOp::AssertU14 { value: mid_u14 });
 

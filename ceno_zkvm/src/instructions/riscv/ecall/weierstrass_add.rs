@@ -52,7 +52,7 @@ pub struct EcallWeierstrassAddAssignConfig<E: ExtensionField, EC: EllipticCurve>
     mem_rw: Vec<WriteMEM>,
 }
 
-/// WeierstrassAddAssignInstruction can handle any instruction and produce its side-effects.
+/// WeierstrassAddAssignInstruction can handle any instruction and produce its lk and shardram data.
 pub struct WeierstrassAddAssignInstruction<E, EC>(PhantomData<(E, EC)>);
 
 impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>

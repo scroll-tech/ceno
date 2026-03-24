@@ -8,7 +8,7 @@ use crate::{
     error::ZKVMError,
     instructions::{
         Instruction,
-        side_effects::emit_u16_limbs,
+        gpu::host_ops::emit_u16_limbs,
     },
     structs::ProgramParams,
     uint::Value,
@@ -45,7 +45,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     type InstructionConfig = ArithConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = matches!(I::INST_KIND, InsnKind::ADD | InsnKind::SUB);
+    const GPU_LK_SHARDRAM: bool = matches!(I::INST_KIND, InsnKind::ADD | InsnKind::SUB);
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]

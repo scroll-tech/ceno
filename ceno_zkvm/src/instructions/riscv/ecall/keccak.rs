@@ -50,7 +50,7 @@ pub struct EcallKeccakConfig<E: ExtensionField> {
     pub(crate) mem_rw: Vec<WriteMEM>,
 }
 
-/// KeccakInstruction can handle any instruction and produce its side-effects.
+/// KeccakInstruction can handle any instruction and produce its lk and shardram data.
 pub struct KeccakInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {

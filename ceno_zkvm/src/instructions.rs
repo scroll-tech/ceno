@@ -22,8 +22,6 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 pub mod riscv;
 pub mod gpu;
 
-/// Backward-compatible re-export: old `side_effects` path still works.
-pub use gpu::host_ops as side_effects;
 
 pub use gpu::host_ops::{cpu_assign_instances, cpu_collect_lk_and_shardram, cpu_collect_shardram};
 
@@ -31,7 +29,7 @@ pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
     type InsnType: Clone + Copy;
 
-    const GPU_SIDE_EFFECTS: bool = false;
+    const GPU_LK_SHARDRAM: bool = false;
 
     fn padding_strategy() -> InstancePaddingStrategy {
         InstancePaddingStrategy::Default
@@ -112,7 +110,7 @@ pub trait Instruction<E: ExtensionField> {
     ) -> Result<(), ZKVMError> {
         Err(ZKVMError::InvalidWitness(
             format!(
-                "{} does not implement lightweight side effects collection",
+                "{} does not implement lk and shardram collection",
                 Self::name()
             )
             .into(),
@@ -127,7 +125,7 @@ pub trait Instruction<E: ExtensionField> {
     ) -> Result<(), ZKVMError> {
         Err(ZKVMError::InvalidWitness(
             format!(
-                "{} does not implement shard-only side effects collection",
+                "{} does not implement shardram-only collection",
                 Self::name()
             )
             .into(),
@@ -234,11 +232,11 @@ pub fn full_step_indices(steps: &[StepRecord]) -> Vec<StepIndex> {
 // ---------------------------------------------------------------------------
 
 /// Implement `collect_lk_and_shardram` with a common prologue
-/// (create `CpuSideEffectSink`, dispatch to `config.$field.emit_lk_and_shardram`)
+/// (create `CpuLkShardramSink`, dispatch to `config.$field.emit_lk_and_shardram`)
 /// and a chip-specific body for additional LK ops.
 ///
 /// The closure receives `(sink, step, config, ctx)`:
-/// - `sink: &mut CpuSideEffectSink` — emit LK ops and send events
+/// - `sink: &mut CpuLkShardramSink` — emit LK ops and send events
 /// - `step: &StepRecord` — current step
 /// - `config: &Self::InstructionConfig` — circuit config (for sub-configs)
 /// - `ctx: &ShardContext` — read-only shard context
@@ -261,7 +259,7 @@ macro_rules! impl_collect_lk_and_shardram {
             let shard_ctx_ptr = shard_ctx as *mut $crate::e2e::ShardContext;
             let _ctx = unsafe { &*shard_ctx_ptr };
             let mut _sink_val = unsafe {
-                $crate::instructions::gpu::host_ops::CpuSideEffectSink::from_raw(
+                $crate::instructions::gpu::host_ops::CpuLkShardramSink::from_raw(
                     shard_ctx_ptr,
                     lk_multiplicity,
                 )

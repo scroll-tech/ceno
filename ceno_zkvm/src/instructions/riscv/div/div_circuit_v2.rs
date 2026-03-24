@@ -18,7 +18,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::constants::LIMB_BITS,
-        side_effects::{LkOp, SideEffectSink, emit_u16_limbs},
+        gpu::host_ops::{LkOp, LkShardramSink, emit_u16_limbs},
     },
     structs::ProgramParams,
     uint::Value,
@@ -55,7 +55,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
     type InstructionConfig = DivRemConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]

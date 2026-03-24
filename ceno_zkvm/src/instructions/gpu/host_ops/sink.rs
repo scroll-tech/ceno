@@ -5,19 +5,19 @@ use crate::{e2e::ShardContext, witness::LkMultiplicity};
 
 use super::{LkOp, SendEvent};
 
-pub trait SideEffectSink {
+pub trait LkShardramSink {
     fn emit_lk(&mut self, op: LkOp);
     fn emit_send(&mut self, event: SendEvent);
     fn touch_addr(&mut self, addr: WordAddr);
 }
 
-pub struct CpuSideEffectSink<'ctx, 'shard, 'lk> {
+pub struct CpuLkShardramSink<'ctx, 'shard, 'lk> {
     shard_ctx: *mut ShardContext<'shard>,
     lk: &'lk mut LkMultiplicity,
     _marker: PhantomData<&'ctx mut ShardContext<'shard>>,
 }
 
-impl<'ctx, 'shard, 'lk> CpuSideEffectSink<'ctx, 'shard, 'lk> {
+impl<'ctx, 'shard, 'lk> CpuLkShardramSink<'ctx, 'shard, 'lk> {
     pub unsafe fn from_raw(
         shard_ctx: *mut ShardContext<'shard>,
         lk: &'lk mut LkMultiplicity,
@@ -31,12 +31,12 @@ impl<'ctx, 'shard, 'lk> CpuSideEffectSink<'ctx, 'shard, 'lk> {
 
     fn shard_ctx(&mut self) -> &mut ShardContext<'shard> {
         // Safety: `from_raw` is only constructed from a live `&mut ShardContext`
-        // for the duration of side-effect collection.
+        // for the duration of lk_shardram collection.
         unsafe { &mut *self.shard_ctx }
     }
 }
 
-/// Create a `CpuSideEffectSink` and an immutable view of `ShardContext`,
+/// Create a `CpuLkShardramSink` and an immutable view of `ShardContext`,
 /// then pass both to the closure `f`.
 ///
 /// This encapsulates the raw-pointer trick needed to hold `&mut ShardContext`
@@ -48,15 +48,15 @@ impl<'ctx, 'shard, 'lk> CpuSideEffectSink<'ctx, 'shard, 'lk> {
 pub fn with_cpu_sink<'a, R>(
     shard_ctx: &'a mut ShardContext<'a>,
     lk: &'a mut LkMultiplicity,
-    f: impl FnOnce(&mut CpuSideEffectSink<'a, 'a, 'a>, &ShardContext) -> R,
+    f: impl FnOnce(&mut CpuLkShardramSink<'a, 'a, 'a>, &ShardContext) -> R,
 ) -> R {
     let ptr = shard_ctx as *mut ShardContext;
     let view = unsafe { &*ptr };
-    let mut sink = unsafe { CpuSideEffectSink::from_raw(ptr, lk) };
+    let mut sink = unsafe { CpuLkShardramSink::from_raw(ptr, lk) };
     f(&mut sink, view)
 }
 
-impl SideEffectSink for CpuSideEffectSink<'_, '_, '_> {
+impl LkShardramSink for CpuLkShardramSink<'_, '_, '_> {
     fn emit_lk(&mut self, op: LkOp) {
         for (table, key) in op.encode_all() {
             self.lk.increment(table, key);

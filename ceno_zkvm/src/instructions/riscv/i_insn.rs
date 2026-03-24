@@ -8,7 +8,7 @@ use crate::{
     error::ZKVMError,
     instructions::{
         riscv::insn_base::{ReadRS1, StateInOut, WriteRD},
-        side_effects::{LkOp, SideEffectSink},
+        gpu::host_ops::{LkOp, LkShardramSink},
     },
     tables::InsnRecord,
     witness::LkMultiplicity,
@@ -82,7 +82,7 @@ impl<E: ExtensionField> IInstructionConfig<E> {
 
     pub fn emit_lk_and_shardram(
         &self,
-        sink: &mut impl SideEffectSink,
+        sink: &mut impl LkShardramSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {

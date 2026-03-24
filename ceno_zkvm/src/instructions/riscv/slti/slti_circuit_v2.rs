@@ -12,7 +12,7 @@ use crate::{
             constants::{UINT_LIMBS, UInt},
             i_insn::IInstructionConfig,
         },
-        side_effects::emit_uint_limbs_lt_ops,
+        gpu::host_ops::emit_uint_limbs_lt_ops,
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},
@@ -45,7 +45,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
     type InstructionConfig = SetLessThanImmConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]

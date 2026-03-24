@@ -7,7 +7,7 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
-        side_effects::emit_u16_limbs,
+        gpu::host_ops::emit_u16_limbs,
     },
     structs::ProgramParams,
     utils::{imm_sign_extend, imm_sign_extend_circuit},
@@ -36,7 +36,7 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     type InstructionConfig = InstructionConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::ADDI]

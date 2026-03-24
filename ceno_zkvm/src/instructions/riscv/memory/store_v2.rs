@@ -13,7 +13,7 @@ use crate::{
             memory::gadget::MemWordUtil,
             s_insn::SInstructionConfig,
         },
-        side_effects::{emit_const_range_op, emit_u16_limbs},
+        gpu::host_ops::{emit_const_range_op, emit_u16_limbs},
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -46,7 +46,7 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
     type InstructionConfig = StoreConfig<E, N_ZEROS>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]

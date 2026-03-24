@@ -13,7 +13,7 @@ use crate::{
             constants::{UINT_BYTE_LIMBS, UInt8},
             i_insn::IInstructionConfig,
         },
-        side_effects::emit_const_range_op,
+        gpu::host_ops::emit_const_range_op,
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -38,7 +38,7 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     type InstructionConfig = LuiConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::LUI]

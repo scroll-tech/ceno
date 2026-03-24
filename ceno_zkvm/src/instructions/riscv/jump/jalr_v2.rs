@@ -15,7 +15,7 @@ use crate::{
             i_insn::IInstructionConfig,
             insn_base::{MemAddr, ReadRS1, StateInOut, WriteRD},
         },
-        side_effects::emit_const_range_op,
+        gpu::host_ops::emit_const_range_op,
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -46,7 +46,7 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     type InstructionConfig = JalrConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::JALR]

@@ -59,7 +59,7 @@ pub struct EcallWeierstrassDecompressConfig<E: ExtensionField, EC: EllipticCurve
     mem_rw: Vec<WriteMEM>,
 }
 
-/// WeierstrassDecompressInstruction can handle any instruction and produce its side-effects.
+/// WeierstrassDecompressInstruction can handle any instruction and produce its lk and shardram data.
 pub struct WeierstrassDecompressInstruction<E, EC>(PhantomData<(E, EC)>);
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E>

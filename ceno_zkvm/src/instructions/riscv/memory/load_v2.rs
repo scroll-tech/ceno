@@ -45,7 +45,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     type InstructionConfig = LoadConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = matches!(
+    const GPU_LK_SHARDRAM: bool = matches!(
         I::INST_KIND,
         InsnKind::LW | InsnKind::LB | InsnKind::LBU | InsnKind::LH | InsnKind::LHU
     );
@@ -259,7 +259,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
     }
 
     impl_collect_lk_and_shardram!(im_insn, |sink, step, config, _ctx| {
-        // Side effects (shard send/addr) are identical for all load types (LW/LH/LB/LHU/LBU).
+        // Shardram (shard send/addr) are identical for all load types (LW/LH/LB/LHU/LBU).
         // Sub-word extraction only affects LK emissions, handled separately by GPU kernel.
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
         let unaligned_addr =

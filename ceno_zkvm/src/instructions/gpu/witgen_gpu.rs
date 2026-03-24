@@ -2,8 +2,8 @@
 ///
 /// This module provides `try_gpu_assign_instances` which:
 /// 1. Runs the GPU kernel to fill the witness matrix (fast)
-/// 2. Runs a lightweight CPU loop to collect side effects without witness replay
-/// 3. Returns the GPU-generated witness + CPU-collected side effects
+/// 2. Runs a lightweight CPU loop to collect lk and shardram without witness replay
+/// 3. Returns the GPU-generated witness + CPU-collected lk and shardram
 use ceno_emul::{StepIndex, StepRecord, WordAddr};
 use ceno_gpu::{
     Buffer, CudaHal, bb31::CudaHalBB31, common::transpose::matrix_transpose,
@@ -18,7 +18,7 @@ use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use super::debug_compare::{
     debug_compare_final_lk, debug_compare_keccak, debug_compare_shard_ec,
-    debug_compare_shard_side_effects, debug_compare_witness,
+    debug_compare_shardram, debug_compare_witness,
 };
 use super::gpu_config::{
     is_gpu_witgen_disabled, is_kind_disabled, kind_has_verified_lk, kind_has_verified_shard,
@@ -135,7 +135,7 @@ pub(crate) fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
         return Ok(None);
     }
 
-    if !I::GPU_SIDE_EFFECTS {
+    if !I::GPU_LK_SHARDRAM {
         return Ok(None);
     }
 
@@ -211,8 +211,8 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
         )
     })?;
 
-    // Step 2: Collect side effects
-    // Priority: GPU shard records > CPU shard records > full CPU side effects
+    // Step 2: Collect lk and shardram
+    // Priority: GPU shard records > CPU shard records > full CPU lk and shardram
     let lk_multiplicity = if gpu_lk_counters.is_some() && kind_has_verified_lk(kind) {
         let lk_multiplicity = info_span!("gpu_lk_d2h").in_scope(|| {
             gpu_lk_counters_to_multiplicity(gpu_lk_counters.unwrap())
@@ -332,13 +332,13 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
         }
         lk_multiplicity
     } else {
-        // GPU LK counters missing or unverified — fall back to full CPU side effects
-        info_span!("cpu_side_effects").in_scope(|| {
+        // GPU LK counters missing or unverified — fall back to full CPU lk and shardram
+        info_span!("cpu_lk_shardram").in_scope(|| {
             collect_lk_and_shardram::<E, I>(config, shard_ctx, shard_steps, step_indices)
         })?
     };
     debug_compare_final_lk::<E, I>(config, shard_ctx, num_witin, num_structural_witin, shard_steps, step_indices, kind, &lk_multiplicity)?;
-    debug_compare_shard_side_effects::<E, I>(config, shard_ctx, shard_steps, step_indices, kind)?;
+    debug_compare_shardram::<E, I>(config, shard_ctx, shard_steps, step_indices, kind)?;
 
     // Step 3: Build structural witness (just selector = ONE)
     let mut raw_structural = RowMajorMatrix::<E::BaseField>::new(
@@ -1154,7 +1154,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     }
 }
 
-/// CPU-side loop to collect side effects only (shard_ctx.send, lk_multiplicity).
+/// CPU-side loop to collect lk and shardram only (shard_ctx.send, lk_multiplicity).
 /// Runs assign_instance with a scratch buffer per thread.
 fn collect_lk_and_shardram<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,

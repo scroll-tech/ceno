@@ -17,7 +17,7 @@ use crate::{
             i_insn::IInstructionConfig,
             logic_imm::LogicOp,
         },
-        side_effects::emit_logic_u8_ops,
+        gpu::host_ops::emit_logic_u8_ops,
     },
     structs::ProgramParams,
     tables::InsnRecord,
@@ -35,7 +35,7 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     type InstructionConfig = LogicConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]

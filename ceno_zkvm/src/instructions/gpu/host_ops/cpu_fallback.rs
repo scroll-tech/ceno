@@ -88,7 +88,7 @@ pub fn cpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
     ))
 }
 
-/// CPU-only side-effect collection for GPU-enabled instructions.
+/// CPU-only lk_shardram collection for GPU-enabled instructions.
 ///
 /// This path deliberately avoids scratch witness buffers and calls only the
 /// instruction-specific side-effect collector.

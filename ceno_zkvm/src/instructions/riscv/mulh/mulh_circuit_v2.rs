@@ -9,7 +9,7 @@ use crate::{
             constants::{LIMB_BITS, UINT_LIMBS, UInt},
             r_insn::RInstructionConfig,
         },
-        side_effects::{LkOp, SideEffectSink},
+        gpu::host_ops::{LkOp, LkShardramSink},
     },
     structs::ProgramParams,
     uint::Value,
@@ -42,7 +42,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
     type InstructionConfig = MulhConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]

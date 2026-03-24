@@ -52,7 +52,7 @@ pub(crate) fn kind_tag(kind: GpuWitgenKind) -> &'static str {
 
 /// Returns true if the GPU CUDA kernel for this kind has been verified to produce
 /// correct LK multiplicity counters matching the CPU baseline.
-/// Unverified kinds fall back to CPU full side effects (GPU still handles witness).
+/// Unverified kinds fall back to CPU full lk_shardram (GPU still handles witness).
 ///
 /// Override with `CENO_GPU_DISABLE_LK_KINDS=add,sub,...` to force specific kinds
 /// back to CPU LK (for binary-search debugging).

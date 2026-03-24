@@ -47,7 +47,7 @@ pub struct EcallShaExtendConfig<E: ExtensionField> {
     mem_rw: Vec<WriteMEM>,
 }
 
-/// ShaExtendInstruction can handle any instruction and produce its side-effects.
+/// ShaExtendInstruction can handle any instruction and produce its lk and shardram data.
 pub struct ShaExtendInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {

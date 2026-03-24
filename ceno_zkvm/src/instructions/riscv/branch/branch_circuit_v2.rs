@@ -12,7 +12,7 @@ use crate::{
             b_insn::BInstructionConfig,
             constants::{UINT_LIMBS, UInt},
         },
-        side_effects::emit_uint_limbs_lt_ops,
+        gpu::host_ops::emit_uint_limbs_lt_ops,
     },
     structs::ProgramParams,
     witness::LkMultiplicity,
@@ -43,7 +43,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
     type InstructionConfig = BranchConfig<E>;
     type InsnType = InsnKind;
 
-    const GPU_SIDE_EFFECTS: bool = true;
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]

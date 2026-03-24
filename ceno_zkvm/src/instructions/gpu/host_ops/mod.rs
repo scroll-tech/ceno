@@ -1,6 +1,6 @@
 //! Host-side operations for GPU-CPU hybrid witness generation.
 //!
-//! Contains lookup/shard side-effect collection abstractions and CPU fallback paths.
+//! Contains lookup/shard lk_shardram collection abstractions and CPU fallback paths.
 
 mod lk_ops;
 mod sink;
@@ -46,7 +46,7 @@ mod tests {
 
     type E = GoldilocksExt2;
 
-    fn assert_side_effects_match<I: Instruction<E>>(
+    fn assert_lk_shardram_match<I: Instruction<E>>(
         config: &I::InstructionConfig,
         num_witin: usize,
         num_structural_witin: usize,
@@ -84,7 +84,7 @@ mod tests {
         );
     }
 
-    fn assert_shard_side_effects_match<I: Instruction<E>>(
+    fn assert_shard_lk_shardram_match<I: Instruction<E>>(
         config: &I::InstructionConfig,
         num_witin: usize,
         num_structural_witin: usize,
@@ -164,8 +164,8 @@ mod tests {
     }
 
     #[test]
-    fn test_add_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "add_side_effects");
+    fn test_add_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "add_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             AddInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -189,7 +189,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<AddInstruction<E>>(
+        assert_lk_shardram_match::<AddInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -198,8 +198,8 @@ mod tests {
     }
 
     #[test]
-    fn test_and_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "and_side_effects");
+    fn test_and_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "and_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             AndInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -223,7 +223,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<AndInstruction<E>>(
+        assert_lk_shardram_match::<AndInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -232,8 +232,8 @@ mod tests {
     }
 
     #[test]
-    fn test_add_shard_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "add_shard_side_effects");
+    fn test_add_shard_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "add_shard_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             AddInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -257,7 +257,7 @@ mod tests {
             })
             .collect();
 
-        assert_shard_side_effects_match::<AddInstruction<E>>(
+        assert_shard_lk_shardram_match::<AddInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -266,8 +266,8 @@ mod tests {
     }
 
     #[test]
-    fn test_and_shard_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "and_shard_side_effects");
+    fn test_and_shard_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "and_shard_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             AndInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -291,7 +291,7 @@ mod tests {
             })
             .collect();
 
-        assert_shard_side_effects_match::<AndInstruction<E>>(
+        assert_shard_lk_shardram_match::<AndInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -300,8 +300,8 @@ mod tests {
     }
 
     #[test]
-    fn test_lw_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "lw_side_effects");
+    fn test_lw_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "lw_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             LwInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -331,7 +331,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<LwInstruction<E>>(
+        assert_lk_shardram_match::<LwInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -340,8 +340,8 @@ mod tests {
     }
 
     #[test]
-    fn test_lw_shard_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "lw_shard_side_effects");
+    fn test_lw_shard_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "lw_shard_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             LwInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -371,7 +371,7 @@ mod tests {
             })
             .collect();
 
-        assert_shard_side_effects_match::<LwInstruction<E>>(
+        assert_shard_lk_shardram_match::<LwInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -380,8 +380,8 @@ mod tests {
     }
 
     #[test]
-    fn test_beq_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "beq_side_effects");
+    fn test_beq_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "beq_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             BeqInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -410,7 +410,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<BeqInstruction<E>>(
+        assert_lk_shardram_match::<BeqInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -419,8 +419,8 @@ mod tests {
     }
 
     #[test]
-    fn test_blt_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "blt_side_effects");
+    fn test_blt_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "blt_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             BltInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -446,7 +446,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<BltInstruction<E>>(
+        assert_lk_shardram_match::<BltInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -455,8 +455,8 @@ mod tests {
     }
 
     #[test]
-    fn test_jal_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "jal_side_effects");
+    fn test_jal_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "jal_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             JalInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -476,7 +476,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<JalInstruction<E>>(
+        assert_lk_shardram_match::<JalInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -485,8 +485,8 @@ mod tests {
     }
 
     #[test]
-    fn test_jalr_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "jalr_side_effects");
+    fn test_jalr_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "jalr_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             JalrInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -508,7 +508,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<JalrInstruction<E>>(
+        assert_lk_shardram_match::<JalrInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -517,8 +517,8 @@ mod tests {
     }
 
     #[test]
-    fn test_slt_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "slt_side_effects");
+    fn test_slt_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "slt_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             SltInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -541,7 +541,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<SltInstruction<E>>(
+        assert_lk_shardram_match::<SltInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -550,8 +550,8 @@ mod tests {
     }
 
     #[test]
-    fn test_slti_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "slti_side_effects");
+    fn test_slti_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "slti_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             SltiInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -573,7 +573,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<SltiInstruction<E>>(
+        assert_lk_shardram_match::<SltiInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -582,8 +582,8 @@ mod tests {
     }
 
     #[test]
-    fn test_sra_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "sra_side_effects");
+    fn test_sra_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "sra_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             SraInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -606,7 +606,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<SraInstruction<E>>(
+        assert_lk_shardram_match::<SraInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -615,8 +615,8 @@ mod tests {
     }
 
     #[test]
-    fn test_slli_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "slli_side_effects");
+    fn test_slli_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "slli_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             SlliInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -637,7 +637,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<SlliInstruction<E>>(
+        assert_lk_shardram_match::<SlliInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -646,8 +646,8 @@ mod tests {
     }
 
     #[test]
-    fn test_sb_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "sb_side_effects");
+    fn test_sb_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "sb_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             SbInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -677,7 +677,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<SbInstruction<E>>(
+        assert_lk_shardram_match::<SbInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -686,8 +686,8 @@ mod tests {
     }
 
     #[test]
-    fn test_mul_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "mul_side_effects");
+    fn test_mul_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "mul_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             MulInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -714,7 +714,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<MulInstruction<E>>(
+        assert_lk_shardram_match::<MulInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -723,8 +723,8 @@ mod tests {
     }
 
     #[test]
-    fn test_mulh_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "mulh_side_effects");
+    fn test_mulh_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "mulh_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             MulhInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -752,7 +752,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<MulhInstruction<E>>(
+        assert_lk_shardram_match::<MulhInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -761,8 +761,8 @@ mod tests {
     }
 
     #[test]
-    fn test_div_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "div_side_effects");
+    fn test_div_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "div_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             DivInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -794,7 +794,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<DivInstruction<E>>(
+        assert_lk_shardram_match::<DivInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
@@ -803,8 +803,8 @@ mod tests {
     }
 
     #[test]
-    fn test_remu_side_effects_match_assign_instance() {
-        let mut cs = ConstraintSystem::<E>::new(|| "remu_side_effects");
+    fn test_remu_lk_shardram_match_assign_instance() {
+        let mut cs = ConstraintSystem::<E>::new(|| "remu_lk_shardram");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
             RemuInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
@@ -832,7 +832,7 @@ mod tests {
             })
             .collect();
 
-        assert_side_effects_match::<RemuInstruction<E>>(
+        assert_lk_shardram_match::<RemuInstruction<E>>(
             &config,
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,

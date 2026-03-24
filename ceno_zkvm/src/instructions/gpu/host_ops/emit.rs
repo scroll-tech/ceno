@@ -5,10 +5,10 @@ use gkr_iop::{
 
 use crate::instructions::riscv::constants::{LIMB_BITS, UINT_LIMBS};
 
-use super::{LkOp, SideEffectSink};
+use super::{LkOp, LkShardramSink};
 
 pub fn emit_assert_lt_ops(
-    sink: &mut impl SideEffectSink,
+    sink: &mut impl LkShardramSink,
     lt_cfg: &AssertLtConfig,
     lhs: u64,
     rhs: u64,
@@ -29,7 +29,7 @@ pub fn emit_assert_lt_ops(
     }
 }
 
-pub fn emit_u16_limbs(sink: &mut impl SideEffectSink, value: u32) {
+pub fn emit_u16_limbs(sink: &mut impl LkShardramSink, value: u32) {
     sink.emit_lk(LkOp::AssertU16 {
         value: (value & 0xffff) as u16,
     });
@@ -38,7 +38,7 @@ pub fn emit_u16_limbs(sink: &mut impl SideEffectSink, value: u32) {
     });
 }
 
-pub fn emit_const_range_op(sink: &mut impl SideEffectSink, value: u64, bits: usize) {
+pub fn emit_const_range_op(sink: &mut impl LkShardramSink, value: u64, bits: usize) {
     match bits {
         0 | 1 => {}
         14 => sink.emit_lk(LkOp::AssertU14 {
@@ -54,7 +54,7 @@ pub fn emit_const_range_op(sink: &mut impl SideEffectSink, value: u64, bits: usi
     }
 }
 
-pub fn emit_byte_decomposition_ops(sink: &mut impl SideEffectSink, bytes: &[u8]) {
+pub fn emit_byte_decomposition_ops(sink: &mut impl LkShardramSink, bytes: &[u8]) {
     for chunk in bytes.chunks(2) {
         match chunk {
             [a, b] => sink.emit_lk(LkOp::DoubleU8 { a: *a, b: *b }),
@@ -64,7 +64,7 @@ pub fn emit_byte_decomposition_ops(sink: &mut impl SideEffectSink, bytes: &[u8])
     }
 }
 
-pub fn emit_signed_extend_op(sink: &mut impl SideEffectSink, n_bits: usize, value: u64) {
+pub fn emit_signed_extend_op(sink: &mut impl LkShardramSink, n_bits: usize, value: u64) {
     let msb = value >> (n_bits - 1);
     sink.emit_lk(LkOp::DynamicRange {
         value: 2 * value - (msb << n_bits),
@@ -73,7 +73,7 @@ pub fn emit_signed_extend_op(sink: &mut impl SideEffectSink, n_bits: usize, valu
 }
 
 pub fn emit_logic_u8_ops<OP: OpsTable>(
-    sink: &mut impl SideEffectSink,
+    sink: &mut impl LkShardramSink,
     lhs: u64,
     rhs: u64,
     num_bytes: usize,
@@ -93,7 +93,7 @@ pub fn emit_logic_u8_ops<OP: OpsTable>(
 }
 
 pub fn emit_uint_limbs_lt_ops(
-    sink: &mut impl SideEffectSink,
+    sink: &mut impl LkShardramSink,
     is_sign_comparison: bool,
     a: &[u16],
     b: &[u16],
