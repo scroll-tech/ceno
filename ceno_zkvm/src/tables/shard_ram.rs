@@ -720,7 +720,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
             .collect());
 
         // 2. Extract column map
-        let col_map = crate::instructions::riscv::gpu::shard_ram::extract_shard_ram_column_map(
+        let col_map = crate::instructions::gpu::shard_ram::extract_shard_ram_column_map(
             config, num_witin,
         );
 
@@ -931,7 +931,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
         let num_rows_padded = 2 * n;
 
         // 1. Extract column map (same as regular path)
-        let col_map = crate::instructions::riscv::gpu::shard_ram::extract_shard_ram_column_map(
+        let col_map = crate::instructions::gpu::shard_ram::extract_shard_ram_column_map(
             config, num_witin,
         );
 

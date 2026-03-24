@@ -180,7 +180,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         #[cfg(feature = "gpu")]
         {
-            use crate::instructions::riscv::gpu::witgen_gpu::gpu_assign_keccak_instances;
+            use crate::instructions::gpu::witgen_gpu::gpu_assign_keccak_instances;
             if let Some(result) = gpu_assign_keccak_instances::<E>(
                 config,
                 shard_ctx,

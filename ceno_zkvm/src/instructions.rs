@@ -20,12 +20,12 @@ use rayon::{
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 pub mod riscv;
-pub mod host_ops;
+pub mod gpu;
 
 /// Backward-compatible re-export: old `side_effects` path still works.
-pub use host_ops as side_effects;
+pub use gpu::host_ops as side_effects;
 
-pub use host_ops::{cpu_assign_instances, cpu_collect_lk_and_shardram, cpu_collect_shardram};
+pub use gpu::host_ops::{cpu_assign_instances, cpu_collect_lk_and_shardram, cpu_collect_shardram};
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
@@ -261,7 +261,7 @@ macro_rules! impl_collect_lk_and_shardram {
             let shard_ctx_ptr = shard_ctx as *mut $crate::e2e::ShardContext;
             let _ctx = unsafe { &*shard_ctx_ptr };
             let mut _sink_val = unsafe {
-                $crate::instructions::side_effects::CpuSideEffectSink::from_raw(
+                $crate::instructions::gpu::host_ops::CpuSideEffectSink::from_raw(
                     shard_ctx_ptr,
                     lk_multiplicity,
                 )
@@ -347,7 +347,7 @@ macro_rules! impl_gpu_assign {
             ),
             $crate::error::ZKVMError,
         > {
-            use $crate::instructions::riscv::gpu::witgen_gpu;
+            use $crate::instructions::gpu::witgen_gpu;
             let gpu_kind: Option<witgen_gpu::GpuWitgenKind> = $kind_expr;
             if let Some(kind) = gpu_kind {
                 if let Some(result) = witgen_gpu::try_gpu_assign_instances::<E, Self>(

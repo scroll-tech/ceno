@@ -1,29 +1,41 @@
-use ceno_gpu::common::witgen::types::JalColumnMap;
+use ceno_gpu::common::witgen::types::AuipcColumnMap;
 use ff_ext::ExtensionField;
 
-use super::colmap_base::{extract_rd, extract_state_branching, extract_uint_limbs};
-use crate::instructions::riscv::jump::jal_v2::JalConfig;
+use super::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
+use crate::instructions::riscv::auipc::AuipcConfig;
 
-/// Extract column map from a constructed JalConfig.
-pub fn extract_jal_column_map<E: ExtensionField>(
-    config: &JalConfig<E>,
+/// Extract column map from a constructed AuipcConfig.
+pub fn extract_auipc_column_map<E: ExtensionField>(
+    config: &AuipcConfig<E>,
     num_witin: usize,
-) -> JalColumnMap {
-    let jm = &config.j_insn;
+) -> AuipcColumnMap {
+    let im = &config.i_insn;
 
-    let (pc, next_pc, ts) = extract_state_branching(&jm.vm_state);
-    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&jm.rd);
+    let (pc, ts) = extract_state(&im.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&im.rs1);
+    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&im.rd);
+
     let rd_bytes = extract_uint_limbs::<E, 4, _, _>(&config.rd_written, "rd_written");
+    let pc_limbs: [u32; 2] = [config.pc_limbs[0].id as u32, config.pc_limbs[1].id as u32];
+    let imm_limbs: [u32; 3] = [
+        config.imm_limbs[0].id as u32,
+        config.imm_limbs[1].id as u32,
+        config.imm_limbs[2].id as u32,
+    ];
 
-    JalColumnMap {
+    AuipcColumnMap {
         pc,
-        next_pc,
         ts,
+        rs1_id,
+        rs1_prev_ts,
+        rs1_lt_diff,
         rd_id,
         rd_prev_ts,
         rd_prev_val,
         rd_lt_diff,
         rd_bytes,
+        pc_limbs,
+        imm_limbs,
         num_cols: num_witin as u32,
     }
 }
@@ -33,7 +45,7 @@ mod tests {
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::jump::JalInstruction},
+        instructions::{Instruction, riscv::auipc::AuipcInstruction},
         structs::ProgramParams,
     };
     use ff_ext::BabyBearExt4;
@@ -41,47 +53,47 @@ mod tests {
     type E = BabyBearExt4;
 
     #[test]
-    fn test_extract_jal_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_jal");
+    fn test_extract_auipc_column_map() {
+        let mut cs = ConstraintSystem::<E>::new(|| "test_auipc");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            JalInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            AuipcInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
-        let col_map = extract_jal_column_map(&config, cb.cs.num_witin as usize);
+        let col_map = extract_auipc_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-        crate::instructions::riscv::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
+        crate::instructions::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]
     #[cfg(feature = "gpu")]
-    fn test_gpu_witgen_jal_correctness() {
+    fn test_gpu_witgen_auipc_correctness() {
         use crate::e2e::ShardContext;
         use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
 
-        let mut cs = ConstraintSystem::<E>::new(|| "test_jal_gpu");
+        let mut cs = ConstraintSystem::<E>::new(|| "test_auipc_gpu");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            JalInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            AuipcInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
         let num_witin = cb.cs.num_witin as usize;
         let num_structural_witin = cb.cs.num_structural_witin as usize;
 
         let n = 1024;
         let steps: Vec<StepRecord> = (0..n)
             .map(|i| {
+                let imm_20bit = (i as i32) % 0x100000; // 0..0xfffff (20-bit)
+                let imm = imm_20bit << 12; // AUIPC immediate is upper 20 bits
                 let pc = ByteAddr(0x1000 + (i as u32) * 4);
-                // JAL offset must be even; use small positive/negative offsets
-                let offset = (((i as i32) % 256) - 128) * 2; // even offsets
-                let new_pc = ByteAddr(pc.0.wrapping_add_signed(offset));
-                let rd_after: u32 = (pc + PC_STEP_SIZE).into();
+                let rd_after = pc.0.wrapping_add(imm as u32);
                 let cycle = 4 + (i as u64) * 4;
-                let insn_code = encode_rv32(InsnKind::JAL, 0, 0, 4, offset);
-                StepRecord::new_j_instruction(
+                let insn_code = encode_rv32(InsnKind::AUIPC, 0, 0, 4, imm);
+                StepRecord::new_i_instruction(
                     cycle,
-                    Change::new(pc, new_pc),
+                    Change::new(pc, pc + PC_STEP_SIZE),
                     insn_code,
+                    0,
                     Change::new((i as u32) % 200, rd_after),
                     0,
                 )
@@ -90,7 +102,7 @@ mod tests {
         let indices: Vec<usize> = (0..n).collect();
 
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, JalInstruction<E>>(
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, AuipcInstruction<E>>(
             &config,
             &mut shard_ctx,
             num_witin,
@@ -101,7 +113,7 @@ mod tests {
         .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
-        let col_map = extract_jal_column_map(&config, num_witin);
+        let col_map = extract_auipc_column_map(&config, num_witin);
         let shard_ctx_gpu = ShardContext::default();
         let shard_offset = shard_ctx_gpu.current_shard_offset_cycle();
         let steps_bytes: &[u8] = unsafe {
@@ -113,7 +125,7 @@ mod tests {
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         let gpu_result = hal.witgen
-            .witgen_jal(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, None, None)
+            .witgen_auipc(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, None, None)
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

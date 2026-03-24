@@ -1,29 +1,41 @@
-use ceno_gpu::common::witgen::types::AuipcColumnMap;
+use ceno_gpu::common::witgen::types::SltiColumnMap;
 use ff_ext::ExtensionField;
 
 use super::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
-use crate::instructions::riscv::auipc::AuipcConfig;
+use crate::instructions::riscv::slti::slti_circuit_v2::SetLessThanImmConfig;
 
-/// Extract column map from a constructed AuipcConfig.
-pub fn extract_auipc_column_map<E: ExtensionField>(
-    config: &AuipcConfig<E>,
+/// Extract column map from a constructed SetLessThanImmConfig (SLTI/SLTIU).
+pub fn extract_slti_column_map<E: ExtensionField>(
+    config: &SetLessThanImmConfig<E>,
     num_witin: usize,
-) -> AuipcColumnMap {
-    let im = &config.i_insn;
+) -> SltiColumnMap {
+    let rs1_limbs = extract_uint_limbs::<E, 2, _, _>(&config.rs1_read, "rs1_read");
+    let imm = config.imm.id as u32;
+    let imm_sign = config.imm_sign.id as u32;
 
-    let (pc, ts) = extract_state(&im.vm_state);
-    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&im.rs1);
-    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&im.rd);
-
-    let rd_bytes = extract_uint_limbs::<E, 4, _, _>(&config.rd_written, "rd_written");
-    let pc_limbs: [u32; 2] = [config.pc_limbs[0].id as u32, config.pc_limbs[1].id as u32];
-    let imm_limbs: [u32; 3] = [
-        config.imm_limbs[0].id as u32,
-        config.imm_limbs[1].id as u32,
-        config.imm_limbs[2].id as u32,
+    // UIntLimbsLT comparison gadget
+    let cmp_lt = config.uint_lt_config.cmp_lt.id as u32;
+    let a_msb_f = config.uint_lt_config.a_msb_f.id as u32;
+    let b_msb_f = config.uint_lt_config.b_msb_f.id as u32;
+    let diff_marker: [u32; 2] = [
+        config.uint_lt_config.diff_marker[0].id as u32,
+        config.uint_lt_config.diff_marker[1].id as u32,
     ];
+    let diff_val = config.uint_lt_config.diff_val.id as u32;
 
-    AuipcColumnMap {
+    let (pc, ts) = extract_state(&config.i_insn.vm_state);
+    let (rs1_id, rs1_prev_ts, rs1_lt_diff) = extract_rs1(&config.i_insn.rs1);
+    let (rd_id, rd_prev_ts, rd_prev_val, rd_lt_diff) = extract_rd(&config.i_insn.rd);
+
+    SltiColumnMap {
+        rs1_limbs,
+        imm,
+        imm_sign,
+        cmp_lt,
+        a_msb_f,
+        b_msb_f,
+        diff_marker,
+        diff_val,
         pc,
         ts,
         rs1_id,
@@ -33,9 +45,6 @@ pub fn extract_auipc_column_map<E: ExtensionField>(
         rd_prev_ts,
         rd_prev_val,
         rd_lt_diff,
-        rd_bytes,
-        pc_limbs,
-        imm_limbs,
         num_cols: num_witin as u32,
     }
 }
@@ -45,7 +54,7 @@ mod tests {
     use super::*;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
-        instructions::{Instruction, riscv::auipc::AuipcInstruction},
+        instructions::{Instruction, riscv::slti::SltiInstruction},
         structs::ProgramParams,
     };
     use ff_ext::BabyBearExt4;
@@ -53,47 +62,51 @@ mod tests {
     type E = BabyBearExt4;
 
     #[test]
-    fn test_extract_auipc_column_map() {
-        let mut cs = ConstraintSystem::<E>::new(|| "test_auipc");
+    fn test_extract_slti_column_map() {
+        let mut cs = ConstraintSystem::<E>::new(|| "test");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            AuipcInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            SltiInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
-        let col_map = extract_auipc_column_map(&config, cb.cs.num_witin as usize);
+        let col_map = extract_slti_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
-        crate::instructions::riscv::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
+        crate::instructions::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]
     #[cfg(feature = "gpu")]
-    fn test_gpu_witgen_auipc_correctness() {
+    fn test_gpu_witgen_slti_correctness() {
         use crate::e2e::ShardContext;
         use ceno_emul::{ByteAddr, Change, InsnKind, PC_STEP_SIZE, StepRecord, encode_rv32};
         use ceno_gpu::{Buffer, bb31::CudaHalBB31};
 
         let hal = CudaHalBB31::new(0).expect("Failed to create CUDA HAL");
 
-        let mut cs = ConstraintSystem::<E>::new(|| "test_auipc_gpu");
+        let mut cs = ConstraintSystem::<E>::new(|| "test_slti_gpu");
         let mut cb = CircuitBuilder::new(&mut cs);
         let config =
-            AuipcInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
+            SltiInstruction::<E>::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
         let num_witin = cb.cs.num_witin as usize;
         let num_structural_witin = cb.cs.num_structural_witin as usize;
 
         let n = 1024;
         let steps: Vec<StepRecord> = (0..n)
             .map(|i| {
-                let imm_20bit = (i as i32) % 0x100000; // 0..0xfffff (20-bit)
-                let imm = imm_20bit << 12; // AUIPC immediate is upper 20 bits
-                let pc = ByteAddr(0x1000 + (i as u32) * 4);
-                let rd_after = pc.0.wrapping_add(imm as u32);
+                let rs1 = ((i as i32) * 137 - 500) as u32;
+                let imm = ((i as i32) % 2048 - 1024) as i32; // -1024..1023
+                let rd_after = if (rs1 as i32) < (imm as i32) {
+                    1u32
+                } else {
+                    0u32
+                };
                 let cycle = 4 + (i as u64) * 4;
-                let insn_code = encode_rv32(InsnKind::AUIPC, 0, 0, 4, imm);
+                let pc = ByteAddr(0x1000 + (i as u32) * 4);
+                let insn_code = encode_rv32(InsnKind::SLTI, 2, 0, 4, imm);
                 StepRecord::new_i_instruction(
                     cycle,
                     Change::new(pc, pc + PC_STEP_SIZE),
                     insn_code,
-                    0,
+                    rs1,
                     Change::new((i as u32) % 200, rd_after),
                     0,
                 )
@@ -102,7 +115,7 @@ mod tests {
         let indices: Vec<usize> = (0..n).collect();
 
         let mut shard_ctx = ShardContext::default();
-        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, AuipcInstruction<E>>(
+        let (cpu_rmms, _lkm) = crate::instructions::cpu_assign_instances::<E, SltiInstruction<E>>(
             &config,
             &mut shard_ctx,
             num_witin,
@@ -113,7 +126,7 @@ mod tests {
         .unwrap();
         let cpu_witness = &cpu_rmms[0];
 
-        let col_map = extract_auipc_column_map(&config, num_witin);
+        let col_map = extract_slti_column_map(&config, num_witin);
         let shard_ctx_gpu = ShardContext::default();
         let shard_offset = shard_ctx_gpu.current_shard_offset_cycle();
         let steps_bytes: &[u8] = unsafe {
@@ -125,7 +138,7 @@ mod tests {
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
         let gpu_result = hal.witgen
-            .witgen_auipc(&col_map, &gpu_records, &indices_u32, shard_offset, 0, 0, None, None)
+            .witgen_slti(&col_map, &gpu_records, &indices_u32, shard_offset, 1, 0, 0, None, None)
             .unwrap();
 
         let gpu_data: Vec<<E as ff_ext::ExtensionField>::BaseField> =

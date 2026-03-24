@@ -77,7 +77,7 @@ mod tests {
         let col_map = extract_shift_r_column_map(&config, cb.cs.num_witin as usize);
         let flat = col_map.to_flat();
 
-        crate::instructions::riscv::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
+        crate::instructions::gpu::colmap_base::validate_column_map(&flat, col_map.num_cols);
     }
 
     #[test]

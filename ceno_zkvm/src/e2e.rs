@@ -1511,7 +1511,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // This batch-D2Hs accumulated EC records and addr_accessed into shard_ctx.
             #[cfg(feature = "gpu")]
             info_span!("flush_shared_ec").in_scope(|| {
-                crate::instructions::riscv::gpu::witgen_gpu::flush_shared_ec_buffers(
+                crate::instructions::gpu::witgen_gpu::flush_shared_ec_buffers(
                     &mut shard_ctx,
                 )
             }).unwrap();
@@ -1519,7 +1519,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // Free GPU shard_steps cache after all opcode circuits are done.
             #[cfg(feature = "gpu")]
             {
-                crate::instructions::riscv::gpu::witgen_gpu::invalidate_shard_steps_cache();
+                crate::instructions::gpu::witgen_gpu::invalidate_shard_steps_cache();
                 if std::env::var_os("CENO_GPU_TRIM_AFTER_WITGEN").is_some() {
                     use gkr_iop::gpu::gpu_prover::get_cuda_hal;
 
@@ -1554,7 +1554,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
                 // Force CPU path for the debug comparison (thread-local, no env var races).
                 #[cfg(feature = "gpu")]
-                crate::instructions::riscv::gpu::witgen_gpu::set_force_cpu_path(true);
+                crate::instructions::gpu::witgen_gpu::set_force_cpu_path(true);
 
                 system_config
                     .config
@@ -1579,7 +1579,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 cpu_witness.finalize_lk_multiplicities();
 
                 #[cfg(feature = "gpu")]
-                crate::instructions::riscv::gpu::witgen_gpu::set_force_cpu_path(false);
+                crate::instructions::gpu::witgen_gpu::set_force_cpu_path(false);
 
                 log_shard_ctx_diff("post_opcode_assignment", &cpu_shard_ctx, &shard_ctx);
 

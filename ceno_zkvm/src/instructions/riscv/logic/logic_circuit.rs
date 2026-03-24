@@ -156,7 +156,7 @@ impl<E: ExtensionField> LogicConfig<E> {
 
     fn emit_lk_and_shardram(
         &self,
-        sink: &mut impl crate::instructions::side_effects::SideEffectSink,
+        sink: &mut impl crate::instructions::gpu::host_ops::SideEffectSink,
         shard_ctx: &ShardContext,
         step: &StepRecord,
     ) {

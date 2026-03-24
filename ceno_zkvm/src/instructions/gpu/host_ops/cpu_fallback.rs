@@ -14,7 +14,7 @@ use crate::{
     e2e::ShardContext, error::ZKVMError, tables::RMMCollections, witness::LkMultiplicity,
 };
 
-use super::super::Instruction;
+use crate::instructions::Instruction;
 
 /// CPU-only assign_instances. Extracted so GPU-enabled instructions can call this as fallback.
 pub fn cpu_assign_instances<E: ExtensionField, I: Instruction<E>>(

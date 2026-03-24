@@ -1,3 +1,4 @@
+pub mod host_ops;
 #[cfg(feature = "gpu")]
 pub mod add;
 #[cfg(all(feature = "gpu", feature = "u16limb_circuit"))]
