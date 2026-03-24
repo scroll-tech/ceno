@@ -82,7 +82,11 @@ pub struct BatchConstraintModule {
 }
 
 impl BatchConstraintModule {
-    pub fn new(b: &mut BusIndexManager, bus_inventory: BusInventory, max_num_proofs: usize) -> Self {
+    pub fn new(
+        b: &mut BusIndexManager,
+        bus_inventory: BusInventory,
+        max_num_proofs: usize,
+    ) -> Self {
         Self {
             transcript_bus: bus_inventory.transcript_bus,
             hyperdim_bus: bus_inventory.hyperdim_bus,
