@@ -124,6 +124,294 @@ where
 {
     fn eval(&self, builder: &mut AB) {
     /* debug block: Step 1 placeholder - all constraints deferred pending trace implementation */
+    /*
+        let cached_local = builder.cached_mains()[0]
+            .row_slice(0)
+            .expect("cached window should have a row")
+            .to_vec();
+        let main_local = builder
+            .common_main()
+            .row_slice(0)
+            .expect("main window should have a row")
+            .to_vec();
+        let main_next = builder
+            .common_main()
+            .row_slice(1)
+            .expect("main window should have two rows")
+            .to_vec();
+
+        let cached_cols: &CachedSymbolicExpressionColumns<AB::Var> =
+            cached_local.as_slice().borrow();
+        let main_cols: Vec<&SingleMainSymbolicExpressionColumns<AB::Var>> = main_local
+            .chunks(SingleMainSymbolicExpressionColumns::<AB::Var>::width())
+            .map(|chunk| chunk.borrow())
+            .collect();
+        let next_main_cols: Vec<&SingleMainSymbolicExpressionColumns<AB::Var>> = main_next
+            .chunks(SingleMainSymbolicExpressionColumns::<AB::Var>::width())
+            .map(|chunk| chunk.borrow())
+            .collect();
+
+        let enc = Encoder::new(NodeKind::COUNT, ENCODER_MAX_DEGREE, true);
+        let flags = cached_cols.flags;
+        let is_valid_row = enc.is_valid::<AB>(&flags);
+
+        let is_arg0_node_idx = enc.contains_flag::<AB>(
+            &flags,
+            &[
+                NodeKind::Add,
+                NodeKind::Sub,
+                NodeKind::Mul,
+                NodeKind::Neg,
+                NodeKind::InteractionMult,
+                NodeKind::InteractionMsgComp,
+                NodeKind::WitIn,
+                NodeKind::StructuralWitIn,
+                NodeKind::Fixed,
+                NodeKind::Instance,
+            ]
+            .map(|x| x as usize),
+        );
+        let is_arg1_node_idx = enc.contains_flag::<AB>(
+            &flags,
+            &[
+                NodeKind::Add,
+                NodeKind::Sub,
+                NodeKind::Mul,
+                NodeKind::InteractionMsgComp,
+            ]
+            .map(|x| x as usize),
+        );
+
+        for (proof_idx, (&cols, &next_cols)) in main_cols.iter().zip(&next_main_cols).enumerate() {
+            let proof_idx = AB::F::from_usize(proof_idx);
+
+            let slot_state: AB::Expr = cols.slot_state.into();
+            let next_slot_state: AB::Expr = next_cols.slot_state.into();
+            let proof_present = slot_state.clone()
+                * (AB::Expr::from_u8(3) - slot_state.clone())
+                * AB::F::TWO.inverse();
+            let next_proof_present = next_slot_state.clone()
+                * (AB::Expr::from_u8(3) - next_slot_state)
+                * AB::F::TWO.inverse();
+            let air_present =
+                slot_state.clone() * (slot_state.clone() - AB::Expr::ONE) * AB::F::TWO.inverse();
+
+            let arg_ef0: [AB::Var; D_EF] = cols.args[..D_EF].try_into().unwrap();
+            let arg_ef1: [AB::Var; D_EF] = cols.args[D_EF..2 * D_EF].try_into().unwrap();
+
+            builder.assert_tern(cols.slot_state);
+            builder
+                .when(cols.is_n_neg)
+                .assert_eq(cols.slot_state, AB::Expr::TWO);
+            builder
+                .when(air_present.clone())
+                .assert_one(is_valid_row.clone());
+            builder
+                .when_transition()
+                .assert_eq(proof_present.clone(), next_proof_present);
+
+            let mut value = [AB::Expr::ZERO; D_EF];
+            for node_kind in NodeKind::iter() {
+                let sel = enc.get_flag_expr::<AB>(node_kind as usize, &flags);
+                let expr = match node_kind {
+                    NodeKind::Add => ext_field_add::<AB::Expr>(arg_ef0, arg_ef1),
+                    NodeKind::Sub => ext_field_subtract::<AB::Expr>(arg_ef0, arg_ef1),
+                    NodeKind::Neg => scalar_subtract_ext_field::<AB::Expr>(AB::Expr::ZERO, arg_ef0),
+                    NodeKind::Mul => ext_field_multiply::<AB::Expr>(arg_ef0, arg_ef1),
+                    NodeKind::Constant => base_to_ext(cached_cols.attrs[0]),
+                    NodeKind::Instance => base_to_ext(cols.args[0]),
+                    NodeKind::SelIsFirst => ext_field_multiply(arg_ef0, arg_ef1),
+                    NodeKind::SelIsLast => ext_field_multiply(arg_ef0, arg_ef1),
+                    NodeKind::SelIsTransition => scalar_subtract_ext_field(
+                        AB::Expr::ONE,
+                        ext_field_multiply(arg_ef0, arg_ef1),
+                    ),
+                    NodeKind::WitIn
+                    | NodeKind::StructuralWitIn
+                    | NodeKind::Fixed
+                    | NodeKind::InteractionMult
+                    | NodeKind::InteractionMsgComp => arg_ef0.map(Into::into),
+                    NodeKind::InteractionBusIndex => {
+                        base_to_ext(cached_cols.attrs[0] + AB::Expr::ONE)
+                    }
+                };
+                value = ext_field_add::<AB::Expr>(
+                    value,
+                    ext_field_multiply_scalar::<AB::Expr>(expr, sel),
+                );
+            }
+
+            self.expr_bus.add_key_with_lookups(
+                builder,
+                proof_idx,
+                SymbolicExpressionMessage {
+                    air_idx: cached_cols.air_idx.into(),
+                    node_idx: cached_cols.node_or_interaction_idx.into(),
+                    value: value.clone(),
+                },
+                air_present.clone() * cached_cols.fanout,
+            );
+            self.expr_bus.lookup_key(
+                builder,
+                proof_idx,
+                SymbolicExpressionMessage {
+                    air_idx: cached_cols.air_idx,
+                    node_idx: cached_cols.attrs[0],
+                    value: arg_ef0,
+                },
+                air_present.clone() * is_arg0_node_idx.clone(),
+            );
+            self.expr_bus.lookup_key(
+                builder,
+                proof_idx,
+                SymbolicExpressionMessage {
+                    air_idx: cached_cols.air_idx,
+                    node_idx: cached_cols.attrs[1],
+                    value: arg_ef1,
+                },
+                air_present.clone() * is_arg1_node_idx.clone(),
+            );
+
+            let is_var = enc.contains_flag::<AB>(
+                &flags,
+                &[NodeKind::WitIn, NodeKind::StructuralWitIn, NodeKind::Fixed].map(|x| x as usize),
+            );
+            self.column_claims_bus.receive(
+                builder,
+                proof_idx,
+                ColumnClaimsMessage {
+                    sort_idx: cols.sort_idx.into(),
+                    part_idx: cached_cols.attrs[1].into(),
+                    col_idx: cached_cols.attrs[0].into(),
+                    claim: array::from_fn(|i| cols.args[i].into()),
+                    is_rot: cached_cols.attrs[2].into(),
+                },
+                is_var * air_present.clone(),
+            );
+            self.public_values_bus.receive(
+                builder,
+                proof_idx,
+                PublicValuesBusMessage {
+                    air_idx: cached_cols.air_idx,
+                    pv_idx: cached_cols.attrs[0],
+                    value: cols.args[0],
+                },
+                enc.get_flag_expr::<AB>(NodeKind::Instance as usize, &flags) * air_present.clone(),
+            );
+            self.air_shape_bus.lookup_key(
+                builder,
+                proof_idx,
+                AirShapeBusMessage {
+                    sort_idx: cols.sort_idx.into(),
+                    property_idx: AirShapeProperty::AirId.to_field(),
+                    value: cached_cols.air_idx.into(),
+                },
+                air_present.clone(),
+            );
+            self.air_presence_bus.lookup_key(
+                builder,
+                proof_idx,
+                AirPresenceBusMessage {
+                    air_idx: cached_cols.air_idx.into(),
+                    is_present: air_present.clone(),
+                },
+                proof_present * is_valid_row.clone(),
+            );
+            self.hyperdim_bus.lookup_key(
+                builder,
+                proof_idx,
+                HyperdimBusMessage {
+                    sort_idx: cols.sort_idx,
+                    n_abs: cols.n_abs,
+                    n_sign_bit: cols.is_n_neg,
+                },
+                air_present.clone(),
+            );
+
+            let is_sel = enc.contains_flag::<AB>(
+                &flags,
+                &[
+                    NodeKind::SelIsFirst,
+                    NodeKind::SelIsLast,
+                    NodeKind::SelIsTransition,
+                ]
+                .map(|x| x as usize),
+            );
+            let is_first = enc.get_flag_expr::<AB>(NodeKind::SelIsFirst as usize, &flags);
+            self.sel_uni_bus.lookup_key(
+                builder,
+                proof_idx,
+                SelUniBusMessage {
+                    n: AB::Expr::NEG_ONE * cols.n_abs * cols.is_n_neg,
+                    is_first: is_first.clone(),
+                    value: arg_ef0.map(Into::into),
+                },
+                air_present.clone() * is_sel.clone(),
+            );
+            self.sel_hypercube_bus.lookup_key(
+                builder,
+                proof_idx,
+                SelHypercubeBusMessage {
+                    n: cols.n_abs.into(),
+                    is_first: is_first.clone(),
+                    value: arg_ef1.map(Into::into),
+                },
+                is_sel.clone() * (air_present.clone() - cols.is_n_neg),
+            );
+            assert_array_eq(
+                &mut builder.when(is_sel.clone() * cols.is_n_neg),
+                arg_ef1,
+                [
+                    AB::Expr::ONE,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                    AB::Expr::ZERO,
+                ],
+            );
+
+            let is_mult = enc.get_flag_expr::<AB>(NodeKind::InteractionMult as usize, &flags);
+            let is_bus_index =
+                enc.get_flag_expr::<AB>(NodeKind::InteractionBusIndex as usize, &flags);
+            let is_interaction = enc.contains_flag::<AB>(
+                &flags,
+                &[NodeKind::InteractionMult, NodeKind::InteractionMsgComp].map(|x| x as usize),
+            );
+            self.interactions_folding_bus.send(
+                builder,
+                proof_idx,
+                InteractionsFoldingMessage {
+                    air_idx: cached_cols.air_idx.into(),
+                    interaction_idx: cached_cols.node_or_interaction_idx.into(),
+                    is_mult,
+                    idx_in_message: cached_cols.attrs[1].into(),
+                    value: value.clone(),
+                },
+                is_interaction * air_present.clone(),
+            );
+            self.interactions_folding_bus.send(
+                builder,
+                proof_idx,
+                InteractionsFoldingMessage {
+                    air_idx: cached_cols.air_idx.into(),
+                    interaction_idx: cached_cols.node_or_interaction_idx.into(),
+                    is_mult: AB::Expr::ZERO,
+                    idx_in_message: AB::Expr::NEG_ONE,
+                    value: value.clone(),
+                },
+                is_bus_index * air_present.clone(),
+            );
+            self.constraints_folding_bus.send(
+                builder,
+                proof_idx,
+                ConstraintsFoldingMessage {
+                    air_idx: cached_cols.air_idx.into(),
+                    constraint_idx: cached_cols.constraint_idx.into(),
+                    value: value.clone(),
+                },
+                cached_cols.is_constraint * air_present,
+            );
+        }
+    */
     #[allow(unused_variables)]
     let _ = &builder;
     }
