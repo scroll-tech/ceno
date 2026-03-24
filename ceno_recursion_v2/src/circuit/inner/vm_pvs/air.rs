@@ -258,16 +258,17 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
 
         // At the leaf level, this AIR is responsible for receiving the cached trace commit
         // program_commit.
-        self.cached_commit_bus.receive(
-            builder,
-            local.proof_idx,
-            CachedCommitBusMessage {
-                air_idx: AB::Expr::from_usize(PROGRAM_AIR_ID),
-                cached_idx: AB::Expr::from_usize(PROGRAM_CACHED_TRACE_INDEX),
-                cached_commit: local.child_pvs.program_commit.map(Into::into),
-            },
-            local.is_valid * is_leaf,
-        );
+        // TODO
+        // self.cached_commit_bus.receive(
+        //     builder,
+        //     local.proof_idx,
+        //     CachedCommitBusMessage {
+        //         air_idx: AB::Expr::from_usize(PROGRAM_AIR_ID),
+        //         cached_idx: AB::Expr::from_usize(PROGRAM_CACHED_TRACE_INDEX),
+        //         cached_commit: local.child_pvs.program_commit.map(Into::into),
+        //     },
+        //     local.is_valid * is_leaf,
+        // );
 
         // We look up proof metadata from VerifierPvsAir here to ensure consistency on each row.
         self.pvs_air_consistency_bus.lookup_key(

@@ -39,7 +39,7 @@ pub struct VerifierPvsCols<F> {
 
 pub struct VerifierPvsAir {
     pub public_values_bus: PublicValuesBus,
-    pub cached_commit_bus: CachedCommitBus,
+    // pub cached_commit_bus: CachedCommitBus,
     pub pvs_air_consistency_bus: PvsAirConsistencyBus,
     pub deferral_config: VerifierDeferralConfig,
 }
@@ -218,35 +218,35 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         // We also need to receive cached commits from ProofShapeModule. Note that the
         // app/deferral circuit cached commits are received in another AIR, so only the
         // internal verifier will receive them here.
-        let is_internal_flag_zero = (local.child_pvs.internal_flag - AB::F::ONE)
-            * (local.child_pvs.internal_flag - AB::F::TWO)
-            * AB::F::TWO.inverse();
-        let is_internal_flag_one =
-            (AB::Expr::TWO - local.child_pvs.internal_flag) * local.child_pvs.internal_flag;
-        let is_recursion_flag_one =
-            (AB::Expr::TWO - local.child_pvs.recursion_flag) * local.child_pvs.recursion_flag;
-        let is_recursion_flag_two = (local.child_pvs.recursion_flag - AB::F::ONE)
-            * local.child_pvs.recursion_flag
-            * AB::F::TWO.inverse();
-        let cached_commit = from_fn(|i| {
-            is_internal_flag_zero.clone() * local.child_pvs.app_dag_commit.cached_commit[i]
-                + is_internal_flag_one.clone() * local.child_pvs.leaf_dag_commit.cached_commit[i]
-                + is_recursion_flag_one.clone()
-                    * local.child_pvs.internal_for_leaf_dag_commit.cached_commit[i]
-                + is_recursion_flag_two.clone()
-                    * local.child_pvs.internal_recursive_dag_commit.cached_commit[i]
-        });
+        // let is_internal_flag_zero = (local.child_pvs.internal_flag - AB::F::ONE)
+        //     * (local.child_pvs.internal_flag - AB::F::TWO)
+        //     * AB::F::TWO.inverse();
+        // let is_internal_flag_one =
+        //     (AB::Expr::TWO - local.child_pvs.internal_flag) * local.child_pvs.internal_flag;
+        // let is_recursion_flag_one =
+        //     (AB::Expr::TWO - local.child_pvs.recursion_flag) * local.child_pvs.recursion_flag;
+        // let is_recursion_flag_two = (local.child_pvs.recursion_flag - AB::F::ONE)
+        //     * local.child_pvs.recursion_flag
+        //     * AB::F::TWO.inverse();
+        // let cached_commit = from_fn(|i| {
+        //     is_internal_flag_zero.clone() * local.child_pvs.app_dag_commit.cached_commit[i]
+        //         + is_internal_flag_one.clone() * local.child_pvs.leaf_dag_commit.cached_commit[i]
+        //         + is_recursion_flag_one.clone()
+        //             * local.child_pvs.internal_for_leaf_dag_commit.cached_commit[i]
+        //         + is_recursion_flag_two.clone()
+        //             * local.child_pvs.internal_recursive_dag_commit.cached_commit[i]
+        // });
 
-        self.cached_commit_bus.receive(
-            builder,
-            local.proof_idx,
-            CachedCommitBusMessage {
-                air_idx: AB::Expr::from_usize(CONSTRAINT_EVAL_AIR_ID),
-                cached_idx: AB::Expr::from_usize(CONSTRAINT_EVAL_CACHED_INDEX),
-                cached_commit,
-            },
-            local.is_valid * is_internal,
-        );
+        // self.cached_commit_bus.receive(
+        //     builder,
+        //     local.proof_idx,
+        //     CachedCommitBusMessage {
+        //         air_idx: AB::Expr::from_usize(CONSTRAINT_EVAL_AIR_ID),
+        //         cached_idx: AB::Expr::from_usize(CONSTRAINT_EVAL_CACHED_INDEX),
+        //         cached_commit,
+        //     },
+        //     local.is_valid * is_internal,
+        // );
 
         // We provide proof metadata for lookup here to ensure consistency between AIRs that
         // process public values.

@@ -56,7 +56,7 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
 
     // First possible tidx and non-main cidx of the current AIR
     pub starting_tidx: F,
-    pub starting_cidx: F,
+    // pub starting_cidx: F,
 
     // Columns that may be read from the transcript. Note that cached_commits is also read
     // from the transcript.
@@ -287,6 +287,7 @@ where
                 is_min_cached += is_current_air.clone();
             }
 
+            assert!(air_data.preprocessed_data.is_none);
             if let Some(preprocessed) = &air_data.preprocessed_data {
                 when_current.assert_eq(
                     local.log_height,
@@ -556,79 +557,84 @@ where
             local.is_present * main_common_width,
         );
 
+        // cidx start from 1
         builder
             .when(and(local.is_first, local.is_valid))
             .assert_one(local.starting_cidx);
+        // let mut cidx_offset = AB::Expr::ZERO;
+
+        // NOTE: this is non used if preprocessed_stacked_width == 0
+        // self.lifted_heights_bus.add_key_with_lookups(
+        //     builder,
+        //     local.proof_idx,
+        //     LiftedHeightsBusMessage {
+        //         sort_idx: local.sorted_idx.into(),
+        //         part_idx: cidx_offset.clone() + AB::F::ONE,
+        //         commit_idx: cidx_offset.clone() + local.starting_cidx,
+        //         hypercube_dim: n.clone(),
+        //         lifted_height: local.height.into(),
+        //         log_lifted_height: local.log_height.into(),
+        //     },
+        //     local.is_present * preprocessed_stacked_width,
+        // );
+
+        // NOTE: this is non-used if has_preprocessed == 0
+        // self.commitments_bus.add_key_with_lookups(
+        //     builder,
+        //     local.proof_idx,
+        //     CommitmentsBusMessage {
+        //         major_idx: AB::Expr::ZERO,
+        //         minor_idx: cidx_offset.clone() + local.starting_cidx,
+        //         commitment: preprocessed_commit,
+        //     },
+        //     has_preprocessed.clone() * local.is_present * AB::Expr::from_usize(self.commit_mult),
+        // );
+        // cidx_offset still be 0
+        // cidx_offset += has_preprocessed.clone();
         let mut cidx_offset = AB::Expr::ZERO;
 
-        self.lifted_heights_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            LiftedHeightsBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                part_idx: cidx_offset.clone() + AB::F::ONE,
-                commit_idx: cidx_offset.clone() + local.starting_cidx,
-                hypercube_dim: n.clone(),
-                lifted_height: local.height.into(),
-                log_lifted_height: local.log_height.into(),
-            },
-            local.is_present * preprocessed_stacked_width,
-        );
-
-        self.commitments_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            CommitmentsBusMessage {
-                major_idx: AB::Expr::ZERO,
-                minor_idx: cidx_offset.clone() + local.starting_cidx,
-                commitment: preprocessed_commit,
-            },
-            has_preprocessed.clone() * local.is_present * AB::Expr::from_usize(self.commit_mult),
-        );
-        cidx_offset += has_preprocessed.clone();
-
-        (0..self.max_cached).for_each(|cached_idx| {
-            self.lifted_heights_bus.add_key_with_lookups(
-                builder,
-                local.proof_idx,
-                LiftedHeightsBusMessage {
-                    sort_idx: local.sorted_idx.into(),
-                    part_idx: cidx_offset.clone() + AB::F::ONE,
-                    commit_idx: cidx_offset.clone() + local.starting_cidx,
-                    hypercube_dim: n.clone(),
-                    lifted_height: local.height.into(),
-                    log_lifted_height: local.log_height.into(),
-                },
-                local.is_present * cached_widths[cached_idx].clone(),
-            );
-
-            self.commitments_bus.add_key_with_lookups(
-                builder,
-                local.proof_idx,
-                CommitmentsBusMessage {
-                    major_idx: AB::Expr::ZERO,
-                    minor_idx: cidx_offset.clone() + local.starting_cidx,
-                    commitment: localv.cached_commits[cached_idx].map(Into::into),
-                },
-                cached_present[cached_idx].clone()
-                    * local.is_present
-                    * AB::Expr::from_usize(self.commit_mult),
-            );
-            cidx_offset += cached_present[cached_idx].clone();
-
-            self.cached_commit_bus.send(
-                builder,
-                local.proof_idx,
-                CachedCommitBusMessage {
-                    air_idx: local.idx.into(),
-                    cached_idx: AB::Expr::from_usize(cached_idx),
-                    cached_commit: localv.cached_commits[cached_idx].map(Into::into),
-                },
-                cached_present[cached_idx].clone()
-                    * local.is_valid
-                    * AB::Expr::from_bool(self.continuations_enabled),
-            );
-        });
+        // (0..self.max_cached).for_each(|cached_idx| {
+        //     self.lifted_heights_bus.add_key_with_lookups(
+        //         builder,
+        //         local.proof_idx,
+        //         LiftedHeightsBusMessage {
+        //             sort_idx: local.sorted_idx.into(),
+        //             part_idx: cidx_offset.clone() + AB::F::ONE,
+        //             commit_idx: cidx_offset.clone() + local.starting_cidx,
+        //             hypercube_dim: n.clone(),
+        //             lifted_height: local.height.into(),
+        //             log_lifted_height: local.log_height.into(),
+        //         },
+        //         local.is_present * cached_widths[cached_idx].clone(),
+        //     );
+        //
+        //     // self.commitments_bus.add_key_with_lookups(
+        //     //     builder,
+        //     //     local.proof_idx,
+        //     //     CommitmentsBusMessage {
+        //     //         major_idx: AB::Expr::ZERO,
+        //     //         minor_idx: cidx_offset.clone() + local.starting_cidx,
+        //     //         commitment: localv.cached_commits[cached_idx].map(Into::into),
+        //     //     },
+        //     //     cached_present[cached_idx].clone()
+        //     //         * local.is_present
+        //     //         * AB::Expr::from_usize(self.commit_mult),
+        //     // );
+        //     // cidx_offset += cached_present[cached_idx].clone();
+        //
+        //     // self.cached_commit_bus.send(
+        //     //     builder,
+        //     //     local.proof_idx,
+        //     //     CachedCommitBusMessage {
+        //     //         air_idx: local.idx.into(),
+        //     //         cached_idx: AB::Expr::from_usize(cached_idx),
+        //     //         cached_commit: localv.cached_commits[cached_idx].map(Into::into),
+        //     //     },
+        //     //     cached_present[cached_idx].clone()
+        //     //         * local.is_valid
+        //     //         * AB::Expr::from_bool(self.continuations_enabled),
+        //     // );
+        // });
 
         builder
             .when(and(local.is_valid, not(next.is_last)))
