@@ -6,7 +6,7 @@
 use ceno_emul::{StepRecord, WordAddr};
 use ceno_gpu::{
     Buffer, CudaHal, CudaSlice, bb31::CudaHalBB31, bb31::ShardDeviceBuffers,
-    common::witgen_types::GpuShardRamRecord, common::witgen_types::GpuShardScalars,
+    common::witgen::types::GpuShardRamRecord, common::witgen::types::GpuShardScalars,
 };
 use std::cell::RefCell;
 use tracing::info_span;
@@ -266,20 +266,20 @@ pub(crate) fn ensure_shard_metadata_cached(
         let ec_u32s = ec_capacity * 26; // 26 u32s per GpuShardRamRecord (104 bytes)
         let addr_capacity = total_ops_estimate.min(256 * 1024 * 1024) as usize;
 
-        let shared_ec_buf = hal
+        let shared_ec_buf = hal.witgen
             .alloc_u32_zeroed(ec_u32s, None)
             .map_err(|e| ZKVMError::InvalidWitness(format!("shared_ec_buf alloc: {e}").into()))?;
-        let shared_ec_count = hal
+        let shared_ec_count = hal.witgen
             .alloc_u32_zeroed(1, None)
             .map_err(|e| {
                 ZKVMError::InvalidWitness(format!("shared_ec_count alloc: {e}").into())
             })?;
-        let shared_addr_buf = hal
+        let shared_addr_buf = hal.witgen
             .alloc_u32_zeroed(addr_capacity, None)
             .map_err(|e| {
                 ZKVMError::InvalidWitness(format!("shared_addr_buf alloc: {e}").into())
             })?;
-        let shared_addr_count = hal
+        let shared_addr_count = hal.witgen
             .alloc_u32_zeroed(1, None)
             .map_err(|e| {
                 ZKVMError::InvalidWitness(format!("shared_addr_count alloc: {e}").into())
@@ -385,7 +385,7 @@ pub fn gpu_batch_continuation_ec_on_device(
     let n_reads = read_records.len();
     let total = n_writes + n_reads;
     if total == 0 {
-        let empty = hal.alloc_u32_zeroed(1, None).map_err(|e| {
+        let empty = hal.witgen.alloc_u32_zeroed(1, None).map_err(|e| {
             ZKVMError::InvalidWitness(format!("alloc: {e}").into())
         })?;
         return Ok((empty, 0, 0));
@@ -399,7 +399,7 @@ pub fn gpu_batch_continuation_ec_on_device(
 
     // GPU batch EC, results stay on device
     let (device_buf, _count) = info_span!("gpu_batch_ec_on_device", n = total).in_scope(|| {
-        hal.batch_continuation_ec_on_device(&gpu_records, None)
+        hal.witgen.batch_continuation_ec_on_device(&gpu_records, None)
     }).map_err(|e| {
         ZKVMError::InvalidWitness(format!("GPU batch EC on device failed: {e}").into())
     })?;

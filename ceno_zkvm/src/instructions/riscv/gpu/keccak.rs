@@ -1,5 +1,5 @@
 use ceno_emul::{StepIndex, StepRecord};
-use ceno_gpu::common::witgen_types::{GpuKeccakInstance, GpuKeccakWriteOp, KeccakColumnMap};
+use ceno_gpu::common::witgen::types::{GpuKeccakInstance, GpuKeccakWriteOp, KeccakColumnMap};
 use ff_ext::ExtensionField;
 use std::sync::Arc;
 

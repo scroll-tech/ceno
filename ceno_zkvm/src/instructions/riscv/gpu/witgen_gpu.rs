@@ -8,7 +8,7 @@ use ceno_emul::{StepIndex, StepRecord, WordAddr};
 use ceno_gpu::{
     Buffer, CudaHal, bb31::CudaHalBB31, common::transpose::matrix_transpose,
 };
-use ceno_gpu::common::witgen_types::{GpuRamRecordSlot, GpuShardRamRecord};
+use ceno_gpu::common::witgen::types::{GpuRamRecordSlot, GpuShardRamRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::FieldAlgebra;
@@ -445,7 +445,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_add").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_add(
                                 &col_map,
                                 gpu_records,
@@ -475,7 +475,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_sub").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_sub(
                                 &col_map,
                                 gpu_records,
@@ -505,7 +505,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_logic_r").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_logic_r(
                                 &col_map,
                                 gpu_records,
@@ -537,7 +537,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_logic_i").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_logic_i(
                                 &col_map,
                                 gpu_records,
@@ -569,7 +569,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_addi").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_addi(
                                 &col_map,
                                 gpu_records,
@@ -600,7 +600,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_lui").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_lui(
                                 &col_map,
                                 gpu_records,
@@ -629,7 +629,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_auipc").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_auipc(
                                 &col_map,
                                 gpu_records,
@@ -660,7 +660,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_jal").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_jal(
                                 &col_map,
                                 gpu_records,
@@ -691,7 +691,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_shift_r").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_shift_r(
                                 &col_map,
                                 gpu_records,
@@ -725,7 +725,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_shift_i").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_shift_i(
                                 &col_map,
                                 gpu_records,
@@ -757,7 +757,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_slt").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_slt(
                                 &col_map,
                                 gpu_records,
@@ -789,7 +789,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_slti").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_slti(
                                 &col_map,
                                 gpu_records,
@@ -824,7 +824,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_branch_eq").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_branch_eq(
                                 &col_map,
                                 gpu_records,
@@ -859,7 +859,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_branch_cmp").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_branch_cmp(
                                 &col_map,
                                 gpu_records,
@@ -891,7 +891,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_jalr").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_jalr(
                                 &col_map,
                                 gpu_records,
@@ -921,7 +921,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_sw").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_sw(
                                 &col_map,
                                 gpu_records,
@@ -952,7 +952,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_sh").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_sh(
                                 &col_map,
                                 gpu_records,
@@ -983,7 +983,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_sb").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_sb(
                                 &col_map,
                                 gpu_records,
@@ -1025,7 +1025,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_load_sub").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_load_sub(
                                 &col_map,
                                 gpu_records,
@@ -1059,7 +1059,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_mul").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_mul(
                                 &col_map,
                                 gpu_records,
@@ -1091,7 +1091,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_div").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_div(
                                 &col_map,
                                 gpu_records,
@@ -1129,7 +1129,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             info_span!("hal_witgen_lw").in_scope(|| {
                 with_cached_shard_steps(|gpu_records| {
                     with_cached_shard_meta(|shard_bufs| {
-                        split_full!(hal
+                        split_full!(hal.witgen
                             .witgen_lw(
                                 &col_map,
                                 gpu_records,
@@ -1302,7 +1302,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     // Step 5: Launch GPU kernel
     let gpu_result = info_span!("gpu_kernel").in_scope(|| {
         with_cached_shard_meta(|shard_bufs| {
-            hal.witgen_keccak(
+            hal.witgen.witgen_keccak(
                 &col_map,
                 &packed_instances,
                 num_padded_rows,

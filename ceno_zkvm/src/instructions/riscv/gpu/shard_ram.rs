@@ -1,4 +1,4 @@
-use ceno_gpu::common::witgen_types::ShardRamColumnMap;
+use ceno_gpu::common::witgen::types::ShardRamColumnMap;
 use ff_ext::ExtensionField;
 
 use crate::tables::ShardRamConfig;

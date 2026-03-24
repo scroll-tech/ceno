@@ -7,7 +7,7 @@
 /// - CENO_GPU_DEBUG_COMPARE_SHARD: compare shard side effects
 /// - CENO_GPU_DEBUG_COMPARE_EC: compare EC points
 use ceno_emul::{StepIndex, StepRecord, WordAddr};
-use ceno_gpu::common::witgen_types::{GpuRamRecordSlot, GpuShardRamRecord};
+use ceno_gpu::common::witgen::types::{GpuRamRecordSlot, GpuShardRamRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use p3::field::FieldAlgebra;

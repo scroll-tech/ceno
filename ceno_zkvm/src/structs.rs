@@ -775,7 +775,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         // 3. GPU sort addr_accessed + dedup, then D2H sorted unique addrs
         let addr_accessed: Vec<WordAddr> = if addr_count > 0 {
             info_span!("gpu_sort_addr").in_scope(|| {
-                let (deduped, unique_count) = hal
+                let (deduped, unique_count) = hal.witgen
                     .sort_and_dedup_u32(&mut shared.addr_buf, addr_count, None)
                     .map_err(|e| {
                         ZKVMError::InvalidWitness(format!("GPU sort addr: {e}").into())
@@ -883,7 +883,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         // 6. GPU merge shared_ec + batch_ec, then partition by is_to_write_set
         let (partitioned_buf, num_writes, total_records) =
             info_span!("gpu_merge_partition").in_scope(|| {
-                hal.merge_and_partition_records(
+                hal.witgen.merge_and_partition_records(
                     &shared.ec_buf,
                     ec_count,
                     &cont_ec_buf,
@@ -908,7 +908,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let max_chunk = shard_ctx.max_num_cross_shard_accesses;
 
         // Record sizes needed for chunking
-        let record_u32s = std::mem::size_of::<ceno_gpu::common::witgen_types::GpuShardRamRecord>() / 4;
+        let record_u32s = std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>() / 4;
 
         let circuit_inputs = info_span!("shard_ram_assign_from_device", n = total_records)
             .in_scope(|| {

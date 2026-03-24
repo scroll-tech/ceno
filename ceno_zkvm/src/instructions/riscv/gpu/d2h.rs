@@ -11,7 +11,7 @@ use ceno_emul::WordAddr;
 use ceno_gpu::{
     Buffer, CudaHal, bb31::CudaHalBB31, common::transpose::matrix_transpose,
 };
-use ceno_gpu::common::witgen_types::{CompactEcResult, GpuRamRecordSlot, GpuShardRamRecord};
+use ceno_gpu::common::witgen::types::{CompactEcResult, GpuRamRecordSlot, GpuShardRamRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use p3::field::FieldAlgebra;
@@ -30,9 +30,9 @@ pub(crate) type WitBuf = ceno_gpu::common::BufferImpl<
 >;
 pub(crate) type LkBuf = ceno_gpu::common::BufferImpl<'static, u32>;
 pub(crate) type RamBuf = ceno_gpu::common::BufferImpl<'static, u32>;
-pub(crate) type WitResult = ceno_gpu::common::witgen_types::GpuWitnessResult<WitBuf>;
-pub(crate) type LkResult = ceno_gpu::common::witgen_types::GpuLookupCountersResult<LkBuf>;
-pub(crate) type CompactEcBuf = ceno_gpu::common::witgen_types::CompactEcResult<RamBuf>;
+pub(crate) type WitResult = ceno_gpu::common::witgen::types::GpuWitnessResult<WitBuf>;
+pub(crate) type LkResult = ceno_gpu::common::witgen::types::GpuLookupCountersResult<LkBuf>;
+pub(crate) type CompactEcBuf = ceno_gpu::common::witgen::types::CompactEcResult<RamBuf>;
 
 /// CPU-side lightweight scan of GPU-produced RAM record slots.
 ///
@@ -168,7 +168,7 @@ pub fn gpu_batch_continuation_ec<E: ExtensionField>(
 
     // GPU batch EC computation
     let result = info_span!("gpu_batch_ec", n = total).in_scope(|| {
-        hal.batch_continuation_ec(&gpu_records)
+        hal.witgen.batch_continuation_ec(&gpu_records)
     }).map_err(|e| {
         ZKVMError::InvalidWitness(format!("GPU batch EC failed: {e}").into())
     })?;
@@ -324,7 +324,7 @@ pub(crate) fn gpu_lk_counters_to_multiplicity(counters: LkResult) -> Result<Mult
 /// This function transposes to row-major on GPU before copying to host.
 pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
     hal: &CudaHalBB31,
-    gpu_result: ceno_gpu::common::witgen_types::GpuWitnessResult<
+    gpu_result: ceno_gpu::common::witgen::types::GpuWitnessResult<
         ceno_gpu::common::BufferImpl<'static, <ff_ext::BabyBearExt4 as ExtensionField>::BaseField>,
     >,
     num_rows: usize,

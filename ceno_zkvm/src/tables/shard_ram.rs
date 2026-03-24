@@ -665,7 +665,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
             bb31::CudaHalBB31,
             common::{
                 transpose::matrix_transpose,
-                witgen_types::GpuShardRamRecord,
+                witgen::types::GpuShardRamRecord,
             },
         };
         use gkr_iop::gpu::gpu_prover::get_cuda_hal;
@@ -730,7 +730,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
             n = steps.len(),
             num_rows_padded,
             num_witin,
-        ).in_scope(|| hal
+        ).in_scope(|| hal.witgen
             .witgen_shard_ram_per_row(
                 &col_map,
                 &gpu_records,
@@ -784,7 +784,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
                     break;
                 }
 
-                let (next_x, next_y) = hal
+                let (next_x, next_y) = hal.witgen
                     .shard_ram_ec_tree_layer(
                         &gpu_cols,
                         &cur_x,
@@ -816,7 +816,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
         ).in_scope(|| -> Result<_, ZKVMError> {
             let wit_num_rows = num_rows_padded;
             let wit_num_cols = num_witin;
-            let mut rmm_buf = hal
+            let mut rmm_buf = hal.witgen
                 .alloc_elems_on_device(wit_num_rows * wit_num_cols, false, None)
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
@@ -843,7 +843,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
             };
 
             let struct_num_cols = num_structural_witin;
-            let mut struct_rmm_buf = hal
+            let mut struct_rmm_buf = hal.witgen
                 .alloc_elems_on_device(wit_num_rows * struct_num_cols, false, None)
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(
@@ -941,7 +941,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
             n = num_records,
             num_rows_padded,
             num_witin,
-        ).in_scope(|| hal
+        ).in_scope(|| hal.witgen
             .witgen_shard_ram_per_row_from_device(
                 &col_map,
                 device_records,
@@ -968,7 +968,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
             })?;
 
             // Extract point_x/y from device records into flat arrays
-            let (mut cur_x, mut cur_y) = hal
+            let (mut cur_x, mut cur_y) = hal.witgen
                 .extract_ec_points_from_device(device_records, num_records, n, None)
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(
@@ -985,7 +985,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
                     break;
                 }
 
-                let (next_x, next_y) = hal
+                let (next_x, next_y) = hal.witgen
                     .shard_ram_ec_tree_layer(
                         &gpu_cols,
                         &cur_x,
@@ -1017,7 +1017,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
         ).in_scope(|| -> Result<_, ZKVMError> {
             let wit_num_rows = num_rows_padded;
             let wit_num_cols = num_witin;
-            let mut rmm_buf = hal
+            let mut rmm_buf = hal.witgen
                 .alloc_elems_on_device(wit_num_rows * wit_num_cols, false, None)
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
@@ -1044,7 +1044,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
             };
 
             let struct_num_cols = num_structural_witin;
-            let mut struct_rmm_buf = hal
+            let mut struct_rmm_buf = hal.witgen
                 .alloc_elems_on_device(wit_num_rows * struct_num_cols, false, None)
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(

@@ -1,4 +1,4 @@
-use ceno_gpu::common::witgen_types::LoadSubColumnMap;
+use ceno_gpu::common::witgen::types::LoadSubColumnMap;
 use ff_ext::ExtensionField;
 
 use super::colmap_base::{extract_rd, extract_read_mem, extract_rs1, extract_state, extract_uint_limbs};
@@ -349,7 +349,7 @@ mod tests {
             let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
             let load_width: u32 = if is_byte { 8 } else { 16 };
             let is_signed_u32: u32 = if is_signed { 1 } else { 0 };
-            let gpu_result = hal
+            let gpu_result = hal.witgen
                 .witgen_load_sub(
                     &col_map,
                     &gpu_records,

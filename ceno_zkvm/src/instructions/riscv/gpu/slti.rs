@@ -1,4 +1,4 @@
-use ceno_gpu::common::witgen_types::SltiColumnMap;
+use ceno_gpu::common::witgen::types::SltiColumnMap;
 use ff_ext::ExtensionField;
 
 use super::colmap_base::{extract_rd, extract_rs1, extract_state, extract_uint_limbs};
@@ -137,7 +137,7 @@ mod tests {
         };
         let gpu_records = hal.inner.htod_copy_stream(None, steps_bytes).unwrap();
         let indices_u32: Vec<u32> = indices.iter().map(|&i| i as u32).collect();
-        let gpu_result = hal
+        let gpu_result = hal.witgen
             .witgen_slti(&col_map, &gpu_records, &indices_u32, shard_offset, 1, 0, 0, None, None)
             .unwrap();
 
