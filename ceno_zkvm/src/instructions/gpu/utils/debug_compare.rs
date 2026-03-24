@@ -2,10 +2,8 @@
 ///
 /// These functions compare GPU-produced results against CPU baselines
 /// to validate correctness. Activated by environment variables:
-/// - CENO_GPU_DEBUG_COMPARE_LK: compare lookup multiplicities
-/// - CENO_GPU_DEBUG_COMPARE_WITNESS: compare witness matrices
-/// - CENO_GPU_DEBUG_COMPARE_SHARD: compare shardram records
-/// - CENO_GPU_DEBUG_COMPARE_EC: compare EC points
+/// All comparisons are activated by setting `CENO_GPU_DEBUG_COMPARE_WITGEN=1`.
+/// This enables: LK multiplicity, witness matrix, shardram records, and EC point comparison.
 use ceno_emul::{StepIndex, StepRecord, WordAddr};
 use ceno_gpu::common::witgen::types::{GpuRamRecordSlot, GpuShardRamRecord};
 use ff_ext::ExtensionField;
@@ -32,7 +30,7 @@ pub(crate) fn debug_compare_final_lk<E: ExtensionField, I: Instruction<E>>(
     kind: GpuWitgenKind,
     mixed_lk: &Multiplicity<u64>,
 ) -> Result<(), ZKVMError> {
-    if std::env::var_os("CENO_GPU_DEBUG_COMPARE_LK").is_none() {
+    if !crate::instructions::gpu::config::is_debug_compare_enabled() {
         return Ok(());
     }
 
@@ -56,10 +54,7 @@ pub(crate) fn log_lk_diff(
     cpu_lk: &Multiplicity<u64>,
     actual_lk: &Multiplicity<u64>,
 ) {
-    let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_LK_LIMIT")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(32);
+    let limit: usize = 16;
 
     let mut total_diffs = 0usize;
     for (table_idx, (cpu_table, actual_table)) in cpu_lk.iter().zip(actual_lk.iter()).enumerate() {
@@ -114,7 +109,7 @@ pub(crate) fn debug_compare_witness<E: ExtensionField, I: Instruction<E>>(
     kind: GpuWitgenKind,
     gpu_witness: &RowMajorMatrix<E::BaseField>,
 ) -> Result<(), ZKVMError> {
-    if std::env::var_os("CENO_GPU_DEBUG_COMPARE_WITNESS").is_none() {
+    if !crate::instructions::gpu::config::is_debug_compare_enabled() {
         return Ok(());
     }
 
@@ -134,10 +129,7 @@ pub(crate) fn debug_compare_witness<E: ExtensionField, I: Instruction<E>>(
         return Ok(());
     }
 
-    let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_WITNESS_LIMIT")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(16);
+    let limit: usize = 16;
     let cpu_num_cols = cpu_witness.n_col();
     let cpu_num_rows = cpu_vals.len() / cpu_num_cols;
     let mut mismatches = 0usize;
@@ -172,7 +164,7 @@ pub(crate) fn debug_compare_shardram<E: ExtensionField, I: Instruction<E>>(
     step_indices: &[StepIndex],
     kind: GpuWitgenKind,
 ) -> Result<(), ZKVMError> {
-    if std::env::var_os("CENO_GPU_DEBUG_COMPARE_SHARD").is_none() {
+    if !crate::instructions::gpu::config::is_debug_compare_enabled() {
         return Ok(());
     }
 
@@ -220,7 +212,7 @@ pub(crate) fn debug_compare_shardram<E: ExtensionField, I: Instruction<E>>(
 ///   B. shard records (sorted, normalized to ShardRamRecord)
 ///   C. EC points (nonce + SepticPoint x,y)
 ///
-/// Activated by CENO_GPU_DEBUG_COMPARE_EC=1.
+/// Activated by CENO_GPU_DEBUG_COMPARE_WITGEN=1.
 pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
     compact_records: &[GpuShardRamRecord],
     ram_slots: &[GpuRamRecordSlot],
@@ -230,7 +222,7 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
     step_indices: &[StepIndex],
     kind: GpuWitgenKind,
 ) {
-    if std::env::var_os("CENO_GPU_DEBUG_COMPARE_EC").is_none() {
+    if !crate::instructions::gpu::config::is_debug_compare_enabled() {
         return;
     }
 
@@ -240,10 +232,7 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
     };
     use ff_ext::{PoseidonField, SmallField};
 
-    let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_EC_LIMIT")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(16);
+    let limit: usize = 16;
 
     // ========== Build CPU shard context (independent, isolated) ==========
     let mut cpu_ctx = shard_ctx.new_empty_like();
@@ -601,10 +590,7 @@ pub(crate) fn log_ram_record_diff(
     cpu_records: &[(u32, u64, u64, u64, u64, Option<u32>, u32, usize)],
     mixed_records: &[(u32, u64, u64, u64, u64, Option<u32>, u32, usize)],
 ) {
-    let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_SHARD_LIMIT")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(16);
+    let limit: usize = 16;
     tracing::error!(
         "[GPU shard debug] kind={kind:?} {} cpu={} gpu={}",
         label,
@@ -649,8 +635,7 @@ pub(crate) fn lookup_table_name(table_idx: usize) -> &'static str {
 /// Debug comparison for keccak GPU witgen.
 /// Runs the CPU path and compares LK / witness / shardram records.
 ///
-/// Activated by CENO_GPU_DEBUG_COMPARE_LK, CENO_GPU_DEBUG_COMPARE_WITNESS,
-/// or CENO_GPU_DEBUG_COMPARE_SHARD environment variables.
+/// Activated by CENO_GPU_DEBUG_COMPARE_WITGEN=1.
 #[cfg(feature = "gpu")]
 pub(crate) fn debug_compare_keccak<E: ExtensionField>(
     config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
@@ -663,9 +648,10 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
     gpu_witin: &RowMajorMatrix<E::BaseField>,
     gpu_addrs: &[u32],
 ) -> Result<(), ZKVMError> {
-    let want_lk = std::env::var_os("CENO_GPU_DEBUG_COMPARE_LK").is_some();
-    let want_witness = std::env::var_os("CENO_GPU_DEBUG_COMPARE_WITNESS").is_some();
-    let want_shard = std::env::var_os("CENO_GPU_DEBUG_COMPARE_SHARD").is_some();
+    let enabled = crate::instructions::gpu::config::is_debug_compare_enabled();
+    let want_lk = enabled;
+    let want_witness = enabled;
+    let want_shard = enabled;
 
     if !want_lk && !want_witness && !want_shard {
         return Ok(());
@@ -684,7 +670,7 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
     tracing::info!("[GPU keccak debug] running CPU baseline for comparison");
 
     // Run CPU path via assign_instances. The IN_DEBUG_COMPARE guard prevents
-    // gpu_assign_keccak_instances from calling debug_compare_keccak again,
+    // gpu_assign_keccak_instances (in chips/keccak.rs) from calling debug_compare_keccak again,
     // so it will produce the GPU result, which is then returned without
     // re-entering this function. We need assign_instances (not cpu_assign_instances)
     // because keccak has rotation matrices and 3 structural columns.
@@ -717,10 +703,7 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
     }
 
     if want_witness {
-        let limit = std::env::var("CENO_GPU_DEBUG_COMPARE_WITNESS_LIMIT")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(32);
+        let limit: usize = 16;
         let cpu_witin = &cpu_rmms[0];
         let gpu_vals = gpu_witin.values();
         let cpu_vals = cpu_witin.values();

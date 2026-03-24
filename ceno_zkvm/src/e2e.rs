@@ -1490,7 +1490,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             }
 
             let debug_compare_e2e_shard =
-                std::env::var_os("CENO_GPU_DEBUG_COMPARE_E2E_SHARD").is_some();
+                crate::instructions::gpu::config::is_debug_compare_enabled();
             let debug_shard_ctx_template = debug_compare_e2e_shard.then(|| clone_debug_shard_ctx(&shard_ctx));
             info_span!("assign_opcode_circuits").in_scope(|| {
                 system_config
@@ -1515,16 +1515,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
 
             // Free GPU shard_steps cache after all opcode circuits are done.
             #[cfg(feature = "gpu")]
-            {
-                crate::instructions::gpu::dispatch::invalidate_shard_steps_cache();
-                if std::env::var_os("CENO_GPU_TRIM_AFTER_WITGEN").is_some() {
-                    use gkr_iop::gpu::gpu_prover::get_cuda_hal;
-
-                    let cuda_hal = get_cuda_hal().unwrap();
-                    cuda_hal.inner().trim_mem_pool().unwrap();
-                    cuda_hal.inner().synchronize().unwrap();
-                }
-            }
+            crate::instructions::gpu::cache::invalidate_shard_steps_cache();
 
             info_span!("assign_dummy_circuits").in_scope(|| {
                 system_config

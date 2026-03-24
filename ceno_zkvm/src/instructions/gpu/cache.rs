@@ -330,6 +330,22 @@ pub(crate) fn with_cached_shard_meta<R>(f: impl FnOnce(&ShardDeviceBuffers) -> R
     })
 }
 
+/// Borrow both cached device buffers (shard_steps + shard_meta) in one call.
+/// Eliminates the nested `with_cached_shard_steps(|s| with_cached_shard_meta(|m| ...))` pattern.
+pub(crate) fn with_cached_gpu_ctx<R>(
+    f: impl FnOnce(&CudaSlice<u8>, &ShardDeviceBuffers) -> R,
+) -> R {
+    SHARD_STEPS_DEVICE.with(|steps_cache| {
+        let steps = steps_cache.borrow();
+        let s = steps.as_ref().expect("shard_steps not uploaded");
+        SHARD_META_CACHE.with(|meta_cache| {
+            let meta = meta_cache.borrow();
+            let m = meta.as_ref().expect("shard metadata not uploaded");
+            f(&s.device_buf, &m.device_bufs)
+        })
+    })
+}
+
 /// Invalidate the shard metadata cache (call when shard processing is complete).
 pub fn invalidate_shard_meta_cache() {
     SHARD_META_CACHE.with(|cache| {
