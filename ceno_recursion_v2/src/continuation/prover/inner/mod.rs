@@ -163,13 +163,11 @@ where
         }
 
         let engine = E::new(self.pk.params.clone());
-        /* debug block: Step 1 placeholder - skip strict debug constraint checks */
-        // #[cfg(debug_assertions)]
-        // debug_constraints(&self.circuit, &ctx, &engine);
+        #[cfg(debug_assertions)]
+    debug_constraints(&self.circuit, &ctx, &engine);
         let proof = engine.prove(&self.d_pk, ctx)?;
-        /* debug block: Step 1 placeholder - skip debug self-verification */
-        // #[cfg(debug_assertions)]
-        // engine.verify(&self.vk, &proof)?;
+        #[cfg(debug_assertions)]
+        engine.verify(&self.vk, &proof)?;
         Ok(proof)
     }
 

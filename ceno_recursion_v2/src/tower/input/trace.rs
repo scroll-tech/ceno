@@ -51,50 +51,56 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
 
         let (data_slice, _) = trace.split_at_mut(num_valid_rows * width);
 
-        // Process each proof row
-        data_slice
-            .par_chunks_mut(width)
-            .zip(gkr_input_records.par_iter().zip(q0_claims.par_iter()))
-            .for_each(|(row_data, (record, q0_claim))| {
-                let cols: &mut TowerInputCols<F> = row_data.borrow_mut();
+        let mut prev_proof_idx = usize::MAX;
+        let mut prev_idx = usize::MAX;
+        for (row_data, (record, q0_claim)) in data_slice
+            .chunks_exact_mut(width)
+            .zip(gkr_input_records.iter().zip(q0_claims.iter()))
+        {
+            let cols: &mut TowerInputCols<F> = row_data.borrow_mut();
 
-                cols.is_enabled = F::ONE;
-                cols.proof_idx = F::from_usize(record.proof_idx);
-                cols.idx = F::from_usize(record.idx);
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.idx = F::from_usize(record.idx);
+            cols.is_first_idx = F::from_bool(prev_proof_idx != record.proof_idx);
+            cols.is_first = F::ONE;
 
-                cols.tidx = F::from_usize(record.tidx);
+            cols.tidx = F::from_usize(record.tidx);
 
-                cols.n_logup = F::from_usize(record.n_logup);
-                IsZeroSubAir.generate_subrow(
-                    cols.n_logup,
-                    (&mut cols.is_n_logup_zero_aux.inv, &mut cols.is_n_logup_zero),
-                );
+            cols.n_logup = F::from_usize(record.n_logup);
+            IsZeroSubAir.generate_subrow(
+                cols.n_logup,
+                (&mut cols.is_n_logup_zero_aux.inv, &mut cols.is_n_logup_zero),
+            );
 
-                let q0_basis = q0_claim.as_basis_coefficients_slice();
-                cols.r0_claim.copy_from_slice(q0_basis);
-                cols.w0_claim.copy_from_slice(q0_basis);
-                cols.q0_claim.copy_from_slice(q0_basis);
-                cols.alpha_logup = record
-                    .alpha_logup
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap();
-                cols.input_layer_claim = record
-                    .input_layer_claim
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap();
-                cols.layer_output_lambda = record
-                    .layer_output_lambda
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap();
-                cols.layer_output_mu = record
-                    .layer_output_mu
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap();
-            });
+            let q0_basis = q0_claim.as_basis_coefficients_slice();
+            cols.r0_claim.copy_from_slice(q0_basis);
+            cols.w0_claim.copy_from_slice(q0_basis);
+            cols.q0_claim.copy_from_slice(q0_basis);
+            cols.alpha_logup = record
+                .alpha_logup
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.input_layer_claim = record
+                .input_layer_claim
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.layer_output_lambda = record
+                .layer_output_lambda
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.layer_output_mu = record
+                .layer_output_mu
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+
+            prev_proof_idx = record.proof_idx;
+            prev_idx = record.idx;
+        }
 
         Some(RowMajorMatrix::new(trace, width))
     }

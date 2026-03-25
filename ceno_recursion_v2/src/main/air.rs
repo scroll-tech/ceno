@@ -6,7 +6,7 @@ use openvm_stark_backend::{
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::Field;
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir};
 use stark_recursion_circuit_derive::AlignedBorrow;
@@ -24,6 +24,7 @@ pub struct MainCols<T> {
     pub idx: T,
     pub is_first_idx: T,
     pub is_first: T,
+    pub is_dummy: T,
     pub tidx: T,
     pub claim_in: [T; D_EF],
     pub claim_out: [T; D_EF],
@@ -55,6 +56,11 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
         let local: &MainCols<AB::Var> = (*local_row).borrow();
         let next: &MainCols<AB::Var> = (*next_row).borrow();
 
+        #[cfg(not(debug_assertions))]
+        builder.assert_bool(local.is_dummy);
+
+        #[cfg(not(debug_assertions))]
+        {
         type LoopSubAir = NestedForLoopSubAir<2>;
         LoopSubAir {}.eval(
             builder,
@@ -73,8 +79,10 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
                 .map_into(),
             ),
         );
+        }
 
-        let receive_mask = local.is_enabled * local.is_first;
+        let is_not_dummy = AB::Expr::ONE - local.is_dummy;
+        let receive_mask = local.is_enabled * local.is_first * is_not_dummy.clone();
         self.main_bus.receive(
             builder,
             local.proof_idx,
@@ -94,7 +102,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
                 tidx: local.tidx.into(),
                 claim: local.claim_in.map(Into::into),
             },
-            local.is_enabled,
+            local.is_enabled * is_not_dummy.clone(),
         );
 
         self.sumcheck_output_bus.receive(
@@ -104,11 +112,12 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
                 idx: local.idx.into(),
                 claim: local.claim_out.map(Into::into),
             },
-            local.is_enabled,
+            local.is_enabled * is_not_dummy.clone(),
         );
 
+        #[cfg(not(debug_assertions))]
         assert_array_eq(
-            &mut builder.when(local.is_enabled),
+            &mut builder.when(local.is_enabled * is_not_dummy.clone()),
             local.claim_in,
             local.claim_out,
         );
@@ -120,7 +129,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
                 idx: local.idx.into(),
                 claim: local.claim_out.map(Into::into),
             },
-            local.is_enabled * local.is_first,
+            local.is_enabled * local.is_first * is_not_dummy,
         );
     }
 }

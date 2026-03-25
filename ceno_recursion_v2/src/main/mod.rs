@@ -75,50 +75,60 @@ impl MainModule {
 
         let mut paired = Vec::new();
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
-            let mut chip_pf_iter = preflight.main.chips.iter();
             let mut saw_chip = false;
-            for (&chip_idx, chip_instances) in &proof.chip_proofs {
-                for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
-                    saw_chip = true;
-                    let pf_entry = chip_pf_iter
-                        .next()
-                        .ok_or_else(|| eyre!(
-                            "missing main preflight entry for chip {chip_idx} instance {instance_idx}"
-                        ))?;
-                    if pf_entry.chip_idx != chip_idx || pf_entry.instance_idx != instance_idx {
-                        bail!(
-                            "main preflight chip mismatch: expected ({}, {}), got ({}, {})",
-                            chip_idx,
-                            instance_idx,
-                            pf_entry.chip_idx,
-                            pf_entry.instance_idx
-                        );
-                    }
+            let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
+                .proof_shape
+                .sorted_trace_vdata
+                .iter()
+                .enumerate()
+                .map(|(sorted_idx, (chip_idx, _))| (*chip_idx, sorted_idx))
+                .collect();
+            let mut sorted_pf_entries: Vec<_> = preflight.main.chips.iter().collect();
+            sorted_pf_entries.sort_by_key(|entry| {
+                (
+                    sorted_idx_by_chip
+                        .get(&entry.chip_idx)
+                        .copied()
+                        .unwrap_or(usize::MAX),
+                    entry.instance_idx,
+                )
+            });
+
+            for (entry_idx, pf_entry) in sorted_pf_entries.into_iter().enumerate() {
+                let chip_idx = pf_entry.chip_idx;
+                let instance_idx = pf_entry.instance_idx;
+                let chip_instances = proof.chip_proofs.get(&chip_idx).ok_or_else(|| {
+                    eyre!("missing chip proof instances for chip {chip_idx}")
+                })?;
+                let chip_proof = chip_instances.get(instance_idx).ok_or_else(|| {
+                    eyre!("missing chip proof instance {instance_idx} for chip {chip_idx}")
+                })?;
                     let claim = input_layer_claim(chip_proof);
                     let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
                     record_main_transcript(&mut ts, chip_idx, chip_proof);
 
                     let main_record = MainRecord {
                         proof_idx,
-                        idx: chip_idx,
+                        idx: entry_idx,
+                        is_dummy: input_layer_count(chip_proof) == 0,
                         tidx: pf_entry.tidx,
                         claim,
                     };
                     let sumcheck_record = build_sumcheck_record_from_chip(
                         proof_idx,
-                        chip_idx,
+                        entry_idx,
                         claim,
                         chip_proof,
                         pf_entry.tidx,
                     );
                     paired.push((main_record, sumcheck_record));
-                }
             }
 
             if !saw_chip {
                 paired.push((
                     MainRecord {
                         proof_idx,
+                        is_dummy: true,
                         ..MainRecord::default()
                     },
                     MainSumcheckRecord::default(),
@@ -246,7 +256,15 @@ impl RowMajorChip<F> for MainModuleChip {
 }
 
 fn input_layer_claim(chip_proof: &ZKVMChipProof<RecursionField>) -> EF {
-    let layer_count = chip_proof
+    let layer_count = input_layer_count(chip_proof);
+    if layer_count == 0 {
+        return EF::ZERO;
+    }
+    convert_logup_claim(chip_proof, layer_count - 1)[0]
+}
+
+fn input_layer_count(chip_proof: &ZKVMChipProof<RecursionField>) -> usize {
+    chip_proof
         .tower_proof
         .logup_specs_eval
         .iter()
@@ -259,16 +277,12 @@ fn input_layer_claim(chip_proof: &ZKVMChipProof<RecursionField>) -> EF {
                 .map(|spec_layers| spec_layers.len()),
         )
         .max()
-        .unwrap_or(0);
-    if layer_count == 0 {
-        return EF::ZERO;
-    }
-    convert_logup_claim(chip_proof, layer_count - 1)[0]
+        .unwrap_or(0)
 }
 
 fn build_sumcheck_record_from_chip(
     proof_idx: usize,
-    chip_idx: usize,
+    idx: usize,
     claim: EF,
     chip_proof: &ZKVMChipProof<RecursionField>,
     tidx: usize,
@@ -296,7 +310,7 @@ fn build_sumcheck_record_from_chip(
 
     MainSumcheckRecord {
         proof_idx,
-        idx: chip_idx,
+        idx,
         tidx,
         claim,
         rounds,

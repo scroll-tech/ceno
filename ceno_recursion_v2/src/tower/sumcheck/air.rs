@@ -126,45 +126,66 @@ where
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_last_layer);
+        builder.assert_bool(local.is_first_round);
 
         ///////////////////////////////////////////////////////////////////////
         // Proof Index and Loop Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        type LoopSubAir = NestedForLoopSubAir<3>;
+        type LoopSubAir = NestedForLoopSubAir<2>;
         LoopSubAir {}.eval(
             builder,
             (
                 NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.idx, local.layer_idx],
-                    is_first: [
-                        local.is_first_idx,
-                        local.is_first_layer,
-                        local.is_first_round,
-                    ],
+                    counter: [local.proof_idx, local.idx],
+                    is_first: [local.is_first_idx, local.is_first_layer],
                 }
                 .map_into(),
                 NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.idx, next.layer_idx],
-                    is_first: [next.is_first_idx, next.is_first_layer, next.is_first_round],
+                    counter: [next.proof_idx, next.idx],
+                    is_first: [next.is_first_idx, next.is_first_layer],
                 }
                 .map_into(),
             ),
         );
 
+        builder
+            .when(local.is_first_round)
+            .assert_one(local.is_enabled.clone());
+        builder
+            .when_transition()
+            .when_ne(local.is_enabled.clone(), AB::Expr::ONE)
+            .assert_zero(next.is_first_round.clone());
+
         let is_transition_round =
-            LoopSubAir::local_is_transition(next.is_enabled, next.is_first_round);
+            AB::Expr::from(next.is_enabled) - AB::Expr::from(next.is_first_round);
         let is_last_round =
-            LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first_round);
+            AB::Expr::from(local.is_enabled) - AB::Expr::from(next.is_enabled)
+                + AB::Expr::from(next.is_first_round);
+        let is_next_layer_same_idx = AB::Expr::from(next.is_enabled)
+            * AB::Expr::from(next.is_first_round)
+            * (AB::Expr::ONE - AB::Expr::from(next.is_first_layer));
 
         // Sumcheck round flag starts at 0
         builder.when(local.is_first_round).assert_zero(local.round);
+        // layer_idx starts at 1 on the first layer of each idx
+        builder
+            .when(local.is_first_layer)
+            .assert_one(local.layer_idx.clone());
         // Sumcheck round flag increments by 1
         builder
             .when(is_transition_round.clone())
             .assert_eq(next.round, local.round + AB::Expr::ONE);
+        // layer_idx stays fixed within a layer
+        builder
+            .when(is_transition_round.clone())
+            .assert_eq(next.layer_idx, local.layer_idx);
+        // layer_idx increments by 1 when advancing to the next layer within the same idx
+        builder
+            .when(is_next_layer_same_idx)
+            .assert_eq(next.layer_idx, local.layer_idx + AB::Expr::ONE);
         // Sumcheck round flag end
         builder
             .when(is_last_round.clone())

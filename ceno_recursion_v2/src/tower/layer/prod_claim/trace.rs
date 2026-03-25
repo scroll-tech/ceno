@@ -82,8 +82,8 @@ fn generate_prod_trace(
                 let row_data = &mut chunk[..width];
                 let cols: &mut TowerProdSumCheckClaimCols<F> = row_data.borrow_mut();
                 cols.is_enabled = F::ONE;
-                cols.is_first_layer = F::ONE;
-                cols.is_first = F::ONE;
+                cols.is_first_layer = F::from_bool(record.is_first_air_idx);
+                cols.is_first = F::ONE; // single row = first of its (degenerate) layer
                 cols.is_dummy = F::ONE;
                 cols.proof_idx = F::from_usize(record.proof_idx);
                 cols.idx = F::from_usize(record.idx);
@@ -142,7 +142,7 @@ fn generate_prod_trace(
                     .try_into()
                     .unwrap();
                 let mu_basis: [F; D_EF] = mu.as_basis_coefficients_slice().try_into().unwrap();
-                let tidx = record.claim_tidx(layer_idx);
+                    let layer_tidx = record.claim_tidx(layer_idx);
 
                 let mut pow_lambda = EF::ONE;
                 let mut pow_lambda_prime = EF::ONE;
@@ -154,8 +154,9 @@ fn generate_prod_trace(
                         .next()
                         .expect("chunk should have enough rows for layer");
                     let cols: &mut TowerProdSumCheckClaimCols<F> = row.borrow_mut();
-                    let is_real = row_in_layer < active_rows.len();
-                    let pair = if is_real {
+                    let is_placeholder = active_rows.is_empty() && row_in_layer == 0;
+                    let is_real = row_in_layer < active_rows.len() || is_placeholder;
+                    let pair = if row_in_layer < active_rows.len() {
                         active_rows[row_in_layer]
                     } else {
                         [EF::ZERO; 2]
@@ -172,14 +173,17 @@ fn generate_prod_trace(
                     };
 
                     cols.is_enabled = F::ONE;
-                    cols.is_dummy = F::from_bool(!is_real);
-                    cols.is_first_layer = F::from_bool(proof_row_idx == 0);
-                    cols.is_first = F::from_bool(row_in_layer == 0);
+                    cols.is_dummy = F::from_bool(layer_idx == 0 || !is_real);
+                    let is_first_row_of_layer = row_in_layer == 0;
+                    let is_first_row_of_record = proof_row_idx == 0;
+                    cols.is_first_layer =
+                        F::from_bool(is_first_row_of_record && record.is_first_air_idx);
+                    cols.is_first = F::from_bool(is_first_row_of_layer);
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
                     cols.layer_idx = F::from_usize(layer_idx);
                     cols.index_id = F::from_usize(row_in_layer);
-                    cols.tidx = F::from_usize(tidx);
+                    cols.tidx = F::from_usize(layer_tidx + row_in_layer * 2 * D_EF);
                     cols.lambda = lambda_basis;
                     cols.lambda_prime = lambda_prime_basis;
                     cols.mu = mu_basis;

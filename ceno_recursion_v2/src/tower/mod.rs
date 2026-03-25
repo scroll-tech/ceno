@@ -56,7 +56,7 @@ use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
     p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use recursion_circuit::primitives::exp_bits_len::ExpBitsLenTraceGenerator;
@@ -133,6 +133,14 @@ struct TowerBlobCpu {
     sumcheck_records: Vec<TowerSumcheckRecord>,
     mus_records: Vec<Vec<EF>>,
     q0_claims: Vec<EF>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TowerTranscriptSchedule {
+    alpha_logup: EF,
+    lambdas: Vec<EF>,
+    mus: Vec<EF>,
+    ris: Vec<EF>,
 }
 
 impl TowerModule {
@@ -285,11 +293,12 @@ fn circuit_vk_for_idx<'a>(
 
 fn build_chip_records(
     proof_idx: usize,
-    chip_idx: usize,
+    idx: usize,
+    is_first_air_idx: bool,
     chip_proof: &ZKVMChipProof<RecursionField>,
     _circuit_vk: &VerifyingKey<RecursionField>,
     replay: &TowerReplayResult,
-    alpha_logup: EF,
+    schedule: &TowerTranscriptSchedule,
     tidx: usize,
 ) -> Result<(
     TowerInputRecord,
@@ -353,8 +362,10 @@ fn build_chip_records(
 
     let mut layer_record = TowerLayerRecord {
         proof_idx,
-        idx: chip_idx,
-        tidx: 0,
+        idx,
+        is_first_air_idx,
+        // TowerLayerAir starts after alpha/beta sampling and q0 observe in TowerInputAir.
+        tidx: tidx + 3 * D_EF,
         layer_claims: Vec::with_capacity(layer_count),
         lambdas: vec![EF::ZERO; layer_count],
         eq_at_r_primes: vec![EF::ZERO; layer_count],
@@ -410,13 +421,21 @@ fn build_chip_records(
 
     let mut sumcheck_record = TowerSumcheckRecord {
         proof_idx,
-        tidx: 0,
+        idx,
+        is_first_air_idx,
+        // First sumcheck transcript row starts at layer_tidx(1) + D_EF.
+        tidx: tidx + 9 * D_EF,
         evals: Vec::new(),
         ris: Vec::new(),
-        claims: vec![EF::ZERO; layer_count],
+        claims: vec![EF::ZERO; layer_count.saturating_sub(1)],
     };
 
-    for round_msgs in &chip_proof.tower_proof.proofs {
+    for round_msgs in chip_proof
+        .tower_proof
+        .proofs
+        .iter()
+        .take(chip_proof.tower_proof.proofs.len().saturating_sub(1))
+    {
         for msg in round_msgs {
             sumcheck_record.evals.push(convert_sumcheck_evals(msg));
         }
@@ -430,24 +449,19 @@ fn build_chip_records(
         .copied()
         .unwrap_or(EF::ZERO);
 
-    let layer_output_lambda = replay.layers.last().map(|layer| layer.lambda).unwrap_or(EF::ZERO);
-    let layer_output_mu = replay.layers.last().map(|layer| layer.mu).unwrap_or(EF::ZERO);
+    let layer_output_lambda = schedule.lambdas.last().copied().unwrap_or(EF::ZERO);
+    let layer_output_mu = schedule.mus.last().copied().unwrap_or(EF::ZERO);
     let input_record = TowerInputRecord {
         proof_idx,
-        idx: chip_idx,
+        idx,
         tidx,
         n_logup: layer_count,
-        alpha_logup,
+        alpha_logup: schedule.alpha_logup,
         input_layer_claim,
         layer_output_lambda,
         layer_output_mu,
     };
-    let flattened_ris: Vec<EF> = replay
-        .layers
-        .iter()
-        .flat_map(|layer| layer.challenges.iter().copied())
-        .collect();
-    sumcheck_record.ris = flattened_ris;
+    sumcheck_record.ris = schedule.ris.clone();
     if !replay.layers.is_empty() {
         eyre::ensure!(
             sumcheck_record.ris.len() == sumcheck_record.evals.len(),
@@ -459,12 +473,16 @@ fn build_chip_records(
     for (layer_idx, data) in replay.layers.iter().enumerate() {
         if layer_idx < layer_record.eq_at_r_primes.len() {
             layer_record.eq_at_r_primes[layer_idx] = data.eq_at_r;
-            layer_record.lambdas[layer_idx] = data.lambda;
-            mus_record[layer_idx] = data.mu;
+            layer_record.lambdas[layer_idx] = schedule.lambdas.get(layer_idx).copied().unwrap_or(EF::ZERO);
+            mus_record[layer_idx] = schedule.mus.get(layer_idx).copied().unwrap_or(EF::ZERO);
         }
-        if layer_idx < sumcheck_record.claims.len() {
-            sumcheck_record.claims[layer_idx] = data.claim_in;
-            layer_record.sumcheck_claims[layer_idx] = data.claim_in;
+        if layer_idx + 1 < layer_count {
+            if layer_idx < sumcheck_record.claims.len() {
+                sumcheck_record.claims[layer_idx] = data.claim_in;
+            }
+            if layer_idx < layer_record.sumcheck_claims.len() {
+                layer_record.sumcheck_claims[layer_idx] = data.claim_in;
+            }
         }
     }
 
@@ -604,29 +622,38 @@ pub(crate) fn build_gkr_blob(
 
     for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
         let mut has_chip = false;
-        let mut chip_preflight_entries = preflight.gkr.chips.iter();
-        for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
+        let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
+            .proof_shape
+            .sorted_trace_vdata
+            .iter()
+            .enumerate()
+            .map(|(sorted_idx, (chip_idx, _))| (*chip_idx, sorted_idx))
+            .collect();
+        let mut sorted_pf_entries: Vec<_> = preflight.gkr.chips.iter().collect();
+        sorted_pf_entries.sort_by_key(|entry| {
+            (
+                sorted_idx_by_chip.get(&entry.chip_idx).copied().unwrap_or(usize::MAX),
+                entry.instance_idx,
+            )
+        });
+        for (entry_idx, pf_entry) in sorted_pf_entries.into_iter().enumerate() {
+            let chip_idx = pf_entry.chip_idx;
+            let instance_idx = pf_entry.instance_idx;
+            let chip_instances = proof.chip_proofs.get(&chip_idx).ok_or_else(|| {
+                eyre::eyre!("missing chip proof instances for chip {chip_idx}")
+            })?;
+            let chip_proof = chip_instances.get(instance_idx).ok_or_else(|| {
+                eyre::eyre!("missing chip proof instance {instance_idx} for chip {chip_idx}")
+            })?;
                 has_chip = true;
-                let pf_entry = chip_preflight_entries.next().ok_or_else(|| {
-                    eyre::eyre!(
-                        "missing GKR preflight entry for chip {chip_idx} instance {instance_idx}"
-                    )
-                })?;
-                if pf_entry.chip_idx != chip_idx || pf_entry.instance_idx != instance_idx {
-                    return Err(eyre::eyre!(
-                        "tower preflight chip mismatch (expected ({}, {}), found ({}, {}))",
-                        chip_idx,
-                        instance_idx,
-                        pf_entry.chip_idx,
-                        pf_entry.instance_idx
-                    ));
-                }
                 let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
-                let alpha_logup = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
+                let schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
 
                 let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx).ok_or_else(|| {
                     eyre::eyre!("missing circuit verifying key for index {chip_idx}")
+                })?;
+                let idx = sorted_idx_by_chip.get(&chip_idx).copied().ok_or_else(|| {
+                    eyre::eyre!("missing proof-shape sorted index for chip {chip_idx}")
                 })?;
                 println!(
                     "processing chip name: {:?}",
@@ -641,11 +668,12 @@ pub(crate) fn build_gkr_blob(
                     q0_claim,
                 ) = build_chip_records(
                     proof_idx,
-                    chip_idx,
+                    idx,
+                    entry_idx == 0,
                     chip_proof,
                     circuit_vk,
                     &pf_entry.tower_replay,
-                    alpha_logup,
+                    &schedule,
                     pf_entry.tidx,
                 )?;
                 input_records.push(input_record);
@@ -654,7 +682,6 @@ pub(crate) fn build_gkr_blob(
                 sumcheck_records.push(sumcheck_record);
                 mus_records.push(mus_record);
                 q0_claims.push(q0_claim);
-            }
         }
 
         if !has_chip {
@@ -665,11 +692,14 @@ pub(crate) fn build_gkr_blob(
             layer_records.push(TowerLayerRecord {
                 idx: 0,
                 proof_idx,
+                is_first_air_idx: true,
                 ..Default::default()
             });
             tower_records.push(TowerTowerEvalRecord::default());
             sumcheck_records.push(TowerSumcheckRecord {
                 proof_idx,
+                idx: 0,
+                is_first_air_idx: true,
                 ..Default::default()
             });
             mus_records.push(vec![]);
@@ -700,10 +730,13 @@ fn record_gkr_transcript<TS>(
     ts: &mut TS,
     _chip_idx: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
-) -> EF
+) -> TowerTranscriptSchedule
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
+    let alpha_logup = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+    // Keep transcript index alignment with TowerInputAir's `tidx + 2 * D_EF` for q0.
+    let _beta_placeholder = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
     if let Some(q0) = chip_proof
         .lk_out_evals
         .get(0)
@@ -711,7 +744,51 @@ where
     {
         ts.observe_ext(*q0);
     }
-    FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts)
+
+    // Reconstruct the transcript events consumed by tower-related AIRs.
+    // This keeps preflight transcript history aligned with TowerLayer/Sumcheck/
+    // ProdClaim/LogupClaim transcript bus interactions.
+    let read_count = chip_proof.r_out_evals.len();
+    let layer_count = chip_proof
+        .tower_proof
+        .logup_specs_eval
+        .iter()
+        .map(Vec::len)
+        .chain(chip_proof.tower_proof.prod_specs_eval.iter().map(Vec::len))
+        .max()
+        .unwrap_or(0);
+
+    let mut lambdas = Vec::with_capacity(layer_count);
+    let mut mus = Vec::with_capacity(layer_count);
+    let mut ris = Vec::new();
+
+    for layer_idx in 0..layer_count {
+        let lambda = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+        lambdas.push(lambda);
+
+        if layer_idx + 1 < layer_count {
+            if let Some(round_msgs) = chip_proof.tower_proof.proofs.get(layer_idx) {
+                for msg in round_msgs {
+                    for eval in msg.evaluations.iter().take(3) {
+                        ts.observe_ext(*eval);
+                    }
+                    let ri = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+                    ris.push(ri);
+                }
+            }
+        }
+
+        let mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+        mus.push(mu);
+    }
+
+    let _ = read_count;
+    TowerTranscriptSchedule {
+        alpha_logup,
+        lambdas,
+        mus,
+        ris,
+    }
 }
 
 impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>> for TowerModule {

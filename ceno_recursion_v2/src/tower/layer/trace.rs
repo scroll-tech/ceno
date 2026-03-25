@@ -13,6 +13,7 @@ use crate::tracegen::RowMajorChip;
 pub struct TowerLayerRecord {
     pub proof_idx: usize,
     pub idx: usize,
+    pub is_first_air_idx: bool,
     pub tidx: usize,
     pub layer_claims: Vec<[EF; 4]>,
     pub lambdas: Vec<EF>,
@@ -202,7 +203,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.is_enabled = F::ONE;
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
-                    cols.is_first_air_idx = F::ONE;
+                    cols.is_first_air_idx = F::from_bool(record.is_first_air_idx);
                     cols.is_first = F::ONE;
                     cols.is_dummy = F::ONE;
                     cols.layer_idx = F::ZERO;
@@ -229,17 +230,18 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     return;
                 }
 
-                chunk
+                let mut prev_folded_claim: Option<EF> = None;
+                for (layer_idx, row_data) in chunk
                     .chunks_mut(width)
                     .take(record.layer_count())
                     .enumerate()
-                    .for_each(|(layer_idx, row_data)| {
-                        let cols: &mut TowerLayerCols<F> = row_data.borrow_mut();
+                {
+                    let cols: &mut TowerLayerCols<F> = row_data.borrow_mut();
                         cols.is_enabled = F::ONE;
                         cols.is_dummy = F::ZERO;
                         cols.proof_idx = F::from_usize(record.proof_idx);
                         cols.idx = F::from_usize(record.idx);
-                        cols.is_first_air_idx = F::from_bool(layer_idx == 0);
+                        cols.is_first_air_idx = F::from_bool(layer_idx == 0 && record.is_first_air_idx);
                         cols.is_first = F::from_bool(layer_idx == 0);
                         cols.layer_idx = F::from_usize(layer_idx);
                         cols.tidx = F::from_usize(record.layer_tidx(layer_idx));
@@ -255,11 +257,11 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                             .unwrap();
                         let mu = mus_for_proof.get(layer_idx).copied().unwrap_or(EF::ZERO);
                         cols.mu = mu.as_basis_coefficients_slice().try_into().unwrap();
-                        let sumcheck_claim = if layer_idx == 0 {
-                            EF::ZERO
-                        } else {
-                            record.sumcheck_claim_at(layer_idx)
-                        };
+                    let sumcheck_claim = if layer_idx == 0 {
+                        EF::ZERO
+                    } else {
+                        prev_folded_claim.unwrap_or(EF::ZERO)
+                    };
                         cols.sumcheck_claim_in = sumcheck_claim
                             .as_basis_coefficients_slice()
                             .try_into()
@@ -306,7 +308,9 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                                 .try_into()
                                 .unwrap();
                         }
-                    });
+
+                    prev_folded_claim = Some(read_claim + write_claim + logup_claim);
+                }
             });
 
         Some(RowMajorMatrix::new(trace, width))

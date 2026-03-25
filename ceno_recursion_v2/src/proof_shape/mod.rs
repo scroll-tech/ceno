@@ -150,7 +150,9 @@ impl ProofShapeModule {
         preflight.proof_shape.l_skip = 0;
 
         let mut current_tidx = 2 * DIGEST_SIZE;
+        let mut current_cidx = 1usize;
         let mut starting_tidx = vec![0usize; child_vk.circuit_vks.len()];
+        let mut starting_cidx = vec![0usize; child_vk.circuit_vks.len()];
         let mut pvs_tidx = Vec::new();
         let n_max = preflight
             .proof_shape
@@ -164,6 +166,10 @@ impl ProofShapeModule {
             let metadata = &self.per_air[air_idx];
             let is_present = proof.chip_proofs.contains_key(&air_idx);
             starting_tidx[air_idx] = current_tidx;
+            starting_cidx[air_idx] = current_cidx;
+
+            current_cidx += usize::from(metadata.preprocessed_data.is_some());
+            current_cidx += metadata.cached_widths.len();
 
             if !metadata.is_required {
                 current_tidx += 1;
@@ -190,6 +196,7 @@ impl ProofShapeModule {
         }
 
         preflight.proof_shape.starting_tidx = starting_tidx;
+        preflight.proof_shape.starting_cidx = starting_cidx;
         preflight.proof_shape.pvs_tidx = pvs_tidx;
         preflight.proof_shape.post_tidx = current_tidx;
         preflight.proof_shape.n_max = n_max;
@@ -350,12 +357,20 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         let pow_checker = &ctx.0;
         let external_range_checks = ctx.1;
+        let cidx_deltas = self
+            .per_air
+            .iter()
+            .map(|metadata| {
+                usize::from(metadata.preprocessed_data.is_some()) + metadata.cached_widths.len()
+            })
+            .collect();
 
         let range_checker = Arc::new(RangeCheckerCpuTraceGenerator::<8>::default());
         let proof_shape = proof_shape::ProofShapeChip::<4, 8>::new(
             self.idx_encoder.clone(),
             self.min_cached_idx,
             self.max_cached,
+            cidx_deltas,
             range_checker.clone(),
             pow_checker.clone(),
         );

@@ -84,54 +84,87 @@ where
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_first_layer);
+        builder.assert_bool(local.is_first);
 
-        type LoopSubAir = NestedForLoopSubAir<2>;
+        // Track proof_idx as the single outer loop counter.
+        // is_first_layer marks the start of each proof scope.
+        type LoopSubAir = NestedForLoopSubAir<1>;
         LoopSubAir {}.eval(
             builder,
             (
                 NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.idx],
-                    is_first: [local.is_first_layer, local.is_first],
+                    counter: [local.proof_idx],
+                    is_first: [local.is_first_layer],
                 }
                 .map_into(),
                 NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.idx],
-                    is_first: [next.is_first_layer, next.is_first],
+                    counter: [next.proof_idx],
+                    is_first: [next.is_first_layer],
                 }
                 .map_into(),
             ),
         );
 
-        let is_transition = LoopSubAir::local_is_transition(next.is_enabled, next.is_first);
-        let is_last_layer_row =
-            LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first);
-        let stay_in_layer = AB::Expr::ONE - is_transition.clone();
-        let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
-
+        // When is_first is set, this must be a real enabled row.
         builder
             .when(local.is_first)
-            .assert_zero(local.layer_idx.clone());
+            .assert_one(local.is_enabled.clone());
+        // After a disabled row, is_first must not be set (padding rows).
         builder
-            .when(is_transition.clone())
-            .assert_eq(next.layer_idx, local.layer_idx + AB::Expr::ONE);
+            .when_transition()
+            .when_ne(local.is_enabled.clone(), AB::Expr::ONE)
+            .assert_zero(next.is_first.clone());
 
+        // is_within_layer: next row continues within the same layer
+        let is_within_layer = AB::Expr::from(next.is_enabled) - AB::Expr::from(next.is_first);
+        // at_layer_boundary: current row is the last index_id of its layer
+        let at_layer_boundary = AB::Expr::from(local.is_enabled)
+            - AB::Expr::from(next.is_enabled)
+            + AB::Expr::from(next.is_first);
+
+        // layer_idx starts at 0 on the first row of each layer (is_first=1)
+            let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
+
+            // idx and layer_idx stay fixed within a layer.
+            builder
+                .when(is_within_layer.clone())
+                .assert_eq(next.idx, local.idx);
+            builder
+                .when(is_within_layer.clone())
+                .assert_eq(next.layer_idx, local.layer_idx);
+
+            // When the next row starts a later layer within the same record, idx stays fixed
+            // and layer_idx increments by 1. If next.layer_idx == 0, this is a new record boundary
+            // and the next row is constrained by its own bus input instead.
+            builder
+                .when(at_layer_boundary.clone() * local.is_enabled * next.is_enabled * next.layer_idx)
+                .assert_eq(next.idx, local.idx);
+            builder
+                .when(at_layer_boundary.clone() * local.is_enabled * next.is_enabled * next.layer_idx)
+                .assert_eq(next.layer_idx, local.layer_idx + AB::Expr::ONE);
+
+        // index_id resets to 0 on the first row of each layer
         builder
-            .when(local.is_first_layer)
+            .when(local.is_first)
             .assert_zero(local.index_id.clone());
+        // index_id also resets on any is_first row
         builder
-            .when(local.is_enabled * next.is_enabled * next.is_first_layer)
+            .when(local.is_enabled * next.is_enabled * next.is_first)
             .assert_zero(next.index_id.clone());
+        // index_id increments within a layer
         builder
-            .when(is_not_dummy.clone() * stay_in_layer.clone())
+            .when(is_not_dummy.clone() * is_within_layer.clone())
             .assert_eq(next.index_id, local.index_id + AB::Expr::ONE);
+        // last row of a layer: index_id + 1 == num_logup_count
         builder
-            .when(is_last_layer_row.clone() * is_not_dummy.clone())
+            .when(at_layer_boundary.clone() * is_not_dummy.clone())
             .assert_eq(
                 local.index_id + AB::Expr::ONE,
                 local.num_logup_count.clone(),
             );
+        let is_last_layer_row = at_layer_boundary;
 
         assert_zeros(
             &mut builder.when(local.is_first * is_not_dummy.clone()),
@@ -186,13 +219,13 @@ where
         let acc_sum_export = acc_sum_with_cur.clone();
 
         assert_array_eq(
-            &mut builder.when(stay_in_layer.clone()),
+            &mut builder.when(is_within_layer.clone()),
             next.acc_sum,
             acc_sum_with_cur,
         );
         let pow_lambda_next = ext_field_multiply::<AB::Expr>(pow_lambda, lambda.clone());
         assert_array_eq(
-            &mut builder.when(stay_in_layer.clone()),
+            &mut builder.when(is_within_layer.clone()),
             next.pow_lambda,
             pow_lambda_next,
         );
@@ -204,7 +237,7 @@ where
             ext_field_multiply::<AB::Expr>(pow_lambda_prime.clone(), p_cross_term),
         );
         assert_array_eq(
-            &mut builder.when(stay_in_layer.clone()),
+            &mut builder.when(is_within_layer.clone()),
             next.acc_p_cross,
             acc_p_with_cur.clone(),
         );
@@ -214,14 +247,14 @@ where
         );
         let acc_q_with_cur = ext_field_add::<AB::Expr>(local.acc_q_cross, scaled_q_term);
         assert_array_eq(
-            &mut builder.when(stay_in_layer.clone()),
+            &mut builder.when(is_within_layer.clone()),
             next.acc_q_cross,
             acc_q_with_cur.clone(),
         );
         let pow_lambda_prime_next =
             ext_field_multiply::<AB::Expr>(pow_lambda_prime, lambda_prime.clone());
         assert_array_eq(
-            &mut builder.when(stay_in_layer.clone()),
+            &mut builder.when(is_within_layer.clone()),
             next.pow_lambda_prime,
             pow_lambda_prime_next,
         );
@@ -237,7 +270,7 @@ where
                 lambda_prime: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
             },
-            local.is_first_layer * is_not_dummy.clone(),
+            AB::Expr::from(local.is_first) * is_not_dummy.clone(),
         );
 
         self.logup_claim_bus.send(
@@ -253,17 +286,7 @@ where
             is_last_layer_row * is_not_dummy.clone(),
         );
 
-        let mut tidx = local.tidx.into();
-        for claim in [local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1] {
-            self.transcript_bus.observe_ext(
-                builder,
-                local.proof_idx,
-                tidx.clone(),
-                claim,
-                local.is_enabled * is_not_dummy.clone(),
-            );
-            tidx += AB::Expr::from_usize(D_EF);
-        }
+        let _ = &self.transcript_bus;
     }
 }
 

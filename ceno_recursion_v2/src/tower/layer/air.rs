@@ -218,7 +218,8 @@ where
         // Module Interactions
         ///////////////////////////////////////////////////////////////////////
 
-        let is_not_dummy = AB::Expr::ONE - local.is_dummy;
+        let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
+        let is_non_root = AB::Expr::ONE - local.is_first;
         let is_non_root_layer = local.is_enabled * (AB::Expr::ONE - local.is_first);
 
         let lookup_enable = local.is_enabled * is_not_dummy.clone();
@@ -265,7 +266,7 @@ where
                 lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * is_non_root.clone(),
         );
         // TODO separate lambda, lambda_prime for prod-write the relation should be local.lambda^(num_read)
         self.prod_write_claim_input_bus.send(
@@ -279,7 +280,7 @@ where
                 lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * is_non_root.clone(),
         );
         // TODO separate lambda, lambda_prime for logup the relation should be local.lambda^(num_read + num_write)
         self.logup_claim_input_bus.send(
@@ -293,7 +294,7 @@ where
                 lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * is_non_root.clone(),
         );
         self.prod_read_claim_bus.receive(
             builder,
@@ -305,7 +306,7 @@ where
                 lambda_prime_claim: local.read_claim_prime.map(Into::into),
                 num_prod_count: local.num_read_count.into(),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * is_non_root.clone(),
         );
         self.prod_write_claim_bus.receive(
             builder,
@@ -317,7 +318,7 @@ where
                 lambda_prime_claim: local.write_claim_prime.map(Into::into),
                 num_prod_count: local.num_write_count.into(),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * is_non_root.clone(),
         );
         self.logup_claim_bus.receive(
             builder,
@@ -329,7 +330,7 @@ where
                 lambda_prime_claim: local.logup_claim_prime.map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * is_non_root,
         );
 
         let root_layer_mask = local.is_first * is_not_dummy.clone();

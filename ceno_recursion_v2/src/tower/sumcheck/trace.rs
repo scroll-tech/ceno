@@ -11,6 +11,8 @@ use crate::tracegen::RowMajorChip;
 #[derive(Default, Debug, Clone)]
 pub struct TowerSumcheckRecord {
     pub proof_idx: usize,
+    pub idx: usize,
+    pub is_first_air_idx: bool,
     pub tidx: usize,
     pub evals: Vec<[EF; 3]>,
     pub ris: Vec<EF>,
@@ -126,10 +128,10 @@ impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
                     cols.is_enabled = F::ONE;
                     cols.tidx = F::from_usize(D_EF);
                     cols.proof_idx = F::from_usize(record.proof_idx);
-                    cols.idx = F::ZERO;
+                    cols.idx = F::from_usize(record.idx);
                     cols.layer_idx = F::ONE;
                     cols.is_first_round = F::ONE;
-                    cols.is_first_idx = F::ONE;
+                    cols.is_first_idx = F::from_bool(record.is_first_air_idx);
                     cols.is_first_layer = F::ONE;
                     cols.is_last_layer = F::ONE;
                     cols.is_dummy = F::ONE;
@@ -196,16 +198,18 @@ impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
                             row_iter.next().unwrap().borrow_mut();
                         cols.is_enabled = F::ONE;
                         cols.proof_idx = F::from_usize(record.proof_idx);
-                        cols.idx = F::ZERO;
+                        cols.idx = F::from_usize(record.idx);
 
                         cols.layer_idx = F::from_usize(layer_idx_value);
                         cols.is_last_layer = F::from_bool(is_last_layer);
 
                         cols.round = F::from_usize(round_in_layer);
                         cols.is_first_round = F::from_bool(round_in_layer == 0);
-                        cols.is_first_layer = F::from_bool(round_in_layer == 0);
-                        cols.is_first_idx =
-                            F::from_bool(layer_idx_value == 1 && round_in_layer == 0);
+                        cols.is_first_layer =
+                            F::from_bool(layer_idx == 0 && round_in_layer == 0);
+                        cols.is_first_idx = F::from_bool(
+                            layer_idx == 0 && round_in_layer == 0 && record.is_first_air_idx,
+                        );
 
                         let tidx = record.derive_tidx(layer_idx, round_in_layer);
                         cols.tidx = F::from_usize(tidx);

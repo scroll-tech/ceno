@@ -50,6 +50,7 @@ pub(in crate::proof_shape) struct ProofShapeChip<const NUM_LIMBS: usize, const L
     idx_encoder: Arc<Encoder>,
     min_cached_idx: usize,
     max_cached: usize,
+    cidx_deltas: Vec<usize>,
     range_checker: Arc<RangeCheckerCpuTraceGenerator<LIMB_BITS>>,
     pow_checker: Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
 }
@@ -97,7 +98,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
             let mut sorted_idx = 0usize;
             let mut num_present = 0usize;
-            let starting_cidx = 1usize;
+            let mut current_cidx = 1usize;
 
             for (air_idx, vdata) in &preflight.proof_shape.sorted_trace_vdata {
                 let chunk = chunks.next().unwrap();
@@ -122,7 +123,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.log_height = F::from_usize(log_height);
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[*air_idx]);
-                cols.starting_cidx = F::from_usize(starting_cidx);
+                cols.starting_cidx = F::from_usize(current_cidx);
                 cols.is_present = F::ONE;
                 cols.height = F::from_usize(trace_height);
                 cols.num_present = F::from_usize(num_present);
@@ -144,6 +145,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     var_cols.cached_commits[self.max_cached - 1] = [F::ZERO; DIGEST_SIZE];
                 }
 
+                current_cidx += self.cidx_deltas.get(*air_idx).copied().unwrap_or(0);
                 self.pow_checker.add_pow(log_height);
                 sorted_idx += 1;
             }
@@ -170,7 +172,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.log_height = F::ZERO;
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[air_idx]);
-                cols.starting_cidx = F::from_usize(starting_cidx);
+                cols.starting_cidx = F::from_usize(current_cidx);
                 cols.is_present = F::ZERO;
                 cols.height = F::ZERO;
                 cols.num_present = F::from_usize(num_present);
@@ -192,6 +194,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     var_cols.cached_commits[self.max_cached - 1] = [F::ZERO; DIGEST_SIZE];
                 }
 
+                current_cidx += self.cidx_deltas.get(air_idx).copied().unwrap_or(0);
                 sorted_idx += 1;
             }
 

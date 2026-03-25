@@ -11,6 +11,7 @@ use crate::tracegen::RowMajorChip;
 pub struct MainRecord {
     pub proof_idx: usize,
     pub idx: usize,
+    pub is_dummy: bool,
     pub tidx: usize,
     pub claim: EF,
 }
@@ -54,18 +55,12 @@ where
     }
 
     let mut prev_proof_idx = usize::MAX;
-    let mut prev_idx = usize::MAX;
     for (row_idx, record) in records.iter().enumerate() {
         let offset = row_idx * width;
         let cols_slice = &mut trace[offset..offset + width];
         let cols = C::from_bytes(cols_slice);
-        fill(
-            record,
-            cols,
-            prev_proof_idx != record.proof_idx || prev_idx != record.idx,
-        );
+        fill(record, cols, prev_proof_idx != record.proof_idx);
         prev_proof_idx = record.proof_idx;
-        prev_idx = record.idx;
     }
 
     Some(RowMajorMatrix::new(trace, width))
@@ -86,12 +81,13 @@ impl ColumnAccess<F> for MainCols<F> {
     }
 }
 
-fn fill_main_cols(record: &MainRecord, cols: &mut MainCols<F>, is_new_pair: bool) {
+fn fill_main_cols(record: &MainRecord, cols: &mut MainCols<F>, is_first_proof: bool) {
     cols.is_enabled = F::ONE;
     cols.proof_idx = F::from_usize(record.proof_idx);
     cols.idx = F::from_usize(record.idx);
-    cols.is_first_idx = F::from_bool(is_new_pair);
+    cols.is_first_idx = F::from_bool(is_first_proof);
     cols.is_first = F::ONE;
+    cols.is_dummy = F::from_bool(record.is_dummy);
     cols.tidx = F::from_usize(record.tidx);
     let claim_basis: [F; D_EF] = record
         .claim
