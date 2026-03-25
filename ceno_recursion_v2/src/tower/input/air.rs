@@ -158,37 +158,40 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 * num_layers.clone()
                 * (num_layers.clone() + AB::Expr::TWO)
                 * AB::Expr::from_usize(2 * D_EF);
-        // 1. TowerLayerInputBus
-        // 1a. Send input to TowerLayerAir
-        self.layer_input_bus.send(
-            builder,
-            local.proof_idx,
-            TowerLayerInputMessage {
-                idx: local.idx.into(),
-                // Skip q0_claim
-                tidx: (tidx_after_alpha_beta + AB::Expr::from_usize(D_EF))
-                    * has_interactions.clone(),
-                r0_claim: local.r0_claim.map(Into::into),
-                w0_claim: local.w0_claim.map(Into::into),
-                q0_claim: local.q0_claim.map(Into::into),
-            },
-            local.is_enabled * has_interactions.clone(),
-        );
-        // 2. TowerLayerOutputBus
-        // 2a. Receive input layer claim from TowerLayerAir
-        self.layer_output_bus.receive(
-            builder,
-            local.proof_idx,
-            TowerLayerOutputMessage {
-                idx: local.idx.into(),
-                tidx: tidx_after_gkr_layers.clone(),
-                layer_idx_end: num_layers.clone() - AB::Expr::ONE,
-                input_layer_claim: local.input_layer_claim.map(Into::into),
-                lambda: local.layer_output_lambda.map(Into::into),
-                mu: local.layer_output_mu.map(Into::into),
-            },
-            local.is_enabled * has_interactions.clone(),
-        );
+        // 1. TowerLayerInputBus (post-fork: gated out in debug mode)
+        #[cfg(not(debug_assertions))]
+        {
+            // 1a. Send input to TowerLayerAir
+            self.layer_input_bus.send(
+                builder,
+                local.proof_idx,
+                TowerLayerInputMessage {
+                    idx: local.idx.into(),
+                    // Skip q0_claim
+                    tidx: (tidx_after_alpha_beta + AB::Expr::from_usize(D_EF))
+                        * has_interactions.clone(),
+                    r0_claim: local.r0_claim.map(Into::into),
+                    w0_claim: local.w0_claim.map(Into::into),
+                    q0_claim: local.q0_claim.map(Into::into),
+                },
+                local.is_enabled * has_interactions.clone(),
+            );
+            // 2. TowerLayerOutputBus
+            // 2a. Receive input layer claim from TowerLayerAir
+            self.layer_output_bus.receive(
+                builder,
+                local.proof_idx,
+                TowerLayerOutputMessage {
+                    idx: local.idx.into(),
+                    tidx: tidx_after_gkr_layers.clone(),
+                    layer_idx_end: num_layers.clone() - AB::Expr::ONE,
+                    input_layer_claim: local.input_layer_claim.map(Into::into),
+                    lambda: local.layer_output_lambda.map(Into::into),
+                    mu: local.layer_output_mu.map(Into::into),
+                },
+                local.is_enabled * has_interactions.clone(),
+            );
+        }
         ///////////////////////////////////////////////////////////////////////
         // External Interactions
         ///////////////////////////////////////////////////////////////////////
@@ -206,24 +209,29 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.is_enabled,
         );
 
-        // 2. TranscriptBus
-        // 2a. Sample alpha_logup challenge
-        self.transcript_bus.sample_ext(
-            builder,
-            local.proof_idx,
-            local.tidx,
-            local.alpha_logup.map(Into::into),
-            local.is_enabled,
-        );
-        // 2b. Observe `q0_claim` claim
-        self.transcript_bus.observe_ext(
-            builder,
-            local.proof_idx,
-            local.tidx + AB::Expr::from_usize(2 * D_EF),
-            local.q0_claim,
-            local.is_enabled * has_interactions.clone(),
-        );
+        // 2. TranscriptBus (post-fork: gated out in debug mode)
+        #[cfg(not(debug_assertions))]
+        {
+            // 2a. Sample alpha_logup challenge
+            self.transcript_bus.sample_ext(
+                builder,
+                local.proof_idx,
+                local.tidx,
+                local.alpha_logup.map(Into::into),
+                local.is_enabled,
+            );
+            // 2b. Observe `q0_claim` claim
+            self.transcript_bus.observe_ext(
+                builder,
+                local.proof_idx,
+                local.tidx + AB::Expr::from_usize(2 * D_EF),
+                local.q0_claim,
+                local.is_enabled * has_interactions.clone(),
+            );
+        }
 
+        // 3. MainBus (post-fork: gated out in debug mode)
+        #[cfg(not(debug_assertions))]
         self.main_bus.send(
             builder,
             local.proof_idx,

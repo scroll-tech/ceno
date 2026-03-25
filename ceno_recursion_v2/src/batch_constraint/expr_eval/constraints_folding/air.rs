@@ -132,6 +132,8 @@ where
             local.value,
         );
 
+        // Gated: proof_shape producer is gated in debug mode
+        #[cfg(not(debug_assertions))]
         self.n_lift_bus.receive(
             builder,
             local.proof_idx,

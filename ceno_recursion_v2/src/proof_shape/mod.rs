@@ -210,6 +210,11 @@ impl ProofShapeModule {
             .max()
             .unwrap_or(0);
 
+        // Verifier preprocess: absorb fixed commitment.
+        // Mirrors v1 verifier order: fixed_commit → (chip_idx, num_instance) → witin_commit → α, β
+        // TODO(recursion-proof-bridge): absorb fixed commitment digest + log2_max_codeword_size
+        // once basefold module is integrated. See v1: PCS::write_commitment(fixed_commit, transcript)
+
         // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
             ts.observe(F::from_usize(chip_idx));
@@ -221,8 +226,9 @@ impl ProofShapeModule {
             }
         }
 
-        // TODO(recursion-proof-bridge): absorb fixed/witness commitments once the local
-        // preflight bridge can encode PCS commitments into the Fiat-Shamir transcript.
+        // TODO(recursion-proof-bridge): absorb witness commitment digest + log2_max_codeword_size
+        // once basefold module is integrated. See v1: PCS::write_commitment(&witin_commit, transcript)
+
         preflight.proof_shape.alpha_tidx = ts.len();
         let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         preflight.proof_shape.beta_tidx = ts.len();

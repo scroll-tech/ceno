@@ -32,12 +32,12 @@ impl TowerSumcheckRecord {
     }
 
     #[inline]
-    fn layer_start_index(layer_idx: usize) -> usize {
+    pub fn layer_start_index(layer_idx: usize) -> usize {
         layer_idx * (layer_idx + 1) / 2
     }
 
     #[inline]
-    fn layer_rounds(layer_idx: usize) -> usize {
+    pub fn layer_rounds(layer_idx: usize) -> usize {
         layer_idx + 1
     }
 
@@ -48,7 +48,7 @@ impl TowerSumcheckRecord {
     }
 
     #[inline]
-    fn prev_challenge(layer_idx: usize, round_in_layer: usize, mus: &[EF], ris: &[EF]) -> EF {
+    pub fn prev_challenge(layer_idx: usize, round_in_layer: usize, mus: &[EF], ris: &[EF]) -> EF {
         if round_in_layer == 0 {
             mus[layer_idx]
         } else {
@@ -58,6 +58,20 @@ impl TowerSumcheckRecord {
             let offset = Self::layer_start_index(prev_layer) + (round_in_layer - 1);
             ris[offset]
         }
+    }
+
+    /// Compute the eq evaluation for a given sumcheck layer from ris and mus.
+    /// This produces the same eq_out value that the sumcheck trace generates.
+    pub fn compute_eq_for_layer(layer_idx: usize, mus: &[EF], ris: &[EF]) -> EF {
+        let rounds = Self::layer_rounds(layer_idx);
+        let start = Self::layer_start_index(layer_idx);
+        let mut eq = EF::ONE;
+        for round in 0..rounds {
+            let prev = Self::prev_challenge(layer_idx, round, mus, ris);
+            let challenge = ris[start + round];
+            eq *= prev * challenge + (EF::ONE - prev) * (EF::ONE - challenge);
+        }
+        eq
     }
 }
 

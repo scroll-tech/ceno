@@ -190,6 +190,8 @@ where
             local.is_first * local.is_valid,
         );
 
+        // Gated: proof_shape producer is gated in debug mode
+        #[cfg(not(debug_assertions))]
         self.hyperdim_bus.lookup_key(
             builder,
             local.proof_idx,

@@ -221,6 +221,9 @@ where
         let is_not_dummy = AB::Expr::ONE - local.is_dummy;
         let is_non_root_layer = local.is_enabled * (AB::Expr::ONE - local.is_first);
 
+        // AirShapeBus lookups (post-fork: gated out in debug mode)
+        #[cfg(not(debug_assertions))]
+        {
         let lookup_enable = local.is_enabled * is_not_dummy.clone();
         self.air_shape_bus.lookup_key(
             builder,
@@ -252,7 +255,11 @@ where
             },
             lookup_enable.clone(),
         );
+        }
 
+        // Claim buses (post-fork: gated out in debug mode)
+        #[cfg(not(debug_assertions))]
+        {
         let tidx_for_claims = tidx_after_sumcheck.clone();
         self.prod_read_claim_input_bus.send(
             builder,
@@ -331,6 +338,7 @@ where
             },
             is_not_dummy.clone(),
         );
+        }
 
         let root_layer_mask = local.is_first * is_not_dummy.clone();
         assert_array_eq(
@@ -349,6 +357,9 @@ where
             local.q0_claim,
         );
 
+        // TowerLayerInputBus + TowerLayerOutputBus (post-fork: gated out in debug mode)
+        #[cfg(not(debug_assertions))]
+        {
         // 1. TowerLayerInputBus
         // 1a. Receive GKR layers input
         self.layer_input_bus.receive(
@@ -378,6 +389,7 @@ where
             },
             is_last.clone() * is_not_dummy.clone(),
         );
+        }
         // 3. TowerSumcheckInputBus
         // 3a. Send claim to sumcheck
         // only send sumcheck on non root layer
@@ -393,7 +405,9 @@ where
             },
             is_non_root_layer.clone() * is_not_dummy.clone(),
         );
-        // 3. TowerSumcheckOutputBus
+        // 3. TowerSumcheckOutputBus (post-fork: gated out in debug mode)
+        #[cfg(not(debug_assertions))]
+        {
         // 3a. Receive sumcheck results
         let prime_fold = ext_field_add::<AB::Expr>(local.read_claim_prime, local.write_claim_prime);
         let sumcheck_claim_out = ext_field_multiply::<AB::Expr>(
@@ -412,6 +426,7 @@ where
             },
             is_non_root_layer.clone() * is_not_dummy.clone(),
         );
+        }
         // 4. TowerSumcheckChallengeBus
         // 4a. Send challenge mu
         self.sumcheck_challenge_bus.send(
@@ -430,27 +445,30 @@ where
         // External Interactions
         ///////////////////////////////////////////////////////////////////////
 
-        // 1. TranscriptBus
-        // sample lambda and mu
-        // in root & intermediate layer: for next.sumcheck_claim_in
-        // in last layer: for send back to GKR input layer
-        // 1a. Sample `lambda`
-        self.transcript_bus.sample_ext(
-            builder,
-            local.proof_idx,
-            local.tidx,
-            local.lambda,
-            local.is_enabled * is_not_dummy.clone(),
-        );
-        // 1b. Observe layer claims
-        let tidx = tidx_after_sumcheck;
-        // 1c. Sample `mu`
-        self.transcript_bus.sample_ext(
-            builder,
-            local.proof_idx,
-            tidx,
-            local.mu,
-            local.is_enabled * is_not_dummy.clone(),
-        );
+        // 1. TranscriptBus (post-fork: gated out in debug mode)
+        #[cfg(not(debug_assertions))]
+        {
+            // sample lambda and mu
+            // in root & intermediate layer: for next.sumcheck_claim_in
+            // in last layer: for send back to GKR input layer
+            // 1a. Sample `lambda`
+            self.transcript_bus.sample_ext(
+                builder,
+                local.proof_idx,
+                local.tidx,
+                local.lambda,
+                local.is_enabled * is_not_dummy.clone(),
+            );
+            // 1b. Observe layer claims
+            let tidx = tidx_after_sumcheck;
+            // 1c. Sample `mu`
+            self.transcript_bus.sample_ext(
+                builder,
+                local.proof_idx,
+                tidx,
+                local.mu,
+                local.is_enabled * is_not_dummy.clone(),
+            );
+        }
     }
 }

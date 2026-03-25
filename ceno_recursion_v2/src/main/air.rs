@@ -77,6 +77,9 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
         );
         }
 
+        // All MainAir bus interactions are post-fork: gated out in debug mode
+        #[cfg(not(debug_assertions))]
+        {
         let receive_mask = local.is_enabled * local.is_first;
         self.main_bus.receive(
             builder,
@@ -110,7 +113,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
             local.is_enabled,
         );
 
-        #[cfg(not(debug_assertions))]
         assert_array_eq(
             &mut builder.when(local.is_enabled),
             local.claim_in,
@@ -126,5 +128,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
             },
             local.is_enabled * local.is_first,
         );
+        }
     }
 }

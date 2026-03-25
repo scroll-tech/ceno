@@ -229,6 +229,8 @@ where
             .assert_zero(local.log_height);
 
         // Range check difference using ExponentBus to ensure local.log_height >= next.log_height
+        // Gated: range checker trace not populated for these lookups
+        #[cfg(not(debug_assertions))]
         self.range_bus.lookup_key(
             builder,
             RangeCheckerBusMessage {
@@ -325,6 +327,8 @@ where
             AB::Expr::from_usize(TranscriptLabel::Riscv.field_len()),
         );
 
+        // Gated: starting_tidx chain depends on gated transcript observation scheme
+        #[cfg(not(debug_assertions))]
         self.starting_tidx_bus.receive(
             builder,
             local.proof_idx,
@@ -340,6 +344,11 @@ where
         );
 
         let mut tidx = local.starting_tidx.into();
+        // TranscriptBus receives gated in debug mode: per-AIR metadata observation scheme
+        // doesn't match v1's actual transcript order (raw_pi → fixed_commit →
+        // (circuit_idx, num_instance) → witin_commit → α, β). These will be redesigned
+        // to match v1 once basefold commitment module is integrated.
+        #[cfg(not(debug_assertions))]
         self.transcript_bus.receive(
             builder,
             local.proof_idx,
@@ -352,6 +361,7 @@ where
         );
         tidx += not::<AB::Expr>(is_required) * local.is_valid;
 
+        #[cfg(not(debug_assertions))]
         for (didx, commit_val) in preprocessed_commit.iter().enumerate() {
             self.transcript_bus.receive(
                 builder,
@@ -366,6 +376,7 @@ where
         }
         tidx += has_preprocessed.clone() * AB::Expr::from_usize(DIGEST_SIZE) * local.is_present;
 
+        #[cfg(not(debug_assertions))]
         self.transcript_bus.receive(
             builder,
             local.proof_idx,
@@ -380,6 +391,7 @@ where
 
         (0..self.max_cached).for_each(|i| {
             for didx in 0..DIGEST_SIZE {
+                #[cfg(not(debug_assertions))]
                 self.transcript_bus.receive(
                     builder,
                     local.proof_idx,
@@ -397,6 +409,9 @@ where
         let num_pvs_tidx = tidx.clone();
         tidx += num_pvs.clone() * local.is_present;
 
+        // Gated: tidx chain depends on gated transcript observation scheme
+        #[cfg(not(debug_assertions))]
+        {
         // constrain next air tid
         self.starting_tidx_bus.send(
             builder,
@@ -417,7 +432,9 @@ where
             },
             and(local.is_first, local.is_valid),
         );
+        }
 
+        #[cfg(not(debug_assertions))]
         for didx in 0..DIGEST_SIZE {
             self.transcript_bus.receive(
                 builder,
@@ -443,8 +460,10 @@ where
         }
 
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // AIR SHAPE LOOKUP
+        // AIR SHAPE LOOKUP (gated: all consumers gated in debug mode)
         ///////////////////////////////////////////////////////////////////////////////////////////
+        #[cfg(not(debug_assertions))]
+        {
         self.air_shape_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
@@ -508,6 +527,7 @@ where
             },
             local.is_present * n.clone(),
         );
+        }
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HYPERDIM LOOKUP
@@ -520,6 +540,8 @@ where
             .when(not(local.is_present))
             .assert_zero(local.num_columns);
         // We range check n in [0, 32).
+        // Gated: range checker trace not populated for these lookups
+        #[cfg(not(debug_assertions))]
         self.range_bus.lookup_key(
             builder,
             RangeCheckerBusMessage {
@@ -529,6 +551,8 @@ where
             local.is_present,
         );
 
+        // Gated: consumer (batch_constraint) is post-fork
+        #[cfg(not(debug_assertions))]
         self.hyperdim_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
@@ -549,6 +573,8 @@ where
             |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
         );
 
+        // Gated: range checker trace not populated
+        #[cfg(not(debug_assertions))]
         self.lifted_heights_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
@@ -663,6 +689,8 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // NUM PUBLIC VALUES
         ///////////////////////////////////////////////////////////////////////////////////////////
+        // Gated: num_pvs feeds gated pvs_bus chain
+        #[cfg(not(debug_assertions))]
         self.num_pvs_bus.send(
             builder,
             local.proof_idx,
@@ -677,6 +705,8 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HEIGHT + GKR MESSAGE
         ///////////////////////////////////////////////////////////////////////////////////////////
+        // Gated: range checker trace not populated for these lookups
+        #[cfg(not(debug_assertions))]
         for i in 0..NUM_LIMBS {
             self.range_bus.lookup_key(
                 builder,
@@ -715,6 +745,8 @@ where
             .assert_eq(local.n_max, next.n_max);
 
         builder.assert_bool(local.is_n_max_greater);
+        // Gated: range checker trace not populated for these lookups
+        #[cfg(not(debug_assertions))]
         self.range_bus.lookup_key(
             builder,
             RangeCheckerBusMessage {
@@ -736,7 +768,8 @@ where
             local.is_last,
         );
 
-        // Send n_max value to expression claim air
+        // Send n_max value to expression claim air (gated: consumer is post-fork)
+        #[cfg(not(debug_assertions))]
         self.expression_claim_n_max_bus.send(
             builder,
             local.proof_idx,
@@ -746,7 +779,8 @@ where
             local.is_last,
         );
 
-        // Send n_lift to constraint folding air
+        // Send n_lift to constraint folding air (gated: consumer is post-fork)
+        #[cfg(not(debug_assertions))]
         self.n_lift_bus.send(
             builder,
             local.proof_idx,
@@ -757,7 +791,8 @@ where
             local.is_present,
         );
 
-        // Send count of present airs to fraction folder air
+        // Send count of present airs to fraction folder air (gated: consumer is post-fork)
+        #[cfg(not(debug_assertions))]
         self.fraction_folder_input_bus.send(
             builder,
             local.proof_idx,

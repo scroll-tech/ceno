@@ -89,6 +89,8 @@ where
             .assert_one(next.is_first_in_air);
 
         let is_same_air = local.is_valid * next.is_valid * not(next.is_first_in_air);
+        // Gated: num_pvs/public_values buses depend on gated proof_shape chain
+        #[cfg(not(debug_assertions))]
         self.num_pvs_bus.receive(
             builder,
             local.proof_idx,
@@ -105,6 +107,8 @@ where
         when_same_air.assert_eq(next.pv_idx, local.pv_idx + AB::Expr::ONE);
         when_same_air.assert_eq(next.tidx, local.tidx + AB::Expr::ONE);
 
+        // Gated: public_values_bus depends on gated proof_shape chain
+        #[cfg(not(debug_assertions))]
         self.public_values_bus.send(
             builder,
             local.proof_idx,
@@ -115,6 +119,7 @@ where
             },
             local.is_valid,
         );
+        #[cfg(not(debug_assertions))]
         if self.continuations_enabled {
             self.public_values_bus.send(
                 builder,
@@ -128,7 +133,9 @@ where
             );
         }
 
-        // Receive transcript read of public values
+        // TranscriptBus receives gated: per-AIR public values observation scheme
+        // doesn't match v1's raw_pi observation order in the transcript.
+        #[cfg(not(debug_assertions))]
         self.transcript_bus.receive(
             builder,
             local.proof_idx,

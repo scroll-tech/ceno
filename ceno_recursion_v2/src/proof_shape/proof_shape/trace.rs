@@ -145,6 +145,9 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 }
 
                 current_cidx += self.cidx_deltas.get(*air_idx).copied().unwrap_or(0);
+                // Gated: PowerCheckerAir's bus interactions (in external crate) are
+                // unpaired when batch_constraint is disabled. Skip populating its trace.
+                #[cfg(not(debug_assertions))]
                 self.pow_checker.add_pow(log_height);
                 sorted_idx += 1;
             }

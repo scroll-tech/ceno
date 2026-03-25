@@ -54,7 +54,8 @@ use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
-    p3_maybe_rayon::prelude::*, prover::AirProvingContext,
+    p3_maybe_rayon::prelude::*,
+    prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
 use p3_field::PrimeCharacteristicRing;
@@ -512,6 +513,29 @@ fn build_chip_records(
             let (claim, prime) = accumulate_logup_claims(rows, lambda, lambda_prime, mu);
             layer_record.logup_claims[layer_idx] = claim;
             layer_record.logup_prime_claims[layer_idx] = prime;
+        }
+    }
+
+    // Sync sumcheck claims with accumulated values so that the sumcheck trace
+    // uses the same claim_in that TowerLayerAir sends on the sumcheck_input_bus.
+    // TowerLayerAir layer j (j >= 1) sends: sumcheck_claim_in = read[j-1] + write[j-1] + logup[j-1]
+    // Sumcheck internal layer k uses: claims[k], where k = j - 1.
+    for k in 0..layer_count.saturating_sub(1) {
+        let folded = layer_record.read_claims[k]
+            + layer_record.write_claims[k]
+            + layer_record.logup_claims[k];
+        sumcheck_record.claims[k] = folded;
+        layer_record.sumcheck_claims[k] = folded;
+    }
+
+    // Compute eq_at_r_primes from ris and mus so that TowerLayerAir's eq values
+    // match the sumcheck trace's eq_out on the sumcheck_output_bus.
+    // Sumcheck internal layer k (0-indexed) → TowerLayerAir layer k+1.
+    let num_sumcheck_layers = layer_count.saturating_sub(1);
+    for k in 0..num_sumcheck_layers {
+        let eq = TowerSumcheckRecord::compute_eq_for_layer(k, &mus_record, &sumcheck_record.ris);
+        if k + 1 < layer_record.eq_at_r_primes.len() {
+            layer_record.eq_at_r_primes[k + 1] = eq;
         }
     }
 

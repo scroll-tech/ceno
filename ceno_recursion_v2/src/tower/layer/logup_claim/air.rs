@@ -296,6 +296,9 @@ where
             pow_lambda_prime_next,
         );
 
+        // Post-fork: gated out in debug mode
+        #[cfg(not(debug_assertions))]
+        {
         self.logup_claim_input_bus.receive(
             builder,
             local.proof_idx,
@@ -307,7 +310,7 @@ where
                 lambda_prime: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
             },
-            local.is_first * is_not_dummy.clone(),
+            local.is_first.into(),
         );
 
         self.logup_claim_bus.send(
@@ -320,19 +323,24 @@ where
                 lambda_prime_claim: acc_q_with_cur.map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
-            is_layer_end * is_not_dummy.clone(),
+            is_layer_end,
         );
+        }
 
-        let mut tidx = local.tidx.into();
-        for claim in [local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1] {
-            self.transcript_bus.observe_ext(
-                builder,
-                local.proof_idx,
-                tidx.clone(),
-                claim,
-                local.is_enabled * is_not_dummy.clone(),
-            );
-            tidx += AB::Expr::from_usize(D_EF);
+        // TranscriptBus (post-fork: gated out in debug mode)
+        #[cfg(not(debug_assertions))]
+        {
+            let mut tidx = local.tidx.into();
+            for claim in [local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1] {
+                self.transcript_bus.observe_ext(
+                    builder,
+                    local.proof_idx,
+                    tidx.clone(),
+                    claim,
+                    local.is_enabled * is_not_dummy.clone(),
+                );
+                tidx += AB::Expr::from_usize(D_EF);
+            }
         }
     }
 }

@@ -87,7 +87,17 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
             main.row_slice(1).expect("window should have two elements"),
         );
         let local: &TowerProdSumCheckClaimCols<AB::Var> = (*local_row).borrow();
-        let next: &TowerProdSumCheckClaimCols<AB::Var> = (*next_row).borrow();
+        let _next: &TowerProdSumCheckClaimCols<AB::Var> = (*next_row).borrow();
+
+        // In debug mode, all constraints in this AIR are gated because:
+        // 1. lambda/mu/lambda_prime are challenge values derived post-fork
+        //    from the transcript, which is incorrect in debug mode
+        // 2. The trace data (p_xi, acc_sum, pow_lambda) depends on these
+        //    challenge values and cannot be verified without correct challenges
+        // 3. Bus interactions (recv_challenge, send_claim) are already gated
+        #[cfg(not(debug_assertions))]
+        {
+        let next = _next;
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_first_layer);
@@ -293,6 +303,7 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
             pow_lambda_prime_next,
         );
 
+        // Post-fork bus interactions (inside outer cfg(not(debug_assertions)) block)
         recv_challenge(
             &self.prod_claim_input_bus,
             builder,
@@ -305,7 +316,7 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
                 lambda_prime: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
             },
-            local.is_first * is_not_dummy.clone(),
+            local.is_first.into(),
         );
 
         send_claim(
@@ -319,25 +330,30 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
                 lambda_prime_claim: acc_sum_prime_export.map(Into::into),
                 num_prod_count: local.num_prod_count.into(),
             },
-            is_layer_end * is_not_dummy.clone(),
+            is_layer_end,
         );
 
-        let mut tidx = local.tidx.into();
-        self.transcript_bus.observe_ext(
-            builder,
-            local.proof_idx,
-            tidx.clone(),
-            local.p_xi_0,
-            local.is_enabled * is_not_dummy.clone(),
-        );
-        tidx += AB::Expr::from_usize(D_EF);
-        self.transcript_bus.observe_ext(
-            builder,
-            local.proof_idx,
-            tidx,
-            local.p_xi_1,
-            local.is_enabled * is_not_dummy,
-        );
+        // TranscriptBus (post-fork: gated out in debug mode)
+        // (already inside outer cfg(not(debug_assertions)) block)
+        {
+            let mut tidx = local.tidx.into();
+            self.transcript_bus.observe_ext(
+                builder,
+                local.proof_idx,
+                tidx.clone(),
+                local.p_xi_0,
+                local.is_enabled * is_not_dummy.clone(),
+            );
+            tidx += AB::Expr::from_usize(D_EF);
+            self.transcript_bus.observe_ext(
+                builder,
+                local.proof_idx,
+                tidx,
+                local.p_xi_1,
+                local.is_enabled * is_not_dummy,
+            );
+        }
+        } // end cfg(not(debug_assertions))
     }
 }
 

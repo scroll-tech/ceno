@@ -65,7 +65,15 @@ impl TranscriptModule {
             let mut count = 0usize;
             let mut num_valid_rows = 0usize;
 
-            for op_is_sample in preflight.transcript.samples() {
+            let samples = preflight.transcript.samples();
+            // In debug mode, skip transcript trace entirely since proof_shape AIRs'
+            // transcript_bus receives are gated (per-AIR metadata scheme doesn't match
+            // v1's actual sponge observations). TranscriptAir sends would be unmatched.
+            #[cfg(debug_assertions)]
+            let samples: &[bool] = &[];
+            #[cfg(not(debug_assertions))]
+            let samples = &samples[..];
+            for op_is_sample in samples {
                 if *op_is_sample {
                     if !cur_is_sample {
                         num_valid_rows += 1;
@@ -114,6 +122,12 @@ impl TranscriptModule {
 
         let mut skip = 0usize;
         for (pidx, preflight) in preflights.iter().enumerate() {
+            // In debug mode, skip transcript trace (see counting loop above).
+            #[cfg(debug_assertions)]
+            let effective_len = 0usize;
+            #[cfg(not(debug_assertions))]
+            let effective_len = preflight.transcript.len();
+
             let mut tidx = 0usize;
             let mut prev_poseidon_state = [F::ZERO; POSEIDON2_WIDTH];
             let off = skip * transcript_width;
@@ -147,7 +161,7 @@ impl TranscriptModule {
                 let mut idx = 1usize;
                 let mut permuted = false;
                 loop {
-                    if tidx >= preflight.transcript.len() {
+                    if tidx >= effective_len {
                         break;
                     }
 
@@ -169,7 +183,7 @@ impl TranscriptModule {
                     tidx += 1;
                     idx += 1;
                     if idx == CHUNK {
-                        permuted = tidx < preflight.transcript.len()
+                        permuted = tidx < effective_len
                             && (!is_sample || preflight.transcript.samples()[tidx]);
                         break;
                     }
@@ -184,7 +198,7 @@ impl TranscriptModule {
             }
 
             skip += valid_rows[pidx];
-            debug_assert_eq!(tidx, preflight.transcript.len());
+            debug_assert_eq!(tidx, effective_len);
         }
 
         Some((

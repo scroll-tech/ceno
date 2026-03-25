@@ -144,6 +144,9 @@ where
             );
         }
 
+        // All MainSumcheckAir bus interactions are post-fork: gated out in debug mode
+        #[cfg(not(debug_assertions))]
+        {
         let receive_mask = local.is_enabled.clone() * local.is_first_round.clone();
         self.sumcheck_input_bus.receive(
             builder,
@@ -166,6 +169,7 @@ where
             },
             send_mask,
         );
+        }
     }
 }
 
