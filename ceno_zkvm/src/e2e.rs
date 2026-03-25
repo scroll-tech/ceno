@@ -2087,89 +2087,91 @@ fn create_proofs_streaming<
     init_mem_state: &InitMemState,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
+
+    // Two pipeline modes:
+    //
+    // Default GPU backend (CENO_GPU_ENABLE_WITGEN unset):
+    //   Overlap: CPU witgen (thread A) and GPU prove (thread B) run in parallel.
+    //   CPU produces witness for shard N+1 while GPU proves shard N.
+    //   Uses a bounded(0) rendezvous channel for back-pressure.
+    //
+    // CENO_GPU_ENABLE_WITGEN=1 (GPU witgen) or CPU-only build:
+    //   Sequential: witgen → prove, one shard at a time.
+    //   When GPU witgen is on, GPU is shared between witgen and proving.
+
     let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
-        // #[cfg(feature = "gpu")]
-        // {
-        //     use crossbeam::channel;
-        //     let (tx, rx) = channel::bounded(0);
-        //     std::thread::scope(|s| {
-        //         // pipeline cpu/gpu workload
-        //         // cpu producer
-        //         s.spawn({
-        //             move || {
-        //                 let wit_iter = generate_witness(
-        //                     &ctx.system_config,
-        //                     emulation_result,
-        //                     ctx.program.clone(),
-        //                     &ctx.platform,
-        //                     init_mem_state,
-        //                     target_shard_id,
-        //                 );
-
-        //                 let wit_iter = if let Some(target_shard_id) = target_shard_id {
-        //                     Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
-        //                 } else {
-        //                     Box::new(wit_iter)
-        //                 };
-
-        //                 for proof_input in wit_iter {
-        //                     if tx.send(proof_input).is_err() {
-        //                         tracing::warn!(
-        //                             "witness consumer dropped; stopping witness generation early"
-        //                         );
-        //                         break;
-        //                     }
-        //                 }
-        //             }
-        //         });
-
-        //         // gpu consumer
-        //         {
-        //             let mut proofs = Vec::new();
-        //             let mut proof_err = None;
-        //             let rx = rx;
-        //             while let Ok((zkvm_witness, shard_ctx, pi)) = rx.recv() {
-        //                 if is_mock_proving {
-        //                     MockProver::assert_satisfied_full(
-        //                         &shard_ctx,
-        //                         &ctx.system_config.zkvm_cs,
-        //                         ctx.zkvm_fixed_traces.clone(),
-        //                         &zkvm_witness,
-        //                         &pi,
-        //                         &ctx.program,
-        //                     );
-        //                     tracing::info!("Mock proving passed");
-        //                 }
-
-        //                 let transcript = Transcript::new(b"riscv");
-        //                 let start = std::time::Instant::now();
-        //                 match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
-        //                     Ok(zkvm_proof) => {
-        //                         tracing::debug!(
-        //                             "{}th shard proof created in {:?}",
-        //                             shard_ctx.shard_id,
-        //                             start.elapsed()
-        //                         );
-        //                         proofs.push(zkvm_proof);
-        //                     }
-        //                     Err(err) => {
-        //                         proof_err = Some(err);
-        //                         break;
-        //                     }
-        //                 }
-        //             }
-        //             drop(rx);
-        //             if let Some(err) = proof_err {
-        //                 panic!("create_proof failed: {err:?}");
-        //             }
-        //             proofs
-        //         }
-        //     })
-        // }
-
-        // #[cfg(not(feature = "gpu"))]
+        #[cfg(feature = "gpu")]
         {
-            // Generate witness
+            // With GPU feature: check if GPU witgen is enabled to select pipeline mode.
+            if !crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                // Default: overlap CPU witgen with GPU proving.
+                use crossbeam::channel;
+                let (tx, rx) = channel::bounded(0);
+                return std::thread::scope(|s| {
+                    // CPU producer: generate witness shards
+                    s.spawn(move || {
+                        let wit_iter = generate_witness(
+                            &ctx.system_config,
+                            emulation_result,
+                            ctx.program.clone(),
+                            &ctx.platform,
+                            init_mem_state,
+                            target_shard_id,
+                        );
+
+                        let wit_iter: Box<dyn Iterator<Item = _>> =
+                            if let Some(target_shard_id) = target_shard_id {
+                                Box::new(wit_iter.skip(target_shard_id))
+                            } else {
+                                Box::new(wit_iter)
+                            };
+
+                        for proof_input in wit_iter {
+                            if tx.send(proof_input).is_err() {
+                                tracing::warn!(
+                                    "witness consumer dropped; stopping witness generation early"
+                                );
+                                break;
+                            }
+                        }
+                    });
+
+                    // GPU consumer: prove each shard as it arrives
+                    let mut proofs = Vec::new();
+                    while let Ok((zkvm_witness, shard_ctx, pi)) = rx.recv() {
+                        if is_mock_proving {
+                            MockProver::assert_satisfied_full(
+                                &shard_ctx,
+                                &ctx.system_config.zkvm_cs,
+                                ctx.zkvm_fixed_traces.clone(),
+                                &zkvm_witness,
+                                &pi,
+                                &ctx.program,
+                            );
+                            tracing::info!("Mock proving passed");
+                        }
+
+                        let transcript = Transcript::new(b"riscv");
+                        let start = std::time::Instant::now();
+                        let zkvm_proof = prover
+                            .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
+                            .expect("create_proof failed");
+                        tracing::debug!(
+                            "{}th shard proof created in {:?}",
+                            shard_ctx.shard_id,
+                            start.elapsed()
+                        );
+                        proofs.push(zkvm_proof);
+                    }
+                    proofs
+                });
+            }
+            // Fall through: GPU witgen enabled → sequential path below.
+        }
+
+        // Sequential: witgen → prove, one shard at a time.
+        // Used by: GPU witgen mode (CENO_GPU_ENABLE_WITGEN=1) and CPU-only builds.
+        {
             let wit_iter = generate_witness(
                 &ctx.system_config,
                 emulation_result,
@@ -2179,11 +2181,12 @@ fn create_proofs_streaming<
                 target_shard_id,
             );
 
-            let wit_iter = if let Some(target_shard_id) = target_shard_id {
-                Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
-            } else {
-                Box::new(wit_iter)
-            };
+            let wit_iter: Box<dyn Iterator<Item = _>> =
+                if let Some(target_shard_id) = target_shard_id {
+                    Box::new(wit_iter.skip(target_shard_id))
+                } else {
+                    Box::new(wit_iter)
+                };
 
             wit_iter
                 .map(|(zkvm_witness, shard_ctx, pi)| {
@@ -2209,7 +2212,6 @@ fn create_proofs_streaming<
                         shard_ctx.shard_id,
                         start.elapsed()
                     );
-                    // only show e2e stats in cpu mode
                     tracing::info!("e2e proof stat: {}", zkvm_proof);
                     zkvm_proof
                 })
