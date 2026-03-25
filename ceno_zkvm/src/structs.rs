@@ -480,9 +480,9 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         use tracing::info_span;
 
         // Try the full GPU pipeline: keep data on device, minimal CPU roundtrips.
-        // Falls back to the traditional path on failure.
+        // Only when GPU witgen is enabled (otherwise witgen must not touch GPU).
         #[cfg(feature = "gpu")]
-        {
+        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
             let gpu_result = self.try_assign_shared_circuit_gpu(cs, shard_ctx, final_mem, config);
             match gpu_result {
                 Ok(true) => return Ok(()), // GPU pipeline succeeded
@@ -582,12 +582,14 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 (write_record_pairs, read_record_pairs)
             });
 
-        // Compute EC points: GPU path (fast) or CPU fallback
+        // Compute EC points: GPU path (only when GPU witgen enabled) or CPU fallback
         let global_input = {
             #[cfg(feature = "gpu")]
-            let ec_result = {
-                use crate::instructions::gpu::dispatch::gpu_batch_continuation_ec;
+            let ec_result = if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                use crate::instructions::gpu::chips::shard_ram::gpu_batch_continuation_ec;
                 gpu_batch_continuation_ec::<E>(&write_record_pairs, &read_record_pairs).ok()
+            } else {
+                None
             };
             #[cfg(not(feature = "gpu"))]
             let ec_result: Option<(Vec<ShardRamInput<E>>, Vec<ShardRamInput<E>>)> = None;

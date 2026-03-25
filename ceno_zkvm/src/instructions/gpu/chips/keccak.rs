@@ -438,13 +438,17 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
                 )
             };
 
-            Ok::<_, ZKVMError>(RowMajorMatrix::<E::BaseField>::from_values_with_rotation(
-                data,
-                num_witin,
-                rotation,
+            // Construct a rotation-aware matrix and fill with GPU-transposed data.
+            // new_by_rotation allocates the correct padded size; we overwrite the real portion.
+            let mut rmm = RowMajorMatrix::<E::BaseField>::new_by_rotation(
                 num_instances,
+                rotation,
+                num_witin,
                 InstancePaddingStrategy::Default,
-            ))
+            );
+            // Access inner p3 matrix's values via DerefMut
+            std::ops::DerefMut::deref_mut(&mut rmm).values[..data.len()].copy_from_slice(&data);
+            Ok::<_, ZKVMError>(rmm)
         })?;
 
     // Step 9: Build structural witness on CPU with selector indices
