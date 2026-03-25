@@ -746,8 +746,9 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<bool, ZKVMError> {
-        use crate::instructions::gpu::dispatch::{
-            gpu_batch_continuation_ec_on_device, take_shared_device_buffers,
+        use crate::instructions::gpu::{
+            chips::shard_ram::gpu_batch_continuation_ec_on_device,
+            dispatch::take_shared_device_buffers,
         };
         use ceno_gpu::Buffer;
         use gkr_iop::gpu::get_cuda_hal;

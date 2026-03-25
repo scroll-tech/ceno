@@ -384,57 +384,6 @@ pub struct SharedDeviceBufferSet {
     pub addr_count: ceno_gpu::common::buffer::BufferImpl<'static, u32>,
 }
 
-/// Batch compute EC points for continuation records, keeping results on device.
-///
-/// Returns (device_buf_as_u32, num_records) where the device buffer contains
-/// GpuShardRamRecord entries with EC points computed.
-pub fn gpu_batch_continuation_ec_on_device(
-    write_records: &[(crate::tables::ShardRamRecord, &'static str)],
-    read_records: &[(crate::tables::ShardRamRecord, &'static str)],
-) -> Result<
-    (
-        ceno_gpu::common::buffer::BufferImpl<'static, u32>,
-        usize,
-        usize,
-    ),
-    ZKVMError,
-> {
-    use gkr_iop::gpu::get_cuda_hal;
-
-    let hal = get_cuda_hal().map_err(|e| {
-        ZKVMError::InvalidWitness(format!("GPU not available for batch EC: {e}").into())
-    })?;
-
-    let n_writes = write_records.len();
-    let n_reads = read_records.len();
-    let total = n_writes + n_reads;
-    if total == 0 {
-        let empty = hal
-            .witgen
-            .alloc_u32_zeroed(1, None)
-            .map_err(|e| ZKVMError::InvalidWitness(format!("alloc: {e}").into()))?;
-        return Ok((empty, 0, 0));
-    }
-
-    // Convert to GpuShardRamRecord format (writes first, reads after)
-    let mut gpu_records: Vec<GpuShardRamRecord> = Vec::with_capacity(total);
-    for (rec, _name) in write_records.iter().chain(read_records.iter()) {
-        gpu_records.push(super::utils::d2h::shard_ram_record_to_gpu(rec));
-    }
-
-    // GPU batch EC, results stay on device
-    let (device_buf, _count) = info_span!("gpu_batch_ec_on_device", n = total)
-        .in_scope(|| {
-            hal.witgen
-                .batch_continuation_ec_on_device(&gpu_records, None)
-        })
-        .map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU batch EC on device failed: {e}").into())
-        })?;
-
-    Ok((device_buf, n_writes, n_reads))
-}
-
 /// Read the current shared addr count from device (single u32 D2H).
 /// Used by debug comparison to snapshot count before/after a kernel.
 #[cfg(feature = "gpu")]
