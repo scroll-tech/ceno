@@ -14,7 +14,6 @@ use openvm_stark_backend::{
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
     Digest, EF, F, default_duplex_sponge_recorder,
 };
-use p3_field::PrimeCharacteristicRing;
 use verify_stark::pvs::DeferralPvs;
 
 use crate::{
@@ -26,6 +25,7 @@ use crate::{
         AggregationSubCircuit, RecursionField, RecursionVk, VerifierConfig, VerifierExternalData,
         VerifierTraceGen,
     },
+    utils::{TranscriptLabel, transcript_observe_label},
 };
 
 pub use continuations_v2::prover::ChildVkKind;
@@ -208,6 +208,8 @@ where
             final_transcript_state: None,
         };
 
+        let mut transcript = default_duplex_sponge_recorder();
+        transcript_observe_label(&mut transcript, TranscriptLabel::Riscv.as_bytes());
         let subcircuit_ctxs = self
             .circuit
             .verifier_circuit
@@ -216,7 +218,7 @@ where
                 child_vk_pcs_data.clone(),
                 proofs,
                 &mut external_data,
-                default_duplex_sponge_recorder(),
+                transcript,
             )
             .expect("verifier sub-circuit ctx generation");
 

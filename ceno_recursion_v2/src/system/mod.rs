@@ -284,11 +284,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             &mut bus_idx_manager,
             bus_inventory.clone(),
         );
-        let batch_constraint = BatchConstraintModule::new(
-            &mut bus_idx_manager,
-            bus_inventory.clone(),
-            MAX_NUM_PROOFS,
-        );
+        let batch_constraint =
+            BatchConstraintModule::new(&mut bus_idx_manager, bus_inventory.clone(), MAX_NUM_PROOFS);
 
         VerifierSubCircuit {
             bus_inventory,

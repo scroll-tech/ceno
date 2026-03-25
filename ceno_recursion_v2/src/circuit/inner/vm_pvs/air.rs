@@ -5,19 +5,15 @@ use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
-use recursion_circuit::bus::{
-    CachedCommitBus, CachedCommitBusMessage, PublicValuesBus, PublicValuesBusMessage,
-};
+use recursion_circuit::bus::{CachedCommitBus, PublicValuesBus};
 use stark_recursion_circuit_derive::AlignedBorrow;
-use verify_stark::pvs::{VM_PVS_AIR_ID, VmPvs};
 
 use crate::circuit::inner::{
-    app::*,
     bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
+    vm_pvs::VmPvs,
 };
 
 #[repr(C)]
@@ -116,158 +112,39 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .when(and(local.is_valid, next.is_valid))
             .assert_eq(local.has_verifier_pvs, next.has_verifier_pvs);
 
-        // We first constrain segment adjacency, i.e. that rows in the trace are such that the
-        // first row is the (chronologically) first segment, and adjacent rows correspond to
-        // adjacent segments.
-        // constrain that is_terminate is the last valid proof
-        builder.assert_bool(local.child_pvs.is_terminate);
+        // We constrain segment adjacency so adjacent rows correspond to adjacent segments.
+        // Non-final segments must suspend with DEFAULT_SUSPEND_EXIT_CODE.
+        let suspend_exit_code_lo = AB::Expr::from_u32(DEFAULT_SUSPEND_EXIT_CODE & 0xffff);
+        let suspend_exit_code_hi = AB::Expr::from_u32((DEFAULT_SUSPEND_EXIT_CODE >> 16) & 0xffff);
         builder
-            .when(local.child_pvs.is_terminate)
-            .assert_one(local.is_last);
+            .when(and(local.is_valid, not(local.is_last)))
+            .assert_eq(local.child_pvs.exit_code[0], suspend_exit_code_lo);
         builder
-            .when(local.child_pvs.is_terminate)
-            .assert_zero(local.child_pvs.exit_code);
-
-        // constrain that non-terminal segments exited successfully
-        builder
-            .when(and(local.is_valid, not(local.child_pvs.is_terminate)))
-            .assert_eq(
-                local.child_pvs.exit_code,
-                AB::F::from_u32(DEFAULT_SUSPEND_EXIT_CODE),
-            );
+            .when(and(local.is_valid, not(local.is_last)))
+            .assert_eq(local.child_pvs.exit_code[1], suspend_exit_code_hi);
 
         // when local and next are valid, constrain increasing proof_idx and adjacency
         let mut when_both_valid = builder.when(and(local.is_valid, not(local.is_last)));
-        when_both_valid.assert_eq(local.child_pvs.final_pc, next.child_pvs.initial_pc);
-        assert_array_eq(
-            &mut when_both_valid,
-            local.child_pvs.final_root,
-            next.child_pvs.initial_root,
-        );
+        when_both_valid.assert_eq(local.child_pvs.end_pc, next.child_pvs.init_pc);
+        when_both_valid.assert_eq(local.child_pvs.end_cycle, next.child_pvs.init_cycle);
 
-        // We receive public values from ProofShapeModule to ensure the values being read here
-        // are correct. The leaf verifier reads public values from PROGRAM_AIR_ID,
-        // CONNECTOR_AIR_ID, and MERKLE_AID_ID while the internal verifier reads the full
-        // VmPvs from VM_PVS_AIR_ID.
-        let is_leaf = not(local.has_verifier_pvs);
-        let is_internal = local.has_verifier_pvs;
-
-        let mut internal_pv_idx = 0u8;
-        let internal_air_id = is_internal * AB::Expr::from_usize(VM_PVS_AIR_ID);
-        let mut internal_pp = || {
-            let ret = is_internal * AB::Expr::from_u8(internal_pv_idx);
-            internal_pv_idx += 1;
-            ret
-        };
-
-        // receive program_commit
-        let cond_program_air_id =
-            is_leaf.clone() * AB::Expr::from_usize(PROGRAM_AIR_ID) + internal_air_id.clone();
-
-        for (didx, value) in local.child_pvs.program_commit.iter().enumerate() {
-            self.public_values_bus.receive(
-                builder,
-                local.proof_idx,
-                PublicValuesBusMessage {
-                    air_idx: cond_program_air_id.clone(),
-                    pv_idx: is_leaf.clone() * AB::Expr::from_usize(didx) + internal_pp(),
-                    value: (*value).into(),
-                },
-                local.is_valid * is_internal,
-            );
-        }
-
-        // receive connector public values
-        let cond_connector_air_id =
-            is_leaf.clone() * AB::Expr::from_usize(CONNECTOR_AIR_ID) + internal_air_id.clone();
-
-        self.public_values_bus.receive(
-            builder,
-            local.proof_idx,
-            PublicValuesBusMessage {
-                air_idx: cond_connector_air_id.clone(),
-                pv_idx: internal_pp(),
-                value: local.child_pvs.initial_pc.into(),
-            },
-            local.is_valid,
-        );
-
-        self.public_values_bus.receive(
-            builder,
-            local.proof_idx,
-            PublicValuesBusMessage {
-                air_idx: cond_connector_air_id.clone(),
-                pv_idx: is_leaf.clone() + internal_pp(),
-                value: local.child_pvs.final_pc.into(),
-            },
-            local.is_valid,
-        );
-
-        self.public_values_bus.receive(
-            builder,
-            local.proof_idx,
-            PublicValuesBusMessage {
-                air_idx: cond_connector_air_id.clone(),
-                pv_idx: is_leaf.clone() * AB::Expr::TWO + internal_pp(),
-                value: local.child_pvs.exit_code.into(),
-            },
-            local.is_valid,
-        );
-
-        self.public_values_bus.receive(
-            builder,
-            local.proof_idx,
-            PublicValuesBusMessage {
-                air_idx: cond_connector_air_id.clone(),
-                pv_idx: is_leaf.clone() * AB::Expr::from_u8(3) + internal_pp(),
-                value: local.child_pvs.is_terminate.into(),
-            },
-            local.is_valid,
-        );
-
-        // receive memory Merkle public values
-        let cond_merkle_air_id =
-            is_leaf.clone() * AB::Expr::from_usize(MERKLE_AIR_ID) + internal_air_id.clone();
-
-        for (didx, value) in local.child_pvs.initial_root.iter().enumerate() {
-            self.public_values_bus.receive(
-                builder,
-                local.proof_idx,
-                PublicValuesBusMessage {
-                    air_idx: cond_merkle_air_id.clone(),
-                    pv_idx: is_leaf.clone() * AB::Expr::from_usize(didx) + internal_pp(),
-                    value: (*value).into(),
-                },
-                local.is_valid,
-            );
-        }
-
-        for (didx, value) in local.child_pvs.final_root.iter().enumerate() {
-            self.public_values_bus.receive(
-                builder,
-                local.proof_idx,
-                PublicValuesBusMessage {
-                    air_idx: cond_merkle_air_id.clone(),
-                    pv_idx: is_leaf.clone() * AB::Expr::from_usize(didx + DIGEST_SIZE)
-                        + internal_pp(),
-                    value: (*value).into(),
-                },
-                local.is_valid,
-            );
-        }
+        // TODO(vm-pvs-mapping): public_values_bus.receive mappings are intentionally disabled
+        // until the new VmPvs -> PublicValuesBus index mapping is finalized.
+        // self.public_values_bus.receive(...);
 
         // At the leaf level, this AIR is responsible for receiving the cached trace commit
         // program_commit.
-        self.cached_commit_bus.receive(
-            builder,
-            local.proof_idx,
-            CachedCommitBusMessage {
-                air_idx: AB::Expr::from_usize(PROGRAM_AIR_ID),
-                cached_idx: AB::Expr::from_usize(PROGRAM_CACHED_TRACE_INDEX),
-                cached_commit: local.child_pvs.program_commit.map(Into::into),
-            },
-            local.is_valid * is_leaf,
-        );
+        // TODO
+        // self.cached_commit_bus.receive(
+        //     builder,
+        //     local.proof_idx,
+        //     CachedCommitBusMessage {
+        //         air_idx: AB::Expr::from_usize(PROGRAM_AIR_ID),
+        //         cached_idx: AB::Expr::from_usize(PROGRAM_CACHED_TRACE_INDEX),
+        //         cached_commit: local.child_pvs.program_commit.map(Into::into),
+        //     },
+        //     local.is_valid * is_leaf,
+        // );
 
         // We look up proof metadata from VerifierPvsAir here to ensure consistency on each row.
         self.pvs_air_consistency_bus.lookup_key(
@@ -280,50 +157,88 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             local.is_valid,
         );
 
-        // Finally, we need to constrain that the public values this AIR produces are consistent
-        // with the child's. Initial output pvs must match the first row, and final output pvs
-        // must match the last.
+        // Finally, constrain that this AIR's output public values are consistent with child_pvs.
         let &VmPvs::<_> {
-            program_commit,
-            initial_pc,
-            final_pc,
+            fixed_commit,
+            fixed_no_omc_init_commit,
             exit_code,
-            is_terminate,
-            initial_root,
-            final_root,
+            init_pc,
+            init_cycle,
+            end_pc,
+            end_cycle,
+            shard_id,
+            heap_start_addr,
+            heap_shard_len,
+            hint_start_addr,
+            hint_shard_len,
+            public_io,
+            shard_rw_sum,
         } = builder.public_values().borrow();
 
         // constrain first proof pvs
         builder
             .when_first_row()
-            .assert_eq(local.child_pvs.initial_pc, initial_pc);
-        assert_array_eq(
-            &mut builder.when_first_row(),
-            local.child_pvs.initial_root,
-            initial_root,
-        );
+            .assert_eq(local.child_pvs.init_pc, init_pc);
+        builder
+            .when_first_row()
+            .assert_eq(local.child_pvs.init_cycle, init_cycle);
 
         // constrain last proof pvs
         builder
             .when(local.is_last)
-            .assert_eq(local.child_pvs.final_pc, final_pc);
+            .assert_eq(local.child_pvs.end_pc, end_pc);
         builder
             .when(local.is_last)
-            .assert_eq(local.child_pvs.exit_code, exit_code);
-        builder
-            .when(local.is_last)
-            .assert_eq(local.child_pvs.is_terminate, is_terminate);
+            .assert_eq(local.child_pvs.end_cycle, end_cycle);
         assert_array_eq(
             &mut builder.when(local.is_last),
-            local.child_pvs.final_root,
-            final_root,
+            local.child_pvs.exit_code,
+            exit_code,
         );
 
-        // constrain program_commit
+        // constrain static per-proof public values
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.shard_id, shard_id);
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.heap_start_addr, heap_start_addr);
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.heap_shard_len, heap_shard_len);
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.hint_start_addr, hint_start_addr);
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.hint_shard_len, hint_shard_len);
         assert_array_eq(
             &mut builder.when(local.is_valid),
-            local.child_pvs.program_commit,
-            program_commit,
+            local.child_pvs.public_io,
+            public_io,
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_valid),
+            local.child_pvs.shard_rw_sum,
+            shard_rw_sum,
+        );
+
+        // constrain fixed commits
+        assert_array_eq(
+            &mut builder.when(local.is_valid),
+            local.child_pvs.fixed_commit,
+            fixed_commit,
+        );
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.init_pc, init_pc);
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.init_cycle, init_cycle);
+        assert_array_eq(
+            &mut builder.when(local.is_valid),
+            local.child_pvs.fixed_no_omc_init_commit,
+            fixed_no_omc_init_commit,
         );
     }
 }

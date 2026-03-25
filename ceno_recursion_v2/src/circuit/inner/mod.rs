@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use openvm_stark_backend::{AirRef, StarkProtocolConfig};
 use recursion_circuit::prelude::F;
-use verify_stark::pvs::{DEF_PVS_AIR_ID, DeferralPvs, VM_PVS_AIR_ID, VmPvs};
+use verify_stark::pvs::{DEF_PVS_AIR_ID, DeferralPvs, VM_PVS_AIR_ID};
 
 use crate::{
     bn254::CommitBytes,
@@ -52,7 +52,7 @@ impl<SC: StarkProtocolConfig<F = F>, S: AggregationSubCircuit> Circuit<SC> for I
 
         let verifier_pvs_air = Arc::new(verifier::VerifierPvsAir {
             public_values_bus,
-            cached_commit_bus,
+            // cached_commit_bus,
             pvs_air_consistency_bus,
             deferral_config,
         }) as AirRef<SC>;
@@ -78,7 +78,7 @@ impl<SC: StarkProtocolConfig<F = F>, S: AggregationSubCircuit> Circuit<SC> for I
                 public_values_bus,
                 pvs_air_consistency_bus,
                 air_idx: VM_PVS_AIR_ID,
-                num_pvs: VmPvs::<u8>::width(),
+                num_pvs: vm_pvs::VmPvs::<u8>::width(),
                 def_flag: 1,
             }) as AirRef<SC>;
             let unset_def_pvs_air = Arc::new(unset::UnsetPvsAir {
