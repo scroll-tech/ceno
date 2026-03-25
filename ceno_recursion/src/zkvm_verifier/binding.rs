@@ -34,6 +34,7 @@ use openvm_native_recursion::{
 use openvm_stark_backend::p3_field::{FieldAlgebra, extension::BinomialExtensionField};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldExtensionAlgebra;
+use std::cmp::max;
 use sumcheck::structs::IOPProof;
 
 pub type F = BabyBear;
@@ -402,7 +403,7 @@ pub struct ZKVMChipProofInput {
     pub has_ecc_proof: usize,
     pub ecc_proof: EccQuarkProofInput,
 
-    pub num_instances: Vec<usize>,
+    pub num_instances: [usize; 2],
 
     pub wits_in_evals: Vec<E>,
     pub fixed_in_evals: Vec<E>,
@@ -657,18 +658,12 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());
 
-        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
-            &self.num_instances,
-        ));
+        stream.extend(self.num_instances.to_vec().write());
 
         let n_inst_0 = self.num_instances[0];
         let n_inst_0_bit_decomps = decompose_minus_one_bits(n_inst_0);
 
-        let n_inst_1 = if self.num_instances.len() > 1 {
-            self.num_instances[1]
-        } else {
-            1usize
-        };
+        let n_inst_1 = max(self.num_instances[1], 1);
         let n_inst_1_bit_decomps = decompose_minus_one_bits(n_inst_1);
 
         stream.extend(n_inst_0_bit_decomps.write());

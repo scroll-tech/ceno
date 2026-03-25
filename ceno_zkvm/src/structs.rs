@@ -325,15 +325,14 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 pub struct ChipInput<E: ExtensionField> {
     pub name: String,
     pub witness_rmms: RMMCollections<E::BaseField>,
-    // in shard ram chip, num_instances length would be > 1
-    pub num_instances: Vec<usize>,
+    pub num_instances: [usize; 2],
 }
 
 impl<E: ExtensionField> ChipInput<E> {
     pub fn new(
         name: String,
         witness_rmms: RMMCollections<E::BaseField>,
-        num_instances: Vec<usize>,
+        num_instances: [usize; 2],
     ) -> Self {
         Self {
             name,
@@ -382,16 +381,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             shard_steps,
             indices,
         )?;
-        let num_instances = vec![witness[0].num_instances()];
-        let input = ChipInput::new(
-            OC::name(),
-            witness,
-            if num_instances[0] > 0 {
-                num_instances
-            } else {
-                vec![]
-            },
-        );
+        let num_instances = [witness[0].num_instances(), 0];
+        let input = ChipInput::new(OC::name(), witness, num_instances);
         assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
         assert!(
             self.lk_mlts
@@ -445,15 +436,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             input,
         )?;
         let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
-        let input = ChipInput::new(
-            TC::name(),
-            witness,
-            if num_instances > 0 {
-                vec![num_instances]
-            } else {
-                vec![]
-            },
-        );
+        let input = ChipInput::new(TC::name(), witness, [num_instances, 0]);
         assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
 
         Ok(())
@@ -613,7 +596,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 Ok(ChipInput::new(
                     ShardRamCircuit::<E>::name(),
                     witness,
-                    vec![num_reads, num_writes],
+                    [num_reads, num_writes],
                 ))
             })
             .collect::<Result<Vec<_>, ZKVMError>>()?;
@@ -627,13 +610,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         Ok(())
     }
 
-    pub fn get_witnesses_name_instance(&self) -> Vec<(String, Vec<usize>)> {
+    pub fn get_witnesses_name_instance(&self) -> Vec<(String, [usize; 2])> {
         self.witnesses
             .iter()
             .flat_map(|(_, chip_inputs)| {
                 chip_inputs
                     .iter()
-                    .map(|chip_input| (chip_input.name.clone(), chip_input.num_instances.clone()))
+                    .map(|chip_input| (chip_input.name.clone(), chip_input.num_instances))
             })
             .collect_vec()
     }

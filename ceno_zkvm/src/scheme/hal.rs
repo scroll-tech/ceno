@@ -50,7 +50,7 @@ pub struct ProofInput<'a, PB: ProverBackend> {
     pub fixed: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub public_input: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub pub_io_evals: Vec<Either<<PB::E as ExtensionField>::BaseField, PB::E>>,
-    pub num_instances: Vec<usize>,
+    pub num_instances: [usize; 2],
     pub has_ecc_ops: bool,
 }
 

@@ -213,7 +213,7 @@ fn test_rw_lk_expression_combination() {
             structural_witness: structural_in,
             public_input: vec![],
             pub_io_evals: vec![],
-            num_instances: vec![num_instances],
+            num_instances: [num_instances, 0],
             has_ecc_ops: false,
         };
         let task = crate::scheme::scheduler::ChipTask {
