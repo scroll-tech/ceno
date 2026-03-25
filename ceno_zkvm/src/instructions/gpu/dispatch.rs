@@ -21,7 +21,7 @@ use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use super::{
-    config::{is_gpu_witgen_disabled, is_kind_disabled},
+    config::{is_gpu_witgen_enabled, is_kind_disabled},
     utils::debug_compare::{
         debug_compare_final_lk, debug_compare_shard_ec, debug_compare_shardram,
         debug_compare_witness,
@@ -117,7 +117,7 @@ pub(crate) fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
 ) -> Result<Option<(RMMCollections<E::BaseField>, Multiplicity<u64>)>, ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
-    if is_gpu_witgen_disabled() || is_force_cpu_path() {
+    if !is_gpu_witgen_enabled() || is_force_cpu_path() {
         return Ok(None);
     }
 

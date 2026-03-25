@@ -26,7 +26,7 @@ use crate::{
             ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,
             with_cached_shard_meta,
         },
-        config::{is_debug_compare_enabled, is_gpu_witgen_disabled, is_kind_disabled},
+        config::{is_debug_compare_enabled, is_gpu_witgen_enabled, is_kind_disabled},
         dispatch::{GpuWitgenKind, compute_fetch_params, is_force_cpu_path},
         utils::{
             d2h::{gpu_compact_ec_d2h, gpu_lk_counters_to_multiplicity},
@@ -217,7 +217,7 @@ pub fn gpu_assign_keccak_instances<E: ExtensionField>(
     use gkr_iop::gpu::get_cuda_hal;
 
     // Guard: disabled or force-CPU
-    if is_gpu_witgen_disabled() || is_force_cpu_path() {
+    if !is_gpu_witgen_enabled() || is_force_cpu_path() {
         return Ok(None);
     }
     // Check if keccak is disabled via CENO_GPU_DISABLE_WITGEN_KINDS=keccak

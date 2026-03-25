@@ -2,7 +2,7 @@
 /// environment-variable disable switches.
 ///
 /// Environment variables (3 total):
-/// - `CENO_GPU_DISABLE_WITGEN` — global kill switch, all chips use CPU
+/// - `CENO_GPU_ENABLE_WITGEN` — opt-in GPU witgen (default: CPU)
 /// - `CENO_GPU_DISABLE_WITGEN_KINDS=add,sub,keccak,...` — per-kind disable (comma-separated tags)
 /// - `CENO_GPU_DEBUG_COMPARE_WITGEN` — enable GPU vs CPU comparison for all chips (witness, LK, shard, EC)
 use super::dispatch::GpuWitgenKind;
@@ -59,19 +59,20 @@ pub(crate) fn is_kind_disabled(kind: GpuWitgenKind) -> bool {
     })
 }
 
-/// Returns true if GPU witgen is globally disabled via `CENO_GPU_DISABLE_WITGEN` env var.
+/// Returns true if GPU witgen is enabled via `CENO_GPU_ENABLE_WITGEN` env var.
+/// Default is disabled (CPU witgen). Set `CENO_GPU_ENABLE_WITGEN=1` to opt in.
 /// The value is cached at first access.
-pub(crate) fn is_gpu_witgen_disabled() -> bool {
+pub(crate) fn is_gpu_witgen_enabled() -> bool {
     use std::sync::OnceLock;
-    static DISABLED: OnceLock<bool> = OnceLock::new();
-    *DISABLED.get_or_init(|| {
-        let val = std::env::var_os("CENO_GPU_DISABLE_WITGEN");
-        let disabled = val.is_some();
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        let val = std::env::var_os("CENO_GPU_ENABLE_WITGEN");
+        let enabled = val.is_some();
         eprintln!(
-            "[GPU witgen] CENO_GPU_DISABLE_WITGEN={:?} → disabled={}",
-            val, disabled
+            "[GPU witgen] CENO_GPU_ENABLE_WITGEN={:?} → enabled={}",
+            val, enabled
         );
-        disabled
+        enabled
     })
 }
 

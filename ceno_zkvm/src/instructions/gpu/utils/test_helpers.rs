@@ -54,7 +54,7 @@ pub fn assert_full_gpu_pipeline<
     let indices: Vec<usize> = (0..steps.len()).collect();
 
     let mut gpu_ctx = crate::e2e::ShardContext::default();
-    let (gpu_rmms, gpu_lkm) = crate::instructions::gpu::dispatch::try_gpu_assign_instances::<E, I>(
+    let result = crate::instructions::gpu::dispatch::try_gpu_assign_instances::<E, I>(
         config,
         &mut gpu_ctx,
         num_witin,
@@ -63,8 +63,12 @@ pub fn assert_full_gpu_pipeline<
         &indices,
         kind,
     )
-    .unwrap()
-    .expect("GPU path should be available");
+    .unwrap();
+    // Skip pipeline comparison if GPU witgen is not enabled (CENO_GPU_ENABLE_WITGEN unset)
+    let Some((gpu_rmms, gpu_lkm)) = result else {
+        eprintln!("GPU witgen not enabled, skipping full pipeline comparison");
+        return;
+    };
 
     crate::instructions::gpu::cache::flush_shared_ec_buffers(&mut gpu_ctx).unwrap();
 

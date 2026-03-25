@@ -657,7 +657,7 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
         return Ok(());
     }
 
-    // Guard against recursion: is_gpu_witgen_disabled() uses OnceLock so env var
+    // Guard against recursion: is_gpu_witgen_enabled() uses OnceLock so env var
     // manipulation doesn't work. Use a thread-local flag instead.
     thread_local! {
         static IN_DEBUG_COMPARE: Cell<bool> = const { Cell::new(false) };
