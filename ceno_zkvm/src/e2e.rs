@@ -200,6 +200,7 @@ pub struct ShardContext<'a> {
     pub shard_heap_addr_range: Range<Addr>,
     pub shard_hint_addr_range: Range<Addr>,
     /// Syscall witnesses for StepRecord::syscall() lookups.
+    /// Borrowed from the tracer — no per-shard Vec clone.
     pub syscall_witnesses: Arc<Vec<SyscallWitness>>,
 }
 
@@ -755,6 +756,8 @@ pub trait StepSource: Iterator<Item = StepIndex> {
     fn shard_steps(&self) -> &[StepRecord];
     fn step_record(&self, idx: StepIndex) -> &StepRecord;
     fn syscall_witnesses(&self) -> &[SyscallWitness];
+    /// Take ownership of syscall witnesses (zero-copy move, leaves empty Vec).
+    fn take_syscall_witnesses(&mut self) -> Vec<SyscallWitness>;
 }
 
 /// Lazily replays `StepRecord`s by re-running the VM up to the number of steps
@@ -830,6 +833,10 @@ impl StepSource for StepReplay {
 
     fn syscall_witnesses(&self) -> &[SyscallWitness] {
         self.vm.tracer().syscall_witnesses()
+    }
+
+    fn take_syscall_witnesses(&mut self) -> Vec<SyscallWitness> {
+        self.vm.tracer_mut().take_syscall_witnesses()
     }
 }
 
@@ -1290,8 +1297,11 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     None => return None,
                 };
             tracing::debug!("position_next_shard finish in {:?}", time.elapsed());
+            // Move (not clone) syscall witnesses from tracer into Arc.
+            // take_syscall_witnesses() swaps the tracer's Vec with an empty one — zero copy.
+            // Must be called before shard_steps() to avoid borrow conflict.
+            shard_ctx.syscall_witnesses = Arc::new(step_iter.take_syscall_witnesses());
             let shard_steps = step_iter.shard_steps();
-            shard_ctx.syscall_witnesses = Arc::new(step_iter.syscall_witnesses().to_vec());
 
             let mut zkvm_witness = ZKVMWitnesses::default();
             let mut pi = pi_template.clone();
@@ -2239,6 +2249,10 @@ mod tests {
 
             fn syscall_witnesses(&self) -> &[SyscallWitness] {
                 &[] // Test replay doesn't track syscalls
+            }
+
+            fn take_syscall_witnesses(&mut self) -> Vec<SyscallWitness> {
+                Vec::new()
             }
         }
 
