@@ -27,12 +27,12 @@ pub trait PublicValuesQuery {
     fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError>;
     #[allow(dead_code)]
     fn query_shard_id(&mut self) -> Result<Instance, CircuitBuilderError>;
-    fn query_heap_start_addr(&self) -> Result<Instance, CircuitBuilderError>;
+    fn query_heap_start_addr(&mut self) -> Result<Instance, CircuitBuilderError>;
     #[allow(dead_code)]
-    fn query_heap_shard_len(&self) -> Result<Instance, CircuitBuilderError>;
-    fn query_hint_start_addr(&self) -> Result<Instance, CircuitBuilderError>;
+    fn query_heap_shard_len(&mut self) -> Result<Instance, CircuitBuilderError>;
+    fn query_hint_start_addr(&mut self) -> Result<Instance, CircuitBuilderError>;
     #[allow(dead_code)]
-    fn query_hint_shard_len(&self) -> Result<Instance, CircuitBuilderError>;
+    fn query_hint_shard_len(&mut self) -> Result<Instance, CircuitBuilderError>;
 }
 
 impl<'a, E: ExtensionField> InstFetch<E> for CircuitBuilder<'a, E> {
@@ -95,18 +95,18 @@ impl<'a, E: ExtensionField> PublicValuesQuery for CircuitBuilder<'a, E> {
         self.cs.query_instance(SHARD_ID_IDX)
     }
 
-    fn query_heap_start_addr(&self) -> Result<Instance, CircuitBuilderError> {
+    fn query_heap_start_addr(&mut self) -> Result<Instance, CircuitBuilderError> {
         self.cs.query_instance(HEAP_START_ADDR_IDX)
     }
 
-    fn query_heap_shard_len(&self) -> Result<Instance, CircuitBuilderError> {
+    fn query_heap_shard_len(&mut self) -> Result<Instance, CircuitBuilderError> {
         self.cs.query_instance(HEAP_LENGTH_IDX)
     }
 
-    fn query_hint_start_addr(&self) -> Result<Instance, CircuitBuilderError> {
+    fn query_hint_start_addr(&mut self) -> Result<Instance, CircuitBuilderError> {
         self.cs.query_instance(HINT_START_ADDR_IDX)
     }
-    fn query_hint_shard_len(&self) -> Result<Instance, CircuitBuilderError> {
+    fn query_hint_shard_len(&mut self) -> Result<Instance, CircuitBuilderError> {
         self.cs.query_instance(HINT_LENGTH_IDX)
     }
 }

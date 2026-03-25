@@ -104,10 +104,13 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let prod_w: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
 
-    iter_zip!(builder, zkvm_proof_input.raw_pi).for_each(|ptr_vec, builder| {
-        let v = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
-        challenger_multi_observe(builder, &mut challenger, &v);
-    });
+    for (_, circuit_vk) in vk.circuit_vks.iter() {
+        for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance_values.iter() {
+            let eval = builder.get(&zkvm_proof_input.pi_evals, instance_value.0);
+            let eval_felts = builder.ext2felt(eval);
+            challenger.observe_slice(builder, eval_felts);
+        }
+    }
 
     iter_zip!(builder, zkvm_proof_input.raw_pi, zkvm_proof_input.pi_evals).for_each(
         |ptr_vec, builder| {

@@ -160,10 +160,20 @@ impl<
             let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
 
             let span = entered_span!("commit_to_pi", profiling_1 = true);
-            // including raw public input to transcript
-            for v in raw_pi.iter().flatten() {
-                transcript.append_field_element(v);
+            // Include transcript-visible public values in canonical circuit order.
+            // The order must match verifier and recursion verifier exactly.
+            // TODO deal with public io memory later
+            for (_, circuit_pk) in self.pk.circuit_pks.iter() {
+                for instance_value in circuit_pk.get_cs().zkvm_v1_css.instance_value.iter() {
+                    let idx = instance_value.0;
+                    let eval = pi_evals
+                        .get(idx)
+                        .copied()
+                        .expect("instance_value index out of bounds for pi_evals");
+                    transcript.append_field_element_ext(&eval);
+                }
             }
+
             exit_span!(span);
 
             let pi: Vec<MultilinearExtension<E>> =

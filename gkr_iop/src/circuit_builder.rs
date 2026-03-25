@@ -102,6 +102,8 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
+    // record which public input index is involving in constraint computation
+    pub instance_values: Vec<Instance>,
     pub instance_openings: Vec<Instance>,
 
     pub ec_point_exprs: Vec<Expression<E>>,
@@ -175,6 +177,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
+            instance_values: vec![],
             instance_openings: vec![],
             ec_final_sum: vec![],
             ec_slope_exprs: vec![],
@@ -259,8 +262,13 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         f
     }
 
-    pub fn query_instance(&self, idx: usize) -> Result<Instance, CircuitBuilderError> {
+    pub fn query_instance(&mut self, idx: usize) -> Result<Instance, CircuitBuilderError> {
         let i = Instance(idx);
+        assert!(
+            !self.instance_values.contains(&i),
+            "query same pubio idx {idx} value more than once",
+        );
+        self.instance_values.push(i);
         Ok(i)
     }
 
@@ -276,7 +284,6 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         );
         self.instance_openings.push(i);
 
-        // return instance only count
         Ok(Instance(self.instance_openings.len() - 1))
     }
 

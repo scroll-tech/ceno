@@ -38,11 +38,12 @@ impl DynVolatileRamTable for HeapTable {
         params: &ProgramParams,
     ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
         let max_len = Self::max_len(params);
+        let offset_instance_id = cb.query_heap_start_addr()?.0 as WitnessId;
         let addr = cb.create_structural_witin(
             || "addr",
             StructuralWitInType::EqualDistanceDynamicSequence {
                 max_len,
-                offset_instance_id: cb.query_heap_start_addr()?.0 as WitnessId,
+                offset_instance_id,
                 multi_factor: WORD_SIZE,
                 descending: Self::DESCENDING,
             },
@@ -143,11 +144,12 @@ impl DynVolatileRamTable for HintsTable {
         params: &ProgramParams,
     ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
         let max_len = Self::max_len(params);
+        let offset_instance_id = cb.query_hint_start_addr()?.0 as WitnessId;
         let addr = cb.create_structural_witin(
             || "addr",
             StructuralWitInType::EqualDistanceDynamicSequence {
                 max_len,
-                offset_instance_id: cb.query_hint_start_addr()?.0 as WitnessId,
+                offset_instance_id,
                 multi_factor: WORD_SIZE,
                 descending: Self::DESCENDING,
             },

@@ -181,12 +181,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        // TODO fix soundness: construct raw public input by ourself and trustless from proof
-        // including raw public input to transcript
-        vm_proof
-            .raw_pi
-            .iter()
-            .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
+        // Include transcript-visible public values in canonical circuit order.
+        // This must match prover and recursion verifier exactly.
+        for (_, circuit_vk) in self.vk.circuit_vks.iter() {
+            for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance_values.iter() {
+                let idx = instance_value.0;
+                let eval = *pi_evals
+                    .get(idx)
+                    .expect("instance_value index out of bounds for pi_evals");
+                transcript.append_field_element_ext(&eval);
+            }
+        }
 
         // check shard id
         assert_eq!(
