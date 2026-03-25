@@ -31,7 +31,7 @@ mod prover_integration {
             bincode::deserialize_from(File::open(vk_path).expect("open vk file"))
                 .expect("deserialize vk file");
 
-        const MAX_NUM_PROOFS: usize = 1;
+        const MAX_NUM_PROOFS: usize = 2;
         let system_params = test_system_params_zero_pow(5, 16, 3);
         let leaf_prover = InnerCpuProver::<MAX_NUM_PROOFS>::new::<Engine>(
             Arc::new(child_vk),
