@@ -835,8 +835,15 @@ impl FullTracer {
     }
 
     /// Returns the syscall witness store. Pass this to `StepRecord::syscall()`.
+    #[inline(always)]
     pub fn syscall_witnesses(&self) -> &[SyscallWitness] {
         &self.syscall_witnesses
+    }
+
+    /// Take ownership of syscall witnesses, leaving an empty Vec for the next shard.
+    /// Avoids the `to_vec()` clone when wrapping in `Arc`.
+    pub fn take_syscall_witnesses(&mut self) -> Vec<SyscallWitness> {
+        std::mem::take(&mut self.syscall_witnesses)
     }
 
     #[inline(always)]
