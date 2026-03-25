@@ -140,9 +140,8 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                             .next()
                             .expect("chunk should have enough rows for layer");
                         let cols: &mut TowerLogupSumCheckClaimCols<F> = row.borrow_mut();
-                        let is_placeholder = logup_rows.is_empty() && row_in_layer == 0;
-                        let is_real = row_in_layer < logup_rows.len() || is_placeholder;
-                        let quad = if row_in_layer < logup_rows.len() {
+                        let is_real = row_in_layer < logup_rows.len();
+                        let quad = if is_real {
                             logup_rows[row_in_layer]
                         } else {
                             [EF::ZERO; 4]
@@ -176,7 +175,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                         };
 
                         cols.is_enabled = F::ONE;
-                        cols.is_dummy = F::from_bool(layer_idx == 0 || !is_real);
+                        cols.is_dummy = F::from_bool(!is_real);
                         let is_first_row_of_layer = row_in_layer == 0;
                         let is_first_row_of_record = proof_row_idx == 0;
                         cols.is_first_layer =

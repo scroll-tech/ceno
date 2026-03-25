@@ -60,7 +60,6 @@ impl RowMajorChip<F> for MainSumcheckTraceGenerator {
 
         for record in records.iter() {
             let rows = record.total_rows();
-            let has_rounds = !record.rounds.is_empty();
             let claim_value = record.claim;
             let eq_value = EF::ONE;
             let is_first_record_of_proof = prev_proof_idx != record.proof_idx;
@@ -78,7 +77,6 @@ impl RowMajorChip<F> for MainSumcheckTraceGenerator {
                 cols.is_first_idx = F::from_bool(is_first_record_of_proof && is_first_round);
                 cols.is_first_round = F::from_bool(is_first_round);
                 cols.is_last_round = F::from_bool(is_last_round);
-                cols.is_dummy = F::from_bool(!has_rounds);
                 cols.round = F::from_usize(round_idx);
                 cols.tidx = F::from_usize(record.tidx + 4 * D_EF * round_idx);
 

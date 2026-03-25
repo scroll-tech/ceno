@@ -128,10 +128,13 @@ pub(crate) struct TowerTowerEvalRecord {
 
 struct TowerBlobCpu {
     input_records: Vec<TowerInputRecord>,
+    /// Per-proof q0 claims matching input_records (one per proof).
+    proof_q0_claims: Vec<EF>,
     layer_records: Vec<TowerLayerRecord>,
     tower_records: Vec<TowerTowerEvalRecord>,
     sumcheck_records: Vec<TowerSumcheckRecord>,
     mus_records: Vec<Vec<EF>>,
+    /// Per-chip q0 claims matching layer_records.
     q0_claims: Vec<EF>,
 }
 
@@ -609,6 +612,7 @@ pub(crate) fn build_gkr_blob(
     preflights: &[Preflight],
 ) -> Result<TowerBlobCpu> {
     let mut input_records = Vec::new();
+    let mut proof_q0_claims = Vec::new();
     let mut layer_records = Vec::new();
     let mut tower_records = Vec::new();
     let mut sumcheck_records = Vec::new();
@@ -622,6 +626,12 @@ pub(crate) fn build_gkr_blob(
 
     for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
         let mut has_chip = false;
+        let mut first_chip_alpha = EF::ZERO;
+        let mut first_chip_q0 = EF::ZERO;
+        let mut last_input_layer_claim = EF::ZERO;
+        let mut last_layer_output_lambda = EF::ZERO;
+        let mut last_layer_output_mu = EF::ZERO;
+
         let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
             .proof_shape
             .sorted_trace_vdata
@@ -652,15 +662,15 @@ pub(crate) fn build_gkr_blob(
                 let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx).ok_or_else(|| {
                     eyre::eyre!("missing circuit verifying key for index {chip_idx}")
                 })?;
-                let idx = sorted_idx_by_chip.get(&chip_idx).copied().ok_or_else(|| {
-                    eyre::eyre!("missing proof-shape sorted index for chip {chip_idx}")
-                })?;
+                // Use sequential index for NestedForLoop compatibility (idx must increment
+                // by 0 or 1 within each proof_idx group).
+                let idx = entry_idx;
                 println!(
                     "processing chip name: {:?}",
                     child_vk.circuit_index_to_name.get(&chip_idx)
                 );
                 let (
-                    input_record,
+                    chip_input_record,
                     layer_record,
                     tower_record,
                     sumcheck_record,
@@ -676,7 +686,18 @@ pub(crate) fn build_gkr_blob(
                     &schedule,
                     pf_entry.tidx,
                 )?;
-                input_records.push(input_record);
+
+                // Capture first chip's alpha and q0 for the proof-level record
+                if entry_idx == 0 {
+                    first_chip_alpha = chip_input_record.alpha_logup;
+                    first_chip_q0 = q0_claim;
+                }
+                // Always update to latest chip for combined values
+                last_input_layer_claim = chip_input_record.input_layer_claim;
+                last_layer_output_lambda = chip_input_record.layer_output_lambda;
+                last_layer_output_mu = chip_input_record.layer_output_mu;
+
+                // Per-chip records (not input_records)
                 layer_records.push(layer_record);
                 tower_records.push(tower_record);
                 sumcheck_records.push(sumcheck_record);
@@ -684,11 +705,20 @@ pub(crate) fn build_gkr_blob(
                 q0_claims.push(q0_claim);
         }
 
+        // ONE input record per proof (matching ProofIdxSubAir constraint)
+        input_records.push(TowerInputRecord {
+            proof_idx,
+            idx: 0,
+            tidx: preflight.proof_shape.post_tidx,
+            n_logup: preflight.proof_shape.n_logup,
+            alpha_logup: first_chip_alpha,
+            input_layer_claim: last_input_layer_claim,
+            layer_output_lambda: last_layer_output_lambda,
+            layer_output_mu: last_layer_output_mu,
+        });
+        proof_q0_claims.push(first_chip_q0);
+
         if !has_chip {
-            input_records.push(TowerInputRecord {
-                proof_idx,
-                ..Default::default()
-            });
             layer_records.push(TowerLayerRecord {
                 idx: 0,
                 proof_idx,
@@ -709,6 +739,7 @@ pub(crate) fn build_gkr_blob(
 
     if input_records.is_empty() {
         input_records.push(TowerInputRecord::default());
+        proof_q0_claims.push(EF::ZERO);
         layer_records.push(TowerLayerRecord::default());
         sumcheck_records.push(TowerSumcheckRecord::default());
         tower_records.push(TowerTowerEvalRecord::default());
@@ -718,6 +749,7 @@ pub(crate) fn build_gkr_blob(
 
     Ok(TowerBlobCpu {
         input_records,
+        proof_q0_claims,
         layer_records,
         tower_records,
         sumcheck_records,
@@ -873,7 +905,7 @@ impl RowMajorChip<F> for TowerModuleChip {
         use TowerModuleChip::*;
         match self {
             Input => TowerInputTraceGenerator
-                .generate_trace(&(&blob.input_records, &blob.q0_claims), required_height),
+                .generate_trace(&(&blob.input_records, &blob.proof_q0_claims), required_height),
             Layer => TowerLayerTraceGenerator.generate_trace(
                 &(&blob.layer_records, &blob.mus_records, &blob.q0_claims),
                 required_height,

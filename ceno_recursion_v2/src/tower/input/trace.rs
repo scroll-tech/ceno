@@ -51,8 +51,6 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
 
         let (data_slice, _) = trace.split_at_mut(num_valid_rows * width);
 
-        let mut prev_proof_idx = usize::MAX;
-        let mut prev_idx = usize::MAX;
         for (row_data, (record, q0_claim)) in data_slice
             .chunks_exact_mut(width)
             .zip(gkr_input_records.iter().zip(q0_claims.iter()))
@@ -62,8 +60,6 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
             cols.is_enabled = F::ONE;
             cols.proof_idx = F::from_usize(record.proof_idx);
             cols.idx = F::from_usize(record.idx);
-            cols.is_first_idx = F::from_bool(prev_proof_idx != record.proof_idx);
-            cols.is_first = F::ONE;
 
             cols.tidx = F::from_usize(record.tidx);
 
@@ -97,9 +93,6 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
                 .as_basis_coefficients_slice()
                 .try_into()
                 .unwrap();
-
-            prev_proof_idx = record.proof_idx;
-            prev_idx = record.idx;
         }
 
         Some(RowMajorMatrix::new(trace, width))

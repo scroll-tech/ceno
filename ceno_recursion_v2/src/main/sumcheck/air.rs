@@ -31,7 +31,6 @@ pub struct MainSumcheckCols<T> {
     pub is_first_idx: T,
     pub is_first_round: T,
     pub is_last_round: T,
-    pub is_dummy: T,
     pub round: T,
     pub tidx: T,
     pub ev1: [T; D_EF],
@@ -75,7 +74,6 @@ where
 
         #[cfg(not(debug_assertions))]
         {
-            builder.assert_bool(local.is_dummy.clone());
             builder.assert_bool(local.is_last_round.clone());
             builder.assert_bool(local.is_first_round.clone());
 
@@ -146,10 +144,7 @@ where
             );
         }
 
-        let is_not_dummy = AB::Expr::ONE - local.is_dummy.clone();
-
-        let receive_mask =
-            local.is_enabled.clone() * local.is_first_round.clone() * is_not_dummy.clone();
+        let receive_mask = local.is_enabled.clone() * local.is_first_round.clone();
         self.sumcheck_input_bus.receive(
             builder,
             local.proof_idx,
@@ -161,7 +156,7 @@ where
             receive_mask,
         );
 
-        let send_mask = local.is_enabled.clone() * local.is_last_round.clone() * is_not_dummy;
+        let send_mask = local.is_enabled.clone() * local.is_last_round.clone();
         self.sumcheck_output_bus.send(
             builder,
             local.proof_idx,

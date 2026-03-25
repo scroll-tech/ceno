@@ -154,9 +154,8 @@ fn generate_prod_trace(
                         .next()
                         .expect("chunk should have enough rows for layer");
                     let cols: &mut TowerProdSumCheckClaimCols<F> = row.borrow_mut();
-                    let is_placeholder = active_rows.is_empty() && row_in_layer == 0;
-                    let is_real = row_in_layer < active_rows.len() || is_placeholder;
-                    let pair = if row_in_layer < active_rows.len() {
+                    let is_real = row_in_layer < active_rows.len();
+                    let pair = if is_real {
                         active_rows[row_in_layer]
                     } else {
                         [EF::ZERO; 2]
@@ -173,7 +172,7 @@ fn generate_prod_trace(
                     };
 
                     cols.is_enabled = F::ONE;
-                    cols.is_dummy = F::from_bool(layer_idx == 0 || !is_real);
+                    cols.is_dummy = F::from_bool(!is_real);
                     let is_first_row_of_layer = row_in_layer == 0;
                     let is_first_row_of_record = proof_row_idx == 0;
                     cols.is_first_layer =

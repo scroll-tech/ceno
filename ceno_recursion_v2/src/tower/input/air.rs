@@ -19,7 +19,7 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::{
-    subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
+    subairs::proof_idx::{ProofIdxIoCols, ProofIdxSubAir},
     utils::assert_zeros,
 };
 use stark_recursion_circuit_derive::AlignedBorrow;
@@ -32,8 +32,6 @@ pub struct TowerInputCols<T> {
 
     pub proof_idx: T,
     pub idx: T,
-    pub is_first_idx: T,
-    pub is_first: T,
 
     pub n_logup: T,
 
@@ -90,20 +88,21 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         // Proof Index Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        type LoopSubAir = NestedForLoopSubAir<2>;
-        LoopSubAir {}.eval(
+        // This subair has the following constraints:
+        // 1. Boolean enabled flag
+        // 2. Disabled rows are followed by disabled rows
+        // 3. Proof index increments by exactly one between enabled rows
+        ProofIdxSubAir.eval(
             builder,
             (
-                NestedForLoopIoCols {
+                ProofIdxIoCols {
                     is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.idx],
-                    is_first: [local.is_first_idx, local.is_first],
+                    proof_idx: local.proof_idx,
                 }
                 .map_into(),
-                NestedForLoopIoCols {
+                ProofIdxIoCols {
                     is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.idx],
-                    is_first: [next.is_first_idx, next.is_first],
+                    proof_idx: next.proof_idx,
                 }
                 .map_into(),
             ),

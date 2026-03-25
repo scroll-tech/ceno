@@ -110,7 +110,6 @@ impl MainModule {
                     let main_record = MainRecord {
                         proof_idx,
                         idx: entry_idx,
-                        is_dummy: input_layer_count(chip_proof) == 0,
                         tidx: pf_entry.tidx,
                         claim,
                     };
@@ -128,7 +127,6 @@ impl MainModule {
                 paired.push((
                     MainRecord {
                         proof_idx,
-                        is_dummy: true,
                         ..MainRecord::default()
                     },
                     MainSumcheckRecord::default(),

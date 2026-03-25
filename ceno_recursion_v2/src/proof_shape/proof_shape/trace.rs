@@ -123,7 +123,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.log_height = F::from_usize(log_height);
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[*air_idx]);
-                cols.starting_cidx = F::from_usize(current_cidx);
                 cols.is_present = F::ONE;
                 cols.height = F::from_usize(trace_height);
                 cols.num_present = F::from_usize(num_present);
@@ -172,7 +171,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.log_height = F::ZERO;
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[air_idx]);
-                cols.starting_cidx = F::from_usize(current_cidx);
                 cols.is_present = F::ZERO;
                 cols.height = F::ZERO;
                 cols.num_present = F::from_usize(num_present);
@@ -212,10 +210,9 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.is_last = F::ONE;
             cols.idx = F::ZERO;
             cols.sorted_idx = F::ZERO;
-            cols.log_height = F::ZERO;
+            cols.log_height = F::from_usize(preflight.proof_shape.n_logup);
             cols.need_rot = F::ZERO;
             cols.starting_tidx = F::from_usize(preflight.proof_shape.post_tidx);
-            cols.starting_cidx = F::from_usize(preflight.proof_shape.n_logup);
             cols.is_present = F::ZERO;
             cols.height = F::ZERO;
             cols.num_present = F::from_usize(num_present);

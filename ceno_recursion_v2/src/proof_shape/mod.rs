@@ -150,7 +150,7 @@ impl ProofShapeModule {
         preflight.proof_shape.sorted_trace_vdata = sorted_trace_vdata;
         preflight.proof_shape.l_skip = 0;
 
-        let mut current_tidx = 2 * DIGEST_SIZE;
+        let mut current_tidx = crate::utils::TranscriptLabel::Riscv.field_len();
         let mut current_cidx = 1usize;
         let mut starting_tidx = vec![0usize; child_vk.circuit_vks.len()];
         let mut starting_cidx = vec![0usize; child_vk.circuit_vks.len()];
@@ -383,6 +383,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         );
         let chips = [
             ProofShapeModuleChip::ProofShape(proof_shape),
+            ProofShapeModuleChip::Commit,
             ProofShapeModuleChip::PublicValues,
         ];
         let ctx = (child_vk, proofs, preflights);
@@ -423,6 +424,7 @@ fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
 #[strum_discriminants(repr(usize))]
 enum ProofShapeModuleChip {
     ProofShape(proof_shape::ProofShapeChip<4, 8>),
+    Commit,
     PublicValues,
 }
 
@@ -448,6 +450,12 @@ impl RowMajorChip<F> for ProofShapeModuleChip {
     ) -> Option<RowMajorMatrix<F>> {
         match self {
             ProofShapeModuleChip::ProofShape(chip) => chip.generate_trace(ctx, required_height),
+            ProofShapeModuleChip::Commit => {
+                let (_, proofs, preflights) = ctx;
+                let commit_ctx: (&[RecursionProof], &[Preflight]) = (*proofs, *preflights);
+                commit::CommitTraceGenerator
+                    .generate_trace(&commit_ctx, required_height)
+            }
             ProofShapeModuleChip::PublicValues => pvs::PublicValuesTraceGenerator
                 .generate_trace(ctx, required_height),
         }

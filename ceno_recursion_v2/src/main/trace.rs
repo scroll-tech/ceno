@@ -11,7 +11,6 @@ use crate::tracegen::RowMajorChip;
 pub struct MainRecord {
     pub proof_idx: usize,
     pub idx: usize,
-    pub is_dummy: bool,
     pub tidx: usize,
     pub claim: EF,
 }
@@ -87,7 +86,6 @@ fn fill_main_cols(record: &MainRecord, cols: &mut MainCols<F>, is_first_proof: b
     cols.idx = F::from_usize(record.idx);
     cols.is_first_idx = F::from_bool(is_first_proof);
     cols.is_first = F::ONE;
-    cols.is_dummy = F::from_bool(record.is_dummy);
     cols.tidx = F::from_usize(record.tidx);
     let claim_basis: [F; D_EF] = record
         .claim

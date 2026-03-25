@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 
-use openvm_circuit_primitives::{SubAir, utils::assert_array_eq};
+use openvm_circuit_primitives::utils::assert_array_eq;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
@@ -16,7 +16,6 @@ use crate::tower::bus::{
 };
 use recursion_circuit::{
     bus::TranscriptBus,
-    subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     utils::{assert_zeros, ext_field_add, ext_field_multiply, ext_field_subtract},
 };
 
@@ -84,87 +83,125 @@ where
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_first_layer);
+
+        ///////////////////////////////////////////////////////////////////////
+        // Structural constraints (replaces NestedForLoopSubAir<2>)
+        //
+        // The trace has a 3-level nested structure:
+        //   proof_idx > idx (chip) > GKR layer (marked by is_first)
+        // NestedForLoopSubAir<2> only supports 2 levels and would forbid
+        // is_first=1 when idx stays the same. We need is_first at every
+        // GKR layer boundary for correct bus send counts, so we write the
+        // loop constraints manually.
+        ///////////////////////////////////////////////////////////////////////
+
+        builder.assert_bool(local.is_enabled);
         builder.assert_bool(local.is_first);
 
-        // Track proof_idx as the single outer loop counter.
-        // is_first_layer marks the start of each proof scope.
-        type LoopSubAir = NestedForLoopSubAir<1>;
-        LoopSubAir {}.eval(
-            builder,
-            (
-                NestedForLoopIoCols {
-                    is_enabled: local.is_enabled,
-                    counter: [local.proof_idx],
-                    is_first: [local.is_first_layer],
-                }
-                .map_into(),
-                NestedForLoopIoCols {
-                    is_enabled: next.is_enabled,
-                    counter: [next.proof_idx],
-                    is_first: [next.is_first_layer],
-                }
-                .map_into(),
-            ),
-        );
-
-        // When is_first is set, this must be a real enabled row.
-        builder
-            .when(local.is_first)
-            .assert_one(local.is_enabled.clone());
-        // After a disabled row, is_first must not be set (padding rows).
+        // is_enabled monotone decreasing: once disabled, stays disabled
         builder
             .when_transition()
-            .when_ne(local.is_enabled.clone(), AB::Expr::ONE)
-            .assert_zero(next.is_first.clone());
+            .when(AB::Expr::ONE - local.is_enabled)
+            .assert_zero(next.is_enabled);
 
-        // is_within_layer: next row continues within the same layer
-        let is_within_layer = AB::Expr::from(next.is_enabled) - AB::Expr::from(next.is_first);
-        // at_layer_boundary: current row is the last index_id of its layer
-        let at_layer_boundary = AB::Expr::from(local.is_enabled)
-            - AB::Expr::from(next.is_enabled)
-            + AB::Expr::from(next.is_first);
+        // is_first flags imply is_enabled
+        builder
+            .when(local.is_first_layer)
+            .assert_one(local.is_enabled);
+        builder.when(local.is_first).assert_one(local.is_enabled);
 
-        // layer_idx starts at 0 on the first row of each layer (is_first=1)
-            let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
+        // First trace row: is_first_layer=1 and proof_idx=0 if enabled
+        builder
+            .when_first_row()
+            .when(local.is_enabled)
+            .assert_one(local.is_first_layer);
+        builder
+            .when_first_row()
+            .when(local.is_enabled)
+            .assert_zero(local.proof_idx);
 
-            // idx and layer_idx stay fixed within a layer.
-            builder
-                .when(is_within_layer.clone())
-                .assert_eq(next.idx, local.idx);
-            builder
-                .when(is_within_layer.clone())
-                .assert_eq(next.layer_idx, local.layer_idx);
+        // is_first_layer implies is_first and idx=0
+        builder
+            .when(local.is_first_layer)
+            .assert_one(local.is_first);
+        builder
+            .when(local.is_first_layer)
+            .assert_zero(local.idx);
 
-            // When the next row starts a later layer within the same record, idx stays fixed
-            // and layer_idx increments by 1. If next.layer_idx == 0, this is a new record boundary
-            // and the next row is constrained by its own bus input instead.
-            builder
-                .when(at_layer_boundary.clone() * local.is_enabled * next.is_enabled * next.layer_idx)
-                .assert_eq(next.idx, local.idx);
-            builder
-                .when(at_layer_boundary.clone() * local.is_enabled * next.is_enabled * next.layer_idx)
-                .assert_eq(next.layer_idx, local.layer_idx + AB::Expr::ONE);
+        // proof_idx transitions: can stay same or increment by 1
+        let proof_diff: AB::Expr = next.proof_idx - local.proof_idx;
+        builder
+            .when_transition()
+            .when(next.is_enabled)
+            .assert_bool(proof_diff.clone());
+        // When proof_idx changes: next.is_first_layer must be 1
+        builder
+            .when_transition()
+            .when(next.is_enabled * proof_diff.clone())
+            .assert_one(next.is_first_layer);
+        // When proof_idx unchanged: next.is_first_layer must be 0
+        builder
+            .when_transition()
+            .when(next.is_enabled * (AB::Expr::ONE - proof_diff))
+            .assert_zero(next.is_first_layer);
 
-        // index_id resets to 0 on the first row of each layer
+        // idx transitions within same proof (non-proof-boundary)
+        let idx_diff: AB::Expr = next.idx - local.idx;
+        builder
+            .when_transition()
+            .when(next.is_enabled * (AB::Expr::ONE - next.is_first_layer))
+            .assert_bool(idx_diff.clone());
+        // When idx changes: next.is_first must be 1
+        builder
+            .when_transition()
+            .when(
+                next.is_enabled
+                    * (AB::Expr::ONE - next.is_first_layer)
+                    * idx_diff,
+            )
+            .assert_one(next.is_first);
+        // NOTE: We do NOT constrain is_first=0 when idx stays the same.
+        // Within the same idx (chip), is_first=1 marks GKR layer boundaries.
+
+        ///////////////////////////////////////////////////////////////////////
+        // Derived flags
+        ///////////////////////////////////////////////////////////////////////
+
+        // is_within_layer: next row continues the same GKR layer
+        let is_within_layer: AB::Expr = next.is_enabled - next.is_first;
+        // is_layer_end: current row is the last of its GKR layer
+        let is_layer_end: AB::Expr =
+            local.is_enabled - next.is_enabled + next.is_first;
+        let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
+
+        ///////////////////////////////////////////////////////////////////////
+        // layer_idx: GKR layer index, constant within each layer
+        ///////////////////////////////////////////////////////////////////////
+
+        // Within the same layer: layer_idx stays constant
+        builder
+            .when(is_within_layer.clone())
+            .assert_eq(next.layer_idx, local.layer_idx);
+
+        ///////////////////////////////////////////////////////////////////////
+        // index_id: row counter within each GKR layer
+        ///////////////////////////////////////////////////////////////////////
+
         builder
             .when(local.is_first)
             .assert_zero(local.index_id.clone());
-        // index_id also resets on any is_first row
         builder
-            .when(local.is_enabled * next.is_enabled * next.is_first)
+            .when(local.is_enabled * next.is_enabled * next.is_first_layer)
             .assert_zero(next.index_id.clone());
-        // index_id increments within a layer
         builder
-            .when(is_not_dummy.clone() * is_within_layer.clone())
+            .when(is_within_layer.clone() * is_not_dummy.clone())
             .assert_eq(next.index_id, local.index_id + AB::Expr::ONE);
-        // last row of a layer: index_id + 1 == num_logup_count
         builder
-            .when(at_layer_boundary.clone() * is_not_dummy.clone())
+            .when(is_layer_end.clone() * is_not_dummy.clone())
             .assert_eq(
                 local.index_id + AB::Expr::ONE,
                 local.num_logup_count.clone(),
             );
-        let is_last_layer_row = at_layer_boundary;
 
         assert_zeros(
             &mut builder.when(local.is_first * is_not_dummy.clone()),
@@ -270,7 +307,7 @@ where
                 lambda_prime: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
             },
-            AB::Expr::from(local.is_first) * is_not_dummy.clone(),
+            local.is_first * is_not_dummy.clone(),
         );
 
         self.logup_claim_bus.send(
@@ -283,10 +320,20 @@ where
                 lambda_prime_claim: acc_q_with_cur.map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
-            is_last_layer_row * is_not_dummy.clone(),
+            is_layer_end * is_not_dummy.clone(),
         );
 
-        let _ = &self.transcript_bus;
+        let mut tidx = local.tidx.into();
+        for claim in [local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1] {
+            self.transcript_bus.observe_ext(
+                builder,
+                local.proof_idx,
+                tidx.clone(),
+                claim,
+                local.is_enabled * is_not_dummy.clone(),
+            );
+            tidx += AB::Expr::from_usize(D_EF);
+        }
     }
 }
 
