@@ -50,9 +50,7 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
         let mut trace = vec![F::ZERO; height * width];
         let mut rows = trace.chunks_exact_mut(width);
 
-        for (proof_idx, (proof, preflight)) in
-            proofs.iter().zip(preflights.iter()).enumerate()
-        {
+        for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
             let mut is_first_in_proof = true;
             let mut pvs_tidx_idx = 0usize;
 

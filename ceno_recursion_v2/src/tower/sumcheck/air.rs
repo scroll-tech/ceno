@@ -134,7 +134,7 @@ where
         builder.assert_bool(local.is_enabled);
         builder
             .when_transition()
-            .when_ne(local.is_enabled.clone(), AB::Expr::ONE)
+            .when_ne(local.is_enabled, AB::Expr::ONE)
             .assert_zero(next.is_enabled);
 
         // --- Boolean flags ---
@@ -191,9 +191,7 @@ where
 
         // --- idx: within proof, increments by 0 or 1 ---
         // On first row of proof: idx = 0
-        builder
-            .when(local.is_first_idx)
-            .assert_zero(local.idx);
+        builder.when(local.is_first_idx).assert_zero(local.idx);
         {
             // Transitions gated by same-proof continuation
             let is_within_proof: AB::Expr =
@@ -223,8 +221,7 @@ where
         {
             let is_within_chip: AB::Expr =
                 next.is_enabled.into() - AB::Expr::from(next.is_first_layer);
-            let layer_diff: AB::Expr =
-                next.layer_idx.into() - AB::Expr::from(local.layer_idx);
+            let layer_diff: AB::Expr = next.layer_idx.into() - AB::Expr::from(local.layer_idx);
             builder
                 .when(is_within_chip.clone())
                 .assert_bool(layer_diff.clone());
@@ -243,8 +240,7 @@ where
         // --- Derived transition flags (same semantics as NestedForLoop) ---
         let is_transition_round: AB::Expr =
             next.is_enabled.into() - AB::Expr::from(next.is_first_round);
-        let is_last_round: AB::Expr = local.is_enabled.into()
-            - AB::Expr::from(next.is_enabled)
+        let is_last_round: AB::Expr = local.is_enabled.into() - AB::Expr::from(next.is_enabled)
             + AB::Expr::from(next.is_first_round);
 
         // Sumcheck round flag starts at 0
@@ -339,7 +335,7 @@ where
             builder,
             local.proof_idx,
             TowerSumcheckChallengeMessage {
-                idx: local.idx.clone().into(),
+                idx: local.idx.into(),
                 layer_idx: local.layer_idx - AB::Expr::ONE,
                 sumcheck_round: local.round.into(),
                 challenge: local.prev_challenge.map(Into::into),

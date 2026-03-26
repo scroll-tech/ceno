@@ -37,6 +37,7 @@ pub(crate) trait RowMajorChip<F> {
     ) -> Option<RowMajorMatrix<F>>;
 }
 
+#[allow(dead_code)]
 pub(crate) struct StandardTracegenCtx<'a> {
     pub vk: &'a RecursionVk,
     pub proofs: &'a [RecursionProof],

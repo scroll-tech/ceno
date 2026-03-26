@@ -117,9 +117,7 @@ where
         builder
             .when(local.is_first_layer)
             .assert_one(local.is_first);
-        builder
-            .when(local.is_first_layer)
-            .assert_zero(local.idx);
+        builder.when(local.is_first_layer).assert_zero(local.idx);
 
         // proof_idx transitions: can stay same or increment by 1
         let proof_diff: AB::Expr = next.proof_idx - local.proof_idx;
@@ -147,11 +145,7 @@ where
         // When idx changes: next.is_first must be 1
         builder
             .when_transition()
-            .when(
-                next.is_enabled
-                    * (AB::Expr::ONE - next.is_first_layer)
-                    * idx_diff,
-            )
+            .when(next.is_enabled * (AB::Expr::ONE - next.is_first_layer) * idx_diff)
             .assert_one(next.is_first);
 
         ///////////////////////////////////////////////////////////////////////
@@ -161,8 +155,7 @@ where
         // is_within_layer: next row continues the same GKR layer
         let is_within_layer: AB::Expr = next.is_enabled - next.is_first;
         // is_layer_end: current row is the last of its GKR layer
-        let is_layer_end: AB::Expr =
-            local.is_enabled - next.is_enabled + next.is_first;
+        let is_layer_end: AB::Expr = local.is_enabled - next.is_enabled + next.is_first;
         let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
 
         ///////////////////////////////////////////////////////////////////////
@@ -176,10 +169,10 @@ where
 
         builder
             .when(local.is_first_layer)
-            .assert_zero(local.index_id.clone());
+            .assert_zero(local.index_id);
         builder
             .when(local.is_enabled * next.is_enabled * next.is_first_layer)
-            .assert_zero(next.index_id.clone());
+            .assert_zero(next.index_id);
         builder
             .when(is_within_layer.clone() * is_not_dummy.clone())
             .assert_eq(next.index_id, local.index_id + AB::Expr::ONE);
@@ -187,7 +180,7 @@ where
             .when(is_layer_end.clone() * is_not_dummy.clone())
             .assert_eq(
                 local.index_id + AB::Expr::ONE,
-                local.num_logup_count.clone(),
+                local.num_logup_count,
             );
 
         assert_zeros(

@@ -133,6 +133,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
     pub(crate) proof_shape: ProofShapeModule,
     pub(crate) main_module: MainModule,
     pub(crate) gkr: TowerModule,
+    #[allow(dead_code)]
     pub(crate) batch_constraint: BatchConstraintModule,
 }
 
@@ -142,6 +143,7 @@ enum TraceModuleRef<'a> {
     ProofShape(&'a ProofShapeModule),
     Main(&'a MainModule),
     Tower(&'a TowerModule),
+    #[allow(dead_code)]
     BatchConstraint(&'a BatchConstraintModule),
 }
 
@@ -477,7 +479,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
 
 fn peek_bus_idx(manager: &BusIndexManager) -> BusIndex {
     // SAFETY: BusIndexManager is currently a transparent wrapper around a single BusIndex field.
-    unsafe { mem::transmute::<BusIndexManager, BusIndex>(manager.clone()) }
+    unsafe { mem::transmute::<BusIndexManager, BusIndex>(*manager) }
 }
 
 impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<MAX_NUM_PROOFS> {

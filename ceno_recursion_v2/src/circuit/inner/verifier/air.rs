@@ -1,4 +1,4 @@
-use std::{array::from_fn, borrow::Borrow};
+use std::borrow::Borrow;
 
 use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
@@ -9,7 +9,7 @@ use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::{
     bus::{
-        CachedCommitBus, CachedCommitBusMessage, Poseidon2CompressBus, Poseidon2CompressMessage,
+        Poseidon2CompressBus, Poseidon2CompressMessage,
         PublicValuesBus, PublicValuesBusMessage,
     },
     prelude::DIGEST_SIZE,
@@ -17,12 +17,11 @@ use recursion_circuit::{
 };
 use stark_recursion_circuit_derive::AlignedBorrow;
 use verify_stark::pvs::{
-    CONSTRAINT_EVAL_AIR_ID, DagCommit, VERIFIER_PVS_AIR_ID, VerifierBasePvs, VerifierDefPvs,
+    DagCommit, VERIFIER_PVS_AIR_ID, VerifierBasePvs, VerifierDefPvs,
 };
 
 use crate::{
     circuit::{
-        CONSTRAINT_EVAL_CACHED_INDEX,
         inner::bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
     },
     utils::digests_to_poseidon2_input,

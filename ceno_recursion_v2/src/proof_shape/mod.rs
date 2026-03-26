@@ -5,8 +5,8 @@ use openvm_circuit_primitives::encoder::Encoder;
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
-    keygen::types::VerifierSinglePreprocessedData, prover::AirProvingContext,
-    p3_maybe_rayon::prelude::*,
+    keygen::types::VerifierSinglePreprocessedData, p3_maybe_rayon::prelude::*,
+    prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
     BabyBearPoseidon2Config, DIGEST_SIZE, Digest, F,
@@ -30,9 +30,8 @@ use crate::{
 use recursion_circuit::primitives::{
     bus::RangeCheckerBus,
     pow::PowerCheckerCpuTraceGenerator,
-    range::{RangeCheckerAir, RangeCheckerCols},
+    range::{RangeCheckerAir, RangeCheckerCols, RangeCheckerCpuTraceGenerator},
 };
-use recursion_circuit::primitives::range::RangeCheckerCpuTraceGenerator;
 
 pub mod bus;
 pub mod commit;
@@ -237,6 +236,7 @@ impl ProofShapeModule {
         let _ = child_vk;
     }
 
+    #[allow(dead_code)]
     fn placeholder_air_widths(&self) -> Vec<usize> {
         let proof_shape_width = proof_shape::ProofShapeCols::<u8, 4>::width()
             + self.idx_encoder.width()
@@ -414,6 +414,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     }
 }
 
+#[allow(dead_code)]
 fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
     height: usize,
     width: usize,
@@ -458,11 +459,11 @@ impl RowMajorChip<F> for ProofShapeModuleChip {
             ProofShapeModuleChip::Commit => {
                 let (_, proofs, preflights) = ctx;
                 let commit_ctx: (&[RecursionProof], &[Preflight]) = (*proofs, *preflights);
-                commit::CommitTraceGenerator
-                    .generate_trace(&commit_ctx, required_height)
+                commit::CommitTraceGenerator.generate_trace(&commit_ctx, required_height)
             }
-            ProofShapeModuleChip::PublicValues => pvs::PublicValuesTraceGenerator
-                .generate_trace(ctx, required_height),
+            ProofShapeModuleChip::PublicValues => {
+                pvs::PublicValuesTraceGenerator.generate_trace(ctx, required_height)
+            }
         }
     }
 }

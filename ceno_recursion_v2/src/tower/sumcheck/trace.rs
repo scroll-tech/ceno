@@ -219,8 +219,7 @@ impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
 
                         cols.round = F::from_usize(round_in_layer);
                         cols.is_first_round = F::from_bool(round_in_layer == 0);
-                        cols.is_first_layer =
-                            F::from_bool(layer_idx == 0 && round_in_layer == 0);
+                        cols.is_first_layer = F::from_bool(layer_idx == 0 && round_in_layer == 0);
                         cols.is_first_idx = F::from_bool(
                             layer_idx == 0 && round_in_layer == 0 && record.is_first_air_idx,
                         );

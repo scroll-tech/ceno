@@ -35,8 +35,9 @@ use crate::{
 pub const NUM_FLAGS: usize = 5;
 pub const ENCODER_MAX_DEGREE: u32 = 2;
 
-#[derive(Debug, Clone, Copy, EnumIter, EnumCount)]
+#[derive(Default, Debug, Clone, Copy, EnumIter, EnumCount)]
 pub enum NodeKind {
+    #[default]
     WitIn = 0,
     StructuralWitIn = 1,
     Fixed = 2,
@@ -52,12 +53,6 @@ pub enum NodeKind {
     InteractionMult = 12,
     InteractionMsgComp = 13,
     InteractionBusIndex = 14,
-}
-
-impl Default for NodeKind {
-    fn default() -> Self {
-        NodeKind::WitIn
-    }
 }
 
 #[derive(AlignedBorrow, Copy, Clone)]

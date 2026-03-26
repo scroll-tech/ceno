@@ -100,6 +100,7 @@ pub use bus::{
 pub mod input;
 pub mod layer;
 pub mod sumcheck;
+#[allow(clippy::module_inception)]
 mod tower;
 pub(crate) use tower::TowerReplayResult;
 pub struct TowerModule {
@@ -126,7 +127,7 @@ pub(crate) struct TowerTowerEvalRecord {
     pub(crate) logup_layers: Vec<Vec<[EF; 4]>>,
 }
 
-struct TowerBlobCpu {
+pub(crate) struct TowerBlobCpu {
     input_records: Vec<TowerInputRecord>,
     /// Per-proof q0 claims matching input_records (one per proof).
     proof_q0_claims: Vec<EF>,
@@ -285,15 +286,16 @@ fn accumulate_logup_claims(rows: &[[EF; 4]], lambda: EF, lambda_prime: EF, mu: E
     (acc_sum, acc_q)
 }
 
-fn circuit_vk_for_idx<'a>(
-    vk: &'a RecursionVk,
+fn circuit_vk_for_idx(
+    vk: &RecursionVk,
     chip_idx: usize,
-) -> Option<&'a VerifyingKey<RecursionField>> {
+) -> Option<&VerifyingKey<RecursionField>> {
     vk.circuit_index_to_name
         .get(&chip_idx)
         .and_then(|name| vk.circuit_vks.get(name))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_chip_records(
     proof_idx: usize,
     idx: usize,
@@ -346,6 +348,7 @@ fn build_chip_records(
     }
 
     for rounds in &chip_proof.tower_proof.logup_specs_eval {
+        #[allow(clippy::needless_range_loop)]
         for layer_idx in 0..layer_count {
             let mut quad = [EF::ZERO; 4];
             if let Some(values) = rounds.get(layer_idx) {
@@ -447,7 +450,7 @@ fn build_chip_records(
 
     let q0_claim = chip_proof
         .lk_out_evals
-        .get(0)
+        .first()
         .and_then(|evals| evals.get(2))
         .copied()
         .unwrap_or(EF::ZERO);
@@ -476,7 +479,8 @@ fn build_chip_records(
     for (layer_idx, data) in replay.layers.iter().enumerate() {
         if layer_idx < layer_record.eq_at_r_primes.len() {
             layer_record.eq_at_r_primes[layer_idx] = data.eq_at_r;
-            layer_record.lambdas[layer_idx] = schedule.lambdas.get(layer_idx).copied().unwrap_or(EF::ZERO);
+            layer_record.lambdas[layer_idx] =
+                schedule.lambdas.get(layer_idx).copied().unwrap_or(EF::ZERO);
             mus_record[layer_idx] = schedule.mus.get(layer_idx).copied().unwrap_or(EF::ZERO);
         }
         if layer_idx + 1 < layer_count {
@@ -665,67 +669,70 @@ pub(crate) fn build_gkr_blob(
         let mut sorted_pf_entries: Vec<_> = preflight.gkr.chips.iter().collect();
         sorted_pf_entries.sort_by_key(|entry| {
             (
-                sorted_idx_by_chip.get(&entry.chip_idx).copied().unwrap_or(usize::MAX),
+                sorted_idx_by_chip
+                    .get(&entry.chip_idx)
+                    .copied()
+                    .unwrap_or(usize::MAX),
                 entry.instance_idx,
             )
         });
         for (entry_idx, pf_entry) in sorted_pf_entries.into_iter().enumerate() {
             let chip_idx = pf_entry.chip_idx;
             let instance_idx = pf_entry.instance_idx;
-            let chip_instances = proof.chip_proofs.get(&chip_idx).ok_or_else(|| {
-                eyre::eyre!("missing chip proof instances for chip {chip_idx}")
-            })?;
+            let chip_instances = proof
+                .chip_proofs
+                .get(&chip_idx)
+                .ok_or_else(|| eyre::eyre!("missing chip proof instances for chip {chip_idx}"))?;
             let chip_proof = chip_instances.get(instance_idx).ok_or_else(|| {
                 eyre::eyre!("missing chip proof instance {instance_idx} for chip {chip_idx}")
             })?;
-                has_chip = true;
-                let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
-                let schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
+            has_chip = true;
+            let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
+            let schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
 
-                let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx).ok_or_else(|| {
-                    eyre::eyre!("missing circuit verifying key for index {chip_idx}")
-                })?;
-                // Use sequential index for NestedForLoop compatibility (idx must increment
-                // by 0 or 1 within each proof_idx group).
-                let idx = entry_idx;
-                println!(
-                    "processing chip name: {:?}",
-                    child_vk.circuit_index_to_name.get(&chip_idx)
-                );
-                let (
-                    chip_input_record,
-                    layer_record,
-                    tower_record,
-                    sumcheck_record,
-                    mus_record,
-                    q0_claim,
-                ) = build_chip_records(
-                    proof_idx,
-                    idx,
-                    entry_idx == 0,
-                    chip_proof,
-                    circuit_vk,
-                    &pf_entry.tower_replay,
-                    &schedule,
-                    pf_entry.tidx,
-                )?;
+            let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
+                .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_idx}"))?;
+            // Use sequential index for NestedForLoop compatibility (idx must increment
+            // by 0 or 1 within each proof_idx group).
+            let idx = entry_idx;
+            println!(
+                "processing chip name: {:?}",
+                child_vk.circuit_index_to_name.get(&chip_idx)
+            );
+            let (
+                chip_input_record,
+                layer_record,
+                tower_record,
+                sumcheck_record,
+                mus_record,
+                q0_claim,
+            ) = build_chip_records(
+                proof_idx,
+                idx,
+                entry_idx == 0,
+                chip_proof,
+                circuit_vk,
+                &pf_entry.tower_replay,
+                &schedule,
+                pf_entry.tidx,
+            )?;
 
-                // Capture first chip's alpha and q0 for the proof-level record
-                if entry_idx == 0 {
-                    first_chip_alpha = chip_input_record.alpha_logup;
-                    first_chip_q0 = q0_claim;
-                }
-                // Always update to latest chip for combined values
-                last_input_layer_claim = chip_input_record.input_layer_claim;
-                last_layer_output_lambda = chip_input_record.layer_output_lambda;
-                last_layer_output_mu = chip_input_record.layer_output_mu;
+            // Capture first chip's alpha and q0 for the proof-level record
+            if entry_idx == 0 {
+                first_chip_alpha = chip_input_record.alpha_logup;
+                first_chip_q0 = q0_claim;
+            }
+            // Always update to latest chip for combined values
+            last_input_layer_claim = chip_input_record.input_layer_claim;
+            last_layer_output_lambda = chip_input_record.layer_output_lambda;
+            last_layer_output_mu = chip_input_record.layer_output_mu;
 
-                // Per-chip records (not input_records)
-                layer_records.push(layer_record);
-                tower_records.push(tower_record);
-                sumcheck_records.push(sumcheck_record);
-                mus_records.push(mus_record);
-                q0_claims.push(q0_claim);
+            // Per-chip records (not input_records)
+            layer_records.push(layer_record);
+            tower_records.push(tower_record);
+            sumcheck_records.push(sumcheck_record);
+            mus_records.push(mus_record);
+            q0_claims.push(q0_claim);
         }
 
         // ONE input record per proof (matching ProofIdxSubAir constraint)
@@ -794,7 +801,7 @@ where
     let _beta_placeholder = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
     if let Some(q0) = chip_proof
         .lk_out_evals
-        .get(0)
+        .first()
         .and_then(|evals| evals.get(2))
     {
         ts.observe_ext(*q0);
@@ -821,15 +828,15 @@ where
         let lambda = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         lambdas.push(lambda);
 
-        if layer_idx + 1 < layer_count {
-            if let Some(round_msgs) = chip_proof.tower_proof.proofs.get(layer_idx) {
-                for msg in round_msgs {
-                    for eval in msg.evaluations.iter().take(3) {
-                        ts.observe_ext(*eval);
-                    }
-                    let ri = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-                    ris.push(ri);
+        if layer_idx + 1 < layer_count
+            && let Some(round_msgs) = chip_proof.tower_proof.proofs.get(layer_idx)
+        {
+            for msg in round_msgs {
+                for eval in msg.evaluations.iter().take(3) {
+                    ts.observe_ext(*eval);
                 }
+                let ri = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+                ris.push(ri);
             }
         }
 
@@ -927,8 +934,10 @@ impl RowMajorChip<F> for TowerModuleChip {
     ) -> Option<RowMajorMatrix<F>> {
         use TowerModuleChip::*;
         match self {
-            Input => TowerInputTraceGenerator
-                .generate_trace(&(&blob.input_records, &blob.proof_q0_claims), required_height),
+            Input => TowerInputTraceGenerator.generate_trace(
+                &(&blob.input_records, &blob.proof_q0_claims),
+                required_height,
+            ),
             Layer => TowerLayerTraceGenerator.generate_trace(
                 &(&blob.layer_records, &blob.mus_records, &blob.q0_claims),
                 required_height,

@@ -1,5 +1,5 @@
 use openvm_stark_sdk::config::baby_bear_poseidon2::{DIGEST_SIZE, F};
-use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_field::PrimeField32;
 
 pub const BN254_BYTES: usize = 32;
 

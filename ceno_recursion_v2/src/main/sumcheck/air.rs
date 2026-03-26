@@ -73,9 +73,9 @@ where
         let local: &MainSumcheckCols<AB::Var> = (*local_row).borrow();
         let next: &MainSumcheckCols<AB::Var> = (*next_row).borrow();
 
-        builder.assert_bool(local.is_dummy.clone());
-        builder.assert_bool(local.is_last_round.clone());
-        builder.assert_bool(local.is_first_round.clone());
+        builder.assert_bool(local.is_dummy);
+        builder.assert_bool(local.is_last_round);
+        builder.assert_bool(local.is_first_round);
 
         type LoopSubAir = NestedForLoopSubAir<2>;
         LoopSubAir {}.eval(
@@ -84,46 +84,46 @@ where
                 NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
                     counter: [local.proof_idx, local.idx],
-                    is_first: [local.is_first_idx, local.is_first_round.clone()],
+                    is_first: [local.is_first_idx, local.is_first_round],
                 }
                 .map_into(),
                 NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
                     counter: [next.proof_idx, next.idx],
-                    is_first: [next.is_first_idx, next.is_first_round.clone()],
+                    is_first: [next.is_first_idx, next.is_first_round],
                 }
                 .map_into(),
             ),
         );
 
         let is_transition_round =
-            LoopSubAir::local_is_transition(next.is_enabled, next.is_first_round.clone());
+            LoopSubAir::local_is_transition(next.is_enabled, next.is_first_round);
         let computed_is_last = LoopSubAir::local_is_last(
             local.is_enabled,
             next.is_enabled,
-            next.is_first_round.clone(),
+            next.is_first_round,
         );
 
         builder
-            .when(local.is_enabled.clone())
-            .assert_eq(local.is_last_round.clone(), computed_is_last.clone());
+            .when(local.is_enabled)
+            .assert_eq(local.is_last_round, computed_is_last.clone());
 
         builder
-            .when(local.is_first_round.clone())
+            .when(local.is_first_round)
             .assert_zero(local.round);
         builder
             .when(is_transition_round.clone())
-            .assert_eq(next.round, local.round.clone() + AB::Expr::ONE);
+            .assert_eq(next.round, local.round + AB::Expr::ONE);
 
         builder.when(is_transition_round.clone()).assert_eq(
             next.tidx,
-            local.tidx.clone().into() + AB::Expr::from_usize(4 * D_EF),
+            local.tidx.into() + AB::Expr::from_usize(4 * D_EF),
         );
 
-        assert_one_ext(&mut builder.when(local.is_first_round.clone()), local.eq_in);
+        assert_one_ext(&mut builder.when(local.is_first_round), local.eq_in);
         let eq_out = update_eq(local.eq_in, local.prev_challenge, local.challenge);
         assert_array_eq(
-            &mut builder.when(local.is_enabled.clone()),
+            &mut builder.when(local.is_enabled),
             local.eq_out,
             eq_out,
         );
@@ -143,10 +143,10 @@ where
             next.claim_in,
         );
 
-        let is_not_dummy = AB::Expr::ONE - local.is_dummy.clone();
+        let is_not_dummy = AB::Expr::ONE - local.is_dummy;
 
         let receive_mask =
-            local.is_enabled.clone() * local.is_first_round.clone() * is_not_dummy.clone();
+            local.is_enabled * local.is_first_round * is_not_dummy.clone();
         self.sumcheck_input_bus.receive(
             builder,
             local.proof_idx,
@@ -158,7 +158,7 @@ where
             receive_mask,
         );
 
-        let send_mask = local.is_enabled.clone() * local.is_last_round.clone() * is_not_dummy;
+        let send_mask = local.is_enabled * local.is_last_round * is_not_dummy;
         self.sumcheck_output_bus.send(
             builder,
             local.proof_idx,

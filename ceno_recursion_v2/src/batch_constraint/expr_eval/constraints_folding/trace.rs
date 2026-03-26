@@ -26,10 +26,12 @@ pub(crate) struct ConstraintsFoldingRecord {
 pub(crate) struct ConstraintsFoldingBlob {
     pub(crate) records: MultiProofVecVec<ConstraintsFoldingRecord>,
     // (n, value), n is before lift, can be negative
+    #[allow(dead_code)]
     pub(crate) folded_claims: MultiProofVecVec<(isize, EF)>,
 }
 
 impl ConstraintsFoldingBlob {
+    #[allow(dead_code)]
     pub fn new(
         child_vk: &RecursionVk,
         expr_evals: &MultiVecWithBounds<EF, 2>,
@@ -45,7 +47,7 @@ impl ConstraintsFoldingBlob {
                 .circuit_vks
                 .get(name)
                 .and_then(|vk| vk.cs.gkr_circuit.as_ref())
-                .and_then(|circuit| circuit.layers.get(0))
+                .and_then(|circuit| circuit.layers.first())
                 .map(|layer| layer.exprs.len())
                 .unwrap_or_default();
             if air_idx >= constraints.len() {
