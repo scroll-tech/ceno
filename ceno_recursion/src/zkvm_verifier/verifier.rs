@@ -587,12 +587,14 @@ fn split_input_opening_evals<C: Config>(
     let wit_end = Usize::from(num_witin);
     let fixed_end: Usize<C::N> = builder.eval(wit_end.clone() + Usize::from(num_fixed));
     let pi_end: Usize<C::N> = builder.eval(fixed_end.clone() + Usize::from(num_pi));
-    builder.assert_usize_eq(main_evals.len(), pi_end.clone());
+    // Native verifier accepts extra trailing evals; only the prefix is consumed here.
+    // Keep recursion semantics aligned by slicing the required prefix.
+    let eval_prefix = main_evals.slice(builder, Usize::from(0), pi_end.clone());
 
     (
-        main_evals.slice(builder, Usize::from(0), wit_end),
-        main_evals.slice(builder, Usize::from(num_witin), fixed_end),
-        main_evals.slice(builder, Usize::from(num_witin + num_fixed), pi_end),
+        eval_prefix.slice(builder, Usize::from(0), wit_end),
+        eval_prefix.slice(builder, Usize::from(num_witin), fixed_end),
+        eval_prefix.slice(builder, Usize::from(num_witin + num_fixed), pi_end),
     )
 }
 
