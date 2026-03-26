@@ -157,7 +157,7 @@ pub fn replay_tower_proof(
         let rt: Point<RecursionField> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
         let eq = eq_eval(&out_rt, &rt);
 
-        let expected = compute_expected_evaluation(
+        let _expected = compute_expected_evaluation(
             tower_proof,
             round,
             &alpha_pows,

@@ -256,23 +256,21 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             .map(|heights| heights.len())
             .unwrap_or(self.num_airs());
 
-        Some(
-            (0..air_count)
-                .map(|idx| {
-                    let height = required_heights
-                        .and_then(|heights| heights.get(idx).copied())
-                        .unwrap_or(1);
-                    if required_heights.is_some() && height < 2 {
-                        return None;
-                    }
-                    let width = widths.get(idx).copied().unwrap_or(1);
-                    let rows = height.max(2);
-                    let cols = width.max(1);
-                    let matrix = RowMajorMatrix::new(vec![F::ZERO; rows * cols], cols);
-                    Some(openvm_stark_backend::prover::AirProvingContext::simple_no_pis(matrix))
-                })
-                .collect::<Option<Vec<_>>>()?,
-        )
+        (0..air_count)
+            .map(|idx| {
+                let height = required_heights
+                    .and_then(|heights| heights.get(idx).copied())
+                    .unwrap_or(1);
+                if required_heights.is_some() && height < 2 {
+                    return None;
+                }
+                let width = widths.get(idx).copied().unwrap_or(1);
+                let rows = height.max(2);
+                let cols = width.max(1);
+                let matrix = RowMajorMatrix::new(vec![F::ZERO; rows * cols], cols);
+                Some(openvm_stark_backend::prover::AirProvingContext::simple_no_pis(matrix))
+            })
+            .collect::<Option<Vec<_>>>()
     }
 }
 

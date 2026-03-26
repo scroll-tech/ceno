@@ -14,11 +14,13 @@ use crate::{
     utils::MultiProofVecVec,
 };
 
+#[allow(dead_code)]
 pub struct ExpressionClaimBlob {
     // (n, value), n is before lift, can be negative
     claims: MultiProofVecVec<(isize, EF)>,
 }
 
+#[allow(dead_code)]
 pub fn generate_expression_claim_blob(
     cf_folded_claims: &MultiProofVecVec<(isize, EF)>,
     if_folded_claims: &MultiProofVecVec<(isize, EF)>,
@@ -32,8 +34,10 @@ pub fn generate_expression_claim_blob(
     ExpressionClaimBlob { claims }
 }
 
+#[allow(dead_code)]
 pub struct ExpressionClaimTraceGenerator;
 
+#[allow(dead_code)]
 pub(crate) struct ExpressionClaimCtx<'a> {
     pub blob: &'a ExpressionClaimBlob,
     pub proofs: &'a [&'a Proof<BabyBearPoseidon2Config>],

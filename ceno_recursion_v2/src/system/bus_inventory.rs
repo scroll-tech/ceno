@@ -82,7 +82,7 @@ impl BusInventory {
             poseidon2_permute_bus,
             poseidon2_compress_bus,
             merkle_verify_bus,
-            tower_module_bus: tower_module_bus,
+            tower_module_bus,
             expression_claim_n_max_bus,
             fraction_folder_input_bus,
             air_shape_bus,

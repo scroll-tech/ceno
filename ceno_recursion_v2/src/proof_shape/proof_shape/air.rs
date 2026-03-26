@@ -543,7 +543,7 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // LIFTED HEIGHTS LOOKUP + STACKING COMMITMENTS
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let raw_height = fold(
+        let _raw_height = fold(
             local.height_limbs.iter().enumerate(),
             AB::Expr::ZERO,
             |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),

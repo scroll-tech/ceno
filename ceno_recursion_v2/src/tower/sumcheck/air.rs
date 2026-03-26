@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 
-use openvm_circuit_primitives::{SubAir, utils::assert_array_eq};
+use openvm_circuit_primitives::utils::assert_array_eq;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
@@ -16,7 +16,6 @@ use crate::tower::bus::{
 };
 use recursion_circuit::{
     bus::{TranscriptBus, XiRandomnessBus, XiRandomnessMessage},
-    subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     utils::{
         assert_one_ext, ext_field_add, ext_field_multiply, ext_field_multiply_scalar,
         ext_field_one_minus, ext_field_subtract,
@@ -131,33 +130,118 @@ where
         // Proof Index and Loop Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        type LoopSubAir = NestedForLoopSubAir<3>;
-        LoopSubAir {}.eval(
-            builder,
-            (
-                NestedForLoopIoCols {
-                    is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.idx, local.layer_idx],
-                    is_first: [
-                        local.is_first_idx,
-                        local.is_first_layer,
-                        local.is_first_round,
-                    ],
-                }
-                .map_into(),
-                NestedForLoopIoCols {
-                    is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.idx, next.layer_idx],
-                    is_first: [next.is_first_idx, next.is_first_layer, next.is_first_round],
-                }
-                .map_into(),
-            ),
-        );
+        // --- is_enabled: boolean, monotone-descending ---
+        builder.assert_bool(local.is_enabled);
+        builder
+            .when_transition()
+            .when_ne(local.is_enabled, AB::Expr::ONE)
+            .assert_zero(next.is_enabled);
 
-        let is_transition_round =
-            LoopSubAir::local_is_transition(next.is_enabled, next.is_first_round);
-        let is_last_round =
-            LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first_round);
+        // --- Boolean flags ---
+        builder.assert_bool(local.is_first_idx);
+        builder.assert_bool(local.is_first_layer);
+        builder.assert_bool(local.is_first_round);
+        builder.assert_bool(next.is_first_idx);
+        builder.assert_bool(next.is_first_layer);
+        builder.assert_bool(next.is_first_round);
+
+        // --- is_first implications ---
+        // is_first_idx implies is_first_layer
+        builder
+            .when(local.is_first_idx)
+            .assert_one(local.is_first_layer);
+        // is_first_layer implies is_first_round
+        builder
+            .when(local.is_first_layer)
+            .assert_one(local.is_first_round);
+        // is_first flags only on enabled rows
+        builder
+            .when(local.is_first_idx)
+            .assert_one(local.is_enabled);
+        builder
+            .when(local.is_first_layer)
+            .assert_one(local.is_enabled);
+        builder
+            .when(local.is_first_round)
+            .assert_one(local.is_enabled);
+
+        // --- First row: must have is_first_idx set ---
+        builder
+            .when_first_row()
+            .when(local.is_enabled)
+            .assert_one(local.is_first_idx);
+
+        // --- proof_idx: non-negative integer, increments by 0 or 1 ---
+        builder
+            .when_first_row()
+            .when(local.is_enabled)
+            .assert_zero(local.proof_idx);
+        {
+            let proof_diff = next.proof_idx - local.proof_idx;
+            builder
+                .when_transition()
+                .when(next.is_enabled)
+                .assert_bool(proof_diff.clone());
+            builder
+                .when_transition()
+                .when(next.is_enabled)
+                .when(proof_diff)
+                .assert_one(next.is_first_idx);
+        }
+
+        // --- idx: within proof, increments by 0 or 1 ---
+        // On first row of proof: idx = 0
+        builder.when(local.is_first_idx).assert_zero(local.idx);
+        {
+            // Transitions gated by same-proof continuation
+            let is_within_proof: AB::Expr =
+                next.is_enabled.into() - AB::Expr::from(next.is_first_idx);
+            let idx_diff: AB::Expr = next.idx.into() - AB::Expr::from(local.idx);
+            builder
+                .when(is_within_proof.clone())
+                .assert_bool(idx_diff.clone());
+            // If idx changed, next.is_first_layer = 1
+            builder
+                .when(next.is_enabled)
+                .when(idx_diff.clone())
+                .assert_one(next.is_first_layer);
+            // If idx unchanged within proof, next.is_first_layer = 0
+            builder
+                .when(is_within_proof)
+                .when_ne(idx_diff, AB::Expr::ONE)
+                .assert_zero(next.is_first_layer);
+        }
+
+        // --- layer_idx: within chip scope, layer_idx is constant within
+        //     a GKR layer and increases at layer boundaries ---
+        //     (value correctness enforced by bus permutation)
+
+        // --- is_first_round: marks GKR layer boundaries within a chip ---
+        // Within a chip (is_first_layer=0): layer_idx must increment by 0 or 1
+        {
+            let is_within_chip: AB::Expr =
+                next.is_enabled.into() - AB::Expr::from(next.is_first_layer);
+            let layer_diff: AB::Expr = next.layer_idx.into() - AB::Expr::from(local.layer_idx);
+            builder
+                .when(is_within_chip.clone())
+                .assert_bool(layer_diff.clone());
+            // If layer_idx changed, is_first_round = 1
+            builder
+                .when(next.is_enabled)
+                .when(layer_diff.clone())
+                .assert_one(next.is_first_round);
+            // If layer_idx unchanged within chip, is_first_round = 0
+            builder
+                .when(is_within_chip)
+                .when_ne(layer_diff, AB::Expr::ONE)
+                .assert_zero(next.is_first_round);
+        }
+
+        // --- Derived transition flags (same semantics as NestedForLoop) ---
+        let is_transition_round: AB::Expr =
+            next.is_enabled.into() - AB::Expr::from(next.is_first_round);
+        let is_last_round: AB::Expr = local.is_enabled.into() - AB::Expr::from(next.is_enabled)
+            + AB::Expr::from(next.is_first_round);
 
         // Sumcheck round flag starts at 0
         builder.when(local.is_first_round).assert_zero(local.round);
@@ -251,7 +335,7 @@ where
             builder,
             local.proof_idx,
             TowerSumcheckChallengeMessage {
-                idx: local.idx.clone().into(),
+                idx: local.idx.into(),
                 layer_idx: local.layer_idx - AB::Expr::ONE,
                 sumcheck_round: local.round.into(),
                 challenge: local.prev_challenge.map(Into::into),

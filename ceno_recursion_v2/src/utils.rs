@@ -168,6 +168,12 @@ pub struct MultiProofVecVec<T> {
     bounds: Vec<usize>,
 }
 
+impl<T> Default for MultiProofVecVec<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> MultiProofVecVec<T> {
     pub fn new() -> Self {
         Self {
@@ -199,6 +205,10 @@ impl<T> MultiProofVecVec<T> {
         self.data.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     pub fn num_proofs(&self) -> usize {
         self.bounds.len() - 1
     }
@@ -217,6 +227,12 @@ impl<T> Index<usize> for MultiProofVecVec<T> {
 pub struct MultiVecWithBounds<T, const DIM_MINUS_ONE: usize> {
     pub data: Vec<T>,
     pub bounds: [Vec<usize>; DIM_MINUS_ONE],
+}
+
+impl<T, const DIM_MINUS_ONE: usize> Default for MultiVecWithBounds<T, DIM_MINUS_ONE> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T, const DIM_MINUS_ONE: usize> MultiVecWithBounds<T, DIM_MINUS_ONE> {
@@ -251,8 +267,8 @@ impl<T, const DIM_MINUS_ONE: usize> Index<[usize; DIM_MINUS_ONE]>
 
     fn index(&self, index: [usize; DIM_MINUS_ONE]) -> &Self::Output {
         let mut idx = 0;
-        for i in 0..DIM_MINUS_ONE {
-            idx += index[i];
+        for (i, &ix) in index.iter().enumerate().take(DIM_MINUS_ONE) {
+            idx += ix;
             if i < DIM_MINUS_ONE - 1 {
                 idx = self.bounds[i][idx];
             }

@@ -11,6 +11,8 @@ use crate::tracegen::RowMajorChip;
 #[derive(Default, Debug, Clone)]
 pub struct TowerSumcheckRecord {
     pub proof_idx: usize,
+    pub idx: usize,
+    pub is_first_air_idx: bool,
     pub tidx: usize,
     pub evals: Vec<[EF; 3]>,
     pub ris: Vec<EF>,
@@ -30,12 +32,12 @@ impl TowerSumcheckRecord {
     }
 
     #[inline]
-    fn layer_start_index(layer_idx: usize) -> usize {
+    pub fn layer_start_index(layer_idx: usize) -> usize {
         layer_idx * (layer_idx + 1) / 2
     }
 
     #[inline]
-    fn layer_rounds(layer_idx: usize) -> usize {
+    pub fn layer_rounds(layer_idx: usize) -> usize {
         layer_idx + 1
     }
 
@@ -46,7 +48,7 @@ impl TowerSumcheckRecord {
     }
 
     #[inline]
-    fn prev_challenge(layer_idx: usize, round_in_layer: usize, mus: &[EF], ris: &[EF]) -> EF {
+    pub fn prev_challenge(layer_idx: usize, round_in_layer: usize, mus: &[EF], ris: &[EF]) -> EF {
         if round_in_layer == 0 {
             mus[layer_idx]
         } else {
@@ -56,6 +58,20 @@ impl TowerSumcheckRecord {
             let offset = Self::layer_start_index(prev_layer) + (round_in_layer - 1);
             ris[offset]
         }
+    }
+
+    /// Compute the eq evaluation for a given sumcheck layer from ris and mus.
+    /// This produces the same eq_out value that the sumcheck trace generates.
+    pub fn compute_eq_for_layer(layer_idx: usize, mus: &[EF], ris: &[EF]) -> EF {
+        let rounds = Self::layer_rounds(layer_idx);
+        let start = Self::layer_start_index(layer_idx);
+        let mut eq = EF::ONE;
+        for round in 0..rounds {
+            let prev = Self::prev_challenge(layer_idx, round, mus, ris);
+            let challenge = ris[start + round];
+            eq *= prev * challenge + (EF::ONE - prev) * (EF::ONE - challenge);
+        }
+        eq
     }
 }
 
@@ -126,10 +142,10 @@ impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
                     cols.is_enabled = F::ONE;
                     cols.tidx = F::from_usize(D_EF);
                     cols.proof_idx = F::from_usize(record.proof_idx);
-                    cols.idx = F::ZERO;
+                    cols.idx = F::from_usize(record.idx);
                     cols.layer_idx = F::ONE;
                     cols.is_first_round = F::ONE;
-                    cols.is_first_idx = F::ONE;
+                    cols.is_first_idx = F::from_bool(record.is_first_air_idx);
                     cols.is_first_layer = F::ONE;
                     cols.is_last_layer = F::ONE;
                     cols.is_dummy = F::ONE;
@@ -196,16 +212,17 @@ impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
                             row_iter.next().unwrap().borrow_mut();
                         cols.is_enabled = F::ONE;
                         cols.proof_idx = F::from_usize(record.proof_idx);
-                        cols.idx = F::ZERO;
+                        cols.idx = F::from_usize(record.idx);
 
                         cols.layer_idx = F::from_usize(layer_idx_value);
                         cols.is_last_layer = F::from_bool(is_last_layer);
 
                         cols.round = F::from_usize(round_in_layer);
                         cols.is_first_round = F::from_bool(round_in_layer == 0);
-                        cols.is_first_layer = F::from_bool(round_in_layer == 0);
-                        cols.is_first_idx =
-                            F::from_bool(layer_idx_value == 1 && round_in_layer == 0);
+                        cols.is_first_layer = F::from_bool(layer_idx == 0 && round_in_layer == 0);
+                        cols.is_first_idx = F::from_bool(
+                            layer_idx == 0 && round_in_layer == 0 && record.is_first_air_idx,
+                        );
 
                         let tidx = record.derive_tidx(layer_idx, round_in_layer);
                         cols.tidx = F::from_usize(tidx);
