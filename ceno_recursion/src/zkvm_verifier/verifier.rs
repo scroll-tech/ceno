@@ -106,7 +106,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
     for (_, circuit_vk) in vk.circuit_vks.iter() {
         for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance_values.iter() {
-            let eval = builder.get(&zkvm_proof_input.pi_evals, instance_value.0);
+            let raw = builder.get(&zkvm_proof_input.raw_pi, instance_value.0);
+            let eval = builder.ext_from_base_slice(&[raw]);
             let eval_felts = builder.ext2felt(eval);
             challenger.observe_slice(builder, eval_felts);
         }
@@ -116,12 +117,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         |ptr_vec, builder| {
             let raw = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
             let eval = builder.iter_ptr_get(&zkvm_proof_input.pi_evals, ptr_vec[1]);
-            let raw0 = builder.get(&raw, 0);
-
-            builder.if_eq(raw.len(), Usize::from(1)).then(|builder| {
-                let raw0_ext = builder.ext_from_base_slice(&[raw0]);
-                builder.assert_ext_eq(raw0_ext, eval);
-            });
+            let raw_ext = builder.ext_from_base_slice(&[raw]);
+            builder.assert_ext_eq(raw_ext, eval);
         },
     );
 
@@ -277,14 +274,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 let mut chip_challenger = clone_challenger_state(builder, &challenger);
                 challenger_add_forked_index(builder, &mut chip_challenger, &forked_sample_index);
                 builder.assert_usize_eq(
-                    chip_proof.wits_in_evals.len(),
-                    Usize::from(circuit_vk.get_cs().num_witin()),
-                );
-                builder.assert_usize_eq(
-                    chip_proof.fixed_in_evals.len(),
-                    Usize::from(circuit_vk.get_cs().num_fixed()),
-                );
-                builder.assert_usize_eq(
                     chip_proof.rw_out_evals.length.clone(),
                     Usize::from(
                         (circuit_vk.get_cs().num_reads() + circuit_vk.get_cs().num_writes()) * 2,
@@ -339,8 +328,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     builder,
                     &mut chip_challenger,
                     &chip_proof,
-                    &zkvm_proof_input.pi_evals,
                     &zkvm_proof_input.raw_pi,
+                    &zkvm_proof_input.mles,
                     &zkvm_proof_input.raw_pi_num_variables,
                     &challenges,
                     chip_vk,
@@ -376,13 +365,20 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
                 let point_clone: Array<C, Ext<C::F, C::EF>> =
                     builder.eval(input_opening_point.clone());
+                let (wits_in_evals, fixed_in_evals, _pi_in_evals) = split_input_opening_evals(
+                    builder,
+                    &chip_proof,
+                    circuit_vk.get_cs().num_witin(),
+                    circuit_vk.get_cs().num_fixed(),
+                    circuit_vk.get_cs().instance_openings().len(),
+                );
 
                 if circuit_vk.get_cs().num_witin() > 0 {
                     let witin_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
                         num_var: input_opening_point.len().get_var(),
                         point_and_evals: PointAndEvalsVariable {
                             point: PointVariable { fs: point_clone },
-                            evals: chip_proof.wits_in_evals,
+                            evals: wits_in_evals,
                         },
                     });
                     builder.set_value(&witin_openings, num_witin_openings.get_var(), witin_round);
@@ -395,7 +391,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                             point: PointVariable {
                                 fs: input_opening_point,
                             },
-                            evals: chip_proof.fixed_in_evals,
+                            evals: fixed_in_evals,
                         },
                     });
 
@@ -559,13 +555,41 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     shard_ec_sum
 }
 
+fn split_input_opening_evals<C: Config>(
+    builder: &mut Builder<C>,
+    chip_proof: &ZKVMChipProofInputVariable<C>,
+    num_witin: usize,
+    num_fixed: usize,
+    num_pi: usize,
+) -> (
+    Array<C, Ext<C::F, C::EF>>,
+    Array<C, Ext<C::F, C::EF>>,
+    Array<C, Ext<C::F, C::EF>>,
+) {
+    let last_layer_idx: Usize<C::N> =
+        builder.eval(chip_proof.gkr_iop_proof.layer_proofs.len() - Usize::from(1));
+    let last_layer = builder.get(&chip_proof.gkr_iop_proof.layer_proofs, last_layer_idx);
+    let main_evals = last_layer.main.evals;
+
+    let wit_end = Usize::from(num_witin);
+    let fixed_end: Usize<C::N> = builder.eval(wit_end.clone() + Usize::from(num_fixed));
+    let pi_end: Usize<C::N> = builder.eval(fixed_end.clone() + Usize::from(num_pi));
+    builder.assert_usize_eq(main_evals.len(), pi_end.clone());
+
+    (
+        main_evals.slice(builder, Usize::from(0), wit_end),
+        main_evals.slice(builder, Usize::from(num_witin), fixed_end),
+        main_evals.slice(builder, Usize::from(num_witin + num_fixed), pi_end),
+    )
+}
+
 pub fn verify_chip_proof<C: Config>(
     circuit_name: &str,
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
     chip_proof: &ZKVMChipProofInputVariable<C>,
-    pi_evals: &Array<C, Ext<C::F, C::EF>>,
-    raw_pi: &Array<C, Array<C, Felt<C::F>>>,
+    raw_pi: &Array<C, Felt<C::F>>,
+    mles: &Array<C, Array<C, Felt<C::F>>>,
     raw_pi_num_variables: &Array<C, Var<C::N>>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     vk: &VerifyingKey<E>,
@@ -712,6 +736,13 @@ pub fn verify_chip_proof<C: Config>(
             builder.set(&q_slice, idx_vec[0], cpt);
         });
     let gkr_circuit = gkr_circuit.clone().unwrap();
+    let circuit_pi_evals: Array<C, Ext<C::F, C::EF>> =
+        builder.dyn_array(Usize::from(cs.instance_values.len()));
+    for (i, instance) in cs.instance_values.iter().enumerate() {
+        let raw = builder.get(raw_pi, instance.0);
+        let eval = builder.ext_from_base_slice(&[raw]);
+        builder.set(&circuit_pi_evals, i, eval);
+    }
 
     let zero_bit_decomps: Array<C, Felt<C::F>> = builder.dyn_array(32);
     let selector_ctxs: Vec<SelectorContextVariable<C>> = if cs.ec_final_sum.is_empty() {
@@ -810,11 +841,10 @@ pub fn verify_chip_proof<C: Config>(
         gkr_circuit,
         &chip_proof.gkr_iop_proof,
         challenges,
-        pi_evals,
-        raw_pi,
+        &circuit_pi_evals,
+        mles,
         raw_pi_num_variables,
         &out_evals,
-        chip_proof,
         selector_ctxs,
         unipoly_extrapolator,
         poly_evaluator,
@@ -832,10 +862,9 @@ pub fn verify_gkr_circuit<C: Config>(
     gkr_proof: &GKRProofVariable<C>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     pub_io_evals: &Array<C, Ext<C::F, C::EF>>,
-    raw_pi: &Array<C, Array<C, Felt<C::F>>>,
+    mles: &Array<C, Array<C, Felt<C::F>>>,
     raw_pi_num_variables: &Array<C, Var<C::N>>,
     claims: &Array<C, PointAndEvalVariable<C>>,
-    _chip_proof: &ZKVMChipProofInputVariable<C>,
     selector_ctxs: Vec<SelectorContextVariable<C>>,
     unipoly_extrapolator: &UniPolyExtrapolator<C>,
     poly_evaluator: &mut PolyEvaluator<C>,
@@ -1130,7 +1159,7 @@ pub fn verify_gkr_circuit<C: Config>(
         let pubio_offset = layer.n_witin + layer.n_fixed;
         for (index, instance) in layer.instance_openings.iter().enumerate() {
             let index: usize = pubio_offset + index;
-            let poly = builder.get(raw_pi, instance.0);
+            let poly = builder.get(mles, instance.0);
             let num_variable = builder.get(raw_pi_num_variables, instance.0);
             let in_point_slice = in_point.slice(builder, 0, num_variable);
             let expected_eval =
@@ -1138,6 +1167,7 @@ pub fn verify_gkr_circuit<C: Config>(
             let main_eval = builder.get(&main_evals, index);
             builder.assert_ext_eq(expected_eval, main_eval);
         }
+
 
         // TODO: we should store alpha_pows in a bigger array to avoid concatenating them
         let main_sumcheck_challenges_len: Usize<C::N> =

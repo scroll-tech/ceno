@@ -26,7 +26,7 @@ use gkr_iop::{
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, WitnessId, fmt,
-    mle::{ArcMultilinearExtension, IntoMLEs, MultilinearExtension},
+    mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
     utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
 };
@@ -40,7 +40,6 @@ use std::{
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
-    ops::Index,
     sync::OnceLock,
 };
 use strum::IntoEnumIterator;
@@ -964,17 +963,22 @@ Hints:
     ) where
         E: LkMultiplicityKey,
     {
-        let pub_io_evals = pi
-            .to_vec::<E>()
-            .into_iter()
-            .map(|v| Either::Right(E::from(*v.index(0))))
-            .collect_vec();
-        let pi_mles: Vec<ArcMultilinearExtension<E>> = pi
-            .to_vec::<E>()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec();
+        let all_pi_mles: Vec<ArcMultilinearExtension<E>> =
+            pi.mles::<E>().into_iter().map(|v| v.into()).collect_vec();
+        let get_circuit_pi_inputs = |circuit_cs: &ConstraintSystem<E>| {
+            let circuit_pub_io_evals = circuit_cs
+                .instance_values
+                .iter()
+                .map(|instance| Either::Right(pi.query_by_index::<E>(instance.0)))
+                .collect_vec();
+            let circuit_pi_mles = circuit_cs
+                .instance_openings
+                .iter()
+                .map(|instance| all_pi_mles[instance.0].clone())
+                .collect_vec();
+            (circuit_pub_io_evals, circuit_pi_mles)
+        };
+
         let mut rng = thread_rng();
         let challenges = [0u8; 2].map(|_| E::random(&mut rng));
 
@@ -1000,11 +1004,7 @@ Hints:
             let ComposedConstrainSystem {
                 zkvm_v1_css: cs, ..
             } = &composed_cs;
-            let pi_mles = cs
-                .instance_openings
-                .iter()
-                .map(|instance| pi_mles[instance.0].clone())
-                .collect_vec();
+            let (circuit_pub_io_evals, circuit_pi_mles) = get_circuit_pi_inputs(cs);
 
             // skip init table on non-first shard
             if composed_cs.with_omc_init_only() && !shard_ctx.is_first_shard() {
@@ -1061,8 +1061,8 @@ Hints:
                     &fixed,
                     &witness,
                     &structural_witness,
-                    &pi_mles,
-                    &pub_io_evals,
+                    &circuit_pi_mles,
+                    &circuit_pub_io_evals,
                     num_rows,
                     challenges,
                     lkm_from_assignments,
@@ -1093,8 +1093,8 @@ Hints:
                         &fixed,
                         &witness,
                         &structural_witness,
-                        &pi_mles,
-                        &pub_io_evals,
+                        &circuit_pi_mles,
+                        &circuit_pub_io_evals,
                         &challenges,
                     )
                     .get_ext_field_vec()
@@ -1108,8 +1108,8 @@ Hints:
                         &fixed,
                         &witness,
                         &structural_witness,
-                        &pi_mles,
-                        &pub_io_evals,
+                        &circuit_pi_mles,
+                        &circuit_pub_io_evals,
                         &challenges,
                     )
                     .get_ext_field_vec()
@@ -1162,11 +1162,7 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
-                    let pi_mles = cs
-                        .instance_openings
-                        .iter()
-                        .map(|instance| pi_mles[instance.0].clone())
-                        .collect_vec();
+                    let (circuit_pub_io_evals, circuit_pi_mles) = get_circuit_pi_inputs(cs);
 
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
@@ -1204,8 +1200,8 @@ Hints:
                             fixed,
                             witness,
                             structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
+                            &circuit_pi_mles,
+                            &circuit_pub_io_evals,
                             &challenges,
                         );
                         let ram_type_vec = ram_type_mle.get_ext_field_vec();
@@ -1217,8 +1213,8 @@ Hints:
                             fixed,
                             witness,
                             structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
+                            &circuit_pi_mles,
+                            &circuit_pub_io_evals,
                             &challenges,
                         );
                         let w_selector_vec = w_selector.get_base_field_vec();
@@ -1268,11 +1264,7 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
-                    let pi_mles = cs
-                        .instance_openings
-                        .iter()
-                        .map(|instance| pi_mles[instance.0].clone())
-                        .collect_vec();
+                    let (circuit_pub_io_evals, circuit_pi_mles) = get_circuit_pi_inputs(cs);
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
                         continue;
@@ -1308,8 +1300,8 @@ Hints:
                             fixed,
                             witness,
                             structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
+                            &circuit_pi_mles,
+                            &circuit_pub_io_evals,
                             &challenges,
                         );
                         let ram_type_vec = ram_type_mle.get_ext_field_vec();
@@ -1321,8 +1313,8 @@ Hints:
                             fixed,
                             witness,
                             structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
+                            &circuit_pi_mles,
+                            &circuit_pub_io_evals,
                             &challenges,
                         );
                         let r_selector_vec = r_selector.get_base_field_vec();
@@ -1349,8 +1341,8 @@ Hints:
                                         fixed,
                                         witness,
                                         structural_witness,
-                                        &pi_mles,
-                                        &pub_io_evals,
+                                        &circuit_pi_mles,
+                                        &circuit_pub_io_evals,
                                         &challenges,
                                     );
                                     filter_mle_by_selector_mle(v, r_selector.clone())
@@ -1481,6 +1473,11 @@ Hints:
         let mut cb = CircuitBuilder::new(&mut cs);
         let gs_init = GlobalState::initial_global_state(&mut cb).unwrap();
         let gs_final = GlobalState::finalize_global_state(&mut cb).unwrap();
+        let gs_pub_io_evals = cs
+            .instance_values
+            .iter()
+            .map(|instance| pi.query_by_index::<E>(instance.0))
+            .collect_vec();
 
         let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
@@ -1489,10 +1486,7 @@ Hints:
                 &[],
                 &[],
                 &[],
-                &pub_io_evals
-                    .iter()
-                    .map(|v| v.right().unwrap())
-                    .collect_vec(),
+                &gs_pub_io_evals,
                 &challenges,
                 &gs_final,
             )
@@ -1504,10 +1498,7 @@ Hints:
                 &[],
                 &[],
                 &[],
-                &pub_io_evals
-                    .iter()
-                    .map(|v| v.right().unwrap())
-                    .collect_vec(),
+                &gs_pub_io_evals,
                 &challenges,
                 &gs_init,
             )

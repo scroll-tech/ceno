@@ -248,13 +248,12 @@ fn test_rw_lk_expression_combination() {
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
         }
-        verifier
+        let _ = verifier
             .verify_chip_proof(
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
-                &[],
-                &[],
+                &PublicValues::default(),
                 &mut v_transcript,
                 NUM_FANIN,
                 &PointAndEval::default(),
@@ -397,7 +396,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, vec![0], [0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(&shard_ctx, zkvm_witness, pi, transcript)

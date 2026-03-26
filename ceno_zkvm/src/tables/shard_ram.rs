@@ -754,6 +754,16 @@ mod tests {
             .map(|record| record.ec_point.point.clone())
             .sum();
 
+        let mut shard_rw_sum = [0u32; SEPTIC_EXTENSION_DEGREE * 2];
+        for (i, fe) in global_ec_sum
+            .x
+            .iter()
+            .chain(global_ec_sum.y.iter())
+            .enumerate()
+        {
+            shard_rw_sum[i] = fe.as_canonical_u32();
+        }
+
         let public_value = PublicValues::new(
             0,
             0,
@@ -766,12 +776,7 @@ mod tests {
             0,
             0,
             vec![0], // dummy
-            global_ec_sum
-                .x
-                .iter()
-                .chain(global_ec_sum.y.iter())
-                .map(|fe| fe.as_canonical_u32())
-                .collect_vec(),
+            shard_rw_sum,
         );
 
         // assign witness
@@ -807,18 +812,24 @@ mod tests {
         let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 
-        let pub_io_evals = public_value
-            .to_vec::<E>()
-            .into_iter()
-            .map(|v| Either::Right(E::from(*v.index(0))))
+        let pub_io_evals = pk
+            .get_cs()
+            .zkvm_v1_css
+            .instance_values
+            .iter()
+            .map(|instance| Either::Right(public_value.query_by_index::<E>(instance.0)))
             .collect_vec();
+        let pi_mles = public_value.mles::<E>();
 
         #[cfg(not(feature = "gpu"))]
         let (witness_mles, structural_mles, public_input_mles) = {
-            let public_input_mles = public_value
-                .to_vec::<E>()
-                .into_iter()
-                .map(|v| Arc::new(v.into_mle()))
+            let public_input_mles = pk
+                .get_cs()
+                .instance_openings()
+                .iter()
+                .map(|instance| {
+                    Arc::new(pi_mles[instance.0].clone())
+                })
                 .collect_vec();
             (
                 witness[0].to_mles().into_iter().map(Arc::new).collect(),
@@ -831,10 +842,12 @@ mod tests {
             let cuda_hal = get_cuda_hal().unwrap();
             let witness_cpu: Vec<_> = witness[0].to_mles();
             let structural_cpu: Vec<_> = witness[1].to_mles();
-            let public_cpu: Vec<_> = public_value
-                .to_vec::<E>()
+            let public_cpu: Vec<_> = pk
+                .get_cs()
+                .instance_openings()
+                .iter()
+                .map(|instance| pi_mles[instance.0].clone())
                 .into_iter()
-                .map(|v| v.into_mle())
                 .collect_vec();
             (
                 witness_cpu
@@ -882,17 +895,12 @@ mod tests {
 
         let mut transcript = BasicTranscript::new(b"global chip test");
         let verifier = ZKVMVerifier::new(zkvm_vk);
-        let pi_evals = public_input_mles
-            .iter()
-            .map(|mle| mle.evaluate(&point[..mle.num_vars()]))
-            .collect_vec();
-        let (vrf_point, _) = verifier
+        let (vrf_point, _, _, _) = verifier
             .verify_chip_proof(
                 "global",
                 &pk.vk,
                 &proof,
-                &pi_evals,
-                &public_value.to_vec::<E>(),
+                &public_value,
                 &mut transcript,
                 2,
                 &PointAndEval::default(),

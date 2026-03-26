@@ -290,11 +290,8 @@ pub fn prove_main_constraints_impl<
             },
         ]
     };
-    let pub_io_mles = cs
-        .instance_openings
-        .iter()
-        .map(|instance| input.public_input[instance.0].clone())
-        .collect_vec();
+    let pub_io_mles = input.public_input.clone();
+    debug_assert_eq!(pub_io_mles.len(), cs.instance_openings.len());
     let GKRProverOutput {
         gkr_proof,
         opening_evaluations,
@@ -339,6 +336,13 @@ pub fn prove_main_constraints_impl<
                 .iter()
                 .skip(cs.num_witin as usize)
                 .take(cs.num_fixed)
+                .map(|Evaluation { value, .. }| value)
+                .copied()
+                .collect_vec(),
+            pi_in_evals: opening_evaluations
+                .iter()
+                .skip(cs.num_witin + cs.num_fixed)
+                .take(cs.instance_openings.len())
                 .map(|Evaluation { value, .. }| value)
                 .copied()
                 .collect_vec(),

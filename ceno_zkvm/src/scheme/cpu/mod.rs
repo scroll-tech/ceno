@@ -842,11 +842,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let Some(gkr_circuit) = gkr_circuit else {
             panic!("empty gkr circuit")
         };
-        let pub_io_mles = cs
-            .instance_openings
-            .iter()
-            .map(|instance| input.public_input[instance.0].clone())
-            .collect_vec();
+        let pub_io_mles = input.public_input.clone();
+        debug_assert_eq!(pub_io_mles.len(), cs.instance_openings.len());
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
             // it's not global chip
             vec![
@@ -925,6 +922,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                     .iter()
                     .skip(cs.num_witin as usize)
                     .take(cs.num_fixed)
+                    .map(|Evaluation { value, .. }| value)
+                    .copied()
+                    .collect_vec(),
+                pi_in_evals: opening_evaluations
+                    .iter()
+                    .skip(cs.num_witin as usize + cs.num_fixed)
+                    .take(cs.instance_openings.len())
                     .map(|Evaluation { value, .. }| value)
                     .copied()
                     .collect_vec(),

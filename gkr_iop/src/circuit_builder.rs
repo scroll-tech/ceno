@@ -269,7 +269,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             "query same pubio idx {idx} value more than once",
         );
         self.instance_values.push(i);
-        Ok(i)
+        Ok(Instance(self.instance_values.len() - 1))
     }
 
     pub fn query_instance_for_openings(

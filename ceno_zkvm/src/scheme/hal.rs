@@ -154,6 +154,7 @@ pub trait TowerProver<PB: ProverBackend> {
 pub struct MainSumcheckEvals<E: ExtensionField> {
     pub wits_in_evals: Vec<E>,
     pub fixed_in_evals: Vec<E>,
+    pub pi_in_evals: Vec<E>,
 }
 
 pub trait MainSumcheckProver<PB: ProverBackend> {

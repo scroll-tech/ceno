@@ -77,7 +77,7 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         proof: LayerProof<E>,
         eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         pub_io_evals: &[E],
-        raw_pi: &[Vec<E::BaseField>],
+        instance_mles: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         selector_ctxs: &[SelectorContext],
@@ -228,7 +228,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         proof: LayerProof<E>,
         mut eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         pub_io_evals: &[E],
-        raw_pi: &[Vec<E::BaseField>],
+        instance_mles: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         selector_ctxs: &[SelectorContext],
@@ -386,12 +386,15 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             }
         }
 
-        // check pub-io
-        // assume public io is tiny vector, so we evaluate it directly without PCS
+        // check pub-io openings by evaluating the opened public-input MLEs.
         let pubio_offset = self.n_witin + self.n_fixed;
         for (index, instance) in self.instance_openings.iter().enumerate() {
             let index = pubio_offset + index;
-            let poly = raw_pi[instance.0].to_vec().into_mle();
+            let poly = instance_mles
+                .get(instance.0)
+                .expect("instance opening index out of bounds for instance_mles")
+                .clone()
+                .into_mle();
             let expected_eval = poly.evaluate(&in_point[..poly.num_vars()]);
             if expected_eval != main_evals[index] {
                 return Err(BackendError::LayerVerificationFailed(

@@ -19,7 +19,6 @@ use gkr_iop::hal::ProverBackend;
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
-use p3::field::FieldAlgebra;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
 use tracing::{error, level_filters::LevelFilter};
@@ -404,8 +403,7 @@ fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     // do sanity check
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![E::BaseField::ONE];
-    zkvm_proof.raw_pi[1] = vec![E::BaseField::ONE];
+    zkvm_proof.public_values.exit_code = 1;
 
     // capture panic message, if have
     let result = with_panic_hook(Box::new(|_info| ()), || {

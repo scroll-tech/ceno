@@ -3,6 +3,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
+use multilinear_extensions::mle::{IntoMLE, MultilinearExtension};
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -18,10 +19,15 @@ use crate::{
     instructions::{
         Instruction,
         riscv::{
-            constants::{LIMB_BITS, LIMB_MASK, UINT_LIMBS},
+            constants::{
+                END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
+                HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, LIMB_BITS,
+                LIMB_MASK, SHARD_ID_IDX, SHARD_RW_SUM_IDX, UINT_LIMBS,
+            },
             ecall::HaltInstruction,
         },
     },
+    scheme::constants::SEPTIC_EXTENSION_DEGREE,
     structs::{TowerProofs, ZKVMVerifyingKey},
 };
 
@@ -65,13 +71,10 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub ecc_proof: Option<EccQuarkProof<E>>,
 
     pub num_instances: Vec<usize>,
-
-    pub fixed_in_evals: Vec<E>,
-    pub wits_in_evals: Vec<E>,
 }
 
 /// each field will be interpret to (constant) polynomial
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct PublicValues {
     pub exit_code: u32,
     pub init_pc: u32,
@@ -84,7 +87,7 @@ pub struct PublicValues {
     pub hint_start_addr: u32,
     pub hint_shard_len: u32,
     pub public_io: Vec<u32>,
-    pub shard_rw_sum: Vec<u32>,
+    pub shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
 }
 
 impl PublicValues {
@@ -101,7 +104,7 @@ impl PublicValues {
         hint_start_addr: u32,
         hint_shard_len: u32,
         public_io: Vec<u32>,
-        shard_rw_sum: Vec<u32>,
+        shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
     ) -> Self {
         Self {
             exit_code,
@@ -118,45 +121,45 @@ impl PublicValues {
             shard_rw_sum,
         }
     }
-    pub fn to_vec<E: ExtensionField>(&self) -> Vec<Vec<E::BaseField>> {
-        vec![
-            vec![E::BaseField::from_canonical_u32(self.exit_code & 0xffff)],
-            vec![E::BaseField::from_canonical_u32(
-                (self.exit_code >> 16) & 0xffff,
-            )],
-            vec![E::BaseField::from_canonical_u32(self.init_pc)],
-            vec![E::BaseField::from_canonical_u64(self.init_cycle)],
-            vec![E::BaseField::from_canonical_u32(self.end_pc)],
-            vec![E::BaseField::from_canonical_u64(self.end_cycle)],
-            vec![E::BaseField::from_canonical_u32(self.shard_id)],
-            vec![E::BaseField::from_canonical_u32(self.heap_start_addr)],
-            vec![E::BaseField::from_canonical_u32(self.heap_shard_len)],
-            vec![E::BaseField::from_canonical_u32(self.hint_start_addr)],
-            vec![E::BaseField::from_canonical_u32(self.hint_shard_len)],
-        ]
-        .into_iter()
-        .chain(
-            // public io processed into UINT_LIMBS column
-            (0..UINT_LIMBS)
-                .map(|limb_index| {
-                    self.public_io
-                        .iter()
-                        .map(|value| {
-                            E::BaseField::from_canonical_u16(
-                                ((value >> (limb_index * LIMB_BITS)) & LIMB_MASK) as u16,
-                            )
-                        })
-                        .collect_vec()
-                })
-                .collect_vec(),
-        )
-        .chain(
-            self.shard_rw_sum
-                .iter()
-                .map(|value| vec![E::BaseField::from_canonical_u32(*value)])
-                .collect_vec(),
-        )
-        .collect::<Vec<_>>()
+    pub fn query_by_index<E: ExtensionField>(&self, index: usize) -> E {
+        match index {
+            EXIT_CODE_IDX => E::from_canonical_u32(self.exit_code & 0xffff),
+            idx if idx == EXIT_CODE_IDX + 1 => {
+                E::from_canonical_u32((self.exit_code >> 16) & 0xffff)
+            }
+            INIT_PC_IDX => E::from_canonical_u32(self.init_pc),
+            INIT_CYCLE_IDX => E::from_canonical_u64(self.init_cycle),
+            END_PC_IDX => E::from_canonical_u32(self.end_pc),
+            END_CYCLE_IDX => E::from_canonical_u64(self.end_cycle),
+            SHARD_ID_IDX => E::from_canonical_u32(self.shard_id),
+            HEAP_START_ADDR_IDX => E::from_canonical_u32(self.heap_start_addr),
+            HEAP_LENGTH_IDX => E::from_canonical_u32(self.heap_shard_len),
+            HINT_START_ADDR_IDX => E::from_canonical_u32(self.hint_start_addr),
+            HINT_LENGTH_IDX => E::from_canonical_u32(self.hint_shard_len),
+            idx if (SHARD_RW_SUM_IDX..(SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE * 2))
+                .contains(&idx) =>
+            {
+                E::from_canonical_u32(self.shard_rw_sum[idx - SHARD_RW_SUM_IDX])
+            }
+            _ => panic!("public value index {index} out of range"),
+        }
+    }
+
+    pub fn mles<E: ExtensionField>(&self) -> Vec<MultilinearExtension<'static, E>> {
+        // public_io is represented as UINT_LIMBS columns.
+        (0..UINT_LIMBS)
+            .map(|limb_index| {
+                self.public_io
+                    .iter()
+                    .map(|value| {
+                        E::BaseField::from_canonical_u16(
+                            ((value >> (limb_index * LIMB_BITS)) & LIMB_MASK) as u16,
+                        )
+                    })
+                    .collect_vec()
+                    .into_mle()
+            })
+            .collect_vec()
     }
 }
 
@@ -169,11 +172,7 @@ impl PublicValues {
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    // TODO preserve in serde only for auxiliary public input
-    // other raw value can be construct by verifier directly.
-    pub raw_pi: Vec<Vec<E::BaseField>>,
-    // the evaluation of raw_pi.
-    pub pi_evals: Vec<E>,
+    pub public_values: PublicValues,
     // each circuit may have multiple proof instances
     pub chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
     pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
@@ -182,40 +181,19 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
-        raw_pi: Vec<Vec<E::BaseField>>,
-        pi_evals: Vec<E>,
+        public_values: PublicValues,
         chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         opening_proof: PCS::Proof,
     ) -> Self {
         Self {
-            raw_pi,
-            pi_evals,
+            public_values,
             chip_proofs,
             witin_commit,
             opening_proof,
         }
     }
 
-    pub fn pi_evals(raw_pi: &[Vec<E::BaseField>]) -> Vec<E> {
-        raw_pi
-            .iter()
-            .map(|pv| {
-                if pv.len() == 1 {
-                    // this is constant poly, and always evaluate to same constant value
-                    E::from(pv[0])
-                } else {
-                    // set 0 as placeholder. will be evaluate lazily
-                    // Or the vector is empty, i.e. the constant 0 polynomial.
-                    E::ZERO
-                }
-            })
-            .collect_vec()
-    }
-
-    pub fn update_pi_eval(&mut self, idx: usize, v: E) {
-        self.pi_evals[idx] = v;
-    }
 
     pub fn num_circuits(&self) -> usize {
         self.chip_proofs.len()

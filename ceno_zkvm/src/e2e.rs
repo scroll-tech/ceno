@@ -1021,7 +1021,7 @@ pub fn emulate_program<'a>(
         platform.hints.start,
         hints_final.len() as u32,
         io_init.iter().map(|rec| rec.value).collect_vec(),
-        vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
+        [0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );
 
     #[cfg(debug_assertions)]
