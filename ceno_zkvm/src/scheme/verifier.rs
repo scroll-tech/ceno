@@ -52,6 +52,7 @@ pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
+    #[allow(clippy::type_complexity)]
     fn split_input_opening_evals(
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMChipProof<E>,

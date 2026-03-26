@@ -265,7 +265,7 @@ impl CenoAggregationProver {
             .collect();
         let user_public_values: Vec<F> = zkvm_proof_inputs
             .iter()
-            .flat_map(|p| p.raw_pi.iter().copied().collect::<Vec<F>>())
+            .flat_map(|p| p.raw_pi.to_vec())
             .collect();
         let leaf_inputs = chunk_ceno_leaf_proof_inputs(zkvm_proof_inputs);
 

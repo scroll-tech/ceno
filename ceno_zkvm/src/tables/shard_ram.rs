@@ -651,7 +651,7 @@ mod tests {
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
     use p3::babybear::BabyBear;
     use rand::thread_rng;
-    use std::{ops::Index, sync::Arc};
+    use std::sync::Arc;
     use tracing_forest::{ForestLayer, util::LevelFilter};
     use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
     use transcript::BasicTranscript;
@@ -670,7 +670,7 @@ mod tests {
         gpu::{MultilinearExtensionGpu, get_cuda_hal},
         hal::MultilinearPolynomial,
     };
-    use multilinear_extensions::mle::IntoMLE;
+    use crate::scheme::constants::SEPTIC_EXTENSION_DEGREE;
     use p3::field::PrimeField32;
 
     type E = BabyBearExt4;
