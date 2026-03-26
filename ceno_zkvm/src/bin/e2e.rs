@@ -426,7 +426,7 @@ fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
                 unreachable!()
             };
 
-            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+            if !msg.starts_with("assertion `left == right` failed") {
                 error!("unknown panic {msg:?}");
                 panic::resume_unwind(err);
             };
