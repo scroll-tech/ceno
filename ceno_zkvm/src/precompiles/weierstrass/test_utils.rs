@@ -71,7 +71,7 @@ fn gen_biguint<R: RngCore>(rng: &mut R, bits: u64) -> BigUint {
     if bits == 0 {
         return BigUint::from(0u8);
     }
-    let num_bytes = ((bits + 7) / 8) as usize;
+    let num_bytes = bits.div_ceil(8) as usize;
     let mut buf = vec![0u8; num_bytes];
     rng.fill_bytes(&mut buf);
     let excess_bits = (num_bytes as u64 * 8) - bits;
