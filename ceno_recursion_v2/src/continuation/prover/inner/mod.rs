@@ -29,6 +29,7 @@ use crate::{
 };
 
 pub use continuations_v2::prover::ChildVkKind;
+use continuations_v2::prover::debug_constraints;
 use openvm_stark_backend::prover::DeviceDataTransporter;
 
 pub use openvm_stark_backend::SystemParams;
