@@ -26,7 +26,10 @@ use crate::{
         SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable,
     },
 };
-use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
+use ceno_zkvm::{
+    instructions::riscv::constants::{END_CYCLE_IDX, END_PC_IDX, INIT_CYCLE_IDX, INIT_PC_IDX},
+    structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey},
+};
 use ff_ext::BabyBearExt4;
 
 use crate::transcript::{challenger_add_forked_index, clone_challenger_state};
@@ -107,9 +110,8 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     for (_, circuit_vk) in vk.circuit_vks.iter() {
         for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance_values.iter() {
             let raw = builder.get(&zkvm_proof_input.raw_pi, instance_value.0);
-            let eval = builder.ext_from_base_slice(&[raw]);
-            let eval_felts = builder.ext2felt(eval);
-            challenger.observe_slice(builder, eval_felts);
+            // Match native verifier transcript behavior: append base-field PI element directly.
+            challenger.observe(builder, raw);
         }
     }
 
@@ -521,6 +523,17 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         &unipoly_extrapolator,
         &mut challenger,
     );
+    // Global-state expressions are defined over compact/query-order PI slots.
+    // Keep this aligned with ceno_zkvm verifier: [init_pc, init_cycle, end_pc, end_cycle].
+    let global_state_pi_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(4);
+    [INIT_PC_IDX, INIT_CYCLE_IDX, END_PC_IDX, END_CYCLE_IDX]
+        .into_iter()
+        .enumerate()
+        .for_each(|(i, idx)| {
+            let raw = builder.get(&zkvm_proof_input.raw_pi, idx);
+            let eval = builder.ext_from_base_slice(&[raw]);
+            builder.set(&global_state_pi_evals, i, eval);
+        });
 
     let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
     let initial_global_state = eval_ceno_expr_with_instance(
@@ -528,7 +541,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         &empty_arr,
         &empty_arr,
         &empty_arr,
-        &zkvm_proof_input.pi_evals,
+        &global_state_pi_evals,
         &challenges,
         &vk.initial_global_state_expr,
     );
@@ -539,7 +552,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         &empty_arr,
         &empty_arr,
         &empty_arr,
-        &zkvm_proof_input.pi_evals,
+        &global_state_pi_evals,
         &challenges,
         &vk.finalize_global_state_expr,
     );
