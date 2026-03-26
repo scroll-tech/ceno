@@ -659,8 +659,8 @@ mod tests {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         scheme::{
-            PublicValues, create_backend, create_prover, hal::ProofInput, prover::ZKVMProver,
-            septic_curve::SepticPoint, verifier::ZKVMVerifier,
+            PublicValues, constants::SEPTIC_EXTENSION_DEGREE, create_backend, create_prover,
+            hal::ProofInput, prover::ZKVMProver, septic_curve::SepticPoint, verifier::ZKVMVerifier,
         },
         structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
         tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
@@ -670,7 +670,6 @@ mod tests {
         gpu::{MultilinearExtensionGpu, get_cuda_hal},
         hal::MultilinearPolynomial,
     };
-    use crate::scheme::constants::SEPTIC_EXTENSION_DEGREE;
     use p3::field::PrimeField32;
 
     type E = BabyBearExt4;
@@ -817,7 +816,7 @@ mod tests {
             .zkvm_v1_css
             .instance_values
             .iter()
-            .map(|instance| Either::Right(public_value.query_by_index::<E>(instance.0)))
+            .map(|instance| Either::Right(E::from(public_value.query_by_index::<E>(instance.0))))
             .collect_vec();
         let pi_mles = public_value.mles::<E>();
 
@@ -827,9 +826,7 @@ mod tests {
                 .get_cs()
                 .instance_openings()
                 .iter()
-                .map(|instance| {
-                    Arc::new(pi_mles[instance.0].clone())
-                })
+                .map(|instance| Arc::new(pi_mles[instance.0].clone()))
                 .collect_vec();
             (
                 witness[0].to_mles().into_iter().map(Arc::new).collect(),

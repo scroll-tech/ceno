@@ -121,25 +121,25 @@ impl PublicValues {
             shard_rw_sum,
         }
     }
-    pub fn query_by_index<E: ExtensionField>(&self, index: usize) -> E {
+    pub fn query_by_index<E: ExtensionField>(&self, index: usize) -> E::BaseField {
         match index {
-            EXIT_CODE_IDX => E::from_canonical_u32(self.exit_code & 0xffff),
+            EXIT_CODE_IDX => E::BaseField::from_canonical_u32(self.exit_code & 0xffff),
             idx if idx == EXIT_CODE_IDX + 1 => {
-                E::from_canonical_u32((self.exit_code >> 16) & 0xffff)
+                E::BaseField::from_canonical_u32((self.exit_code >> 16) & 0xffff)
             }
-            INIT_PC_IDX => E::from_canonical_u32(self.init_pc),
-            INIT_CYCLE_IDX => E::from_canonical_u64(self.init_cycle),
-            END_PC_IDX => E::from_canonical_u32(self.end_pc),
-            END_CYCLE_IDX => E::from_canonical_u64(self.end_cycle),
-            SHARD_ID_IDX => E::from_canonical_u32(self.shard_id),
-            HEAP_START_ADDR_IDX => E::from_canonical_u32(self.heap_start_addr),
-            HEAP_LENGTH_IDX => E::from_canonical_u32(self.heap_shard_len),
-            HINT_START_ADDR_IDX => E::from_canonical_u32(self.hint_start_addr),
-            HINT_LENGTH_IDX => E::from_canonical_u32(self.hint_shard_len),
+            INIT_PC_IDX => E::BaseField::from_canonical_u32(self.init_pc),
+            INIT_CYCLE_IDX => E::BaseField::from_canonical_u64(self.init_cycle),
+            END_PC_IDX => E::BaseField::from_canonical_u32(self.end_pc),
+            END_CYCLE_IDX => E::BaseField::from_canonical_u64(self.end_cycle),
+            SHARD_ID_IDX => E::BaseField::from_canonical_u32(self.shard_id),
+            HEAP_START_ADDR_IDX => E::BaseField::from_canonical_u32(self.heap_start_addr),
+            HEAP_LENGTH_IDX => E::BaseField::from_canonical_u32(self.heap_shard_len),
+            HINT_START_ADDR_IDX => E::BaseField::from_canonical_u32(self.hint_start_addr),
+            HINT_LENGTH_IDX => E::BaseField::from_canonical_u32(self.hint_shard_len),
             idx if (SHARD_RW_SUM_IDX..(SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE * 2))
                 .contains(&idx) =>
             {
-                E::from_canonical_u32(self.shard_rw_sum[idx - SHARD_RW_SUM_IDX])
+                E::BaseField::from_canonical_u32(self.shard_rw_sum[idx - SHARD_RW_SUM_IDX])
             }
             _ => panic!("public value index {index} out of range"),
         }
@@ -149,15 +149,22 @@ impl PublicValues {
         // public_io is represented as UINT_LIMBS columns.
         (0..UINT_LIMBS)
             .map(|limb_index| {
-                self.public_io
+                let limb_values = self
+                    .public_io
                     .iter()
                     .map(|value| {
                         E::BaseField::from_canonical_u16(
                             ((value >> (limb_index * LIMB_BITS)) & LIMB_MASK) as u16,
                         )
                     })
-                    .collect_vec()
-                    .into_mle()
+                    .collect_vec();
+
+                // Empty public_io means a constant-zero public input column.
+                if limb_values.is_empty() {
+                    vec![E::BaseField::ZERO].into_mle()
+                } else {
+                    limb_values.into_mle()
+                }
             })
             .collect_vec()
     }
@@ -193,7 +200,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
             opening_proof,
         }
     }
-
 
     pub fn num_circuits(&self) -> usize {
         self.chip_proofs.len()

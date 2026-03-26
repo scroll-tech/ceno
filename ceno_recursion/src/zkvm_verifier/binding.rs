@@ -69,11 +69,13 @@ fn raw_pi_from_public_values(public_values: &ceno_zkvm::scheme::PublicValues) ->
 fn mles_from_public_values(public_values: &ceno_zkvm::scheme::PublicValues) -> Vec<Vec<F>> {
     (0..UINT_LIMBS)
         .map(|limb_index| {
-        public_values
-            .public_io
-            .iter()
-            .map(|value| F::from_canonical_u16(((value >> (limb_index * LIMB_BITS)) & LIMB_MASK) as u16))
-            .collect_vec()
+            public_values
+                .public_io
+                .iter()
+                .map(|value| {
+                    F::from_canonical_u16(((value >> (limb_index * LIMB_BITS)) & LIMB_MASK) as u16)
+                })
+                .collect_vec()
         })
         .collect_vec()
 }
@@ -710,7 +712,6 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
 
         stream.extend(n_inst_0_bit_decomps.write());
         stream.extend(n_inst_1_bit_decomps.write());
-
 
         stream
     }

@@ -12,7 +12,10 @@
 
 use crate::{
     error::ZKVMError,
-    scheme::{ZKVMChipProof, hal::MainSumcheckEvals, hal::ProofInput},
+    scheme::{
+        ZKVMChipProof,
+        hal::{MainSumcheckEvals, ProofInput},
+    },
     structs::ProvingKey,
 };
 use ff_ext::ExtensionField;

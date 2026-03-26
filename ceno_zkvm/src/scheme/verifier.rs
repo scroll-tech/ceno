@@ -1,5 +1,5 @@
 use either::Either;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 use std::{
     iter::{self, once, repeat_n},
     marker::PhantomData,
@@ -154,16 +154,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 // to satisfy initial reads for all prev_cycle = 0 < init_cycle
                 assert_eq!(
                     vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX),
-                    E::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
+                    E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
                 );
                 // check init_pc match prev end_pc
                 if let Some(prev_pc) = prev_pc {
-                    assert_eq!(vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX), prev_pc);
+                    assert_eq!(
+                       vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX),
+                        prev_pc
+                    );
                 } else {
                     // first chunk, check program entry
                     assert_eq!(
                         vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX),
-                        E::from_canonical_u32(self.vk.entry_pc)
+                        E::BaseField::from_canonical_u32(self.vk.entry_pc)
                     );
                 }
                 let end_pc = vm_proof.public_values.query_by_index::<E>(END_PC_IDX);
@@ -213,12 +216,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
 
-
         // Global-state expressions are built from compact instance IDs
         // (query order), not absolute public-value indices.
         let pi_evals = [INIT_PC_IDX, INIT_CYCLE_IDX, END_PC_IDX, END_CYCLE_IDX]
             .into_iter()
-            .map(|idx| vm_proof.public_values.query_by_index::<E>(idx))
+            .map(|idx| E::from(vm_proof.public_values.query_by_index::<E>(idx)))
             .collect_vec();
 
         // make sure circuit index of chip proofs are
@@ -239,8 +241,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // This must match prover and recursion verifier exactly.
         for (_, circuit_vk) in self.vk.circuit_vks.iter() {
             for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance_values.iter() {
-                let eval = vm_proof.public_values.query_by_index::<E>(instance_value.0);
-                transcript.append_field_element_ext(&eval);
+                transcript.append_field_element(
+                    &vm_proof.public_values.query_by_index::<E>(instance_value.0),
+                );
             }
         }
 
@@ -381,17 +384,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
                 logup_sum += chip_logup_sum;
             };
-            let (input_opening_point, chip_shard_ec_sum, wits_in_evals, fixed_in_evals) =
-                self.verify_chip_proof(
-                circuit_name,
-                circuit_vk,
-                proof,
-                &vm_proof.public_values,
-                transcript,
-                NUM_FANIN,
-                &point_eval,
-                &challenges,
-            )?;
+            let (input_opening_point, chip_shard_ec_sum, wits_in_evals, fixed_in_evals) = self
+                .verify_chip_proof(
+                    circuit_name,
+                    circuit_vk,
+                    proof,
+                    &vm_proof.public_values,
+                    transcript,
+                    NUM_FANIN,
+                    &point_eval,
+                    &challenges,
+                )?;
             if circuit_vk.get_cs().num_witin() > 0 {
                 witin_openings.push((
                     input_opening_point.len(),
@@ -694,7 +697,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let pi = cs
             .instance_values
             .iter()
-            .map(|instance| public_values.query_by_index::<E>(instance.0))
+            .map(|instance| E::from(public_values.query_by_index::<E>(instance.0)))
             .collect_vec();
         let (wits_in_evals, fixed_in_evals, _pi_in_evals) =
             Self::split_input_opening_evals(circuit_vk, proof)?;

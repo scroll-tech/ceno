@@ -1168,7 +1168,6 @@ pub fn verify_gkr_circuit<C: Config>(
             builder.assert_ext_eq(expected_eval, main_eval);
         }
 
-
         // TODO: we should store alpha_pows in a bigger array to avoid concatenating them
         let main_sumcheck_challenges_len: Usize<C::N> =
             builder.eval(alpha_pows.len() + Usize::from(2));

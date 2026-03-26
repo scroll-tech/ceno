@@ -3,11 +3,7 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
 };
-use std::{
-    collections::BTreeMap,
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 #[cfg(feature = "gpu")]
 use crate::scheme::gpu::estimate_chip_proof_memory;
@@ -157,10 +153,10 @@ impl<
             let span = entered_span!("commit_to_pi", profiling_1 = true);
             // Include transcript-visible public values in canonical circuit order.
             // The order must match verifier and recursion verifier exactly.
+            // TODO deal with vector-based public value to transcript
             for (_, circuit_pk) in self.pk.circuit_pks.iter() {
                 for instance_value in circuit_pk.get_cs().zkvm_v1_css.instance_values.iter() {
-                    let eval = pi.query_by_index::<E>(instance_value.0);
-                    transcript.append_field_element_ext(&eval);
+                    transcript.append_field_element(&pi.query_by_index::<E>(instance_value.0));
                 }
             }
 
@@ -328,12 +324,7 @@ impl<
             });
             exit_span!(pcs_opening);
 
-            let vm_proof = ZKVMProof::new(
-                pi,
-                chip_proofs,
-                witin_commit,
-                mpcs_opening_proof,
-            );
+            let vm_proof = ZKVMProof::new(pi, chip_proofs, witin_commit, mpcs_opening_proof);
 
             Ok(vm_proof)
         })
@@ -630,7 +621,10 @@ impl<
                 .instance_openings()
                 .iter()
                 .map(|Instance(idx)| {
-                    debug_assert!(*idx < UINT_LIMBS, "instance_opening index {idx} out of range");
+                    debug_assert!(
+                        *idx < UINT_LIMBS,
+                        "instance_opening index {idx} out of range"
+                    );
                     public_input[*idx].clone()
                 })
                 .collect_vec();
@@ -639,7 +633,7 @@ impl<
                 .zkvm_v1_css
                 .instance_values
                 .iter()
-                .map(|Instance(idx)| Either::Right(pi.query_by_index::<E>(*idx)))
+                .map(|Instance(idx)| Either::Left(pi.query_by_index::<E>(*idx)))
                 .collect_vec();
 
             let input_temp: ProofInput<'_, PB> = ProofInput {

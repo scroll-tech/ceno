@@ -969,7 +969,7 @@ Hints:
             let circuit_pub_io_evals = circuit_cs
                 .instance_values
                 .iter()
-                .map(|instance| Either::Right(pi.query_by_index::<E>(instance.0)))
+                .map(|instance| Either::Right(E::from(pi.query_by_index::<E>(instance.0))))
                 .collect_vec();
             let circuit_pi_mles = circuit_cs
                 .instance_openings
@@ -1476,34 +1476,20 @@ Hints:
         let gs_pub_io_evals = cs
             .instance_values
             .iter()
-            .map(|instance| pi.query_by_index::<E>(instance.0))
+            .map(|instance| E::from(pi.query_by_index::<E>(instance.0)))
             .collect_vec();
 
         let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
         gs_rs.insert(
-            eval_by_expr_with_instance(
-                &[],
-                &[],
-                &[],
-                &gs_pub_io_evals,
-                &challenges,
-                &gs_final,
-            )
-            .right()
-            .unwrap(),
+            eval_by_expr_with_instance(&[], &[], &[], &gs_pub_io_evals, &challenges, &gs_final)
+                .right()
+                .unwrap(),
         );
         gs_ws.insert(
-            eval_by_expr_with_instance(
-                &[],
-                &[],
-                &[],
-                &gs_pub_io_evals,
-                &challenges,
-                &gs_init,
-            )
-            .right()
-            .unwrap(),
+            eval_by_expr_with_instance(&[], &[], &[], &gs_pub_io_evals, &challenges, &gs_init)
+                .right()
+                .unwrap(),
         );
 
         // gs stores { (pc, timestamp) }
