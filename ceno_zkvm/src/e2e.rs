@@ -1397,12 +1397,19 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 }
             }
 
-            #[cfg(feature = "gpu")]
-            let debug_compare_e2e_shard =
-                crate::instructions::gpu::config::is_debug_compare_enabled();
-            #[cfg(not(feature = "gpu"))]
-            let debug_compare_e2e_shard = false;
-            let debug_shard_ctx_template = debug_compare_e2e_shard.then(|| shard_ctx.new_empty_like());
+            let debug_shard_ctx_for_gpu = {
+                #[cfg(feature = "gpu")]
+                if crate::instructions::gpu::config::is_debug_compare_enabled() {
+                    crate::instructions::gpu::utils::debug_compare::set_debug_compare_shard_id(
+                        shard_ctx.shard_id,
+                    );
+                    Some(shard_ctx.new_empty_like())
+                } else {
+                    None
+                }
+                #[cfg(not(feature = "gpu"))]
+                { None::<ShardContext<'static>> }
+            };
             info_span!("assign_opcode_circuits").in_scope(|| {
                 system_config
                     .config
@@ -1443,7 +1450,9 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 zkvm_witness.finalize_lk_multiplicities();
             });
 
-            if let Some(mut cpu_shard_ctx) = debug_shard_ctx_template {
+            // E2E shard-level debug: run all opcode circuits on CPU as baseline,
+            // compare aggregated results (all chips combined) against GPU.
+            if let Some(mut cpu_shard_ctx) = debug_shard_ctx_for_gpu {
                 let mut cpu_witness = ZKVMWitnesses::default();
                 let mut cpu_dispatch_ctx = system_config.inst_dispatch_builder.to_dispatch_ctx();
                 cpu_dispatch_ctx.begin_shard();
@@ -1998,6 +2007,11 @@ fn create_proofs_streaming<
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
 
+    #[cfg(feature = "gpu")]
+    if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        crate::instructions::gpu::utils::debug_compare::init_debug_compare_report();
+    }
+
     // Two pipeline modes:
     //
     // Default GPU backend (CENO_GPU_ENABLE_WITGEN unset):
@@ -2144,6 +2158,11 @@ fn create_proofs_streaming<
             cuda_hal.inner().synchronize().unwrap();
         });
     };
+
+    #[cfg(feature = "gpu")]
+    if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        crate::instructions::gpu::utils::debug_compare::assert_debug_compare_report();
+    }
 
     proofs
 }

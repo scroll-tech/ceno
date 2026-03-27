@@ -1,15 +1,17 @@
 /// Debug comparison functions for GPU witness generation.
 ///
 /// These functions compare GPU-produced results against CPU baselines
-/// to validate correctness. Activated by environment variables:
-/// All comparisons are activated by setting `CENO_GPU_DEBUG_COMPARE_WITGEN=1`.
-/// This enables: LK multiplicity, witness matrix, shardram records, and EC point comparison.
+/// to validate correctness. Activated by setting `CENO_GPU_DEBUG_COMPARE_WITGEN=1`.
+///
+/// All failures are collected into a thread-local [`DebugCompareReport`].
+/// Call [`init_debug_compare_report`] before the shard loop and
+/// [`assert_debug_compare_report`] after all proofs to panic if any mismatches.
 use ceno_emul::{StepIndex, StepRecord, WordAddr};
 use ceno_gpu::common::witgen::types::{GpuRamRecordSlot, GpuShardRamRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use p3::field::FieldAlgebra;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use witness::RowMajorMatrix;
 
 use crate::{
@@ -21,6 +23,110 @@ use crate::{
 };
 
 use crate::instructions::gpu::dispatch::{GpuWitgenKind, set_force_cpu_path};
+
+// ---------------------------------------------------------------------------
+// DebugCompareReport: collects failures across shards/chips, panics at the end
+// ---------------------------------------------------------------------------
+
+struct DebugCompareFailure {
+    shard_id: usize,
+    component: String,
+    check: String,
+    detail: String,
+}
+
+/// Accumulates debug comparison failures across the entire pipeline.
+pub struct DebugCompareReport {
+    failures: Vec<DebugCompareFailure>,
+}
+
+impl DebugCompareReport {
+    fn new() -> Self {
+        Self {
+            failures: Vec::new(),
+        }
+    }
+}
+
+thread_local! {
+    static DEBUG_COMPARE_REPORT: RefCell<Option<DebugCompareReport>> =
+        const { RefCell::new(None) };
+    static DEBUG_COMPARE_SHARD_ID: Cell<usize> = const { Cell::new(0) };
+}
+
+/// Initialize the debug compare report. Call before the shard loop.
+pub fn init_debug_compare_report() {
+    DEBUG_COMPARE_REPORT.with(|cell| {
+        *cell.borrow_mut() = Some(DebugCompareReport::new());
+    });
+}
+
+/// Set the current shard ID for subsequent `record_failure` calls.
+pub fn set_debug_compare_shard_id(shard_id: usize) {
+    DEBUG_COMPARE_SHARD_ID.with(|cell| cell.set(shard_id));
+}
+
+/// Record a comparison failure. Also logs via tracing::error.
+pub(crate) fn record_failure(component: &str, check: &str, detail: String) {
+    let shard_id = DEBUG_COMPARE_SHARD_ID.with(|cell| cell.get());
+    tracing::error!(
+        "[GPU debug] shard={} component={} check={}: {}",
+        shard_id,
+        component,
+        check,
+        detail
+    );
+    DEBUG_COMPARE_REPORT.with(|cell| {
+        if let Some(report) = cell.borrow_mut().as_mut() {
+            report.failures.push(DebugCompareFailure {
+                shard_id,
+                component: component.to_string(),
+                check: check.to_string(),
+                detail,
+            });
+        }
+    });
+}
+
+/// Assert no failures were recorded. Call after all proofs are done.
+/// Panics with a summary table if any mismatches were found.
+pub fn assert_debug_compare_report() {
+    DEBUG_COMPARE_REPORT.with(|cell| {
+        let report = cell.borrow_mut().take();
+        let Some(report) = report else { return };
+        if report.failures.is_empty() {
+            tracing::info!("[GPU debug] all comparisons passed");
+            return;
+        }
+
+        eprintln!(
+            "\n=== GPU Debug Compare Report: {} failures ===\n",
+            report.failures.len()
+        );
+        eprintln!(
+            "{:<8} {:<30} {:<20} {}",
+            "Shard", "Component", "Check", "Detail"
+        );
+        eprintln!("{}", "-".repeat(100));
+        for f in &report.failures {
+            eprintln!(
+                "{:<8} {:<30} {:<20} {}",
+                f.shard_id, f.component, f.check, f.detail
+            );
+        }
+        eprintln!();
+        panic!(
+            "GPU debug compare: {} failures detected across {} shards",
+            report.failures.len(),
+            report
+                .failures
+                .iter()
+                .map(|f| f.shard_id)
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+        );
+    });
+}
 
 pub(crate) fn debug_compare_final_lk<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,
@@ -98,6 +204,12 @@ pub(crate) fn log_lk_diff(
 
     if total_diffs == 0 {
         tracing::info!("[GPU lk debug] kind={kind:?} CPU/GPU lookup multiplicities match");
+    } else {
+        record_failure(
+            &format!("{kind:?}"),
+            "lk_multiplicity",
+            format!("{total_diffs} diffs"),
+        );
     }
 }
 
@@ -152,9 +264,10 @@ pub(crate) fn debug_compare_witness<E: ExtensionField, I: Instruction<E>>(
             }
         }
     }
-    tracing::error!(
-        "[GPU witness debug] kind={kind:?} total_mismatches={}",
-        mismatches
+    record_failure(
+        &format!("{kind:?}"),
+        "witness",
+        format!("{mismatches} mismatches / {} elements", cpu_vals.len()),
     );
     Ok(())
 }
@@ -176,9 +289,12 @@ pub(crate) fn debug_compare_shardram<E: ExtensionField, I: Instruction<E>>(
     let mut mixed_ctx = shard_ctx.new_empty_like();
     let _ = cpu_collect_shardram::<E, I>(config, &mut mixed_ctx, shard_steps, step_indices)?;
 
+    let mut diffs = 0usize;
+
     let cpu_addr = cpu_ctx.get_addr_accessed();
     let mixed_addr = mixed_ctx.get_addr_accessed();
     if cpu_addr != mixed_addr {
+        diffs += 1;
         tracing::error!(
             "[GPU shard debug] kind={kind:?} addr_accessed cpu={} gpu={}",
             cpu_addr.len(),
@@ -189,13 +305,23 @@ pub(crate) fn debug_compare_shardram<E: ExtensionField, I: Instruction<E>>(
     let cpu_reads = flatten_ram_records(cpu_ctx.read_records());
     let mixed_reads = flatten_ram_records(mixed_ctx.read_records());
     if cpu_reads != mixed_reads {
+        diffs += 1;
         log_ram_record_diff(kind, "read_records", &cpu_reads, &mixed_reads);
     }
 
     let cpu_writes = flatten_ram_records(cpu_ctx.write_records());
     let mixed_writes = flatten_ram_records(mixed_ctx.write_records());
     if cpu_writes != mixed_writes {
+        diffs += 1;
         log_ram_record_diff(kind, "write_records", &cpu_writes, &mixed_writes);
+    }
+
+    if diffs > 0 {
+        record_failure(
+            &format!("{kind:?}"),
+            "shardram",
+            format!("{diffs} field(s) differ"),
+        );
     }
 
     Ok(())
@@ -239,7 +365,11 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
     // ========== Build CPU shard context (independent, isolated) ==========
     let mut cpu_ctx = shard_ctx.new_empty_like();
     if let Err(e) = cpu_collect_shardram::<E, I>(config, &mut cpu_ctx, shard_steps, step_indices) {
-        tracing::error!("[GPU EC debug] kind={kind:?} CPU shardram records failed: {e:?}");
+        record_failure(
+            &format!("{kind:?}"),
+            "shard_ec_cpu_baseline",
+            format!("CPU shardram failed: {e:?}"),
+        );
         return;
     }
 
@@ -553,8 +683,8 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
             cpu_addr.len()
         );
     } else {
-        tracing::error!(
-            "[GPU EC debug] kind={kind:?} MISMATCH: matched={matched} record_diffs={record_mismatches} \
+        let detail = format!(
+            "matched={matched} record_diffs={record_mismatches} \
              ec_diffs={ec_mismatches} gpu_dups={gpu_dup_count} addr_ok={addr_ok} \
              (cpu_records={} gpu_records={} cpu_addrs={} gpu_addrs={})",
             cpu_entries.len(),
@@ -562,6 +692,8 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
             cpu_addr.len(),
             gpu_addr.len()
         );
+        tracing::error!("[GPU EC debug] kind={kind:?} MISMATCH: {detail}");
+        record_failure(&format!("{kind:?}"), "shard_ec", detail);
     }
 }
 
@@ -732,10 +864,10 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
                 gpu_vals.len()
             );
         } else {
-            tracing::error!(
-                "[GPU keccak debug] witness mismatch: {} diffs out of {}",
-                diffs,
-                gpu_vals.len()
+            record_failure(
+                "Keccak",
+                "witness",
+                format!("{diffs} diffs / {} elements", gpu_vals.len()),
             );
         }
     }
@@ -779,10 +911,10 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
                 cpu_addr.len()
             );
         } else {
-            tracing::error!(
-                "[GPU keccak shard] addr_accessed diff: missing_from_gpu={} extra_in_gpu={}",
-                missing_from_gpu,
-                extra_in_gpu
+            record_failure(
+                "Keccak",
+                "addr_accessed",
+                format!("missing_from_gpu={missing_from_gpu} extra_in_gpu={extra_in_gpu}"),
             );
         }
     }
@@ -790,38 +922,42 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
     Ok(())
 }
 
-/// Compare ShardContext records between CPU and GPU paths (e2e shard-level debug).
+/// Compare aggregated ShardContext between CPU and GPU paths (e2e shard-level).
 pub(crate) fn log_shard_ctx_diff(kind: &str, cpu: &ShardContext, gpu: &ShardContext) {
     let cpu_addr = cpu.get_addr_accessed();
     let gpu_addr = gpu.get_addr_accessed();
     if cpu_addr != gpu_addr {
-        tracing::error!(
-            "[GPU e2e debug] {} addr_accessed cpu={} gpu={}",
+        record_failure(
             kind,
-            cpu_addr.len(),
-            gpu_addr.len()
+            "addr_accessed",
+            format!("cpu={} gpu={}", cpu_addr.len(), gpu_addr.len()),
         );
+    }
+
+    // Skip write_records/read_records comparison when GPU witgen is enabled:
+    // GPU path bypasses ShardContext records, using compact EC records instead.
+    // Per-chip correctness is verified by debug_compare_shard_ec.
+    if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+        return;
     }
 
     let cpu_reads = flatten_ram_records(cpu.read_records());
     let gpu_reads = flatten_ram_records(gpu.read_records());
     if cpu_reads != gpu_reads {
-        tracing::error!(
-            "[GPU e2e debug] {} read_records cpu={} gpu={}",
+        record_failure(
             kind,
-            cpu_reads.len(),
-            gpu_reads.len()
+            "read_records",
+            format!("cpu={} gpu={}", cpu_reads.len(), gpu_reads.len()),
         );
     }
 
     let cpu_writes = flatten_ram_records(cpu.write_records());
     let gpu_writes = flatten_ram_records(gpu.write_records());
     if cpu_writes != gpu_writes {
-        tracing::error!(
-            "[GPU e2e debug] {} write_records cpu={} gpu={}",
+        record_failure(
             kind,
-            cpu_writes.len(),
-            gpu_writes.len()
+            "write_records",
+            format!("cpu={} gpu={}", cpu_writes.len(), gpu_writes.len()),
         );
     }
 }
@@ -935,9 +1071,10 @@ pub(crate) fn log_combined_lk_diff<E: ExtensionField>(
             cpu_lk_keys.len()
         );
     } else {
-        tracing::error!(
-            "[GPU e2e debug] TOTAL LK DIFFS = {} (combined + per-chip)",
-            total_diffs
+        record_failure(
+            "e2e",
+            "combined_lk",
+            format!("{total_diffs} diffs (combined + per-chip)"),
         );
     }
 }
@@ -954,6 +1091,9 @@ pub(crate) fn debug_compare_shard_ram_witness<E: ExtensionField>(
 ) {
     use crate::tables::ShardRamCircuit;
 
+    // Force CPU path to avoid recursion:
+    // assign_instances → try_gpu → debug_compare → assign_instances → ...
+    set_force_cpu_path(true);
     let cpu_result = ShardRamCircuit::<E>::assign_instances(
         config,
         num_witin,
@@ -961,11 +1101,16 @@ pub(crate) fn debug_compare_shard_ram_witness<E: ExtensionField>(
         &[], // ShardRam doesn't use LK multiplicity
         steps,
     );
+    set_force_cpu_path(false);
 
     let cpu_witness = match cpu_result {
         Ok(w) => w,
         Err(e) => {
-            tracing::error!("[GPU shard_ram debug] CPU assign_instances failed: {e:?}");
+            record_failure(
+                "shard_ram",
+                "cpu_baseline",
+                format!("CPU assign_instances failed: {e:?}"),
+            );
             return;
         }
     };
@@ -1004,7 +1149,7 @@ pub(crate) fn debug_compare_shard_ram_witness_from_device<E: ExtensionField>(
     let raw_u32: Vec<u32> = match device_records.to_vec_n(total_u32s) {
         Ok(v) => v,
         Err(e) => {
-            tracing::error!("[GPU shard_ram debug] D2H device records failed: {e:?}");
+            record_failure("shard_ram_from_device", "d2h", format!("D2H failed: {e:?}"));
             return;
         }
     };
@@ -1017,15 +1162,17 @@ pub(crate) fn debug_compare_shard_ram_witness_from_device<E: ExtensionField>(
 
     // Verify counts match
     if writes.len() != num_local_writes {
-        tracing::error!(
-            "[GPU shard_ram debug] from_device: write count mismatch: gpu={} d2h={}",
-            num_local_writes,
-            writes.len()
+        record_failure(
+            "shard_ram_from_device",
+            "write_count",
+            format!("gpu={} d2h={}", num_local_writes, writes.len()),
         );
     }
 
     let steps: Vec<crate::tables::ShardRamInput<E>> = writes.into_iter().chain(reads).collect();
 
+    // Force CPU path to avoid recursion
+    set_force_cpu_path(true);
     let cpu_result = ShardRamCircuit::<E>::assign_instances(
         config,
         num_witin,
@@ -1033,12 +1180,15 @@ pub(crate) fn debug_compare_shard_ram_witness_from_device<E: ExtensionField>(
         &[], // ShardRam doesn't use LK multiplicity
         &steps,
     );
+    set_force_cpu_path(false);
 
     let cpu_witness = match cpu_result {
         Ok(w) => w,
         Err(e) => {
-            tracing::error!(
-                "[GPU shard_ram debug] from_device: CPU assign_instances failed: {e:?}"
+            record_failure(
+                "shard_ram_from_device",
+                "cpu_baseline",
+                format!("CPU assign_instances failed: {e:?}"),
             );
             return;
         }
@@ -1068,10 +1218,10 @@ fn compare_witness_matrices<E: ExtensionField>(
     let gpu_data = gpu.values();
     let cpu_data = cpu.values();
     if gpu_data.len() != cpu_data.len() {
-        tracing::error!(
-            "[GPU {label} debug] size mismatch: gpu={} cpu={}",
-            gpu_data.len(),
-            cpu_data.len()
+        record_failure(
+            label,
+            "witness_size",
+            format!("gpu={} cpu={}", gpu_data.len(), cpu_data.len()),
         );
         return;
     }
@@ -1090,9 +1240,10 @@ fn compare_witness_matrices<E: ExtensionField>(
         }
     }
     if mismatches > 0 {
-        tracing::error!(
-            "[GPU {label} debug] total mismatches: {mismatches} / {}",
-            gpu_data.len()
+        record_failure(
+            label,
+            "witness",
+            format!("{mismatches} mismatches / {} elements", gpu_data.len()),
         );
     } else {
         tracing::info!("[GPU {label} debug] match ({} elements)", gpu_data.len());

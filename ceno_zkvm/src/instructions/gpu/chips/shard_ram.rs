@@ -202,7 +202,9 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
 
     type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
 
-    if !crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+    if !crate::instructions::gpu::config::is_gpu_witgen_enabled()
+        || crate::instructions::gpu::dispatch::is_force_cpu_path()
+    {
         return Ok(None);
     }
 

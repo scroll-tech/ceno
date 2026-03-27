@@ -147,22 +147,26 @@ create_proofs_streaming()
 
 ### `CENO_GPU_DEBUG_COMPARE_WITGEN` Coverage
 
-When set, the following comparisons run automatically:
+When set, all failures are collected into a `DebugCompareReport` (thread-local).
+Detailed mismatches are logged via `tracing::error!` in real time; at pipeline end
+`assert_debug_compare_report()` prints a summary table and panics if any failures exist.
 
 **Per-chip (in dispatch.rs, for each opcode circuit):**
 - `debug_compare_final_lk` — GPU LK multiplicity vs CPU `assign_instance` baseline (all 8 lookup tables)
-- `debug_compare_witness` — GPU witness matrix vs CPU witness (element-by-element, col-major vs row-major)
+- `debug_compare_witness` — GPU witness matrix vs CPU witness (element-by-element)
 - `debug_compare_shardram` — GPU shard records (read_records, write_records, addr_accessed) vs CPU
 - `debug_compare_shard_ec` — GPU compact EC records vs CPU-computed EC points (nonce, x[7], y[7])
 
 **Per-chip, Keccak-specific (in chips/keccak.rs):**
 - `debug_compare_keccak` — Combined witness + LK + shard comparison for keccak's rotation-aware layout
 
-**Per-shard, E2E level (in e2e.rs):**
-- `log_shard_ctx_diff` — Full shard context comparison after all opcode circuits (addr_accessed, read/write records across all chips merged)
-- `log_combined_lk_diff` — Merged LK multiplicities after `finalize_lk_multiplicities()` (catches cross-chip merge issues)
+**ShardRamCircuit (in chips/shard_ram.rs):**
+- `debug_compare_shard_ram_witness` — GPU ShardRam witness vs CPU baseline (from ShardRamInput)
+- `debug_compare_shard_ram_witness_from_device` — GPU ShardRam witness vs CPU baseline (D2H device buffer → convert → CPU assign)
 
-All comparisons output to stderr via `eprintln!` / `tracing::error!`, with a default limit of 16 mismatches per category.
+**Per-shard, E2E level (in e2e.rs, all chips combined):**
+- `log_shard_ctx_diff` — Aggregated addr_accessed comparison (write/read_records skipped when GPU witgen enabled)
+- `log_combined_lk_diff` — Merged LK multiplicities after `finalize_lk_multiplicities()` (catches cross-chip merge issues)
 
 ## Tests
 
