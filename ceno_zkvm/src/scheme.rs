@@ -91,6 +91,38 @@ pub struct PublicValues {
 }
 
 impl PublicValues {
+    pub const fn flattened_len() -> usize {
+        PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS
+    }
+
+    pub fn iter_field<'a, Base: FieldAlgebra + 'a>(&'a self) -> impl Iterator<Item = Base> + 'a {
+        [
+            Base::from_canonical_u32(self.exit_code & 0xffff),
+            Base::from_canonical_u32((self.exit_code >> 16) & 0xffff),
+            Base::from_canonical_u32(self.init_pc),
+            Base::from_canonical_u64(self.init_cycle),
+            Base::from_canonical_u32(self.end_pc),
+            Base::from_canonical_u64(self.end_cycle),
+            Base::from_canonical_u32(self.shard_id),
+            Base::from_canonical_u32(self.heap_start_addr),
+            Base::from_canonical_u32(self.heap_shard_len),
+            Base::from_canonical_u32(self.hint_start_addr),
+            Base::from_canonical_u32(self.hint_shard_len),
+        ]
+        .into_iter()
+        .chain(
+            self.shard_rw_sum
+                .iter()
+                .map(|value| Base::from_canonical_u32(*value)),
+        )
+        .chain(self.public_io_digest.iter().flat_map(|word| {
+            [
+                Base::from_canonical_u32(word & 0xffff),
+                Base::from_canonical_u32((word >> 16) & 0xffff),
+            ]
+        }))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         exit_code: u32,

@@ -41,30 +41,6 @@ pub type E = BinomialExtensionField<F, 4>;
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
 pub type InnerConfig = AsmConfig<F, E>;
 
-fn pi_from_public_values(public_values: &ceno_zkvm::scheme::PublicValues) -> Vec<F> {
-    vec![
-        F::from_canonical_u32(public_values.exit_code & 0xffff),
-        F::from_canonical_u32((public_values.exit_code >> 16) & 0xffff),
-        F::from_canonical_u32(public_values.init_pc),
-        F::from_canonical_u64(public_values.init_cycle),
-        F::from_canonical_u32(public_values.end_pc),
-        F::from_canonical_u64(public_values.end_cycle),
-        F::from_canonical_u32(public_values.shard_id),
-        F::from_canonical_u32(public_values.heap_start_addr),
-        F::from_canonical_u32(public_values.heap_shard_len),
-        F::from_canonical_u32(public_values.hint_start_addr),
-        F::from_canonical_u32(public_values.hint_shard_len),
-    ]
-    .into_iter()
-    .chain(
-        public_values
-            .shard_rw_sum
-            .iter()
-            .map(|value| F::from_canonical_u32(*value)),
-    )
-    .collect_vec()
-}
-
 pub fn decompose_minus_one_bits(n: usize) -> Vec<F> {
     let a = if n > 0 { n - 1 } else { 0 };
     let mut bit_decomp: Vec<F> = vec![];
@@ -129,7 +105,7 @@ impl ZKVMProofInput {
         zkvm_proof: ZKVMProof<E, RecPcs>,
         vk: &ZKVMVerifyingKey<E, RecPcs>,
     ) -> Self {
-        let pi = pi_from_public_values(&zkvm_proof.public_values);
+        let pi = zkvm_proof.public_values.iter_field::<F>().collect_vec();
 
         let mut chip_witin_num_vars: HashMap<usize, (usize, usize)> = HashMap::new(); // (chip_id, (num_witin, num_fixed))
         let mut chip_indices = zkvm_proof

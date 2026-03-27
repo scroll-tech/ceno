@@ -34,7 +34,7 @@ use ff_ext::{Instrumented, PoseidonField};
 
 use super::{
     PublicValues,
-    constants::MAX_NUM_VARIABLES,
+    constants::{MAX_NUM_VARIABLES, SEPTIC_EXTENSION_DEGREE},
     prover::ZKVMProver,
     utils::infer_tower_product_witness,
     verifier::{TowerVerify, ZKVMVerifier},
@@ -51,6 +51,39 @@ use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
 use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use transcript::{BasicTranscript, Transcript};
+
+#[test]
+fn test_public_values_iter_field_matches_query_order() {
+    type E = GoldilocksExt2;
+
+    let public_values = PublicValues::new(
+        0xABCD_1234,
+        0x0800_0000,
+        123,
+        0x0800_1000,
+        456,
+        7,
+        0x3000_0000,
+        64,
+        0x2800_0000,
+        32,
+        [0, 1, 2, 3, 4, 5, 6, 7],
+        std::array::from_fn(|i| (i as u32) + 10),
+    );
+
+    let from_iter = public_values
+        .iter_field::<<E as ExtensionField>::BaseField>()
+        .collect_vec();
+    let from_query = (0..PublicValues::flattened_len())
+        .map(|i| public_values.query_by_index::<E>(i))
+        .collect_vec();
+
+    assert_eq!(
+        PublicValues::flattened_len(),
+        11 + SEPTIC_EXTENSION_DEGREE * 2 + 16
+    );
+    assert_eq!(from_iter, from_query);
+}
 
 struct TestConfig {
     pub(crate) reg_id: WitIn,
