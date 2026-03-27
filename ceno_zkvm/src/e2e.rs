@@ -41,7 +41,6 @@ use itertools::MinMaxResult;
 use itertools::{Itertools, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
-use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 #[cfg(debug_assertions)]

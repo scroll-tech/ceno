@@ -6,7 +6,7 @@ use crate::{
     scheme::septic_curve::SepticPoint,
     state::StateCircuit,
     tables::{
-        MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
+        ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
         TableCircuit,
     },
 };
@@ -486,92 +486,106 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             let gpu_result = self.try_assign_shared_circuit_gpu(cs, shard_ctx, final_mem, config);
             match gpu_result {
                 Ok(true) => return Ok(()),
-                Ok(false) => {} // GPU pipeline unavailable (no shared buffers), fall through to CPU
+                Ok(false) => {} /* GPU pipeline unavailable (no shared buffers), fall through to CPU */
                 Err(e) => return Err(e),
             }
         }
 
+        let perm = <E::BaseField as PoseidonField>::get_default_perm();
         let addr_accessed =
             info_span!("get_addr_accessed").in_scope(|| shard_ctx.get_addr_accessed());
 
-        // Collect cross-shard records (filter only, no EC computation yet)
-        let (write_record_pairs, read_record_pairs) =
-            info_span!("collect_records").in_scope(|| {
-                let first_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> =
-                    if shard_ctx.is_first_shard() {
-                        final_mem
-                            .par_iter()
-                            .filter(|(_, range, _)| range.is_none())
-                            .flat_map(|(mem_name, _, final_mem)| {
-                                final_mem.par_iter().filter_map(|mem_record| {
-                                    let (waddr, addr) = Self::mem_addresses(mem_record);
-                                    Self::make_cross_shard_record(
-                                        mem_name,
-                                        mem_record,
-                                        waddr,
-                                        addr,
-                                        shard_ctx,
-                                        &addr_accessed,
-                                    )
-                                })
-                            })
-                            .collect()
-                    } else {
-                        vec![]
-                    };
+        // future shard needed records := shard_ctx.write_records ∪
+        // (shard_ctx.after_current_shard_cycle(mem_record.cycle) && !addr_accessed.contains(&waddr))
 
-                let current_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> =
-                    final_mem
-                        .par_iter()
-                        .filter(|(_, range, _)| range.is_some())
-                        .flat_map(|(mem_name, range, final_mem)| {
-                            let range = range.as_ref().unwrap();
-                            final_mem.par_iter().filter_map(|mem_record| {
-                                let (waddr, addr) = Self::mem_addresses(mem_record);
-                                if !range.contains(&addr) {
-                                    return None;
-                                }
-                                Self::make_cross_shard_record(
-                                    mem_name,
-                                    mem_record,
-                                    waddr,
-                                    addr,
-                                    shard_ctx,
-                                    &addr_accessed,
-                                )
-                            })
-                        })
-                        .collect();
-
-                let write_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
-                    .write_records()
-                    .iter()
-                    .flat_map(|records| {
-                        records.iter().map(|(vma, record)| {
-                            ((vma, record, true).into(), "current_shard_external_write")
-                        })
+        // 1. process final mem which
+        // 1.1 init in first shard
+        // 1.2 not accessed in first shard
+        // 1.3 accessed in future shard
+        let first_shard_access_later_records = if shard_ctx.is_first_shard() {
+            final_mem
+                .par_iter()
+                // only process no range restriction memory record
+                // for range specified it means dynamic init across different shard
+                .filter(|(_, range, _)| range.is_none())
+                .flat_map(|(mem_name, _, final_mem)| {
+                    final_mem.par_iter().filter_map(|mem_record| {
+                        let (waddr, addr) = Self::mem_addresses(mem_record);
+                        Self::make_cross_shard_input(
+                            mem_name,
+                            mem_record,
+                            waddr,
+                            addr,
+                            shard_ctx,
+                            &addr_accessed,
+                            &perm,
+                        )
                     })
-                    .chain(first_shard_access_later_recs)
-                    .chain(current_shard_access_later_recs)
-                    .collect();
+                })
+                .collect()
+        } else {
+            vec![]
+        };
 
-                let read_record_pairs: Vec<(ShardRamRecord, &'static str)> = shard_ctx
-                    .read_records()
-                    .iter()
-                    .flat_map(|records| {
-                        records.iter().map(|(vma, record)| {
-                            ((vma, record, false).into(), "current_shard_external_read")
-                        })
-                    })
-                    .collect();
+        // 2. process records which
+        // 2.1 init within current shard
+        // 2.2 not accessed in current shard
+        // 2.3 access by later shards.
+        let current_shard_access_later = final_mem
+            .par_iter()
+            // only process range-restricted memory record
+            // for range specified it means dynamic init across different shard
+            .filter(|(_, range, _)| range.is_some())
+            .flat_map(|(mem_name, range, final_mem)| {
+                let range = range.as_ref().unwrap();
+                final_mem.par_iter().filter_map(|mem_record| {
+                    let (waddr, addr) = Self::mem_addresses(mem_record);
+                    if !range.contains(&addr) {
+                        return None;
+                    }
+                    Self::make_cross_shard_input(
+                        mem_name,
+                        mem_record,
+                        waddr,
+                        addr,
+                        shard_ctx,
+                        &addr_accessed,
+                        &perm,
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
 
-                (write_record_pairs, read_record_pairs)
-            });
-
-        // Compute EC points and build global_input (writes then reads).
-        // GPU witgen: batch EC on GPU + take pre-computed compact shard records.
-        // CPU: per-record Poseidon2 EC computation.
-        let global_input = build_shard_ram_inputs::<E>(write_record_pairs, read_record_pairs);
+        let global_input = shard_ctx
+            .write_records()
+            .par_iter()
+            .flat_map(|records| {
+                // global write -> local reads
+                records.par_iter().map(|(vma, record)| {
+                    let global_write: ShardRamRecord = (vma, record, true).into();
+                    let ec_point: ECPoint<E> = global_write.to_ec_point(&perm);
+                    ShardRamInput {
+                        name: "current_shard_external_write",
+                        record: global_write,
+                        ec_point,
+                    }
+                })
+            })
+            .chain(first_shard_access_later_records.into_par_iter())
+            .chain(current_shard_access_later.into_par_iter())
+            .chain(shard_ctx.read_records().par_iter().flat_map(|records| {
+                // global read -> local write
+                records.par_iter().map(|(vma, record)| {
+                    let global_read: ShardRamRecord = (vma, record, false).into();
+                    let ec_point: ECPoint<E> = global_read.to_ec_point(&perm);
+                    ShardRamInput {
+                        name: "current_shard_external_read",
+                        record: global_read,
+                        ec_point,
+                    }
+                })
+            }))
+            .collect::<Vec<_>>();
 
         if tracing::enabled!(Level::DEBUG) {
             let total = global_input.len() as f64;
@@ -598,40 +612,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     count,
                     pct
                 );
-            }
-        }
-
-        // Invariant: all writes (is_to_write_set=true) must precede all reads.
-        // ShardRamCircuit::assign_instances uses take_while to count writes.
-        // Activate with CENO_DEBUG_SHARD_RAM_ORDER=1.
-        if std::env::var_os("CENO_DEBUG_SHARD_RAM_ORDER").is_some() {
-            let mut seen_read = false;
-            for (i, input) in global_input.iter().enumerate() {
-                if input.record.is_to_write_set {
-                    if seen_read {
-                        tracing::error!(
-                            "[SHARD_RAM_ORDER] BUG: write after read at index={i} \
-                             addr={} ram_type={:?} shard={} global_clk={} \
-                             (total={} writes={} reads={})",
-                            input.record.addr,
-                            input.record.ram_type,
-                            shard_ctx.shard_id,
-                            input.record.global_clk,
-                            global_input.len(),
-                            global_input
-                                .iter()
-                                .filter(|x| x.record.is_to_write_set)
-                                .count(),
-                            global_input
-                                .iter()
-                                .filter(|x| !x.record.is_to_write_set)
-                                .count(),
-                        );
-                        break;
-                    }
-                } else {
-                    seen_read = true;
-                }
             }
         }
 
@@ -743,6 +723,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     /// Filter and construct a cross-shard ShardRamRecord without EC computation.
     /// Used by the GPU path where EC is computed in batch on device.
     #[inline(always)]
+    #[allow(dead_code)]
     pub(crate) fn make_cross_shard_record(
         mem_name: &'static str,
         mem_record: &MemFinalRecord,
@@ -771,38 +752,44 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         };
         Some((global_write, mem_name))
     }
-}
 
-/// Compute EC points for record pairs using CPU Poseidon2 permutation.
-/// Returns writes-then-reads ordering required by ShardRamCircuit.
-fn build_shard_ram_inputs<E: ExtensionField>(
-    write_record_pairs: Vec<(ShardRamRecord, &'static str)>,
-    read_record_pairs: Vec<(ShardRamRecord, &'static str)>,
-) -> Vec<ShardRamInput<E>> {
-    let perm = <E::BaseField as PoseidonField>::get_default_perm();
-    let writes: Vec<ShardRamInput<E>> = write_record_pairs
-        .into_par_iter()
-        .map(|(record, name)| {
-            let ec_point = record.to_ec_point(&perm);
-            ShardRamInput {
-                name,
-                record,
-                ec_point,
-            }
+    /// Filter and construct a cross-shard ShardRamInput with EC computation.
+    /// Used by the CPU path where EC is computed per-record via Poseidon2.
+    #[inline(always)]
+    fn make_cross_shard_input(
+        mem_name: &'static str,
+        mem_record: &MemFinalRecord,
+        waddr: WordAddr,
+        addr: u32,
+        shard_ctx: &ShardContext,
+        addr_accessed: &FxHashSet<WordAddr>,
+        perm: &<<E as ExtensionField>::BaseField as PoseidonField>::P,
+    ) -> Option<ShardRamInput<E>> {
+        if addr_accessed.contains(&waddr) || !shard_ctx.after_current_shard_cycle(mem_record.cycle)
+        {
+            return None;
+        }
+
+        let global_write = ShardRamRecord {
+            addr: match mem_record.ram_type {
+                RAMType::Register => addr,
+                RAMType::Memory => waddr.into(),
+                _ => unimplemented!(),
+            },
+            ram_type: mem_record.ram_type,
+            value: mem_record.init_value,
+            shard: shard_ctx.shard_id as u64,
+            local_clk: 0,
+            global_clk: 0,
+            is_to_write_set: true,
+        };
+        let ec_point: ECPoint<E> = global_write.to_ec_point(perm);
+        Some(ShardRamInput {
+            name: mem_name,
+            record: global_write,
+            ec_point,
         })
-        .collect();
-    let reads: Vec<ShardRamInput<E>> = read_record_pairs
-        .into_par_iter()
-        .map(|(record, name)| {
-            let ec_point = record.to_ec_point(&perm);
-            ShardRamInput {
-                name,
-                record,
-                ec_point,
-            }
-        })
-        .collect();
-    writes.into_iter().chain(reads).collect()
+    }
 }
 
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
