@@ -20,7 +20,7 @@ use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSlice,
 };
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -485,26 +485,14 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
             let gpu_result = self.try_assign_shared_circuit_gpu(cs, shard_ctx, final_mem, config);
             match gpu_result {
-                Ok(true) => return Ok(()), // GPU pipeline succeeded
-                Ok(false) => {}            // GPU pipeline unavailable, fall through
-                Err(e) => {
-                    tracing::warn!("GPU full pipeline failed, falling back: {e:?}");
-                }
+                Ok(true) => return Ok(()),
+                Ok(false) => {} // GPU pipeline unavailable (no shared buffers), fall through to CPU
+                Err(e) => return Err(e),
             }
         }
 
         let addr_accessed =
-            info_span!("get_addr_accessed").in_scope(|| shard_ctx.get_addr_accessed_sorted());
-
-        // GPU compact shard records: take accumulated records and convert to ShardRamInput.
-        // EC points are already computed on GPU. Partitioned into (writes, reads).
-        #[cfg(feature = "gpu")]
-        let (gpu_ec_writes, gpu_ec_reads) = info_span!("gpu_ec_convert").in_scope(|| {
-            crate::instructions::gpu::cache::take_and_convert_compact_shard_records::<E>()
-        });
-        #[cfg(not(feature = "gpu"))]
-        let (gpu_ec_writes, gpu_ec_reads): (Vec<ShardRamInput<E>>, Vec<ShardRamInput<E>>) =
-            (vec![], vec![]);
+            info_span!("get_addr_accessed").in_scope(|| shard_ctx.get_addr_accessed());
 
         // Collect cross-shard records (filter only, no EC computation yet)
         let (write_record_pairs, read_record_pairs) =
@@ -580,59 +568,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 (write_record_pairs, read_record_pairs)
             });
 
-        // Compute EC points: GPU path (only when GPU witgen enabled) or CPU fallback
-        let global_input = {
-            #[cfg(feature = "gpu")]
-            let ec_result = if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                use crate::instructions::gpu::chips::shard_ram::gpu_batch_continuation_ec;
-                gpu_batch_continuation_ec::<E>(&write_record_pairs, &read_record_pairs).ok()
-            } else {
-                None
-            };
-            #[cfg(not(feature = "gpu"))]
-            let ec_result: Option<(Vec<ShardRamInput<E>>, Vec<ShardRamInput<E>>)> = None;
-
-            if let Some((computed_writes, computed_reads)) = ec_result {
-                // GPU path: chain computed EC with pre-computed GPU EC records
-                computed_writes
-                    .into_iter()
-                    .chain(gpu_ec_writes)
-                    .chain(computed_reads)
-                    .chain(gpu_ec_reads)
-                    .collect::<Vec<_>>()
-            } else {
-                // CPU fallback: compute EC points with Poseidon2 permutation
-                let perm = <E::BaseField as PoseidonField>::get_default_perm();
-                let cpu_writes: Vec<ShardRamInput<E>> = write_record_pairs
-                    .into_par_iter()
-                    .map(|(record, name)| {
-                        let ec_point = record.to_ec_point(&perm);
-                        ShardRamInput {
-                            name,
-                            record,
-                            ec_point,
-                        }
-                    })
-                    .collect();
-                let cpu_reads: Vec<ShardRamInput<E>> = read_record_pairs
-                    .into_par_iter()
-                    .map(|(record, name)| {
-                        let ec_point = record.to_ec_point(&perm);
-                        ShardRamInput {
-                            name,
-                            record,
-                            ec_point,
-                        }
-                    })
-                    .collect();
-                cpu_writes
-                    .into_iter()
-                    .chain(gpu_ec_writes)
-                    .chain(cpu_reads)
-                    .chain(gpu_ec_reads)
-                    .collect::<Vec<_>>()
-            }
-        };
+        // Compute EC points and build global_input (writes then reads).
+        // GPU witgen: batch EC on GPU + take pre-computed compact shard records.
+        // CPU: per-record Poseidon2 EC computation.
+        let global_input = build_shard_ram_inputs::<E>(write_record_pairs, read_record_pairs);
 
         if tracing::enabled!(Level::DEBUG) {
             let total = global_input.len() as f64;
@@ -810,10 +749,9 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         waddr: WordAddr,
         addr: u32,
         shard_ctx: &ShardContext,
-        addr_accessed: &[WordAddr],
+        addr_accessed: &FxHashSet<WordAddr>,
     ) -> Option<(ShardRamRecord, &'static str)> {
-        if addr_accessed.binary_search(&waddr).is_ok()
-            || !shard_ctx.after_current_shard_cycle(mem_record.cycle)
+        if addr_accessed.contains(&waddr) || !shard_ctx.after_current_shard_cycle(mem_record.cycle)
         {
             return None;
         }
@@ -833,6 +771,57 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         };
         Some((global_write, mem_name))
     }
+}
+
+/// Build ShardRamInput from record pairs by computing EC points.
+/// Uses GPU batch EC when available, otherwise CPU Poseidon2 per-record.
+fn build_shard_ram_inputs<E: ExtensionField>(
+    write_record_pairs: Vec<(ShardRamRecord, &'static str)>,
+    read_record_pairs: Vec<(ShardRamRecord, &'static str)>,
+) -> Vec<ShardRamInput<E>> {
+    // Try GPU batch EC computation
+    #[cfg(feature = "gpu")]
+    if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+        use crate::instructions::gpu::chips::shard_ram::gpu_batch_continuation_ec;
+        if let Ok((computed_writes, computed_reads)) =
+            gpu_batch_continuation_ec::<E>(&write_record_pairs, &read_record_pairs)
+        {
+            let (gpu_ec_writes, gpu_ec_reads) =
+                crate::instructions::gpu::cache::take_and_convert_compact_shard_records::<E>();
+            return computed_writes
+                .into_iter()
+                .chain(gpu_ec_writes)
+                .chain(computed_reads)
+                .chain(gpu_ec_reads)
+                .collect();
+        }
+    }
+
+    // CPU fallback: compute EC points with Poseidon2 permutation
+    let perm = <E::BaseField as PoseidonField>::get_default_perm();
+    let cpu_writes: Vec<ShardRamInput<E>> = write_record_pairs
+        .into_par_iter()
+        .map(|(record, name)| {
+            let ec_point = record.to_ec_point(&perm);
+            ShardRamInput {
+                name,
+                record,
+                ec_point,
+            }
+        })
+        .collect();
+    let cpu_reads: Vec<ShardRamInput<E>> = read_record_pairs
+        .into_par_iter()
+        .map(|(record, name)| {
+            let ec_point = record.to_ec_point(&perm);
+            ShardRamInput {
+                name,
+                record,
+                ec_point,
+            }
+        })
+        .collect();
+    cpu_writes.into_iter().chain(cpu_reads).collect()
 }
 
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {

@@ -781,7 +781,9 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         vec![]
     };
 
-    // 4. CPU collect_records (uses sorted unique addrs)
+    // 4. CPU collect_records (uses unique addrs)
+    let addr_accessed: rustc_hash::FxHashSet<ceno_emul::WordAddr> =
+        addr_accessed.into_iter().collect();
     let (write_record_pairs, read_record_pairs) = info_span!("collect_records").in_scope(|| {
         let first_shard_access_later_recs: Vec<(ShardRamRecord, &'static str)> =
             if shard_ctx.is_first_shard() {
