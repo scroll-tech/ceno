@@ -67,8 +67,6 @@ pub use super::cache::{
     SharedDeviceBufferSet, flush_shared_ec_buffers, invalidate_shard_meta_cache,
     invalidate_shard_steps_cache, take_shared_device_buffers,
 };
-// Re-export for external callers (structs.rs).
-pub use super::chips::shard_ram::gpu_batch_continuation_ec;
 use super::{
     cache::{
         ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,

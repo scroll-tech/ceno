@@ -773,33 +773,14 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     }
 }
 
-/// Build ShardRamInput from record pairs by computing EC points.
-/// Uses GPU batch EC when available, otherwise CPU Poseidon2 per-record.
+/// Compute EC points for record pairs using CPU Poseidon2 permutation.
+/// Returns writes-then-reads ordering required by ShardRamCircuit.
 fn build_shard_ram_inputs<E: ExtensionField>(
     write_record_pairs: Vec<(ShardRamRecord, &'static str)>,
     read_record_pairs: Vec<(ShardRamRecord, &'static str)>,
 ) -> Vec<ShardRamInput<E>> {
-    // Try GPU batch EC computation
-    #[cfg(feature = "gpu")]
-    if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-        use crate::instructions::gpu::chips::shard_ram::gpu_batch_continuation_ec;
-        if let Ok((computed_writes, computed_reads)) =
-            gpu_batch_continuation_ec::<E>(&write_record_pairs, &read_record_pairs)
-        {
-            let (gpu_ec_writes, gpu_ec_reads) =
-                crate::instructions::gpu::cache::take_and_convert_compact_shard_records::<E>();
-            return computed_writes
-                .into_iter()
-                .chain(gpu_ec_writes)
-                .chain(computed_reads)
-                .chain(gpu_ec_reads)
-                .collect();
-        }
-    }
-
-    // CPU fallback: compute EC points with Poseidon2 permutation
     let perm = <E::BaseField as PoseidonField>::get_default_perm();
-    let cpu_writes: Vec<ShardRamInput<E>> = write_record_pairs
+    let writes: Vec<ShardRamInput<E>> = write_record_pairs
         .into_par_iter()
         .map(|(record, name)| {
             let ec_point = record.to_ec_point(&perm);
@@ -810,7 +791,7 @@ fn build_shard_ram_inputs<E: ExtensionField>(
             }
         })
         .collect();
-    let cpu_reads: Vec<ShardRamInput<E>> = read_record_pairs
+    let reads: Vec<ShardRamInput<E>> = read_record_pairs
         .into_par_iter()
         .map(|(record, name)| {
             let ec_point = record.to_ec_point(&perm);
@@ -821,7 +802,7 @@ fn build_shard_ram_inputs<E: ExtensionField>(
             }
         })
         .collect();
-    cpu_writes.into_iter().chain(cpu_reads).collect()
+    writes.into_iter().chain(reads).collect()
 }
 
 pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {

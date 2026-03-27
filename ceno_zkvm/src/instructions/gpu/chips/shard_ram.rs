@@ -134,69 +134,6 @@ fn gpu_shard_ram_record_to_ec_point<E: ExtensionField>(
     }
 }
 
-/// Batch compute EC points on GPU, D2H results back to CPU as ShardRamInput.
-///
-/// Used by the CPU fallback path in `structs.rs` when the full GPU pipeline
-/// is unavailable. For the device-resident variant, see `gpu_batch_continuation_ec_on_device`.
-pub fn gpu_batch_continuation_ec<E: ExtensionField>(
-    write_records: &[(crate::tables::ShardRamRecord, &'static str)],
-    read_records: &[(crate::tables::ShardRamRecord, &'static str)],
-) -> Result<
-    (
-        Vec<crate::tables::ShardRamInput<E>>,
-        Vec<crate::tables::ShardRamInput<E>>,
-    ),
-    ZKVMError,
-> {
-    use crate::tables::ShardRamInput;
-    use gkr_iop::gpu::get_cuda_hal;
-
-    let hal = get_cuda_hal().map_err(|e| {
-        ZKVMError::InvalidWitness(format!("GPU not available for batch EC: {e}").into())
-    })?;
-
-    let total = write_records.len() + read_records.len();
-    if total == 0 {
-        return Ok((vec![], vec![]));
-    }
-
-    let mut gpu_records: Vec<GpuShardRamRecord> = Vec::with_capacity(total);
-    for (rec, _name) in write_records.iter().chain(read_records.iter()) {
-        gpu_records.push(shard_ram_record_to_gpu(rec));
-    }
-
-    let result = info_span!("gpu_batch_ec", n = total)
-        .in_scope(|| hal.witgen.batch_continuation_ec(&gpu_records))
-        .map_err(|e| ZKVMError::InvalidWitness(format!("GPU batch EC failed: {e}").into()))?;
-
-    let mut write_inputs = Vec::with_capacity(write_records.len());
-    let mut read_inputs = Vec::with_capacity(read_records.len());
-
-    for (i, gpu_rec) in result.iter().enumerate() {
-        let (rec, name) = if i < write_records.len() {
-            (&write_records[i].0, write_records[i].1)
-        } else {
-            let ri = i - write_records.len();
-            (&read_records[ri].0, read_records[ri].1)
-        };
-
-        let ec_point = gpu_shard_ram_record_to_ec_point::<E>(gpu_rec);
-        let input = ShardRamInput {
-            name,
-            record: rec.clone(),
-            ec_point,
-        };
-
-        if i < write_records.len() {
-            write_inputs.push(input);
-        } else {
-            read_inputs.push(input);
-        }
-    }
-
-    Ok((write_inputs, read_inputs))
-}
-
 /// Batch compute EC points on GPU, results stay on device.
 ///
 /// Used by the full GPU pipeline in `structs.rs` where records feed directly
