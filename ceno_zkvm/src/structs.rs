@@ -720,39 +720,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         }
     }
 
-    /// Filter and construct a cross-shard ShardRamRecord without EC computation.
-    /// Used by the GPU path where EC is computed in batch on device.
-    #[inline(always)]
-    #[allow(dead_code)]
-    pub(crate) fn make_cross_shard_record(
-        mem_name: &'static str,
-        mem_record: &MemFinalRecord,
-        waddr: WordAddr,
-        addr: u32,
-        shard_ctx: &ShardContext,
-        addr_accessed: &FxHashSet<WordAddr>,
-    ) -> Option<(ShardRamRecord, &'static str)> {
-        if addr_accessed.contains(&waddr) || !shard_ctx.after_current_shard_cycle(mem_record.cycle)
-        {
-            return None;
-        }
-
-        let global_write = ShardRamRecord {
-            addr: match mem_record.ram_type {
-                RAMType::Register => addr,
-                RAMType::Memory => waddr.into(),
-                _ => unimplemented!(),
-            },
-            ram_type: mem_record.ram_type,
-            value: mem_record.init_value,
-            shard: shard_ctx.shard_id as u64,
-            local_clk: 0,
-            global_clk: 0,
-            is_to_write_set: true,
-        };
-        Some((global_write, mem_name))
-    }
-
     /// Filter and construct a cross-shard ShardRamInput with EC computation.
     /// Used by the CPU path where EC is computed per-record via Poseidon2.
     #[inline(always)]

@@ -1,7 +1,45 @@
+use ceno_emul::WordAddr;
 use ceno_gpu::common::witgen::types::ShardRamColumnMap;
 use ff_ext::ExtensionField;
+use gkr_iop::RAMType;
+use rustc_hash::FxHashSet;
 
-use crate::{error::ZKVMError, tables::ShardRamConfig};
+use crate::{
+    e2e::ShardContext,
+    error::ZKVMError,
+    tables::{MemFinalRecord, ShardRamConfig, ShardRamRecord},
+};
+
+/// Filter and construct a cross-shard ShardRamRecord without EC computation.
+/// EC is computed in batch on device by the GPU pipeline.
+#[inline(always)]
+fn make_cross_shard_record(
+    mem_name: &'static str,
+    mem_record: &MemFinalRecord,
+    waddr: WordAddr,
+    addr: u32,
+    shard_ctx: &ShardContext,
+    addr_accessed: &FxHashSet<WordAddr>,
+) -> Option<(ShardRamRecord, &'static str)> {
+    if addr_accessed.contains(&waddr) || !shard_ctx.after_current_shard_cycle(mem_record.cycle) {
+        return None;
+    }
+
+    let global_write = ShardRamRecord {
+        addr: match mem_record.ram_type {
+            RAMType::Register => addr,
+            RAMType::Memory => waddr.into(),
+            _ => unimplemented!(),
+        },
+        ram_type: mem_record.ram_type,
+        value: mem_record.init_value,
+        shard: shard_ctx.shard_id as u64,
+        local_clk: 0,
+        global_clk: 0,
+        is_to_write_set: true,
+    };
+    Some((global_write, mem_name))
+}
 
 /// Extract column map from a constructed ShardRamConfig.
 ///
@@ -86,7 +124,6 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
 // ---------------------------------------------------------------------------
 
 use ceno_gpu::common::witgen::types::GpuShardRamRecord;
-use gkr_iop::RAMType;
 use p3::field::FieldAlgebra;
 use tracing::info_span;
 
@@ -760,7 +797,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
                     .flat_map(|(mem_name, _, final_mem)| {
                         final_mem.par_iter().filter_map(|mem_record| {
                             let (waddr, addr) = ZKVMWitnesses::<E>::mem_addresses(mem_record);
-                            ZKVMWitnesses::<E>::make_cross_shard_record(
+                            make_cross_shard_record(
                                 mem_name,
                                 mem_record,
                                 waddr,
@@ -785,7 +822,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
                     if !range.contains(&addr) {
                         return None;
                     }
-                    ZKVMWitnesses::<E>::make_cross_shard_record(
+                    make_cross_shard_record(
                         mem_name,
                         mem_record,
                         waddr,
