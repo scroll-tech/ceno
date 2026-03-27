@@ -16,6 +16,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     instructions::{Instruction, cpu_collect_lk_and_shardram, cpu_collect_shardram},
+    structs::ZKVMWitnesses,
 };
 
 use crate::instructions::gpu::dispatch::{GpuWitgenKind, set_force_cpu_path};
@@ -786,4 +787,156 @@ pub(crate) fn debug_compare_keccak<E: ExtensionField>(
     }
 
     Ok(())
+}
+
+/// Compare ShardContext records between CPU and GPU paths (e2e shard-level debug).
+pub(crate) fn log_shard_ctx_diff(kind: &str, cpu: &ShardContext, gpu: &ShardContext) {
+    let cpu_addr = cpu.get_addr_accessed();
+    let gpu_addr = gpu.get_addr_accessed();
+    if cpu_addr != gpu_addr {
+        tracing::error!(
+            "[GPU e2e debug] {} addr_accessed cpu={} gpu={}",
+            kind,
+            cpu_addr.len(),
+            gpu_addr.len()
+        );
+    }
+
+    let cpu_reads = flatten_ram_records(cpu.read_records());
+    let gpu_reads = flatten_ram_records(gpu.read_records());
+    if cpu_reads != gpu_reads {
+        tracing::error!(
+            "[GPU e2e debug] {} read_records cpu={} gpu={}",
+            kind,
+            cpu_reads.len(),
+            gpu_reads.len()
+        );
+    }
+
+    let cpu_writes = flatten_ram_records(cpu.write_records());
+    let gpu_writes = flatten_ram_records(gpu.write_records());
+    if cpu_writes != gpu_writes {
+        tracing::error!(
+            "[GPU e2e debug] {} write_records cpu={} gpu={}",
+            kind,
+            cpu_writes.len(),
+            gpu_writes.len()
+        );
+    }
+}
+
+/// Compare combined LK multiplicities between CPU and GPU witnesses (e2e shard-level debug).
+pub(crate) fn log_combined_lk_diff<E: ExtensionField>(
+    cpu_witness: &ZKVMWitnesses<E>,
+    gpu_witness: &ZKVMWitnesses<E>,
+) {
+    let cpu_combined = cpu_witness.combined_lk_mlt().expect("cpu combined_lk_mlt");
+    let gpu_combined = gpu_witness.combined_lk_mlt().expect("gpu combined_lk_mlt");
+
+    let table_names = [
+        "Dynamic",
+        "DoubleU8",
+        "And",
+        "Or",
+        "Xor",
+        "Ltu",
+        "Pow",
+        "Instruction",
+    ];
+
+    let mut total_diffs = 0usize;
+    for (table_idx, (cpu_table, gpu_table)) in
+        cpu_combined.iter().zip(gpu_combined.iter()).enumerate()
+    {
+        let mut keys: Vec<u64> = cpu_table.keys().chain(gpu_table.keys()).copied().collect();
+        keys.sort_unstable();
+        keys.dedup();
+
+        let mut table_diffs = 0usize;
+        for &key in &keys {
+            let cpu_count = cpu_table.get(&key).copied().unwrap_or(0);
+            let gpu_count = gpu_table.get(&key).copied().unwrap_or(0);
+            if cpu_count != gpu_count {
+                table_diffs += 1;
+                if table_diffs <= 8 {
+                    let name = table_names.get(table_idx).unwrap_or(&"Unknown");
+                    tracing::error!(
+                        "[GPU e2e debug] combined_lk table={} key={} cpu={} gpu={}",
+                        name,
+                        key,
+                        cpu_count,
+                        gpu_count
+                    );
+                }
+            }
+        }
+        total_diffs += table_diffs;
+        if table_diffs > 8 {
+            let name = table_names.get(table_idx).unwrap_or(&"Unknown");
+            tracing::error!(
+                "[GPU e2e debug] combined_lk table={} total_diffs={} (showing first 8)",
+                name,
+                table_diffs
+            );
+        }
+    }
+
+    let cpu_lk_keys: std::collections::BTreeSet<_> = cpu_witness.lk_mlts().keys().collect();
+    let gpu_lk_keys: std::collections::BTreeSet<_> = gpu_witness.lk_mlts().keys().collect();
+    if cpu_lk_keys != gpu_lk_keys {
+        tracing::error!(
+            "[GPU e2e debug] lk_mlts key mismatch: cpu_only={:?} gpu_only={:?}",
+            cpu_lk_keys.difference(&gpu_lk_keys).collect::<Vec<_>>(),
+            gpu_lk_keys.difference(&cpu_lk_keys).collect::<Vec<_>>(),
+        );
+    }
+    for name in cpu_lk_keys.intersection(&gpu_lk_keys) {
+        let cpu_lk = cpu_witness.lk_mlts().get(*name).unwrap();
+        let gpu_lk = gpu_witness.lk_mlts().get(*name).unwrap();
+        let mut chip_diffs = 0usize;
+        for (t_idx, (ct, gt)) in cpu_lk.iter().zip(gpu_lk.iter()).enumerate() {
+            let mut ks: Vec<u64> = ct.keys().chain(gt.keys()).copied().collect();
+            ks.sort_unstable();
+            ks.dedup();
+            for &k in &ks {
+                let cv = ct.get(&k).copied().unwrap_or(0);
+                let gv = gt.get(&k).copied().unwrap_or(0);
+                if cv != gv {
+                    chip_diffs += 1;
+                    if chip_diffs <= 4 {
+                        let tname = table_names.get(t_idx).unwrap_or(&"Unknown");
+                        tracing::error!(
+                            "[GPU e2e debug] per_chip_lk chip={} table={} key={} cpu={} gpu={}",
+                            name,
+                            tname,
+                            k,
+                            cv,
+                            gv
+                        );
+                    }
+                }
+            }
+        }
+        if chip_diffs > 0 {
+            total_diffs += chip_diffs;
+            tracing::error!(
+                "[GPU e2e debug] per_chip_lk chip={} total_diffs={}",
+                name,
+                chip_diffs
+            );
+        }
+    }
+
+    if total_diffs == 0 {
+        tracing::info!(
+            "[GPU e2e debug] combined_lk_mlt + per_chip_lk: CPU/GPU match (tables={}, chips={})",
+            cpu_combined.len(),
+            cpu_lk_keys.len()
+        );
+    } else {
+        tracing::error!(
+            "[GPU e2e debug] TOTAL LK DIFFS = {} (combined + per-chip)",
+            total_diffs
+        );
+    }
 }
