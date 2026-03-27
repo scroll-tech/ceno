@@ -34,14 +34,13 @@ use ff_ext::{ExtensionField, SmallField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 use gkr_iop::{RAMType, hal::ProverBackend};
+use itertools::Itertools;
 #[cfg(debug_assertions)]
-use itertools::MinMaxResult;
-use itertools::{Itertools, chain};
+use itertools::{MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
-use tiny_keccak::{Hasher, Keccak};
 #[cfg(debug_assertions)]
 use std::collections::{HashMap, HashSet};
 use std::{
@@ -50,6 +49,7 @@ use std::{
     ops::Range,
     sync::Arc,
 };
+use tiny_keccak::{Hasher, Keccak};
 use tracing::info_span;
 use transcript::BasicTranscript as Transcript;
 use witness::next_pow2_instance_padding;
@@ -66,22 +66,9 @@ pub fn public_io_words_to_digest_words(words: &[u32]) -> [u32; 8] {
     }
     let mut digest = [0u8; 32];
     keccak.finalize(&mut digest);
-    #[cfg(target_endian = "little")]
-    {
-        // Reinterpret Keccak digest bytes as 8 little-endian u32 words.
-        unsafe { core::mem::transmute::<[u8; 32], [u32; 8]>(digest) }
-    }
-    #[cfg(not(target_endian = "little"))]
-    {
-        core::array::from_fn(|i| {
-            u32::from_le_bytes([
-                digest[i * 4],
-                digest[i * 4 + 1],
-                digest[i * 4 + 2],
-                digest[i * 4 + 3],
-            ])
-        })
-    }
+
+    // Reinterpret Keccak digest bytes as 8 little-endian u32 words.
+    unsafe { core::mem::transmute::<[u8; 32], [u32; 8]>(digest) }
 }
 
 // define a relative small number to make first shard handle much less instruction
@@ -1572,12 +1559,8 @@ pub fn setup_program<E: ExtensionField>(
     let system_config = construct_configs::<E>(program_params);
     let reg_init = system_config.mmu_config.initial_registers();
     // Generate fixed traces
-    let zkvm_fixed_traces = generate_fixed_traces(
-        &system_config,
-        &reg_init,
-        &static_addrs,
-        &program,
-    );
+    let zkvm_fixed_traces =
+        generate_fixed_traces(&system_config, &reg_init, &static_addrs, &program);
 
     E2EProgramCtx {
         program: Arc::new(program),
@@ -2135,6 +2118,7 @@ mod tests {
     use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepIndex, StepRecord};
     use itertools::Itertools;
     use std::sync::Arc;
+    use tiny_keccak::{Hasher, Keccak};
 
     #[test]
     fn test_single_prover_shard_ctx() {
@@ -2263,5 +2247,28 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn public_io_digest_matches_guest_commit_hashing() {
+        let words = vec![4191u32];
+        let digest_words = super::public_io_words_to_digest_words(&words);
+
+        let mut keccak = Keccak::v256();
+        for word in &words {
+            keccak.update(&word.to_le_bytes());
+        }
+        let mut digest = [0u8; 32];
+        keccak.finalize(&mut digest);
+        let expected = core::array::from_fn(|i| {
+            u32::from_le_bytes([
+                digest[i * 4],
+                digest[i * 4 + 1],
+                digest[i * 4 + 2],
+                digest[i * 4 + 3],
+            ])
+        });
+
+        assert_eq!(digest_words, expected);
     }
 }

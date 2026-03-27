@@ -1,5 +1,4 @@
-use crate::uint::UIntLimbs;
-use crate::scheme::constants::SEPTIC_EXTENSION_DEGREE;
+use crate::{scheme::constants::SEPTIC_EXTENSION_DEGREE, uint::UIntLimbs};
 pub use ceno_emul::PC_STEP_SIZE;
 
 pub const ECALL_HALT_OPCODE: [usize; 2] = [0x00_00, 0x00_00];

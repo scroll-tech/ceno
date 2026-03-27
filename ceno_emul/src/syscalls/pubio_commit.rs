@@ -23,6 +23,3 @@ pub fn pubio_commit<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {
         next_pc: None,
     }
 }
-
-
-

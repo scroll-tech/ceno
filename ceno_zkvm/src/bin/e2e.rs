@@ -174,26 +174,8 @@ fn main() {
         .with(args.profiling.is_none().then_some(default_filter))
         .init();
 
-    // process public input first
-    let public_io = args
-        .public_io
-        .and_then(|public_io| {
-            // if the vector contains only one element, write it as a raw `u32`
-            // otherwise, write the entire vector
-            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
-            if public_io.len() == 1 {
-                CenoStdin::default()
-                    .write(&public_io[0])
-                    .ok()
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            } else {
-                CenoStdin::default()
-                    .write(&public_io)
-                    .ok()
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            }
-        })
-        .unwrap_or_default();
+    // process public input first; this is raw u32 public input, not pre-digested words.
+    let public_io = args.public_io.unwrap_or_default();
     assert!(
         public_io.len() <= args.public_io_size as usize / WORD_SIZE,
         "require pub io length {} < max public_io_size {}",

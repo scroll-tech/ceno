@@ -169,25 +169,9 @@ impl CenoOptions {
         self.heap_size.next_multiple_of(WORD_SIZE as u32)
     }
 
-    /// Read the public io into ceno stdin
-    pub fn read_public_io(&self) -> anyhow::Result<Vec<u32>> {
-        if let Some(public_io) = &self.public_io {
-            // if vector contains only one element, write it as a raw `u32`
-            // otherwise, write the entire vector
-            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
-            if public_io.len() == 1 {
-                CenoStdin::default()
-                    .write(&public_io[0])
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            } else {
-                CenoStdin::default()
-                    .write(public_io)
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            }
-            .context("failed to get public_io".to_string())
-        } else {
-            Ok(vec![])
-        }
+    /// Read raw public-io words; digesting happens later in the zkVM pipeline.
+    pub fn read_public_io(&self) -> Vec<u32> {
+        self.public_io.clone().unwrap_or_default()
     }
 
     /// Read the hints
@@ -367,9 +351,7 @@ fn run_elf_inner<
         options.max_cycle_per_shard,
     );
 
-    let public_io_digest_input = options
-        .read_public_io()
-        .context("failed to read public io")?;
+    let public_io_digest_input = options.read_public_io();
     let public_io_digest = public_io_words_to_digest_words(&public_io_digest_input);
     tracing::debug!("public io digest words: {:?}", public_io_digest);
     let public_io_size = options.public_io_size;

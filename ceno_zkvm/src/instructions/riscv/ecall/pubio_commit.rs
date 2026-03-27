@@ -1,6 +1,8 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{Change, InsnKind, Platform, PubIoCommitSpec, StepRecord, SyscallSpec, WORD_SIZE, WriteOp};
+use ceno_emul::{
+    Change, InsnKind, Platform, PubIoCommitSpec, StepRecord, SyscallSpec, WORD_SIZE, WriteOp,
+};
 use ff_ext::ExtensionField;
 use multilinear_extensions::ToExpr;
 use p3::field::FieldAlgebra;
@@ -15,7 +17,7 @@ use crate::{
         riscv::{
             constants::{LIMB_BITS, LIMB_MASK, MEM_BITS, UInt},
             ecall_base::OpFixedRS,
-            insn_base::{MemAddr, ReadMEM, StateInOut},
+            insn_base::{MemAddr, StateInOut, WriteMEM},
         },
     },
     precompiles::{PUBIO_COMMIT_WORDS, PubioCommitLayout},
@@ -29,7 +31,7 @@ pub struct EcallPubioCommitConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
     digest_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    mem_read: [ReadMEM<E>; PUBIO_COMMIT_WORDS],
+    mem_rw: [WriteMEM; PUBIO_COMMIT_WORDS],
 }
 
 pub struct PubIoCommitInstruction<E>(PhantomData<E>);
@@ -82,12 +84,13 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
         ))?;
 
         let layout = PubioCommitLayout::construct_circuit(cb)?;
-        let mem_read: [ReadMEM<E>; PUBIO_COMMIT_WORDS] = (0..PUBIO_COMMIT_WORDS)
+        let mem_rw: [WriteMEM; PUBIO_COMMIT_WORDS] = (0..PUBIO_COMMIT_WORDS)
             .map(|i| {
-                ReadMEM::construct_circuit(
+                WriteMEM::construct_circuit(
                     cb,
                     digest_ptr.prev_value.as_ref().unwrap().value()
                         + E::BaseField::from_canonical_u32((i * WORD_SIZE) as u32).expr(),
+                    layout.digest_words[i].clone(),
                     layout.digest_words[i].clone(),
                     vm_state.ts,
                 )
@@ -100,7 +103,7 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
             vm_state,
             ecall_id,
             digest_ptr: (digest_ptr, digest_ptr_value),
-            mem_read,
+            mem_rw,
         })
     }
 
@@ -135,10 +138,11 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
             ),
         )?;
 
-        config
-            .digest_ptr
-            .1
-            .assign_instance(instance, lk_multiplicity, ops.reg_ops[0].value.after)?;
+        config.digest_ptr.1.assign_instance(
+            instance,
+            lk_multiplicity,
+            ops.reg_ops[0].value.after,
+        )?;
         config.digest_ptr.0.assign_op(
             instance,
             shard_ctx,
@@ -147,17 +151,11 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
             &ops.reg_ops[0],
         )?;
 
-        for (reader, op) in config.mem_read.iter().zip(&ops.mem_ops) {
-            reader.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
+        for (writer, op) in config.mem_rw.iter().zip(&ops.mem_ops) {
+            writer.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
         }
 
         lk_multiplicity.fetch(step.pc().before.0);
         Ok(())
     }
 }
-
-
-
-
-
-

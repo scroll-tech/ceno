@@ -46,10 +46,10 @@ use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
     Bn254FpMulSpec,
     InsnKind::{self, *},
-    KeccakSpec, LogPcCycleSpec, Platform, PubIoCommitSpec, Secp256k1AddSpec, Secp256k1DecompressSpec,
-    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec, Secp256r1DoubleSpec,
-    Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepCellExtractor, StepIndex, StepRecord,
-    SyscallSpec, Uint256MulSpec, Word,
+    KeccakSpec, LogPcCycleSpec, Platform, PubIoCommitSpec, Secp256k1AddSpec,
+    Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec,
+    Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepCellExtractor, StepIndex,
+    StepRecord, SyscallSpec, Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;

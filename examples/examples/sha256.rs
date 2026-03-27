@@ -10,12 +10,6 @@ fn main() {
 
     let h = Sha256::digest(&input);
     let h_bytes: [u8; 32] = h.into();
-    let h: [u32; 8] = core::array::from_fn(|i| {
-        let chunk = &h_bytes[4 * i..][..4];
-        u32::from_be_bytes(chunk.try_into().unwrap())
-    });
-
     // Output the final hash values one by one
     ceno_rt::commit(&h_bytes);
-    // debug_print!("{:x}", h[0]);
 }

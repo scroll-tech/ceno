@@ -35,5 +35,3 @@ impl<E: ExtensionField> PubioCommitLayout<E> {
         })
     }
 }
-
-

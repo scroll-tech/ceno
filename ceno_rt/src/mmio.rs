@@ -1,8 +1,8 @@
 //! Memory-mapped I/O (MMIO) functions.
 
 use ceno_serde::from_slice;
-use core::{cell::UnsafeCell, ptr, slice::from_raw_parts};
 use ceno_syscall::syscall_pub_io_commit;
+use core::{cell::UnsafeCell, ptr, slice::from_raw_parts};
 use serde::de::DeserializeOwned;
 use tiny_keccak::{Hasher, Keccak};
 

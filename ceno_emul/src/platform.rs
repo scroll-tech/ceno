@@ -91,7 +91,7 @@ impl Display for Platform {
 // │
 // └───────────────────────────── 0x8000_0000 (rom base)
 pub static CENO_PLATFORM: Lazy<Platform> = Lazy::new(|| Platform {
-    rom: 0x0800_0000..0x1000_0000,       // 128 MB
+    rom: 0x0800_0000..0x1000_0000,   // 128 MB
     stack: 0x1000_0000..0x2000_4000, // stack grows downward, 0x4000 reserved for debug io.
     // we make hints start from 0x2800_0000 thus reserve a 128MB gap for debug io
     // at the end of stack
@@ -180,12 +180,7 @@ impl Platform {
 
     /// Validate the platform configuration, range shall not overlap.
     pub fn validate(&self) -> bool {
-        let mut ranges = [
-            &self.rom,
-            &self.stack,
-            &self.heap,
-            &self.hints,
-        ];
+        let mut ranges = [&self.rom, &self.stack, &self.heap, &self.hints];
         ranges.sort_by_key(|r| r.start);
         for i in 0..ranges.len() - 1 {
             if ranges[i].end > ranges[i + 1].start {
