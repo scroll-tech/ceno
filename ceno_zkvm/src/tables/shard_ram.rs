@@ -672,6 +672,10 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
 
         type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
 
+        if !crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+            return Ok(None);
+        }
+
         // GPU only supports BabyBear
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>() {
             return Ok(None);
