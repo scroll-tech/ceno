@@ -211,13 +211,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // write fixed commitment to transcript
         // TODO check soundness if there is no fixed_commit but got fixed proof?
-        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref()
-            && shard_id == 0
-        {
+        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
-        } else if let Some(fixed_commit) = self.vk.fixed_no_omc_init_commit.as_ref()
-            && shard_id > 0
-        {
+        }
+        if let Some(fixed_commit) = self.vk.fixed_no_omc_init_commit.as_ref() {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
@@ -632,7 +629,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
-            assert_eq!(proof.num_instances.len(), 1);
+            assert_eq!(proof.num_instances[1], 0);
             // it's not shard chip
             vec![
                 SelectorContext::new(0, num_instances, num_var_with_rotation);
@@ -643,7 +640,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .unwrap_or(0)
             ]
         } else {
-            assert_eq!(proof.num_instances.len(), 2);
             // it's shard chip
             tracing::debug!(
                 "num_reads: {}, num_writes: {}, total: {}",

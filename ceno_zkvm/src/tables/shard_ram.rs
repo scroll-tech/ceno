@@ -858,7 +858,7 @@ mod tests {
             fixed: vec![],
             public_input: public_input_mles.clone(),
             pub_io_evals,
-            num_instances: vec![n_global_writes as usize, n_global_reads as usize],
+            num_instances: [n_global_writes as usize, n_global_reads as usize],
             has_ecc_ops: true,
         };
         let mut rng = thread_rng();

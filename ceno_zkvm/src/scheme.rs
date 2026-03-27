@@ -64,7 +64,7 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub tower_proof: TowerProofs<E>,
     pub ecc_proof: Option<EccQuarkProof<E>>,
 
-    pub num_instances: Vec<usize>,
+    pub num_instances: [usize; 2],
 
     pub fixed_in_evals: Vec<E>,
     pub wits_in_evals: Vec<E>,

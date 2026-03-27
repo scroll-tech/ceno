@@ -171,14 +171,11 @@ impl<
 
             // commit to fixed commitment
             let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
-            if let Some(fixed_commit) = &self.pk.fixed_commit
-                && shard_ctx.is_first_shard()
-            {
+            if let Some(fixed_commit) = self.pk.fixed_commit.as_ref() {
                 PCS::write_commitment(fixed_commit, &mut transcript)
                     .map_err(ZKVMError::PCSError)?;
-            } else if let Some(fixed_commit) = &self.pk.fixed_no_omc_init_commit
-                && !shard_ctx.is_first_shard()
-            {
+            }
+            if let Some(fixed_commit) = self.pk.fixed_no_omc_init_commit.as_ref() {
                 PCS::write_commitment(fixed_commit, &mut transcript)
                     .map_err(ZKVMError::PCSError)?;
             }
@@ -198,10 +195,10 @@ impl<
                 // num_instance from witness might include rotation
                 let num_instances = chip_inputs
                     .iter()
-                    .flat_map(|chip_input| &chip_input.num_instances)
+                    .flat_map(|chip_input| chip_input.num_instances)
                     .collect_vec();
 
-                if num_instances.is_empty() {
+                if num_instances.iter().sum::<usize>() == 0 {
                     continue;
                 }
 
@@ -210,7 +207,7 @@ impl<
                 transcript.append_field_element(&E::BaseField::from_canonical_usize(*circuit_idx));
                 for num_instance in num_instances {
                     transcript
-                        .append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
+                        .append_field_element(&E::BaseField::from_canonical_usize(num_instance));
                 }
             }
 
@@ -548,7 +545,7 @@ impl<
                 ecc_proof,
                 fixed_in_evals,
                 wits_in_evals,
-                num_instances: input.num_instances.clone(),
+                num_instances: input.num_instances,
             },
             pi_in_evals,
             input_opening_point,
@@ -561,7 +558,7 @@ impl<
     fn build_chip_tasks<'data>(
         &self,
         shard_ctx: &ShardContext,
-        name_and_instances: Vec<(String, Vec<usize>)>,
+        name_and_instances: Vec<(String, [usize; 2])>,
         structural_rmms: Vec<witness::RowMajorMatrix<E::BaseField>>,
         #[allow(unused_mut)] mut witness_mles: Vec<PB::MultilinearPoly<'data>>,
         witness_data: &PB::PcsData,
@@ -600,11 +597,11 @@ impl<
             let pk = self.pk.circuit_pks.get(&circuit_name).unwrap();
             let cs = pk.get_cs();
             if !shard_ctx.is_first_shard() && cs.with_omc_init_only() {
-                assert!(num_instances.is_empty());
+                assert_eq!(num_instances, [0, 0]);
                 // skip drain respective fixed because we use different set of fixed commitment
                 continue;
             }
-            if num_instances.is_empty() {
+            if num_instances.iter().sum::<usize>() == 0 {
                 // we need to drain respective fixed when num_instances is 0
                 if cs.num_fixed() > 0 {
                     let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
@@ -651,7 +648,7 @@ impl<
                 structural_witness,
                 public_input: public_input.clone(),
                 pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
-                num_instances: num_instances.clone(),
+                num_instances,
                 has_ecc_ops: cs.has_ecc_ops(),
             };
             // SAFETY: All Arcs in ProofInput contain 'static data:
