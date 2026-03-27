@@ -24,11 +24,6 @@ The following types were made `#[repr(C)]` to enable zero-copy H2D transfer to G
 Adding `#[repr(C)]` pins field order and padding. No behavioral change for CPU code,
 but **field reordering or insertion now requires updating the CUDA mirror structs**.
 
-### New types in `tracer.rs`
-
-- `PackedNextAccessEntry` (16B, `#[repr(C)]`) — 40-bit packed cycle+addr for GPU FA table
-- `ShardPlanBuilder` — preflight shard planning with cell-count balancing
-
 ### Layout test
 
 `test_step_record_layout_for_gpu` verifies byte offsets of all `StepRecord` fields
@@ -106,14 +101,6 @@ The `#[cfg(feature = "gpu")] assign_instances` override is only compiled with th
 
 **File**: `ceno_zkvm/src/e2e.rs` (+616 / -199 lines)
 
-### New fields
-
-| Field | Type | Purpose |
-|-------|------|---------|
-| ~~`sorted_next_accesses`~~ | ~~`Arc<SortedNextAccesses>`~~ | Removed — GPU cache builds sorted FA table on demand from `addr_future_accesses` HashMap |
-| `gpu_ec_records` | `Vec<u8>` | Raw bytes of GPU-produced compact EC shard records |
-| `syscall_witnesses` | `Arc<Vec<SyscallWitness>>` | Keccak syscall data (previously passed separately) |
-
 ### New methods
 
 | Method | Purpose |
@@ -121,8 +108,6 @@ The `#[cfg(feature = "gpu")] assign_instances` override is only compiled with th
 | `new_empty_like()` | Clone shard metadata with empty record storage (for debug comparison) |
 | `insert_read_record()` / `insert_write_record()` | Direct record insertion (GPU D2H path) |
 | `push_addr_accessed()` | Direct addr insertion (GPU D2H path) |
-| `extend_gpu_ec_records_raw()` | Append raw GPU EC record bytes |
-| `has_gpu_ec_records()` / `take_gpu_ec_records()` | GPU EC record lifecycle |
 
 ### Renamed method
 
@@ -227,7 +212,7 @@ New CPU-side math for EC point computation (mirrored in CUDA):
 | `#[repr(C)]` on emulator types | Layout pinning | Low — additive, but field changes now need CUDA sync |
 | `Instruction<E>` trait extensions | Additive (defaults provided) | None — existing chips unaffected |
 | Gadget `emit_*` methods | Additive | None — existing `assign_instance` unchanged |
-| `ShardContext` new fields | Additive (defaults in `Default`) | Low — `Vec::new()` / `Arc::new()` zero-cost |
+| `ShardContext` new methods | Additive | Low — existing methods unchanged |
 | `send()` → `record_send_without_touch()` + `send()` | Rename + split | Low — `send()` still works identically |
 | `ShardRamConfig` visibility | `private` → `pub(crate)` | None |
 | Pipeline overlap mode | New default behavior | Medium — CPU witgen + GPU prove on separate threads |

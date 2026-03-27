@@ -288,14 +288,14 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
                     );
                 }
 
-                // Populate shard_ctx: gpu_ec_records (raw bytes for assign_shared_circuit)
+                // Accumulate compact shard records for assign_shared_circuit
                 let raw_bytes = unsafe {
                     std::slice::from_raw_parts(
                         compact_records.as_ptr() as *const u8,
                         compact_records.len() * std::mem::size_of::<GpuShardRamRecord>(),
                     )
                 };
-                shard_ctx.extend_gpu_ec_records_raw(raw_bytes);
+                super::cache::append_compact_shard_records(raw_bytes);
 
                 Ok::<(), ZKVMError>(())
             })?;

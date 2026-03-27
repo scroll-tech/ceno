@@ -177,6 +177,30 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
+/// Per-shard accumulator for compact shard RAM records produced by GPU kernels.
+/// Each record is GPU_SHARD_RAM_RECORD_SIZE bytes (GpuShardRamRecord).
+/// Accumulated during opcode circuit assignment, consumed by assign_shared_circuit.
+thread_local! {
+    static COMPACT_SHARD_RECORDS: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Append raw compact shard records from a GPU kernel D2H transfer.
+pub fn append_compact_shard_records(raw_bytes: &[u8]) {
+    COMPACT_SHARD_RECORDS.with(|cell| {
+        cell.borrow_mut().extend_from_slice(raw_bytes);
+    });
+}
+
+/// Take all accumulated compact shard records, leaving the buffer empty.
+pub fn take_compact_shard_records() -> Vec<u8> {
+    COMPACT_SHARD_RECORDS.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
+}
+
+/// Returns true if compact shard records have been accumulated.
+pub fn has_compact_shard_records() -> bool {
+    COMPACT_SHARD_RECORDS.with(|cell| !cell.borrow().is_empty())
+}
+
 /// Build sorted packed next-access entries from the cross-shard HashMap.
 /// Called once on the first shard; the result is uploaded to GPU and reused.
 fn build_sorted_next_accesses(shard_ctx: &ShardContext) -> Vec<PackedNextAccessEntry> {
@@ -564,7 +588,7 @@ pub fn flush_shared_ec_buffers(shard_ctx: &mut ShardContext) -> Result<(), ZKVME
                 ec_count,
                 raw_bytes.len() as f64 / (1024.0 * 1024.0),
             );
-            shard_ctx.extend_gpu_ec_records_raw(raw_bytes);
+            append_compact_shard_records(raw_bytes);
         }
 
         // D2H addr_accessed count

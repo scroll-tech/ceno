@@ -37,7 +37,7 @@ gpu/
                     Pass 1: PreflightTracer
                     ┌──────────────────────┐
                     │  ShardPlanBuilder     │ → shard boundaries
-                    │  PackedNextAccessEntry│ → sorted future-access table
+                    │  addr_future_accesses │ → next-access HashMap (GPU cache reads and sorts before H2D)
                     └──────────┬───────────┘
                                │
                     Pass 2: FullTracer (per shard)

@@ -393,14 +393,14 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
                 Ok(())
             })?;
 
-            // Populate shard_ctx with GPU EC records
+            // Accumulate compact shard records for assign_shared_circuit
             let raw_bytes = unsafe {
                 std::slice::from_raw_parts(
                     compact_records.as_ptr() as *const u8,
                     compact_records.len() * std::mem::size_of::<GpuShardRamRecord>(),
                 )
             };
-            shard_ctx.extend_gpu_ec_records_raw(raw_bytes);
+            crate::instructions::gpu::cache::append_compact_shard_records(raw_bytes);
 
             Ok::<(), ZKVMError>(())
         })?;

@@ -496,13 +496,17 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let addr_accessed =
             info_span!("get_addr_accessed").in_scope(|| shard_ctx.get_addr_accessed_sorted());
 
-        // GPU EC records: convert raw bytes to ShardRamInput (EC points already computed on GPU)
-        // Partition into writes and reads to maintain the ordering invariant required by
-        // ShardRamCircuit::assign_instances (writes first, reads after).
+        // GPU compact shard records: convert raw bytes to ShardRamInput (EC points already
+        // computed on GPU). Partition into writes and reads to maintain the ordering invariant
+        // required by ShardRamCircuit::assign_instances (writes first, reads after).
+        #[cfg(feature = "gpu")]
+        let compact_records = crate::instructions::gpu::cache::take_compact_shard_records();
+        #[cfg(not(feature = "gpu"))]
+        let compact_records: Vec<u8> = vec![];
         let (gpu_ec_writes, gpu_ec_reads) =
-            info_span!("gpu_ec_convert", n = shard_ctx.gpu_ec_records.len() / 104).in_scope(|| {
-                if shard_ctx.has_gpu_ec_records() {
-                    gpu_ec_records_to_shard_ram_inputs::<E>(&shard_ctx.gpu_ec_records)
+            info_span!("gpu_ec_convert", n = compact_records.len() / 104).in_scope(|| {
+                if !compact_records.is_empty() {
+                    gpu_ec_records_to_shard_ram_inputs::<E>(&compact_records)
                 } else {
                     (vec![], vec![])
                 }
