@@ -133,23 +133,16 @@ CPU witgen on thread A, GPU prove on thread B, connected by `crossbeam::bounded(
 
 ## 6. `ZKVMWitnesses` — GPU ShardRam Pipeline
 
-**File**: `ceno_zkvm/src/structs.rs` (+580 / -130 lines)
+**File**: `ceno_zkvm/src/structs.rs` (thin wrapper only)
 
-### `assign_shared_circuit` — new GPU fast path
+### `assign_shared_circuit` — GPU fast path
 
-Added `try_assign_shared_circuit_gpu()` that keeps data on GPU device:
-1. Takes shared device buffers (EC records + addr_accessed)
-2. GPU sort+dedup addr_accessed
-3. GPU batch EC computation for continuation records
-4. GPU merge+partition records (writes before reads)
-5. GPU ShardRamCircuit witness generation (Poseidon2 + EC tree)
+`try_assign_shared_circuit_gpu()` delegates to `gpu/chips/shard_ram::try_gpu_assign_shared_circuit()`.
+The full GPU pipeline logic and `gpu_ec_records_to_shard_ram_inputs` conversion have been
+moved to `instructions/gpu/` — `structs.rs` only contains the wrapper that inserts results
+into `self.witnesses`.
 
-Falls back to CPU path on failure.
-
-### `gpu_ec_records_to_shard_ram_inputs`
-
-Converts raw GPU EC bytes (`Vec<u8>`) to `Vec<ShardRamInput<E>>` with pre-computed
-EC points. Used in the CPU fallback path.
+Two helper methods made `pub(crate)` for GPU access: `mem_addresses()`, `make_cross_shard_record()`.
 
 ---
 
