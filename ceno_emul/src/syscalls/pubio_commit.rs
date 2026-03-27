@@ -1,8 +1,16 @@
 use crate::{Change, EmuContext, Platform, Tracer, VMState, WriteOp, utils::MemoryView};
 
-use super::{PubIoCommitSpec, SyscallEffects, SyscallSpec, SyscallWitness};
+use super::{SyscallEffects, SyscallSpec, SyscallWitness};
 
 const PUBIO_COMMIT_WORDS: usize = 8;
+
+pub struct PubIoCommitSpec;
+impl SyscallSpec for PubIoCommitSpec {
+    const NAME: &'static str = "PUB_IO_COMMIT";
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize = PUBIO_COMMIT_WORDS;
+    const CODE: u32 = ceno_syscall::PUB_IO_COMMIT;
+}
 
 /// Trace the PUB_IO_COMMIT syscall by reading 8 digest words from guest memory.
 pub fn pubio_commit<T: Tracer>(vm: &VMState<T>) -> SyscallEffects {

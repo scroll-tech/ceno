@@ -15,9 +15,11 @@ pub mod uint256;
 pub use ceno_syscall::{
     BLS12381_ADD, BLS12381_DECOMPRESS, BLS12381_DOUBLE, BN254_ADD, BN254_DOUBLE, BN254_FP_ADD,
     BN254_FP_MUL, BN254_FP2_ADD, BN254_FP2_MUL, KECCAK_PERMUTE, PHANTOM_LOG_PC_CYCLE,
-    SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SECP256K1_SCALAR_INVERT, SECP256R1_ADD,
-    SECP256R1_DECOMPRESS, SECP256R1_DOUBLE, SECP256R1_SCALAR_INVERT, SHA_EXTEND, UINT256_MUL,
+    PUB_IO_COMMIT, SECP256K1_ADD, SECP256K1_DECOMPRESS, SECP256K1_DOUBLE, SECP256K1_SCALAR_INVERT,
+    SECP256R1_ADD, SECP256R1_DECOMPRESS, SECP256R1_DOUBLE, SECP256R1_SCALAR_INVERT, SHA_EXTEND,
+    UINT256_MUL,
 };
+pub use pubio_commit::PubIoCommitSpec;
 
 pub trait SyscallSpec {
     const NAME: &'static str;
@@ -29,14 +31,6 @@ pub trait SyscallSpec {
     const HAS_LOOKUPS: bool = false;
 
     const GKR_OUTPUTS: usize = 0;
-}
-
-pub struct PubIoCommitSpec;
-impl SyscallSpec for PubIoCommitSpec {
-    const NAME: &'static str = "PUB_IO_COMMIT";
-    const REG_OPS_COUNT: usize = 1;
-    const MEM_OPS_COUNT: usize = 8;
-    const CODE: u32 = ceno_syscall::PUB_IO_COMMIT;
 }
 
 /// Trace the inputs and effects of a syscall.
@@ -58,7 +52,7 @@ pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<
         BN254_FP2_ADD => Ok(bn254::bn254_fp2_add(vm)),
         BN254_FP2_MUL => Ok(bn254::bn254_fp2_mul(vm)),
         UINT256_MUL => Ok(uint256::uint256_mul(vm)),
-        code if code == PubIoCommitSpec::CODE => Ok(pubio_commit::pubio_commit(vm)),
+        PUB_IO_COMMIT => Ok(pubio_commit::pubio_commit(vm)),
 
         // phantom syscall
         PHANTOM_LOG_PC_CYCLE => Ok(phantom::log_pc_cycle(vm)),
