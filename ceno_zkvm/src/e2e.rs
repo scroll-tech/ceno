@@ -59,14 +59,29 @@ pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
 pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
 
-pub fn public_io_words_to_digest_u16_limbs(words: &[u32]) -> [u32; 16] {
+pub fn public_io_words_to_digest_words(words: &[u32]) -> [u32; 8] {
     let mut keccak = Keccak::v256();
     for word in words {
         keccak.update(&word.to_le_bytes());
     }
     let mut digest = [0u8; 32];
     keccak.finalize(&mut digest);
-    core::array::from_fn(|i| u16::from_le_bytes([digest[2 * i], digest[2 * i + 1]]) as u32)
+    #[cfg(target_endian = "little")]
+    {
+        // Reinterpret Keccak digest bytes as 8 little-endian u32 words.
+        unsafe { core::mem::transmute::<[u8; 32], [u32; 8]>(digest) }
+    }
+    #[cfg(not(target_endian = "little"))]
+    {
+        core::array::from_fn(|i| {
+            u32::from_le_bytes([
+                digest[i * 4],
+                digest[i * 4 + 1],
+                digest[i * 4 + 2],
+                digest[i * 4 + 3],
+            ])
+        })
+    }
 }
 
 // define a relative small number to make first shard handle much less instruction
@@ -782,7 +797,7 @@ impl StepReplay {
     ) -> Self {
         let mut vm =
             VMState::new_with_tracer_config(platform, program, FullTracerConfig { max_step_shard });
-        for record in chain!(init_mem_state.hints.iter(), init_mem_state.io.iter()) {
+        for record in init_mem_state.hints.iter() {
             vm.init_memory(record.addr.into(), record.value);
         }
         StepReplay {
@@ -840,13 +855,14 @@ pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
     init_mem_state: &InitMemState,
+    public_io_digest_input: &[u32],
     platform: &Platform,
     multi_prover: &MultiProver,
     step_cell_extractor: Arc<dyn StepCellExtractor>,
 ) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
-        io: io_init,
+        io: _,
         reg: reg_init,
         hints: hints_init,
         stack: _,
@@ -865,7 +881,7 @@ pub fn emulate_program<'a>(
         });
 
     info_span!("[ceno] emulator.init_mem").in_scope(|| {
-        for record in chain!(hints_init, io_init) {
+        for record in hints_init {
             vm.init_memory(record.addr.into(), record.value);
         }
     });
@@ -949,17 +965,8 @@ pub fn emulate_program<'a>(
         })
         .collect_vec();
 
-    // Find the final public IO cycles.
-    let io_final = io_init
-        .iter()
-        .map(|rec| MemFinalRecord {
-            ram_type: RAMType::Memory,
-            addr: rec.addr,
-            value: rec.value,
-            init_value: rec.value,
-            cycle: final_access.cycle(rec.addr.into()),
-        })
-        .collect_vec();
+    // Legacy public-io memory init is removed.
+    let io_final: Vec<MemFinalRecord> = vec![];
 
     // Find the final hints IO cycles.
     let hints_final = hints_init
@@ -1032,8 +1039,8 @@ pub fn emulate_program<'a>(
         heap_final.len() as u32,
         platform.hints.start,
         hints_final.len() as u32,
-        io_init.iter().map(|rec| rec.value).collect_vec(),
-        public_io_words_to_digest_u16_limbs(&io_init.iter().map(|rec| rec.value).collect_vec()),
+        vec![],
+        public_io_words_to_digest_words(public_io_digest_input),
         [0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );
 
@@ -1221,7 +1228,6 @@ pub fn generate_fixed_traces<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     reg_init: &[MemInitRecord],
     static_mem_init: &[MemInitRecord],
-    io_addrs: &[Addr],
     program: &Program,
 ) -> ZKVMFixedTraces<E> {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
@@ -1240,7 +1246,6 @@ pub fn generate_fixed_traces<E: ExtensionField>(
         &mut zkvm_fixed_traces,
         reg_init,
         static_mem_init,
-        io_addrs,
     );
     system_config
         .dummy_config
@@ -1415,7 +1420,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &pi,
                         &emul_result.final_mem_state.reg,
                         &emul_result.final_mem_state.mem,
-                        &emul_result.final_mem_state.io,
                         &emul_result.final_mem_state.stack,
                     )
                     .unwrap();
@@ -1427,7 +1431,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &system_config.zkvm_cs,
                         &mut zkvm_witness,
                         &pi,
-                        &[],
                         &[],
                         &[],
                         &[],
@@ -1460,7 +1463,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     &pi,
                     &emul_result.final_mem_state.reg,
                     &emul_result.final_mem_state.mem,
-                    &emul_result.final_mem_state.io,
                     &emul_result.final_mem_state.hints,
                     &emul_result.final_mem_state.stack,
                     &emul_result.final_mem_state.heap,
@@ -1532,7 +1534,6 @@ pub struct E2EProgramCtx<E: ExtensionField> {
     pub pubio_len: usize,
     pub system_config: ConstraintSystemConfig<E>,
     pub reg_init: Vec<MemInitRecord>,
-    pub io_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
 }
 
@@ -1570,14 +1571,11 @@ pub fn setup_program<E: ExtensionField>(
     };
     let system_config = construct_configs::<E>(program_params);
     let reg_init = system_config.mmu_config.initial_registers();
-    let io_init: Vec<MemInitRecord> = vec![];
-
     // Generate fixed traces
     let zkvm_fixed_traces = generate_fixed_traces(
         &system_config,
         &reg_init,
         &static_addrs,
-        &io_init.iter().map(|rec| rec.addr).collect_vec(),
         &program,
     );
 
@@ -1589,7 +1587,6 @@ pub fn setup_program<E: ExtensionField>(
         pubio_len,
         system_config,
         reg_init,
-        io_init,
         zkvm_fixed_traces,
     }
 }
@@ -1643,9 +1640,8 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
     }
 
     /// Setup init mem state
-    pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> InitMemState {
-        let _ = public_io;
-        let io_init = self.io_init.clone();
+    pub fn setup_init_mem(&self, hints: &[u32], public_io_digest_input: &[u32]) -> InitMemState {
+        let _ = public_io_digest_input;
         let hint_init = MemPadder::new_mem_records(
             self.platform.hints.clone(),
             hints.len().next_power_of_two(),
@@ -1655,7 +1651,7 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
         InitMemState {
             mem: self.static_addrs.clone(),
             reg: self.reg_init.clone(),
-            io: io_init,
+            io: vec![],
             hints: hint_init,
             // stack/heap both init value 0 and range is dynamic
             stack: vec![],
@@ -1687,7 +1683,7 @@ pub fn run_e2e_with_checkpoint<
     platform: Platform,
     multi_prover: MultiProver,
     hints: &[u32],
-    public_io: &[u32],
+    public_io_digest_input: &[u32],
     max_steps: usize,
     checkpoint: Checkpoint,
     // for debug purpose
@@ -1706,12 +1702,13 @@ pub fn run_e2e_with_checkpoint<
     let prover = ZKVMProver::new(pk.into(), device);
 
     let start = std::time::Instant::now();
-    let init_full_mem = prover.setup_init_mem(hints, public_io);
+    let init_full_mem = prover.setup_init_mem(hints, public_io_digest_input);
     tracing::debug!("setup_init_mem done in {:?}", start.elapsed());
 
     // Generate witness
     let is_mock_proving = std::env::var("MOCK_PROVING").is_ok();
     if let Checkpoint::PrepE2EProving = checkpoint {
+        let public_io_digest_input_owned = public_io_digest_input.to_vec();
         return E2ECheckpointResult {
             proofs: None,
             vk: Some(vk),
@@ -1719,6 +1716,7 @@ pub fn run_e2e_with_checkpoint<
                 _ = run_e2e_proof::<E, _, _, _>(
                     &prover,
                     &init_full_mem,
+                    &public_io_digest_input_owned,
                     max_steps,
                     is_mock_proving,
                     target_shard_id,
@@ -1736,6 +1734,7 @@ pub fn run_e2e_with_checkpoint<
         prover.pk.program_ctx.as_ref().unwrap().program.clone(),
         max_steps,
         &init_full_mem,
+        public_io_digest_input,
         &prover.pk.program_ctx.as_ref().unwrap().platform,
         &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
         step_cell_extractor,
@@ -1816,6 +1815,7 @@ pub fn run_e2e_proof<
 >(
     prover: &ZKVMProver<E, PCS, PB, PD>,
     init_full_mem: &InitMemState,
+    public_io_digest_input: &[u32],
     max_steps: usize,
     is_mock_proving: bool,
     // for debug purpose
@@ -1829,6 +1829,7 @@ pub fn run_e2e_proof<
         ctx.program.clone(),
         max_steps,
         init_full_mem,
+        public_io_digest_input,
         &ctx.platform,
         &ctx.multi_prover,
         step_cell_extractor,

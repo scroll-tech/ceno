@@ -367,14 +367,16 @@ fn run_elf_inner<
         options.max_cycle_per_shard,
     );
 
-    let public_io = options
+    let public_io_digest_input = options
         .read_public_io()
         .context("failed to read public io")?;
+    let public_io_digest = public_io_words_to_digest_words(&public_io_digest_input);
+    tracing::debug!("public io digest words: {:?}", public_io_digest);
     let public_io_size = options.public_io_size;
     assert!(
-        public_io.len() <= public_io_size as usize / WORD_SIZE,
+        public_io_digest_input.len() <= public_io_size as usize / WORD_SIZE,
         "require pub io length {} < max public_io_size {}",
-        public_io.len(),
+        public_io_digest_input.len(),
         public_io_size as usize / WORD_SIZE
     );
 
@@ -416,7 +418,7 @@ fn run_elf_inner<
         platform,
         multi_prover,
         &hints,
-        &public_io,
+        &public_io_digest_input,
         options.max_steps,
         checkpoint,
         options.shard_id.map(|v| v as usize),

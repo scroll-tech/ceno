@@ -1,9 +1,10 @@
-use crate::{Platform, RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
+use crate::{RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
 use anyhow::Result;
 
 pub mod bn254;
 pub mod keccak_permute;
 pub mod phantom;
+pub mod pubio_commit;
 pub mod secp256k1;
 pub(crate) mod secp256r1;
 pub mod sha256;
@@ -33,9 +34,9 @@ pub trait SyscallSpec {
 pub struct PubIoCommitSpec;
 impl SyscallSpec for PubIoCommitSpec {
     const NAME: &'static str = "PUB_IO_COMMIT";
-    const REG_OPS_COUNT: usize = 0;
-    const MEM_OPS_COUNT: usize = 0;
-    const CODE: u32 = Platform::ecall_pub_io_commit();
+    const REG_OPS_COUNT: usize = 1;
+    const MEM_OPS_COUNT: usize = 8;
+    const CODE: u32 = ceno_syscall::PUB_IO_COMMIT;
 }
 
 /// Trace the inputs and effects of a syscall.
@@ -57,7 +58,7 @@ pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<
         BN254_FP2_ADD => Ok(bn254::bn254_fp2_add(vm)),
         BN254_FP2_MUL => Ok(bn254::bn254_fp2_mul(vm)),
         UINT256_MUL => Ok(uint256::uint256_mul(vm)),
-        code if code == PubIoCommitSpec::CODE => Ok(SyscallEffects::default()),
+        code if code == PubIoCommitSpec::CODE => Ok(pubio_commit::pubio_commit(vm)),
 
         // phantom syscall
         PHANTOM_LOG_PC_CYCLE => Ok(phantom::log_pc_cycle(vm)),

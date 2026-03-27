@@ -173,11 +173,6 @@ impl Platform {
         0
     }
 
-    /// The code of ecall PUB_IO_COMMIT.
-    pub const fn ecall_pub_io_commit() -> u32 {
-        1
-    }
-
     /// The code of success.
     pub const fn code_success() -> u32 {
         0

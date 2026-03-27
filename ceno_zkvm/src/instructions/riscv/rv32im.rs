@@ -21,9 +21,10 @@ use crate::{
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
                 Fp2AddInstruction, Fp2MulInstruction, FpAddInstruction, FpMulInstruction,
-                KeccakInstruction, Secp256k1InvInstruction, Secp256r1InvInstruction,
-                ShaExtendInstruction, Uint256MulInstruction, WeierstrassAddAssignInstruction,
-                WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
+                KeccakInstruction, PubIoCommitInstruction, Secp256k1InvInstruction,
+                Secp256r1InvInstruction, ShaExtendInstruction, Uint256MulInstruction,
+                WeierstrassAddAssignInstruction, WeierstrassDecompressInstruction,
+                WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
@@ -73,7 +74,7 @@ use strum::{EnumCount, IntoEnumIterator};
 pub mod mmu;
 
 const ECALL_HALT: u32 = Platform::ecall_halt();
-const ECALL_PUB_IO_COMMIT: u32 = Platform::ecall_pub_io_commit();
+const ECALL_PUB_IO_COMMIT: u32 = PubIoCommitSpec::CODE;
 
 pub struct Rv32imConfig<E: ExtensionField> {
     // ALU Opcodes.
@@ -135,8 +136,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
 
     // Ecall Opcodes
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
-    pub pubio_commit_config:
-        <LargeEcallDummy<E, PubIoCommitSpec> as Instruction<E>>::InstructionConfig,
+    pub pubio_commit_config: <PubIoCommitInstruction<E> as Instruction<E>>::InstructionConfig,
     pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sha_extend_config: <ShaExtendInstruction<E> as Instruction<E>>::InstructionConfig,
     pub bn254_add_config:
@@ -359,7 +359,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         }
         let halt_config = register_ecall_circuit!(HaltInstruction<E>, ecall_cells_map);
         let pubio_commit_config =
-            register_ecall_circuit!(LargeEcallDummy<E, PubIoCommitSpec>, ecall_cells_map);
+            register_ecall_circuit!(PubIoCommitInstruction<E>, ecall_cells_map);
 
         // Keccak precompile is a known hotspot for peak memory.
         // Its heavy read/write/LK activity inflates tower-witness usage, causing
@@ -568,10 +568,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // system
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, PubIoCommitSpec>>(
-            cs,
-            &self.pubio_commit_config,
-        );
+        fixed.register_opcode_circuit::<PubIoCommitInstruction<E>>(cs, &self.pubio_commit_config);
         fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs, &self.keccak_config);
         fixed.register_opcode_circuit::<ShaExtendInstruction<E>>(cs, &self.sha_extend_config);
         fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
@@ -773,7 +770,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // ecall / halt
         assign_ecall!(HaltInstruction<E>, halt_config, ECALL_HALT);
         assign_ecall!(
-            LargeEcallDummy<E, PubIoCommitSpec>,
+            PubIoCommitInstruction<E>,
             pubio_commit_config,
             ECALL_PUB_IO_COMMIT
         );
@@ -1060,7 +1057,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .expect("unable to find name"),
             ECALL_PUB_IO_COMMIT => *self
                 .ecall_cells_map
-                .get(&LargeEcallDummy::<E, PubIoCommitSpec>::name())
+                .get(&PubIoCommitInstruction::<E>::name())
                 .expect("unable to find name"),
             KeccakSpec::CODE => *self
                 .ecall_cells_map

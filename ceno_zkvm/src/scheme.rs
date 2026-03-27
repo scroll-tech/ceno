@@ -22,7 +22,8 @@ use crate::{
             constants::{
                 END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
                 HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, LIMB_BITS,
-                LIMB_MASK, SHARD_ID_IDX, SHARD_RW_SUM_IDX, UINT_LIMBS,
+                LIMB_MASK, PUBIO_DIGEST_IDX, PUBIO_DIGEST_U16_LIMBS, SHARD_ID_IDX,
+                SHARD_RW_SUM_IDX, UINT_LIMBS,
             },
             ecall::HaltInstruction,
         },
@@ -87,7 +88,7 @@ pub struct PublicValues {
     pub hint_start_addr: u32,
     pub hint_shard_len: u32,
     pub public_io: Vec<u32>,
-    pub pubio_digest: [u32; 16],
+    pub public_io_digest: [u32; 8],
     pub shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
 }
 
@@ -105,7 +106,7 @@ impl PublicValues {
         hint_start_addr: u32,
         hint_shard_len: u32,
         public_io: Vec<u32>,
-        pubio_digest: [u32; 16],
+        public_io_digest: [u32; 8],
         shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
     ) -> Self {
         Self {
@@ -120,7 +121,7 @@ impl PublicValues {
             hint_start_addr,
             hint_shard_len,
             public_io,
-            pubio_digest,
+            public_io_digest,
             shard_rw_sum,
         }
     }
@@ -143,6 +144,16 @@ impl PublicValues {
                 .contains(&idx) =>
             {
                 E::BaseField::from_canonical_u32(self.shard_rw_sum[idx - SHARD_RW_SUM_IDX])
+            }
+            idx if (PUBIO_DIGEST_IDX..(PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS))
+                .contains(&idx) =>
+            {
+                let digest_limb_idx = idx - PUBIO_DIGEST_IDX;
+                let word_idx = digest_limb_idx / UINT_LIMBS;
+                let limb_idx = digest_limb_idx % UINT_LIMBS;
+                E::BaseField::from_canonical_u32(
+                    (self.public_io_digest[word_idx] >> (limb_idx * LIMB_BITS)) & LIMB_MASK,
+                )
             }
             _ => panic!("public value index {index} out of range"),
         }

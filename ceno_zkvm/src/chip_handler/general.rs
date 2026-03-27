@@ -6,7 +6,7 @@ use crate::{
     instructions::riscv::constants::{
         END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
         HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBLIC_IO_IDX,
-        SHARD_ID_IDX, SHARD_RW_SUM_IDX, UINT_LIMBS,
+        PUBIO_DIGEST_IDX, PUBIO_DIGEST_U16_LIMBS, SHARD_ID_IDX, SHARD_RW_SUM_IDX, UINT_LIMBS,
     },
     scheme::constants::SEPTIC_EXTENSION_DEGREE,
     tables::InsnRecord,
@@ -25,6 +25,9 @@ pub trait PublicValuesQuery {
     fn query_end_cycle(&mut self) -> Result<Instance, CircuitBuilderError>;
     fn query_global_rw_sum(&mut self) -> Result<Vec<Instance>, CircuitBuilderError>;
     fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError>;
+    fn query_public_io_digest(
+        &mut self,
+    ) -> Result<[Instance; PUBIO_DIGEST_U16_LIMBS], CircuitBuilderError>;
     #[allow(dead_code)]
     fn query_shard_id(&mut self) -> Result<Instance, CircuitBuilderError>;
     fn query_heap_start_addr(&mut self) -> Result<Instance, CircuitBuilderError>;
@@ -89,6 +92,17 @@ impl<'a, E: ExtensionField> PublicValuesQuery for CircuitBuilder<'a, E> {
             self.cs.query_instance_for_openings(PUBLIC_IO_IDX)?,
             self.cs.query_instance_for_openings(PUBLIC_IO_IDX + 1)?,
         ])
+    }
+
+    fn query_public_io_digest(
+        &mut self,
+    ) -> Result<[Instance; PUBIO_DIGEST_U16_LIMBS], CircuitBuilderError> {
+        let limbs = (0..PUBIO_DIGEST_U16_LIMBS)
+            .map(|i| self.cs.query_instance(PUBIO_DIGEST_IDX + i))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(limbs
+            .try_into()
+            .expect("pubio digest instance limb count must be fixed"))
     }
 
     fn query_shard_id(&mut self) -> Result<Instance, CircuitBuilderError> {

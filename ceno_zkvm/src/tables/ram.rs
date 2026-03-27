@@ -2,7 +2,7 @@ use ceno_emul::{Addr, VM_REG_COUNT, WORD_SIZE};
 use ff_ext::ExtensionField;
 use gkr_iop::error::CircuitBuilderError;
 use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
-use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamInitCircuit};
+use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit};
 
 use crate::{
     instructions::riscv::constants::UINT_LIMBS,
@@ -241,22 +241,4 @@ impl NonVolatileTable for StaticMemTable {
 pub type StaticMemInitCircuit<E> =
     NonVolatileRamCircuit<E, StaticMemTable, NonVolatileInitTableConfig<StaticMemTable>>;
 
-#[derive(Clone)]
-pub struct PubIOTable;
-
-impl NonVolatileTable for PubIOTable {
-    const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = UINT_LIMBS;
-    const WRITABLE: bool = false;
-
-    fn name() -> &'static str {
-        "PubIOTable"
-    }
-
-    fn len(params: &ProgramParams) -> usize {
-        params.pubio_len
-    }
-}
-
-pub type PubIOInitCircuit<E> = PubIORamInitCircuit<E, PubIOTable>;
 pub type LocalFinalCircuit<E> = LocalFinalRamCircuit<UINT_LIMBS, E>;

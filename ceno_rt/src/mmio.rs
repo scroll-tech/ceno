@@ -2,6 +2,7 @@
 
 use ceno_serde::from_slice;
 use core::{cell::UnsafeCell, ptr, slice::from_raw_parts};
+use ceno_syscall::syscall_pub_io_commit;
 use serde::de::DeserializeOwned;
 use tiny_keccak::{Hasher, Keccak};
 
@@ -98,26 +99,15 @@ where
     read_owned()
 }
 
-#[cfg(target_arch = "riscv32")]
-#[inline(always)]
-fn syscall_pub_io_commit(digest_u16_limbs: &[u32; 16]) {
-    // a0 carries a pointer to the digest limbs, a1 carries the limb count.
-    unsafe {
-        core::arch::asm!(
-            "ecall",
-            in("a0") digest_u16_limbs.as_ptr(),
-            in("a1") digest_u16_limbs.len(),
-            in("t0") 1_u32,
-        );
-    }
-}
-
-#[cfg(not(target_arch = "riscv32"))]
-#[inline(always)]
-fn syscall_pub_io_commit(_digest_u16_limbs: &[u32; 16]) {}
-
-fn digest_to_u16_limbs(digest: [u8; 32]) -> [u32; 16] {
-    core::array::from_fn(|i| u16::from_le_bytes([digest[i * 2], digest[i * 2 + 1]]) as u32)
+fn digest_to_words(digest: [u8; 32]) -> [u32; 8] {
+    core::array::from_fn(|i| {
+        u32::from_le_bytes([
+            digest[i * 4],
+            digest[i * 4 + 1],
+            digest[i * 4 + 2],
+            digest[i * 4 + 3],
+        ])
+    })
 }
 
 /// Commit arbitrary public bytes by hashing with Keccak-256 and emitting digest limbs.
@@ -127,6 +117,6 @@ pub fn commit(data: &[u8]) {
     let mut digest = [0u8; 32];
     keccak.finalize(&mut digest);
 
-    let digest_u16_limbs = digest_to_u16_limbs(digest);
-    syscall_pub_io_commit(&digest_u16_limbs);
+    let digest_words = digest_to_words(digest);
+    syscall_pub_io_commit(&digest_words);
 }
