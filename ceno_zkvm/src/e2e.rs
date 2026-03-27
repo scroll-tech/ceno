@@ -41,6 +41,7 @@ use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
+use tiny_keccak::{Hasher, Keccak};
 #[cfg(debug_assertions)]
 use std::collections::{HashMap, HashSet};
 use std::{
@@ -57,6 +58,17 @@ use witness::next_pow2_instance_padding;
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
 pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
+
+pub fn public_io_words_to_digest_u16_limbs(words: &[u32]) -> [u32; 16] {
+    let mut keccak = Keccak::v256();
+    for word in words {
+        keccak.update(&word.to_le_bytes());
+    }
+    let mut digest = [0u8; 32];
+    keccak.finalize(&mut digest);
+    core::array::from_fn(|i| u16::from_le_bytes([digest[2 * i], digest[2 * i + 1]]) as u32)
+}
+
 // define a relative small number to make first shard handle much less instruction
 /// The polynomial commitment scheme kind
 #[derive(
@@ -1021,6 +1033,7 @@ pub fn emulate_program<'a>(
         platform.hints.start,
         hints_final.len() as u32,
         io_init.iter().map(|rec| rec.value).collect_vec(),
+        public_io_words_to_digest_u16_limbs(&io_init.iter().map(|rec| rec.value).collect_vec()),
         [0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );
 
@@ -1139,17 +1152,13 @@ fn setup_platform_inner(
         heap.start..heap_end as u32
     };
 
-    assert!(
-        pub_io_size.is_power_of_two(),
-        "pub io size {pub_io_size} must be a power of two"
-    );
+    let _ = pub_io_size;
     let platform = Platform {
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
         prog_data,
         stack,
         heap,
-        public_io: preset.public_io.start..preset.public_io.start + pub_io_size,
         ..preset
     };
     assert!(
@@ -1552,7 +1561,7 @@ pub fn setup_program<E: ExtensionField>(
     multi_prover: MultiProver,
 ) -> E2EProgramCtx<E> {
     let static_addrs = init_static_addrs(&program);
-    let pubio_len = platform.public_io.iter_addresses().len();
+    let pubio_len = 0;
     let program_params = ProgramParams {
         platform: platform.clone(),
         program_size: next_pow2_instance_padding(program.instructions.len()),
@@ -1561,7 +1570,7 @@ pub fn setup_program<E: ExtensionField>(
     };
     let system_config = construct_configs::<E>(program_params);
     let reg_init = system_config.mmu_config.initial_registers();
-    let io_init = MemPadder::new_mem_records_uninit(platform.public_io.clone(), pubio_len);
+    let io_init: Vec<MemInitRecord> = vec![];
 
     // Generate fixed traces
     let zkvm_fixed_traces = generate_fixed_traces(
@@ -1635,8 +1644,8 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
 
     /// Setup init mem state
     pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> InitMemState {
-        let mut io_init = self.io_init.clone();
-        MemPadder::init_mem_records(&mut io_init, public_io);
+        let _ = public_io;
+        let io_init = self.io_init.clone();
         let hint_init = MemPadder::new_mem_records(
             self.platform.hints.clone(),
             hints.len().next_power_of_two(),

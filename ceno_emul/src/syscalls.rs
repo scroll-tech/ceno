@@ -1,4 +1,4 @@
-use crate::{RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
+use crate::{Platform, RegIdx, Tracer, VMState, Word, WordAddr, WriteOp};
 use anyhow::Result;
 
 pub mod bn254;
@@ -30,6 +30,14 @@ pub trait SyscallSpec {
     const GKR_OUTPUTS: usize = 0;
 }
 
+pub struct PubIoCommitSpec;
+impl SyscallSpec for PubIoCommitSpec {
+    const NAME: &'static str = "PUB_IO_COMMIT";
+    const REG_OPS_COUNT: usize = 0;
+    const MEM_OPS_COUNT: usize = 0;
+    const CODE: u32 = Platform::ecall_pub_io_commit();
+}
+
 /// Trace the inputs and effects of a syscall.
 pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<SyscallEffects> {
     match function_code {
@@ -49,6 +57,7 @@ pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<
         BN254_FP2_ADD => Ok(bn254::bn254_fp2_add(vm)),
         BN254_FP2_MUL => Ok(bn254::bn254_fp2_mul(vm)),
         UINT256_MUL => Ok(uint256::uint256_mul(vm)),
+        code if code == PubIoCommitSpec::CODE => Ok(SyscallEffects::default()),
 
         // phantom syscall
         PHANTOM_LOG_PC_CYCLE => Ok(phantom::log_pc_cycle(vm)),

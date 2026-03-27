@@ -3,6 +3,7 @@
 use ceno_serde::from_slice;
 use core::{cell::UnsafeCell, ptr, slice::from_raw_parts};
 use serde::de::DeserializeOwned;
+use tiny_keccak::{Hasher, Keccak};
 
 struct RegionState {
     next_len_at: *const usize,
@@ -58,8 +59,6 @@ impl RegionState {
 unsafe extern "C" {
     static _hints_start: u8;
     static _lengths_of_hints_start: usize;
-    static _pubio_start: u8;
-    static _lengths_of_pubio_start: usize;
 }
 
 struct RegionStateCell(UnsafeCell<RegionState>);
@@ -77,7 +76,6 @@ impl RegionStateCell {
 unsafe impl Sync for RegionStateCell {}
 
 static HINT_STATE: RegionStateCell = RegionStateCell::new();
-static PUBIO_STATE: RegionStateCell = RegionStateCell::new();
 
 pub fn read_slice<'a>() -> &'a [u8] {
     unsafe {
@@ -100,18 +98,35 @@ where
     read_owned()
 }
 
-pub fn pubio_read_slice<'a>() -> &'a [u8] {
+#[cfg(target_arch = "riscv32")]
+#[inline(always)]
+fn syscall_pub_io_commit(digest_u16_limbs: &[u32; 16]) {
+    // a0 carries a pointer to the digest limbs, a1 carries the limb count.
     unsafe {
-        PUBIO_STATE
-            .with_mut(|state| state.take_slice(&raw const _lengths_of_pubio_start, &_pubio_start))
+        core::arch::asm!(
+            "ecall",
+            in("a0") digest_u16_limbs.as_ptr(),
+            in("a1") digest_u16_limbs.len(),
+            in("t0") 1_u32,
+        );
     }
 }
 
-/// Read a value from public io, deserialize it, and assert that it matches the given value.
-pub fn commit<T>(v: &T)
-where
-    T: DeserializeOwned + core::fmt::Debug + PartialEq,
-{
-    let expected: T = from_slice(pubio_read_slice()).expect("Deserialised value failed.");
-    assert_eq!(*v, expected);
+#[cfg(not(target_arch = "riscv32"))]
+#[inline(always)]
+fn syscall_pub_io_commit(_digest_u16_limbs: &[u32; 16]) {}
+
+fn digest_to_u16_limbs(digest: [u8; 32]) -> [u32; 16] {
+    core::array::from_fn(|i| u16::from_le_bytes([digest[i * 2], digest[i * 2 + 1]]) as u32)
+}
+
+/// Commit arbitrary public bytes by hashing with Keccak-256 and emitting digest limbs.
+pub fn commit(data: &[u8]) {
+    let mut keccak = Keccak::v256();
+    keccak.update(data);
+    let mut digest = [0u8; 32];
+    keccak.finalize(&mut digest);
+
+    let digest_u16_limbs = digest_to_u16_limbs(digest);
+    syscall_pub_io_commit(&digest_u16_limbs);
 }

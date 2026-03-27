@@ -87,6 +87,7 @@ pub struct PublicValues {
     pub hint_start_addr: u32,
     pub hint_shard_len: u32,
     pub public_io: Vec<u32>,
+    pub pubio_digest: [u32; 16],
     pub shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
 }
 
@@ -104,6 +105,7 @@ impl PublicValues {
         hint_start_addr: u32,
         hint_shard_len: u32,
         public_io: Vec<u32>,
+        pubio_digest: [u32; 16],
         shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
     ) -> Self {
         Self {
@@ -118,6 +120,7 @@ impl PublicValues {
             hint_start_addr,
             hint_shard_len,
             public_io,
+            pubio_digest,
             shard_rw_sum,
         }
     }

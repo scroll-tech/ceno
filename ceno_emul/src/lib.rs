@@ -41,6 +41,7 @@ pub use syscalls::{
     },
     keccak_permute::{KECCAK_WORDS, KeccakSpec},
     phantom::LogPcCycleSpec,
+    PubIoCommitSpec,
     secp256k1::{
         COORDINATE_WORDS as SECP256K1_COORDINATE_WORDS, SECP256K1_ARG_WORDS, Secp256k1AddSpec,
         Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec,

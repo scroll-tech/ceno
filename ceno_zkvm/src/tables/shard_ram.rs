@@ -775,6 +775,7 @@ mod tests {
             0,
             0,
             vec![0], // dummy
+            [0; 16],
             shard_rw_sum,
         );
 
