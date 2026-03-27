@@ -103,8 +103,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub fixed_namespace_map: Vec<String>,
 
     // record which public input index is involving in constraint computation
-    pub instance_values: Vec<Instance>,
-    pub instance_openings: Vec<Instance>,
+    pub instance: Vec<Instance>,
 
     pub ec_point_exprs: Vec<Expression<E>>,
     pub ec_slope_exprs: Vec<Expression<E>>,
@@ -177,8 +176,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
-            instance_values: vec![],
-            instance_openings: vec![],
+            instance: vec![],
             ec_final_sum: vec![],
             ec_slope_exprs: vec![],
             ec_point_exprs: vec![],
@@ -265,26 +263,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     pub fn query_instance(&mut self, idx: usize) -> Result<Instance, CircuitBuilderError> {
         let i = Instance(idx);
         assert!(
-            !self.instance_values.contains(&i),
+            !self.instance.contains(&i),
             "query same pubio idx {idx} value more than once",
         );
-        self.instance_values.push(i);
-        Ok(Instance(self.instance_values.len() - 1))
-    }
-
-    pub fn query_instance_for_openings(
-        &mut self,
-        idx: usize,
-    ) -> Result<Instance, CircuitBuilderError> {
-        let i = Instance(idx);
-
-        assert!(
-            !self.instance_openings.contains(&i),
-            "query same pubio idx {idx} mle more than once",
-        );
-        self.instance_openings.push(i);
-
-        Ok(Instance(self.instance_openings.len() - 1))
+        self.instance.push(i);
+        Ok(Instance(self.instance.len() - 1))
     }
 
     pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {

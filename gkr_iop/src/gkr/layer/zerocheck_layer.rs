@@ -3,7 +3,7 @@ use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{
     ChallengeId, Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitnessId,
     macros::{entered_span, exit_span},
-    mle::{IntoMLE, Point},
+    mle::Point,
     monomial::Term,
     monomialize_expr_to_wit_terms,
     utils::{eval_by_expr, eval_by_expr_with_instance, expr_convert_to_witins},
@@ -77,7 +77,6 @@ pub trait ZerocheckLayer<E: ExtensionField> {
         proof: LayerProof<E>,
         eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         pub_io_evals: &[E],
-        instance_mles: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         selector_ctxs: &[SelectorContext],
@@ -228,7 +227,6 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         proof: LayerProof<E>,
         mut eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         pub_io_evals: &[E],
-        instance_mles: &[Vec<E::BaseField>],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
         selector_ctxs: &[SelectorContext],
@@ -381,27 +379,6 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     VerifierError::ClaimNotMatch(
                         format!("{}", expected_eval).into(),
                         format!("{}", main_evals[wit_id]).into(),
-                    ),
-                ));
-            }
-        }
-
-        // check pub-io openings by evaluating the opened public-input MLEs.
-        let pubio_offset = self.n_witin + self.n_fixed;
-        for (index, instance) in self.instance_openings.iter().enumerate() {
-            let index = pubio_offset + index;
-            let poly = instance_mles
-                .get(instance.0)
-                .expect("instance opening index out of bounds for instance_mles")
-                .clone()
-                .into_mle();
-            let expected_eval = poly.evaluate(&in_point[..poly.num_vars()]);
-            if expected_eval != main_evals[index] {
-                return Err(BackendError::LayerVerificationFailed(
-                    format!("layer {} pi mismatch", self.name.clone()).into(),
-                    VerifierError::ClaimNotMatch(
-                        format!("{}", expected_eval).into(),
-                        format!("{}", main_evals[index]).into(),
                     ),
                 ));
             }

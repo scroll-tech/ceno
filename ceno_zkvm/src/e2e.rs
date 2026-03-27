@@ -1026,7 +1026,6 @@ pub fn emulate_program<'a>(
         heap_final.len() as u32,
         platform.hints.start,
         hints_final.len() as u32,
-        vec![],
         public_io_words_to_digest_words(public_io_digest_input),
         [0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );

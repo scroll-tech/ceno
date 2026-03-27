@@ -90,8 +90,8 @@ impl<'a, E: ExtensionField> PublicValuesQuery for CircuitBuilder<'a, E> {
 
     fn query_public_io(&mut self) -> Result<[Instance; UINT_LIMBS], CircuitBuilderError> {
         Ok([
-            self.cs.query_instance_for_openings(PUBLIC_IO_IDX)?,
-            self.cs.query_instance_for_openings(PUBLIC_IO_IDX + 1)?,
+            self.cs.query_instance(PUBLIC_IO_IDX)?,
+            self.cs.query_instance(PUBLIC_IO_IDX + 1)?,
         ])
     }
 

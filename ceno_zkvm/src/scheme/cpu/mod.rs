@@ -842,8 +842,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let Some(gkr_circuit) = gkr_circuit else {
             panic!("empty gkr circuit")
         };
-        let pub_io_mles = input.public_input.clone();
-        debug_assert_eq!(pub_io_mles.len(), cs.instance_openings.len());
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
             // it's not global chip
             vec![
@@ -887,20 +885,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             num_var_with_rotation,
             gkr::GKRCircuitWitness {
                 layers: vec![LayerWitness(
-                    chain!(
-                        &input.witness,
-                        &input.fixed,
-                        &pub_io_mles,
-                        &input.structural_witness,
-                    )
-                    .cloned()
-                    .collect_vec(),
+                    chain!(&input.witness, &input.fixed, &input.structural_witness,)
+                        .cloned()
+                        .collect_vec(),
                 )],
             },
             // eval value doesnt matter as it wont be used by prover
             &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
             &input
-                .pub_io_evals
+                .pi
                 .iter()
                 .map(|v| v.map_either(E::from, |v| v).into_inner())
                 .collect_vec(),
@@ -922,13 +915,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                     .iter()
                     .skip(cs.num_witin as usize)
                     .take(cs.num_fixed)
-                    .map(|Evaluation { value, .. }| value)
-                    .copied()
-                    .collect_vec(),
-                pi_in_evals: opening_evaluations
-                    .iter()
-                    .skip(cs.num_witin as usize + cs.num_fixed)
-                    .take(cs.instance_openings.len())
                     .map(|Evaluation { value, .. }| value)
                     .copied()
                     .collect_vec(),

@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::mle::{IntoMLE, MultilinearExtension};
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -87,7 +86,6 @@ pub struct PublicValues {
     pub heap_shard_len: u32,
     pub hint_start_addr: u32,
     pub hint_shard_len: u32,
-    pub public_io: Vec<u32>,
     pub public_io_digest: [u32; 8],
     pub shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
 }
@@ -105,7 +103,6 @@ impl PublicValues {
         heap_shard_len: u32,
         hint_start_addr: u32,
         hint_shard_len: u32,
-        public_io: Vec<u32>,
         public_io_digest: [u32; 8],
         shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
     ) -> Self {
@@ -120,7 +117,6 @@ impl PublicValues {
             heap_shard_len,
             hint_start_addr,
             hint_shard_len,
-            public_io,
             public_io_digest,
             shard_rw_sum,
         }
@@ -157,30 +153,6 @@ impl PublicValues {
             }
             _ => panic!("public value index {index} out of range"),
         }
-    }
-
-    pub fn mles<E: ExtensionField>(&self) -> Vec<MultilinearExtension<'static, E>> {
-        // public_io is represented as UINT_LIMBS columns.
-        (0..UINT_LIMBS)
-            .map(|limb_index| {
-                let limb_values = self
-                    .public_io
-                    .iter()
-                    .map(|value| {
-                        E::BaseField::from_canonical_u16(
-                            ((value >> (limb_index * LIMB_BITS)) & LIMB_MASK) as u16,
-                        )
-                    })
-                    .collect_vec();
-
-                // Empty public_io means a constant-zero public input column.
-                if limb_values.is_empty() {
-                    vec![E::BaseField::ZERO].into_mle()
-                } else {
-                    limb_values.into_mle()
-                }
-            })
-            .collect_vec()
     }
 }
 

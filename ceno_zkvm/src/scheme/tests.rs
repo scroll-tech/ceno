@@ -211,8 +211,7 @@ fn test_rw_lk_expression_combination() {
             fixed: vec![],
             witness: wits_in,
             structural_witness: structural_in,
-            public_input: vec![],
-            pub_io_evals: vec![],
+            pi: vec![],
             num_instances: vec![num_instances],
             has_ecc_ops: false,
         };
@@ -396,7 +395,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, vec![0], [0; 8], [0; 14]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0; 8], [0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(&shard_ctx, zkvm_witness, pi, transcript)

@@ -56,7 +56,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     fn split_input_opening_evals(
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMChipProof<E>,
-    ) -> Result<(Vec<E>, Vec<E>, Vec<E>), ZKVMError> {
+    ) -> Result<(Vec<E>, Vec<E>), ZKVMError> {
         let cs = circuit_vk.get_cs();
         let Some(gkr_proof) = proof.gkr_iop_proof.as_ref() else {
             return Err(ZKVMError::InvalidProof("missing gkr proof".into()));
@@ -68,8 +68,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let evals = &last_layer.main.evals;
         let wit_len = cs.num_witin();
         let fixed_len = cs.num_fixed();
-        let pi_len = cs.instance_openings().len();
-        let min_len = wit_len + fixed_len + pi_len;
+        let min_len = wit_len + fixed_len;
         if evals.len() < min_len {
             return Err(ZKVMError::InvalidProof(
                 format!(
@@ -83,8 +82,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         let wits_in_evals = evals[..wit_len].to_vec();
         let fixed_in_evals = evals[wit_len..(wit_len + fixed_len)].to_vec();
-        let pi_in_evals = evals[(wit_len + fixed_len)..(wit_len + fixed_len + pi_len)].to_vec();
-        Ok((wits_in_evals, fixed_in_evals, pi_in_evals))
+        Ok((wits_in_evals, fixed_in_evals))
     }
 
     pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
@@ -218,7 +216,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // Global-state expressions are built from compact instance IDs
         // (query order), not absolute public-value indices.
-        let pi_evals = [INIT_PC_IDX, INIT_CYCLE_IDX, END_PC_IDX, END_CYCLE_IDX]
+        let pi = [INIT_PC_IDX, INIT_CYCLE_IDX, END_PC_IDX, END_CYCLE_IDX]
             .into_iter()
             .map(|idx| E::from(vm_proof.public_values.query_by_index::<E>(idx)))
             .collect_vec();
@@ -240,7 +238,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // Include transcript-visible public values in canonical circuit order.
         // This must match prover and recursion verifier exactly.
         for (_, circuit_vk) in self.vk.circuit_vks.iter() {
-            for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance_values.iter() {
+            for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
                 transcript.append_field_element(
                     &vm_proof.public_values.query_by_index::<E>(instance_value.0),
                 );
@@ -461,7 +459,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &[],
             &[],
             &[],
-            &pi_evals,
+            &pi,
             &challenges,
             &self.vk.initial_global_state_expr,
         )
@@ -472,7 +470,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &[],
             &[],
             &[],
-            &pi_evals,
+            &pi,
             &challenges,
             &self.vk.finalize_global_state_expr,
         )
@@ -695,23 +693,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             ]
         };
         let pi = cs
-            .instance_values
+            .instance
             .iter()
             .map(|instance| E::from(public_values.query_by_index::<E>(instance.0)))
             .collect_vec();
-        let (wits_in_evals, fixed_in_evals, _pi_in_evals) =
-            Self::split_input_opening_evals(circuit_vk, proof)?;
-        let instance_mles = public_values
-            .mles::<E>()
-            .into_iter()
-            .map(|mle| mle.get_base_field_vec().to_vec())
-            .collect_vec();
+        let (wits_in_evals, fixed_in_evals) = Self::split_input_opening_evals(circuit_vk, proof)?;
         let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
             &evals,
             &pi,
-            &instance_mles,
             challenges,
             transcript,
             &selector_ctxs,
