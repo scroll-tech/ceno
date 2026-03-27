@@ -1108,7 +1108,6 @@ pub struct PreflightTracer {
     mmio_min_max_access: Option<BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)>>,
     latest_accesses: LatestAccesses,
     next_accesses: NextCycleAccess,
-    next_accesses_vec: Vec<PackedNextAccessEntry>,
     register_reads_tracked: u8,
     planner: Option<ShardPlanBuilder>,
     current_shard_start_cycle: Cycle,
@@ -1133,7 +1132,6 @@ impl fmt::Debug for PreflightTracer {
             .field("mmio_min_max_access", &self.mmio_min_max_access)
             .field("latest_accesses", &self.latest_accesses)
             .field("next_accesses", &self.next_accesses)
-            .field("next_accesses_vec_len", &self.next_accesses_vec.len())
             .field("register_reads_tracked", &self.register_reads_tracked)
             .field("planner", &self.planner)
             .field("current_shard_start_cycle", &self.current_shard_start_cycle)
@@ -1231,7 +1229,6 @@ impl PreflightTracer {
             mmio_min_max_access: Some(init_mmio_min_max_access(platform)),
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: FxHashMap::default(),
-            next_accesses_vec: Vec::new(),
             register_reads_tracked: 0,
             planner: Some(ShardPlanBuilder::new(
                 max_cell_per_shard,
@@ -1244,20 +1241,14 @@ impl PreflightTracer {
         tracer
     }
 
-    pub fn into_shard_plan(
-        self,
-    ) -> (
-        ShardPlanBuilder,
-        NextCycleAccess,
-        Vec<PackedNextAccessEntry>,
-    ) {
+    pub fn into_shard_plan(self) -> (ShardPlanBuilder, NextCycleAccess) {
         let Some(mut planner) = self.planner else {
             panic!("shard planner missing")
         };
         if !planner.finalized {
             planner.finalize(self.cycle);
         }
-        (planner, self.next_accesses, self.next_accesses_vec)
+        (planner, self.next_accesses)
     }
 
     #[inline(always)]
@@ -1378,8 +1369,6 @@ impl Tracer for PreflightTracer {
                 .entry(prev_cycle)
                 .or_default()
                 .push((addr, cur_cycle));
-            self.next_accesses_vec
-                .push(PackedNextAccessEntry::new(prev_cycle, addr.0, cur_cycle));
         }
         prev_cycle
     }

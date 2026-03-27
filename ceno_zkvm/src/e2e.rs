@@ -750,31 +750,22 @@ impl ShardContextBuilder {
         shard_cycle_boundaries: Arc<Vec<Cycle>>,
         max_cycle: Cycle,
         addr_future_accesses: NextCycleAccess,
-        next_accesses_vec: Vec<PackedNextAccessEntry>,
     ) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
 
         let sorted_next_accesses = info_span!("next_access_presort").in_scope(|| {
-            let source = std::env::var("CENO_NEXT_ACCESS_SOURCE").unwrap_or_default();
-            let mut entries = if source == "hashmap" {
-                tracing::info!("[next-access presort] converting from HashMap");
-                info_span!("next_access_from_hashmap").in_scope(|| {
-                    let mut entries = Vec::new();
-                    for (cycle, pairs) in addr_future_accesses.iter() {
-                        for &(addr, next_cycle) in pairs.iter() {
-                            entries.push(PackedNextAccessEntry::new(*cycle, addr.0, next_cycle));
-                        }
+            let mut entries = info_span!("next_access_from_hashmap").in_scope(|| {
+                let total_entries: usize =
+                    addr_future_accesses.values().map(|pairs| pairs.len()).sum();
+                let mut entries = Vec::with_capacity(total_entries);
+                for (cycle, pairs) in addr_future_accesses.iter() {
+                    for &(addr, next_cycle) in pairs.iter() {
+                        entries.push(PackedNextAccessEntry::new(*cycle, addr.0, next_cycle));
                     }
-                    entries
-                })
-            } else {
-                tracing::info!(
-                    "[next-access presort] using preflight-appended vec ({} entries)",
-                    next_accesses_vec.len()
-                );
-                next_accesses_vec
-            };
+                }
+                entries
+            });
             let len = entries.len();
             info_span!("next_access_par_sort", n = len).in_scope(|| {
                 entries.par_sort_unstable();
@@ -1196,7 +1187,7 @@ pub fn emulate_program<'a>(
     }
 
     let tracer = vm.take_tracer();
-    let (plan_builder, next_accesses, next_accesses_vec) = tracer.into_shard_plan();
+    let (plan_builder, next_accesses) = tracer.into_shard_plan();
     let max_step_shard = plan_builder.max_step_shard();
     let shard_cycle_boundaries = Arc::new(plan_builder.into_cycle_boundaries());
     let shard_ctx_builder = ShardContextBuilder::from_plan(
@@ -1205,7 +1196,6 @@ pub fn emulate_program<'a>(
         shard_cycle_boundaries.clone(),
         max_cycle,
         next_accesses,
-        next_accesses_vec,
     );
     tracing::info!(
         "num_shards: {}, max_cycle {}, shard_cycle_boundaries {:?}",
@@ -2594,7 +2584,6 @@ mod tests {
             shard_cycle_boundaries,
             max_cycle,
             NextCycleAccess::default(),
-            Vec::new(),
         );
         struct TestReplay {
             steps: Vec<StepRecord>,
