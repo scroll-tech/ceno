@@ -243,9 +243,6 @@ impl<'a> Default for ShardContext<'a> {
     }
 }
 
-/// Size of a single GpuShardRamRecord in bytes (must match CUDA struct).
-pub const GPU_SHARD_RAM_RECORD_SIZE: usize = 104;
-
 /// `prover_id` and `num_provers` in MultiProver are exposed as arguments
 /// to specify the number of physical provers in a cluster,
 /// each mark with a prover_id.
