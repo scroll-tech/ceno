@@ -3,12 +3,13 @@
 /// Manages thread-local caches for shard step data and shard metadata
 /// device buffers, avoiding redundant host-to-device transfers within
 /// the same shard.
-use ceno_emul::{StepRecord, WordAddr};
+use ceno_emul::{PackedNextAccessEntry, StepRecord, WordAddr};
 use ceno_gpu::{
     Buffer, CudaHal, CudaSlice,
     bb31::{CudaHalBB31, ShardDeviceBuffers},
     common::witgen::types::{GpuShardRamRecord, GpuShardScalars},
 };
+use rayon::prelude::*;
 use std::cell::RefCell;
 use tracing::info_span;
 
@@ -102,6 +103,8 @@ pub fn invalidate_shard_steps_cache() {
 struct ShardMetadataCache {
     shard_id: usize,
     device_bufs: ShardDeviceBuffers,
+    /// Total number of cross-shard next-access entries (constant across shards).
+    next_access_count: u32,
     /// Shared EC record buffer (owns the GPU memory, pointer stored in device_bufs).
     shared_ec_buf: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
     /// Shared EC record count buffer (single u32 counter).
@@ -117,9 +120,34 @@ thread_local! {
         const { RefCell::new(None) };
 }
 
+/// Build sorted packed next-access entries from the cross-shard HashMap.
+/// Called once on the first shard; the result is uploaded to GPU and reused.
+fn build_sorted_next_accesses(shard_ctx: &ShardContext) -> Vec<PackedNextAccessEntry> {
+    info_span!("next_access_presort").in_scope(|| {
+        let next_accesses = &shard_ctx.addr_future_accesses;
+        let total: usize = next_accesses.values().map(|pairs| pairs.len()).sum();
+        let mut entries = Vec::with_capacity(total);
+        for (cycle, pairs) in next_accesses.iter() {
+            for &(addr, next_cycle) in pairs.iter() {
+                entries.push(PackedNextAccessEntry::new(*cycle, addr.0, next_cycle));
+            }
+        }
+        let len = entries.len();
+        info_span!("next_access_par_sort", n = len).in_scope(|| {
+            entries.par_sort_unstable();
+        });
+        tracing::info!(
+            "[GPU] sorted {} next-access entries ({:.2} MB)",
+            len,
+            len * 16 / (1024 * 1024)
+        );
+        entries
+    })
+}
+
 /// Build and cache shard metadata device buffers for GPU shard records.
 ///
-/// FA (future access) device buffers are global and identical across all shards,
+/// Next-access device buffers are global and identical across all shards,
 /// so they are uploaded once and reused via move. Only per-shard data (scalars +
 /// prev_shard_ranges) is re-uploaded when the shard changes.
 pub(crate) fn ensure_shard_metadata_cached(
@@ -136,40 +164,45 @@ pub(crate) fn ensure_shard_metadata_cached(
             }
         }
 
-        // Move FA device buffer from previous cache (reuse across shards).
-        // FA data is global — identical across all shards — so we reuse, not re-upload.
-        let existing_fa = cache.take().map(|c| {
-            let ShardDeviceBuffers {
-                next_access_packed,
-                scalars: _,
-                prev_shard_cycle_range: _,
-                prev_shard_heap_range: _,
-                prev_shard_hint_range: _,
-                gpu_ec_shard_id: _,
-                shared_ec_out_ptr: _,
-                shared_ec_count_ptr: _,
-                shared_addr_out_ptr: _,
-                shared_addr_count_ptr: _,
-                shared_ec_capacity: _,
-                shared_addr_capacity: _,
-            } = c.device_bufs;
-            next_access_packed
-        });
+        // Move next-access device buffer + count from previous cache (reuse across shards).
+        // Next-access data is global — identical across all shards — so we reuse, not re-upload.
+        let (existing_next_access, prev_next_access_count) = match cache.take() {
+            Some(c) => {
+                let count = c.next_access_count;
+                let ShardDeviceBuffers {
+                    next_access_packed,
+                    scalars: _,
+                    prev_shard_cycle_range: _,
+                    prev_shard_heap_range: _,
+                    prev_shard_hint_range: _,
+                    gpu_ec_shard_id: _,
+                    shared_ec_out_ptr: _,
+                    shared_ec_count_ptr: _,
+                    shared_addr_out_ptr: _,
+                    shared_addr_count_ptr: _,
+                    shared_ec_capacity: _,
+                    shared_addr_capacity: _,
+                } = c.device_bufs;
+                (Some(next_access_packed), count)
+            }
+            None => (None, 0),
+        };
 
-        let next_access_packed_device = if let Some(fa) = existing_fa {
-            fa // Reuse existing GPU memory — zero cost pointer move
+        let (next_access_packed_device, next_access_count) = if let Some(buf) = existing_next_access
+        {
+            (buf, prev_next_access_count) // Reuse existing GPU memory
         } else {
-            // First shard: bulk H2D upload packed FA entries (no sort here)
-            let sorted = &shard_ctx.sorted_next_accesses;
-            tracing::info_span!("next_access_h2d").in_scope(|| -> Result<_, ZKVMError> {
-                let packed_bytes: &[u8] = if sorted.packed.is_empty() {
+            // First shard: build sorted packed next-access entries from HashMap and H2D upload
+            let sorted = build_sorted_next_accesses(shard_ctx);
+            let count = sorted.len() as u32;
+            let device = info_span!("next_access_h2d").in_scope(|| -> Result<_, ZKVMError> {
+                let packed_bytes: &[u8] = if sorted.is_empty() {
                     &[0u8; 16] // sentinel for empty
                 } else {
                     unsafe {
                         std::slice::from_raw_parts(
-                            sorted.packed.as_ptr() as *const u8,
-                            sorted.packed.len()
-                                * std::mem::size_of::<ceno_emul::PackedNextAccessEntry>(),
+                            sorted.as_ptr() as *const u8,
+                            sorted.len() * std::mem::size_of::<PackedNextAccessEntry>(),
                         )
                     }
                 };
@@ -182,12 +215,13 @@ pub(crate) fn ensure_shard_metadata_cached(
                 let next_access_device = ceno_gpu::common::buffer::BufferImpl::new(buf);
                 let mb = packed_bytes.len() as f64 / (1024.0 * 1024.0);
                 tracing::info!(
-                    "[GPU shard] FA uploaded once: {} entries, {:.2} MB (packed)",
-                    sorted.packed.len(),
+                    "[GPU shard] next-access uploaded once: {} entries, {:.2} MB (packed)",
+                    sorted.len(),
                     mb,
                 );
                 Ok(next_access_device)
-            })?
+            })?;
+            (device, count)
         };
 
         // Per-shard: always re-upload scalars + prev_shard_ranges
@@ -204,7 +238,7 @@ pub(crate) fn ensure_shard_metadata_cached(
             shard_heap_end: shard_ctx.shard_heap_addr_range.end,
             shard_hint_start: shard_ctx.shard_hint_addr_range.start,
             shard_hint_end: shard_ctx.shard_hint_addr_range.end,
-            next_access_count: shard_ctx.sorted_next_accesses.packed.len() as u32,
+            next_access_count,
             num_prev_shards: shard_ctx.prev_shard_cycle_range.len() as u32,
             num_prev_heap_ranges: shard_ctx.prev_shard_heap_range.len() as u32,
             num_prev_hint_ranges: shard_ctx.prev_shard_hint_range.len() as u32,
@@ -298,6 +332,7 @@ pub(crate) fn ensure_shard_metadata_cached(
 
         *cache = Some(ShardMetadataCache {
             shard_id,
+            next_access_count,
             device_bufs: ShardDeviceBuffers {
                 scalars: scalars_device,
                 next_access_packed: next_access_packed_device,

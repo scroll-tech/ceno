@@ -110,7 +110,7 @@ The `#[cfg(feature = "gpu")] assign_instances` override is only compiled with th
 
 | Field | Type | Purpose |
 |-------|------|---------|
-| `sorted_next_accesses` | `Arc<SortedNextAccesses>` | Pre-sorted packed future-access table for GPU bulk H2D |
+| ~~`sorted_next_accesses`~~ | ~~`Arc<SortedNextAccesses>`~~ | Removed — GPU cache builds sorted FA table on demand from `addr_future_accesses` HashMap |
 | `gpu_ec_records` | `Vec<u8>` | Raw bytes of GPU-produced compact EC shard records |
 | `syscall_witnesses` | `Arc<Vec<SyscallWitness>>` | Keccak syscall data (previously passed separately) |
 
