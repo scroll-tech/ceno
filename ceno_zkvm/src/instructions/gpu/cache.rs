@@ -218,6 +218,20 @@ pub fn take_and_convert_compact_shard_records<E: ff_ext::ExtensionField>() -> (
 }
 
 /// Convert raw GPU EC record bytes to ShardRamInput.
+/// Public entry point for debug comparison (D2H device records → ShardRamInput).
+pub fn convert_raw_to_shard_ram_inputs<E: ff_ext::ExtensionField>(
+    raw: &[u8],
+) -> (
+    Vec<crate::tables::ShardRamInput<E>>,
+    Vec<crate::tables::ShardRamInput<E>>,
+) {
+    if raw.is_empty() {
+        return (vec![], vec![]);
+    }
+    convert_compact_shard_records::<E>(raw)
+}
+
+/// Convert raw GPU EC record bytes to ShardRamInput.
 /// The raw bytes are from `GpuShardRamRecord` structs (104 bytes each).
 /// EC points are already computed on GPU — no Poseidon2/SepticCurve needed.
 /// Returns (writes, reads) pre-partitioned using parallel iteration.

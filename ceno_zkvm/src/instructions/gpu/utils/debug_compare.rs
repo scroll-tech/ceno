@@ -17,6 +17,7 @@ use crate::{
     error::ZKVMError,
     instructions::{Instruction, cpu_collect_lk_and_shardram, cpu_collect_shardram},
     structs::ZKVMWitnesses,
+    tables::{ShardRamConfig, TableCircuit},
 };
 
 use crate::instructions::gpu::dispatch::{GpuWitgenKind, set_force_cpu_path};
@@ -938,5 +939,162 @@ pub(crate) fn log_combined_lk_diff<E: ExtensionField>(
             "[GPU e2e debug] TOTAL LK DIFFS = {} (combined + per-chip)",
             total_diffs
         );
+    }
+}
+
+/// Compare GPU ShardRamCircuit witness against CPU baseline.
+/// Called from `try_gpu_assign_shard_ram` when inputs are already `ShardRamInput`.
+pub(crate) fn debug_compare_shard_ram_witness<E: ExtensionField>(
+    config: &ShardRamConfig<E>,
+    num_witin: usize,
+    num_structural_witin: usize,
+    steps: &[crate::tables::ShardRamInput<E>],
+    gpu_witin: &RowMajorMatrix<E::BaseField>,
+    gpu_structural: &RowMajorMatrix<E::BaseField>,
+) {
+    use crate::tables::ShardRamCircuit;
+
+    let cpu_result = ShardRamCircuit::<E>::assign_instances(
+        config,
+        num_witin,
+        num_structural_witin,
+        &[], // ShardRam doesn't use LK multiplicity
+        steps,
+    );
+
+    let cpu_witness = match cpu_result {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!("[GPU shard_ram debug] CPU assign_instances failed: {e:?}");
+            return;
+        }
+    };
+
+    compare_witness_matrices::<E>("shard_ram", num_witin, gpu_witin, &cpu_witness[0]);
+    compare_witness_matrices::<E>(
+        "shard_ram_structural",
+        num_structural_witin,
+        gpu_structural,
+        &cpu_witness[1],
+    );
+}
+
+/// Compare GPU ShardRamCircuit witness from device buffer against CPU baseline.
+/// D2Hs the device records, converts to ShardRamInput, runs CPU assign, compares.
+/// Called from `try_gpu_assign_shard_ram_from_device` in the full GPU pipeline.
+pub(crate) fn debug_compare_shard_ram_witness_from_device<E: ExtensionField>(
+    config: &ShardRamConfig<E>,
+    num_witin: usize,
+    num_structural_witin: usize,
+    device_records: &ceno_gpu::common::buffer::BufferImpl<'static, u32>,
+    num_records: usize,
+    num_local_writes: usize,
+    gpu_witin: &RowMajorMatrix<E::BaseField>,
+    gpu_structural: &RowMajorMatrix<E::BaseField>,
+) {
+    use crate::{
+        instructions::gpu::cache::take_and_convert_compact_shard_records, tables::ShardRamCircuit,
+    };
+    use ceno_gpu::Buffer;
+    use gkr_iop::utils::lk_multiplicity::LkMultiplicity;
+
+    // D2H device records → raw bytes
+    let record_size = std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>() / 4;
+    let total_u32s = num_records * record_size;
+    let raw_u32: Vec<u32> = match device_records.to_vec_n(total_u32s) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::error!("[GPU shard_ram debug] D2H device records failed: {e:?}");
+            return;
+        }
+    };
+    let raw_bytes: &[u8] =
+        unsafe { std::slice::from_raw_parts(raw_u32.as_ptr() as *const u8, raw_u32.len() * 4) };
+
+    // Convert raw bytes → ShardRamInput (writes then reads)
+    let convert = crate::instructions::gpu::cache::convert_raw_to_shard_ram_inputs::<E>(raw_bytes);
+    let (writes, reads) = convert;
+
+    // Verify counts match
+    if writes.len() != num_local_writes {
+        tracing::error!(
+            "[GPU shard_ram debug] from_device: write count mismatch: gpu={} d2h={}",
+            num_local_writes,
+            writes.len()
+        );
+    }
+
+    let steps: Vec<crate::tables::ShardRamInput<E>> = writes.into_iter().chain(reads).collect();
+
+    let cpu_result = ShardRamCircuit::<E>::assign_instances(
+        config,
+        num_witin,
+        num_structural_witin,
+        &[], // ShardRam doesn't use LK multiplicity
+        &steps,
+    );
+
+    let cpu_witness = match cpu_result {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!(
+                "[GPU shard_ram debug] from_device: CPU assign_instances failed: {e:?}"
+            );
+            return;
+        }
+    };
+
+    compare_witness_matrices::<E>(
+        "shard_ram_from_device",
+        num_witin,
+        gpu_witin,
+        &cpu_witness[0],
+    );
+    compare_witness_matrices::<E>(
+        "shard_ram_structural_from_device",
+        num_structural_witin,
+        gpu_structural,
+        &cpu_witness[1],
+    );
+}
+
+/// Helper: compare two witness matrices element by element.
+fn compare_witness_matrices<E: ExtensionField>(
+    label: &str,
+    num_cols: usize,
+    gpu: &RowMajorMatrix<E::BaseField>,
+    cpu: &RowMajorMatrix<E::BaseField>,
+) {
+    let gpu_data = gpu.values();
+    let cpu_data = cpu.values();
+    if gpu_data.len() != cpu_data.len() {
+        tracing::error!(
+            "[GPU {label} debug] size mismatch: gpu={} cpu={}",
+            gpu_data.len(),
+            cpu_data.len()
+        );
+        return;
+    }
+
+    let mut mismatches = 0usize;
+    for (i, (g, c)) in gpu_data.iter().zip(cpu_data.iter()).enumerate() {
+        if g != c {
+            mismatches += 1;
+            if mismatches <= 10 {
+                let row = i / num_cols;
+                let col = i % num_cols;
+                tracing::error!(
+                    "[GPU {label} debug] mismatch row={row} col={col}: gpu={g:?} cpu={c:?}"
+                );
+            }
+        }
+    }
+    if mismatches > 0 {
+        tracing::error!(
+            "[GPU {label} debug] total mismatches: {mismatches} / {}",
+            gpu_data.len()
+        );
+    } else {
+        tracing::info!("[GPU {label} debug] match ({} elements)", gpu_data.len());
     }
 }

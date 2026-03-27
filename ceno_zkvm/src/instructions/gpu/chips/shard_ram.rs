@@ -432,6 +432,18 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
         num_rows_padded
     );
 
+    // Debug: compare GPU witness against CPU baseline
+    if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        crate::instructions::gpu::utils::debug_compare::debug_compare_shard_ram_witness::<E>(
+            config,
+            num_witin,
+            num_structural_witin,
+            steps,
+            &raw_witin,
+            &raw_structural_witin,
+        );
+    }
+
     Ok(Some([raw_witin, raw_structural_witin]))
 }
 
@@ -628,6 +640,22 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
         num_records,
         num_rows_padded
     );
+
+    // Debug: compare GPU witness against CPU baseline (D2H + convert + CPU assign)
+    if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        crate::instructions::gpu::utils::debug_compare::debug_compare_shard_ram_witness_from_device::<
+            E,
+        >(
+            config,
+            num_witin,
+            num_structural_witin,
+            device_records,
+            num_records,
+            num_local_writes,
+            &raw_witin,
+            &raw_structural_witin,
+        );
+    }
 
     Ok(Some([raw_witin, raw_structural_witin]))
 }
