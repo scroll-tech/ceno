@@ -86,63 +86,6 @@ pub trait StepCellExtractor {
 pub type NextAccessPair = SmallVec<[(WordAddr, Cycle); 1]>;
 pub type NextCycleAccess = FxHashMap<Cycle, NextAccessPair>;
 
-/// Packed next-access entry (16 bytes, u128-aligned).
-/// Stores (cycle, addr, next_cycle) with 40-bit cycles for GPU bulk H2D upload.
-/// Must be layout-compatible with CUDA `PackedNextAccessEntry` in shard_helpers.cuh.
-#[repr(C, align(16))]
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PackedNextAccessEntry {
-    pub cycles_lo: u32,
-    pub addr: u32,
-    pub nexts_lo: u32,
-    pub cycles_hi: u8,
-    pub nexts_hi: u8,
-    pub _reserved: u16,
-}
-
-impl PackedNextAccessEntry {
-    #[inline]
-    pub fn new(cycle: u64, addr: u32, next_cycle: u64) -> Self {
-        Self {
-            cycles_lo: cycle as u32,
-            addr,
-            nexts_lo: next_cycle as u32,
-            cycles_hi: (cycle >> 32) as u8,
-            nexts_hi: (next_cycle >> 32) as u8,
-            _reserved: 0,
-        }
-    }
-}
-
-impl Eq for PackedNextAccessEntry {}
-
-impl PartialEq for PackedNextAccessEntry {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool {
-        self.cycles_hi == other.cycles_hi
-            && self.cycles_lo == other.cycles_lo
-            && self.addr == other.addr
-    }
-}
-
-impl Ord for PackedNextAccessEntry {
-    #[inline]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (self.cycles_hi, self.cycles_lo, self.addr).cmp(&(
-            other.cycles_hi,
-            other.cycles_lo,
-            other.addr,
-        ))
-    }
-}
-
-impl PartialOrd for PackedNextAccessEntry {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 fn init_mmio_min_max_access(
     platform: &Platform,
 ) -> BTreeMap<WordAddr, (WordAddr, WordAddr, WordAddr, WordAddr)> {

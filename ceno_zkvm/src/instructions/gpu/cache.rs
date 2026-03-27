@@ -3,7 +3,7 @@
 /// Manages thread-local caches for shard step data and shard metadata
 /// device buffers, avoiding redundant host-to-device transfers within
 /// the same shard.
-use ceno_emul::{PackedNextAccessEntry, StepRecord, WordAddr};
+use ceno_emul::{StepRecord, WordAddr};
 use ceno_gpu::{
     Buffer, CudaHal, CudaSlice,
     bb31::{CudaHalBB31, ShardDeviceBuffers},
@@ -14,6 +14,63 @@ use std::cell::RefCell;
 use tracing::info_span;
 
 use crate::{e2e::ShardContext, error::ZKVMError};
+
+/// Packed next-access entry (16 bytes, u128-aligned).
+/// Stores (cycle, addr, next_cycle) with 40-bit cycles for GPU bulk H2D upload.
+/// Must be layout-compatible with CUDA `PackedNextAccessEntry` in shard_helpers.cuh.
+#[repr(C, align(16))]
+#[derive(Debug, Clone, Copy, Default)]
+struct PackedNextAccessEntry {
+    cycles_lo: u32,
+    addr: u32,
+    nexts_lo: u32,
+    cycles_hi: u8,
+    nexts_hi: u8,
+    _reserved: u16,
+}
+
+impl PackedNextAccessEntry {
+    #[inline]
+    fn new(cycle: u64, addr: u32, next_cycle: u64) -> Self {
+        Self {
+            cycles_lo: cycle as u32,
+            addr,
+            nexts_lo: next_cycle as u32,
+            cycles_hi: (cycle >> 32) as u8,
+            nexts_hi: (next_cycle >> 32) as u8,
+            _reserved: 0,
+        }
+    }
+}
+
+impl Eq for PackedNextAccessEntry {}
+
+impl PartialEq for PackedNextAccessEntry {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.cycles_hi == other.cycles_hi
+            && self.cycles_lo == other.cycles_lo
+            && self.addr == other.addr
+    }
+}
+
+impl Ord for PackedNextAccessEntry {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (self.cycles_hi, self.cycles_lo, self.addr).cmp(&(
+            other.cycles_hi,
+            other.cycles_lo,
+            other.addr,
+        ))
+    }
+}
+
+impl PartialOrd for PackedNextAccessEntry {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 /// Cached shard_steps device buffer with metadata for logging.
 struct ShardStepsCache {
