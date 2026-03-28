@@ -1,3 +1,4 @@
+use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
     Expression, Fixed, Instance, StructuralWitIn, StructuralWitInType, ToExpr, WitIn, WitnessId,
@@ -5,8 +6,6 @@ use multilinear_extensions::{
 };
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
-
-use ff_ext::ExtensionField;
 
 use crate::{
     RAMType, error::CircuitBuilderError, gkr::layer::ROTATION_OPENING_COUNT,

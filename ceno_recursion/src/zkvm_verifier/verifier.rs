@@ -278,37 +278,35 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
                 chip_challenger.observe(builder, chip_proof.idx_felt);
 
-                if !circuit_vk.get_cs().is_with_lk_table() {
-                    // getting the number of dummy padding item that we used in this opcode circuit
-                    let num_lks: Var<C::N> =
-                        builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
+                // getting the number of dummy padding item that we used in this opcode circuit
+                let num_lks: Var<C::N> =
+                    builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
 
-                    // each padding instance contribute to (2^rotation_vars) dummy lookup padding
-                    let next_pow2_instance: Var<C::N> =
-                        pow_2(builder, chip_proof.log2_num_instances.get_var());
-                    let num_padded_instance: Var<C::N> =
-                        builder.eval(next_pow2_instance - chip_proof.sum_num_instances.clone());
-                    let rotation_var: Var<C::N> = builder.constant(C::N::from_canonical_usize(
-                        1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0),
+                // each padding instance contribute to (2^rotation_vars) dummy lookup padding
+                let next_pow2_instance: Var<C::N> =
+                    pow_2(builder, chip_proof.log2_num_instances.get_var());
+                let num_padded_instance: Var<C::N> =
+                    builder.eval(next_pow2_instance - chip_proof.sum_num_instances.clone());
+                let rotation_var: Var<C::N> = builder.constant(C::N::from_canonical_usize(
+                    1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0),
+                ));
+                let rotation_subgroup_size: Var<C::N> =
+                    builder.constant(C::N::from_canonical_usize(
+                        circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0),
                     ));
-                    let rotation_subgroup_size: Var<C::N> =
-                        builder.constant(C::N::from_canonical_usize(
-                            circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0),
-                        ));
-                    builder.assign(&num_padded_instance, num_padded_instance * rotation_var);
+                builder.assign(&num_padded_instance, num_padded_instance * rotation_var);
 
-                    // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
-                    let num_instance_non_selected: Var<C::N> = builder.eval(
-                        chip_proof.sum_num_instances.clone()
-                            * (rotation_var - rotation_subgroup_size - C::N::ONE),
-                    );
-                    let new_multiplicity: Var<C::N> =
-                        builder.eval(num_lks * (num_padded_instance + num_instance_non_selected));
-                    builder.assign(
-                        &dummy_table_item_multiplicity,
-                        dummy_table_item_multiplicity + new_multiplicity,
-                    );
-                }
+                // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
+                let num_instance_non_selected: Var<C::N> = builder.eval(
+                    chip_proof.sum_num_instances.clone()
+                        * (rotation_var - rotation_subgroup_size - C::N::ONE),
+                );
+                let new_multiplicity: Var<C::N> =
+                    builder.eval(num_lks * (num_padded_instance + num_instance_non_selected));
+                builder.assign(
+                    &dummy_table_item_multiplicity,
+                    dummy_table_item_multiplicity + new_multiplicity,
+                );
 
                 builder.cycle_tracker_start("Verify chip proof");
                 let (
@@ -348,11 +346,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
                     });
 
-                if circuit_vk.get_cs().is_with_lk_table() {
-                    builder.assign(&logup_sum, logup_sum - chip_logup_sum);
-                } else {
-                    builder.assign(&logup_sum, logup_sum + chip_logup_sum);
-                }
+                builder.assign(&logup_sum, logup_sum + chip_logup_sum);
 
                 let point_clone: Array<C, Ext<C::F, C::EF>> =
                     builder.eval(input_opening_point.clone());

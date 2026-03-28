@@ -428,12 +428,23 @@ impl<E: ExtensionField> Layer<E> {
         if let Some(lk_selector) = cb.cs.lk_selector.as_ref() {
             // process lookup records
             let evals = Self::dedup_last_selector_evals(lk_selector, &mut expr_evals);
-            for (idx, ((lookup, name), lookup_eval)) in (cb
+            for (idx, (((is_negate, lookup), name), lookup_eval)) in (cb
                 .cs
                 .lk_expressions
                 .iter()
-                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.multiplicity))
-                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.values)))
+                .map(|expr| (false, expr))
+                .chain(
+                    cb.cs
+                        .lk_table_expressions
+                        .iter()
+                        .map(|t| (true, &t.multiplicity)),
+                )
+                .chain(
+                    cb.cs
+                        .lk_table_expressions
+                        .iter()
+                        .map(|t| (false, &t.values)),
+                ))
             .zip_eq(if cb.cs.lk_table_expressions.is_empty() {
                 Either::Left(cb.cs.lk_expressions_namespace_map.iter())
             } else {
@@ -448,13 +459,35 @@ impl<E: ExtensionField> Layer<E> {
             .zip_eq(&lookup_evals)
             .enumerate()
             {
-                expressions.push(lookup - cb.cs.chip_record_alpha.clone());
-                evals.push(EvalExpression::<E>::Linear(
-                    // evaluation = claim * one - alpha (padding)
-                    *lookup_eval,
-                    E::BaseField::ONE.expr().into(),
-                    cb.cs.chip_record_alpha.clone().neg().into(),
-                ));
+                // Encode lookup constraints in the canonical form: `sel * expression = evaluation`.
+                //
+                // Non-negated lookup:
+                //   claim = sel * lookup + (1 - sel) * padding
+                //   => claim - padding = sel * (lookup - padding)
+                //   so we use `expression = lookup - padding` and `evaluation = claim - padding`.
+                //
+                // Negated lookup (`-lookup` used by multiplicity path):
+                //   claim - padding = sel * (-lookup - padding)
+                //   => padding - claim = sel * (lookup + padding)
+                //   so we use `expression = lookup + padding` and `evaluation = padding - claim`.
+                if is_negate {
+                    expressions.push(lookup + cb.cs.chip_record_alpha.clone());
+                    evals.push(EvalExpression::<E>::Linear(
+                        // evaluation = alpha (padding) - claim * one
+                        *lookup_eval,
+                        E::BaseField::ONE.neg().expr().into(),
+                        cb.cs.chip_record_alpha.clone().into(),
+                    ));
+                } else {
+                    expressions.push(lookup - cb.cs.chip_record_alpha.clone());
+                    evals.push(EvalExpression::<E>::Linear(
+                        // evaluation = claim * one - alpha (padding)
+                        *lookup_eval,
+                        E::BaseField::ONE.expr().into(),
+                        cb.cs.chip_record_alpha.clone().neg().into(),
+                    ));
+                };
+
                 expr_names.push(format!("{}/{idx}", name));
             }
         }

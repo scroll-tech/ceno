@@ -365,23 +365,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .sum::<E>();
 
             transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
-            if circuit_vk.get_cs().is_with_lk_table() {
-                logup_sum -= chip_logup_sum;
-            } else {
-                // getting the number of dummy padding item that we used in this opcode circuit
-                let num_lks = circuit_vk.get_cs().num_lks();
-                // each padding instance contribute to (2^rotation_vars) dummy lookup padding
-                let num_padded_instance = (next_pow2_instance_padding(num_instance) - num_instance)
-                    * (1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0));
-                // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
-                let num_instance_non_selected = num_instance
-                    * ((1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0))
-                        - (circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0) + 1));
-                dummy_table_item_multiplicity +=
-                    num_lks * (num_padded_instance + num_instance_non_selected);
 
-                logup_sum += chip_logup_sum;
-            };
+            // compute logup_sum padding
+            // getting the number of dummy padding item that we used in this opcode circuit
+            let num_lks = circuit_vk.get_cs().num_lks();
+            // each padding instance contribute to (2^rotation_vars) dummy lookup padding
+            let num_padded_instance = (next_pow2_instance_padding(num_instance) - num_instance)
+                * (1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0));
+            // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
+            let num_instance_non_selected = num_instance
+                * ((1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0))
+                    - (circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0) + 1));
+            dummy_table_item_multiplicity +=
+                num_lks * (num_padded_instance + num_instance_non_selected);
+
+            // accumulate logup_sum
+            logup_sum += chip_logup_sum;
+
             let (input_opening_point, chip_shard_ec_sum, wits_in_evals, fixed_in_evals) = self
                 .verify_chip_proof(
                     circuit_name,
