@@ -1061,7 +1061,7 @@ dependencies = [
 [[package]]
 name = "ceno_crypto_primitives"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#b79232a6fc80c799f584380273fd6d3055b36808"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#6e90bc85bceefe09003f84ca5cc1afbe2911a2db"
 dependencies = [
  "ceno_syscall",
  "elliptic-curve",
@@ -1193,7 +1193,7 @@ dependencies = [
 [[package]]
 name = "ceno_syscall"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#b79232a6fc80c799f584380273fd6d3055b36808"
+source = "git+https://github.com/scroll-tech/ceno-patch.git?branch=main#6e90bc85bceefe09003f84ca5cc1afbe2911a2db"
 
 [[package]]
 name = "ceno_zkvm"
