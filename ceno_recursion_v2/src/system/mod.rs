@@ -4,8 +4,8 @@ mod types;
 
 pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
-    BatchConstraintPreflight, ChipTranscriptRange, MainPreflight, Preflight, ProofShapePreflight,
-    TowerChipTranscriptRange, TowerPreflight, TraceVData,
+    BatchConstraintPreflight, ChipTranscriptRange, ForkTranscriptLog, MainPreflight, Preflight,
+    ProofShapePreflight, TowerChipTranscriptRange, TowerPreflight, TraceVData,
 };
 pub use recursion_circuit::system::{
     AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule, VerifierConfig,
@@ -300,7 +300,12 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         }
     }
 
-    /// Runs preflight for a single proof.
+    /// Runs preflight for a single proof, with proper transcript forking.
+    ///
+    /// This mirrors the native verifier's `verify_proof_validity` fork protocol:
+    /// 1. Trunk: ProofShape module (observe pi, commits, sample α/β)
+    /// 2. Fork: clone sponge per chip, observe fork index, run Tower + Main
+    /// 3. Merge: each fork samples 1 ext element → observe into trunk
     #[tracing::instrument(name = "execute_preflight", skip_all)]
     fn run_preflight<TS>(
         &self,
@@ -313,18 +318,166 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         let mut preflight = Preflight::default();
-        let modules = [
-            TraceModuleRef::ProofShape(&self.proof_shape),
-            TraceModuleRef::Tower(&self.gkr),
-            TraceModuleRef::Main(&self.main_module),
-            // TODO(batch-constraint): uncomment after fixing SymbolicExpressionAir trace/preprocessed
-            // shape assumptions that currently trigger SymbolicEvaluator OOB in release tests.
-            // TraceModuleRef::BatchConstraint(&self.batch_constraint),
-        ];
-        for module in modules {
-            module.run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+
+        // Phase 1: Trunk operations (ProofShape module).
+        TraceModuleRef::ProofShape(&self.proof_shape).run_preflight(
+            child_vk,
+            proof,
+            &mut preflight,
+            &mut sponge,
+        );
+
+        // Phase 2: Fork — clone sponge for each chip proof instance.
+        let chip_proof_list: Vec<(usize, usize, &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>)> =
+            proof
+                .chip_proofs
+                .iter()
+                .flat_map(|(&chip_idx, instances)| {
+                    instances
+                        .iter()
+                        .enumerate()
+                        .map(move |(instance_idx, chip_proof)| {
+                            (chip_idx, instance_idx, chip_proof)
+                        })
+                })
+                .collect();
+
+        let num_forks = chip_proof_list.len();
+        let fork_offset = sponge.len(); // tidx of the fork point in the trunk
+
+        let mut fork_sponges: Vec<TS> = (0..num_forks)
+            .map(|i| {
+                let mut forked = sponge.clone();
+                forked.observe(F::from_u64(i as u64));
+                forked
+            })
+            .collect();
+
+        // Phase 3: Run Tower + Main on each fork.
+        // Each fork sponge processes independently. We record fork-local offsets
+        // first, then remap to global tidx after we know the trunk length.
+        struct ForkLocalRecord {
+            tower_local_tidx: usize,
+            main_local_tidx: usize,
+            fork_len: usize,
         }
-        preflight.transcript = sponge.into_log();
+        let mut fork_records: Vec<ForkLocalRecord> = Vec::with_capacity(num_forks);
+
+        for (fork_idx, &(chip_idx, instance_idx, chip_proof)) in
+            chip_proof_list.iter().enumerate()
+        {
+            let fs = &mut fork_sponges[fork_idx];
+            let fork_start_len = fs.len();
+
+            // Fork-local tidx: position within the fork's extracted log.
+            // The fork_id observation is at position 0; tower ops follow.
+            let tower_local = fs.len() - fork_start_len;
+            let _ = crate::tower::record_gkr_transcript(fs, chip_idx, chip_proof);
+
+            let tower_replay =
+                match crate::tower::circuit_vk_for_idx(child_vk, chip_idx) {
+                    Some(circuit_vk) => {
+                        match crate::tower::replay_tower_proof(
+                            chip_proof,
+                            circuit_vk,
+                        ) {
+                            Ok(replay) => replay,
+                            Err(err) => {
+                                eprintln!(
+                                    "failed to replay tower proof during preflight for chip \
+                                     {chip_idx}: {err:?}"
+                                );
+                                crate::tower::TowerReplayResult::default()
+                            }
+                        }
+                    }
+                    None => {
+                        eprintln!(
+                            "missing circuit verifying key during GKR preflight for chip \
+                             {chip_idx}"
+                        );
+                        crate::tower::TowerReplayResult::default()
+                    }
+                };
+
+            // Record tower with placeholder tidx (will be remapped below).
+            preflight.gkr.chips.push(TowerChipTranscriptRange {
+                chip_idx,
+                instance_idx,
+                tidx: tower_local, // placeholder
+                tower_replay,
+            });
+
+            // Main preflight for this chip.
+            let main_local = fs.len() - fork_start_len;
+            crate::main::record_main_transcript(fs, chip_idx, chip_proof);
+
+            preflight.main.chips.push(ChipTranscriptRange {
+                chip_idx,
+                instance_idx,
+                tidx: main_local, // placeholder
+            });
+
+            fork_records.push(ForkLocalRecord {
+                tower_local_tidx: tower_local,
+                main_local_tidx: main_local,
+                fork_len: fs.len() - fork_start_len,
+            });
+        }
+
+        // Phase 4: Merge — sample 1 ext element from each fork, observe into trunk.
+        for fork_sponge in &mut fork_sponges {
+            let sample: <BabyBearPoseidon2Config as StarkProtocolConfig>::EF =
+                FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(fork_sponge);
+            sponge.observe_ext(sample);
+        }
+
+        // The trunk log now contains pre-fork ops (0..fork_offset) and merge
+        // ops (fork_offset..trunk_len). The merge phase adds D_EF samples per
+        // fork (from sample_ext on each fork) and D_EF observations per fork
+        // (from observe_ext on trunk).
+        let trunk_log = sponge.into_log();
+        let trunk_len = trunk_log.len();
+
+        // Remap fork-local tidx to global tidx.
+        // Global layout: trunk 0..trunk_len, fork0 trunk_len.., fork1 .., etc.
+        let mut global_cursor = trunk_len;
+        for (fork_idx, record) in fork_records.iter().enumerate() {
+            preflight.gkr.chips[fork_idx].tidx =
+                global_cursor + record.tower_local_tidx;
+            preflight.main.chips[fork_idx].tidx =
+                global_cursor + record.main_local_tidx;
+            global_cursor += record.fork_len;
+        }
+
+        preflight.proof_shape.fork_start_tidx = fork_offset;
+
+        // Store fork transcript logs.
+        // Each fork sponge log contains the trunk's history (0..fork_offset)
+        // followed by the fork-only operations. We extract the fork portion.
+        for (fork_idx, fork_sponge) in fork_sponges.into_iter().enumerate() {
+            let full_fork_log = fork_sponge.into_log();
+            let fork_values = full_fork_log.values()[fork_offset..].to_vec();
+            let fork_samples = full_fork_log.samples()[fork_offset..].to_vec();
+            let fork_log =
+                openvm_stark_backend::TranscriptLog::new(fork_values, fork_samples);
+
+            // The fork's initial sponge state will be reconstructed during
+            // trace generation by replaying the trunk's pre-fork operations.
+            // We store the global tidx offset for this fork.
+            preflight.fork_transcripts.push(ForkTranscriptLog {
+                log: fork_log,
+                initial_state: [F::ZERO; POSEIDON2_WIDTH],
+                fork_id: fork_idx + 1, // 1-based fork IDs (0 = trunk)
+                global_tidx_offset: trunk_len
+                    + fork_records[..fork_idx]
+                        .iter()
+                        .map(|r| r.fork_len)
+                        .sum::<usize>(),
+            });
+        }
+
+        preflight.transcript = trunk_log;
         preflight
     }
 

@@ -78,7 +78,6 @@ use crate::{
             TowerProdWriteSumCheckClaimTraceGenerator,
         },
         sumcheck::{TowerLayerSumcheckAir, TowerSumcheckRecord, TowerSumcheckTraceGenerator},
-        tower::replay_tower_proof,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
@@ -102,7 +101,7 @@ pub mod layer;
 pub mod sumcheck;
 #[allow(clippy::module_inception)]
 mod tower;
-pub(crate) use tower::TowerReplayResult;
+pub(crate) use tower::{TowerReplayResult, replay_tower_proof};
 pub struct TowerModule {
     // Global bus inventory
     bus_inventory: BusInventory,
@@ -140,7 +139,7 @@ pub(crate) struct TowerBlobCpu {
 }
 
 #[derive(Debug, Clone, Default)]
-struct TowerTranscriptSchedule {
+pub(crate) struct TowerTranscriptSchedule {
     alpha_logup: EF,
     lambdas: Vec<EF>,
     mus: Vec<EF>,
@@ -286,7 +285,7 @@ fn accumulate_logup_claims(rows: &[[EF; 4]], lambda: EF, lambda_prime: EF, mu: E
     (acc_sum, acc_q)
 }
 
-fn circuit_vk_for_idx(
+pub(crate) fn circuit_vk_for_idx(
     vk: &RecursionVk,
     chip_idx: usize,
 ) -> Option<&VerifyingKey<RecursionField>> {
@@ -687,7 +686,10 @@ pub(crate) fn build_gkr_blob(
                 eyre::eyre!("missing chip proof instance {instance_idx} for chip {chip_idx}")
             })?;
             has_chip = true;
-            let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
+            let mut ts = {
+                let (log, local_tidx) = preflight.transcript_log_for_tidx(pf_entry.tidx);
+                ReadOnlyTranscript::new(log, local_tidx)
+            };
             let schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
 
             let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
@@ -788,7 +790,7 @@ pub(crate) fn build_gkr_blob(
     })
 }
 
-fn record_gkr_transcript<TS>(
+pub(crate) fn record_gkr_transcript<TS>(
     ts: &mut TS,
     _chip_idx: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,

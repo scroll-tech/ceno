@@ -1,3 +1,4 @@
+use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use recursion_circuit::{bus as upstream, define_typed_per_proof_permutation_bus};
 pub use upstream::{
@@ -9,6 +10,19 @@ pub use upstream::{
     PublicValuesBusMessage, SelHypercubeBus, SelHypercubeBusMessage, SelUniBus, SelUniBusMessage,
     TranscriptBus, TranscriptBusMessage,
 };
+
+// ── Fork state sidechain bus ──────────────────────────────────────────────────
+// Carries the full Poseidon2 sponge state from the trunk's fork point to
+// each forked transcript chain, so the fork can start from the correct state.
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct ForkStateBusMessage<T> {
+    pub fork_id: T,
+    pub state: [T; POSEIDON2_WIDTH],
+}
+
+define_typed_per_proof_permutation_bus!(ForkStateBus, ForkStateBusMessage);
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]

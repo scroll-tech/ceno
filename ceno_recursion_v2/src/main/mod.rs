@@ -95,7 +95,8 @@ impl MainModule {
                         );
                     }
                     let claim = input_layer_claim(chip_proof);
-                    let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
+                    let (log, local_tidx) = preflight.transcript_log_for_tidx(pf_entry.tidx);
+                    let mut ts = ReadOnlyTranscript::new(log, local_tidx);
                     record_main_transcript(&mut ts, chip_idx, chip_proof);
 
                     let main_record = MainRecord {
@@ -303,7 +304,7 @@ fn build_sumcheck_record_from_chip(
     }
 }
 
-fn record_main_transcript<TS>(
+pub(crate) fn record_main_transcript<TS>(
     ts: &mut TS,
     _chip_idx: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
