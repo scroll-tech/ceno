@@ -2,9 +2,13 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::{
     arithmetics::{ceil_log2, next_pow2_instance_padding},
-    basefold_verifier::basefold::{
-        BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
+    basefold_verifier::{
+        basefold::{
+            BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
+        },
+        utils::read_hint_slice,
     },
+    field_ext::CanonicalFieldExt,
     tower_verifier::binding::{
         IOPProverMessage, IOPProverMessageVec, IOPProverMessageVecVariable, PointVariable,
         ThreeDimensionalVecVariable, ThreeDimensionalVector,
@@ -24,12 +28,15 @@ use openvm_native_compiler::{
     prelude::*,
 };
 use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::hints::{Hintable, VecAutoHintable};
-use openvm_stark_backend::p3_field::{PrimeCharacteristicRing as FieldAlgebra, extension::BinomialExtensionField};
+use openvm_native_recursion::{
+    hints::{Hintable, VecAutoHintable},
+    vars::HintSlice,
+};
+use openvm_stark_backend::p3_field::{FieldAlgebra, extension::BinomialExtensionField};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldExtensionAlgebra;
+use std::cmp::max;
 use sumcheck::structs::IOPProof;
-use crate::field_ext::CanonicalFieldExt;
 
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, 4>;
@@ -379,9 +386,9 @@ pub struct ZKVMChipProofInput {
     pub r_out_evals_len: usize,
     pub w_out_evals_len: usize,
     pub lk_out_evals_len: usize,
-    pub r_out_evals: Vec<Vec<E>>,
-    pub w_out_evals: Vec<Vec<E>>,
-    pub lk_out_evals: Vec<Vec<E>>,
+    pub r_out_evals: Vec<E>,
+    pub w_out_evals: Vec<E>,
+    pub lk_out_evals: Vec<E>,
 
     pub tower_proof: TowerProofInput,
 
@@ -397,7 +404,7 @@ pub struct ZKVMChipProofInput {
     pub has_ecc_proof: usize,
     pub ecc_proof: EccQuarkProofInput,
 
-    pub num_instances: Vec<usize>,
+    pub num_instances: [usize; 2],
 
     pub wits_in_evals: Vec<E>,
     pub fixed_in_evals: Vec<E>,
@@ -461,9 +468,9 @@ impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
             r_out_evals_len: p.r_out_evals.len(),
             w_out_evals_len: p.w_out_evals.len(),
             lk_out_evals_len: p.lk_out_evals.len(),
-            r_out_evals: p.r_out_evals,
-            w_out_evals: p.w_out_evals,
-            lk_out_evals: p.lk_out_evals,
+            r_out_evals: p.r_out_evals.into_iter().flatten().collect(),
+            w_out_evals: p.w_out_evals.into_iter().flatten().collect(),
+            lk_out_evals: p.lk_out_evals.into_iter().flatten().collect(),
             tower_proof: p.tower_proof.into(),
             has_main_sumcheck_proofs: if p.main_sumcheck_proofs.is_some() {
                 1
@@ -513,9 +520,8 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub w_out_evals_len: Usize<C::N>,
     pub lk_out_evals_len: Usize<C::N>,
 
-    pub r_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    pub w_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    pub lk_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
+    pub rw_out_evals: HintSlice<C>,
+    pub lk_out_evals: HintSlice<C>,
 
     pub has_main_sumcheck_proofs: Usize<C::N>,
     pub main_sumcheck_proofs: IOPProverMessageVecVariable<C>,
@@ -547,9 +553,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let lk_out_evals_len = Usize::Var(usize::read(builder));
 
         builder.cycle_tracker_start("read omc out evals");
-        let r_out_evals = Vec::<Vec<E>>::read(builder);
-        let w_out_evals = Vec::<Vec<E>>::read(builder);
-        let lk_out_evals = Vec::<Vec<E>>::read(builder);
+        let rw_out_evals = read_hint_slice(builder);
+        let lk_out_evals = read_hint_slice(builder);
         builder.cycle_tracker_end("read omc out evals");
 
         builder.cycle_tracker_start("read tower proofs");
@@ -582,8 +587,7 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             r_out_evals_len,
             w_out_evals_len,
             lk_out_evals_len,
-            r_out_evals,
-            w_out_evals,
+            rw_out_evals,
             lk_out_evals,
             has_main_sumcheck_proofs,
             main_sumcheck_proofs,
@@ -617,9 +621,9 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let log2_num_instances = ceil_log2(next_pow2_instance);
         stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
 
-        let r_out_evals_len = self.r_out_evals.len();
-        let w_out_evals_len = self.w_out_evals.len();
-        let lk_out_evals_len = self.lk_out_evals.len();
+        let r_out_evals_len = self.r_out_evals_len;
+        let w_out_evals_len = self.w_out_evals_len;
+        let lk_out_evals_len = self.lk_out_evals_len;
         tracing::debug!(
             "circuit {} r_len: {}, w: {}, lk: {}, n_prods: {}, n_logups: {}, n_layers: {}, n_prod_evals: {}, n_logup_evals: {}",
             self.idx,
@@ -641,8 +645,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&w_out_evals_len));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&lk_out_evals_len));
 
-        stream.extend(self.r_out_evals.write());
-        stream.extend(self.w_out_evals.write());
+        let rw_out_evals = [self.r_out_evals.clone(), self.w_out_evals.clone()].concat();
+        stream.extend(rw_out_evals.write());
         stream.extend(self.lk_out_evals.write());
 
         stream.extend(self.tower_proof.write());
@@ -655,18 +659,12 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());
 
-        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
-            &self.num_instances,
-        ));
+        stream.extend(self.num_instances.to_vec().write());
 
         let n_inst_0 = self.num_instances[0];
         let n_inst_0_bit_decomps = decompose_minus_one_bits(n_inst_0);
 
-        let n_inst_1 = if self.num_instances.len() > 1 {
-            self.num_instances[1]
-        } else {
-            1usize
-        };
+        let n_inst_1 = max(self.num_instances[1], 1);
         let n_inst_1_bit_decomps = decompose_minus_one_bits(n_inst_1);
 
         stream.extend(n_inst_0_bit_decomps.write());

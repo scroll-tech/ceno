@@ -212,13 +212,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         // write fixed commitment to transcript
         // TODO check soundness if there is no fixed_commit but got fixed proof?
-        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref()
-            && shard_id == 0
-        {
+        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
-        } else if let Some(fixed_commit) = self.vk.fixed_no_omc_init_commit.as_ref()
-            && shard_id > 0
-        {
+        }
+        if let Some(fixed_commit) = self.vk.fixed_no_omc_init_commit.as_ref() {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
@@ -566,6 +563,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
+        // bind read/write/lookup out evals into transcript before deriving tower challenges
+        for eval in proof
+            .r_out_evals
+            .iter()
+            .chain(proof.w_out_evals.iter())
+            .chain(proof.lk_out_evals.iter())
+            .flatten()
+        {
+            transcript.append_field_element_ext(eval);
+        }
+
         let (_, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
             proof
                 .r_out_evals
@@ -621,7 +629,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
-            assert_eq!(proof.num_instances.len(), 1);
+            assert_eq!(proof.num_instances[1], 0);
             // it's not shard chip
             vec![
                 SelectorContext::new(0, num_instances, num_var_with_rotation);
@@ -632,7 +640,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .unwrap_or(0)
             ]
         } else {
-            assert_eq!(proof.num_instances.len(), 2);
             // it's shard chip
             tracing::debug!(
                 "num_reads: {}, num_writes: {}, total: {}",
@@ -784,6 +791,7 @@ impl TowerVerify {
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
                 let eq = eq_eval(out_rt, &rt);
+
                 let expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())
