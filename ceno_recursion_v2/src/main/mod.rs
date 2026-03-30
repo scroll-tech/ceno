@@ -194,6 +194,22 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         let mut paired = self.collect_records(child_vk, proofs, preflights).ok()?;
         paired.sort_by_key(|(record, _)| (record.proof_idx, record.idx));
+        // Replace chip_idx with sequential index per proof_idx group to satisfy
+        // NestedForLoopSubAir counter constraints (must increment by 0 or 1).
+        // This matches the tower module which also uses entry_idx.
+        {
+            let mut prev_proof_idx = usize::MAX;
+            let mut seq_idx = 0usize;
+            for (record, sumcheck_record) in paired.iter_mut() {
+                if record.proof_idx != prev_proof_idx {
+                    seq_idx = 0;
+                    prev_proof_idx = record.proof_idx;
+                }
+                record.idx = seq_idx;
+                sumcheck_record.idx = seq_idx;
+                seq_idx += 1;
+            }
+        }
         let (main_records, sumcheck_records): (Vec<_>, Vec<_>) = paired.into_iter().unzip();
         let ctx = MainTraceCtx {
             main_records: &main_records,

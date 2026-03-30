@@ -124,8 +124,6 @@ impl ProofShapeModule {
         let _ = self;
 
         // Verifier preprocess: absorb raw public input polynomials.
-        let raw_pi_total: usize = proof.raw_pi.iter().map(|v| v.len()).sum();
-        eprintln!("[DEBUG_PF] raw_pi groups={} total_fields={}", proof.raw_pi.len(), raw_pi_total);
         for raw_pi in &proof.raw_pi {
             for &value in raw_pi {
                 ts.observe(value);
@@ -141,7 +139,6 @@ impl ProofShapeModule {
             ts.observe(F::from_u64(
                 fixed_commit.log2_max_codeword_size as u64,
             ));
-            eprintln!("[DEBUG_PF] observed fixed_commit ({} digest elems + log2_max={})", DIGEST_SIZE, fixed_commit.log2_max_codeword_size);
         }
         if let Some(fixed_no_omc) = child_vk.fixed_no_omc_init_commit.as_ref() {
             for elem in fixed_no_omc.commit.clone().into_iter() {
@@ -150,7 +147,6 @@ impl ProofShapeModule {
             ts.observe(F::from_u64(
                 fixed_no_omc.log2_max_codeword_size as u64,
             ));
-            eprintln!("[DEBUG_PF] observed fixed_no_omc_init_commit ({} digest elems + log2_max={})", DIGEST_SIZE, fixed_no_omc.log2_max_codeword_size);
         }
 
         // Build per-air shape metadata from present chip proofs.
@@ -234,8 +230,6 @@ impl ProofShapeModule {
 
         // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            let ni: Vec<usize> = chip_instances.iter().flat_map(|i| i.num_instances.iter().copied()).collect();
-            eprintln!("[DEBUG_PF] chip_idx={} num_instances={:?}", chip_idx, ni);
             ts.observe(F::from_usize(chip_idx));
             for num_instance in chip_instances
                 .iter()
@@ -255,15 +249,12 @@ impl ProofShapeModule {
             ts.observe(F::from_u64(
                 witin.log2_max_codeword_size as u64,
             ));
-            eprintln!("[DEBUG_PF] observed witin_commit ({} digest elems + log2_max={})", DIGEST_SIZE, witin.log2_max_codeword_size);
         }
 
         preflight.proof_shape.alpha_tidx = ts.len();
         let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-        eprintln!("[DEBUG_PF] alpha={:?}", _alpha);
         preflight.proof_shape.beta_tidx = ts.len();
         let _beta = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-        eprintln!("[DEBUG_PF] beta={:?}", _beta);
         preflight.proof_shape.fork_start_tidx = ts.len();
 
         let _ = child_vk;

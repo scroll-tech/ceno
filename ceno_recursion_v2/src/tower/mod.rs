@@ -688,10 +688,6 @@ pub(crate) fn build_gkr_blob(
             has_chip = true;
             let mut ts = {
                 let (log, local_tidx) = preflight.transcript_log_for_tidx(pf_entry.tidx);
-                eprintln!(
-                    "[DEBUG_BLOB] entry_idx={} chip_idx={} inst={} tidx={} local_tidx={} log_len={}",
-                    entry_idx, chip_idx, instance_idx, pf_entry.tidx, local_tidx, log.len()
-                );
                 ReadOnlyTranscript::new(log, local_tidx)
             };
             let schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);

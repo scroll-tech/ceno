@@ -56,12 +56,15 @@ impl RowMajorChip<F> for MainSumcheckTraceGenerator {
 
         let zero_challenge: [F; D_EF] = EF::ZERO.as_basis_coefficients_slice().try_into().unwrap();
         let mut row_offset = 0;
+        let mut prev_proof_idx: Option<usize> = None;
 
         for record in records.iter() {
             let rows = record.total_rows();
             let has_rounds = !record.rounds.is_empty();
             let claim_value = record.claim;
             let eq_value = EF::ONE;
+            let is_new_proof_idx = prev_proof_idx != Some(record.proof_idx);
+            prev_proof_idx = Some(record.proof_idx);
 
             for round_idx in 0..rows {
                 let offset = row_offset * width;
@@ -73,7 +76,7 @@ impl RowMajorChip<F> for MainSumcheckTraceGenerator {
                 cols.is_enabled = F::ONE;
                 cols.proof_idx = F::from_usize(record.proof_idx);
                 cols.idx = F::from_usize(record.idx);
-                cols.is_first_idx = F::from_bool(is_first_round);
+                cols.is_first_idx = F::from_bool(is_first_round && is_new_proof_idx);
                 cols.is_first_round = F::from_bool(is_first_round);
                 cols.is_last_round = F::from_bool(is_last_round);
                 cols.is_dummy = F::from_bool(!has_rounds);
