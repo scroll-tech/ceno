@@ -786,6 +786,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             self.build_tower_witness(composed_cs, input, records);
         exit_span!(span);
 
+        // bind read/write/lookup out evals into transcript before deriving tower challenges
+        for eval in out_evals.iter().flat_map(|evals| evals.iter()).flatten() {
+            transcript.append_field_element_ext(eval);
+        }
+
         // Then prove the tower relation
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         let (rt, proofs) = CpuTowerProver::create_proof(prod_specs, logup_specs, 2, transcript);
