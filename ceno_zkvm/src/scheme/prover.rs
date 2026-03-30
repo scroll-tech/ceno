@@ -206,8 +206,7 @@ impl<
                 // write (circuit_idx, num_var) to transcript
                 transcript.append_field_element(&E::BaseField::from_usize(*circuit_idx));
                 for num_instance in num_instances {
-                    transcript
-                        .append_field_element(&E::BaseField::from_canonical_usize(num_instance));
+                    transcript.append_field_element(&E::BaseField::from_usize(num_instance));
                 }
             }
 

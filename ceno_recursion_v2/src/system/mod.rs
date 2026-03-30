@@ -369,7 +369,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         {
             let fs = &mut fork_sponges[fork_idx];
             let fork_start_len = fs.len();
-            eprintln!("[DEBUG_PF] fork#{} chip_idx={}", fork_idx, chip_idx);
+            eprintln!("[DEBUG_PF] fork#{} chip_idx={} has_ecc={}", fork_idx, chip_idx, chip_proof.ecc_proof.is_some());
 
             // Observe circuit_idx into the fork transcript.
             // Mirrors v1 verifier: transcript.append_field_element(circuit_idx)
