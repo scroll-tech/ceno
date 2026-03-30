@@ -8,6 +8,7 @@ use crate::{
         },
         utils::read_hint_slice,
     },
+    field_ext::CanonicalFieldExt,
     tower_verifier::binding::{
         IOPProverMessage, IOPProverMessageVec, IOPProverMessageVecVariable, PointVariable,
         ThreeDimensionalVecVariable, ThreeDimensionalVector,
@@ -36,7 +37,6 @@ use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldExtensionAlgebra;
 use std::cmp::max;
 use sumcheck::structs::IOPProof;
-use crate::field_ext::CanonicalFieldExt;
 
 pub type F = BabyBear;
 pub type E = BinomialExtensionField<F, 4>;
