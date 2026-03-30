@@ -343,6 +343,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 .collect();
 
         let num_forks = chip_proof_list.len();
+        eprintln!("[DEBUG_PF] num_forks={}", num_forks);
         let fork_offset = sponge.len(); // tidx of the fork point in the trunk
 
         let mut fork_sponges: Vec<TS> = (0..num_forks)
@@ -368,9 +369,13 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         {
             let fs = &mut fork_sponges[fork_idx];
             let fork_start_len = fs.len();
+            eprintln!("[DEBUG_PF] fork#{} chip_idx={}", fork_idx, chip_idx);
+
+            // Observe circuit_idx into the fork transcript.
+            // Mirrors v1 verifier: transcript.append_field_element(circuit_idx)
+            fs.observe(F::from_u64(chip_idx as u64));
 
             // Fork-local tidx: position within the fork's extracted log.
-            // The fork_id observation is at position 0; tower ops follow.
             let tower_local = fs.len() - fork_start_len;
             let _ = crate::tower::record_gkr_transcript(fs, chip_idx, chip_proof);
 
@@ -426,9 +431,10 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         }
 
         // Phase 4: Merge — sample 1 ext element from each fork, observe into trunk.
-        for fork_sponge in &mut fork_sponges {
+        for (i, fork_sponge) in fork_sponges.iter_mut().enumerate() {
             let sample: <BabyBearPoseidon2Config as StarkProtocolConfig>::EF =
                 FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(fork_sponge);
+            eprintln!("[DEBUG_PF] merge fork#{} sample={:?}", i, sample);
             sponge.observe_ext(sample);
         }
 

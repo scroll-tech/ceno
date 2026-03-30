@@ -798,6 +798,18 @@ pub(crate) fn record_gkr_transcript<TS>(
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
+    // Bind read/write/lookup out evals into transcript before deriving tower
+    // challenges. Mirrors v1 verifier: append_field_element_ext for each eval.
+    for eval in chip_proof
+        .r_out_evals
+        .iter()
+        .chain(chip_proof.w_out_evals.iter())
+        .chain(chip_proof.lk_out_evals.iter())
+        .flatten()
+    {
+        ts.observe_ext(*eval);
+    }
+
     let alpha_logup = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
     // Keep transcript index alignment with TowerInputAir's `tidx + 2 * D_EF` for q0.
     let _beta_placeholder = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
