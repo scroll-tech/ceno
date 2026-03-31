@@ -3,8 +3,8 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_recursion::aggregation::CenoAggregationProver;
 use ceno_zkvm::{
     e2e::{
-        Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
-        setup_platform, setup_platform_debug,
+        Checkpoint, FieldType, MultiProver, PcsKind, Preset, public_io_words_to_digest_words,
+        run_e2e_with_checkpoint, setup_platform, setup_platform_debug,
     },
     scheme::{constants::MAX_NUM_VARIABLES, create_backend, create_prover},
 };
@@ -220,6 +220,7 @@ fn main() {
         .unwrap_or_default();
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
+    let public_io_digest = public_io_words_to_digest_words(&public_io);
     let multi_prover = MultiProver::new(
         args.prover_id as usize,
         args.num_provers as usize,
@@ -236,7 +237,7 @@ fn main() {
             platform,
             multi_prover,
             &hints,
-            &public_io,
+            public_io_digest,
             max_steps,
             Checkpoint::Complete,
             None,

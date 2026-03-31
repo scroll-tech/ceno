@@ -7,6 +7,11 @@ use serde::de::DeserializeOwned;
 use std::vec::Vec;
 use tiny_keccak::{Hasher, Keccak};
 
+/// Keccak-256 digest of the empty string (""), encoded as 8 little-endian `u32` words.
+pub const KECCAK_EMPTY_WORDS: [u32; 8] = [
+    0x0146d2c5, 0x3c23f786, 0xb27d7e92, 0xc003c7dc, 0x53b600e5, 0x3b2782ca, 0x04d8fa7b, 0x70a4855d,
+];
+
 struct RegionState {
     next_len_at: *const usize,
     next_data_at: *const u8,
@@ -112,6 +117,10 @@ fn digest_to_words(digest: [u8; 32]) -> [u32; 8] {
 }
 
 fn keccak_words(bytes: &[u8]) -> [u32; 8] {
+    if bytes.is_empty() {
+        return KECCAK_EMPTY_WORDS;
+    }
+
     let mut keccak = Keccak::v256();
     keccak.update(bytes);
     let mut digest = [0u8; 32];

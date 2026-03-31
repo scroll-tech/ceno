@@ -57,8 +57,21 @@ use witness::next_pow2_instance_padding;
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
 pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
+/// Keccak-256 digest of the empty string (""), in big-endian byte form.
+pub const KECCAK_EMPTY: [u8; 32] = [
+    0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7, 0x03, 0xc0,
+    0xe5, 0x00, 0xb6, 0x53, 0xca, 0x82, 0x27, 0x3b, 0x7b, 0xfa, 0xd8, 0x04, 0x5d, 0x85, 0xa4, 0x70,
+];
+/// Same empty-string Keccak digest, reinterpreted as 8 little-endian `u32` words.
+pub const KECCAK_EMPTY_WORDS: [u32; 8] = [
+    0x0146d2c5, 0x3c23f786, 0xb27d7e92, 0xc003c7dc, 0x53b600e5, 0x3b2782ca, 0x04d8fa7b, 0x70a4855d,
+];
 
 pub fn public_io_words_to_digest_words(words: &[u32]) -> [u32; 8] {
+    if words.is_empty() {
+        return KECCAK_EMPTY_WORDS;
+    }
+
     let mut keccak = Keccak::v256();
     for word in words {
         keccak.update(&word.to_le_bytes());
@@ -841,7 +854,7 @@ pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
     init_mem_state: &InitMemState,
-    public_io_digest_input: &[u32],
+    public_io_digest: [u32; 8],
     platform: &Platform,
     multi_prover: &MultiProver,
     step_cell_extractor: Arc<dyn StepCellExtractor>,
@@ -1025,7 +1038,7 @@ pub fn emulate_program<'a>(
         heap_final.len() as u32,
         platform.hints.start,
         hints_final.len() as u32,
-        public_io_words_to_digest_words(public_io_digest_input),
+        public_io_digest,
         [0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );
 
@@ -1658,7 +1671,7 @@ pub fn run_e2e_with_checkpoint<
     platform: Platform,
     multi_prover: MultiProver,
     hints: &[u32],
-    public_io_digest_input: &[u32],
+    public_io_digest: [u32; 8],
     max_steps: usize,
     checkpoint: Checkpoint,
     // for debug purpose
@@ -1683,7 +1696,6 @@ pub fn run_e2e_with_checkpoint<
     // Generate witness
     let is_mock_proving = std::env::var("MOCK_PROVING").is_ok();
     if let Checkpoint::PrepE2EProving = checkpoint {
-        let public_io_digest_input_owned = public_io_digest_input.to_vec();
         return E2ECheckpointResult {
             proofs: None,
             vk: Some(vk),
@@ -1691,7 +1703,7 @@ pub fn run_e2e_with_checkpoint<
                 _ = run_e2e_proof::<E, _, _, _>(
                     &prover,
                     &init_full_mem,
-                    &public_io_digest_input_owned,
+                    public_io_digest,
                     max_steps,
                     is_mock_proving,
                     target_shard_id,
@@ -1709,7 +1721,7 @@ pub fn run_e2e_with_checkpoint<
         prover.pk.program_ctx.as_ref().unwrap().program.clone(),
         max_steps,
         &init_full_mem,
-        public_io_digest_input,
+        public_io_digest,
         &prover.pk.program_ctx.as_ref().unwrap().platform,
         &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
         step_cell_extractor,
@@ -1790,7 +1802,7 @@ pub fn run_e2e_proof<
 >(
     prover: &ZKVMProver<E, PCS, PB, PD>,
     init_full_mem: &InitMemState,
-    public_io_digest_input: &[u32],
+    public_io_digest: [u32; 8],
     max_steps: usize,
     is_mock_proving: bool,
     // for debug purpose
@@ -1804,7 +1816,7 @@ pub fn run_e2e_proof<
         ctx.program.clone(),
         max_steps,
         init_full_mem,
-        public_io_digest_input,
+        public_io_digest,
         &ctx.platform,
         &ctx.multi_prover,
         step_cell_extractor,
@@ -2262,5 +2274,9 @@ mod tests {
         });
 
         assert_eq!(digest_words, expected);
+        assert_eq!(
+            super::public_io_words_to_digest_words(&[]),
+            super::KECCAK_EMPTY_WORDS
+        );
     }
 }

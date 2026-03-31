@@ -2,7 +2,7 @@ use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
-    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    e2e::{Checkpoint, KECCAK_EMPTY_WORDS, Preset, run_e2e_with_checkpoint, setup_platform},
     scheme::{create_backend, create_prover},
 };
 use std::{fs, path::PathBuf, time::Duration};
@@ -42,6 +42,7 @@ fn fibonacci_witness(c: &mut Criterion) {
     let (program, platform) = setup();
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let public_io_digest = KECCAK_EMPTY_WORDS;
 
     let max_steps = usize::MAX;
     let mut group = c.benchmark_group(format!("fib_wit_max_steps_{}", max_steps));
@@ -67,7 +68,7 @@ fn fibonacci_witness(c: &mut Criterion) {
                         platform.clone(),
                         MultiProver::default(),
                         &Vec::from(&hints),
-                        &[],
+                        public_io_digest,
                         max_steps,
                         Checkpoint::PrepWitnessGen,
                         None,

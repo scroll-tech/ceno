@@ -4,8 +4,8 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
-        Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
-        setup_platform, setup_platform_debug, verify,
+        Checkpoint, FieldType, MultiProver, PcsKind, Preset, public_io_words_to_digest_words,
+        run_e2e_with_checkpoint, setup_platform, setup_platform_debug, verify,
     },
     scheme::{
         ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
@@ -230,6 +230,7 @@ fn main() {
     );
 
     let target_shard_id = args.shard_id.map(|v| v as usize);
+    let public_io_digest = public_io_words_to_digest_words(&public_io);
 
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
@@ -241,7 +242,7 @@ fn main() {
                 platform,
                 multi_prover,
                 &hints,
-                &public_io,
+                public_io_digest,
                 max_steps,
                 args.proof_file,
                 args.vk_file,
@@ -258,7 +259,7 @@ fn main() {
                 platform,
                 multi_prover,
                 &hints,
-                &public_io,
+                public_io_digest,
                 max_steps,
                 args.proof_file,
                 args.vk_file,
@@ -275,7 +276,7 @@ fn main() {
                 platform,
                 multi_prover,
                 &hints,
-                &public_io,
+                public_io_digest,
                 max_steps,
                 args.proof_file,
                 args.vk_file,
@@ -292,7 +293,7 @@ fn main() {
                 platform,
                 multi_prover,
                 &hints,
-                &public_io,
+                public_io_digest,
                 max_steps,
                 args.proof_file,
                 args.vk_file,
@@ -320,7 +321,7 @@ fn run_inner<
     platform: Platform,
     multi_prover: MultiProver,
     hints: &[u32],
-    public_io: &[u32],
+    public_io_digest: [u32; 8],
     max_steps: usize,
     proof_file: PathBuf,
     vk_file: PathBuf,
@@ -333,7 +334,7 @@ fn run_inner<
         platform,
         multi_prover,
         hints,
-        public_io,
+        public_io_digest,
         max_steps,
         checkpoint,
         target_shard_id,

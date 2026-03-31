@@ -4,7 +4,7 @@ use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
-    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    e2e::{Checkpoint, KECCAK_EMPTY_WORDS, Preset, run_e2e_with_checkpoint, setup_platform},
     scheme::{create_backend, create_prover},
 };
 mod alloc;
@@ -41,6 +41,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
     let (program, platform) = setup();
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let public_io_digest = KECCAK_EMPTY_WORDS;
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
     for n in [100, 500] {
@@ -65,7 +66,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                             platform.clone(),
                             MultiProver::default(),
                             &hints,
-                            &[],
+                            public_io_digest,
                             max_steps,
                             Checkpoint::PrepE2EProving,
                             None,

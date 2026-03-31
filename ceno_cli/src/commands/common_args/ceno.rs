@@ -347,8 +347,8 @@ fn run_elf_inner<
         options.max_cycle_per_shard,
     );
 
-    let public_io_digest_input = options.read_public_io();
-    let public_io_digest = public_io_words_to_digest_words(&public_io_digest_input);
+    let public_io = options.read_public_io();
+    let public_io_digest = public_io_words_to_digest_words(&public_io);
     tracing::debug!("public io digest words: {:?}", public_io_digest);
 
     let platform = if compilation_options.release {
@@ -387,7 +387,7 @@ fn run_elf_inner<
         platform,
         multi_prover,
         &hints,
-        &public_io_digest_input,
+        public_io_digest,
         options.max_steps,
         checkpoint,
         options.shard_id.map(|v| v as usize),
