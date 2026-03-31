@@ -439,13 +439,14 @@ where
         // sample lambda and mu
         // in root & intermediate layer: for next.sumcheck_claim_in
         // in last layer: for send back to GKR input layer
-        // 1a. Sample `lambda`
+        // 1a. Sample `lambda` — only on non-root layers.
+        //     Root layer uses alpha_logup (set in trace), not a transcript sample.
         self.transcript_bus.sample_ext(
             builder,
             local.proof_idx,
             local.tidx,
             local.lambda,
-            local.is_enabled * is_not_dummy.clone(),
+            is_non_root_layer.clone() * is_not_dummy.clone(),
         );
         // 1b. Observe layer claims
         let tidx = tidx_after_sumcheck;

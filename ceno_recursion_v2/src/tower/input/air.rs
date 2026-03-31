@@ -156,8 +156,8 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         };
         let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN);
         // Add GKR layers + Sumcheck.
-        // Total GKR span (incl. q0): n*(10n+25) - 9 for n>0.
-        // = n*(10n+25) - 9.
+        // Total GKR span: n*(10n+25) - 13 for n>0.
+        // layers_cumulative(n) = 10n² + 25n - 13.
         let gkr_inner = num_layers.clone()
             * AB::Expr::from_usize(ROUND_LEN / 2)
             + AB::Expr::from_usize(
@@ -166,9 +166,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         let tidx_after_gkr_layers = tidx_after_alpha_beta.clone()
             + has_interactions.clone()
                 * (num_layers.clone() * gkr_inner
-                    - AB::Expr::from_usize(
-                        POST_SUMCHECK_LEN - ALPHA_LEN - SUMCHECK_INIT_LEN,
-                    ));
+                    - AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN));
         // 1. TowerLayerInputBus
         // 1a. Send input to TowerLayerAir
         self.layer_input_bus.send(
@@ -176,8 +174,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.proof_idx,
             TowerLayerInputMessage {
                 idx: local.idx.into(),
-                // Skip q0_claim
-                tidx: (tidx_after_alpha_beta + AB::Expr::from_usize(D_EF))
+                tidx: tidx_after_alpha_beta.clone()
                     * has_interactions.clone(),
                 r0_claim: local.r0_claim.map(Into::into),
                 w0_claim: local.w0_claim.map(Into::into),
@@ -226,15 +223,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.alpha_logup.map(Into::into),
             local.is_enabled,
         );
-        // 2b. Observe `q0_claim` claim
-        self.transcript_bus.observe_ext(
-            builder,
-            local.proof_idx,
-            local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN),
-            local.q0_claim,
-            local.is_enabled * has_interactions.clone(),
-        );
-
         self.main_bus.send(
             builder,
             local.proof_idx,

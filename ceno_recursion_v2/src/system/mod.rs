@@ -383,20 +383,12 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                             circuit_vk,
                         ) {
                             Ok(replay) => replay,
-                            Err(err) => {
-                                eprintln!(
-                                    "failed to replay tower proof during preflight for chip \
-                                     {chip_idx}: {err:?}"
-                                );
+                            Err(_err) => {
                                 crate::tower::TowerReplayResult::default()
                             }
                         }
                     }
                     None => {
-                        eprintln!(
-                            "missing circuit verifying key during GKR preflight for chip \
-                             {chip_idx}"
-                        );
                         crate::tower::TowerReplayResult::default()
                     }
                 };
@@ -616,10 +608,6 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
 
         for (module, module_ctxs) in modules.into_iter().zip(ctxs_by_module.iter()) {
             if module_ctxs.is_none() {
-                eprintln!(
-                    "subcircuit_generate_proving_ctxs: module {} returned None",
-                    module.name()
-                );
             }
         }
 

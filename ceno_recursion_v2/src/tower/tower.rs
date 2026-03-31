@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{collections::VecDeque, marker::PhantomData};
 
 use ceno_zkvm::{
     scheme::{ZKVMChipProof, constants::NUM_FANIN},
@@ -12,14 +12,17 @@ use multilinear_extensions::{
     util::ceil_log2,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
+use openvm_stark_sdk::config::baby_bear_poseidon2::F;
+use p3::challenger::{CanObserve, CanSampleBits, GrindingChallenger};
 use p3_field::PrimeCharacteristicRing;
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState},
     util::get_challenge_pows,
 };
-use transcript::{Transcript, basic::BasicTranscript};
+use transcript::{Challenge, Transcript, basic::BasicTranscript};
 use witness::next_pow2_instance_padding;
 
+use super::TowerTranscriptSchedule;
 use crate::system::RecursionField;
 
 #[derive(Debug, Clone)]
@@ -40,6 +43,121 @@ pub struct TowerReplayResult {
 pub fn replay_tower_proof(
     chip_proof: &ZKVMChipProof<RecursionField>,
     vk: &VerifyingKey<RecursionField>,
+) -> Result<TowerReplayResult> {
+    let mut transcript = BasicTranscript::<RecursionField>::new(b"ceno-recursion-tower-tower");
+    replay_tower_proof_inner(chip_proof, vk, &mut transcript)
+}
+
+// ---------------------------------------------------------------------------
+// PrecomputedTranscript: feeds Poseidon2-derived challenges into replay logic
+// ---------------------------------------------------------------------------
+
+/// A transcript pre-loaded with challenge values from a Poseidon2 schedule.
+/// Observations are ignored; samples return pre-computed values in order.
+#[derive(Clone)]
+struct PrecomputedTranscript {
+    challenges: VecDeque<RecursionField>,
+}
+
+impl PrecomputedTranscript {
+    fn from_schedule(schedule: &TowerTranscriptSchedule) -> Self {
+        let mut challenges = VecDeque::new();
+        // 1. alpha (get_challenge_pows → sample_and_append_challenge → read_challenge)
+        challenges.push_back(schedule.alpha_logup);
+        // 2. beta (sample_and_append_vec → sample_vec(1))
+        challenges.push_back(schedule.beta);
+
+        // For each layer k:
+        //   IOPVerifierState::verify → (k+1) read_challenges (the ris)
+        //   sample_and_append_vec("merge",1) → 1 sample (mu)
+        //   get_challenge_pows → 1 read_challenge (lambda for next iteration)
+        let num_layers = schedule.mus.len();
+        let mut ri_offset = 0;
+        for k in 0..num_layers {
+            let n_ris = k + 1;
+            for i in 0..n_ris {
+                challenges.push_back(schedule.ris[ri_offset + i]);
+            }
+            ri_offset += n_ris;
+            challenges.push_back(schedule.mus[k]);
+            // lambda for the next iteration
+            if k + 1 < schedule.lambdas.len() {
+                challenges.push_back(schedule.lambdas[k + 1]);
+            } else {
+                // Last round still samples lambda; use a dummy.
+                challenges.push_back(RecursionField::ZERO);
+            }
+        }
+        Self { challenges }
+    }
+}
+
+impl CanObserve<F> for PrecomputedTranscript {
+    fn observe(&mut self, _value: F) {}
+}
+
+impl CanSampleBits<usize> for PrecomputedTranscript {
+    fn sample_bits(&mut self, _bits: usize) -> usize {
+        unimplemented!("PrecomputedTranscript: sample_bits not expected")
+    }
+}
+
+impl GrindingChallenger for PrecomputedTranscript {
+    type Witness = F;
+    fn grind(&mut self, _bits: usize) -> F {
+        unimplemented!("PrecomputedTranscript: grind not expected")
+    }
+}
+
+impl Transcript<RecursionField> for PrecomputedTranscript {
+    fn append_field_elements(&mut self, _elements: &[F]) {}
+    fn append_field_element_ext(&mut self, _element: &RecursionField) {}
+
+    fn read_challenge(&mut self) -> Challenge<RecursionField> {
+        Challenge {
+            elements: self
+                .challenges
+                .pop_front()
+                .expect("PrecomputedTranscript: ran out of challenges"),
+        }
+    }
+
+    fn sample_vec(&mut self, n: usize) -> Vec<RecursionField> {
+        (0..n)
+            .map(|_| {
+                self.challenges
+                    .pop_front()
+                    .expect("PrecomputedTranscript: ran out of challenges")
+            })
+            .collect()
+    }
+
+    fn read_field_element_exts(&self) -> Vec<RecursionField> {
+        unimplemented!()
+    }
+    fn read_field_element(&self) -> F {
+        unimplemented!()
+    }
+    fn send_challenge(&self, _challenge: RecursionField) {}
+    fn commit_rolling(&mut self) {}
+}
+
+/// Replay the tower proof using Poseidon2-derived challenges from the schedule,
+/// so that eq_at_r / claim_in / mu / lambda match the native DuplexSponge verifier.
+pub fn replay_tower_proof_poseidon(
+    chip_proof: &ZKVMChipProof<RecursionField>,
+    vk: &VerifyingKey<RecursionField>,
+    schedule: &TowerTranscriptSchedule,
+) -> Result<TowerReplayResult> {
+    let mut transcript = PrecomputedTranscript::from_schedule(schedule);
+    replay_tower_proof_inner(chip_proof, vk, &mut transcript)
+}
+
+/// Core replay logic, generic over transcript type.
+fn replay_tower_proof_inner(
+    chip_proof: &ZKVMChipProof<RecursionField>,
+    vk: &VerifyingKey<RecursionField>,
+    transcript: &mut impl Transcript<RecursionField>,
 ) -> Result<TowerReplayResult> {
     let cs = &vk.cs;
     let tower_proof = &chip_proof.tower_proof;
@@ -77,10 +195,9 @@ pub fn replay_tower_proof(
         "logup spec mismatch"
     );
 
-    let mut transcript = BasicTranscript::<RecursionField>::new(b"ceno-recursion-tower-tower");
     let log2_num_fanin = ceil_log2(NUM_FANIN);
 
-    let mut alpha_pows = get_challenge_pows(num_prod_spec + num_logup_spec * 2, &mut transcript);
+    let mut alpha_pows = get_challenge_pows(num_prod_spec + num_logup_spec * 2, transcript);
 
     let challenge_from_pows = |pows: &[RecursionField]| -> RecursionField {
         pows.get(1).copied().unwrap_or(RecursionField::ONE)
@@ -151,7 +268,7 @@ pub fn replay_tower_proof(
                 max_num_variables: (round + 1) * log2_num_fanin,
                 phantom: PhantomData,
             },
-            &mut transcript,
+            transcript,
         );
 
         let rt: Point<RecursionField> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
@@ -167,11 +284,6 @@ pub fn replay_tower_proof(
             &logup_spec_q_point_n_eval,
             &num_variables,
         )?;
-        // TEMP: Relax strict replay equality while refactoring transcript/plumbing.
-        // ensure!(
-        //     expected == sumcheck_claim.expected_evaluation,
-        //     "tower sumcheck mismatch at layer {round}"
-        // );
 
         let r_merge = transcript.sample_and_append_vec(b"merge", log2_num_fanin);
         let mu = r_merge[0];
@@ -179,7 +291,7 @@ pub fn replay_tower_proof(
         let rt_prime = [rt.clone(), r_merge].concat();
 
         let next_alpha_pows =
-            get_challenge_pows(num_prod_spec + num_logup_spec * 2, &mut transcript);
+            get_challenge_pows(num_prod_spec + num_logup_spec * 2, transcript);
 
         update_point_evals(
             tower_proof,
