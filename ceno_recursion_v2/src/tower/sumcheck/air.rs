@@ -289,9 +289,10 @@ where
         );
 
         // Transcript index increment
+        use crate::tower::tower_transcript_len::ROUND_LEN;
         builder.when(is_transition_round.clone()).assert_eq(
             next.tidx,
-            local.tidx.into() + AB::Expr::from_usize(4 * D_EF),
+            local.tidx.into() + AB::Expr::from_usize(ROUND_LEN),
         );
 
         ///////////////////////////////////////////////////////////////////////
@@ -322,7 +323,7 @@ where
             TowerSumcheckOutputMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: local.tidx.into() + AB::Expr::from_usize(4 * D_EF),
+                tidx: local.tidx.into() + AB::Expr::from_usize(ROUND_LEN),
                 claim_out: local.claim_out.map(Into::into),
                 eq_at_r_prime: local.eq_out.map(Into::into),
             },

@@ -150,14 +150,25 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
 
         let num_layers = local.n_logup;
 
-        // Add PoW (if any) and alpha, beta
-        let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(2 * D_EF);
-        // Add GKR layers + Sumcheck
+        // Add PoW (if any) and alpha label+sample, beta label+sample
+        use crate::tower::tower_transcript_len::{
+            ALPHA_BETA_LEN, ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
+        };
+        let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN);
+        // Add GKR layers + Sumcheck.
+        // Total GKR span (incl. q0): n*(10n+25) - 9 for n>0.
+        // = n*(10n+25) - 9.
+        let gkr_inner = num_layers.clone()
+            * AB::Expr::from_usize(ROUND_LEN / 2)
+            + AB::Expr::from_usize(
+                ALPHA_LEN + SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN - ROUND_LEN / 2,
+            );
         let tidx_after_gkr_layers = tidx_after_alpha_beta.clone()
             + has_interactions.clone()
-                * num_layers
-                * (num_layers + AB::Expr::TWO)
-                * AB::Expr::from_usize(2 * D_EF);
+                * (num_layers.clone() * gkr_inner
+                    - AB::Expr::from_usize(
+                        POST_SUMCHECK_LEN - ALPHA_LEN - SUMCHECK_INIT_LEN,
+                    ));
         // 1. TowerLayerInputBus
         // 1a. Send input to TowerLayerAir
         self.layer_input_bus.send(
@@ -219,7 +230,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         self.transcript_bus.observe_ext(
             builder,
             local.proof_idx,
-            local.tidx + AB::Expr::from_usize(2 * D_EF),
+            local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN),
             local.q0_claim,
             local.is_enabled * has_interactions.clone(),
         );

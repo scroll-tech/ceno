@@ -6,7 +6,7 @@ use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::TowerLayerSumcheckCols;
-use crate::tracegen::RowMajorChip;
+use crate::{tower::tower_transcript_len, tracegen::RowMajorChip};
 
 #[derive(Default, Debug, Clone)]
 pub struct TowerSumcheckRecord {
@@ -44,7 +44,9 @@ impl TowerSumcheckRecord {
     #[inline]
     fn derive_tidx(&self, layer_idx: usize, round_in_layer: usize) -> usize {
         let rounds_before_layer = Self::layer_start_index(layer_idx);
-        self.tidx + 4 * D_EF * (rounds_before_layer + round_in_layer) + 6 * D_EF * layer_idx
+        self.tidx
+            + tower_transcript_len::ROUND_LEN * (rounds_before_layer + round_in_layer)
+            + tower_transcript_len::LAYER_GAP_LEN * layer_idx
     }
 
     #[inline]

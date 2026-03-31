@@ -80,6 +80,7 @@ use crate::{
         sumcheck::{TowerLayerSumcheckAir, TowerSumcheckRecord, TowerSumcheckTraceGenerator},
     },
     tracegen::{ModuleChip, RowMajorChip},
+    utils::transcript_observe_label,
 };
 use ceno_zkvm::{scheme::ZKVMChipProof, structs::VerifyingKey};
 use eyre::Result;
@@ -94,6 +95,83 @@ pub use bus::{
     TowerSumcheckInputBus, TowerSumcheckInputMessage, TowerSumcheckOutputBus,
     TowerSumcheckOutputMessage,
 };
+
+/// Transcript field-element lengths per tower operation.
+///
+/// These match the native verifier (gkr-backend `BasicTranscript`) which absorbs
+/// labels before each sample via `sample_and_append_challenge` /
+/// `sample_and_append_vec`.  The recursion transcript must reproduce the exact
+/// same sponge sequence.
+pub mod tower_transcript_len {
+    use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
+
+    // Label field-element counts: ceil(byte_len / 4).
+    // b"combine subset evals" = 20 bytes → 5 field elements
+    const LABEL_COMBINE: usize = 5;
+    // b"product_sum" = 11 bytes → 3 field elements
+    const LABEL_PRODUCT_SUM: usize = 3;
+    // b"Internal round" = 14 bytes → 4 field elements
+    const LABEL_INTERNAL_ROUND: usize = 4;
+    // b"merge" = 5 bytes → 2 field elements
+    const LABEL_MERGE: usize = 2;
+    // usize::to_le_bytes() = 8 bytes → 2 field elements (64-bit platform)
+    const LABEL_USIZE: usize = 2;
+
+    /// label "combine subset evals" (5) + sample alpha (D_EF)
+    pub const ALPHA_LEN: usize = LABEL_COMBINE + D_EF;
+    /// label "product_sum" (3) + sample initial_rt (D_EF)
+    pub const BETA_LEN: usize = LABEL_PRODUCT_SUM + D_EF;
+    /// Alpha + beta: total elements before the GKR layer loop.
+    pub const ALPHA_BETA_LEN: usize = ALPHA_LEN + BETA_LEN;
+    /// Sumcheck init: label max_num_variables (2) + label max_degree (2)
+    pub const SUMCHECK_INIT_LEN: usize = LABEL_USIZE + LABEL_USIZE;
+    /// Per sumcheck round: 3 observe (3*D_EF) + label "Internal round" (4) + sample (D_EF)
+    pub const ROUND_LEN: usize = 3 * D_EF + LABEL_INTERNAL_ROUND + D_EF;
+    /// Merge: label "merge" (2) + sample mu (D_EF)
+    pub const MERGE_LEN: usize = LABEL_MERGE + D_EF;
+
+    /// Post-sumcheck tidx span: claim observation slots (4*D_EF) + MERGE_LEN.
+    /// This is the tidx gap from `tidx_after_sumcheck` to `tidx_end`.
+    pub const POST_SUMCHECK_LEN: usize = 4 * D_EF + MERGE_LEN;
+
+    /// Gap between consecutive sumcheck blocks across GKR layers:
+    /// post-sumcheck of previous layer + pre-sumcheck of next layer.
+    pub const LAYER_GAP_LEN: usize = POST_SUMCHECK_LEN + ALPHA_LEN + SUMCHECK_INIT_LEN;
+
+    /// Tidx span of layer `layer_idx` (includes claim slots + transcript ops).
+    /// Layer 0 (root): lambda(D_EF, no label) + POST_SUMCHECK_LEN.
+    /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + j*ROUND_LEN + POST_SUMCHECK_LEN.
+    pub const fn layer_span(layer_idx: usize) -> usize {
+        if layer_idx == 0 {
+            POST_SUMCHECK_LEN
+        } else {
+            ALPHA_LEN + SUMCHECK_INIT_LEN + layer_idx * ROUND_LEN + POST_SUMCHECK_LEN
+        }
+    }
+
+    /// Cumulative tidx span for layers 0..layer_idx (exclusive).
+    pub const fn layers_cumulative(layer_idx: usize) -> usize {
+        let mut total = 0;
+        let mut i = 0;
+        while i < layer_idx {
+            total += layer_span(i);
+            i += 1;
+        }
+        total
+    }
+
+    /// Offset from the start of layer `layer_idx` to `tidx_after_sumcheck`
+    /// (where claims start).
+    /// Layer 0: 0.
+    /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + j*ROUND_LEN.
+    pub const fn claim_offset_in_layer(layer_idx: usize) -> usize {
+        if layer_idx == 0 {
+            0
+        } else {
+            ALPHA_LEN + SUMCHECK_INIT_LEN + layer_idx * ROUND_LEN
+        }
+    }
+}
 
 // Sub-modules for different AIRs
 pub mod input;
@@ -369,8 +447,8 @@ fn build_chip_records(
         proof_idx,
         idx,
         is_first_air_idx,
-        // TowerLayerAir starts after alpha/beta sampling and q0 observe in TowerInputAir.
-        tidx: tidx + 3 * D_EF,
+        // TowerLayerAir starts after alpha/beta labels+sampling and q0 observe.
+        tidx: tidx + tower_transcript_len::ALPHA_BETA_LEN + D_EF,
         layer_claims: Vec::with_capacity(layer_count),
         lambdas: vec![EF::ZERO; layer_count],
         eq_at_r_primes: vec![EF::ZERO; layer_count],
@@ -428,8 +506,13 @@ fn build_chip_records(
         proof_idx,
         idx,
         is_first_air_idx,
-        // First sumcheck transcript row starts at layer_tidx(1) + D_EF.
-        tidx: tidx + 9 * D_EF,
+        // First sumcheck transcript row starts at layer_tidx(1) + ALPHA_LEN + SUMCHECK_INIT_LEN.
+        tidx: tidx
+            + tower_transcript_len::ALPHA_BETA_LEN
+            + D_EF
+            + tower_transcript_len::POST_SUMCHECK_LEN
+            + tower_transcript_len::ALPHA_LEN
+            + tower_transcript_len::SUMCHECK_INIT_LEN,
         evals: Vec::new(),
         ris: Vec::new(),
         claims: vec![EF::ZERO; layer_count.saturating_sub(1)],
@@ -810,9 +893,19 @@ where
         ts.observe_ext(*eval);
     }
 
+    // Mirror native: get_challenge_pows calls
+    // transcript.sample_and_append_challenge(b"combine subset evals")
+    // which does append_message(label) then read_challenge().
+    transcript_observe_label(ts, b"combine subset evals");
     let alpha_logup = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-    // Keep transcript index alignment with TowerInputAir's `tidx + 2 * D_EF` for q0.
+    eprintln!("[RECURSION] chip_idx={_chip_idx} alpha={alpha_logup:?}");
+
+    // Mirror native: transcript.sample_and_append_vec(b"product_sum", log2_num_fanin)
+    // which does append_message(label) then sample_vec(1).
+    transcript_observe_label(ts, b"product_sum");
+    // Keep transcript index alignment with TowerInputAir's `tidx + ALPHA_BETA_LEN` for q0.
     let _beta_placeholder = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+    eprintln!("[RECURSION] chip_idx={_chip_idx} beta={_beta_placeholder:?}");
     if let Some(q0) = chip_proof
         .lk_out_evals
         .first()
@@ -834,28 +927,51 @@ where
         .max()
         .unwrap_or(0);
 
+    let log2_num_fanin: usize = 1; // ceil_log2(NUM_FANIN=2) = 1
+
     let mut lambdas = Vec::with_capacity(layer_count);
     let mut mus = Vec::with_capacity(layer_count);
     let mut ris = Vec::new();
 
     for layer_idx in 0..layer_count {
+        // At the start of each layer (except 0), this sample corresponds to
+        // get_challenge_pows in the native verifier (the "next alpha" after the
+        // previous round's merge). For layer 0 this is a structural placeholder
+        // that the recursion circuit expects.
+        if layer_idx > 0 {
+            transcript_observe_label(ts, b"combine subset evals");
+        }
         let lambda = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         lambdas.push(lambda);
+        eprintln!("[RECURSION] chip_idx={_chip_idx} layer={layer_idx} lambda={lambda:?}");
 
         if layer_idx + 1 < layer_count
             && let Some(round_msgs) = chip_proof.tower_proof.proofs.get(layer_idx)
         {
+            // Mirror native sumcheck IOPVerifierState::verify init:
+            // append_message(max_num_variables.to_le_bytes())
+            // append_message(max_degree.to_le_bytes())
+            let max_num_variables = (layer_idx + 1) * log2_num_fanin;
+            let max_degree: usize = 3; // NUM_FANIN + 1
+            transcript_observe_label(ts, &max_num_variables.to_le_bytes());
+            transcript_observe_label(ts, &max_degree.to_le_bytes());
+
             for msg in round_msgs {
                 for eval in msg.evaluations.iter().take(3) {
                     ts.observe_ext(*eval);
                 }
+                // Mirror native: sample_and_append_challenge(b"Internal round")
+                transcript_observe_label(ts, b"Internal round");
                 let ri = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
                 ris.push(ri);
             }
         }
 
+        // Mirror native: sample_and_append_vec(b"merge", log2_num_fanin)
+        transcript_observe_label(ts, b"merge");
         let mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         mus.push(mu);
+        eprintln!("[RECURSION] chip_idx={_chip_idx} layer={layer_idx} mu={mu:?}");
     }
 
     let _ = read_count;
