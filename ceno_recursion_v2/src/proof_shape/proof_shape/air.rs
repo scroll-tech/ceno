@@ -19,7 +19,7 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 use crate::{
     bus::{
         AirShapeBus, AirShapeBusMessage, CachedCommitBus, ExpressionClaimNMaxBus,
-        ExpressionClaimNMaxMessage, ForkedTranscriptBus,
+        ExpressionClaimNMaxMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
         FractionFolderInputBus, FractionFolderInputMessage,
         HyperdimBus, HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus,
         NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
@@ -464,26 +464,24 @@ where
                 );
         }
 
-        // is_first row: receive before_forked_state from the transcript bus.
-        // The fork_start_tidx positions carry the snapshot state as observations
-        // in the trunk transcript. We use the same TranscriptBus but at a
-        // sentinel tidx derived from the total AIR count (magic air ID).
-        //
-        // TODO(forked-transcript): Wire up the exact transcript bus tidx once
-        // the Verifier+VerifierPvs commitment flow is finalized (tid bump to
-        // 4*3=12 per hero78119's comment).
-
-        // continuous/is_present rows: receive per-chip fork data from
-        // ForkedTranscriptBus. Each present AIR corresponds to one fork:
-        //   - (air_id, fork_tid=0): the fork's initial state after observing
-        //     fork_id into the cloned trunk sponge.
-        //   - (air_id, fork_tid=[N..N+D_EF]): the forked challenge after tower
-        //     sumcheck, before main sumcheck (for future batching).
-        //
-        // TODO(forked-transcript): Enable these receives once TranscriptAir
-        // sends on ForkedTranscriptBus for fork rows and Tower AIRs are
-        // migrated to receive from ForkedTranscriptBus. Without corresponding
-        // sends, enabling these would cause bus imbalance.
+        // Each present AIR corresponds to one fork whose fork_id equals
+        // num_present (1-based position among present AIRs in sorted order).
+        // Receive the trunk's sponge state at the fork point from the
+        // ForkedTranscriptBus, cross-checking current_snapshot_state against
+        // TranscriptAir's trunk_fork_state.
+        for i in 0..POSEIDON2_WIDTH {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.num_present.into(),
+                    fork_tidx: AB::Expr::from_usize(i),
+                    value: local.current_snapshot_state[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_present * local.is_valid,
+            );
+        }
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // AIR SHAPE LOOKUP

@@ -30,7 +30,7 @@ use p3_matrix::Matrix;
 use recursion_circuit::subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir};
 use recursion_circuit::transcript::poseidon2::{CHUNK, POSEIDON2_WIDTH};
 
-use crate::bus::{TranscriptBus, TranscriptBusMessage};
+use crate::bus::{ForkedTranscriptBus, ForkedTranscriptBusMessage, TranscriptBus, TranscriptBusMessage};
 use recursion_circuit::bus::{
     FinalTranscriptStateBus, FinalTranscriptStateMessage, Poseidon2PermuteBus,
     Poseidon2PermuteMessage,
@@ -97,6 +97,7 @@ impl<T: Copy> core::borrow::BorrowMut<ForkedTranscriptCols<T>> for [T] {
 
 pub struct ForkedTranscriptAir {
     pub transcript_bus: TranscriptBus,
+    pub forked_transcript_bus: ForkedTranscriptBus,
     pub poseidon2_permute_bus: Poseidon2PermuteBus,
     pub final_state_bus: Option<FinalTranscriptStateBus>,
 }
@@ -295,6 +296,26 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
                 local.proof_idx,
                 sample_message,
                 local.mask[i] * local.is_sample,
+            );
+        }
+
+        ///////////////////////////////////////////////////////////////////////
+        // Forked transcript bus interactions (send fork state)
+        ///////////////////////////////////////////////////////////////////////
+        // On is_fork_start rows, send the trunk_fork_state (the sponge state
+        // at the fork point) on the ForkedTranscriptBus. ProofShapeAir
+        // receives these to cross-check its current_snapshot_state.
+        for i in 0..POSEIDON2_WIDTH {
+            self.forked_transcript_bus.send(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    fork_tidx: AB::Expr::from_usize(i),
+                    value: local.trunk_fork_state[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_fork_start,
             );
         }
 

@@ -12,17 +12,17 @@ pub use upstream::{
 };
 
 // ── Forked transcript bus ─────────────────────────────────────────────────────
-// Carries per-chip fork transcript operations, addressed by (air_id, fork_tidx)
+// Carries per-chip fork transcript state, addressed by (fork_id, fork_tidx)
 // instead of the absolute tidx used by the trunk TranscriptBus.
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct ForkedTranscriptBusMessage<T> {
-    /// Child proof's AIR index for this fork.
-    pub air_id: T,
-    /// Fork-local transcript position (starts at 0 for each fork).
+    /// Fork identifier (1-based). Matches TranscriptAir's fork_id column.
+    pub fork_id: T,
+    /// Position within the fork state (0-based).
     pub fork_tidx: T,
-    /// Observed or sampled field element.
+    /// Sponge state element being communicated.
     pub value: T,
     /// 1 if this is a sample operation, 0 if observe.
     pub is_sample: T,

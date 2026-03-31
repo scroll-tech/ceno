@@ -397,6 +397,7 @@ impl AirModule for TranscriptModule {
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
         let transcript_air = ForkedTranscriptAir {
             transcript_bus: self.bus_inventory.transcript_bus,
+            forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             poseidon2_permute_bus: self.bus_inventory.poseidon2_permute_bus,
             final_state_bus: self
                 .final_state_bus_enabled
