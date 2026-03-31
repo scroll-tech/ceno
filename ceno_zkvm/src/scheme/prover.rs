@@ -155,7 +155,6 @@ impl<
             let span = entered_span!("commit_to_pi", profiling_1 = true);
             // Include transcript-visible public values in canonical circuit order.
             // The order must match verifier and recursion verifier exactly.
-            // TODO deal with vector-based public value to transcript
             for (_, circuit_pk) in self.pk.circuit_pks.iter() {
                 for instance_value in circuit_pk.get_cs().zkvm_v1_css.instance.iter() {
                     transcript.append_field_element(&pi.query_by_index::<E>(instance_value.0));

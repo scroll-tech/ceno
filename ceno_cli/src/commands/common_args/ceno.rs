@@ -56,10 +56,6 @@ pub struct CenoOptions {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
-    /// pub io size in byte
-    #[arg(long, default_value = "1k", value_parser = parse_size)]
-    public_io_size: u32,
-
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
@@ -354,13 +350,6 @@ fn run_elf_inner<
     let public_io_digest_input = options.read_public_io();
     let public_io_digest = public_io_words_to_digest_words(&public_io_digest_input);
     tracing::debug!("public io digest words: {:?}", public_io_digest);
-    let public_io_size = options.public_io_size;
-    assert!(
-        public_io_digest_input.len() <= public_io_size as usize / WORD_SIZE,
-        "require pub io length {} < max public_io_size {}",
-        public_io_digest_input.len(),
-        public_io_size as usize / WORD_SIZE
-    );
 
     let platform = if compilation_options.release {
         setup_platform(
@@ -368,7 +357,6 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            public_io_size,
         )
     } else {
         setup_platform_debug(
@@ -376,7 +364,6 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            public_io_size,
         )
     };
     tracing::info!("Running on platform {:?} {}", options.platform, platform);
