@@ -108,15 +108,11 @@ impl<
         }
     }
 
-    pub fn setup_init_mem(
-        &self,
-        hints: &[u32],
-        public_io_digest_input: &[u32],
-    ) -> crate::e2e::InitMemState {
+    pub fn setup_init_mem(&self, hints: &[u32]) -> crate::e2e::InitMemState {
         let Some(ctx) = self.pk.program_ctx.as_ref() else {
             panic!("empty program ctx")
         };
-        ctx.setup_init_mem(hints, public_io_digest_input)
+        ctx.setup_init_mem(hints)
     }
 }
 
@@ -155,7 +151,6 @@ impl<
             let span = entered_span!("commit_to_pi", profiling_1 = true);
             // Include transcript-visible public values in canonical circuit order.
             // The order must match verifier and recursion verifier exactly.
-            // TODO deal with vector-based public value to transcript
             for (_, circuit_pk) in self.pk.circuit_pks.iter() {
                 for instance_value in circuit_pk.get_cs().zkvm_v1_css.instance.iter() {
                     transcript.append_field_element(&pi.query_by_index::<E>(instance_value.0));

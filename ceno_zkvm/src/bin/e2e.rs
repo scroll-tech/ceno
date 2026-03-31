@@ -100,10 +100,6 @@ struct Args {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
-    /// pub io size in byte
-    #[arg(long, default_value = "1k", value_parser = parse_size)]
-    public_io_size: u32,
-
     /// The security level to use.
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
@@ -176,32 +172,14 @@ fn main() {
 
     // process public input first; this is raw u32 public input, not pre-digested words.
     let public_io = args.public_io.unwrap_or_default();
-    assert!(
-        public_io.len() <= args.public_io_size as usize / WORD_SIZE,
-        "require pub io length {} < max public_io_size {}",
-        public_io.len(),
-        args.public_io_size as usize / WORD_SIZE
-    );
 
     tracing::info!("Loading ELF file: {}", args.elf.display());
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
     let platform = if cfg!(debug_assertions) {
-        setup_platform_debug(
-            args.platform,
-            &program,
-            args.stack_size,
-            args.heap_size,
-            args.public_io_size,
-        )
+        setup_platform_debug(args.platform, &program, args.stack_size, args.heap_size)
     } else {
-        setup_platform(
-            args.platform,
-            &program,
-            args.stack_size,
-            args.heap_size,
-            args.public_io_size,
-        )
+        setup_platform(args.platform, &program, args.stack_size, args.heap_size)
     };
     tracing::info!("Running on platform {:?} {}", args.platform, platform);
     tracing::info!(

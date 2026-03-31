@@ -1090,9 +1090,8 @@ pub fn setup_platform(
     program: &Program,
     stack_size: u32,
     heap_size: u32,
-    pub_io_size: u32,
 ) -> Platform {
-    setup_platform_inner(preset, program, stack_size, heap_size, pub_io_size, false)
+    setup_platform_inner(preset, program, stack_size, heap_size, false)
 }
 
 pub fn setup_platform_debug(
@@ -1100,9 +1099,8 @@ pub fn setup_platform_debug(
     program: &Program,
     stack_size: u32,
     heap_size: u32,
-    pub_io_size: u32,
 ) -> Platform {
-    setup_platform_inner(preset, program, stack_size, heap_size, pub_io_size, true)
+    setup_platform_inner(preset, program, stack_size, heap_size, true)
 }
 
 fn setup_platform_inner(
@@ -1110,7 +1108,6 @@ fn setup_platform_inner(
     program: &Program,
     stack_size: u32,
     heap_size: u32,
-    pub_io_size: u32,
     is_debug: bool,
 ) -> Platform {
     let preset = match preset {
@@ -1144,7 +1141,6 @@ fn setup_platform_inner(
         heap.start..heap_end as u32
     };
 
-    let _ = pub_io_size;
     let platform = Platform {
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
@@ -1620,8 +1616,7 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
     }
 
     /// Setup init mem state
-    pub fn setup_init_mem(&self, hints: &[u32], public_io_digest_input: &[u32]) -> InitMemState {
-        let _ = public_io_digest_input;
+    pub fn setup_init_mem(&self, hints: &[u32]) -> InitMemState {
         let hint_init = MemPadder::new_mem_records(
             self.platform.hints.clone(),
             hints.len().next_power_of_two(),
@@ -1682,7 +1677,7 @@ pub fn run_e2e_with_checkpoint<
     let prover = ZKVMProver::new(pk.into(), device);
 
     let start = std::time::Instant::now();
-    let init_full_mem = prover.setup_init_mem(hints, public_io_digest_input);
+    let init_full_mem = prover.setup_init_mem(hints);
     tracing::debug!("setup_init_mem done in {:?}", start.elapsed());
 
     // Generate witness

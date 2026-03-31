@@ -30,9 +30,8 @@ type E = BabyBearExt4;
 fn setup() -> (Program, Platform) {
     let stack_size = 32768;
     let heap_size = 2097152;
-    let pub_io_size = 16;
     let program = Program::load_elf(ceno_examples::is_prime, u32::MAX).unwrap();
-    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size, pub_io_size);
+    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size);
     (program, platform)
 }
 
