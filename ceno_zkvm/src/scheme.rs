@@ -68,7 +68,7 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub gkr_iop_proof: Option<GKRProof<E>>,
 
     pub tower_proof: TowerProofs<E>,
-   pub ecc_proof: Option<EccQuarkProof<E>>,
+    pub ecc_proof: Option<EccQuarkProof<E>>,
 
     pub num_instances: [usize; 2],
 }

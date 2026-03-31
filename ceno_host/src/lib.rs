@@ -111,12 +111,7 @@ impl CenoStdin {
     }
 }
 
-pub fn run(
-    platform: Platform,
-    elf: &[u8],
-    hints: &CenoStdin,
-    _public_io: Option<&CenoStdin>,
-) -> Vec<Vec<u8>> {
+pub fn run(platform: Platform, elf: &[u8], hints: &CenoStdin) -> Vec<Vec<u8>> {
     let program = Program::load_elf(elf, u32::MAX).unwrap();
     let platform = Platform {
         prog_data: Arc::new(program.image.keys().copied().collect()),
