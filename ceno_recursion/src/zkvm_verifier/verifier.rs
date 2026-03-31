@@ -104,23 +104,13 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let prod_w: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
 
-    iter_zip!(builder, zkvm_proof_input.raw_pi).for_each(|ptr_vec, builder| {
-        let v = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
-        challenger_multi_observe(builder, &mut challenger, &v);
-    });
-
-    iter_zip!(builder, zkvm_proof_input.raw_pi, zkvm_proof_input.pi_evals).for_each(
-        |ptr_vec, builder| {
-            let raw = builder.iter_ptr_get(&zkvm_proof_input.raw_pi, ptr_vec[0]);
-            let eval = builder.iter_ptr_get(&zkvm_proof_input.pi_evals, ptr_vec[1]);
-            let raw0 = builder.get(&raw, 0);
-
-            builder.if_eq(raw.len(), Usize::from(1)).then(|builder| {
-                let raw0_ext = builder.ext_from_base_slice(&[raw0]);
-                builder.assert_ext_eq(raw0_ext, eval);
-            });
-        },
-    );
+    for (_, circuit_vk) in vk.circuit_vks.iter() {
+        for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
+            let raw = builder.get(&zkvm_proof_input.pi, instance_value.0);
+            // Match native verifier transcript behavior: append base-field PI element directly.
+            challenger.observe(builder, raw);
+        }
+    }
 
     if let Some(fixed_commit) = vk.fixed_commit.as_ref() {
         let commit: crate::basefold_verifier::hash::Hash = fixed_commit.commit().into();
@@ -266,14 +256,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 let mut chip_challenger = clone_challenger_state(builder, &challenger);
                 challenger_add_forked_index(builder, &mut chip_challenger, &forked_sample_index);
                 builder.assert_usize_eq(
-                    chip_proof.wits_in_evals.len(),
-                    Usize::from(circuit_vk.get_cs().num_witin()),
-                );
-                builder.assert_usize_eq(
-                    chip_proof.fixed_in_evals.len(),
-                    Usize::from(circuit_vk.get_cs().num_fixed()),
-                );
-                builder.assert_usize_eq(
                     chip_proof.rw_out_evals.length.clone(),
                     Usize::from(
                         (circuit_vk.get_cs().num_reads() + circuit_vk.get_cs().num_writes()) * 2,
@@ -285,37 +267,35 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
                 chip_challenger.observe(builder, chip_proof.idx_felt);
 
-                if !circuit_vk.get_cs().is_with_lk_table() {
-                    // getting the number of dummy padding item that we used in this opcode circuit
-                    let num_lks: Var<C::N> =
-                        builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
+                // getting the number of dummy padding item that we used in this opcode circuit
+                let num_lks: Var<C::N> =
+                    builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
 
-                    // each padding instance contribute to (2^rotation_vars) dummy lookup padding
-                    let next_pow2_instance: Var<C::N> =
-                        pow_2(builder, chip_proof.log2_num_instances.get_var());
-                    let num_padded_instance: Var<C::N> =
-                        builder.eval(next_pow2_instance - chip_proof.sum_num_instances.clone());
-                    let rotation_var: Var<C::N> = builder.constant(C::N::from_canonical_usize(
-                        1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0),
+                // each padding instance contribute to (2^rotation_vars) dummy lookup padding
+                let next_pow2_instance: Var<C::N> =
+                    pow_2(builder, chip_proof.log2_num_instances.get_var());
+                let num_padded_instance: Var<C::N> =
+                    builder.eval(next_pow2_instance - chip_proof.sum_num_instances.clone());
+                let rotation_var: Var<C::N> = builder.constant(C::N::from_canonical_usize(
+                    1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0),
+                ));
+                let rotation_subgroup_size: Var<C::N> =
+                    builder.constant(C::N::from_canonical_usize(
+                        circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0),
                     ));
-                    let rotation_subgroup_size: Var<C::N> =
-                        builder.constant(C::N::from_canonical_usize(
-                            circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0),
-                        ));
-                    builder.assign(&num_padded_instance, num_padded_instance * rotation_var);
+                builder.assign(&num_padded_instance, num_padded_instance * rotation_var);
 
-                    // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
-                    let num_instance_non_selected: Var<C::N> = builder.eval(
-                        chip_proof.sum_num_instances.clone()
-                            * (rotation_var - rotation_subgroup_size - C::N::ONE),
-                    );
-                    let new_multiplicity: Var<C::N> =
-                        builder.eval(num_lks * (num_padded_instance + num_instance_non_selected));
-                    builder.assign(
-                        &dummy_table_item_multiplicity,
-                        dummy_table_item_multiplicity + new_multiplicity,
-                    );
-                }
+                // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
+                let num_instance_non_selected: Var<C::N> = builder.eval(
+                    chip_proof.sum_num_instances.clone()
+                        * (rotation_var - rotation_subgroup_size - C::N::ONE),
+                );
+                let new_multiplicity: Var<C::N> =
+                    builder.eval(num_lks * (num_padded_instance + num_instance_non_selected));
+                builder.assign(
+                    &dummy_table_item_multiplicity,
+                    dummy_table_item_multiplicity + new_multiplicity,
+                );
 
                 builder.cycle_tracker_start("Verify chip proof");
                 let (
@@ -328,9 +308,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     builder,
                     &mut chip_challenger,
                     &chip_proof,
-                    &zkvm_proof_input.pi_evals,
-                    &zkvm_proof_input.raw_pi,
-                    &zkvm_proof_input.raw_pi_num_variables,
+                    &zkvm_proof_input.pi,
                     &challenges,
                     chip_vk,
                     &unipoly_extrapolator,
@@ -357,21 +335,23 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         builder.assign(&chip_logup_sum, chip_logup_sum + p2 * q2.inverse());
                     });
 
-                if circuit_vk.get_cs().is_with_lk_table() {
-                    builder.assign(&logup_sum, logup_sum - chip_logup_sum);
-                } else {
-                    builder.assign(&logup_sum, logup_sum + chip_logup_sum);
-                }
+                builder.assign(&logup_sum, logup_sum + chip_logup_sum);
 
                 let point_clone: Array<C, Ext<C::F, C::EF>> =
                     builder.eval(input_opening_point.clone());
+                let (wits_in_evals, fixed_in_evals) = split_input_opening_evals(
+                    builder,
+                    &chip_proof,
+                    circuit_vk.get_cs().num_witin(),
+                    circuit_vk.get_cs().num_fixed(),
+                );
 
                 if circuit_vk.get_cs().num_witin() > 0 {
                     let witin_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
                         num_var: input_opening_point.len().get_var(),
                         point_and_evals: PointAndEvalsVariable {
                             point: PointVariable { fs: point_clone },
-                            evals: chip_proof.wits_in_evals,
+                            evals: wits_in_evals,
                         },
                     });
                     builder.set_value(&witin_openings, num_witin_openings.get_var(), witin_round);
@@ -384,7 +364,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                             point: PointVariable {
                                 fs: input_opening_point,
                             },
-                            evals: chip_proof.fixed_in_evals,
+                            evals: fixed_in_evals,
                         },
                     });
 
@@ -514,7 +494,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         &unipoly_extrapolator,
         &mut challenger,
     );
-
     // memory consistency check
     builder.assert_ext_eq(prod_r, prod_w);
 
@@ -525,14 +504,35 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     shard_ec_sum
 }
 
+fn split_input_opening_evals<C: Config>(
+    builder: &mut Builder<C>,
+    chip_proof: &ZKVMChipProofInputVariable<C>,
+    num_witin: usize,
+    num_fixed: usize,
+) -> (Array<C, Ext<C::F, C::EF>>, Array<C, Ext<C::F, C::EF>>) {
+    let last_layer_idx: Usize<C::N> =
+        builder.eval(chip_proof.gkr_iop_proof.layer_proofs.len() - Usize::from(1));
+    let last_layer = builder.get(&chip_proof.gkr_iop_proof.layer_proofs, last_layer_idx);
+    let main_evals = last_layer.main.evals;
+
+    let wit_end = Usize::from(num_witin);
+    let fixed_end: Usize<C::N> = builder.eval(wit_end.clone() + Usize::from(num_fixed));
+    // Native verifier accepts extra trailing evals; only the prefix is consumed here.
+    // Keep recursion semantics aligned by slicing the required prefix.
+    let eval_prefix = main_evals.slice(builder, Usize::from(0), fixed_end.clone());
+
+    (
+        eval_prefix.slice(builder, Usize::from(0), wit_end),
+        eval_prefix.slice(builder, Usize::from(num_witin), fixed_end),
+    )
+}
+
 pub fn verify_chip_proof<C: Config>(
     circuit_name: &str,
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
     chip_proof: &ZKVMChipProofInputVariable<C>,
-    pi_evals: &Array<C, Ext<C::F, C::EF>>,
-    raw_pi: &Array<C, Array<C, Felt<C::F>>>,
-    raw_pi_num_variables: &Array<C, Var<C::N>>,
+    pi: &Array<C, Felt<C::F>>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     vk: &VerifyingKey<E>,
     unipoly_extrapolator: &UniPolyExtrapolator<C>,
@@ -678,6 +678,13 @@ pub fn verify_chip_proof<C: Config>(
             builder.set(&q_slice, idx_vec[0], cpt);
         });
     let gkr_circuit = gkr_circuit.clone().unwrap();
+    let circuit_pi_evals: Array<C, Ext<C::F, C::EF>> =
+        builder.dyn_array(Usize::from(cs.instance.len()));
+    for (i, instance) in cs.instance.iter().enumerate() {
+        let raw = builder.get(pi, instance.0);
+        let eval = builder.ext_from_base_slice(&[raw]);
+        builder.set(&circuit_pi_evals, i, eval);
+    }
 
     let zero_bit_decomps: Array<C, Felt<C::F>> = builder.dyn_array(32);
     let selector_ctxs: Vec<SelectorContextVariable<C>> = if cs.ec_final_sum.is_empty() {
@@ -775,11 +782,8 @@ pub fn verify_chip_proof<C: Config>(
         gkr_circuit,
         &chip_proof.gkr_iop_proof,
         challenges,
-        pi_evals,
-        raw_pi,
-        raw_pi_num_variables,
+        &circuit_pi_evals,
         &out_evals,
-        chip_proof,
         selector_ctxs,
         unipoly_extrapolator,
         poly_evaluator,
@@ -797,13 +801,10 @@ pub fn verify_gkr_circuit<C: Config>(
     gkr_proof: &GKRProofVariable<C>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     pub_io_evals: &Array<C, Ext<C::F, C::EF>>,
-    raw_pi: &Array<C, Array<C, Felt<C::F>>>,
-    raw_pi_num_variables: &Array<C, Var<C::N>>,
     claims: &Array<C, PointAndEvalVariable<C>>,
-    _chip_proof: &ZKVMChipProofInputVariable<C>,
     selector_ctxs: Vec<SelectorContextVariable<C>>,
     unipoly_extrapolator: &UniPolyExtrapolator<C>,
-    poly_evaluator: &mut PolyEvaluator<C>,
+    _poly_evaluator: &mut PolyEvaluator<C>,
 ) -> PointVariable<C> {
     let rt = PointVariable {
         fs: builder.dyn_array(0),
@@ -1090,18 +1091,6 @@ pub fn verify_gkr_circuit<C: Config>(
 
             let main_wit_eval = builder.get(&main_evals, wit_id);
             builder.assert_ext_eq(expected_eval, main_wit_eval);
-        }
-
-        let pubio_offset = layer.n_witin + layer.n_fixed;
-        for (index, instance) in layer.instance_openings.iter().enumerate() {
-            let index: usize = pubio_offset + index;
-            let poly = builder.get(raw_pi, instance.0);
-            let num_variable = builder.get(raw_pi_num_variables, instance.0);
-            let in_point_slice = in_point.slice(builder, 0, num_variable);
-            let expected_eval =
-                poly_evaluator.evaluate_base_poly_at_point(builder, &poly, &in_point_slice);
-            let main_eval = builder.get(&main_evals, index);
-            builder.assert_ext_eq(expected_eval, main_eval);
         }
 
         // TODO: we should store alpha_pows in a bigger array to avoid concatenating them

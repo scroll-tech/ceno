@@ -1,7 +1,7 @@
 MEMORY
 {
     ROM           (rx) : ORIGIN = 0x08000000, LENGTH = 128M
-    STACK_PUBIO   (rw) : ORIGIN = 0x10000000, LENGTH = 256M  /* PUBIO first 128M, Stack second 128M */
+    STACK_PUBIO   (rw) : ORIGIN = 0x10000000, LENGTH = 256M  /* Stack region */
     HINTS         (r)  : ORIGIN = 0x20000000, LENGTH = 256M  /* will shift hint to 0x28000000 with 128M to reserve gap*/
     RAM           (rw) : ORIGIN = 0x30000000, LENGTH = 256M   /* heap/data/bss */
 }
@@ -9,7 +9,6 @@ MEMORY
 REGION_ALIAS("REGION_TEXT", ROM);
 REGION_ALIAS("REGION_RODATA", ROM);
 
-REGION_ALIAS("REGION_PUBIO", STACK_PUBIO);
 REGION_ALIAS("REGION_STACK", STACK_PUBIO);
 
 REGION_ALIAS("REGION_HINTS", HINTS);

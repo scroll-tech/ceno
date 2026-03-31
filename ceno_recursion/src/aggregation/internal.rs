@@ -128,7 +128,7 @@ impl<C: Config> NonLeafVerifierVariables<C> {
             //         let expected_last_shard_id = Usize::uninit(builder);
             //         builder.assign(&expected_last_shard_id, pv.len() - Usize::from(1));
 
-            //         let shard_id_fs = builder.get(&shard_raw_pi, SHARD_ID_IDX);
+            //         let shard_id_fs = builder.get(&shard_pi, SHARD_ID_IDX);
             //         let shard_id_f = builder.get(&shard_id_fs, 0);
             //         let shard_id = Usize::Var(builder.cast_felt_to_var(shard_id_f));
             //         builder.assert_usize_eq(expected_last_shard_id, shard_id);

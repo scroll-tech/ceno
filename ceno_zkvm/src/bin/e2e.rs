@@ -19,7 +19,6 @@ use gkr_iop::hal::ProverBackend;
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
-use p3::field::FieldAlgebra;
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
 use tracing::{error, level_filters::LevelFilter};
@@ -175,26 +174,8 @@ fn main() {
         .with(args.profiling.is_none().then_some(default_filter))
         .init();
 
-    // process public input first
-    let public_io = args
-        .public_io
-        .and_then(|public_io| {
-            // if the vector contains only one element, write it as a raw `u32`
-            // otherwise, write the entire vector
-            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
-            if public_io.len() == 1 {
-                CenoStdin::default()
-                    .write(&public_io[0])
-                    .ok()
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            } else {
-                CenoStdin::default()
-                    .write(&public_io)
-                    .ok()
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            }
-        })
-        .unwrap_or_default();
+    // process public input first; this is raw u32 public input, not pre-digested words.
+    let public_io = args.public_io.unwrap_or_default();
     assert!(
         public_io.len() <= args.public_io_size as usize / WORD_SIZE,
         "require pub io length {} < max public_io_size {}",
@@ -404,8 +385,7 @@ fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     // do sanity check
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![E::BaseField::ONE];
-    zkvm_proof.raw_pi[1] = vec![E::BaseField::ONE];
+    zkvm_proof.public_values.exit_code = 1;
 
     // capture panic message, if have
     let result = with_panic_hook(Box::new(|_info| ()), || {
@@ -428,7 +408,7 @@ fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
                 unreachable!()
             };
 
-            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+            if !msg.starts_with("assertion `left == right` failed") {
                 error!("unknown panic {msg:?}");
                 panic::resume_unwind(err);
             };
