@@ -460,9 +460,14 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             let fork_log_len = fork_log.len();
             fork_log_lens.push(fork_log_len);
 
+            // Compute the fork's initial sponge state by replaying the
+            // full log up to fork_offset + 1 (trunk ops + fork_id observe).
+            let initial_state =
+                crate::utils::replay_sponge_state_from_log(&full_fork_log, fork_offset + 1);
+
             preflight.fork_transcripts.push(ForkTranscriptLog {
                 log: fork_log,
-                initial_state: [F::ZERO; POSEIDON2_WIDTH],
+                initial_state,
                 fork_id: _fork_idx + 1, // 1-based fork IDs (0 = trunk)
                 global_tidx_offset: 0,  // placeholder, filled below
             });

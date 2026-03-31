@@ -466,6 +466,9 @@ where
 
         // Each present AIR corresponds to one fork whose fork_id equals
         // num_present (1-based position among present AIRs in sorted order).
+        // This assumes a 1:1 mapping between present AIRs and forks, which
+        // holds when each chip has exactly one proof instance. Multi-instance
+        // chips would require a separate fork_id column.
         // Receive the trunk's sponge state at the fork point from the
         // ForkedTranscriptBus, cross-checking current_snapshot_state against
         // TranscriptAir's trunk_fork_state.

@@ -285,6 +285,11 @@ pub fn replay_sponge_state_from_log(
     log: &openvm_stark_backend::TranscriptLog<F, [F; POSEIDON2_WIDTH]>,
     up_to: usize,
 ) -> [F; POSEIDON2_WIDTH] {
+    assert!(
+        up_to <= log.len(),
+        "replay_sponge_state_from_log: up_to ({up_to}) exceeds log length ({})",
+        log.len()
+    );
     let perm = poseidon2_perm();
     let mut state = [F::ZERO; POSEIDON2_WIDTH];
     let mut absorb_idx = 0usize;
