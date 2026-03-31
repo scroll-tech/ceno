@@ -11,6 +11,25 @@ pub use upstream::{
     TranscriptBus, TranscriptBusMessage,
 };
 
+// ── Forked transcript bus ─────────────────────────────────────────────────────
+// Carries per-chip fork transcript operations, addressed by (air_id, fork_tidx)
+// instead of the absolute tidx used by the trunk TranscriptBus.
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct ForkedTranscriptBusMessage<T> {
+    /// Child proof's AIR index for this fork.
+    pub air_id: T,
+    /// Fork-local transcript position (starts at 0 for each fork).
+    pub fork_tidx: T,
+    /// Observed or sampled field element.
+    pub value: T,
+    /// 1 if this is a sample operation, 0 if observe.
+    pub is_sample: T,
+}
+
+define_typed_per_proof_permutation_bus!(ForkedTranscriptBus, ForkedTranscriptBusMessage);
+
 // ── Fork state sidechain bus ──────────────────────────────────────────────────
 // Carries the full Poseidon2 sponge state from the trunk's fork point to
 // each forked transcript chain, so the fork can start from the correct state.

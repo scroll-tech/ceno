@@ -277,6 +277,42 @@ impl<T, const DIM_MINUS_ONE: usize> Index<[usize; DIM_MINUS_ONE]>
     }
 }
 
+/// Replay the duplex sponge up to `up_to` transcript operations and return
+/// the internal sponge state at that point. This duplicates the overwrite-mode
+/// behavior of [`DuplexSponge`] so we can recover the state at the fork point
+/// from a transcript log without requiring the concrete sponge type.
+pub fn replay_sponge_state_from_log(
+    log: &openvm_stark_backend::TranscriptLog<F, [F; POSEIDON2_WIDTH]>,
+    up_to: usize,
+) -> [F; POSEIDON2_WIDTH] {
+    let perm = poseidon2_perm();
+    let mut state = [F::ZERO; POSEIDON2_WIDTH];
+    let mut absorb_idx = 0usize;
+    let mut sample_idx = 0usize;
+
+    for i in 0..up_to {
+        if log.samples()[i] {
+            let needs_perm = absorb_idx != 0 || sample_idx == 0;
+            if needs_perm {
+                perm.permute_mut(&mut state);
+                absorb_idx = 0;
+                sample_idx = CHUNK;
+            }
+            sample_idx -= 1;
+        } else {
+            state[absorb_idx] = log.values()[i];
+            absorb_idx += 1;
+            if absorb_idx == CHUNK {
+                perm.permute_mut(&mut state);
+                absorb_idx = 0;
+                sample_idx = CHUNK;
+            }
+        }
+    }
+
+    state
+}
+
 pub fn poseidon2_hash_slice(vals: &[F]) -> ([F; CHUNK], Vec<[F; POSEIDON2_WIDTH]>) {
     let num_chunks = vals.len().div_ceil(CHUNK);
     let mut pre_states = Vec::with_capacity(num_chunks);

@@ -441,6 +441,10 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
         preflight.proof_shape.fork_start_tidx = fork_offset;
 
+        // Compute the sponge state at the fork point by replaying the trunk log.
+        preflight.proof_shape.fork_start_state =
+            crate::utils::replay_sponge_state_from_log(&trunk_log, fork_offset);
+
         // Store fork transcript logs first, then remap tidx using actual log lengths.
         // Each fork sponge log contains the trunk's history (0..fork_offset)
         // followed by fork-only operations (fork_id observe + phase 3 ops +

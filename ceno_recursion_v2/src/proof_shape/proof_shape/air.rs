@@ -13,12 +13,14 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
+use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
         AirShapeBus, AirShapeBusMessage, CachedCommitBus, ExpressionClaimNMaxBus,
-        ExpressionClaimNMaxMessage, FractionFolderInputBus, FractionFolderInputMessage,
+        ExpressionClaimNMaxMessage, ForkedTranscriptBus,
+        FractionFolderInputBus, FractionFolderInputMessage,
         HyperdimBus, HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus,
         NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
     },
@@ -79,6 +81,10 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
 
     pub num_air_id_lookups: F,
     pub num_columns: F,
+
+    /// The Poseidon2 sponge state at the fork point (trunk state just before
+    /// forking). Constrained to be identical across all rows within a proof.
+    pub current_snapshot_state: [F; POSEIDON2_WIDTH],
 }
 
 // Variable-length columns are stored at the end
@@ -117,6 +123,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub lifted_heights_bus: LiftedHeightsBus,
     // pub commitments_bus: GlobalCommitmentsBus,
     pub transcript_bus: TranscriptBus,
+    pub forked_transcript_bus: ForkedTranscriptBus,
     pub n_lift_bus: NLiftBus,
 
     // For continuations
@@ -441,6 +448,42 @@ where
                 is_min_cached.clone() * local.is_valid,
             );
         }
+
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        // SNAPSHOT STATE CONTINUITY (forked transcript)
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        // The sponge state at the fork point is identical for all forks.
+        // Constrain: local.current_snapshot_state == next.current_snapshot_state
+        // for all valid rows within the same proof.
+        for i in 0..POSEIDON2_WIDTH {
+            builder
+                .when(and(local.is_valid, not(next.is_last)))
+                .assert_eq(
+                    local.current_snapshot_state[i],
+                    next.current_snapshot_state[i],
+                );
+        }
+
+        // is_first row: receive before_forked_state from the transcript bus.
+        // The fork_start_tidx positions carry the snapshot state as observations
+        // in the trunk transcript. We use the same TranscriptBus but at a
+        // sentinel tidx derived from the total AIR count (magic air ID).
+        //
+        // TODO(forked-transcript): Wire up the exact transcript bus tidx once
+        // the Verifier+VerifierPvs commitment flow is finalized (tid bump to
+        // 4*3=12 per hero78119's comment).
+
+        // continuous/is_present rows: receive per-chip fork data from
+        // ForkedTranscriptBus. Each present AIR corresponds to one fork:
+        //   - (air_id, fork_tid=0): the fork's initial state after observing
+        //     fork_id into the cloned trunk sponge.
+        //   - (air_id, fork_tid=[N..N+D_EF]): the forked challenge after tower
+        //     sumcheck, before main sumcheck (for future batching).
+        //
+        // TODO(forked-transcript): Enable these receives once TranscriptAir
+        // sends on ForkedTranscriptBus for fork rows and Tower AIRs are
+        // migrated to receive from ForkedTranscriptBus. Without corresponding
+        // sends, enabling these would cause bus imbalance.
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // AIR SHAPE LOOKUP

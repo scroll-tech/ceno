@@ -130,6 +130,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
                 cols.num_columns = F::ZERO;
+                cols.current_snapshot_state = preflight.proof_shape.fork_start_state;
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -178,6 +179,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
                 cols.num_columns = F::ZERO;
+                cols.current_snapshot_state = preflight.proof_shape.fork_start_state;
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -218,6 +220,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 F::from_bool(preflight.proof_shape.n_max > preflight.proof_shape.n_logup);
             cols.num_air_id_lookups = F::ZERO;
             cols.num_columns = F::ZERO;
+            cols.current_snapshot_state = preflight.proof_shape.fork_start_state;
             if self.max_cached != 0 {
                 var_cols.cached_commits[self.max_cached - 1] = [F::ZERO; DIGEST_SIZE];
             }
