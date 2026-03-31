@@ -35,7 +35,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-e4dfb526.js";
+            window.path_to_searchindex_js = "searchindex-7d282987.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-83df31e6.js"></script>
@@ -194,8 +194,8 @@ fn main() {
         a = b;
         b = c;
     }
-    // Constrain with public io
-    ceno_rt::commit(&amp;b);
+    // Constrain with public io digest.
+    ceno_rt::commit(&amp;b.to_le_bytes());
 }</code></pre>
 <p>The guest program reads a private input <code>log_n</code> from the host. This input determines the number of iterations to perform. The program then calculates <code>n = 1 &lt;&lt; log_n</code> and computes the <code>n</code>-th Fibonacci number using a standard iterative approach. To prevent the numbers from growing too large, the computation is performed modulo 7919. Finally, the program commits the result back to the host as a public output.</p>
 <p>This example demonstrates the basic workflow of a Ceno zkVM program: reading private inputs, performing computations, and committing public outputs. It shows that you can write standard Rust code for the guest, and the zkVM will execute it.</p>
