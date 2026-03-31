@@ -763,20 +763,7 @@ mod tests {
             shard_rw_sum[i] = fe.as_canonical_u32();
         }
 
-        let public_value = PublicValues::new(
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            vec![0], // dummy
-            shard_rw_sum,
-        );
+        let public_value = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0; 8], shard_rw_sum);
 
         // assign witness
         let witness = ShardRamCircuit::assign_instances(
@@ -814,48 +801,29 @@ mod tests {
         let pub_io_evals = pk
             .get_cs()
             .zkvm_v1_css
-            .instance_values
+            .instance
             .iter()
             .map(|instance| Either::Right(E::from(public_value.query_by_index::<E>(instance.0))))
             .collect_vec();
-        let pi_mles = public_value.mles::<E>();
 
         #[cfg(not(feature = "gpu"))]
-        let (witness_mles, structural_mles, public_input_mles) = {
-            let public_input_mles = pk
-                .get_cs()
-                .instance_openings()
-                .iter()
-                .map(|instance| Arc::new(pi_mles[instance.0].clone()))
-                .collect_vec();
+        let (witness_mles, structural_mles) = {
             (
                 witness[0].to_mles().into_iter().map(Arc::new).collect(),
                 witness[1].to_mles().into_iter().map(Arc::new).collect(),
-                public_input_mles,
             )
         };
         #[cfg(feature = "gpu")]
-        let (witness_mles, structural_mles, public_input_mles) = {
+        let (witness_mles, structural_mles) = {
             let cuda_hal = get_cuda_hal().unwrap();
             let witness_cpu: Vec<_> = witness[0].to_mles();
             let structural_cpu: Vec<_> = witness[1].to_mles();
-            let public_cpu: Vec<_> = pk
-                .get_cs()
-                .instance_openings()
-                .iter()
-                .map(|instance| pi_mles[instance.0].clone())
-                .into_iter()
-                .collect_vec();
             (
                 witness_cpu
                     .iter()
                     .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
                     .collect_vec(),
                 structural_cpu
-                    .iter()
-                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
-                    .collect_vec(),
-                public_cpu
                     .iter()
                     .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
                     .collect_vec(),
@@ -866,8 +834,7 @@ mod tests {
             witness: witness_mles,
             structural_witness: structural_mles,
             fixed: vec![],
-            public_input: public_input_mles.clone(),
-            pub_io_evals,
+            pi: pub_io_evals,
             num_instances: vec![n_global_writes as usize, n_global_reads as usize],
             has_ecc_ops: true,
         };

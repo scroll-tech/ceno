@@ -3,7 +3,6 @@ use ff_ext::ExtensionField;
 use gkr_iop::gkr::GKRProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::mle::{IntoMLE, MultilinearExtension};
 use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -22,7 +21,8 @@ use crate::{
             constants::{
                 END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
                 HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, LIMB_BITS,
-                LIMB_MASK, SHARD_ID_IDX, SHARD_RW_SUM_IDX, UINT_LIMBS,
+                LIMB_MASK, PUBIO_DIGEST_IDX, PUBIO_DIGEST_U16_LIMBS, SHARD_ID_IDX,
+                SHARD_RW_SUM_IDX, UINT_LIMBS,
             },
             ecall::HaltInstruction,
         },
@@ -86,11 +86,43 @@ pub struct PublicValues {
     pub heap_shard_len: u32,
     pub hint_start_addr: u32,
     pub hint_shard_len: u32,
-    pub public_io: Vec<u32>,
+    pub public_io_digest: [u32; 8],
     pub shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
 }
 
 impl PublicValues {
+    pub const fn flattened_len() -> usize {
+        PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS
+    }
+
+    pub fn iter_field<'a, Base: FieldAlgebra + 'a>(&'a self) -> impl Iterator<Item = Base> + 'a {
+        [
+            Base::from_canonical_u32(self.exit_code & 0xffff),
+            Base::from_canonical_u32((self.exit_code >> 16) & 0xffff),
+            Base::from_canonical_u32(self.init_pc),
+            Base::from_canonical_u64(self.init_cycle),
+            Base::from_canonical_u32(self.end_pc),
+            Base::from_canonical_u64(self.end_cycle),
+            Base::from_canonical_u32(self.shard_id),
+            Base::from_canonical_u32(self.heap_start_addr),
+            Base::from_canonical_u32(self.heap_shard_len),
+            Base::from_canonical_u32(self.hint_start_addr),
+            Base::from_canonical_u32(self.hint_shard_len),
+        ]
+        .into_iter()
+        .chain(
+            self.shard_rw_sum
+                .iter()
+                .map(|value| Base::from_canonical_u32(*value)),
+        )
+        .chain(self.public_io_digest.iter().flat_map(|word| {
+            [
+                Base::from_canonical_u32(word & 0xffff),
+                Base::from_canonical_u32((word >> 16) & 0xffff),
+            ]
+        }))
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         exit_code: u32,
@@ -103,7 +135,7 @@ impl PublicValues {
         heap_shard_len: u32,
         hint_start_addr: u32,
         hint_shard_len: u32,
-        public_io: Vec<u32>,
+        public_io_digest: [u32; 8],
         shard_rw_sum: [u32; SEPTIC_EXTENSION_DEGREE * 2],
     ) -> Self {
         Self {
@@ -117,7 +149,7 @@ impl PublicValues {
             heap_shard_len,
             hint_start_addr,
             hint_shard_len,
-            public_io,
+            public_io_digest,
             shard_rw_sum,
         }
     }
@@ -141,32 +173,18 @@ impl PublicValues {
             {
                 E::BaseField::from_canonical_u32(self.shard_rw_sum[idx - SHARD_RW_SUM_IDX])
             }
+            idx if (PUBIO_DIGEST_IDX..(PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS))
+                .contains(&idx) =>
+            {
+                let digest_limb_idx = idx - PUBIO_DIGEST_IDX;
+                let word_idx = digest_limb_idx / UINT_LIMBS;
+                let limb_idx = digest_limb_idx % UINT_LIMBS;
+                E::BaseField::from_canonical_u32(
+                    (self.public_io_digest[word_idx] >> (limb_idx * LIMB_BITS)) & LIMB_MASK,
+                )
+            }
             _ => panic!("public value index {index} out of range"),
         }
-    }
-
-    pub fn mles<E: ExtensionField>(&self) -> Vec<MultilinearExtension<'static, E>> {
-        // public_io is represented as UINT_LIMBS columns.
-        (0..UINT_LIMBS)
-            .map(|limb_index| {
-                let limb_values = self
-                    .public_io
-                    .iter()
-                    .map(|value| {
-                        E::BaseField::from_canonical_u16(
-                            ((value >> (limb_index * LIMB_BITS)) & LIMB_MASK) as u16,
-                        )
-                    })
-                    .collect_vec();
-
-                // Empty public_io means a constant-zero public input column.
-                if limb_values.is_empty() {
-                    vec![E::BaseField::ZERO].into_mle()
-                } else {
-                    limb_values.into_mle()
-                }
-            })
-            .collect_vec()
     }
 }
 

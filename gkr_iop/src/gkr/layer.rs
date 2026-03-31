@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
-    Expression, Instance, StructuralWitIn, ToExpr,
+    Expression, StructuralWitIn, ToExpr,
     mle::{Point, PointAndEval},
     monomial::Term,
 };
@@ -75,8 +75,6 @@ pub struct Layer<E: ExtensionField> {
     pub max_expr_degree: usize,
     /// keep all structural witin which could be evaluated succinctly without PCS
     pub structural_witins: Vec<StructuralWitIn>,
-    /// instance openings
-    pub instance_openings: Vec<Instance>,
     /// num challenges dedicated to this layer.
     pub n_challenges: usize,
     /// Expressions to prove in this layer. For zerocheck and linear layers,
@@ -158,7 +156,6 @@ impl<E: ExtensionField> Layer<E> {
         ),
         expr_names: Vec<String>,
         structural_witins: Vec<StructuralWitIn>,
-        instance_openings: Vec<Instance>,
     ) -> Self {
         assert_eq!(expr_names.len(), exprs.len(), "there are expr without name");
         let max_expr_degree = exprs
@@ -178,7 +175,6 @@ impl<E: ExtensionField> Layer<E> {
                     n_instance,
                     max_expr_degree,
                     structural_witins,
-                    instance_openings,
                     n_challenges,
                     exprs,
                     exprs_with_selector_out_eval_monomial_form: vec![],
@@ -258,7 +254,6 @@ impl<E: ExtensionField> Layer<E> {
         proof: LayerProof<E>,
         claims: &mut [PointAndEval<E>],
         pub_io_evals: &[E],
-        instance_mles: &[Vec<E::BaseField>],
         challenges: &mut Vec<E>,
         transcript: &mut Trans,
         selector_ctxs: &[SelectorContext],
@@ -273,7 +268,6 @@ impl<E: ExtensionField> Layer<E> {
                 proof,
                 eval_and_dedup_points,
                 pub_io_evals,
-                instance_mles,
                 challenges,
                 transcript,
                 selector_ctxs,
@@ -434,12 +428,23 @@ impl<E: ExtensionField> Layer<E> {
         if let Some(lk_selector) = cb.cs.lk_selector.as_ref() {
             // process lookup records
             let evals = Self::dedup_last_selector_evals(lk_selector, &mut expr_evals);
-            for (idx, ((lookup, name), lookup_eval)) in (cb
+            for (idx, (((is_negate, lookup), name), lookup_eval)) in (cb
                 .cs
                 .lk_expressions
                 .iter()
-                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.multiplicity))
-                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.values)))
+                .map(|expr| (false, expr))
+                .chain(
+                    cb.cs
+                        .lk_table_expressions
+                        .iter()
+                        .map(|t| (true, &t.multiplicity)),
+                )
+                .chain(
+                    cb.cs
+                        .lk_table_expressions
+                        .iter()
+                        .map(|t| (false, &t.values)),
+                ))
             .zip_eq(if cb.cs.lk_table_expressions.is_empty() {
                 Either::Left(cb.cs.lk_expressions_namespace_map.iter())
             } else {
@@ -454,13 +459,35 @@ impl<E: ExtensionField> Layer<E> {
             .zip_eq(&lookup_evals)
             .enumerate()
             {
-                expressions.push(lookup - cb.cs.chip_record_alpha.clone());
-                evals.push(EvalExpression::<E>::Linear(
-                    // evaluation = claim * one - alpha (padding)
-                    *lookup_eval,
-                    E::BaseField::ONE.expr().into(),
-                    cb.cs.chip_record_alpha.clone().neg().into(),
-                ));
+                // Encode lookup constraints in the canonical form: `sel * expression = evaluation`.
+                //
+                // Non-negated lookup:
+                //   claim = sel * lookup + (1 - sel) * padding
+                //   => claim - padding = sel * (lookup - padding)
+                //   so we use `expression = lookup - padding` and `evaluation = claim - padding`.
+                //
+                // Negated lookup (`-lookup` used by multiplicity path):
+                //   claim - padding = sel * (-lookup - padding)
+                //   => padding - claim = sel * (lookup + padding)
+                //   so we use `expression = lookup + padding` and `evaluation = padding - claim`.
+                if is_negate {
+                    expressions.push(lookup + cb.cs.chip_record_alpha.clone());
+                    evals.push(EvalExpression::<E>::Linear(
+                        // evaluation = alpha (padding) - claim * one
+                        *lookup_eval,
+                        E::BaseField::ONE.neg().expr().into(),
+                        cb.cs.chip_record_alpha.clone().into(),
+                    ));
+                } else {
+                    expressions.push(lookup - cb.cs.chip_record_alpha.clone());
+                    evals.push(EvalExpression::<E>::Linear(
+                        // evaluation = claim * one - alpha (padding)
+                        *lookup_eval,
+                        E::BaseField::ONE.expr().into(),
+                        cb.cs.chip_record_alpha.clone().neg().into(),
+                    ));
+                };
+
                 expr_names.push(format!("{}/{idx}", name));
             }
         }
@@ -495,7 +522,7 @@ impl<E: ExtensionField> Layer<E> {
         } = &cb.cs;
 
         let in_eval_expr = (non_zero_expr_len..)
-            .take(cb.cs.num_witin as usize + cb.cs.num_fixed + cb.cs.instance_openings.len())
+            .take(cb.cs.num_witin as usize + cb.cs.num_fixed)
             .collect_vec();
         if rotations.is_empty() {
             Layer::new(
@@ -504,7 +531,7 @@ impl<E: ExtensionField> Layer<E> {
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
-                cb.cs.instance_openings.len(),
+                0,
                 expressions,
                 n_challenges,
                 in_eval_expr,
@@ -512,7 +539,6 @@ impl<E: ExtensionField> Layer<E> {
                 ((None, vec![]), 0, 0),
                 expr_names,
                 cb.cs.structural_witins.clone(),
-                cb.cs.instance_openings.clone(),
             )
         } else {
             let Some(RotationParams {
@@ -529,7 +555,7 @@ impl<E: ExtensionField> Layer<E> {
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
-                cb.cs.instance_openings.len(),
+                0,
                 expressions,
                 n_challenges,
                 in_eval_expr,
@@ -541,7 +567,6 @@ impl<E: ExtensionField> Layer<E> {
                 ),
                 expr_names,
                 cb.cs.structural_witins.clone(),
-                cb.cs.instance_openings.clone(),
             )
         }
     }

@@ -31,7 +31,6 @@ use crate::structs::ProvingKey;
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::riscv::constants::UINT_LIMBS,
     scheme::{
         hal::{DeviceProvingKey, ProofInput},
         utils::build_main_witness,
@@ -109,11 +108,15 @@ impl<
         }
     }
 
-    pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> crate::e2e::InitMemState {
+    pub fn setup_init_mem(
+        &self,
+        hints: &[u32],
+        public_io_digest_input: &[u32],
+    ) -> crate::e2e::InitMemState {
         let Some(ctx) = self.pk.program_ctx.as_ref() else {
             panic!("empty program ctx")
         };
-        ctx.setup_init_mem(hints, public_io)
+        ctx.setup_init_mem(hints, public_io_digest_input)
     }
 }
 
@@ -143,7 +146,6 @@ impl<
             .get_device_proving_key(shard_ctx)
             .map(|dpk| dpk.fixed_mles.clone())
             .unwrap_or_default();
-        let pi_mles_preload = pi.mles::<E>();
 
         info_span!(
             "[ceno] create_proof_of_shard",
@@ -155,7 +157,7 @@ impl<
             // The order must match verifier and recursion verifier exactly.
             // TODO deal with vector-based public value to transcript
             for (_, circuit_pk) in self.pk.circuit_pks.iter() {
-                for instance_value in circuit_pk.get_cs().zkvm_v1_css.instance_values.iter() {
+                for instance_value in circuit_pk.get_cs().zkvm_v1_css.instance.iter() {
                     transcript.append_field_element(&pi.query_by_index::<E>(instance_value.0));
                 }
             }
@@ -268,10 +270,6 @@ impl<
             ];
             tracing::debug!("global challenges in prover: {:?}", challenges);
 
-            let public_input_span = entered_span!("public_input", profiling_1 = true);
-            let public_input = self.device.transport_mles(&pi_mles_preload);
-            exit_span!(public_input_span);
-
             let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
 
             // Phase 1: Build all ChipTasks
@@ -284,7 +282,6 @@ impl<
                 &witness_data,
                 fixed_mles,
                 challenges,
-                public_input,
                 &pi,
                 &circuit_trace_indices,
             );
@@ -503,7 +500,6 @@ impl<
         let MainSumcheckEvals {
             wits_in_evals,
             fixed_in_evals,
-            pi_in_evals,
         } = evals;
         exit_span!(span);
 
@@ -521,7 +517,6 @@ impl<
             MainSumcheckEvals {
                 wits_in_evals,
                 fixed_in_evals,
-                pi_in_evals,
             },
             input_opening_point,
         ))
@@ -539,7 +534,6 @@ impl<
         witness_data: &PB::PcsData,
         mut fixed_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
         challenges: [E; 2],
-        public_input: Vec<Arc<PB::MultilinearPoly<'data>>>,
         pi: &PublicValues,
         circuit_trace_indices: &[Option<usize>],
     ) -> Vec<ChipTask<'_, PB>> {
@@ -617,21 +611,10 @@ impl<
             };
 
             let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
-            let public_io = cs
-                .instance_openings()
-                .iter()
-                .map(|Instance(idx)| {
-                    debug_assert!(
-                        *idx < UINT_LIMBS,
-                        "instance_opening index {idx} out of range"
-                    );
-                    public_input[*idx].clone()
-                })
-                .collect_vec();
 
-            let pi_evals = cs
+            let circuit_pi = cs
                 .zkvm_v1_css
-                .instance_values
+                .instance
                 .iter()
                 .map(|Instance(idx)| Either::Left(pi.query_by_index::<E>(*idx)))
                 .collect_vec();
@@ -640,14 +623,13 @@ impl<
                 witness: witness_mle,
                 fixed,
                 structural_witness,
-                public_input: public_io,
-                pub_io_evals: pi_evals,
+                pi: circuit_pi,
                 num_instances: num_instances.clone(),
                 has_ecc_ops: cs.has_ecc_ops(),
             };
             // SAFETY: All Arcs in ProofInput contain 'static data:
             // - GPU path: `witness` and `structural_witness` are empty vecs (deferred extraction),
-            //   `fixed` and `public_input` originate from `DeviceProvingKey<'static, PB>`.
+            //   `fixed` originates from `DeviceProvingKey<'static, PB>`.
             // - CPU path: `witness_mle` may borrow non-'static data, but the CPU path always
             //   uses sequential execution (never enters the concurrent scheduler), so the data
             //   remains valid for the lifetime of `build_chip_tasks`'s caller.
@@ -726,7 +708,6 @@ impl<
                 evaluations.push(vec![
                     result.opening_evals.wits_in_evals,
                     result.opening_evals.fixed_in_evals,
-                    result.opening_evals.pi_in_evals,
                 ]);
             }
             chip_proofs
@@ -864,7 +845,6 @@ where
     let MainSumcheckEvals {
         wits_in_evals,
         fixed_in_evals,
-        pi_in_evals,
     } = evals;
     exit_span!(span);
 
@@ -882,7 +862,6 @@ where
         MainSumcheckEvals {
             wits_in_evals,
             fixed_in_evals,
-            pi_in_evals,
         },
         input_opening_point,
     ))

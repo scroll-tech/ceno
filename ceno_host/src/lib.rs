@@ -115,7 +115,7 @@ pub fn run(
     platform: Platform,
     elf: &[u8],
     hints: &CenoStdin,
-    public_io: Option<&CenoStdin>,
+    _public_io: Option<&CenoStdin>,
 ) -> Vec<Vec<u8>> {
     let program = Program::load_elf(elf, u32::MAX).unwrap();
     let platform = Platform {
@@ -124,17 +124,11 @@ pub fn run(
     };
 
     let hints: Vec<u32> = hints.into();
-    let pubio: Vec<u32> = public_io.map(|c| c.into()).unwrap_or_default();
     let hints_range = platform.hints.clone();
-    let pubio_range = platform.public_io.clone();
 
     let mut state = VMState::new(platform, Arc::new(program));
 
     for (addr, value) in zip(hints_range.iter_addresses(), hints) {
-        state.init_memory(addr.into(), value);
-    }
-
-    for (addr, value) in zip(pubio_range.iter_addresses(), pubio) {
         state.init_memory(addr.into(), value);
     }
 

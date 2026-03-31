@@ -1,4 +1,4 @@
-use crate::uint::UIntLimbs;
+use crate::{scheme::constants::SEPTIC_EXTENSION_DEGREE, uint::UIntLimbs};
 pub use ceno_emul::PC_STEP_SIZE;
 
 pub const ECALL_HALT_OPCODE: [usize; 2] = [0x00_00, 0x00_00];
@@ -18,6 +18,8 @@ pub const HINT_START_ADDR_IDX: usize = HEAP_LENGTH_IDX + 1;
 pub const HINT_LENGTH_IDX: usize = HINT_START_ADDR_IDX + 1;
 
 pub const SHARD_RW_SUM_IDX: usize = HINT_LENGTH_IDX + 1;
+pub const PUBIO_DIGEST_IDX: usize = SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE * 2;
+pub const PUBIO_DIGEST_U16_LIMBS: usize = 8 * UINT_LIMBS;
 
 /// vector-based public value, id start from 0
 pub const PUBLIC_IO_IDX: usize = 0;

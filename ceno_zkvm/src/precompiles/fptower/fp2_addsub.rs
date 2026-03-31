@@ -523,7 +523,6 @@ mod tests {
                 gkr_proof,
                 &out_evals,
                 &[],
-                &[],
                 &challenges,
                 &mut verifier_transcript,
                 &selector_ctxs,

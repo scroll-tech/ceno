@@ -11,6 +11,8 @@ version = "0.1.0"
 
 [dependencies]
 ceno_serde = { path = "../ceno_serde" }
+ceno_syscall.workspace = true
 getrandom = { version = "0.2.15", features = ["custom"], default-features = false }
 getrandom_v3 = { package = "getrandom", version = "0.3", default-features = false }
 serde.workspace = true
+tiny-keccak.workspace = true

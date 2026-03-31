@@ -265,7 +265,7 @@ impl CenoAggregationProver {
             .collect();
         let user_public_values: Vec<F> = zkvm_proof_inputs
             .iter()
-            .flat_map(|p| p.raw_pi.to_vec())
+            .flat_map(|p| p.pi.to_vec())
             .collect();
         let leaf_inputs = chunk_ceno_leaf_proof_inputs(zkvm_proof_inputs);
 
@@ -398,7 +398,7 @@ impl CenoLeafVmVerifierConfig {
 
             builder.cycle_tracker_start("Verify Ceno ZKVM Proof");
             let zkvm_proof = ceno_leaf_input.proof;
-            let raw_pi = zkvm_proof.raw_pi.clone();
+            let pi = zkvm_proof.pi.clone();
             let _calculated_shard_ec_sum = verify_zkvm_proof(&mut builder, zkvm_proof, &self.vk);
             builder.cycle_tracker_end("Verify Ceno ZKVM Proof");
 
@@ -409,7 +409,7 @@ impl CenoLeafVmVerifierConfig {
                 builder.assign(&stark_pvs.app_commit[i], F::ZERO);
             }
 
-            let pv = &raw_pi;
+            let pv = &pi;
             let init_pc = builder.get(pv, INIT_PC_IDX);
             let end_pc = builder.get(pv, END_PC_IDX);
             let exit_code = builder.get(pv, EXIT_CODE_IDX);

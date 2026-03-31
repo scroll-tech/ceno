@@ -623,7 +623,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     left,
                     cs.num_witin,
                     cs.num_fixed as WitnessId,
-                    cs.instance_openings.len(),
+                    0,
                     fixed,
                     wits_in,
                     structural_witin,
@@ -638,7 +638,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     &right,
                     cs.num_witin,
                     cs.num_fixed as WitnessId,
-                    cs.instance_openings.len(),
+                    0,
                     fixed,
                     wits_in,
                     structural_witin,
@@ -670,7 +670,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     expr,
                     cs.num_witin,
                     cs.num_fixed as WitnessId,
-                    cs.instance_openings.len(),
+                    0,
                     fixed,
                     wits_in,
                     structural_witin,
@@ -716,7 +716,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 expr,
                 cs.num_witin,
                 cs.num_fixed as WitnessId,
-                cs.instance_openings.len(),
+                0,
                 fixed,
                 wits_in,
                 structural_witin,
@@ -762,7 +762,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             arg_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             wits_in,
                             structural_witin,
@@ -963,19 +963,13 @@ Hints:
     ) where
         E: LkMultiplicityKey,
     {
-        let all_pi_mles: Vec<ArcMultilinearExtension<E>> =
-            pi.mles::<E>().into_iter().map(|v| v.into()).collect_vec();
         let get_circuit_pi_inputs = |circuit_cs: &ConstraintSystem<E>| {
             let circuit_pub_io_evals = circuit_cs
-                .instance_values
+                .instance
                 .iter()
                 .map(|instance| Either::Right(E::from(pi.query_by_index::<E>(instance.0))))
                 .collect_vec();
-            let circuit_pi_mles = circuit_cs
-                .instance_openings
-                .iter()
-                .map(|instance| all_pi_mles[instance.0].clone())
-                .collect_vec();
+            let circuit_pi_mles = vec![];
             (circuit_pub_io_evals, circuit_pi_mles)
         };
 
@@ -1089,7 +1083,7 @@ Hints:
                         &expr.values,
                         cs.num_witin,
                         cs.num_fixed as WitnessId,
-                        cs.instance_openings.len(),
+                        0,
                         &fixed,
                         &witness,
                         &structural_witness,
@@ -1104,7 +1098,7 @@ Hints:
                         &expr.multiplicity,
                         cs.num_witin,
                         cs.num_fixed as WitnessId,
-                        cs.instance_openings.len(),
+                        0,
                         &fixed,
                         &witness,
                         &structural_witness,
@@ -1196,7 +1190,7 @@ Hints:
                             ram_type_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             witness,
                             structural_witness,
@@ -1209,7 +1203,7 @@ Hints:
                             w_rlc_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             witness,
                             structural_witness,
@@ -1296,7 +1290,7 @@ Hints:
                             ram_type_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             witness,
                             structural_witness,
@@ -1309,7 +1303,7 @@ Hints:
                             r_rlc_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             witness,
                             structural_witness,
@@ -1337,7 +1331,7 @@ Hints:
                                         expr,
                                         cs.num_witin,
                                         cs.num_fixed as WitnessId,
-                                        cs.instance_openings.len(),
+                                        0,
                                         fixed,
                                         witness,
                                         structural_witness,
@@ -1474,7 +1468,7 @@ Hints:
         let gs_init = GlobalState::initial_global_state(&mut cb).unwrap();
         let gs_final = GlobalState::finalize_global_state(&mut cb).unwrap();
         let gs_pub_io_evals = cs
-            .instance_values
+            .instance
             .iter()
             .map(|instance| E::from(pi.query_by_index::<E>(instance.0)))
             .collect_vec();
