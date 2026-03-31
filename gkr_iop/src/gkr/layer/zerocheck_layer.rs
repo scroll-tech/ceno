@@ -121,13 +121,15 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                 let sel_expr = sel_type.selector_expr();
                 let expr = match out_eval {
                     EvalExpression::Linear(_, a, b) => {
-                        assert_eq!(
-                            a.as_ref().clone(),
-                            E::BaseField::ONE.expr(),
-                            "need to extend expression to support a.inverse()"
-                        );
-                        // sel * exp - b
-                        sel_expr.clone() * expr + b.as_ref().neg().clone()
+                        // See `gkr_iop/src/gkr/layer.rs` for the +/-1 linear-coefficient derivation.
+                        let coeff = a.as_ref();
+                        if *coeff == E::BaseField::ONE.expr() {
+                            sel_expr.clone() * expr + b.as_ref().neg().clone()
+                        } else if *coeff == E::BaseField::ONE.neg().expr() {
+                            b.as_ref().clone() - sel_expr.clone() * expr
+                        } else {
+                            panic!("unsupported linear eval coefficient: expected +/-1")
+                        }
                     }
                     EvalExpression::Single(_) => sel_expr.clone() * expr,
                     EvalExpression::Zero => Expression::ZERO,
