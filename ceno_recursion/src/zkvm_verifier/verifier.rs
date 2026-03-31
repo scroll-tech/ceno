@@ -515,29 +515,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         &mut challenger,
     );
 
-    let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
-    let initial_global_state = eval_ceno_expr_with_instance(
-        builder,
-        &empty_arr,
-        &empty_arr,
-        &empty_arr,
-        &zkvm_proof_input.pi_evals,
-        &challenges,
-        &vk.initial_global_state_expr,
-    );
-    builder.assign(&prod_w, prod_w * initial_global_state);
-
-    let finalize_global_state = eval_ceno_expr_with_instance(
-        builder,
-        &empty_arr,
-        &empty_arr,
-        &empty_arr,
-        &zkvm_proof_input.pi_evals,
-        &challenges,
-        &vk.finalize_global_state_expr,
-    );
-    builder.assign(&prod_r, prod_r * finalize_global_state);
-
     // memory consistency check
     builder.assert_ext_eq(prod_r, prod_w);
 

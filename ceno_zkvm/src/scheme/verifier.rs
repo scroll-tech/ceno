@@ -35,7 +35,6 @@ use multilinear_extensions::{
     StructuralWitInType::StackedConstantSequence,
     mle::IntoMLE,
     util::ceil_log2,
-    utils::eval_by_expr_with_instance,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use p3::field::FieldAlgebra;
@@ -427,29 +426,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;
-
-        let initial_global_state = eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            pi_evals,
-            &challenges,
-            &self.vk.initial_global_state_expr,
-        )
-        .right()
-        .unwrap();
-        prod_w *= initial_global_state;
-        let finalize_global_state = eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            pi_evals,
-            &challenges,
-            &self.vk.finalize_global_state_expr,
-        )
-        .right()
-        .unwrap();
-        prod_r *= finalize_global_state;
 
         // check rw_set equality of shard proof
         if prod_r != prod_w {

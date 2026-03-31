@@ -3,7 +3,6 @@ use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     e2e::ShardContext,
-    state::{GlobalState, StateCircuit},
     structs::{
         ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
         ZKVMWitnesses,
@@ -28,7 +27,7 @@ use multilinear_extensions::{
     Expression, WitnessId, fmt,
     mle::{ArcMultilinearExtension, IntoMLEs, MultilinearExtension},
     util::ceil_log2,
-    utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
+    utils::{eval_by_expr, eval_by_expr_with_fixed},
 };
 use p3::field::{Field, FieldAlgebra};
 use rand::thread_rng;
@@ -1477,43 +1476,8 @@ Hints:
             };
         }
         // part1 global state
-        let mut cs = ConstraintSystem::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let gs_init = GlobalState::initial_global_state(&mut cb).unwrap();
-        let gs_final = GlobalState::finalize_global_state(&mut cb).unwrap();
-
-        let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
+        let (gs_rs, rs_grp_by_anno, gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
-        gs_rs.insert(
-            eval_by_expr_with_instance(
-                &[],
-                &[],
-                &[],
-                &pub_io_evals
-                    .iter()
-                    .map(|v| v.right().unwrap())
-                    .collect_vec(),
-                &challenges,
-                &gs_final,
-            )
-            .right()
-            .unwrap(),
-        );
-        gs_ws.insert(
-            eval_by_expr_with_instance(
-                &[],
-                &[],
-                &[],
-                &pub_io_evals
-                    .iter()
-                    .map(|v| v.right().unwrap())
-                    .collect_vec(),
-                &challenges,
-                &gs_init,
-            )
-            .right()
-            .unwrap(),
-        );
 
         // gs stores { (pc, timestamp) }
         find_rw_mismatch!(

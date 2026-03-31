@@ -12,7 +12,6 @@ use crate::{
         septic_curve::SepticPoint,
         verifier::ZKVMVerifier,
     },
-    state::GlobalState,
     structs::{
         ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
         ZKVMWitnesses,
@@ -1197,7 +1196,6 @@ pub fn construct_configs<E: ExtensionField>(
     let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
     let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
-    zkvm_cs.register_global_state::<GlobalState>();
     ConstraintSystemConfig {
         zkvm_cs,
         config: Arc::new(config),

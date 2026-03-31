@@ -4,7 +4,6 @@ use crate::{
     error::ZKVMError,
     instructions::Instruction,
     scheme::septic_curve::SepticPoint,
-    state::StateCircuit,
     tables::{
         ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
         TableCircuit,
@@ -15,7 +14,7 @@ use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{Expression, Instance};
+use multilinear_extensions::Instance;
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSlice,
@@ -195,8 +194,6 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
 #[derive(Clone)]
 pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub(crate) circuit_css: BTreeMap<String, ComposedConstrainSystem<E>>,
-    pub(crate) initial_global_state_expr: Expression<E>,
-    pub(crate) finalize_global_state_expr: Expression<E>,
     // pub keccak_gkr_iop: Option<KeccakGKRIOP<E>>,
     pub params: ProgramParams,
 }
@@ -205,8 +202,6 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
     fn default() -> Self {
         ZKVMConstraintSystem {
             circuit_css: BTreeMap::new(),
-            initial_global_state_expr: Expression::ZERO,
-            finalize_global_state_expr: Expression::ZERO,
             params: ProgramParams::default(),
             // keccak_gkr_iop: None,
         }
@@ -257,15 +252,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         };
         assert!(self.circuit_css.insert(TC::name(), cs).is_none());
         config
-    }
-
-    pub fn register_global_state<SC: StateCircuit<E>>(&mut self) {
-        let mut cs = ConstraintSystem::new(|| "riscv_state");
-        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        self.initial_global_state_expr =
-            SC::initial_global_state(&mut circuit_builder).expect("global_state_in failed");
-        self.finalize_global_state_expr =
-            SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
     }
 
     pub fn get_css(&self) -> &BTreeMap<String, ComposedConstrainSystem<E>> {
@@ -381,7 +367,22 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             shard_steps,
             indices,
         )?;
-        let num_instances = [witness[0].num_instances(), 0];
+        let witness_instances = witness[0].num_instances();
+        let structural_instances = witness[1].num_instances();
+        if witness_instances > 0 && structural_instances > 0 {
+            assert_eq!(
+                witness_instances,
+                structural_instances,
+                "{}: mismatched num_instances between witness and structural RMMs",
+                OC::name()
+            );
+        }
+        let num_instances = if witness_instances > 0 {
+            witness_instances
+        } else {
+            structural_instances
+        };
+        let num_instances = [num_instances, 0];
         let input = ChipInput::new(OC::name(), witness, num_instances);
         assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
         assert!(
@@ -435,7 +436,17 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
-        let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
+        let witness_instances = witness[0].num_instances();
+        let structural_instances = witness[1].num_instances();
+        if witness_instances > 0 && structural_instances > 0 {
+            assert_eq!(
+                witness_instances,
+                structural_instances,
+                "{}: mismatched num_instances between witness and structural RMMs",
+                TC::name()
+            );
+        }
+        let num_instances = std::cmp::max(witness_instances, structural_instances);
         let input = ChipInput::new(TC::name(), witness, [num_instances, 0]);
         assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
 
@@ -704,10 +715,6 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
 
     pub circuit_index_fixed_num_instances: BTreeMap<usize, usize>,
-
-    // expression for global state in/out
-    pub initial_global_state_expr: Expression<E>,
-    pub finalize_global_state_expr: Expression<E>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
@@ -718,8 +725,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             program_ctx: None,
             entry_pc: 0,
             circuit_pks: BTreeMap::new(),
-            initial_global_state_expr: Expression::ZERO,
-            finalize_global_state_expr: Expression::ZERO,
             circuit_index_fixed_num_instances: BTreeMap::new(),
             circuit_name_to_index: BTreeMap::new(),
             fixed_commit_wd: None,
@@ -783,9 +788,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .collect(),
             fixed_commit: self.fixed_commit.clone(),
             fixed_no_omc_init_commit: self.fixed_no_omc_init_commit.clone(),
-            // expression for global state in/out
-            initial_global_state_expr: self.initial_global_state_expr.clone(),
-            finalize_global_state_expr: self.finalize_global_state_expr.clone(),
             circuit_index_to_name: self
                 .circuit_pks
                 .keys()
@@ -816,9 +818,6 @@ where
     pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
-    // expression for global state in/out
-    pub initial_global_state_expr: Expression<E>,
-    pub finalize_global_state_expr: Expression<E>,
     // circuit index -> circuit name
     // mainly used for debugging
     pub circuit_index_to_name: BTreeMap<usize, String>,
