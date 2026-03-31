@@ -108,15 +108,11 @@ impl<
         }
     }
 
-    pub fn setup_init_mem(
-        &self,
-        hints: &[u32],
-        public_io_digest_input: &[u32],
-    ) -> crate::e2e::InitMemState {
+    pub fn setup_init_mem(&self, hints: &[u32]) -> crate::e2e::InitMemState {
         let Some(ctx) = self.pk.program_ctx.as_ref() else {
             panic!("empty program ctx")
         };
-        ctx.setup_init_mem(hints, public_io_digest_input)
+        ctx.setup_init_mem(hints)
     }
 }
 

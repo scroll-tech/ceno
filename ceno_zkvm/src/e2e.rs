@@ -1616,8 +1616,7 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
     }
 
     /// Setup init mem state
-    pub fn setup_init_mem(&self, hints: &[u32], public_io_digest_input: &[u32]) -> InitMemState {
-        let _ = public_io_digest_input;
+    pub fn setup_init_mem(&self, hints: &[u32]) -> InitMemState {
         let hint_init = MemPadder::new_mem_records(
             self.platform.hints.clone(),
             hints.len().next_power_of_two(),
@@ -1678,7 +1677,7 @@ pub fn run_e2e_with_checkpoint<
     let prover = ZKVMProver::new(pk.into(), device);
 
     let start = std::time::Instant::now();
-    let init_full_mem = prover.setup_init_mem(hints, public_io_digest_input);
+    let init_full_mem = prover.setup_init_mem(hints);
     tracing::debug!("setup_init_mem done in {:?}", start.elapsed());
 
     // Generate witness

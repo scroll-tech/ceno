@@ -148,17 +148,16 @@ where
     pub fn generate_base_proof(
         &self,
         hints: CenoStdin,
-        pub_io: CenoStdin,
+        pub_io_digest: &[u32],
         max_steps: usize,
         shard_id: Option<usize>,
     ) -> Vec<ZKVMProof<E, PCS>> {
         if let Some(zkvm_prover) = self.zkvm_prover.as_ref() {
-            let public_io_words = Vec::from(&pub_io);
-            let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(&hints), &public_io_words);
+            let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(&hints));
             run_e2e_proof::<E, PCS, PB, PD>(
                 zkvm_prover,
                 &init_full_mem,
-                &public_io_words,
+                pub_io_digest,
                 max_steps,
                 false,
                 shard_id,
