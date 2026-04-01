@@ -210,6 +210,11 @@ impl ProofShapeModule {
             .max()
             .unwrap_or(0);
 
+        // Verifier preprocess: absorb fixed commitment.
+        // Mirrors v1 verifier order: fixed_commit → (chip_idx, num_instance) → witin_commit → α, β
+        // TODO(recursion-proof-bridge): absorb fixed commitment digest + log2_max_codeword_size
+        // once basefold module is integrated. See v1: PCS::write_commitment(fixed_commit, transcript)
+
         // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
             ts.observe(F::from_usize(chip_idx));
@@ -221,6 +226,8 @@ impl ProofShapeModule {
             }
         }
 
+        // TODO(recursion-proof-bridge): absorb witness commitment digest + log2_max_codeword_size
+        // once basefold module is integrated. See v1: PCS::write_commitment(&witin_commit, transcript)
         // Witness commitment observation is handled by VerifierModule.
         verifier.observe_witness_commit(proof, ts);
 
@@ -240,6 +247,8 @@ impl ProofShapeModule {
             + self.max_cached * DIGEST_SIZE;
         let pvs_width = pvs::PublicValuesCols::<u8>::width();
         let range_width = RangeCheckerCols::<u8>::width();
+        // TODO(recursion-proof-bridge): replace proof-shape module placeholder contexts with
+        // real tracegen so RangeCheckerAir rows are semantically valid, not only width-correct.
         vec![proof_shape_width, pvs_width, range_width]
     }
 }

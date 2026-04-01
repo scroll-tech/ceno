@@ -52,6 +52,8 @@ pub fn generate_proving_ctx(
     AirProvingContext<CpuBackend<BabyBearPoseidon2Config>>,
     Vec<[F; POSEIDON2_WIDTH]>,
 ) {
+    // TODO(recursion-proof-bridge): populate verifier trace/public values from RecursionProof.
+    // Any verifier-specific values not available on RecursionProof are currently zero-mocked.
     let _ = (proofs, proofs_type, child_is_app, child_dag_commit);
 
     let rows = proofs.len().max(1).next_power_of_two();
