@@ -786,6 +786,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             self.build_tower_witness(composed_cs, input, records);
         exit_span!(span);
 
+        // bind read/write/lookup out evals into transcript before deriving tower challenges
+        for eval in out_evals.iter().flat_map(|evals| evals.iter()).flatten() {
+            transcript.append_field_element_ext(eval);
+        }
+
         // Then prove the tower relation
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         let (rt, proofs) = CpuTowerProver::create_proof(prod_specs, logup_specs, 2, transcript);
@@ -837,11 +842,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let Some(gkr_circuit) = gkr_circuit else {
             panic!("empty gkr circuit")
         };
-        let pub_io_mles = cs
-            .instance_openings
-            .iter()
-            .map(|instance| input.public_input[instance.0].clone())
-            .collect_vec();
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
             // it's not global chip
             vec![
@@ -885,20 +885,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             num_var_with_rotation,
             gkr::GKRCircuitWitness {
                 layers: vec![LayerWitness(
-                    chain!(
-                        &input.witness,
-                        &input.fixed,
-                        &pub_io_mles,
-                        &input.structural_witness,
-                    )
-                    .cloned()
-                    .collect_vec(),
+                    chain!(&input.witness, &input.fixed, &input.structural_witness,)
+                        .cloned()
+                        .collect_vec(),
                 )],
             },
             // eval value doesnt matter as it wont be used by prover
             &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
             &input
-                .pub_io_evals
+                .pi
                 .iter()
                 .map(|v| v.map_either(E::from, |v| v).into_inner())
                 .collect_vec(),

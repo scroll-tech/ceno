@@ -473,9 +473,20 @@ impl<E: ExtensionField> ReadMEM<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let op = step.memory_op().unwrap();
+        self.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), &op)
+    }
+
+    pub fn assign_op(
+        &self,
+        instance: &mut [E::BaseField],
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        cycle: Cycle,
+        op: &WriteOp,
+    ) -> Result<(), ZKVMError> {
         let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
         let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
-        let shard_cycle = step.cycle() - current_shard_offset_cycle;
+        let shard_cycle = cycle - current_shard_offset_cycle;
         // Memory state
         set_val!(instance, self.prev_ts, shard_prev_cycle);
 
@@ -491,7 +502,7 @@ impl<E: ExtensionField> ReadMEM<E> {
             RAMType::Memory,
             op.addr,
             op.addr.baddr().0 as u64,
-            step.cycle() + Tracer::SUBCYCLE_MEM,
+            cycle + Tracer::SUBCYCLE_MEM,
             op.previous_cycle,
             op.value.after,
             None,

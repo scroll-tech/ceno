@@ -123,7 +123,6 @@ fn test_hints() -> Result<()> {
             .write(&"This is my hint string.".to_string())?
             .write(&1997_u32)?
             .write(&1999_u32)?,
-        None,
     ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
@@ -140,7 +139,6 @@ fn test_bubble_sorting() -> Result<()> {
         ceno_examples::quadratic_sorting,
         // Provide some random numbers to sort.
         CenoStdin::default().write(&(0..1_000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
-        None,
     ));
     for msg in &all_messages {
         print!("{msg}");
@@ -155,7 +153,6 @@ fn test_sorting() -> Result<()> {
         ceno_examples::sorting,
         // Provide some random numbers to sort.
         CenoStdin::default().write(&(0..1000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
-        None,
     ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
@@ -178,7 +175,6 @@ fn test_median() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::median,
         &hints,
-        None,
     ));
     assert!(!all_messages.is_empty());
     for (i, msg) in enumerate(&all_messages) {
@@ -200,7 +196,6 @@ fn test_hashing_fail() {
         CENO_PLATFORM.clone(),
         ceno_examples::hashing,
         CenoStdin::default().write(&nums).unwrap(),
-        None,
     );
 }
 
@@ -221,7 +216,6 @@ fn test_hashing() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::hashing,
         CenoStdin::default().write(&uniques)?,
-        None,
     ));
     assert!(!all_messages.is_empty());
     for (i, msg) in enumerate(&all_messages) {
@@ -536,7 +530,7 @@ fn test_sha256_extend() -> Result<()> {
 
 #[test]
 fn test_sha256_full() -> Result<()> {
-    let public_io: &[u32; 8] = &[
+    let _public_io: &[u32; 8] = &[
         30689455, 3643278932, 1489987339, 1626711444, 3610619649, 1925764735, 581441152, 321290698,
     ];
     let hints: &Vec<u32> = &vec![0u32; 10];
@@ -544,7 +538,6 @@ fn test_sha256_full() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::sha256,
         CenoStdin::default().write(hints)?,
-        Some(CenoStdin::default().write(public_io)?),
     ));
     assert_eq!(all_messages.len(), 0);
 
@@ -747,7 +740,6 @@ fn test_fibonacci() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::fibonacci,
         CenoStdin::default().write(&10_u32)?,
-        Some(CenoStdin::default().write(&4191_u32)?),
     );
     Ok(())
 }
@@ -759,7 +751,6 @@ fn test_keccak_no_syscall() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::keccak_no_syscall,
         CenoStdin::default().write(&pre_image)?,
-        None,
     ));
 
     let pre_image: Vec<u8> = pre_image.iter().flat_map(|x| x.to_le_bytes()).collect();
@@ -786,14 +777,12 @@ fn test_keccak_guest() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::keccak_lib,
         &CenoStdin::default(),
-        None,
     );
 
     let _ = ceno_host::run(
         CENO_PLATFORM.clone(),
         ceno_examples::keccak_native,
         &CenoStdin::default(),
-        None,
     );
     Ok(())
 }
