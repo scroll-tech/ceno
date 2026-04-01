@@ -6,7 +6,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     proof_shape::pvs::PublicValuesCols,
-    system::{Preflight, RecursionProof, RecursionVk},
+    system::{Preflight, RecursionField, RecursionProof, RecursionVk},
     tracegen::RowMajorChip,
 };
 
@@ -33,7 +33,7 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
                             .circuit_index_to_name
                             .get(&air_idx)
                             .and_then(|name| child_vk.circuit_vks.get(name))
-                            .map(|vk| vk.get_cs().instance_openings().len())
+                            .map(|vk| vk.get_cs().zkvm_v1_css.instance.len())
                     })
                     .sum::<usize>()
             })
@@ -64,7 +64,7 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
                 let Some(circuit_vk) = child_vk.circuit_vks.get(circuit_name) else {
                     continue;
                 };
-                let instance_openings = circuit_vk.get_cs().instance_openings();
+                let instance_openings = &circuit_vk.get_cs().zkvm_v1_css.instance;
                 if instance_openings.is_empty() {
                     continue;
                 }
@@ -76,11 +76,8 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
                     let row = rows.next().unwrap();
                     let cols: &mut PublicValuesCols<F> = row.borrow_mut();
                     let value = proof
-                        .raw_pi
-                        .get(instance.0)
-                        .and_then(|poly| poly.first())
-                        .copied()
-                        .unwrap_or(F::ZERO);
+                        .public_values
+                        .query_by_index::<RecursionField>(instance.0);
 
                     cols.is_valid = F::ONE;
                     cols.proof_idx = F::from_usize(proof_idx);

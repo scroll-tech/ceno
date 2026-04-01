@@ -957,8 +957,8 @@ where
 
         if let Some(round_msgs) = chip_proof.tower_proof.proofs.get(layer_idx) {
             // Mirror native sumcheck IOPVerifierState::verify init:
-            // append_message(max_num_variables.to_le_bytes())
-            // append_message(max_degree.to_le_bytes())
+            // append_message(max_num_variables.to_leBytes())
+            // append_message(max_degree.to_leBytes())
             let max_num_variables = (layer_idx + 1) * log2_num_fanin;
             let max_degree: usize = 3; // NUM_FANIN + 1
             transcript_observe_label(ts, &max_num_variables.to_le_bytes());

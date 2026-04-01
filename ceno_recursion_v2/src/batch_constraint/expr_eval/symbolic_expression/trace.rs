@@ -366,7 +366,7 @@ impl Counts {
             num_witin: css.num_witin as usize,
             num_structural_witin: css.num_structural_witin as usize,
             num_fixed: css.num_fixed,
-            num_instance: css.instance_openings.len(),
+            num_instance: css.instance.len(),
         }
     }
 }

@@ -5,9 +5,9 @@ use crate::{
     structs::{ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, HintsTable,
-        LocalFinalCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, PubIOInitCircuit,
-        PubIOTable, RegTable, RegTableInitCircuit, ShardRamCircuit, StackInitCircuit, StackTable,
-        StaticMemInitCircuit, StaticMemTable, TableCircuit,
+        LocalFinalCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, RegTable,
+        RegTableInitCircuit, ShardRamCircuit, StackInitCircuit, StackTable, StaticMemInitCircuit,
+        StaticMemTable, TableCircuit,
     },
 };
 use ceno_emul::{Addr, IterAddresses, WORD_SIZE, Word};
@@ -20,8 +20,6 @@ pub struct MmuConfig<E: ExtensionField> {
     pub reg_init_config: <RegTableInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of memory with static addresses.
     pub static_mem_init_config: <StaticMemInitCircuit<E> as TableCircuit<E>>::TableConfig,
-    /// Initialization of public IO.
-    pub public_io_init_config: <PubIOInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of hints.
     pub hints_init_config: <HintsInitCircuit<E> as TableCircuit<E>>::TableConfig,
     /// Initialization of heap.
@@ -41,8 +39,6 @@ impl<E: ExtensionField> MmuConfig<E> {
 
         let static_mem_init_config = cs.register_table_circuit::<StaticMemInitCircuit<E>>();
 
-        let public_io_init_config = cs.register_table_circuit::<PubIOInitCircuit<E>>();
-
         let hints_init_config = cs.register_table_circuit::<HintsInitCircuit<E>>();
         let stack_init_config = cs.register_table_circuit::<StackInitCircuit<E>>();
         let heap_init_config = cs.register_table_circuit::<HeapInitCircuit<E>>();
@@ -52,7 +48,6 @@ impl<E: ExtensionField> MmuConfig<E> {
         Self {
             reg_init_config,
             static_mem_init_config,
-            public_io_init_config,
             hints_init_config,
             stack_init_config,
             heap_init_config,
@@ -68,12 +63,10 @@ impl<E: ExtensionField> MmuConfig<E> {
         fixed: &mut ZKVMFixedTraces<E>,
         reg_init: &[MemInitRecord],
         static_mem_init: &[MemInitRecord],
-        io_addrs: &[Addr],
     ) {
         assert!(
             chain!(
                 static_mem_init.iter_addresses(),
-                io_addrs.iter_addresses(),
                 // TODO: optimize with min_max and Range.
                 self.params.platform.hints.iter_addresses(),
             )
@@ -87,12 +80,6 @@ impl<E: ExtensionField> MmuConfig<E> {
             cs,
             &self.static_mem_init_config,
             static_mem_init,
-        );
-
-        fixed.register_table_circuit::<PubIOInitCircuit<E>>(
-            cs,
-            &self.public_io_init_config,
-            io_addrs,
         );
         fixed.register_table_circuit::<HintsInitCircuit<E>>(cs, &self.hints_init_config, &());
         fixed.register_table_circuit::<StackInitCircuit<E>>(cs, &self.stack_init_config, &());
@@ -130,7 +117,6 @@ impl<E: ExtensionField> MmuConfig<E> {
         pv: &PublicValues,
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
-        io_final: &[MemFinalRecord],
         stack_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         witness.assign_table_circuit::<RegTableInitCircuit<E>>(
@@ -143,12 +129,6 @@ impl<E: ExtensionField> MmuConfig<E> {
             cs,
             &self.static_mem_init_config,
             static_mem_final,
-        )?;
-
-        witness.assign_table_circuit::<PubIOInitCircuit<E>>(
-            cs,
-            &self.public_io_init_config,
-            io_final,
         )?;
 
         witness.assign_table_circuit::<StackInitCircuit<E>>(
@@ -168,13 +148,11 @@ impl<E: ExtensionField> MmuConfig<E> {
         pv: &PublicValues,
         reg_final: &[MemFinalRecord],
         static_mem_final: &[MemFinalRecord],
-        io_final: &[MemFinalRecord],
         hints_final: &[MemFinalRecord],
         stack_final: &[MemFinalRecord],
         heap_final: &[MemFinalRecord],
     ) -> Result<(), ZKVMError> {
         let all_records = vec![
-            (PubIOTable::name(), None, io_final),
             (RegTable::name(), None, reg_final),
             (StaticMemTable::name(), None, static_mem_final),
             (StackTable::name(), None, stack_final),
@@ -223,10 +201,6 @@ impl<E: ExtensionField> MmuConfig<E> {
 
     pub fn static_mem_len(&self) -> usize {
         <StaticMemTable as NonVolatileTable>::len(&self.params)
-    }
-
-    pub fn public_io_len(&self) -> usize {
-        <PubIOTable as NonVolatileTable>::len(&self.params)
     }
 }
 

@@ -12,14 +12,17 @@
 
 use crate::{
     error::ZKVMError,
-    scheme::{ZKVMChipProof, hal::ProofInput},
+    scheme::{
+        ZKVMChipProof,
+        hal::{MainSumcheckEvals, ProofInput},
+    },
     structs::ProvingKey,
 };
 use ff_ext::ExtensionField;
 use gkr_iop::hal::ProverBackend;
 use mpcs::Point;
 use p3::field::PrimeCharacteristicRing;
-use std::{collections::HashMap, sync::OnceLock};
+use std::sync::OnceLock;
 use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
 
@@ -77,8 +80,8 @@ pub struct ChipTaskResult<E: ExtensionField> {
     pub circuit_idx: usize,
     /// The generated proof
     pub proof: ZKVMChipProof<E>,
-    /// Public input evaluations
-    pub pi_in_evals: HashMap<usize, E>,
+    /// Prover-only opening evaluations split by witness/fixed/pi domains.
+    pub opening_evals: MainSumcheckEvals<E>,
     /// Opening point for this proof
     pub input_opening_point: Point<E>,
     /// Whether this circuit has witness or fixed polynomials

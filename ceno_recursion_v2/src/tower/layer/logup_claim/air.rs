@@ -178,10 +178,7 @@ where
             .assert_eq(next.index_id, local.index_id + AB::Expr::ONE);
         builder
             .when(is_layer_end.clone() * is_not_dummy.clone())
-            .assert_eq(
-                local.index_id + AB::Expr::ONE,
-                local.num_logup_count,
-            );
+            .assert_eq(local.index_id + AB::Expr::ONE, local.num_logup_count);
 
         assert_zeros(
             &mut builder.when(local.is_first * is_not_dummy.clone()),

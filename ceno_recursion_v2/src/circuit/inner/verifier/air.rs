@@ -9,22 +9,17 @@ use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
 use recursion_circuit::{
     bus::{
-        Poseidon2CompressBus, Poseidon2CompressMessage,
-        PublicValuesBus, PublicValuesBusMessage,
+        Poseidon2CompressBus, Poseidon2CompressMessage, PublicValuesBus, PublicValuesBusMessage,
     },
     prelude::DIGEST_SIZE,
     utils::assert_zeros,
 };
 use stark_recursion_circuit_derive::AlignedBorrow;
-use verify_stark::pvs::{
-    DagCommit, VERIFIER_PVS_AIR_ID, VerifierBasePvs, VerifierDefPvs,
-};
+use verify_stark::pvs::{DagCommit, VERIFIER_PVS_AIR_ID, VerifierBasePvs, VerifierDefPvs};
 
 use crate::{
     bus::{TranscriptBus, TranscriptBusMessage},
-    circuit::{
-        inner::bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
-    },
+    circuit::inner::bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
     proof_shape::bus::{CommitmentsBus, CommitmentsBusMessage},
     utils::digests_to_poseidon2_input,
 };

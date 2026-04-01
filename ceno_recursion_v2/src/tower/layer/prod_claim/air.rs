@@ -188,9 +188,7 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
         // index_id: row counter within each GKR layer
         ///////////////////////////////////////////////////////////////////////
 
-        builder
-            .when(local.is_first)
-            .assert_zero(local.index_id);
+        builder.when(local.is_first).assert_zero(local.index_id);
         builder
             .when(local.is_enabled * next.is_enabled * next.is_first_layer)
             .assert_zero(next.index_id);
