@@ -280,6 +280,7 @@ impl TowerModule {
                     chip_idx,
                     instance_idx,
                     tidx,
+                    fork_idx: 0, // unused in forked flow
                     tower_replay,
                 });
             }
@@ -773,9 +774,10 @@ pub(crate) fn build_gkr_blob(
                 eyre::eyre!("missing chip proof instance {instance_idx} for chip {chip_idx}")
             })?;
             has_chip = true;
+            // Access the fork log directly using fork_idx and fork-local tidx.
             let mut ts = {
-                let (log, local_tidx) = preflight.transcript_log_for_tidx(pf_entry.tidx);
-                ReadOnlyTranscript::new(log, local_tidx)
+                let fork_log = preflight.fork_log(pf_entry.fork_idx);
+                ReadOnlyTranscript::new(fork_log, pf_entry.tidx)
             };
             let schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
 
@@ -795,6 +797,9 @@ pub(crate) fn build_gkr_blob(
             // Use sequential index for NestedForLoop compatibility (idx must increment
             // by 0 or 1 within each proof_idx group).
             let idx = entry_idx;
+            // Compute global tidx from fork-local tidx for trace column values.
+            let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx)
+                + pf_entry.tidx;
             let (
                 chip_input_record,
                 layer_record,
@@ -810,7 +815,7 @@ pub(crate) fn build_gkr_blob(
                 circuit_vk,
                 &poseidon_replay,
                 &schedule,
-                pf_entry.tidx,
+                global_tidx,
             )?;
 
             // Capture first chip's alpha and q0 for the proof-level record

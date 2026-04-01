@@ -21,30 +21,22 @@ pub struct Preflight {
 }
 
 impl Preflight {
-    /// Given a global tidx, return the appropriate transcript log and
-    /// the local position within that log.
+    /// Return the transcript log for a given fork index.
+    pub fn fork_log(&self, fork_idx: usize) -> &TranscriptLog<F, PoseidonWord> {
+        &self.fork_transcripts[fork_idx].log
+    }
+
+    /// Compute the global tidx offset for a fork, on the fly.
     ///
-    /// - If tidx < trunk_len, returns the trunk log with tidx unchanged.
-    /// - Otherwise, finds the fork containing this tidx and returns
-    ///   (fork_log, tidx - fork.global_tidx_offset).
-    pub fn transcript_log_for_tidx(
-        &self,
-        tidx: usize,
-    ) -> (&TranscriptLog<F, PoseidonWord>, usize) {
+    /// Global layout: trunk 0..trunk_len, fork0, fork1, ...
+    /// The offset for fork_idx is trunk_len + sum of preceding fork log lengths.
+    pub fn fork_global_offset(&self, fork_idx: usize) -> usize {
         let trunk_len = self.transcript.len();
-        if tidx < trunk_len {
-            return (&self.transcript, tidx);
-        }
-        for fork in &self.fork_transcripts {
-            let fork_end = fork.global_tidx_offset + fork.log.len();
-            if tidx >= fork.global_tidx_offset && tidx < fork_end {
-                return (&fork.log, tidx - fork.global_tidx_offset);
-            }
-        }
-        panic!(
-            "tidx {tidx} out of range (trunk_len={trunk_len}, {} forks)",
-            self.fork_transcripts.len()
-        );
+        let preceding: usize = self.fork_transcripts[..fork_idx]
+            .iter()
+            .map(|f| f.log.len())
+            .sum();
+        trunk_len + preceding
     }
 }
 
@@ -58,9 +50,6 @@ pub struct ForkTranscriptLog {
     pub initial_state: PoseidonWord,
     /// The fork identifier (1-based: fork 0 = trunk, 1..N = chip forks).
     pub fork_id: usize,
-    /// Global tidx offset for this fork's first operation (position in the
-    /// unified tidx space: trunk_len + sum of previous forks' lengths).
-    pub global_tidx_offset: usize,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -100,7 +89,10 @@ pub struct TowerPreflight {
 pub struct TowerChipTranscriptRange {
     pub chip_idx: usize,
     pub instance_idx: usize,
+    /// Fork-local tidx (position within the fork's transcript log).
     pub tidx: usize,
+    /// Index into `Preflight::fork_transcripts`.
+    pub fork_idx: usize,
     pub tower_replay: TowerReplayResult,
 }
 
@@ -117,7 +109,10 @@ pub struct BatchConstraintPreflight {
 pub struct ChipTranscriptRange {
     pub chip_idx: usize,
     pub instance_idx: usize,
+    /// Fork-local tidx (position within the fork's transcript log).
     pub tidx: usize,
+    /// Index into `Preflight::fork_transcripts`.
+    pub fork_idx: usize,
 }
 
 #[allow(dead_code)]

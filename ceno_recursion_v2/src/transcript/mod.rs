@@ -297,7 +297,10 @@ impl TranscriptModule {
                 preflight.proof_shape.fork_start_tidx,
             );
 
-            // Fill fork rows.
+            // Fill fork rows. Global tidx offsets for each fork are computed
+            // on the fly (trunk_len + sum of preceding fork lengths).
+            let trunk_len = preflight.transcript.len();
+            let mut fork_tidx_cursor = trunk_len;
             for (fi, fork_log) in preflight.fork_transcripts.iter().enumerate() {
                 let fork_rows = info.fork_rows[fi];
                 let fork_end = offset + fork_rows;
@@ -314,9 +317,10 @@ impl TranscriptModule {
                     false, // is_proof_start
                     true,  // is_fork_start
                     fork_point_state, // trunk state at fork point
-                    fork_log.global_tidx_offset, // global tidx offset for this fork
+                    fork_tidx_cursor, // computed global tidx offset
                     &mut poseidon2_perm_inputs,
                 );
+                fork_tidx_cursor += fork_log.log.len();
                 offset = fork_end;
             }
 

@@ -95,14 +95,18 @@ impl MainModule {
                         );
                     }
                     let claim = input_layer_claim(chip_proof);
-                    let (log, local_tidx) = preflight.transcript_log_for_tidx(pf_entry.tidx);
-                    let mut ts = ReadOnlyTranscript::new(log, local_tidx);
+                    // Access the fork log directly using fork_idx and fork-local tidx.
+                    let fork_log = preflight.fork_log(pf_entry.fork_idx);
+                    let mut ts = ReadOnlyTranscript::new(fork_log, pf_entry.tidx);
                     record_main_transcript(&mut ts, chip_idx, chip_proof);
 
+                    // Compute global tidx for trace column values.
+                    let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx)
+                        + pf_entry.tidx;
                     let main_record = MainRecord {
                         proof_idx,
                         idx: chip_idx,
-                        tidx: pf_entry.tidx,
+                        tidx: global_tidx,
                         claim,
                     };
                     let sumcheck_record = build_sumcheck_record_from_chip(
@@ -110,7 +114,7 @@ impl MainModule {
                         chip_idx,
                         claim,
                         chip_proof,
-                        pf_entry.tidx,
+                        global_tidx,
                     );
                     paired.push((main_record, sumcheck_record));
                 }
@@ -175,6 +179,7 @@ impl MainModule {
                     chip_idx,
                     instance_idx,
                     tidx,
+                    fork_idx: 0, // unused in forked flow
                 });
             }
         }

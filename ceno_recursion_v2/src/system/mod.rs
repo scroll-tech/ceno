@@ -354,13 +354,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             .collect();
 
         // Phase 3: Run Tower + Main on each fork.
-        // Each fork sponge processes independently. We record fork-local offsets
-        // first, then remap to global tidx after we know the trunk length.
-        struct ForkLocalRecord {
-            tower_local_tidx: usize,
-            main_local_tidx: usize,
-        }
-        let mut fork_records: Vec<ForkLocalRecord> = Vec::with_capacity(num_forks);
+        // Each fork sponge processes independently. We record fork-local tidx
+        // directly — global offsets are computed on the fly at trace gen time.
 
         for (fork_idx, &(chip_idx, instance_idx, chip_proof)) in
             chip_proof_list.iter().enumerate()
@@ -393,11 +388,15 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                     }
                 };
 
-            // Record tower with placeholder tidx (will be remapped below).
+            // Record tower with fork-local tidx.
+            // Fork log layout: [0]=fork_id observe, [1..]=circuit_idx + tower + main.
+            // tower_local is relative to fork_start_len (after fork_id), so
+            // fork-log-local position = 1 (fork_id) + tower_local.
             preflight.gkr.chips.push(TowerChipTranscriptRange {
                 chip_idx,
                 instance_idx,
-                tidx: tower_local, // placeholder
+                tidx: 1 + tower_local,
+                fork_idx,
                 tower_replay,
             });
 
@@ -408,12 +407,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             preflight.main.chips.push(ChipTranscriptRange {
                 chip_idx,
                 instance_idx,
-                tidx: main_local, // placeholder
-            });
-
-            fork_records.push(ForkLocalRecord {
-                tower_local_tidx: tower_local,
-                main_local_tidx: main_local,
+                tidx: 1 + main_local,
+                fork_idx,
             });
         }
 
@@ -429,7 +424,6 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         // fork (from sample_ext on each fork) and D_EF observations per fork
         // (from observe_ext on trunk).
         let trunk_log = sponge.into_log();
-        let trunk_len = trunk_log.len();
 
         preflight.proof_shape.fork_start_tidx = fork_offset;
 
@@ -437,20 +431,17 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         preflight.proof_shape.fork_start_state =
             crate::utils::replay_sponge_state_from_log(&trunk_log, fork_offset);
 
-        // Store fork transcript logs first, then remap tidx using actual log lengths.
-        // Each fork sponge log contains the trunk's history (0..fork_offset)
-        // followed by fork-only operations (fork_id observe + phase 3 ops +
-        // phase 4 sample_ext). We extract the fork portion.
-        let mut fork_log_lens: Vec<usize> = Vec::with_capacity(num_forks);
+        // Store fork transcript logs. Each fork sponge log contains the
+        // trunk's history (0..fork_offset) followed by fork-only operations
+        // (fork_id observe + phase 3 ops + phase 4 sample_ext). Extract the
+        // fork portion. Global offsets are NOT stored — they are computed on
+        // the fly via Preflight::fork_global_offset().
         for (_fork_idx, fork_sponge) in fork_sponges.into_iter().enumerate() {
             let full_fork_log = fork_sponge.into_log();
             let fork_values = full_fork_log.values()[fork_offset..].to_vec();
             let fork_samples = full_fork_log.samples()[fork_offset..].to_vec();
             let fork_log =
                 openvm_stark_backend::TranscriptLog::new(fork_values, fork_samples);
-
-            let fork_log_len = fork_log.len();
-            fork_log_lens.push(fork_log_len);
 
             // Compute the fork's initial sponge state by replaying the
             // full log up to fork_offset + 1 (trunk ops + fork_id observe).
@@ -461,25 +452,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 log: fork_log,
                 initial_state,
                 fork_id: _fork_idx + 1, // 1-based fork IDs (0 = trunk)
-                global_tidx_offset: 0,  // placeholder, filled below
             });
-        }
-
-        // Remap fork-local tidx to global tidx.
-        // Global layout: trunk 0..trunk_len, fork0 trunk_len.., fork1 .., etc.
-        // Use actual fork log lengths (which include the fork_id observe and
-        // the Phase 4 sample_ext) for correct offset accumulation.
-        let mut global_cursor = trunk_len;
-        for (fork_idx, record) in fork_records.iter().enumerate() {
-            preflight.fork_transcripts[fork_idx].global_tidx_offset = global_cursor;
-            // tower_local_tidx and main_local_tidx are relative to
-            // fork_start_len (after fork_id observe). The fork log starts at
-            // the fork_id observe, so add 1 to account for it.
-            preflight.gkr.chips[fork_idx].tidx =
-                global_cursor + 1 + record.tower_local_tidx;
-            preflight.main.chips[fork_idx].tidx =
-                global_cursor + 1 + record.main_local_tidx;
-            global_cursor += fork_log_lens[fork_idx];
         }
 
         preflight.transcript = trunk_log;

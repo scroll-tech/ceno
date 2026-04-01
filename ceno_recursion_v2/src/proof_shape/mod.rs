@@ -132,6 +132,9 @@ impl ProofShapeModule {
 
         // Verifier preprocess: absorb fixed commitment(s).
         // Mirrors v1 verifier: PCS::write_commitment(fixed_commit, transcript)
+        // TODO(hero78119): Move fixed commitment absorption (and AIR constraints)
+        // to a dedicated circuit/verifier module. These should only be observed
+        // once per proof, so a verifier AIR is the natural home.
         if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
             for elem in fixed_commit.commit.clone().into_iter() {
                 ts.observe(elem);
@@ -241,6 +244,8 @@ impl ProofShapeModule {
 
         // Verifier preprocess: absorb witness commitment.
         // Mirrors v1: PCS::write_commitment(&witin_commit, transcript)
+        // TODO(hero78119): Move witness commitment absorption (and AIR constraints)
+        // to a dedicated circuit/verifier module, same as fixed commitments.
         {
             let witin = &proof.witin_commit;
             for elem in witin.commit.clone().into_iter() {
