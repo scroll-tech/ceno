@@ -6,6 +6,7 @@ use openvm_circuit_primitives::{
     encoder::Encoder,
     utils::{and, not, or},
 };
+use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
@@ -13,24 +14,22 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
-use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
         AirShapeBus, AirShapeBusMessage, CachedCommitBus, ExpressionClaimNMaxBus,
         ExpressionClaimNMaxMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
-        FractionFolderInputBus, FractionFolderInputMessage,
-        HyperdimBus, HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus,
-        NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
+        FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage,
+        LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus, NLiftMessage, TowerModuleBus,
+        TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
         AirMetadata,
         bus::{
-            AirShapeProperty, NumPublicValuesBus,
-            NumPublicValuesMessage, ProofShapePermutationBus, ProofShapePermutationMessage,
-            StartingTidxBus, StartingTidxMessage,
+            AirShapeProperty, NumPublicValuesBus, NumPublicValuesMessage, ProofShapePermutationBus,
+            ProofShapePermutationMessage, StartingTidxBus, StartingTidxMessage,
         },
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},

@@ -290,8 +290,7 @@ fn replay_tower_proof_inner(
         let coeffs = build_eq_x_r_vec_sequential(&r_merge);
         let rt_prime = [rt.clone(), r_merge].concat();
 
-        let next_alpha_pows =
-            get_challenge_pows(num_prod_spec + num_logup_spec * 2, transcript);
+        let next_alpha_pows = get_challenge_pows(num_prod_spec + num_logup_spec * 2, transcript);
 
         update_point_evals(
             tower_proof,

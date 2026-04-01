@@ -158,8 +158,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         // Add GKR layers + Sumcheck.
         // Total GKR span: n*(10n+25) - 13 for n>0.
         // layers_cumulative(n) = 10n² + 25n - 13.
-        let gkr_inner = num_layers.clone()
-            * AB::Expr::from_usize(ROUND_LEN / 2)
+        let gkr_inner = num_layers.clone() * AB::Expr::from_usize(ROUND_LEN / 2)
             + AB::Expr::from_usize(
                 ALPHA_LEN + SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN - ROUND_LEN / 2,
             );
@@ -174,8 +173,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.proof_idx,
             TowerLayerInputMessage {
                 idx: local.idx.into(),
-                tidx: tidx_after_alpha_beta.clone()
-                    * has_interactions.clone(),
+                tidx: tidx_after_alpha_beta.clone() * has_interactions.clone(),
                 r0_claim: local.r0_claim.map(Into::into),
                 w0_claim: local.w0_claim.map(Into::into),
                 q0_claim: local.q0_claim.map(Into::into),

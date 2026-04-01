@@ -271,9 +271,7 @@ impl TowerModule {
                             TowerReplayResult::default()
                         }
                     },
-                    None => {
-                        TowerReplayResult::default()
-                    }
+                    None => TowerReplayResult::default(),
                 };
 
                 preflight.gkr.chips.push(TowerChipTranscriptRange {
@@ -788,18 +786,14 @@ pub(crate) fn build_gkr_blob(
             // schedule so that eq_at_r / claim_in / mu / lambda match the native
             // DuplexSponge verifier (the preflight replay used a fresh keccak
             // BasicTranscript and is wrong).
-            let poseidon_replay =
-                replay_tower_proof_poseidon(chip_proof, circuit_vk, &schedule)
-                    .unwrap_or_else(|_err| {
-                        TowerReplayResult::default()
-                    });
+            let poseidon_replay = replay_tower_proof_poseidon(chip_proof, circuit_vk, &schedule)
+                .unwrap_or_else(|_err| TowerReplayResult::default());
 
             // Use sequential index for NestedForLoop compatibility (idx must increment
             // by 0 or 1 within each proof_idx group).
             let idx = entry_idx;
             // Compute global tidx from fork-local tidx for trace column values.
-            let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx)
-                + pf_entry.tidx;
+            let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
             let (
                 chip_input_record,
                 layer_record,

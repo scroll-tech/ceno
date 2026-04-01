@@ -18,19 +18,23 @@
 use core::borrow::Borrow;
 
 use openvm_circuit_primitives::{
-    utils::{and, assert_array_eq, not, or},
     SubAir,
+    utils::{and, assert_array_eq, not, or},
 };
 use openvm_stark_backend::{
-    interaction::InteractionBuilder, BaseAirWithPublicValues, PartitionedBaseAir,
+    BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
-use recursion_circuit::subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir};
-use recursion_circuit::transcript::poseidon2::{CHUNK, POSEIDON2_WIDTH};
+use recursion_circuit::{
+    subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
+    transcript::poseidon2::{CHUNK, POSEIDON2_WIDTH},
+};
 
-use crate::bus::{ForkedTranscriptBus, ForkedTranscriptBusMessage, TranscriptBus, TranscriptBusMessage};
+use crate::bus::{
+    ForkedTranscriptBus, ForkedTranscriptBusMessage, TranscriptBus, TranscriptBusMessage,
+};
 use recursion_circuit::bus::{
     FinalTranscriptStateBus, FinalTranscriptStateMessage, Poseidon2PermuteBus,
     Poseidon2PermuteMessage,
@@ -131,15 +135,13 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         builder.assert_bool(local.is_proof_start);
         builder.assert_bool(local.is_fork_start);
         // A row is a "chain start" if either is_proof_start or is_fork_start
-        let is_chain_start: AB::Expr =
-            local.is_proof_start.into() + local.is_fork_start.into();
+        let is_chain_start: AB::Expr = local.is_proof_start.into() + local.is_fork_start.into();
         // At most one of these can be 1
         builder
             .when(is_chain_start.clone())
             .assert_bool(is_chain_start.clone());
 
-        let next_is_chain_start: AB::Expr =
-            next.is_proof_start.into() + next.is_fork_start.into();
+        let next_is_chain_start: AB::Expr = next.is_proof_start.into() + next.is_fork_start.into();
 
         // proof_idx ordering via NestedForLoopSubAir<1>.
         NestedForLoopSubAir::<1> {}.eval(
@@ -209,12 +211,10 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         // trunk_fork_state for capacity positions and unmasked rate positions.
         for i in 0..CHUNK {
             // Capacity: always constrained
-            builder
-                .when(local.is_fork_start)
-                .assert_eq(
-                    local.prev_state[i + CHUNK],
-                    local.trunk_fork_state[i + CHUNK],
-                );
+            builder.when(local.is_fork_start).assert_eq(
+                local.prev_state[i + CHUNK],
+                local.trunk_fork_state[i + CHUNK],
+            );
             // Rate: constrained where mask[i] == 0 (position not overwritten by absorption)
             builder
                 .when(local.is_fork_start)
@@ -227,8 +227,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         ///////////////////////////////////////////////////////////////////////
         // Two consecutive rows are in the same chain iff next row is valid,
         // is not a proof start, and is not a fork start.
-        let local_next_same_chain: AB::Expr =
-            next_valid.into() - next_is_chain_start.clone();
+        let local_next_same_chain: AB::Expr = next_valid.into() - next_is_chain_start.clone();
 
         let mut count = AB::Expr::ZERO;
         for i in 0..CHUNK {

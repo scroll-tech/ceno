@@ -183,8 +183,13 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::BatchConstraint(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
-            TraceModuleRef::Transcript(_) | TraceModuleRef::Verifier(_) | TraceModuleRef::ProofShape(_) => {
-                panic!("{} module does not participate in per-module preflight", self.name())
+            TraceModuleRef::Transcript(_)
+            | TraceModuleRef::Verifier(_)
+            | TraceModuleRef::ProofShape(_) => {
+                panic!(
+                    "{} module does not participate in per-module preflight",
+                    self.name()
+                )
             }
         }
     }
@@ -340,19 +345,20 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         );
 
         // Phase 2: Fork — clone sponge for each chip proof instance.
-        let chip_proof_list: Vec<(usize, usize, &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>)> =
-            proof
-                .chip_proofs
-                .iter()
-                .flat_map(|(&chip_idx, instances)| {
-                    instances
-                        .iter()
-                        .enumerate()
-                        .map(move |(instance_idx, chip_proof)| {
-                            (chip_idx, instance_idx, chip_proof)
-                        })
-                })
-                .collect();
+        let chip_proof_list: Vec<(
+            usize,
+            usize,
+            &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
+        )> = proof
+            .chip_proofs
+            .iter()
+            .flat_map(|(&chip_idx, instances)| {
+                instances
+                    .iter()
+                    .enumerate()
+                    .map(move |(instance_idx, chip_proof)| (chip_idx, instance_idx, chip_proof))
+            })
+            .collect();
 
         let num_forks = chip_proof_list.len();
         let fork_offset = sponge.len(); // tidx of the fork point in the trunk
@@ -369,8 +375,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         // Each fork sponge processes independently. We record fork-local tidx
         // directly — global offsets are computed on the fly at trace gen time.
 
-        for (fork_idx, &(chip_idx, instance_idx, chip_proof)) in
-            chip_proof_list.iter().enumerate()
+        for (fork_idx, &(chip_idx, instance_idx, chip_proof)) in chip_proof_list.iter().enumerate()
         {
             let fs = &mut fork_sponges[fork_idx];
             let fork_start_len = fs.len();
@@ -382,23 +387,15 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             let tower_local = fs.len() - fork_start_len;
             let _ = crate::tower::record_gkr_transcript(fs, chip_idx, chip_proof);
 
-            let tower_replay =
-                match crate::tower::circuit_vk_for_idx(child_vk, chip_idx) {
-                    Some(circuit_vk) => {
-                        match crate::tower::replay_tower_proof(
-                            chip_proof,
-                            circuit_vk,
-                        ) {
-                            Ok(replay) => replay,
-                            Err(_err) => {
-                                crate::tower::TowerReplayResult::default()
-                            }
-                        }
+            let tower_replay = match crate::tower::circuit_vk_for_idx(child_vk, chip_idx) {
+                Some(circuit_vk) => {
+                    match crate::tower::replay_tower_proof(chip_proof, circuit_vk) {
+                        Ok(replay) => replay,
+                        Err(_err) => crate::tower::TowerReplayResult::default(),
                     }
-                    None => {
-                        crate::tower::TowerReplayResult::default()
-                    }
-                };
+                }
+                None => crate::tower::TowerReplayResult::default(),
+            };
 
             // Record tower with fork-local tidx.
             // Fork log layout: [0]=fork_id observe, [1..]=circuit_idx + tower + main.
@@ -452,8 +449,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             let full_fork_log = fork_sponge.into_log();
             let fork_values = full_fork_log.values()[fork_offset..].to_vec();
             let fork_samples = full_fork_log.samples()[fork_offset..].to_vec();
-            let fork_log =
-                openvm_stark_backend::TranscriptLog::new(fork_values, fork_samples);
+            let fork_log = openvm_stark_backend::TranscriptLog::new(fork_values, fork_samples);
 
             // Compute the fork's initial sponge state by replaying the
             // full log up to fork_offset + 1 (trunk ops + fork_id observe).
@@ -594,8 +590,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             .collect::<Vec<_>>();
 
         for (module, module_ctxs) in modules.into_iter().zip(ctxs_by_module.iter()) {
-            if module_ctxs.is_none() {
-            }
+            if module_ctxs.is_none() {}
         }
 
         let ctxs_by_module: Vec<Vec<AirProvingContext<CpuBackend<SC>>>> =

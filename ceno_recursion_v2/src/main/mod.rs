@@ -101,8 +101,8 @@ impl MainModule {
                     record_main_transcript(&mut ts, chip_idx, chip_proof);
 
                     // Compute global tidx for trace column values.
-                    let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx)
-                        + pf_entry.tidx;
+                    let global_tidx =
+                        preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
                     let main_record = MainRecord {
                         proof_idx,
                         idx: chip_idx,

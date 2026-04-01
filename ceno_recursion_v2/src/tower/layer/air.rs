@@ -392,8 +392,7 @@ where
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 is_last_layer: is_last.clone(),
-                tidx: local.tidx
-                    + AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN),
+                tidx: local.tidx + AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN),
                 claim: local.sumcheck_claim_in.map(Into::into),
             },
             is_non_root_layer.clone() * is_not_dummy.clone(),

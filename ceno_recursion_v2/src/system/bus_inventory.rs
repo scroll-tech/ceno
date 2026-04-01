@@ -9,14 +9,12 @@ use recursion_circuit::{
 
 use crate::bus::{
     CachedCommitBus as LocalCachedCommitBus, CommitmentsBus as LocalCommitmentsBus,
-    ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
-    ForkStateBus as LocalForkStateBus,
+    ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus, ForkStateBus as LocalForkStateBus,
     ForkedTranscriptBus as LocalForkedTranscriptBus,
-    FractionFolderInputBus as LocalFractionFolderInputBus,
-    HyperdimBus as LocalHyperdimBus, LiftedHeightsBus as LocalLiftedHeightsBus, MainBus,
-    MainExpressionClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus,
-    NLiftBus as LocalNLiftBus, PublicValuesBus as LocalPublicValuesBus, TowerModuleBus,
-    TranscriptBus as LocalTranscriptBus,
+    FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
+    LiftedHeightsBus as LocalLiftedHeightsBus, MainBus, MainExpressionClaimBus,
+    MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
+    PublicValuesBus as LocalPublicValuesBus, TowerModuleBus, TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]

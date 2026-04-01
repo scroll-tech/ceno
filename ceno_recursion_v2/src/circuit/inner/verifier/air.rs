@@ -1,6 +1,9 @@
 use std::borrow::Borrow;
 
-use openvm_circuit_primitives::{AlignedBorrow as AlignedBorrow2, utils::{and, assert_array_eq, not}};
+use openvm_circuit_primitives::{
+    AlignedBorrow as AlignedBorrow2,
+    utils::{and, assert_array_eq, not},
+};
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };

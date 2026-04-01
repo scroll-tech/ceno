@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::{
-    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
-    prover::AirProvingContext,
+    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory, prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
@@ -59,9 +58,7 @@ impl VerifierModule {
             for elem in fixed_no_omc.commit.clone().into_iter() {
                 ts.observe(elem);
             }
-            ts.observe(F::from_u64(
-                fixed_no_omc.log2_max_codeword_size as u64,
-            ));
+            ts.observe(F::from_u64(fixed_no_omc.log2_max_codeword_size as u64));
         }
     }
 

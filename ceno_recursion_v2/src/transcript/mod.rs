@@ -14,8 +14,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_symmetric::Permutation;
 
 use crate::system::{
-    AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk,
-    TraceGenModule,
+    AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
 };
 use recursion_circuit::transcript::{
     merkle_verify::{MerkleVerifyAir, MerkleVerifyCols},
@@ -171,10 +170,7 @@ impl TranscriptModule {
             cols.prev_state = prev_poseidon_state;
 
             if is_sample {
-                debug_assert_eq!(
-                    cols.prev_state[CHUNK - 1],
-                    log.values()[tidx]
-                );
+                debug_assert_eq!(cols.prev_state[CHUNK - 1], log.values()[tidx]);
             } else {
                 cols.prev_state[0] = log.values()[tidx];
             }
@@ -194,10 +190,7 @@ impl TranscriptModule {
 
                 cols.mask[idx] = F::ONE;
                 if is_sample {
-                    debug_assert_eq!(
-                        cols.prev_state[CHUNK - 1 - idx],
-                        log.values()[tidx]
-                    );
+                    debug_assert_eq!(cols.prev_state[CHUNK - 1 - idx], log.values()[tidx]);
                 } else {
                     cols.prev_state[idx] = log.values()[tidx];
                 }
@@ -205,8 +198,7 @@ impl TranscriptModule {
                 tidx += 1;
                 idx += 1;
                 if idx == CHUNK {
-                    permuted = tidx < log.len()
-                        && (!is_sample || log.samples()[tidx]);
+                    permuted = tidx < log.len() && (!is_sample || log.samples()[tidx]);
                     break;
                 }
             }
@@ -281,21 +273,19 @@ impl TranscriptModule {
                 transcript_width,
                 &preflight.transcript,
                 pidx,
-                0, // fork_id
-                true, // is_proof_start
-                false, // is_fork_start
+                0,                          // fork_id
+                true,                       // is_proof_start
+                false,                      // is_fork_start
                 [F::ZERO; POSEIDON2_WIDTH], // trunk starts with zero state
-                0, // tidx_offset: trunk starts at global tidx 0
+                0,                          // tidx_offset: trunk starts at global tidx 0
                 &mut poseidon2_perm_inputs,
             );
             offset = trunk_end;
 
             // Compute the sponge state at the fork point by replaying
             // the trunk's pre-fork operations.
-            let fork_point_state = self.replay_sponge_state(
-                &preflight.transcript,
-                preflight.proof_shape.fork_start_tidx,
-            );
+            let fork_point_state = self
+                .replay_sponge_state(&preflight.transcript, preflight.proof_shape.fork_start_tidx);
 
             // Fill fork rows. Global tidx offsets for each fork are computed
             // on the fly (trunk_len + sum of preceding fork lengths).
@@ -314,8 +304,8 @@ impl TranscriptModule {
                     &fork_log.log,
                     pidx,
                     fork_log.fork_id,
-                    false, // is_proof_start
-                    true,  // is_fork_start
+                    false,            // is_proof_start
+                    true,             // is_fork_start
                     fork_point_state, // trunk state at fork point
                     fork_tidx_cursor, // computed global tidx offset
                     &mut poseidon2_perm_inputs,
