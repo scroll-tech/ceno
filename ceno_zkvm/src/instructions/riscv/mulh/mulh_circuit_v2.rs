@@ -1,8 +1,10 @@
 use crate::{
     circuit_builder::CircuitBuilder,
     error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::{LkOp, LkShardramSink},
         riscv::{
             RIVInstruction,
             constants::{LIMB_BITS, UINT_LIMBS, UInt},
@@ -26,19 +28,21 @@ use std::{array, marker::PhantomData};
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
 pub struct MulhConfig<E: ExtensionField> {
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    r_insn: RInstructionConfig<E>,
-    rd_low: [WitIn; UINT_LIMBS],
-    rd_high: Option<[WitIn; UINT_LIMBS]>,
-    rs1_ext: Option<WitIn>,
-    rs2_ext: Option<WitIn>,
+    pub(crate) rs1_read: UInt<E>,
+    pub(crate) rs2_read: UInt<E>,
+    pub(crate) r_insn: RInstructionConfig<E>,
+    pub(crate) rd_low: [WitIn; UINT_LIMBS],
+    pub(crate) rd_high: Option<[WitIn; UINT_LIMBS]>,
+    pub(crate) rs1_ext: Option<WitIn>,
+    pub(crate) rs2_ext: Option<WitIn>,
     phantom: PhantomData<E>,
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBase<E, I> {
     type InstructionConfig = MulhConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -327,6 +331,97 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
+        let rs1 = step.rs1().unwrap().value;
+        let rs1_val = Value::new_unchecked(rs1);
+        let rs2 = step.rs2().unwrap().value;
+        let rs2_val = Value::new_unchecked(rs2);
+
+        let (rd_high, rd_low, carry, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
+            I::INST_KIND,
+            rs1_val
+                .as_u16_limbs()
+                .iter()
+                .map(|x| *x as u32)
+                .collect::<Vec<_>>()
+                .as_slice(),
+            rs2_val
+                .as_u16_limbs()
+                .iter()
+                .map(|x| *x as u32)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        );
+
+        for (rd_low, carry_low) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
+            sink.emit_lk(LkOp::DynamicRange {
+                value: *rd_low as u64,
+                bits: 16,
+            });
+            sink.emit_lk(LkOp::DynamicRange {
+                value: *carry_low as u64,
+                bits: 18,
+            });
+        }
+
+        match I::INST_KIND {
+            InsnKind::MULH | InsnKind::MULHU | InsnKind::MULHSU => {
+                for (rd_high, carry_high) in rd_high.iter().zip(carry[UINT_LIMBS..].iter()) {
+                    sink.emit_lk(LkOp::DynamicRange {
+                        value: *rd_high as u64,
+                        bits: 16,
+                    });
+                    sink.emit_lk(LkOp::DynamicRange {
+                        value: *carry_high as u64,
+                        bits: 18,
+                    });
+                }
+            }
+            _ => {}
+        }
+
+        let sign_mask = 1 << (LIMB_BITS - 1);
+        let ext = (1 << LIMB_BITS) - 1;
+        let rs1_sign = rs1_ext / ext;
+        let rs2_sign = rs2_ext / ext;
+        let rs1_limbs = rs1_val.as_u16_limbs();
+        let rs2_limbs = rs2_val.as_u16_limbs();
+
+        match I::INST_KIND {
+            InsnKind::MULH => {
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
+                    bits: 16,
+                });
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: (2 * (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask)) as u64,
+                    bits: 16,
+                });
+            }
+            InsnKind::MULHSU => {
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
+                    bits: 16,
+                });
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
+                    bits: 16,
+                });
+            }
+            _ => {}
+        }
+    });
+
+    impl_collect_shardram!(r_insn);
+
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::MUL => Some(dispatch::GpuWitgenKind::Mul(0u32)),
+        InsnKind::MULH => Some(dispatch::GpuWitgenKind::Mul(1u32)),
+        InsnKind::MULHU => Some(dispatch::GpuWitgenKind::Mul(2u32)),
+        InsnKind::MULHSU => Some(dispatch::GpuWitgenKind::Mul(3u32)),
+        _ => None,
+    });
 }
 
 fn run_mulh<const NUM_LIMBS: usize, const LIMB_BITS: usize>(

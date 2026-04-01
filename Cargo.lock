@@ -2415,6 +2415,7 @@ dependencies = [
  "p3",
  "rand 0.8.5",
  "rayon",
+ "rustc-hash",
  "serde",
  "smallvec",
  "strum",

@@ -23,10 +23,12 @@ use crate::{
 };
 use ceno_emul::{
     Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, IterAddresses,
-    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, StepCellExtractor,
-    StepIndex, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
-    host_utils::read_all_messages,
+    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
+    StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
+    WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
+#[cfg(feature = "gpu")]
+use ceno_gpu::CudaHal;
 use clap::ValueEnum;
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};
@@ -225,6 +227,9 @@ pub struct ShardContext<'a> {
     pub platform: Platform,
     pub shard_heap_addr_range: Range<Addr>,
     pub shard_hint_addr_range: Range<Addr>,
+    /// Syscall witnesses for StepRecord::syscall() lookups.
+    /// Borrowed from the tracer — no per-shard Vec clone.
+    pub syscall_witnesses: Arc<Vec<SyscallWitness>>,
 }
 
 impl<'a> Default for ShardContext<'a> {
@@ -259,6 +264,7 @@ impl<'a> Default for ShardContext<'a> {
             platform: CENO_PLATFORM.clone(),
             shard_heap_addr_range: CENO_PLATFORM.heap.clone(),
             shard_hint_addr_range: CENO_PLATFORM.hints.clone(),
+            syscall_witnesses: Arc::new(Vec::new()),
         }
     }
 }
@@ -274,6 +280,39 @@ impl<'a> Default for ShardContext<'a> {
 /// for example, if there are 10 shards and 3 provers,
 /// the shard counts will be distributed as 3, 3, and 4, ensuring an even workload across all provers.
 impl<'a> ShardContext<'a> {
+    /// Create a new ShardContext with the same shard metadata but empty record storage.
+    /// Useful for debug comparisons against the actual shard context.
+    pub fn new_empty_like(&self) -> ShardContext<'static> {
+        let max_threads = max_usable_threads();
+        ShardContext {
+            shard_id: self.shard_id,
+            num_shards: self.num_shards,
+            max_cycle: self.max_cycle,
+            addr_future_accesses: self.addr_future_accesses.clone(),
+            addr_accessed_tbs: Either::Left(vec![Vec::new(); max_threads]),
+            read_records_tbs: Either::Left(
+                (0..max_threads)
+                    .map(|_| BTreeMap::new())
+                    .collect::<Vec<_>>(),
+            ),
+            write_records_tbs: Either::Left(
+                (0..max_threads)
+                    .map(|_| BTreeMap::new())
+                    .collect::<Vec<_>>(),
+            ),
+            cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
+            expected_inst_per_shard: self.expected_inst_per_shard,
+            max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
+            prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
+            prev_shard_heap_range: self.prev_shard_heap_range.clone(),
+            prev_shard_hint_range: self.prev_shard_hint_range.clone(),
+            platform: self.platform.clone(),
+            shard_heap_addr_range: self.shard_heap_addr_range.clone(),
+            shard_hint_addr_range: self.shard_hint_addr_range.clone(),
+            syscall_witnesses: self.syscall_witnesses.clone(),
+        }
+    }
+
     pub fn get_forked(&mut self) -> Vec<ShardContext<'_>> {
         match (
             &mut self.read_records_tbs,
@@ -305,6 +344,7 @@ impl<'a> ShardContext<'a> {
                     platform: self.platform.clone(),
                     shard_heap_addr_range: self.shard_heap_addr_range.clone(),
                     shard_hint_addr_range: self.shard_hint_addr_range.clone(),
+                    syscall_witnesses: self.syscall_witnesses.clone(),
                 })
                 .collect_vec(),
             _ => panic!("invalid type"),
@@ -414,8 +454,38 @@ impl<'a> ShardContext<'a> {
     }
 
     #[inline(always)]
+    pub fn insert_read_record(&mut self, addr: WordAddr, record: RAMRecord) {
+        let ram_record = self
+            .read_records_tbs
+            .as_mut()
+            .right()
+            .expect("illegal type");
+        ram_record.insert(addr, record);
+    }
+
+    #[inline(always)]
+    pub fn insert_write_record(&mut self, addr: WordAddr, record: RAMRecord) {
+        let ram_record = self
+            .write_records_tbs
+            .as_mut()
+            .right()
+            .expect("illegal type");
+        ram_record.insert(addr, record);
+    }
+
+    #[inline(always)]
+    pub fn push_addr_accessed(&mut self, addr: WordAddr) {
+        let addr_accessed = self
+            .addr_accessed_tbs
+            .as_mut()
+            .right()
+            .expect("illegal type");
+        addr_accessed.push(addr);
+    }
+
+    #[inline(always)]
     #[allow(clippy::too_many_arguments)]
-    pub fn send(
+    pub fn record_send_without_touch(
         &mut self,
         ram_type: crate::structs::RAMType,
         addr: WordAddr,
@@ -432,15 +502,9 @@ impl<'a> ShardContext<'a> {
             let addr_raw = addr.baddr().0;
             let is_heap = self.platform.heap.contains(&addr_raw);
             let is_hint = self.platform.hints.contains(&addr_raw);
-            // 1. checking reads from the external bus
             if prev_cycle > 0 || (prev_cycle == 0 && (!is_heap && !is_hint)) {
                 let prev_shard_id = self.extract_shard_id_by_cycle(prev_cycle);
-                let ram_record = self
-                    .read_records_tbs
-                    .as_mut()
-                    .right()
-                    .expect("illegal type");
-                ram_record.insert(
+                self.insert_read_record(
                     addr,
                     RAMRecord {
                         ram_type,
@@ -459,22 +523,15 @@ impl<'a> ShardContext<'a> {
                     prev_cycle == 0 && (is_heap || is_hint),
                     "addr {addr_raw:x} prev_cycle {prev_cycle}, is_heap {is_heap}, is_hint {is_hint}",
                 );
-                // 2. handle heap/hint initial reads outside the shard range.
                 let prev_shard_id = if is_heap && !self.shard_heap_addr_range.contains(&addr_raw) {
                     Some(self.extract_shard_id_by_heap_addr(addr_raw))
                 } else if is_hint && !self.shard_hint_addr_range.contains(&addr_raw) {
                     Some(self.extract_shard_id_by_hint_addr(addr_raw))
                 } else {
-                    // dynamic init in current shard, skip and do nothing
                     None
                 };
                 if let Some(prev_shard_id) = prev_shard_id {
-                    let ram_record = self
-                        .read_records_tbs
-                        .as_mut()
-                        .right()
-                        .expect("illegal type");
-                    ram_record.insert(
+                    self.insert_read_record(
                         addr,
                         RAMRecord {
                             ram_type,
@@ -492,18 +549,12 @@ impl<'a> ShardContext<'a> {
             }
         }
 
-        // check write to external mem bus
         if let Some(future_touch_cycle) = self.find_future_next_access(cycle, addr)
             && self.after_current_shard_cycle(future_touch_cycle)
             && self.is_in_current_shard(cycle)
         {
             let shard_cycle = self.aligned_current_ts(cycle);
-            let ram_record = self
-                .write_records_tbs
-                .as_mut()
-                .right()
-                .expect("illegal type");
-            ram_record.insert(
+            self.insert_write_record(
                 addr,
                 RAMRecord {
                     ram_type,
@@ -518,26 +569,36 @@ impl<'a> ShardContext<'a> {
                 },
             );
         }
+    }
 
-        let addr_accessed = self
-            .addr_accessed_tbs
-            .as_mut()
-            .right()
-            .expect("illegal type");
-        addr_accessed.push(addr);
+    #[inline(always)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn send(
+        &mut self,
+        ram_type: crate::structs::RAMType,
+        addr: WordAddr,
+        id: u64,
+        cycle: Cycle,
+        prev_cycle: Cycle,
+        value: Word,
+        prev_value: Option<Word>,
+    ) {
+        self.record_send_without_touch(ram_type, addr, id, cycle, prev_cycle, value, prev_value);
+        self.push_addr_accessed(addr);
     }
 
     /// merge addr accessed in different threads
     pub fn get_addr_accessed(&self) -> FxHashSet<WordAddr> {
-        let mut merged = FxHashSet::default();
         if let Either::Left(addr_accessed_tbs) = &self.addr_accessed_tbs {
+            let total: usize = addr_accessed_tbs.iter().map(|v| v.len()).sum();
+            let mut merged = FxHashSet::with_capacity_and_hasher(total, Default::default());
             for addrs in addr_accessed_tbs {
                 merged.extend(addrs.iter().copied());
             }
+            merged
         } else {
             panic!("invalid type");
         }
-        merged
     }
 
     /// Splits a total count `num_shards` into up to `num_provers` non-empty parts, distributing as evenly as possible.
@@ -663,6 +724,7 @@ impl ShardContextBuilder {
     ) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
+
         ShardContextBuilder {
             cur_shard_id: 0,
             addr_future_accesses: Arc::new(addr_future_accesses),
@@ -776,6 +838,9 @@ pub trait StepSource: Iterator<Item = StepIndex> {
     fn start_new_shard(&mut self);
     fn shard_steps(&self) -> &[StepRecord];
     fn step_record(&self, idx: StepIndex) -> &StepRecord;
+    fn syscall_witnesses(&self) -> &[SyscallWitness];
+    /// Take ownership of syscall witnesses (zero-copy move, leaves empty Vec).
+    fn take_syscall_witnesses(&mut self) -> Vec<SyscallWitness>;
 }
 
 /// Lazily replays `StepRecord`s by re-running the VM up to the number of steps
@@ -847,6 +912,14 @@ impl StepSource for StepReplay {
     #[inline(always)]
     fn step_record(&self, idx: StepIndex) -> &StepRecord {
         self.vm.tracer().step_record(idx)
+    }
+
+    fn syscall_witnesses(&self) -> &[SyscallWitness] {
+        self.vm.tracer().syscall_witnesses()
+    }
+
+    fn take_syscall_witnesses(&mut self) -> Vec<SyscallWitness> {
+        self.vm.tracer_mut().take_syscall_witnesses()
     }
 }
 
@@ -926,8 +999,8 @@ pub fn emulate_program<'a>(
     let reg_final = reg_init
         .iter()
         .map(|rec| {
-            let index = rec.addr as usize;
-            if index < VM_REG_COUNT {
+            if (rec.addr as usize) < VM_REG_COUNT {
+                let index = rec.addr as RegIdx;
                 let vma: WordAddr = Platform::register_vma(index).into();
                 MemFinalRecord {
                     ram_type: RAMType::Register,
@@ -1277,17 +1350,22 @@ pub fn generate_witness<'a, E: ExtensionField>(
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
-            let time = std::time::Instant::now();
             instrunction_dispatch_ctx.begin_shard();
             let (mut shard_ctx, shard_summary) =
-                match shard_ctx_builder.position_next_shard(
-                    &mut step_iter,
-                    |idx, record| instrunction_dispatch_ctx.ingest_step(idx, record),
-                ) {
+                match info_span!("position_next_shard").in_scope(|| {
+                    shard_ctx_builder.position_next_shard(
+                        &mut step_iter,
+                        |idx, record| instrunction_dispatch_ctx.ingest_step(idx, record),
+                    )
+                }) {
                     Some(result) => result,
                     None => return None,
                 };
-            tracing::debug!("position_next_shard finish in {:?}", time.elapsed());
+
+            // Move (not clone) syscall witnesses from tracer into Arc.
+            // take_syscall_witnesses() swaps the tracer's Vec with an empty one — zero copy.
+            // Must be called before shard_steps() to avoid borrow conflict.
+            shard_ctx.syscall_witnesses = Arc::new(step_iter.take_syscall_witnesses());
             let shard_steps = step_iter.shard_steps();
 
             let mut zkvm_witness = ZKVMWitnesses::default();
@@ -1337,31 +1415,106 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 }
             }
 
-            let time = std::time::Instant::now();
-            system_config
-                .config
-                .assign_opcode_circuit(
-                    &system_config.zkvm_cs,
+            let debug_shard_ctx_for_gpu = {
+                #[cfg(feature = "gpu")]
+                if crate::instructions::gpu::config::is_debug_compare_enabled() {
+                    crate::instructions::gpu::utils::debug_compare::set_debug_compare_shard_id(
+                        shard_ctx.shard_id,
+                    );
+                    Some(shard_ctx.new_empty_like())
+                } else {
+                    None
+                }
+                #[cfg(not(feature = "gpu"))]
+                { None::<ShardContext<'static>> }
+            };
+            info_span!("assign_opcode_circuits").in_scope(|| {
+                system_config
+                    .config
+                    .assign_opcode_circuit(
+                        &system_config.zkvm_cs,
+                        &mut shard_ctx,
+                        &mut instrunction_dispatch_ctx,
+                        shard_steps,
+                        &mut zkvm_witness,
+                    )
+            }).unwrap();
+
+            // Flush shared EC/addr buffers from GPU after all opcode circuits are done.
+            // This batch-D2Hs accumulated EC records and addr_accessed into shard_ctx.
+            #[cfg(feature = "gpu")]
+            info_span!("flush_shared_ec").in_scope(|| {
+                crate::instructions::gpu::dispatch::flush_shared_ec_buffers(
                     &mut shard_ctx,
-                    &mut instrunction_dispatch_ctx,
-                    shard_steps,
-                    &mut zkvm_witness,
                 )
-                .unwrap();
-            tracing::debug!("assign_opcode_circuit finish in {:?}", time.elapsed());
-            let time = std::time::Instant::now();
-            system_config
-                .dummy_config
-                .assign_opcode_circuit(
-                    &system_config.zkvm_cs,
-                    &mut shard_ctx,
-                    &instrunction_dispatch_ctx,
-                    shard_steps,
-                    &mut zkvm_witness,
-                )
-                .unwrap();
-            tracing::debug!("assign_dummy_config finish in {:?}", time.elapsed());
-            zkvm_witness.finalize_lk_multiplicities();
+            }).unwrap();
+
+            // Free GPU shard_steps cache after all opcode circuits are done.
+            #[cfg(feature = "gpu")]
+            crate::instructions::gpu::cache::invalidate_shard_steps_cache();
+
+            info_span!("assign_dummy_circuits").in_scope(|| {
+                system_config
+                    .dummy_config
+                    .assign_opcode_circuit(
+                        &system_config.zkvm_cs,
+                        &mut shard_ctx,
+                        &instrunction_dispatch_ctx,
+                        shard_steps,
+                        &mut zkvm_witness,
+                    )
+            }).unwrap();
+            info_span!("finalize_lk_multiplicities").in_scope(|| {
+                zkvm_witness.finalize_lk_multiplicities();
+            });
+
+            // E2E shard-level debug: run all opcode circuits on CPU as baseline,
+            // compare aggregated results (all chips combined) against GPU.
+            if let Some(mut cpu_shard_ctx) = debug_shard_ctx_for_gpu {
+                let mut cpu_witness = ZKVMWitnesses::default();
+                let mut cpu_dispatch_ctx = system_config.inst_dispatch_builder.to_dispatch_ctx();
+                cpu_dispatch_ctx.begin_shard();
+                for (step_idx, step) in shard_steps.iter().enumerate() {
+                    cpu_dispatch_ctx.ingest_step(step_idx, step);
+                }
+
+                // Force CPU path for the debug comparison (thread-local, no env var races).
+                #[cfg(feature = "gpu")]
+                crate::instructions::gpu::dispatch::set_force_cpu_path(true);
+
+                system_config
+                    .config
+                    .assign_opcode_circuit(
+                        &system_config.zkvm_cs,
+                        &mut cpu_shard_ctx,
+                        &mut cpu_dispatch_ctx,
+                        shard_steps,
+                        &mut cpu_witness,
+                    )
+                    .unwrap();
+                system_config
+                    .dummy_config
+                    .assign_opcode_circuit(
+                        &system_config.zkvm_cs,
+                        &mut cpu_shard_ctx,
+                        &cpu_dispatch_ctx,
+                        shard_steps,
+                        &mut cpu_witness,
+                    )
+                    .unwrap();
+                cpu_witness.finalize_lk_multiplicities();
+
+                #[cfg(feature = "gpu")]
+                crate::instructions::gpu::dispatch::set_force_cpu_path(false);
+
+                #[cfg(feature = "gpu")]
+                crate::instructions::gpu::utils::debug_compare::log_shard_ctx_diff("post_opcode_assignment", &cpu_shard_ctx, &shard_ctx);
+
+                // Compare combined_lk_mlt (the merged LK after finalize_lk_multiplicities).
+                // This catches issues where per-chip LK appears correct but the merge differs.
+                #[cfg(feature = "gpu")]
+                crate::instructions::gpu::utils::debug_compare::log_combined_lk_diff(&cpu_witness, &zkvm_witness);
+            }
 
             // Memory record routing (per address / waddr)
             //
@@ -1396,107 +1549,99 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // ├─ later rw? NO  -> ShardRAM + LocalFinalize
             // └─ later rw? YES -> ShardRAM
 
-            let time = std::time::Instant::now();
-            system_config
-                .config
-                .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
-                .unwrap();
-            tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
+            info_span!("assign_table_circuits").in_scope(|| {
+                system_config
+                    .config
+                    .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
+            }).unwrap();
 
-            if shard_ctx.is_first_shard() {
-                let time = std::time::Instant::now();
+            info_span!("assign_init_table").in_scope(|| {
+                if shard_ctx.is_first_shard() {
+                    system_config
+                        .mmu_config
+                        .assign_init_table_circuit(
+                            &system_config.zkvm_cs,
+                            &mut zkvm_witness,
+                            &pi,
+                            &emul_result.final_mem_state.reg,
+                            &emul_result.final_mem_state.mem,
+                            &emul_result.final_mem_state.stack,
+                        )
+                } else {
+                    system_config
+                        .mmu_config
+                        .assign_init_table_circuit(
+                            &system_config.zkvm_cs,
+                            &mut zkvm_witness,
+                            &pi,
+                            &[],
+                            &[],
+                            &[],
+                        )
+                }
+            }).unwrap();
+
+            info_span!("assign_dynamic_init_table").in_scope(|| {
                 system_config
                     .mmu_config
-                    .assign_init_table_circuit(
+                    .assign_dynamic_init_table_circuit(
                         &system_config.zkvm_cs,
+                        &mut zkvm_witness,
+                        &pi,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.heap,
+                    )
+            }).unwrap();
+
+            info_span!("assign_continuation").in_scope(|| {
+                system_config
+                    .mmu_config
+                    .assign_continuation_circuit(
+                        &system_config.zkvm_cs,
+                        &shard_ctx,
                         &mut zkvm_witness,
                         &pi,
                         &emul_result.final_mem_state.reg,
                         &emul_result.final_mem_state.mem,
+                        &emul_result.final_mem_state.hints,
                         &emul_result.final_mem_state.stack,
+                        &emul_result.final_mem_state.heap,
                     )
-                    .unwrap();
-                tracing::debug!("assign_init_table_circuit finish in {:?}", time.elapsed());
-            } else {
-                system_config
-                    .mmu_config
-                    .assign_init_table_circuit(
+            }).unwrap();
+
+            info_span!("assign_program_table").in_scope(|| {
+                zkvm_witness
+                    .assign_table_circuit::<ProgramTableCircuit<E>>(
                         &system_config.zkvm_cs,
-                        &mut zkvm_witness,
-                        &pi,
-                        &[],
-                        &[],
-                        &[],
+                        &system_config.prog_config,
+                        &program,
                     )
-                    .unwrap();
-            }
-
-            let time = std::time::Instant::now();
-            system_config
-                .mmu_config
-                .assign_dynamic_init_table_circuit(
-                    &system_config.zkvm_cs,
-                    &mut zkvm_witness,
-                    &pi,
-                    &emul_result.final_mem_state.hints,
-                    &emul_result.final_mem_state.heap,
-                )
-                .unwrap();
-            tracing::debug!(
-                "assign_dynamic_init_table_circuit finish in {:?}",
-                time.elapsed()
-            );
-            let time = std::time::Instant::now();
-            system_config
-                .mmu_config
-                .assign_continuation_circuit(
-                    &system_config.zkvm_cs,
-                    &shard_ctx,
-                    &mut zkvm_witness,
-                    &pi,
-                    &emul_result.final_mem_state.reg,
-                    &emul_result.final_mem_state.mem,
-                    &emul_result.final_mem_state.hints,
-                    &emul_result.final_mem_state.stack,
-                    &emul_result.final_mem_state.heap,
-                )
-                .unwrap();
-            tracing::debug!("assign_continuation_circuit finish in {:?}", time.elapsed());
-
-            let time = std::time::Instant::now();
-            zkvm_witness
-                .assign_table_circuit::<ProgramTableCircuit<E>>(
-                    &system_config.zkvm_cs,
-                    &system_config.prog_config,
-                    &program,
-                )
-                .unwrap();
-            tracing::debug!("assign_table_circuit finish in {:?}", time.elapsed());
+            }).unwrap();
 
             if let Some(shard_ram_witnesses) =
                 zkvm_witness.get_witness(&ShardRamCircuit::<E>::name())
             {
-                let time = std::time::Instant::now();
-                let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
-                    .iter()
-                    .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
-                    .map(|shard_ram_witness| {
-                        ShardRamCircuit::<E>::extract_ec_sum(
-                            &system_config.mmu_config.ram_bus_circuit,
-                            &shard_ram_witness.witness_rmms[0],
-                        )
-                    })
-                    .sum();
+                info_span!("shard_ram_ec_sum").in_scope(|| {
+                    let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
+                        .iter()
+                        .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
+                        .map(|shard_ram_witness| {
+                            ShardRamCircuit::<E>::extract_ec_sum(
+                                &system_config.mmu_config.ram_bus_circuit,
+                                &shard_ram_witness.witness_rmms[0],
+                            )
+                        })
+                        .sum();
 
-                let xy = shard_ram_ec_sum
-                    .x
-                    .0
-                    .iter()
-                    .chain(shard_ram_ec_sum.y.0.iter());
-                for (f, v) in xy.zip_eq(pi.shard_rw_sum.as_mut_slice()) {
-                    *v = f.to_canonical_u64() as u32;
-                }
-                tracing::debug!("update pi shard_rw_sum finish in {:?}", time.elapsed());
+                    let xy = shard_ram_ec_sum
+                        .x
+                        .0
+                        .iter()
+                        .chain(shard_ram_ec_sum.y.0.iter());
+                    for (f, v) in xy.zip_eq(pi.shard_rw_sum.as_mut_slice()) {
+                        *v = f.to_canonical_u64() as u32;
+                    }
+                });
             }
 
             Some((zkvm_witness, shard_ctx, pi))
@@ -1869,16 +2014,34 @@ fn create_proofs_streaming<
     init_mem_state: &InitMemState,
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
+
+    #[cfg(feature = "gpu")]
+    if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        crate::instructions::gpu::utils::debug_compare::init_debug_compare_report();
+    }
+
+    // Two pipeline modes:
+    //
+    // Default GPU backend (CENO_GPU_ENABLE_WITGEN unset):
+    //   Overlap: CPU witgen (thread A) and GPU prove (thread B) run in parallel.
+    //   CPU produces witness for shard N+1 while GPU proves shard N.
+    //   Uses a bounded(0) rendezvous channel for back-pressure.
+    //
+    // CENO_GPU_ENABLE_WITGEN=1 (GPU witgen) or CPU-only build:
+    //   Sequential: witgen → prove, one shard at a time.
+    //   When GPU witgen is on, GPU is shared between witgen and proving.
+
     let proofs = info_span!("[ceno] app_prove.inner").in_scope(|| {
         #[cfg(feature = "gpu")]
         {
-            use crossbeam::channel;
-            let (tx, rx) = channel::bounded(0);
-            std::thread::scope(|s| {
-                // pipeline cpu/gpu workload
-                // cpu producer
-                s.spawn({
-                    move || {
+            // With GPU feature: check if GPU witgen is enabled to select pipeline mode.
+            if !crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                // Default: overlap CPU witgen with GPU proving.
+                use crossbeam::channel;
+                let (tx, rx) = channel::bounded(0);
+                return std::thread::scope(|s| {
+                    // CPU producer: generate witness shards
+                    s.spawn(move || {
                         let wit_iter = generate_witness(
                             &ctx.system_config,
                             emulation_result,
@@ -1888,11 +2051,12 @@ fn create_proofs_streaming<
                             target_shard_id,
                         );
 
-                        let wit_iter = if let Some(target_shard_id) = target_shard_id {
-                            Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
-                        } else {
-                            Box::new(wit_iter)
-                        };
+                        let wit_iter: Box<dyn Iterator<Item = _>> =
+                            if let Some(target_shard_id) = target_shard_id {
+                                Box::new(wit_iter.skip(target_shard_id))
+                            } else {
+                                Box::new(wit_iter)
+                            };
 
                         for proof_input in wit_iter {
                             if tx.send(proof_input).is_err() {
@@ -1902,14 +2066,10 @@ fn create_proofs_streaming<
                                 break;
                             }
                         }
-                    }
-                });
+                    });
 
-                // gpu consumer
-                {
+                    // GPU consumer: prove each shard as it arrives
                     let mut proofs = Vec::new();
-                    let mut proof_err = None;
-                    let rx = rx;
                     while let Ok((zkvm_witness, shard_ctx, pi)) = rx.recv() {
                         if is_mock_proving {
                             MockProver::assert_satisfied_full(
@@ -1925,33 +2085,25 @@ fn create_proofs_streaming<
 
                         let transcript = Transcript::new(b"riscv");
                         let start = std::time::Instant::now();
-                        match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
-                            Ok(zkvm_proof) => {
-                                tracing::debug!(
-                                    "{}th shard proof created in {:?}",
-                                    shard_ctx.shard_id,
-                                    start.elapsed()
-                                );
-                                proofs.push(zkvm_proof);
-                            }
-                            Err(err) => {
-                                proof_err = Some(err);
-                                break;
-                            }
-                        }
-                    }
-                    drop(rx);
-                    if let Some(err) = proof_err {
-                        panic!("create_proof failed: {err:?}");
+                        let zkvm_proof = prover
+                            .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
+                            .expect("create_proof failed");
+                        tracing::debug!(
+                            "{}th shard proof created in {:?}",
+                            shard_ctx.shard_id,
+                            start.elapsed()
+                        );
+                        proofs.push(zkvm_proof);
                     }
                     proofs
-                }
-            })
+                });
+            }
+            // Fall through: GPU witgen enabled → sequential path below.
         }
 
-        #[cfg(not(feature = "gpu"))]
+        // Sequential: witgen → prove, one shard at a time.
+        // Used by: GPU witgen mode (CENO_GPU_ENABLE_WITGEN=1) and CPU-only builds.
         {
-            // Generate witness
             let wit_iter = generate_witness(
                 &ctx.system_config,
                 emulation_result,
@@ -1961,11 +2113,12 @@ fn create_proofs_streaming<
                 target_shard_id,
             );
 
-            let wit_iter = if let Some(target_shard_id) = target_shard_id {
-                Box::new(wit_iter.skip(target_shard_id)) as Box<dyn Iterator<Item = _>>
-            } else {
-                Box::new(wit_iter)
-            };
+            let wit_iter: Box<dyn Iterator<Item = _>> =
+                if let Some(target_shard_id) = target_shard_id {
+                    Box::new(wit_iter.skip(target_shard_id))
+                } else {
+                    Box::new(wit_iter)
+                };
 
             wit_iter
                 .map(|(zkvm_witness, shard_ctx, pi)| {
@@ -1991,7 +2144,6 @@ fn create_proofs_streaming<
                         shard_ctx.shard_id,
                         start.elapsed()
                     );
-                    // only show e2e stats in cpu mode
                     tracing::info!("e2e proof stat: {}", zkvm_proof);
                     zkvm_proof
                 })
@@ -2014,6 +2166,11 @@ fn create_proofs_streaming<
             cuda_hal.inner().synchronize().unwrap();
         });
     };
+
+    #[cfg(feature = "gpu")]
+    if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        crate::instructions::gpu::utils::debug_compare::assert_debug_compare_report();
+    }
 
     proofs
 }
@@ -2119,7 +2276,9 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 #[cfg(test)]
 mod tests {
     use crate::e2e::{MultiProver, ShardContextBuilder};
-    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepIndex, StepRecord};
+    use ceno_emul::{
+        CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepIndex, StepRecord, SyscallWitness,
+    };
     use itertools::Itertools;
     use std::sync::Arc;
     use tiny_keccak::{Hasher, Keccak};
@@ -2221,6 +2380,14 @@ mod tests {
 
             fn step_record(&self, idx: StepIndex) -> &StepRecord {
                 &self.steps[self.shard_start + idx]
+            }
+
+            fn syscall_witnesses(&self) -> &[SyscallWitness] {
+                &[] // Test replay doesn't track syscalls
+            }
+
+            fn take_syscall_witnesses(&mut self) -> Vec<SyscallWitness> {
+                Vec::new()
             }
         }
 
