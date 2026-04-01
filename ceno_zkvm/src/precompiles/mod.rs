@@ -1,6 +1,7 @@
 mod bitwise_keccakf;
 mod fptower;
 pub(crate) mod lookup_keccakf;
+mod pubio_commit;
 mod sha256;
 mod uint256;
 mod utils;
@@ -12,6 +13,7 @@ pub use lookup_keccakf::{
     ROUNDS as KECCAK_ROUNDS, ROUNDS_CEIL_LOG2 as KECCAK_ROUNDS_CEIL_LOG2, XOR_LOOKUPS,
     run_lookup_keccakf, setup_gkr_circuit as setup_lookup_keccak_gkr_circuit,
 };
+pub use pubio_commit::{PUBIO_COMMIT_WORDS, PUBIO_DIGEST_U16_LIMBS, PubioCommitLayout};
 
 pub use bitwise_keccakf::{
     KeccakLayout as BitwiseKeccakLayout, run_keccakf as run_bitwise_keccakf,

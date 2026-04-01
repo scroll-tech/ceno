@@ -3,11 +3,7 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 #[cfg(feature = "gpu")]
 use crate::scheme::gpu::estimate_chip_proof_memory;
@@ -17,13 +13,9 @@ use crate::scheme::{
     scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
 };
 use either::Either;
-use gkr_iop::hal::MultilinearPolynomial;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{
-    Expression, Instance,
-    mle::{IntoMLE, MultilinearExtension},
-};
+use multilinear_extensions::{Expression, Instance};
 use p3::field::FieldAlgebra;
 use std::iter::Iterator;
 use sumcheck::{
@@ -46,7 +38,7 @@ use crate::{
     structs::{TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
-type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
+type CreateTableProof<E> = (ZKVMChipProof<E>, MainSumcheckEvals<E>, Point<E>);
 
 pub type ZkVMCpuProver<E, PCS> =
     ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
@@ -116,11 +108,11 @@ impl<
         }
     }
 
-    pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> crate::e2e::InitMemState {
+    pub fn setup_init_mem(&self, hints: &[u32]) -> crate::e2e::InitMemState {
         let Some(ctx) = self.pk.program_ctx.as_ref() else {
             panic!("empty program ctx")
         };
-        ctx.setup_init_mem(hints, public_io)
+        ctx.setup_init_mem(hints)
     }
 }
 
@@ -156,29 +148,24 @@ impl<
             shard_id = shard_ctx.shard_id
         )
         .in_scope(|| {
-            let raw_pi = pi.to_vec::<E>();
-            let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
-
             let span = entered_span!("commit_to_pi", profiling_1 = true);
-            // including raw public input to transcript
-            for v in raw_pi.iter().flatten() {
-                transcript.append_field_element(v);
+            // Include transcript-visible public values in canonical circuit order.
+            // The order must match verifier and recursion verifier exactly.
+            for (_, circuit_pk) in self.pk.circuit_pks.iter() {
+                for instance_value in circuit_pk.get_cs().zkvm_v1_css.instance.iter() {
+                    transcript.append_field_element(&pi.query_by_index::<E>(instance_value.0));
+                }
             }
-            exit_span!(span);
 
-            let pi: Vec<MultilinearExtension<E>> =
-                raw_pi.iter().map(|p| p.to_vec().into_mle()).collect();
+            exit_span!(span);
 
             // commit to fixed commitment
             let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
-            if let Some(fixed_commit) = &self.pk.fixed_commit
-                && shard_ctx.is_first_shard()
-            {
+            if let Some(fixed_commit) = self.pk.fixed_commit.as_ref() {
                 PCS::write_commitment(fixed_commit, &mut transcript)
                     .map_err(ZKVMError::PCSError)?;
-            } else if let Some(fixed_commit) = &self.pk.fixed_no_omc_init_commit
-                && !shard_ctx.is_first_shard()
-            {
+            }
+            if let Some(fixed_commit) = self.pk.fixed_no_omc_init_commit.as_ref() {
                 PCS::write_commitment(fixed_commit, &mut transcript)
                     .map_err(ZKVMError::PCSError)?;
             }
@@ -198,10 +185,10 @@ impl<
                 // num_instance from witness might include rotation
                 let num_instances = chip_inputs
                     .iter()
-                    .flat_map(|chip_input| &chip_input.num_instances)
+                    .flat_map(|chip_input| chip_input.num_instances)
                     .collect_vec();
 
-                if num_instances.is_empty() {
+                if num_instances.iter().sum::<usize>() == 0 {
                     continue;
                 }
 
@@ -210,7 +197,7 @@ impl<
                 transcript.append_field_element(&E::BaseField::from_canonical_usize(*circuit_idx));
                 for num_instance in num_instances {
                     transcript
-                        .append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
+                        .append_field_element(&E::BaseField::from_canonical_usize(num_instance));
                 }
             }
 
@@ -275,10 +262,6 @@ impl<
             ];
             tracing::debug!("global challenges in prover: {:?}", challenges);
 
-            let public_input_span = entered_span!("public_input", profiling_1 = true);
-            let public_input = self.device.transport_mles(&pi);
-            exit_span!(public_input_span);
-
             let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
 
             // Phase 1: Build all ChipTasks
@@ -291,8 +274,7 @@ impl<
                 &witness_data,
                 fixed_mles,
                 challenges,
-                public_input,
-                &pi_evals,
+                &pi,
                 &circuit_trace_indices,
             );
             exit_span!(build_tasks_span);
@@ -307,11 +289,7 @@ impl<
 
             // Phase 3: Collect results
             let collect_results_span = entered_span!("collect_chip_results", profiling_1 = true);
-            let (chip_proofs, points, evaluations, pi_updates) =
-                Self::collect_chip_results(results);
-            for (idx, eval) in pi_updates {
-                pi_evals[idx] = eval;
-            }
+            let (chip_proofs, points, evaluations) = Self::collect_chip_results(results);
             exit_span!(collect_results_span);
             exit_span!(main_proofs_span);
 
@@ -335,13 +313,7 @@ impl<
             });
             exit_span!(pcs_opening);
 
-            let vm_proof = ZKVMProof::new(
-                raw_pi,
-                pi_evals,
-                chip_proofs,
-                witin_commit,
-                mpcs_opening_proof,
-            );
+            let vm_proof = ZKVMProof::new(pi, chip_proofs, witin_commit, mpcs_opening_proof);
 
             Ok(vm_proof)
         })
@@ -389,7 +361,7 @@ impl<
                     let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
                         unsafe { std::mem::transmute(task.input) };
 
-                    let (proof, pi_in_evals, input_opening_point) =
+                    let (proof, opening_evals, input_opening_point) =
                         create_chip_proof_gpu_impl::<E, PCS>(
                             task.circuit_name.as_str(),
                             task.pk,
@@ -406,7 +378,7 @@ impl<
                         task_id: task.task_id,
                         circuit_idx: task.circuit_idx,
                         proof,
-                        pi_in_evals,
+                        opening_evals,
                         input_opening_point,
                         has_witness_or_fixed: task.has_witness_or_fixed,
                     })
@@ -424,14 +396,14 @@ impl<
             // Prepare: deferred extraction for GPU, no-op for CPU
             self.device.prepare_chip_input(&mut task, witness_data);
 
-            let (proof, pi_in_evals, input_opening_point) =
+            let (proof, opening_evals, input_opening_point) =
                 self.create_chip_proof(&task, transcript)?;
 
             Ok(ChipTaskResult {
                 task_id: task.task_id,
                 circuit_idx: task.circuit_idx,
                 proof,
-                pi_in_evals,
+                opening_evals,
                 input_opening_point,
                 has_witness_or_fixed: task.has_witness_or_fixed,
             })
@@ -523,20 +495,6 @@ impl<
         } = evals;
         exit_span!(span);
 
-        // evaluate pi if there is instance query
-        let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
-        if !cs.instance_openings().is_empty() {
-            let span = entered_span!("pi::evals", profiling_2 = true);
-            for &Instance(idx) in cs.instance_openings() {
-                let poly = &input.public_input[idx];
-                pi_in_evals.insert(
-                    idx,
-                    poly.eval(input_opening_point[..poly.num_vars()].to_vec()),
-                );
-            }
-            exit_span!(span);
-        }
-
         Ok((
             ZKVMChipProof {
                 r_out_evals,
@@ -546,11 +504,12 @@ impl<
                 gkr_iop_proof,
                 tower_proof,
                 ecc_proof,
-                fixed_in_evals,
-                wits_in_evals,
-                num_instances: input.num_instances.clone(),
+                num_instances: input.num_instances,
             },
-            pi_in_evals,
+            MainSumcheckEvals {
+                wits_in_evals,
+                fixed_in_evals,
+            },
             input_opening_point,
         ))
     }
@@ -561,14 +520,13 @@ impl<
     fn build_chip_tasks<'data>(
         &self,
         shard_ctx: &ShardContext,
-        name_and_instances: Vec<(String, Vec<usize>)>,
+        name_and_instances: Vec<(String, [usize; 2])>,
         structural_rmms: Vec<witness::RowMajorMatrix<E::BaseField>>,
         #[allow(unused_mut)] mut witness_mles: Vec<PB::MultilinearPoly<'data>>,
         witness_data: &PB::PcsData,
         mut fixed_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
         challenges: [E; 2],
-        public_input: Vec<Arc<PB::MultilinearPoly<'data>>>,
-        pi_evals: &[E],
+        pi: &PublicValues,
         circuit_trace_indices: &[Option<usize>],
     ) -> Vec<ChipTask<'_, PB>> {
         // CPU path: eagerly extract witness MLEs from pcs_data
@@ -600,11 +558,11 @@ impl<
             let pk = self.pk.circuit_pks.get(&circuit_name).unwrap();
             let cs = pk.get_cs();
             if !shard_ctx.is_first_shard() && cs.with_omc_init_only() {
-                assert!(num_instances.is_empty());
+                assert_eq!(num_instances, [0, 0]);
                 // skip drain respective fixed because we use different set of fixed commitment
                 continue;
             }
-            if num_instances.is_empty() {
+            if num_instances.iter().sum::<usize>() == 0 {
                 // we need to drain respective fixed when num_instances is 0
                 if cs.num_fixed() > 0 {
                     let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
@@ -645,18 +603,25 @@ impl<
             };
 
             let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
+
+            let circuit_pi = cs
+                .zkvm_v1_css
+                .instance
+                .iter()
+                .map(|Instance(idx)| Either::Left(pi.query_by_index::<E>(*idx)))
+                .collect_vec();
+
             let input_temp: ProofInput<'_, PB> = ProofInput {
                 witness: witness_mle,
                 fixed,
                 structural_witness,
-                public_input: public_input.clone(),
-                pub_io_evals: pi_evals.iter().map(|p| Either::Right(*p)).collect(),
-                num_instances: num_instances.clone(),
+                pi: circuit_pi,
+                num_instances,
                 has_ecc_ops: cs.has_ecc_ops(),
             };
             // SAFETY: All Arcs in ProofInput contain 'static data:
             // - GPU path: `witness` and `structural_witness` are empty vecs (deferred extraction),
-            //   `fixed` and `public_input` originate from `DeviceProvingKey<'static, PB>`.
+            //   `fixed` originates from `DeviceProvingKey<'static, PB>`.
             // - CPU path: `witness_mle` may borrow non-'static data, but the CPU path always
             //   uses sequential execution (never enters the concurrent scheduler), so the data
             //   remains valid for the lifetime of `build_chip_tasks`'s caller.
@@ -718,12 +683,10 @@ impl<
         BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
         Vec<Point<E>>,
         Vec<Vec<Vec<E>>>,
-        HashMap<usize, E>,
     ) {
         let mut chip_proofs = BTreeMap::new();
         let mut points = Vec::new();
         let mut evaluations = Vec::new();
-        let mut pi_updates = HashMap::new();
 
         for result in results {
             tracing::trace!(
@@ -735,23 +698,17 @@ impl<
             if result.has_witness_or_fixed {
                 points.push(result.input_opening_point);
                 evaluations.push(vec![
-                    result.proof.wits_in_evals.clone(),
-                    result.proof.fixed_in_evals.clone(),
+                    result.opening_evals.wits_in_evals,
+                    result.opening_evals.fixed_in_evals,
                 ]);
-            } else {
-                assert!(result.proof.wits_in_evals.is_empty());
-                assert!(result.proof.fixed_in_evals.is_empty());
             }
             chip_proofs
                 .entry(result.circuit_idx)
                 .or_insert(vec![])
                 .push(result.proof);
-            for (idx, eval) in result.pi_in_evals {
-                pi_updates.insert(idx, eval);
-            }
         }
 
-        (chip_proofs, points, evaluations, pi_updates)
+        (chip_proofs, points, evaluations)
     }
 }
 
@@ -883,20 +840,6 @@ where
     } = evals;
     exit_span!(span);
 
-    // evaluate pi if there is instance query
-    let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
-    if !cs.instance_openings().is_empty() {
-        let span = entered_span!("pi::evals", profiling_2 = true);
-        for &Instance(idx) in cs.instance_openings() {
-            let poly = &input.public_input[idx];
-            pi_in_evals.insert(
-                idx,
-                poly.eval(input_opening_point[..poly.num_vars()].to_vec()),
-            );
-        }
-        exit_span!(span);
-    }
-
     Ok((
         ZKVMChipProof {
             r_out_evals,
@@ -906,11 +849,12 @@ where
             gkr_iop_proof,
             tower_proof,
             ecc_proof,
-            fixed_in_evals,
-            wits_in_evals,
             num_instances: input.num_instances,
         },
-        pi_in_evals,
+        MainSumcheckEvals {
+            wits_in_evals,
+            fixed_in_evals,
+        },
         input_opening_point,
     ))
 }

@@ -1,8 +1,16 @@
 //! Memory-mapped I/O (MMIO) functions.
 
 use ceno_serde::from_slice;
+use ceno_syscall::syscall_pub_io_commit;
 use core::{cell::UnsafeCell, ptr, slice::from_raw_parts};
 use serde::de::DeserializeOwned;
+use std::vec::Vec;
+use tiny_keccak::{Hasher, Keccak};
+
+/// Keccak-256 digest of the empty string (""), encoded as 8 little-endian `u32` words.
+pub const KECCAK_EMPTY_WORDS: [u32; 8] = [
+    0x0146d2c5, 0x3c23f786, 0xb27d7e92, 0xc003c7dc, 0x53b600e5, 0x3b2782ca, 0x04d8fa7b, 0x70a4855d,
+];
 
 struct RegionState {
     next_len_at: *const usize,
@@ -58,8 +66,6 @@ impl RegionState {
 unsafe extern "C" {
     static _hints_start: u8;
     static _lengths_of_hints_start: usize;
-    static _pubio_start: u8;
-    static _lengths_of_pubio_start: usize;
 }
 
 struct RegionStateCell(UnsafeCell<RegionState>);
@@ -77,7 +83,6 @@ impl RegionStateCell {
 unsafe impl Sync for RegionStateCell {}
 
 static HINT_STATE: RegionStateCell = RegionStateCell::new();
-static PUBIO_STATE: RegionStateCell = RegionStateCell::new();
 
 pub fn read_slice<'a>() -> &'a [u8] {
     unsafe {
@@ -100,18 +105,114 @@ where
     read_owned()
 }
 
-pub fn pubio_read_slice<'a>() -> &'a [u8] {
-    unsafe {
-        PUBIO_STATE
-            .with_mut(|state| state.take_slice(&raw const _lengths_of_pubio_start, &_pubio_start))
+fn digest_to_words(digest: [u8; 32]) -> [u32; 8] {
+    core::array::from_fn(|i| {
+        u32::from_le_bytes([
+            digest[i * 4],
+            digest[i * 4 + 1],
+            digest[i * 4 + 2],
+            digest[i * 4 + 3],
+        ])
+    })
+}
+
+fn keccak_words(bytes: &[u8]) -> [u32; 8] {
+    if bytes.is_empty() {
+        return KECCAK_EMPTY_WORDS;
+    }
+
+    let mut keccak = Keccak::v256();
+    keccak.update(bytes);
+    let mut digest = [0u8; 32];
+    keccak.finalize(&mut digest);
+    digest_to_words(digest)
+}
+
+/// Commit a precomputed public-io digest.
+///
+/// The input must already be an 8-word Keccak-256 digest encoded in little-endian words.
+pub fn commit_digest(digest_words: [u32; 8]) {
+    syscall_pub_io_commit(&digest_words);
+}
+
+/// Accumulates committed bytes and emits one digest when finalized.
+#[derive(Clone, Debug, Default)]
+pub struct CommitCtx {
+    bytes: Vec<u8>,
+}
+
+impl CommitCtx {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn digest_words(&self) -> [u32; 8] {
+        keccak_words(&self.bytes)
+    }
+
+    /// Append arbitrary bytes to this context.
+    pub fn commit(&mut self, data: &[u8]) {
+        self.bytes.extend_from_slice(data);
+    }
+
+    /// Compute a final digest by hashing the accumulated bytes once.
+    pub fn finalized(self) {
+        commit_digest(self.digest_words())
     }
 }
 
-/// Read a value from public io, deserialize it, and assert that it matches the given value.
-pub fn commit<T>(v: &T)
-where
-    T: DeserializeOwned + core::fmt::Debug + PartialEq,
-{
-    let expected: T = from_slice(pubio_read_slice()).expect("Deserialised value failed.");
-    assert_eq!(*v, expected);
+/// Commit arbitrary public bytes by hashing with Keccak-256 and emitting digest limbs.
+pub fn commit(data: &[u8]) {
+    commit_digest(keccak_words(data));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CommitCtx, digest_to_words, keccak_words};
+    use tiny_keccak::{Hasher, Keccak};
+
+    #[test]
+    fn keccak_words_matches_manual_conversion() {
+        let words = keccak_words(b"hello world");
+
+        let mut manual = Keccak::v256();
+        manual.update(b"hello world");
+        let mut digest = [0u8; 32];
+        manual.finalize(&mut digest);
+
+        assert_eq!(words, digest_to_words(digest));
+    }
+
+    #[test]
+    fn commit_ctx_digest_words_hashes_all_appended_bytes() {
+        let mut ctx = CommitCtx::new();
+        ctx.commit(b"abc");
+        ctx.commit(b"123");
+
+        let got = ctx.digest_words();
+        let expected = keccak_words(b"abc123");
+
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn commit_ctx_commit_appends_raw_bytes_before_finalize() {
+        let mut ctx = CommitCtx::new();
+        ctx.commit(b"hello");
+        ctx.commit(b" ");
+        ctx.commit(b"world");
+
+        let got = ctx.digest_words();
+        let expected = keccak_words(b"hello world");
+
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "syscall_pub_io_commit should only run inside zkvm")]
+    fn commit_ctx_finalized_is_callable() {
+        let mut ctx = CommitCtx::new();
+        ctx.commit(b"payload");
+        ctx.finalized();
+    }
 }

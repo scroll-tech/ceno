@@ -1,5 +1,5 @@
 use either::Either;
-use ff_ext::ExtensionField;
+use ff_ext::{ExtensionField, SmallField};
 use std::{
     iter::{self, once, repeat_n},
     marker::PhantomData,
@@ -8,11 +8,11 @@ use std::{
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use super::{ZKVMChipProof, ZKVMProof};
+use super::{PublicValues, ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
     instructions::riscv::constants::{
-        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, SHARD_ID_IDX,
+        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
     },
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
@@ -35,7 +35,6 @@ use multilinear_extensions::{
     StructuralWitInType::StackedConstantSequence,
     mle::IntoMLE,
     util::ceil_log2,
-    utils::eval_by_expr_with_instance,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
 use p3::field::FieldAlgebra;
@@ -51,6 +50,39 @@ pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
+    #[allow(clippy::type_complexity)]
+    fn split_input_opening_evals(
+        circuit_vk: &VerifyingKey<E>,
+        proof: &ZKVMChipProof<E>,
+    ) -> Result<(Vec<E>, Vec<E>), ZKVMError> {
+        let cs = circuit_vk.get_cs();
+        let Some(gkr_proof) = proof.gkr_iop_proof.as_ref() else {
+            return Err(ZKVMError::InvalidProof("missing gkr proof".into()));
+        };
+        let Some(last_layer) = gkr_proof.0.last() else {
+            return Err(ZKVMError::InvalidProof("empty gkr proof layers".into()));
+        };
+
+        let evals = &last_layer.main.evals;
+        let wit_len = cs.num_witin();
+        let fixed_len = cs.num_fixed();
+        let min_len = wit_len + fixed_len;
+        if evals.len() < min_len {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "insufficient main evals: {} < required {}",
+                    evals.len(),
+                    min_len
+                )
+                .into(),
+            ));
+        }
+
+        let wits_in_evals = evals[..wit_len].to_vec();
+        let fixed_in_evals = evals[wit_len..(wit_len + fixed_len)].to_vec();
+        Ok((wits_in_evals, fixed_in_evals))
+    }
+
     pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
         ZKVMVerifier { vk }
     }
@@ -116,19 +148,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 }
                 // each shard set init cycle = Tracer::SUBCYCLES_PER_INSN
                 // to satisfy initial reads for all prev_cycle = 0 < init_cycle
-                assert_eq!(vm_proof.pi_evals[INIT_CYCLE_IDX], E::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN));
+                assert_eq!(
+                    vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX),
+                    E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
+                );
                 // check init_pc match prev end_pc
                 if let Some(prev_pc) = prev_pc {
-                    assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], prev_pc);
+                    assert_eq!(
+                       vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX),
+                        prev_pc
+                    );
                 } else {
                     // first chunk, check program entry
-                    assert_eq!(vm_proof.pi_evals[INIT_PC_IDX], E::from_canonical_u32(self.vk.entry_pc));
+                    assert_eq!(
+                        vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX),
+                        E::BaseField::from_canonical_u32(self.vk.entry_pc)
+                    );
                 }
-                let end_pc = vm_proof.pi_evals[END_PC_IDX];
+                let end_pc = vm_proof.public_values.query_by_index::<E>(END_PC_IDX);
 
                 // check memory continuation consistency
-                let heap_addr_start_u32 = vm_proof.pi_evals[HEAP_START_ADDR_IDX].to_canonical_u64() as u32;
-                let heap_len= vm_proof.pi_evals[HEAP_LENGTH_IDX].to_canonical_u64() as u32;
+                let heap_addr_start_u32 = vm_proof
+                    .public_values
+                    .query_by_index::<E>(HEAP_START_ADDR_IDX)
+                    .to_canonical_u64() as u32;
+                let heap_len = vm_proof
+                    .public_values
+                    .query_by_index::<E>(HEAP_LENGTH_IDX)
+                    .to_canonical_u64() as u32;
                 if let Some(prev_heap_addr_end) = prev_heap_addr_end {
                     assert_eq!(heap_addr_start_u32, prev_heap_addr_end);
                     // TODO check heap addr in prime field within range
@@ -165,8 +212,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let mut prod_w = E::ONE;
         let mut logup_sum = E::ZERO;
 
-        let pi_evals = &vm_proof.pi_evals;
-
         // make sure circuit index of chip proofs are
         // subset of that of self.vk.circuit_vks
         for chip_idx in vm_proof.chip_proofs.keys() {
@@ -181,43 +226,25 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        // TODO fix soundness: construct raw public input by ourself and trustless from proof
-        // including raw public input to transcript
-        vm_proof
-            .raw_pi
-            .iter()
-            .for_each(|v| v.iter().for_each(|v| transcript.append_field_element(v)));
+        // Include transcript-visible public values in canonical circuit order.
+        // This must match prover and recursion verifier exactly.
+        for (_, circuit_vk) in self.vk.circuit_vks.iter() {
+            for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
+                transcript.append_field_element(
+                    &vm_proof.public_values.query_by_index::<E>(instance_value.0),
+                );
+            }
+        }
 
         // check shard id
-        assert_eq!(
-            vm_proof.raw_pi[SHARD_ID_IDX],
-            vec![E::BaseField::from_canonical_usize(shard_id)]
-        );
-
-        // verify constant poly(s) evaluation result match
-        // we can evaluate at this moment because constant always evaluate to same value
-        // non-constant poly(s) will be verified in respective (table) proof accordingly
-        izip!(&vm_proof.raw_pi, pi_evals)
-            .enumerate()
-            .try_for_each(|(i, (raw, eval))| {
-                if raw.len() == 1 && E::from(raw[0]) != *eval {
-                    Err(ZKVMError::VerifyError(
-                        format!("{shard_id}th shard pub input on index {i} mismatch  {raw:?} != {eval:?}").into(),
-                    ))
-                } else {
-                    Ok(())
-                }
-            })?;
+        assert_eq!(vm_proof.public_values.shard_id, shard_id as u32);
 
         // write fixed commitment to transcript
         // TODO check soundness if there is no fixed_commit but got fixed proof?
-        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref()
-            && shard_id == 0
-        {
+        if let Some(fixed_commit) = self.vk.fixed_commit.as_ref() {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
-        } else if let Some(fixed_commit) = self.vk.fixed_no_omc_init_commit.as_ref()
-            && shard_id > 0
-        {
+        }
+        if let Some(fixed_commit) = self.vk.fixed_no_omc_init_commit.as_ref() {
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
@@ -291,21 +318,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
-            // check chip proof is well-formed
-            if proof.wits_in_evals.len() != circuit_vk.get_cs().num_witin()
-                || proof.fixed_in_evals.len() != circuit_vk.get_cs().num_fixed()
-            {
-                return Err(ZKVMError::InvalidProof(
-                    format!(
-                        "{shard_id}th shard witness/fixed evaluations length mismatch: ({}, {}) != ({}, {})",
-                        proof.wits_in_evals.len(),
-                        proof.fixed_in_evals.len(),
-                        circuit_vk.get_cs().num_witin(),
-                        circuit_vk.get_cs().num_fixed(),
-                    )
-                        .into(),
-                ));
-            }
             if proof.r_out_evals.len() != circuit_vk.get_cs().num_reads()
                 || proof.w_out_evals.len() != circuit_vk.get_cs().num_writes()
             {
@@ -341,44 +353,44 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .sum::<E>();
 
             transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
-            if circuit_vk.get_cs().is_with_lk_table() {
-                logup_sum -= chip_logup_sum;
-            } else {
-                // getting the number of dummy padding item that we used in this opcode circuit
-                let num_lks = circuit_vk.get_cs().num_lks();
-                // each padding instance contribute to (2^rotation_vars) dummy lookup padding
-                let num_padded_instance = (next_pow2_instance_padding(num_instance) - num_instance)
-                    * (1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0));
-                // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
-                let num_instance_non_selected = num_instance
-                    * ((1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0))
-                        - (circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0) + 1));
-                dummy_table_item_multiplicity +=
-                    num_lks * (num_padded_instance + num_instance_non_selected);
 
-                logup_sum += chip_logup_sum;
-            };
-            let (input_opening_point, chip_shard_ec_sum) = self.verify_chip_proof(
-                circuit_name,
-                circuit_vk,
-                proof,
-                pi_evals,
-                &vm_proof.raw_pi,
-                transcript,
-                NUM_FANIN,
-                &point_eval,
-                &challenges,
-            )?;
+            // compute logup_sum padding
+            // getting the number of dummy padding item that we used in this opcode circuit
+            let num_lks = circuit_vk.get_cs().num_lks();
+            // each padding instance contribute to (2^rotation_vars) dummy lookup padding
+            let num_padded_instance = (next_pow2_instance_padding(num_instance) - num_instance)
+                * (1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0));
+            // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
+            let num_instance_non_selected = num_instance
+                * ((1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0))
+                    - (circuit_vk.get_cs().rotation_subgroup_size().unwrap_or(0) + 1));
+            dummy_table_item_multiplicity +=
+                num_lks * (num_padded_instance + num_instance_non_selected);
+
+            // accumulate logup_sum
+            logup_sum += chip_logup_sum;
+
+            let (input_opening_point, chip_shard_ec_sum, wits_in_evals, fixed_in_evals) = self
+                .verify_chip_proof(
+                    circuit_name,
+                    circuit_vk,
+                    proof,
+                    &vm_proof.public_values,
+                    transcript,
+                    NUM_FANIN,
+                    &point_eval,
+                    &challenges,
+                )?;
             if circuit_vk.get_cs().num_witin() > 0 {
                 witin_openings.push((
                     input_opening_point.len(),
-                    (input_opening_point.clone(), proof.wits_in_evals.clone()),
+                    (input_opening_point.clone(), wits_in_evals),
                 ));
             }
             if circuit_vk.get_cs().num_fixed() > 0 {
                 fixed_openings.push((
                     input_opening_point.len(),
-                    (input_opening_point.clone(), proof.fixed_in_evals.clone()),
+                    (input_opening_point.clone(), fixed_in_evals),
                 ));
             }
             prod_w *= proof.w_out_evals.iter().flatten().copied().product::<E>();
@@ -430,30 +442,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             &mut transcript,
         )
         .map_err(ZKVMError::PCSError)?;
-
-        let initial_global_state = eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            pi_evals,
-            &challenges,
-            &self.vk.initial_global_state_expr,
-        )
-        .right()
-        .unwrap();
-        prod_w *= initial_global_state;
-        let finalize_global_state = eval_by_expr_with_instance(
-            &[],
-            &[],
-            &[],
-            pi_evals,
-            &challenges,
-            &self.vk.finalize_global_state_expr,
-        )
-        .right()
-        .unwrap();
-        prod_r *= finalize_global_state;
-
         // check rw_set equality of shard proof
         if prod_r != prod_w {
             return Err(ZKVMError::VerifyError(
@@ -478,13 +466,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         _name: &str,
         circuit_vk: &VerifyingKey<E>,
         proof: &ZKVMChipProof<E>,
-        pi: &[E],
-        raw_pi: &[Vec<E::BaseField>],
+        public_values: &PublicValues,
         transcript: &mut impl Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
-    ) -> Result<(Point<E>, Option<SepticPoint<E::BaseField>>), ZKVMError> {
+    ) -> Result<(Point<E>, Option<SepticPoint<E::BaseField>>, Vec<E>, Vec<E>), ZKVMError> {
         let composed_cs = circuit_vk.get_cs();
         let ComposedConstrainSystem {
             zkvm_v1_css: cs,
@@ -566,6 +553,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
 
+        // bind read/write/lookup out evals into transcript before deriving tower challenges
+        for eval in proof
+            .r_out_evals
+            .iter()
+            .chain(proof.w_out_evals.iter())
+            .chain(proof.lk_out_evals.iter())
+            .flatten()
+        {
+            transcript.append_field_element_ext(eval);
+        }
+
         let (_, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
             proof
                 .r_out_evals
@@ -621,7 +619,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
         let selector_ctxs = if cs.ec_final_sum.is_empty() {
-            assert_eq!(proof.num_instances.len(), 1);
+            assert_eq!(proof.num_instances[1], 0);
             // it's not shard chip
             vec![
                 SelectorContext::new(0, num_instances, num_var_with_rotation);
@@ -632,7 +630,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .unwrap_or(0)
             ]
         } else {
-            assert_eq!(proof.num_instances.len(), 2);
             // it's shard chip
             tracing::debug!(
                 "num_reads: {}, num_writes: {}, total: {}",
@@ -658,17 +655,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 },
             ]
         };
+        let pi = cs
+            .instance
+            .iter()
+            .map(|instance| E::from(public_values.query_by_index::<E>(instance.0)))
+            .collect_vec();
+        let (wits_in_evals, fixed_in_evals) = Self::split_input_opening_evals(circuit_vk, proof)?;
         let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
             &evals,
-            pi,
-            raw_pi,
+            &pi,
             challenges,
             transcript,
             &selector_ctxs,
         )?;
-        Ok((rt, shard_ec_sum))
+        Ok((rt, shard_ec_sum, wits_in_evals, fixed_in_evals))
     }
 }
 
@@ -784,6 +786,7 @@ impl TowerVerify {
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
                 let eq = eq_eval(out_rt, &rt);
+
                 let expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())

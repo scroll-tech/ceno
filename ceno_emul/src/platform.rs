@@ -13,7 +13,6 @@ use crate::addr::{Addr, RegIdx};
 pub struct Platform {
     pub rom: Range<Addr>,
     pub prog_data: Arc<BTreeSet<Addr>>,
-    pub public_io: Range<Addr>,
 
     pub stack: Range<Addr>,
     pub heap: Range<Addr>,
@@ -34,7 +33,7 @@ impl Display for Platform {
         write!(
             f,
             "Platform {{ rom: {:#x}..{:#x}, prog_data: {:#x}..{:#x}, stack: {:#x}..{:#x}, heap: {:#x}..{:#x}, \
-            public_io: {:#x}..{:#x}, hints: {:#x}..{:#x}, unsafe_ecall_nop: {} }}",
+            hints: {:#x}..{:#x}, unsafe_ecall_nop: {} }}",
             self.rom.start,
             self.rom.end,
             prog_data
@@ -49,8 +48,6 @@ impl Display for Platform {
             self.stack.end,
             self.heap.start,
             self.heap.end,
-            self.public_io.start,
-            self.public_io.end,
             self.hints.start,
             self.hints.end,
             self.unsafe_ecall_nop
@@ -81,21 +78,21 @@ impl Display for Platform {
 // │   STACK (≈128 MB, grows downward)
 // │   0x1800_0000 .. 0x2000_0000
 // │
-// ├───────────────────────────── 0x1800_0000 (stack base / pubio end)
+// ├───────────────────────────── 0x1800_0000 (stack base)
 // │
-// │   PUBLIC I/O (128 MB)
-// │   0x1000_0000 .. 0x1800_0000
+// │   STACK (stack-only memory window, includes reserved low-address area
+// │   previously used for PUBLIC I/O)
+// │   0x1000_0000 .. 0x2000_0000
 // │
-// ├───────────────────────────── 0x1000_0000 (pubio base / rom end)
+// ├───────────────────────────── 0x1000_0000 (stack base / rom end)
 // │
 // │   ROM / TEXT / RODATA (128 MB)
 // │   0x0800_0000 .. 0x1000_0000
 // │
 // └───────────────────────────── 0x8000_0000 (rom base)
 pub static CENO_PLATFORM: Lazy<Platform> = Lazy::new(|| Platform {
-    rom: 0x0800_0000..0x1000_0000,       // 128 MB
-    public_io: 0x1000_0000..0x1800_0000, // 128 MB
-    stack: 0x1800_0000..0x2000_4000, // stack grows downward 128MB, 0x4000 reserved for debug io.
+    rom: 0x0800_0000..0x1000_0000,   // 128 MB
+    stack: 0x1000_0000..0x2000_4000, // stack grows downward, 0x4000 reserved for debug io.
     // we make hints start from 0x2800_0000 thus reserve a 128MB gap for debug io
     // at the end of stack
     hints: 0x2800_0000..0x3000_0000, // 128 MB
@@ -121,10 +118,6 @@ impl Platform {
 
     pub fn is_ram(&self, addr: Addr) -> bool {
         self.stack.contains(&addr) || self.heap.contains(&addr) || self.is_prog_data(addr)
-    }
-
-    pub fn is_pub_io(&self, addr: Addr) -> bool {
-        self.public_io.contains(&addr)
     }
 
     pub fn is_hints(&self, addr: Addr) -> bool {
@@ -155,7 +148,7 @@ impl Platform {
     }
 
     pub fn can_write(&self, addr: Addr) -> bool {
-        self.is_ram(addr) || self.is_pub_io(addr) || self.is_hints(addr)
+        self.is_ram(addr) || self.is_hints(addr)
     }
 
     // Environment calls.
@@ -187,13 +180,7 @@ impl Platform {
 
     /// Validate the platform configuration, range shall not overlap.
     pub fn validate(&self) -> bool {
-        let mut ranges = [
-            &self.rom,
-            &self.stack,
-            &self.heap,
-            &self.public_io,
-            &self.hints,
-        ];
+        let mut ranges = [&self.rom, &self.stack, &self.heap, &self.hints];
         ranges.sort_by_key(|r| r.start);
         for i in 0..ranges.len() - 1 {
             if ranges[i].end > ranges[i + 1].start {
