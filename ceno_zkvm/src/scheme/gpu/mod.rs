@@ -290,11 +290,6 @@ pub fn prove_main_constraints_impl<
             },
         ]
     };
-    let pub_io_mles = cs
-        .instance_openings
-        .iter()
-        .map(|instance| input.public_input[instance.0].clone())
-        .collect_vec();
     let GKRProverOutput {
         gkr_proof,
         opening_evaluations,
@@ -304,20 +299,15 @@ pub fn prove_main_constraints_impl<
         num_var_with_rotation,
         gkr::GKRCircuitWitness {
             layers: vec![LayerWitness(
-                chain!(
-                    &input.witness,
-                    &input.fixed,
-                    &pub_io_mles,
-                    &input.structural_witness,
-                )
-                .cloned()
-                .collect_vec(),
+                chain!(&input.witness, &input.fixed, &input.structural_witness,)
+                    .cloned()
+                    .collect_vec(),
             )],
         },
         // eval value doesn't matter as it won't be used by prover
         &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
         &input
-            .pub_io_evals
+            .pi
             .iter()
             .map(|v| v.map_either(E::from, |v| v).into_inner())
             .collect_vec(),

@@ -112,8 +112,7 @@ fn bench_add(c: &mut Criterion) {
                             fixed: vec![],
                             witness: polys,
                             structural_witness: vec![],
-                            public_input: vec![],
-                            pub_io_evals: vec![],
+                            pi: vec![],
                             num_instances: [num_instances, 0],
                             has_ecc_ops: false,
                         };

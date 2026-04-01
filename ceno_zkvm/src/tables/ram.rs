@@ -2,7 +2,7 @@ use ceno_emul::{Addr, VM_REG_COUNT, WORD_SIZE};
 use ff_ext::ExtensionField;
 use gkr_iop::error::CircuitBuilderError;
 use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
-use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit, PubIORamInitCircuit};
+use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit};
 
 use crate::{
     instructions::riscv::constants::UINT_LIMBS,
@@ -38,11 +38,12 @@ impl DynVolatileRamTable for HeapTable {
         params: &ProgramParams,
     ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
         let max_len = Self::max_len(params);
+        let offset_instance_id = cb.query_heap_start_addr()?.0 as WitnessId;
         let addr = cb.create_structural_witin(
             || "addr",
             StructuralWitInType::EqualDistanceDynamicSequence {
                 max_len,
-                offset_instance_id: cb.query_heap_start_addr()?.0 as WitnessId,
+                offset_instance_id,
                 multi_factor: WORD_SIZE,
                 descending: Self::DESCENDING,
             },
@@ -143,11 +144,12 @@ impl DynVolatileRamTable for HintsTable {
         params: &ProgramParams,
     ) -> Result<(Expression<E>, StructuralWitIn), CircuitBuilderError> {
         let max_len = Self::max_len(params);
+        let offset_instance_id = cb.query_hint_start_addr()?.0 as WitnessId;
         let addr = cb.create_structural_witin(
             || "addr",
             StructuralWitInType::EqualDistanceDynamicSequence {
                 max_len,
-                offset_instance_id: cb.query_hint_start_addr()?.0 as WitnessId,
+                offset_instance_id,
                 multi_factor: WORD_SIZE,
                 descending: Self::DESCENDING,
             },
@@ -239,22 +241,4 @@ impl NonVolatileTable for StaticMemTable {
 pub type StaticMemInitCircuit<E> =
     NonVolatileRamCircuit<E, StaticMemTable, NonVolatileInitTableConfig<StaticMemTable>>;
 
-#[derive(Clone)]
-pub struct PubIOTable;
-
-impl NonVolatileTable for PubIOTable {
-    const RAM_TYPE: RAMType = RAMType::Memory;
-    const V_LIMBS: usize = UINT_LIMBS;
-    const WRITABLE: bool = false;
-
-    fn name() -> &'static str {
-        "PubIOTable"
-    }
-
-    fn len(params: &ProgramParams) -> usize {
-        params.pubio_len
-    }
-}
-
-pub type PubIOInitCircuit<E> = PubIORamInitCircuit<E, PubIOTable>;
 pub type LocalFinalCircuit<E> = LocalFinalRamCircuit<UINT_LIMBS, E>;

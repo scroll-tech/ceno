@@ -27,5 +27,5 @@ fn main() {
         panic!();
     }
 
-    ceno_rt::commit(&cnt_primes);
+    ceno_rt::commit(&cnt_primes.to_le_bytes());
 }

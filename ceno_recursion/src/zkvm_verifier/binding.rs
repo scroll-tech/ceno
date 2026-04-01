@@ -72,9 +72,7 @@ pub fn decompose_prefixed_layer_bits(n: usize) -> (Vec<usize>, Vec<Vec<F>>) {
 #[derive(DslVariable, Clone)]
 pub struct ZKVMProofInputVariable<C: Config> {
     pub shard_id: Usize<C::N>,
-    pub raw_pi: Array<C, Array<C, Felt<C::F>>>,
-    pub raw_pi_num_variables: Array<C, Var<C::N>>,
-    pub pi_evals: Array<C, Ext<C::F, C::EF>>,
+    pub pi: Array<C, Felt<C::F>>,
     pub chip_proofs: Array<C, Array<C, ZKVMChipProofInputVariable<C>>>,
     pub max_num_var: Var<C::N>,
     pub max_width: Var<C::N>,
@@ -96,9 +94,7 @@ pub struct TowerProofInputVariable<C: Config> {
 
 pub(crate) struct ZKVMProofInput {
     pub shard_id: usize,
-    pub raw_pi: Vec<Vec<F>>,
-    // Evaluation of raw_pi.
-    pub pi_evals: Vec<E>,
+    pub pi: Vec<F>,
     pub chip_proofs: BTreeMap<usize, ZKVMChipProofs>,
     pub witin_commit: BasefoldCommitment,
     pub opening_proof: BasefoldProof,
@@ -110,6 +106,8 @@ impl ZKVMProofInput {
         zkvm_proof: ZKVMProof<E, RecPcs>,
         vk: &ZKVMVerifyingKey<E, RecPcs>,
     ) -> Self {
+        let pi = zkvm_proof.public_values.iter_field::<F>().collect_vec();
+
         let mut chip_witin_num_vars: HashMap<usize, (usize, usize)> = HashMap::new(); // (chip_id, (num_witin, num_fixed))
         let mut chip_indices = zkvm_proof
             .chip_proofs
@@ -137,8 +135,7 @@ impl ZKVMProofInput {
 
         ZKVMProofInput {
             shard_id,
-            raw_pi: zkvm_proof.raw_pi,
-            pi_evals: zkvm_proof.pi_evals,
+            pi,
             chip_proofs: zkvm_proof
                 .chip_proofs
                 .into_iter()
@@ -169,9 +166,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let shard_id = Usize::Var(usize::read(builder));
-        let raw_pi = Vec::<Vec<F>>::read(builder);
-        let raw_pi_num_variables = Vec::<usize>::read(builder);
-        let pi_evals = Vec::<E>::read(builder);
+        let pi = Vec::<F>::read(builder);
         builder.cycle_tracker_start("read chip proofs");
         let chip_proofs = Vec::<ZKVMChipProofs>::read(builder);
         builder.cycle_tracker_end("read chip proofs");
@@ -187,9 +182,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
 
         ZKVMProofInputVariable {
             shard_id,
-            raw_pi,
-            raw_pi_num_variables,
-            pi_evals,
+            pi,
             chip_proofs,
             max_num_var,
             max_width,
@@ -202,11 +195,6 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
 
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        let raw_pi_num_variables: Vec<usize> = self
-            .raw_pi
-            .iter()
-            .map(|v| ceil_log2(v.len().next_power_of_two()))
-            .collect();
         let witin_num_vars = self
             .chip_proofs
             .iter()
@@ -218,21 +206,21 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .map(|proof| proof.wits_in_evals.len().max(1))
+            .map(|proof| proof.num_witin.max(1))
             .collect::<Vec<_>>();
         let fixed_num_vars = self
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .filter(|proof| !proof.fixed_in_evals.is_empty())
+            .filter(|proof| proof.num_fixed > 0)
             .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .filter(|proof| !proof.fixed_in_evals.is_empty())
-            .map(|proof| proof.fixed_in_evals.len())
+            .filter(|proof| proof.num_fixed > 0)
+            .map(|proof| proof.num_fixed)
             .collect::<Vec<_>>();
         let max_num_var = witin_num_vars
             .iter()
@@ -264,9 +252,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let fixed_perm = get_perm(fixed_num_vars);
 
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.shard_id));
-        stream.extend(self.raw_pi.write());
-        stream.extend(raw_pi_num_variables.write());
-        stream.extend(self.pi_evals.write());
+        stream.extend(self.pi.write());
         stream.extend(vec![vec![F::from_canonical_usize(self.chip_proofs.len())]]);
         for proofs in self.chip_proofs.values() {
             stream.extend(proofs.write());
@@ -404,9 +390,6 @@ pub struct ZKVMChipProofInput {
     pub ecc_proof: EccQuarkProofInput,
 
     pub num_instances: [usize; 2],
-
-    pub wits_in_evals: Vec<E>,
-    pub fixed_in_evals: Vec<E>,
 }
 
 impl VecAutoHintable for ZKVMChipProofInput {}
@@ -500,8 +483,6 @@ impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
                 EccQuarkProofInput::dummy()
             },
             num_instances: p.num_instances,
-            wits_in_evals: p.wits_in_evals,
-            fixed_in_evals: p.fixed_in_evals,
         }
     }
 }
@@ -532,9 +513,6 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub num_instances: Array<C, Var<C::N>>,
     pub n_inst_0_bit_decomps: Array<C, Felt<C::F>>,
     pub n_inst_1_bit_decomps: Array<C, Felt<C::F>>,
-
-    pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
-    pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
 }
 impl Hintable<InnerConfig> for ZKVMChipProofInput {
     type HintVariable = ZKVMChipProofInputVariable<InnerConfig>;
@@ -572,11 +550,6 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let n_inst_0_bit_decomps = Vec::<F>::read(builder);
         let n_inst_1_bit_decomps = Vec::<F>::read(builder);
 
-        builder.cycle_tracker_start("read wit/fixed evals");
-        let fixed_in_evals = Vec::<E>::read(builder);
-        let wits_in_evals = Vec::<E>::read(builder);
-        builder.cycle_tracker_end("read wit/fixed evals");
-
         ZKVMChipProofInputVariable {
             idx,
             idx_felt,
@@ -598,8 +571,6 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             num_instances,
             n_inst_0_bit_decomps,
             n_inst_1_bit_decomps,
-            fixed_in_evals,
-            wits_in_evals,
         }
     }
 
@@ -668,9 +639,6 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
 
         stream.extend(n_inst_0_bit_decomps.write());
         stream.extend(n_inst_1_bit_decomps.write());
-
-        stream.extend(self.fixed_in_evals.write());
-        stream.extend(self.wits_in_evals.write());
 
         stream
     }

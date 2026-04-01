@@ -1168,9 +1168,11 @@ name = "ceno_rt"
 version = "0.1.0"
 dependencies = [
  "ceno_serde",
+ "ceno_syscall",
  "getrandom 0.2.16",
  "getrandom 0.3.2",
  "serde",
+ "tiny-keccak",
 ]
 
 [[package]]
