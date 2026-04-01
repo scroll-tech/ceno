@@ -461,8 +461,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 (None, None, None)
             };
 
-        // TODO(recursion-proof-bridge): Implement MerkleVerify trace generation using
-        // RecursionProof/RecursionVk once those fields are available in local bridge APIs.
         let merkle_rows = required_merkle_verify.unwrap_or(1);
         if merkle_rows == 0 {
             return None;

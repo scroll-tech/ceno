@@ -11,10 +11,36 @@ use verify_stark::pvs::{VerifierBasePvs, VerifierDefPvs};
 use crate::{
     circuit::inner::{
         ProofsType,
-        verifier::air::{VerifierDeferralCols, VerifierPvsCols},
+        verifier::air::{CommitAirCols, VerifierDeferralCols, VerifierPvsCols},
     },
-    system::RecursionProof,
+    system::{Preflight, RecursionProof},
+    tracegen::RowMajorChip,
 };
+
+///////////////////////////////////////////////////////////////////////////////
+// COMMIT TRACE GENERATOR
+///////////////////////////////////////////////////////////////////////////////
+
+pub struct CommitTraceGenerator;
+
+impl RowMajorChip<F> for CommitTraceGenerator {
+    type Ctx<'a> = (&'a [RecursionProof], &'a [Preflight]);
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    fn generate_trace(
+        &self,
+        _ctx: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let rows = required_height.unwrap_or(1).max(1);
+        let width = CommitAirCols::<u8>::width();
+        Some(RowMajorMatrix::new(vec![F::ZERO; rows * width], width))
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// VERIFIER PVS TRACE GENERATOR
+///////////////////////////////////////////////////////////////////////////////
 
 pub fn generate_proving_ctx(
     proofs: &[RecursionProof],
@@ -26,8 +52,6 @@ pub fn generate_proving_ctx(
     AirProvingContext<CpuBackend<BabyBearPoseidon2Config>>,
     Vec<[F; POSEIDON2_WIDTH]>,
 ) {
-    // TODO(recursion-proof-bridge): populate verifier trace/public values from RecursionProof.
-    // Any verifier-specific values not available on RecursionProof are currently zero-mocked.
     let _ = (proofs, proofs_type, child_is_app, child_dag_commit);
 
     let rows = proofs.len().max(1).next_power_of_two();

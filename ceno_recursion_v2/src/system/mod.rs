@@ -25,6 +25,7 @@ use std::{iter, mem, sync::Arc};
 use self::utils::test_system_params_zero_pow;
 use crate::{
     batch_constraint::{self, BatchConstraintModule},
+    circuit::inner::verifier::VerifierModule,
     main::MainModule,
     tower::TowerModule,
     transcript::TranscriptModule,
@@ -131,6 +132,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
     pub(crate) bus_idx_manager: BusIndexManager,
     pub(crate) transcript: TranscriptModule,
     pub(crate) proof_shape: ProofShapeModule,
+    pub(crate) verifier: VerifierModule,
     pub(crate) main_module: MainModule,
     pub(crate) gkr: TowerModule,
     #[allow(dead_code)]
@@ -141,6 +143,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
 enum TraceModuleRef<'a> {
     Transcript(&'a TranscriptModule),
     ProofShape(&'a ProofShapeModule),
+    Verifier(&'a VerifierModule),
     Main(&'a MainModule),
     Tower(&'a TowerModule),
     #[allow(dead_code)]
@@ -152,6 +155,7 @@ impl<'a> TraceModuleRef<'a> {
         match self {
             TraceModuleRef::Transcript(_) => "Transcript",
             TraceModuleRef::ProofShape(_) => "ProofShape",
+            TraceModuleRef::Verifier(_) => "Verifier",
             TraceModuleRef::Main(_) => "Main",
             TraceModuleRef::Tower(_) => "Tower",
             TraceModuleRef::BatchConstraint(_) => "BatchConstraint",
@@ -170,9 +174,6 @@ impl<'a> TraceModuleRef<'a> {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         match self {
-            TraceModuleRef::ProofShape(module) => {
-                module.run_preflight(child_vk, proof, preflight, sponge)
-            }
             TraceModuleRef::Main(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
@@ -182,8 +183,8 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::BatchConstraint(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
-            TraceModuleRef::Transcript(_) => {
-                panic!("Transcript module does not participate in preflight")
+            TraceModuleRef::Transcript(_) | TraceModuleRef::Verifier(_) | TraceModuleRef::ProofShape(_) => {
+                panic!("{} module does not participate in per-module preflight", self.name())
             }
         }
     }
@@ -234,6 +235,9 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::BatchConstraint(module) => {
                 module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
             }
+            TraceModuleRef::Verifier(module) => {
+                module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
+            }
         }
     }
 }
@@ -280,6 +284,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             bus_inventory.clone(),
             config.continuations_enabled,
         );
+        let verifier = VerifierModule::new(&mut bus_idx_manager, bus_inventory.clone());
         let main_module = MainModule::new(&mut bus_idx_manager, bus_inventory.clone());
         let gkr = TowerModule::new(
             child_vk.as_ref(),
@@ -294,6 +299,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             bus_idx_manager,
             transcript,
             proof_shape,
+            verifier,
             main_module,
             gkr,
             batch_constraint,
@@ -303,7 +309,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     /// Runs preflight for a single proof, with proper transcript forking.
     ///
     /// This mirrors the native verifier's `verify_proof_validity` fork protocol:
-    /// 1. Trunk: ProofShape module (observe pi, commits, sample α/β)
+    /// 1. Trunk: Observe fixed commits (verifier), per-AIR shape (proof_shape),
+    ///    witness commit (verifier), sample α/β (proof_shape)
     /// 2. Fork: clone sponge per chip, observe fork index, run Tower + Main
     /// 3. Merge: each fork samples 1 ext element → observe into trunk
     #[tracing::instrument(name = "execute_preflight", skip_all)]
@@ -319,12 +326,17 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     {
         let mut preflight = Preflight::default();
 
-        // Phase 1: Trunk operations (ProofShape module).
-        TraceModuleRef::ProofShape(&self.proof_shape).run_preflight(
+        // Phase 1: Trunk operations.
+        // 1a. ProofShape observes raw PIs and per-AIR metadata; the verifier
+        //     module observes fixed + witness commitments at the correct
+        //     Fiat-Shamir positions (interleaved by the ProofShape preflight
+        //     which delegates back to the verifier).
+        self.proof_shape.run_preflight_with_verifier(
             child_vk,
             proof,
             &mut preflight,
             &mut sponge,
+            &self.verifier,
         );
 
         // Phase 2: Fork — clone sponge for each chip proof instance.
@@ -466,9 +478,10 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     ) -> (Vec<Option<&'a [usize]>>, Option<usize>, Option<usize>) {
         let t_n = self.transcript.num_airs();
         let ps_n = self.proof_shape.num_airs();
+        let v_n = self.verifier.num_airs();
         let gkr_n = self.gkr.num_airs();
         let main_n = self.main_module.num_airs();
-        let module_air_counts = [t_n, ps_n, gkr_n, main_n];
+        let module_air_counts = [t_n, ps_n, v_n, gkr_n, main_n];
 
         let Some(heights) = required_heights else {
             return (vec![None; module_air_counts.len()], None, None);
@@ -555,10 +568,9 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         let modules = [
             TraceModuleRef::Transcript(&self.transcript),
             TraceModuleRef::ProofShape(&self.proof_shape),
+            TraceModuleRef::Verifier(&self.verifier),
             TraceModuleRef::Tower(&self.gkr),
             TraceModuleRef::Main(&self.main_module),
-            // TODO(batch-constraint): re-enable once batch tracegen/preflight alignment is fixed.
-            // TraceModuleRef::BatchConstraint(&self.batch_constraint),
         ];
 
         let span = Span::current();
@@ -623,10 +635,9 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
         iter::empty()
             .chain(self.transcript.airs())
             .chain(self.proof_shape.airs())
+            .chain(self.verifier.airs())
             .chain(self.gkr.airs())
             .chain(self.main_module.airs())
-            // TODO(batch-constraint): re-chain batch AIRs after BatchConstraintModule is stable.
-            // .chain(self.batch_constraint.airs())
             .chain([
                 Arc::new(power_checker_air) as AirRef<_>,
                 Arc::new(exp_bits_len_air) as AirRef<_>,

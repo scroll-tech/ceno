@@ -8,7 +8,6 @@ pub mod inner;
 
 pub const CONSTRAINT_EVAL_CACHED_INDEX: usize = 0;
 
-// TODO: move to stark-backend-v2
 pub trait Circuit<SC: StarkProtocolConfig<F = F>> {
     fn airs(&self) -> Vec<AirRef<SC>>;
 }

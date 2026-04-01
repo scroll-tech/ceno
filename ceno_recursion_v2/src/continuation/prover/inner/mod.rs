@@ -157,11 +157,6 @@ where
         child_vk_kind: ChildVkKind,
     ) -> Result<Proof<SC>> {
         let ctx = self.generate_proving_ctx(proofs, child_vk_kind, ProofsType::Vm, None);
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            // TODO enable trace height
-            //     trace_heights_tracing_info::<_, SC>(&ctx.per_trace, &self.circuit.airs());
-        }
-
         let engine = E::new(self.pk.params.clone());
         #[cfg(debug_assertions)]
         debug_constraints(&self.circuit, &ctx, &engine);

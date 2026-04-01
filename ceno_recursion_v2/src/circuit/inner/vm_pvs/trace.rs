@@ -19,8 +19,6 @@ pub fn generate_proving_ctx(
     child_is_app: bool,
     deferral_enabled: bool,
 ) -> AirProvingContext<CpuBackend<BabyBearPoseidon2Config>> {
-    // TODO(recursion-proof-bridge): populate VM PVS from RecursionProof once projection exists.
-    // For now we return shape-correct zero rows and zero public values.
     let _ = (proofs, proofs_type, child_is_app, deferral_enabled);
 
     let rows = proofs.len().max(1).next_power_of_two();

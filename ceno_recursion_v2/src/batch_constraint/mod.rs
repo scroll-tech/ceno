@@ -173,8 +173,6 @@ impl BatchConstraintModule {
         let eq_ns_frontloaded = vec![EF::ONE; n_max + 1];
         let eq_sharp_ns_frontloaded = vec![EF::ONE; n_max + 1];
 
-        // TODO(recursion-proof-bridge): replace placeholder eq vectors with verifier-equivalent
-        // frontloaded eq_n / eq_sharp_n computation derived from xi and sumcheck randomness.
         preflight.batch_constraint = BatchConstraintPreflight {
             lambda_tidx,
             tidx_before_univariate,

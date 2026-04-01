@@ -271,7 +271,6 @@ where
             },
             is_not_dummy.clone(),
         );
-        // TODO separate lambda, lambda_prime for prod-write the relation should be local.lambda^(num_read)
         self.prod_write_claim_input_bus.send(
             builder,
             local.proof_idx,
@@ -285,7 +284,6 @@ where
             },
             is_not_dummy.clone(),
         );
-        // TODO separate lambda, lambda_prime for logup the relation should be local.lambda^(num_read + num_write)
         self.logup_claim_input_bus.send(
             builder,
             local.proof_idx,

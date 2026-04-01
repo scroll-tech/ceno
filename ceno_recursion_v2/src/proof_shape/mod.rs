@@ -16,8 +16,7 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
     proof_shape::{
-        bus::{CommitmentsBus, NumPublicValuesBus, ProofShapePermutationBus, StartingTidxBus},
-        commit::CommitAir,
+        bus::{NumPublicValuesBus, ProofShapePermutationBus, StartingTidxBus},
         proof_shape::ProofShapeAir,
         pvs::PublicValuesAir,
     },
@@ -34,7 +33,6 @@ use recursion_circuit::primitives::{
 };
 
 pub mod bus;
-pub mod commit;
 #[allow(clippy::module_inception)]
 pub mod proof_shape;
 pub mod pvs;
@@ -63,7 +61,6 @@ pub struct ProofShapeModule {
     bus_inventory: BusInventory,
     range_bus: RangeCheckerBus,
     permutation_bus: ProofShapePermutationBus,
-    commitments_tidx_bus: CommitmentsBus,
     starting_tidx_bus: StartingTidxBus,
     num_pvs_bus: NumPublicValuesBus,
 
@@ -100,7 +97,6 @@ impl ProofShapeModule {
             bus_inventory,
             range_bus,
             permutation_bus: ProofShapePermutationBus::new(b.new_bus_idx()),
-            commitments_tidx_bus: CommitmentsBus::new(b.new_bus_idx()),
             starting_tidx_bus: StartingTidxBus::new(b.new_bus_idx()),
             num_pvs_bus: NumPublicValuesBus::new(b.new_bus_idx()),
             idx_encoder,
@@ -112,12 +108,13 @@ impl ProofShapeModule {
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
-    pub fn run_preflight<TS>(
+    pub fn run_preflight_with_verifier<TS>(
         &self,
         child_vk: &RecursionVk,
         proof: &RecursionProof,
         preflight: &mut Preflight,
         ts: &mut TS,
+        verifier: &crate::circuit::inner::verifier::VerifierModule,
     ) where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
@@ -130,27 +127,9 @@ impl ProofShapeModule {
             }
         }
 
-        // Verifier preprocess: absorb fixed commitment(s).
-        // Mirrors v1 verifier: PCS::write_commitment(fixed_commit, transcript)
-        // TODO(hero78119): Move fixed commitment absorption (and AIR constraints)
-        // to a dedicated circuit/verifier module. These should only be observed
-        // once per proof, so a verifier AIR is the natural home.
-        if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
-            for elem in fixed_commit.commit.clone().into_iter() {
-                ts.observe(elem);
-            }
-            ts.observe(F::from_u64(
-                fixed_commit.log2_max_codeword_size as u64,
-            ));
-        }
-        if let Some(fixed_no_omc) = child_vk.fixed_no_omc_init_commit.as_ref() {
-            for elem in fixed_no_omc.commit.clone().into_iter() {
-                ts.observe(elem);
-            }
-            ts.observe(F::from_u64(
-                fixed_no_omc.log2_max_codeword_size as u64,
-            ));
-        }
+        // Fixed commitment observations (fixed_commit, fixed_no_omc_init_commit)
+        // are handled by VerifierModule, which owns the CommitAir constraints.
+        verifier.observe_fixed_commits(child_vk, ts);
 
         // Build per-air shape metadata from present chip proofs.
         let mut sorted_trace_vdata = proof
@@ -242,19 +221,8 @@ impl ProofShapeModule {
             }
         }
 
-        // Verifier preprocess: absorb witness commitment.
-        // Mirrors v1: PCS::write_commitment(&witin_commit, transcript)
-        // TODO(hero78119): Move witness commitment absorption (and AIR constraints)
-        // to a dedicated circuit/verifier module, same as fixed commitments.
-        {
-            let witin = &proof.witin_commit;
-            for elem in witin.commit.clone().into_iter() {
-                ts.observe(elem);
-            }
-            ts.observe(F::from_u64(
-                witin.log2_max_codeword_size as u64,
-            ));
-        }
+        // Witness commitment observation is handled by VerifierModule.
+        verifier.observe_witness_commit(proof, ts);
 
         preflight.proof_shape.alpha_tidx = ts.len();
         let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
@@ -270,12 +238,9 @@ impl ProofShapeModule {
         let proof_shape_width = proof_shape::ProofShapeCols::<u8, 4>::width()
             + self.idx_encoder.width()
             + self.max_cached * DIGEST_SIZE;
-        let commit_width = commit::CommitAirCols::<u8>::width();
         let pvs_width = pvs::PublicValuesCols::<u8>::width();
         let range_width = RangeCheckerCols::<u8>::width();
-        // TODO(recursion-proof-bridge): replace proof-shape module placeholder contexts with
-        // real tracegen so RangeCheckerAir rows are semantically valid, not only width-correct.
-        vec![proof_shape_width, commit_width, pvs_width, range_width]
+        vec![proof_shape_width, pvs_width, range_width]
     }
 }
 
@@ -291,7 +256,6 @@ fn extract_rwlk_counts(child_vk: &RecursionVk, expected_len: usize) -> Vec<(usiz
                     (cs.num_reads(), cs.num_writes(), cs.num_lks())
                 })
                 .unwrap_or_else(|| {
-                    // TODO: Populate GKR count metadata once every AIR is backed by a concrete VK.
                     (0, 0, 0)
                 })
         })
@@ -329,7 +293,7 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk, max_cached: usize) -> Ve
 
 impl AirModule for ProofShapeModule {
     fn num_airs(&self) -> usize {
-        4
+        3
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -341,7 +305,6 @@ impl AirModule for ProofShapeModule {
             idx_encoder: self.idx_encoder.clone(),
             range_bus: self.range_bus,
             permutation_bus: self.permutation_bus,
-            commitments_tidx_bus: self.commitments_tidx_bus,
             starting_tidx_bus: self.starting_tidx_bus,
             num_pvs_bus: self.num_pvs_bus,
             fraction_folder_input_bus: self.bus_inventory.fraction_folder_input_bus,
@@ -363,16 +326,11 @@ impl AirModule for ProofShapeModule {
             transcript_bus: self.bus_inventory.transcript_bus,
             continuations_enabled: self.continuations_enabled,
         };
-        let commit_air = CommitAir {
-            commitments_bus: self.commitments_tidx_bus,
-            transcript_bus: self.bus_inventory.transcript_bus,
-        };
         let range_checker = RangeCheckerAir::<8> {
             bus: self.range_bus,
         };
         vec![
             Arc::new(proof_shape_air) as AirRef<_>,
-            Arc::new(commit_air) as AirRef<_>,
             Arc::new(pvs_air) as AirRef<_>,
             Arc::new(range_checker) as AirRef<_>,
         ]
@@ -418,7 +376,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         );
         let chips = [
             ProofShapeModuleChip::ProofShape(proof_shape),
-            ProofShapeModuleChip::Commit,
             ProofShapeModuleChip::PublicValues,
         ];
         let ctx = (child_vk, proofs, preflights);
@@ -460,7 +417,6 @@ fn zero_air_ctx<SC: StarkProtocolConfig<F = F>>(
 #[strum_discriminants(repr(usize))]
 enum ProofShapeModuleChip {
     ProofShape(proof_shape::ProofShapeChip<4, 8>),
-    Commit,
     PublicValues,
 }
 
@@ -486,11 +442,6 @@ impl RowMajorChip<F> for ProofShapeModuleChip {
     ) -> Option<RowMajorMatrix<F>> {
         match self {
             ProofShapeModuleChip::ProofShape(chip) => chip.generate_trace(ctx, required_height),
-            ProofShapeModuleChip::Commit => {
-                let (_, proofs, preflights) = ctx;
-                let commit_ctx: (&[RecursionProof], &[Preflight]) = (*proofs, *preflights);
-                commit::CommitTraceGenerator.generate_trace(&commit_ctx, required_height)
-            }
             ProofShapeModuleChip::PublicValues => {
                 pvs::PublicValuesTraceGenerator.generate_trace(ctx, required_height)
             }
