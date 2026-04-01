@@ -248,6 +248,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
+        // write witin commitment to transcript
+        PCS::write_commitment(&vm_proof.witin_commit, &mut transcript)
+            .map_err(ZKVMError::PCSError)?;
+
         // write (circuit_idx, num_instance) to transcript
         for (circuit_idx, proofs) in vm_proof.chip_proofs.iter() {
             transcript.append_field_element(&E::BaseField::from_canonical_u32(*circuit_idx as u32));
@@ -256,10 +260,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 transcript.append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
             }
         }
-
-        // write witin commitment to transcript
-        PCS::write_commitment(&vm_proof.witin_commit, &mut transcript)
-            .map_err(ZKVMError::PCSError)?;
 
         #[cfg(debug_assertions)]
         {

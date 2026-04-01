@@ -153,6 +153,19 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         challenger.observe(builder, log2_max_codeword_size_felt);
     }
 
+    challenger_multi_observe(
+        builder,
+        &mut challenger,
+        &zkvm_proof_input.witin_commit.commit.value,
+    );
+    let log2_max_codeword_size_felt = builder.unsafe_cast_var_to_felt(
+        zkvm_proof_input
+            .witin_commit
+            .log2_max_codeword_size
+            .get_var(),
+    );
+    challenger.observe(builder, log2_max_codeword_size_felt);
+
     iter_zip!(builder, zkvm_proof_input.chip_proofs).for_each(|ptr_vec, builder| {
         let chip_proofs = builder.iter_ptr_get(&zkvm_proof_input.chip_proofs, ptr_vec[0]);
         let chip_idx = builder.get(&chip_proofs, 0).idx_felt;
@@ -168,19 +181,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             });
         });
     });
-
-    challenger_multi_observe(
-        builder,
-        &mut challenger,
-        &zkvm_proof_input.witin_commit.commit.value,
-    );
-    let log2_max_codeword_size_felt = builder.unsafe_cast_var_to_felt(
-        zkvm_proof_input
-            .witin_commit
-            .log2_max_codeword_size
-            .get_var(),
-    );
-    challenger.observe(builder, log2_max_codeword_size_felt);
 
     let alpha = challenger.sample_ext(builder);
     let beta = challenger.sample_ext(builder);
