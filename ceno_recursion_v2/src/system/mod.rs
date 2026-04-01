@@ -571,6 +571,8 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             TraceModuleRef::Verifier(&self.verifier),
             TraceModuleRef::Tower(&self.gkr),
             TraceModuleRef::Main(&self.main_module),
+            // TODO(batch-constraint): re-enable once batch tracegen/preflight alignment is fixed.
+            // TraceModuleRef::BatchConstraint(&self.batch_constraint),
         ];
 
         let span = Span::current();
@@ -638,6 +640,8 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
             .chain(self.verifier.airs())
             .chain(self.gkr.airs())
             .chain(self.main_module.airs())
+            // TODO(batch-constraint): re-chain batch AIRs after BatchConstraintModule is stable.
+            // .chain(self.batch_constraint.airs())
             .chain([
                 Arc::new(power_checker_air) as AirRef<_>,
                 Arc::new(exp_bits_len_air) as AirRef<_>,

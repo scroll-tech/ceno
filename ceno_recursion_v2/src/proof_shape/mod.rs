@@ -265,6 +265,7 @@ fn extract_rwlk_counts(child_vk: &RecursionVk, expected_len: usize) -> Vec<(usiz
                     (cs.num_reads(), cs.num_writes(), cs.num_lks())
                 })
                 .unwrap_or_else(|| {
+                    // TODO: Populate GKR count metadata once every AIR is backed by a concrete VK.
                     (0, 0, 0)
                 })
         })
