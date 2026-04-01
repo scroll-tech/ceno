@@ -359,12 +359,6 @@ pub fn build_main_witness<
         "assert circuit"
     );
 
-    let pub_io_mles = cs
-        .instance_openings
-        .iter()
-        .map(|instance| input.public_input[instance.0].clone())
-        .collect_vec();
-
     // check all witness size are power of 2
     assert!(
         input
@@ -372,7 +366,6 @@ pub fn build_main_witness<
             .iter()
             .chain(&input.structural_witness)
             .chain(&input.fixed)
-            .chain(&pub_io_mles)
             .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
     );
 
@@ -387,8 +380,8 @@ pub fn build_main_witness<
         &input.witness,
         &input.structural_witness,
         &input.fixed,
-        &pub_io_mles,
-        &input.pub_io_evals,
+        &[],
+        &input.pi,
         challenges,
     );
 

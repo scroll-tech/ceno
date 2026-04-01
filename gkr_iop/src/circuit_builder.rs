@@ -1,3 +1,4 @@
+use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
     Expression, Fixed, Instance, StructuralWitIn, StructuralWitInType, ToExpr, WitIn, WitnessId,
@@ -5,9 +6,6 @@ use multilinear_extensions::{
 };
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
-
-use ff_ext::ExtensionField;
-use p3_field::PrimeCharacteristicRing;
 
 use crate::{
     RAMType, error::CircuitBuilderError, gkr::layer::ROTATION_OPENING_COUNT,
@@ -101,7 +99,8 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
-    pub instance_openings: Vec<Instance>,
+    // record which public input index is involving in constraint computation
+    pub instance: Vec<Instance>,
 
     pub ec_point_exprs: Vec<Expression<E>>,
     pub ec_slope_exprs: Vec<Expression<E>>,
@@ -174,7 +173,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
-            instance_openings: vec![],
+            instance: vec![],
             ec_final_sum: vec![],
             ec_slope_exprs: vec![],
             ec_point_exprs: vec![],
@@ -258,25 +257,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         f
     }
 
-    pub fn query_instance(&self, idx: usize) -> Result<Instance, CircuitBuilderError> {
+    pub fn query_instance(&mut self, idx: usize) -> Result<Instance, CircuitBuilderError> {
         let i = Instance(idx);
-        Ok(i)
-    }
-
-    pub fn query_instance_for_openings(
-        &mut self,
-        idx: usize,
-    ) -> Result<Instance, CircuitBuilderError> {
-        let i = Instance(idx);
-
         assert!(
-            !self.instance_openings.contains(&i),
-            "query same pubio idx {idx} mle more than once",
+            !self.instance.contains(&i),
+            "query same pubio idx {idx} value more than once",
         );
-        self.instance_openings.push(i);
-
-        // return instance only count
-        Ok(Instance(self.instance_openings.len() - 1))
+        self.instance.push(i);
+        Ok(Instance(self.instance.len() - 1))
     }
 
     pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {

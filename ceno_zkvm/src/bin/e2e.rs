@@ -4,8 +4,8 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
-        Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
-        setup_platform, setup_platform_debug, verify,
+        Checkpoint, FieldType, MultiProver, PcsKind, Preset, public_io_words_to_digest_words,
+        run_e2e_with_checkpoint, setup_platform, setup_platform_debug, verify,
     },
     scheme::{
         ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
@@ -19,8 +19,6 @@ use gkr_iop::hal::ProverBackend;
 use mpcs::{
     Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
 };
-use p3::field::PrimeCharacteristicRing;
-
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
 use tracing::{error, level_filters::LevelFilter};
@@ -102,10 +100,6 @@ struct Args {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
-    /// pub io size in byte
-    #[arg(long, default_value = "1k", value_parser = parse_size)]
-    public_io_size: u32,
-
     /// The security level to use.
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
@@ -176,52 +170,16 @@ fn main() {
         .with(args.profiling.is_none().then_some(default_filter))
         .init();
 
-    // process public input first
-    let public_io = args
-        .public_io
-        .and_then(|public_io| {
-            // if the vector contains only one element, write it as a raw `u32`
-            // otherwise, write the entire vector
-            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
-            if public_io.len() == 1 {
-                CenoStdin::default()
-                    .write(&public_io[0])
-                    .ok()
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            } else {
-                CenoStdin::default()
-                    .write(&public_io)
-                    .ok()
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            }
-        })
-        .unwrap_or_default();
-    assert!(
-        public_io.len() <= args.public_io_size as usize / WORD_SIZE,
-        "require pub io length {} < max public_io_size {}",
-        public_io.len(),
-        args.public_io_size as usize / WORD_SIZE
-    );
+    // process public input first; this is raw u32 public input, not pre-digested words.
+    let public_io = args.public_io.unwrap_or_default();
 
     tracing::info!("Loading ELF file: {}", args.elf.display());
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
     let platform = if cfg!(debug_assertions) {
-        setup_platform_debug(
-            args.platform,
-            &program,
-            args.stack_size,
-            args.heap_size,
-            args.public_io_size,
-        )
+        setup_platform_debug(args.platform, &program, args.stack_size, args.heap_size)
     } else {
-        setup_platform(
-            args.platform,
-            &program,
-            args.stack_size,
-            args.heap_size,
-            args.public_io_size,
-        )
+        setup_platform(args.platform, &program, args.stack_size, args.heap_size)
     };
     tracing::info!("Running on platform {:?} {}", args.platform, platform);
     tracing::info!(
@@ -272,6 +230,7 @@ fn main() {
     );
 
     let target_shard_id = args.shard_id.map(|v| v as usize);
+    let public_io_digest = public_io_words_to_digest_words(&public_io);
 
     match (args.pcs, args.field) {
         (PcsKind::Basefold, FieldType::Goldilocks) => {
@@ -283,7 +242,7 @@ fn main() {
                 platform,
                 multi_prover,
                 &hints,
-                &public_io,
+                public_io_digest,
                 max_steps,
                 args.proof_file,
                 args.vk_file,
@@ -300,7 +259,7 @@ fn main() {
                 platform,
                 multi_prover,
                 &hints,
-                &public_io,
+                public_io_digest,
                 max_steps,
                 args.proof_file,
                 args.vk_file,
@@ -317,7 +276,7 @@ fn main() {
                 platform,
                 multi_prover,
                 &hints,
-                &public_io,
+                public_io_digest,
                 max_steps,
                 args.proof_file,
                 args.vk_file,
@@ -334,7 +293,7 @@ fn main() {
                 platform,
                 multi_prover,
                 &hints,
-                &public_io,
+                public_io_digest,
                 max_steps,
                 args.proof_file,
                 args.vk_file,
@@ -362,7 +321,7 @@ fn run_inner<
     platform: Platform,
     multi_prover: MultiProver,
     hints: &[u32],
-    public_io: &[u32],
+    public_io_digest: [u32; 8],
     max_steps: usize,
     proof_file: PathBuf,
     vk_file: PathBuf,
@@ -375,7 +334,7 @@ fn run_inner<
         platform,
         multi_prover,
         hints,
-        public_io,
+        public_io_digest,
         max_steps,
         checkpoint,
         target_shard_id,
@@ -405,8 +364,7 @@ fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
     // do sanity check
     let transcript = Transcript::new(b"riscv");
     // change public input maliciously should cause verifier to reject proof
-    zkvm_proof.raw_pi[0] = vec![E::BaseField::ONE];
-    zkvm_proof.raw_pi[1] = vec![E::BaseField::ONE];
+    zkvm_proof.public_values.exit_code = 1;
 
     // capture panic message, if have
     let result = with_panic_hook(Box::new(|_info| ()), || {
@@ -429,7 +387,7 @@ fn soundness_test<E: ExtensionField, Pcs: PolynomialCommitmentScheme<E>>(
                 unreachable!()
             };
 
-            if !msg.starts_with("0th round's prover message is not consistent with the claim") {
+            if !msg.starts_with("assertion `left == right` failed") {
                 error!("unknown panic {msg:?}");
                 panic::resume_unwind(err);
             };
