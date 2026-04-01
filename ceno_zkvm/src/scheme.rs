@@ -29,7 +29,7 @@ use crate::{
     scheme::constants::SEPTIC_EXTENSION_DEGREE,
     structs::{TowerProofs, ZKVMVerifyingKey},
 };
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 pub mod constants;
 pub mod cpu;
 #[cfg(feature = "gpu")]
@@ -94,30 +94,28 @@ impl PublicValues {
         PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS
     }
 
-    pub fn iter_field<'a, Base: FieldAlgebra + 'a>(&'a self) -> impl Iterator<Item = Base> + 'a {
+    pub fn iter_field<'a, Base: PrimeCharacteristicRing + 'a>(
+        &'a self,
+    ) -> impl Iterator<Item = Base> + 'a {
         [
-            Base::from_canonical_u32(self.exit_code & 0xffff),
-            Base::from_canonical_u32((self.exit_code >> 16) & 0xffff),
-            Base::from_canonical_u32(self.init_pc),
-            Base::from_canonical_u64(self.init_cycle),
-            Base::from_canonical_u32(self.end_pc),
-            Base::from_canonical_u64(self.end_cycle),
-            Base::from_canonical_u32(self.shard_id),
-            Base::from_canonical_u32(self.heap_start_addr),
-            Base::from_canonical_u32(self.heap_shard_len),
-            Base::from_canonical_u32(self.hint_start_addr),
-            Base::from_canonical_u32(self.hint_shard_len),
+            Base::from_u32(self.exit_code & 0xffff),
+            Base::from_u32((self.exit_code >> 16) & 0xffff),
+            Base::from_u32(self.init_pc),
+            Base::from_u64(self.init_cycle),
+            Base::from_u32(self.end_pc),
+            Base::from_u64(self.end_cycle),
+            Base::from_u32(self.shard_id),
+            Base::from_u32(self.heap_start_addr),
+            Base::from_u32(self.heap_shard_len),
+            Base::from_u32(self.hint_start_addr),
+            Base::from_u32(self.hint_shard_len),
         ]
         .into_iter()
-        .chain(
-            self.shard_rw_sum
-                .iter()
-                .map(|value| Base::from_canonical_u32(*value)),
-        )
+        .chain(self.shard_rw_sum.iter().map(|value| Base::from_u32(*value)))
         .chain(self.public_io_digest.iter().flat_map(|word| {
             [
-                Base::from_canonical_u32(word & 0xffff),
-                Base::from_canonical_u32((word >> 16) & 0xffff),
+                Base::from_u32(word & 0xffff),
+                Base::from_u32((word >> 16) & 0xffff),
             ]
         }))
     }
@@ -154,23 +152,23 @@ impl PublicValues {
     }
     pub fn query_by_index<E: ExtensionField>(&self, index: usize) -> E::BaseField {
         match index {
-            EXIT_CODE_IDX => E::BaseField::from_canonical_u32(self.exit_code & 0xffff),
+            EXIT_CODE_IDX => E::BaseField::from_u32(self.exit_code & 0xffff),
             idx if idx == EXIT_CODE_IDX + 1 => {
-                E::BaseField::from_canonical_u32((self.exit_code >> 16) & 0xffff)
+                E::BaseField::from_u32((self.exit_code >> 16) & 0xffff)
             }
-            INIT_PC_IDX => E::BaseField::from_canonical_u32(self.init_pc),
-            INIT_CYCLE_IDX => E::BaseField::from_canonical_u64(self.init_cycle),
-            END_PC_IDX => E::BaseField::from_canonical_u32(self.end_pc),
-            END_CYCLE_IDX => E::BaseField::from_canonical_u64(self.end_cycle),
-            SHARD_ID_IDX => E::BaseField::from_canonical_u32(self.shard_id),
-            HEAP_START_ADDR_IDX => E::BaseField::from_canonical_u32(self.heap_start_addr),
-            HEAP_LENGTH_IDX => E::BaseField::from_canonical_u32(self.heap_shard_len),
-            HINT_START_ADDR_IDX => E::BaseField::from_canonical_u32(self.hint_start_addr),
-            HINT_LENGTH_IDX => E::BaseField::from_canonical_u32(self.hint_shard_len),
+            INIT_PC_IDX => E::BaseField::from_u32(self.init_pc),
+            INIT_CYCLE_IDX => E::BaseField::from_u64(self.init_cycle),
+            END_PC_IDX => E::BaseField::from_u32(self.end_pc),
+            END_CYCLE_IDX => E::BaseField::from_u64(self.end_cycle),
+            SHARD_ID_IDX => E::BaseField::from_u32(self.shard_id),
+            HEAP_START_ADDR_IDX => E::BaseField::from_u32(self.heap_start_addr),
+            HEAP_LENGTH_IDX => E::BaseField::from_u32(self.heap_shard_len),
+            HINT_START_ADDR_IDX => E::BaseField::from_u32(self.hint_start_addr),
+            HINT_LENGTH_IDX => E::BaseField::from_u32(self.hint_shard_len),
             idx if (SHARD_RW_SUM_IDX..(SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE * 2))
                 .contains(&idx) =>
             {
-                E::BaseField::from_canonical_u32(self.shard_rw_sum[idx - SHARD_RW_SUM_IDX])
+                E::BaseField::from_u32(self.shard_rw_sum[idx - SHARD_RW_SUM_IDX])
             }
             idx if (PUBIO_DIGEST_IDX..(PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS))
                 .contains(&idx) =>
@@ -178,7 +176,7 @@ impl PublicValues {
                 let digest_limb_idx = idx - PUBIO_DIGEST_IDX;
                 let word_idx = digest_limb_idx / UINT_LIMBS;
                 let limb_idx = digest_limb_idx % UINT_LIMBS;
-                E::BaseField::from_canonical_u32(
+                E::BaseField::from_u32(
                     (self.public_io_digest[word_idx] >> (limb_idx * LIMB_BITS)) & LIMB_MASK,
                 )
             }

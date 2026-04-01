@@ -98,19 +98,14 @@ where
 
         let is_transition_round =
             LoopSubAir::local_is_transition(next.is_enabled, next.is_first_round);
-        let computed_is_last = LoopSubAir::local_is_last(
-            local.is_enabled,
-            next.is_enabled,
-            next.is_first_round,
-        );
+        let computed_is_last =
+            LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first_round);
 
         builder
             .when(local.is_enabled)
             .assert_eq(local.is_last_round, computed_is_last.clone());
 
-        builder
-            .when(local.is_first_round)
-            .assert_zero(local.round);
+        builder.when(local.is_first_round).assert_zero(local.round);
         builder
             .when(is_transition_round.clone())
             .assert_eq(next.round, local.round + AB::Expr::ONE);
@@ -122,11 +117,7 @@ where
 
         assert_one_ext(&mut builder.when(local.is_first_round), local.eq_in);
         let eq_out = update_eq(local.eq_in, local.prev_challenge, local.challenge);
-        assert_array_eq(
-            &mut builder.when(local.is_enabled),
-            local.eq_out,
-            eq_out,
-        );
+        assert_array_eq(&mut builder.when(local.is_enabled), local.eq_out, eq_out);
         assert_array_eq(
             &mut builder.when(is_transition_round.clone()),
             local.eq_out,
@@ -145,8 +136,7 @@ where
 
         let is_not_dummy = AB::Expr::ONE - local.is_dummy;
 
-        let receive_mask =
-            local.is_enabled * local.is_first_round * is_not_dummy.clone();
+        let receive_mask = local.is_enabled * local.is_first_round * is_not_dummy.clone();
         self.sumcheck_input_bus.receive(
             builder,
             local.proof_idx,

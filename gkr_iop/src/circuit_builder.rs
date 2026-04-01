@@ -4,6 +4,7 @@ use multilinear_extensions::{
     Expression, Fixed, Instance, StructuralWitIn, StructuralWitInType, ToExpr, WitIn, WitnessId,
     rlc_chip_record,
 };
+use p3_field::PrimeCharacteristicRing;
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 

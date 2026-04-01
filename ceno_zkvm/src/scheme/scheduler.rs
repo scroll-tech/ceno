@@ -21,7 +21,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use gkr_iop::hal::ProverBackend;
 use mpcs::Point;
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 use std::sync::OnceLock;
 use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();

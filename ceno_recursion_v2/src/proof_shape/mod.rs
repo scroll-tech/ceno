@@ -23,7 +23,7 @@ use crate::{
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        RecursionProof, RecursionVk, TraceGenModule, TraceVData,
+        RecursionField, RecursionProof, RecursionVk, TraceGenModule, TraceVData,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
@@ -123,10 +123,14 @@ impl ProofShapeModule {
     {
         let _ = self;
 
-        // Verifier preprocess: absorb raw public input polynomials.
-        for raw_pi in &proof.raw_pi {
-            for &value in raw_pi {
-                ts.observe(value);
+        // Verifier preprocess: absorb public values in canonical circuit-instance order.
+        for (_, circuit_vk) in child_vk.circuit_vks.iter() {
+            for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
+                ts.observe(
+                    proof
+                        .public_values
+                        .query_by_index::<RecursionField>(instance_value.0),
+                );
             }
         }
 
@@ -280,7 +284,7 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk, max_cached: usize) -> Ve
                 .circuit_index_to_name
                 .get(&idx)
                 .and_then(|name| child_vk.circuit_vks.get(name))
-                .map(|circuit_vk| circuit_vk.get_cs().instance_openings().len())
+                .map(|circuit_vk| circuit_vk.get_cs().zkvm_v1_css.instance.len())
                 .unwrap_or(0);
 
             AirMetadata {

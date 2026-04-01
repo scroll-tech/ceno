@@ -16,7 +16,7 @@ use either::Either;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},

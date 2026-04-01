@@ -1,5 +1,6 @@
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};
+use p3::field::PrimeCharacteristicRing;
 use std::{
     iter::{self, once, repeat_n},
     marker::PhantomData,
@@ -150,7 +151,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 // to satisfy initial reads for all prev_cycle = 0 < init_cycle
                 assert_eq!(
                     vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX),
-                    E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
+                    E::BaseField::from_u64(Tracer::SUBCYCLES_PER_INSN)
                 );
                 // check init_pc match prev end_pc
                 if let Some(prev_pc) = prev_pc {
@@ -162,7 +163,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     // first chunk, check program entry
                     assert_eq!(
                         vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX),
-                        E::BaseField::from_canonical_u32(self.vk.entry_pc)
+                        E::BaseField::from_u32(self.vk.entry_pc)
                     );
                 }
                 let end_pc = vm_proof.public_values.query_by_index::<E>(END_PC_IDX);
@@ -352,7 +353,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 })
                 .sum::<E>();
 
-            transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
+            transcript.append_field_element(&E::BaseField::from_u64(*index as u64));
 
             // compute logup_sum padding
             // getting the number of dummy padding item that we used in this opcode circuit

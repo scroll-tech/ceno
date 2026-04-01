@@ -286,10 +286,7 @@ fn accumulate_logup_claims(rows: &[[EF; 4]], lambda: EF, lambda_prime: EF, mu: E
     (acc_sum, acc_q)
 }
 
-fn circuit_vk_for_idx(
-    vk: &RecursionVk,
-    chip_idx: usize,
-) -> Option<&VerifyingKey<RecursionField>> {
+fn circuit_vk_for_idx(vk: &RecursionVk, chip_idx: usize) -> Option<&VerifyingKey<RecursionField>> {
     vk.circuit_index_to_name
         .get(&chip_idx)
         .and_then(|name| vk.circuit_vks.get(name))
