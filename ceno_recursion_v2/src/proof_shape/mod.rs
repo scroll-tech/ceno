@@ -216,6 +216,8 @@ impl ProofShapeModule {
         let _beta = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         preflight.proof_shape.fork_start_tidx = ts.len();
 
+        eprintln!("_alpha {} _beta {}", _alpha, _beta);
+
         let _ = child_vk;
     }
 
