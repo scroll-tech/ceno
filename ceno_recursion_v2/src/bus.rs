@@ -30,19 +30,6 @@ pub struct ForkedTranscriptBusMessage<T> {
 
 define_typed_per_proof_permutation_bus!(ForkedTranscriptBus, ForkedTranscriptBusMessage);
 
-// ── Fork state sidechain bus ──────────────────────────────────────────────────
-// Carries the full Poseidon2 sponge state from the trunk's fork point to
-// each forked transcript chain, so the fork can start from the correct state.
-
-#[repr(C)]
-#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
-pub struct ForkStateBusMessage<T> {
-    pub fork_id: T,
-    pub state: [T; POSEIDON2_WIDTH],
-}
-
-define_typed_per_proof_permutation_bus!(ForkStateBus, ForkStateBusMessage);
-
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct TowerModuleMessage<T> {

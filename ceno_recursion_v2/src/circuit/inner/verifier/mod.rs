@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::{
-    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory, prover::AirProvingContext,
+    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
@@ -10,10 +9,9 @@ use p3_field::PrimeCharacteristicRing;
 use crate::{
     proof_shape::bus::CommitmentsBus,
     system::{
-        AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, Preflight, RecursionProof,
-        RecursionVk, TraceGenModule,
+        AirModule, BusIndexManager, BusInventory, RecursionProof,
+        RecursionVk,
     },
-    tracegen::RowMajorChip,
 };
 
 mod air;
@@ -102,58 +100,5 @@ impl AirModule for VerifierModule {
             transcript_bus: self.bus_inventory.transcript_bus,
         };
         vec![Arc::new(commit_air) as AirRef<_>]
-    }
-}
-
-impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>>
-    for VerifierModule
-{
-    type ModuleSpecificCtx<'a> = ();
-
-    #[tracing::instrument(skip_all)]
-    fn generate_proving_ctxs(
-        &self,
-        _child_vk: &RecursionVk,
-        proofs: &[RecursionProof],
-        preflights: &[Preflight],
-        _ctx: &(),
-        required_heights: Option<&[usize]>,
-    ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
-        let commit_ctx: (&[RecursionProof], &[Preflight]) = (proofs, preflights);
-        let height = required_heights.and_then(|h| h.first().copied());
-        let trace = CommitTraceGenerator.generate_trace(&commit_ctx, height)?;
-        Some(vec![AirProvingContext::simple_no_pis(trace)])
-    }
-}
-
-#[cfg(feature = "cuda")]
-mod cuda_tracegen {
-    use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix};
-
-    use super::*;
-    use crate::cuda::{
-        GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu,
-    };
-
-    impl TraceGenModule<GlobalCtxGpu, GpuBackend> for VerifierModule {
-        type ModuleSpecificCtx<'a> = ();
-
-        #[tracing::instrument(skip_all)]
-        fn generate_proving_ctxs(
-            &self,
-            _child_vk: &VerifyingKeyGpu,
-            _proofs: &[ProofGpu],
-            _preflights: &[PreflightGpu],
-            _ctx: &(),
-            required_heights: Option<&[usize]>,
-        ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
-            let width = CommitAirCols::<u8>::width();
-            let height = required_heights
-                .and_then(|h| h.first().copied())
-                .unwrap_or(1)
-                .max(1);
-            let trace = DeviceMatrix::with_capacity(height, width);
-            Some(vec![AirProvingContext::simple_no_pis(trace)])
-        }
     }
 }
