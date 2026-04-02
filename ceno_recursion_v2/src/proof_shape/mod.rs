@@ -209,7 +209,6 @@ impl ProofShapeModule {
             }
         }
 
-
         preflight.proof_shape.alpha_tidx = ts.len();
         let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         preflight.proof_shape.beta_tidx = ts.len();

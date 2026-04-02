@@ -16,9 +16,7 @@ use p3_symmetric::Permutation;
 use crate::system::{
     AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
 };
-use recursion_circuit::transcript::{
-    poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols},
-};
+use recursion_circuit::transcript::poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols};
 
 mod transcript_air;
 pub use transcript_air::{ForkedTranscriptAir, ForkedTranscriptCols};
@@ -35,10 +33,7 @@ pub struct TranscriptModule {
 }
 
 impl TranscriptModule {
-    pub fn new(
-        bus_inventory: BusInventory,
-        final_state_bus_enabled: bool,
-    ) -> Self {
+    pub fn new(bus_inventory: BusInventory, final_state_bus_enabled: bool) -> Self {
         let sub_chip = Poseidon2SubChip::<F, 1>::new(Poseidon2Config::default().constants);
         Self {
             bus_inventory,
@@ -426,15 +421,14 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         let _ = (child_vk, proofs);
 
-        let (required_transcript, required_poseidon2) =
-            if let Some(heights) = required_heights {
-                if heights.len() != 2 {
-                    return None;
-                }
-                (Some(heights[0]), Some(heights[1]))
-            } else {
-                (None, None)
-            };
+        let (required_transcript, required_poseidon2) = if let Some(heights) = required_heights {
+            if heights.len() != 2 {
+                return None;
+            }
+            (Some(heights[0]), Some(heights[1]))
+        } else {
+            (None, None)
+        };
 
         let (transcript_trace, mut poseidon2_perm_inputs) =
             self.build_transcript_trace(preflights, required_transcript)?;

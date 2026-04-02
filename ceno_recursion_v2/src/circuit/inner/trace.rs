@@ -2,7 +2,10 @@ use openvm_cpu_backend::CpuBackend;
 #[cfg(feature = "cuda")]
 use openvm_cuda_backend::GpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
-use openvm_stark_backend::{FiatShamirTranscript, TranscriptHistory, prover::{AirProvingContext, ProverBackend}};
+use openvm_stark_backend::{
+    FiatShamirTranscript, TranscriptHistory,
+    prover::{AirProvingContext, ProverBackend},
+};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use verify_stark::pvs::DeferralPvs;
 
@@ -28,7 +31,11 @@ pub trait InnerTraceGen<PB: ProverBackend> {
         child_vk: &RecursionVk,
         child_dag_commit: PB::Commitment,
         initial_transcript: TS,
-    ) -> (Vec<AirProvingContext<PB>>, Vec<[F; POSEIDON2_WIDTH]>, Vec<TS>)
+    ) -> (
+        Vec<AirProvingContext<PB>>,
+        Vec<[F; POSEIDON2_WIDTH]>,
+        Vec<TS>,
+    )
     where
         TS: Clone
             + FiatShamirTranscript<BabyBearPoseidon2Config>
@@ -77,6 +84,7 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             self.deferral_enabled,
         );
         let vm_ctx = super::vm_pvs::generate_proving_ctx(
+            child_vk,
             proofs,
             proofs_type,
             child_is_app,

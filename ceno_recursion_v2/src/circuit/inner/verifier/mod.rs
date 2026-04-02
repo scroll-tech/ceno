@@ -11,14 +11,13 @@ pub use trace::*;
 
 #[tracing::instrument(level = "trace", skip_all)]
 pub fn run_preflight<TS>(
-	child_vk: &RecursionVk,
-	proof: &RecursionProof,
-	_preflight: &mut Preflight,
-	ts: &mut TS,
+    child_vk: &RecursionVk,
+    proof: &RecursionProof,
+    _preflight: &mut Preflight,
+    ts: &mut TS,
 ) where
-	TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
 {
-	// Reserved verifier-owned preflight step. VmPvs currently owns transcript observations.
-	let _ = (child_vk, proof, ts);
+    // Reserved verifier-owned preflight step. VmPvs currently owns transcript observations.
+    let _ = (child_vk, proof, ts);
 }
-

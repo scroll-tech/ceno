@@ -1,8 +1,6 @@
 use std::borrow::Borrow;
 
-use openvm_circuit_primitives::{
-    utils::{and, assert_array_eq, not},
-};
+use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
@@ -23,7 +21,6 @@ use crate::{
     circuit::inner::bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
     utils::digests_to_poseidon2_input,
 };
-
 
 ///////////////////////////////////////////////////////////////////////////////
 // VERIFIER PVS AIR — public values and DAG commit consistency

@@ -30,7 +30,6 @@ pub struct NumPublicValuesMessage<T> {
 
 define_typed_per_proof_permutation_bus!(NumPublicValuesBus, NumPublicValuesMessage);
 
-
 #[repr(u8)]
 #[derive(Debug, Copy, Clone)]
 pub enum AirShapeProperty {

@@ -9,7 +9,10 @@ use p3_matrix::dense::RowMajorMatrix;
 use verify_stark::pvs::{VerifierBasePvs, VerifierDefPvs};
 
 use crate::{
-    circuit::inner::{ProofsType, verifier::air::{VerifierDeferralCols, VerifierPvsCols}},
+    circuit::inner::{
+        ProofsType,
+        verifier::air::{VerifierDeferralCols, VerifierPvsCols},
+    },
     system::RecursionProof,
 };
 

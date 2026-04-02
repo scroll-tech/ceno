@@ -267,7 +267,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
         let mut bus_idx_manager = BusIndexManager::new();
         let bus_inventory = BusInventory::new(&mut bus_idx_manager);
-        let transcript = TranscriptModule::new(bus_inventory.clone(), config.final_state_bus_enabled);
+        let transcript =
+            TranscriptModule::new(bus_inventory.clone(), config.final_state_bus_enabled);
         let proof_shape = ProofShapeModule::new(
             child_vk.as_ref(),
             &mut bus_idx_manager,
@@ -315,12 +316,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
         // Phase 1: Trunk operations.
         // Proof-shape metadata and alpha/beta sampling after pre-verifier transcript observes.
-        self.proof_shape.run_preflight(
-            child_vk,
-            proof,
-            &mut preflight,
-            &mut sponge,
-        );
+        self.proof_shape
+            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
 
         // Phase 2: Fork — clone sponge for each chip proof instance.
         let chip_proof_list: Vec<(

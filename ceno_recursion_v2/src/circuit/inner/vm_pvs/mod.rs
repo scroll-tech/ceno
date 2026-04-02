@@ -15,6 +15,7 @@ pub const SEPTIC_EXTENSION_DEGREE: usize = 7;
 pub struct VmPvs<F> {
     pub fixed_commit: [F; DIGEST_SIZE],
     pub fixed_no_omc_init_commit: [F; DIGEST_SIZE],
+    pub witness_commit: [F; DIGEST_SIZE],
 
     // Ordered to match ceno_zkvm::scheme::PublicValues.
     pub exit_code: [F; 2],
@@ -74,4 +75,3 @@ pub fn run_preflight<TS>(
     }
     ts.observe(F::from_u64(witin.log2_max_codeword_size as u64));
 }
-

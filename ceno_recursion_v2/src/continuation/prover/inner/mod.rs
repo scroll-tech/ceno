@@ -72,11 +72,14 @@ impl<
                 ..Default::default()
             },
         );
+        let instance_public_value_indices =
+            Arc::new(build_instance_public_value_indices(&child_vk));
         let engine = Eg::new(system_params);
         let child_vk_pcs_data = verifier_circuit.commit_child_vk(&engine, &child_vk);
         let circuit = Arc::new(InnerCircuit::new(
             Arc::new(verifier_circuit),
             def_hook_commit.map(|d| d.into()),
+            instance_public_value_indices,
         ));
         let (pk, vk) = engine.keygen(&circuit.airs());
         let d_pk = engine.device().transport_pk_to_device(&pk);
@@ -114,11 +117,14 @@ impl<
                 ..Default::default()
             },
         );
+        let instance_public_value_indices =
+            Arc::new(build_instance_public_value_indices(&child_vk));
         let engine = Eg::new(pk.params.clone());
         let child_vk_pcs_data = verifier_circuit.commit_child_vk(&engine, &child_vk);
         let circuit = Arc::new(InnerCircuit::new(
             Arc::new(verifier_circuit),
             def_hook_commit.map(|d| d.into()),
+            instance_public_value_indices,
         ));
         let vk = Arc::new(pk.get_vk());
         let d_pk = engine.device().transport_pk_to_device(&pk);
@@ -141,6 +147,27 @@ impl<
             self_vk_pcs_data,
         }
     }
+}
+
+fn build_instance_public_value_indices(child_vk: &RecursionVk) -> Vec<Vec<usize>> {
+    (0..child_vk.circuit_vks.len())
+        .map(|air_idx| {
+            child_vk
+                .circuit_index_to_name
+                .get(&air_idx)
+                .and_then(|name| child_vk.circuit_vks.get(name))
+                .map(|circuit_vk| {
+                    circuit_vk
+                        .get_cs()
+                        .zkvm_v1_css
+                        .instance
+                        .iter()
+                        .map(|instance_value| instance_value.0)
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .collect()
 }
 
 impl<
