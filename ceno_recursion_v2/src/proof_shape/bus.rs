@@ -30,13 +30,6 @@ pub struct NumPublicValuesMessage<T> {
 
 define_typed_per_proof_permutation_bus!(NumPublicValuesBus, NumPublicValuesMessage);
 
-#[repr(C)]
-#[derive(AlignedBorrow, Debug, Clone)]
-pub struct CommitmentsBusMessage<T> {
-    pub tidx: T,
-}
-
-define_typed_per_proof_permutation_bus!(CommitmentsBus, CommitmentsBusMessage);
 
 #[repr(u8)]
 #[derive(Debug, Copy, Clone)]

@@ -302,7 +302,6 @@ impl AirModule for ProofShapeModule {
             air_shape_bus: self.bus_inventory.air_shape_bus,
             hyperdim_bus: self.bus_inventory.hyperdim_bus,
             lifted_heights_bus: self.bus_inventory.lifted_heights_bus,
-            // commitments_bus: self.bus_inventory.commitments_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             n_lift_bus: self.bus_inventory.n_lift_bus,

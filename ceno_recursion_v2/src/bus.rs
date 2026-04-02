@@ -3,12 +3,11 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use recursion_circuit::{bus as upstream, define_typed_per_proof_permutation_bus};
 pub use upstream::{
     AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage, CachedCommitBus,
-    CachedCommitBusMessage, ColumnClaimsBus, ColumnClaimsMessage, CommitmentsBus,
-    CommitmentsBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
-    FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage,
-    LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus, NLiftMessage, PublicValuesBus,
-    PublicValuesBusMessage, SelHypercubeBus, SelHypercubeBusMessage, SelUniBus, SelUniBusMessage,
-    TranscriptBus, TranscriptBusMessage,
+    CachedCommitBusMessage, ColumnClaimsBus, ColumnClaimsMessage, ExpressionClaimNMaxBus,
+    ExpressionClaimNMaxMessage, FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus,
+    HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus, NLiftMessage,
+    PublicValuesBus, PublicValuesBusMessage, SelHypercubeBus, SelHypercubeBusMessage, SelUniBus,
+    SelUniBusMessage, TranscriptBus, TranscriptBusMessage,
 };
 
 // ── Forked transcript bus ─────────────────────────────────────────────────────

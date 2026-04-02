@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::{POSEIDON2_WIDTH, Poseidon2Config, Poseidon2SubChip};
-use openvm_stark_backend::{AirRef, StarkProtocolConfig, SystemParams, prover::AirProvingContext};
+use openvm_stark_backend::{AirRef, StarkProtocolConfig, prover::AirProvingContext};
 use openvm_stark_sdk::{
     config::baby_bear_poseidon2::{F, poseidon2_perm},
     p3_baby_bear::Poseidon2BabyBear,
@@ -17,7 +17,6 @@ use crate::system::{
     AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
 };
 use recursion_circuit::transcript::{
-    merkle_verify::{MerkleVerifyAir, MerkleVerifyCols},
     poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols},
 };
 
@@ -29,7 +28,6 @@ const SBOX_REGISTERS: usize = 1;
 
 pub struct TranscriptModule {
     pub bus_inventory: BusInventory,
-    params: SystemParams,
     final_state_bus_enabled: bool,
 
     sub_chip: Poseidon2SubChip<F, SBOX_REGISTERS>,
@@ -39,13 +37,11 @@ pub struct TranscriptModule {
 impl TranscriptModule {
     pub fn new(
         bus_inventory: BusInventory,
-        params: SystemParams,
         final_state_bus_enabled: bool,
     ) -> Self {
         let sub_chip = Poseidon2SubChip::<F, 1>::new(Poseidon2Config::default().constants);
         Self {
             bus_inventory,
-            params,
             final_state_bus_enabled,
             sub_chip,
             perm: poseidon2_perm().clone(),
@@ -385,7 +381,7 @@ impl TranscriptModule {
 
 impl AirModule for TranscriptModule {
     fn num_airs(&self) -> usize {
-        3
+        2
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -402,18 +398,7 @@ impl AirModule for TranscriptModule {
             poseidon2_permute_bus: self.bus_inventory.poseidon2_permute_bus,
             poseidon2_compress_bus: self.bus_inventory.poseidon2_compress_bus,
         };
-        let merkle_verify_air = MerkleVerifyAir {
-            poseidon2_compress_bus: self.bus_inventory.poseidon2_compress_bus,
-            merkle_verify_bus: self.bus_inventory.merkle_verify_bus,
-            commitments_bus: self.bus_inventory.commitments_bus,
-            right_shift_bus: self.bus_inventory.right_shift_bus,
-            k: self.params.k_whir(),
-        };
-        vec![
-            Arc::new(transcript_air),
-            Arc::new(poseidon2_air),
-            Arc::new(merkle_verify_air),
-        ]
+        vec![Arc::new(transcript_air), Arc::new(poseidon2_air)]
     }
 }
 
@@ -441,24 +426,15 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         let _ = (child_vk, proofs);
 
-        let (required_transcript, required_poseidon2, required_merkle_verify) =
+        let (required_transcript, required_poseidon2) =
             if let Some(heights) = required_heights {
-                if heights.len() != 3 {
+                if heights.len() != 2 {
                     return None;
                 }
-                (Some(heights[0]), Some(heights[1]), Some(heights[2]))
+                (Some(heights[0]), Some(heights[1]))
             } else {
-                (None, None, None)
+                (None, None)
             };
-
-        let merkle_rows = required_merkle_verify.unwrap_or(1);
-        if merkle_rows == 0 {
-            return None;
-        }
-        let merkle_verify_trace = RowMajorMatrix::new(
-            vec![F::ZERO; merkle_rows * MerkleVerifyCols::<F>::width()],
-            MerkleVerifyCols::<F>::width(),
-        );
 
         let (transcript_trace, mut poseidon2_perm_inputs) =
             self.build_transcript_trace(preflights, required_transcript)?;
@@ -504,7 +480,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         Some(vec![
             AirProvingContext::simple_no_pis(transcript_trace),
             AirProvingContext::simple_no_pis(poseidon2_trace),
-            AirProvingContext::simple_no_pis(merkle_verify_trace),
         ])
     }
 }
