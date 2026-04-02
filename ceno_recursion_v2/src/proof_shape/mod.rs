@@ -22,7 +22,7 @@ use crate::{
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        RecursionField, RecursionProof, RecursionVk, TraceGenModule, TraceVData,
+        RecursionProof, RecursionVk, TraceGenModule, TraceVData,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
@@ -118,17 +118,6 @@ impl ProofShapeModule {
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
         let _ = self;
-
-        // Verifier preprocess: absorb public values in canonical circuit-instance order.
-        for (_, circuit_vk) in child_vk.circuit_vks.iter() {
-            for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
-                ts.observe(
-                    proof
-                        .public_values
-                        .query_by_index::<RecursionField>(instance_value.0),
-                );
-            }
-        }
 
         // Build per-air shape metadata from present chip proofs.
         let mut sorted_trace_vdata = proof

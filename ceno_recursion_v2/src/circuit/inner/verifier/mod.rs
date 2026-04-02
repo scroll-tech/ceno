@@ -4,12 +4,11 @@ use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
-use p3_field::PrimeCharacteristicRing;
 
 use crate::{
     proof_shape::bus::CommitmentsBus,
     system::{
-        AirModule, BusIndexManager, BusInventory, RecursionProof,
+        AirModule, BusIndexManager, BusInventory, Preflight, RecursionProof,
         RecursionVk,
     },
 };
@@ -20,12 +19,10 @@ mod trace;
 pub use air::*;
 pub use trace::*;
 
-/// Circuit-level module for commitment observations.
+/// Circuit-level module for commitment-trace constraints.
 ///
-/// Fixed commitments (`fixed_commit`, `fixed_no_omc_init_commit`) and the witness
-/// commitment (`witin_commit`) should each be observed exactly once per proof.
-/// This module owns that logic, keeping it separate from the per-AIR proof-shape
-/// metadata handled by [`ProofShapeModule`].
+/// Preflight transcript commitment observations are now emitted by vm_pvs so the
+/// system can keep explicit module ordering.
 pub struct VerifierModule {
     bus_inventory: BusInventory,
     commitments_tidx_bus: CommitmentsBus,
@@ -39,53 +36,17 @@ impl VerifierModule {
         }
     }
 
-    /// Observe fixed commitments (`fixed_commit`, `fixed_no_omc_init_commit`) into the
-    /// Fiat-Shamir transcript. Called during the trunk phase, before per-AIR shape
-    /// observations.
-    pub fn observe_fixed_commits<TS>(&self, child_vk: &RecursionVk, ts: &mut TS)
-    where
-        TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
-    {
-        if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
-            for elem in fixed_commit.commit.clone().into_iter() {
-                ts.observe(elem);
-            }
-            ts.observe(F::from_u64(fixed_commit.log2_max_codeword_size as u64));
-        }
-        if let Some(fixed_no_omc) = child_vk.fixed_no_omc_init_commit.as_ref() {
-            for elem in fixed_no_omc.commit.clone().into_iter() {
-                ts.observe(elem);
-            }
-            ts.observe(F::from_u64(fixed_no_omc.log2_max_codeword_size as u64));
-        }
-    }
-
-    /// Observe the witness commitment (`witin_commit`) into the Fiat-Shamir transcript.
-    /// Called during the verifier-owned trunk preflight.
-    pub fn observe_witness_commit<TS>(&self, proof: &RecursionProof, ts: &mut TS)
-    where
-        TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
-    {
-        let witin = &proof.witin_commit;
-        for elem in witin.commit.clone().into_iter() {
-            ts.observe(elem);
-        }
-        ts.observe(F::from_u64(witin.log2_max_codeword_size as u64));
-    }
-
     #[tracing::instrument(level = "trace", skip_all)]
     pub fn run_preflight<TS>(
         &self,
-        child_vk: &RecursionVk,
-        proof: &RecursionProof,
+        _child_vk: &RecursionVk,
+        _proof: &RecursionProof,
         _preflight: &mut Preflight,
-        ts: &mut TS,
+        _ts: &mut TS,
     ) where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
-        // Verifier-only trunk phase observations.
-        self.observe_fixed_commits(child_vk, ts);
-        self.observe_witness_commit(proof, ts);
+        // Intentionally a no-op: vm_pvs now owns transcript commitment observations.
     }
 }
 

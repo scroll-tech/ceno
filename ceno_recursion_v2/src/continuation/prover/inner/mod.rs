@@ -188,14 +188,19 @@ where
         };
         let child_is_app = matches!(child_vk_kind, ChildVkKind::App);
 
-        let (pre_ctxs, poseidon2_compress_inputs) = self
+        let mut transcript = default_duplex_sponge_recorder();
+        transcript_observe_label(&mut transcript, TranscriptLabel::Riscv.as_bytes());
+
+        let (pre_ctxs, poseidon2_compress_inputs, subcircuit_initial_transcripts) = self
             .agg_node_tracegen
             .generate_pre_verifier_subcircuit_ctxs(
                 proofs,
                 proofs_type,
                 absent_trace_pvs,
                 child_is_app,
+                child_vk,
                 child_vk_pcs_data.commitment,
+                transcript,
             );
 
         let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
@@ -208,8 +213,6 @@ where
             final_transcript_state: None,
         };
 
-        let mut transcript = default_duplex_sponge_recorder();
-        transcript_observe_label(&mut transcript, TranscriptLabel::Riscv.as_bytes());
         let subcircuit_ctxs = self
             .circuit
             .verifier_circuit
@@ -218,7 +221,7 @@ where
                 child_vk_pcs_data.clone(),
                 proofs,
                 &mut external_data,
-                transcript,
+                subcircuit_initial_transcripts,
             )
             .expect("verifier sub-circuit ctx generation");
 

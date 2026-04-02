@@ -88,12 +88,13 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
         child_vk_pcs_data: CommittedTraceData<PB>,
         proofs: &[RecursionProof],
         external_data: &mut VerifierExternalData<'_>,
-        initial_transcript: TS,
+        initial_transcripts: Vec<TS>,
     ) -> Option<Vec<AirProvingContext<PB>>>;
 
     fn generate_proving_ctxs_base<
         TS: FiatShamirTranscript<BabyBearPoseidon2Config>
-            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
+            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>
+            + Clone,
     >(
         &self,
         child_vk: &RecursionVk,
@@ -118,7 +119,7 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
             child_vk_pcs_data,
             proofs,
             &mut external_data,
-            initial_transcript,
+            vec![initial_transcript; proofs.len()],
         )
         .unwrap()
     }
@@ -314,8 +315,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     /// Runs preflight for a single proof, with proper transcript forking.
     ///
     /// This mirrors the native verifier's `verify_proof_validity` fork protocol:
-    /// 1. Trunk: Run verifier preflight first (fixed + witness commits), then
-    ///    proof-shape preflight (public values + per-AIR shape + α/β)
+    /// 1. Trunk: proof-shape (per-AIR shape + α/β)
     /// 2. Fork: clone sponge per chip, observe fork index, run Tower + Main
     /// 3. Merge: each fork samples 1 ext element → observe into trunk
     #[tracing::instrument(name = "execute_preflight", skip_all)]
@@ -332,11 +332,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let mut preflight = Preflight::default();
 
         // Phase 1: Trunk operations.
-        // 1a. Verifier-owned commitment observations.
-        self.verifier
-            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
-
-        // 1b. Proof-shape metadata and alpha/beta sampling.
+        // Proof-shape metadata and alpha/beta sampling after pre-verifier transcript observes.
         self.proof_shape.run_preflight(
             child_vk,
             proof,
@@ -524,9 +520,12 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         _child_vk_pcs_data: CommittedTraceData<CpuBackend<SC>>,
         proofs: &[RecursionProof],
         external_data: &mut VerifierExternalData<'_>,
-        initial_transcript: TS,
+        initial_transcripts: Vec<TS>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         debug_assert!(proofs.len() <= MAX_NUM_PROOFS);
+        if initial_transcripts.len() != proofs.len() {
+            return None;
+        }
 
         let span = Span::current();
         let child_vk_recursion = child_vk;
@@ -534,9 +533,9 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         let preflights = std::thread::scope(|s| {
             let handles: Vec<_> = proofs
                 .iter()
-                .map(|zk_proof| {
+                .zip(initial_transcripts)
+                .map(|(zk_proof, sponge)| {
                     let child_vk = child_vk_recursion;
-                    let sponge = initial_transcript.clone();
                     let span = span.clone();
                     s.spawn(move || {
                         let _guard = span.enter();
