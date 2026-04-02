@@ -44,6 +44,7 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     pub is_first: F,
     pub is_last: F,
 
+    // TODO remove idx
     // loop: proof_idx -> idx (air idx)
     pub idx: F,
     pub sorted_idx: F,
@@ -201,46 +202,6 @@ where
             next.num_present,
         );
 
-        ///////////////////////////////////////////////////////////////////////////////////////////
-        // PERMUTATION AND SORTING
-        ///////////////////////////////////////////////////////////////////////////////////////////
-        builder.when(local.is_first).assert_zero(local.sorted_idx);
-        builder
-            .when(next.sorted_idx)
-            .assert_eq(local.sorted_idx, next.sorted_idx - AB::F::ONE);
-
-        self.permutation_bus.send(
-            builder,
-            local.proof_idx,
-            ProofShapePermutationMessage {
-                idx: local.sorted_idx,
-            },
-            local.is_valid,
-        );
-
-        self.permutation_bus.receive(
-            builder,
-            local.proof_idx,
-            ProofShapePermutationMessage { idx: local.idx },
-            local.is_valid,
-        );
-
-        builder
-            .when(and(not(local.is_present), local.is_valid))
-            .assert_zero(local.height);
-        builder
-            .when(and(not(local.is_present), local.is_valid))
-            .assert_zero(local.log_height);
-
-        // Range check difference using ExponentBus to ensure local.log_height >= next.log_height
-        self.range_bus.lookup_key(
-            builder,
-            RangeCheckerBusMessage {
-                value: local.log_height - next.log_height,
-                max_bits: AB::Expr::from_usize(5),
-            },
-            and(local.is_valid, not(next.is_last)),
-        );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // VK FIELD SELECTION
@@ -318,6 +279,48 @@ where
             num_logup_count +=
                 is_current_air.clone() * AB::Expr::from_usize(air_data.num_logup_count);
         }
+
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        // PERMUTATION AND SORTING
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        builder.when(local.is_first).assert_zero(local.sorted_idx);
+        builder
+            .when(next.sorted_idx)
+            .assert_eq(local.sorted_idx, next.sorted_idx - AB::F::ONE);
+
+        self.permutation_bus.send(
+            builder,
+            local.proof_idx,
+            ProofShapePermutationMessage {
+                idx: local.sorted_idx,
+            },
+            local.is_valid,
+        );
+
+        self.permutation_bus.receive(
+            builder,
+            local.proof_idx,
+            ProofShapePermutationMessage { idx: local.idx },
+            local.is_valid,
+        );
+
+        builder
+            .when(and(not(local.is_present), local.is_valid))
+            .assert_zero(local.height);
+        builder
+            .when(and(not(local.is_present), local.is_valid))
+            .assert_zero(local.log_height);
+
+        // Range check difference using ExponentBus to ensure local.log_height >= next.log_height
+        self.range_bus.lookup_key(
+            builder,
+            RangeCheckerBusMessage {
+                value: local.log_height - next.log_height,
+                max_bits: AB::Expr::from_usize(5),
+            },
+            and(local.is_valid, not(next.is_last)),
+        );
+
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // TRANSCRIPT OBSERVATIONS

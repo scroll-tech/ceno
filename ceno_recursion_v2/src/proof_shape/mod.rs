@@ -119,6 +119,17 @@ impl ProofShapeModule {
     {
         let _ = self;
 
+        // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
+        for (&chip_idx, chip_instances) in &proof.chip_proofs {
+            ts.observe(F::from_usize(chip_idx));
+            for num_instance in chip_instances
+                .iter()
+                .flat_map(|instance| &instance.num_instances)
+            {
+                ts.observe(F::from_usize(*num_instance));
+            }
+        }
+
         // Build per-air shape metadata from present chip proofs.
         let mut sorted_trace_vdata = proof
             .chip_proofs
@@ -136,12 +147,16 @@ impl ProofShapeModule {
             .collect_vec();
         sorted_trace_vdata.sort_by_key(|(air_idx, v)| (usize::MAX - v.log_height, *air_idx));
         preflight.proof_shape.sorted_trace_vdata = sorted_trace_vdata;
+        // TODO remove l_skip
         preflight.proof_shape.l_skip = 0;
 
-        let mut current_tidx = crate::utils::TranscriptLabel::Riscv.field_len();
+        let mut current_tidx = ts.len();
+        // TODO remove cidx related
         let mut current_cidx = 1usize;
         let mut starting_tidx = vec![0usize; child_vk.circuit_vks.len()];
+        // TODO remove cidx related
         let mut starting_cidx = vec![0usize; child_vk.circuit_vks.len()];
+        // TODO remove pvs_tidx related
         let mut pvs_tidx = Vec::new();
         let n_max = preflight
             .proof_shape
@@ -157,6 +172,7 @@ impl ProofShapeModule {
             starting_tidx[air_idx] = current_tidx;
             starting_cidx[air_idx] = current_cidx;
 
+            // TODO remove current_cidx
             current_cidx += usize::from(metadata.preprocessed_data.is_some());
             current_cidx += metadata.cached_widths.len();
 
@@ -197,17 +213,6 @@ impl ProofShapeModule {
             .map(|entry| entry.tower_replay.layers.len())
             .max()
             .unwrap_or(0);
-
-        // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
-        for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            ts.observe(F::from_usize(chip_idx));
-            for num_instance in chip_instances
-                .iter()
-                .flat_map(|instance| &instance.num_instances)
-            {
-                ts.observe(F::from_usize(*num_instance));
-            }
-        }
 
         preflight.proof_shape.alpha_tidx = ts.len();
         let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);

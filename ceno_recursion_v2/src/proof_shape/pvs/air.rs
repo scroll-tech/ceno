@@ -13,6 +13,7 @@ use crate::{
     proof_shape::bus::{NumPublicValuesBus, NumPublicValuesMessage},
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
 };
+use crate::utils::TranscriptLabel;
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
@@ -89,7 +90,8 @@ where
             .assert_one(next.is_first_in_air);
 
         let is_same_air = local.is_valid * next.is_valid * not(next.is_first_in_air);
-
+        // TODO fix first tidx to be TranscriptLabel::Riscv.field_len()
+        // TODO fix comment as well
         // first tidx happened here
         builder
             .when(local.is_valid * local.is_first_in_proof * local.is_first_in_air)

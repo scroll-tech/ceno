@@ -61,6 +61,7 @@ pub struct ProofShapePreflight {
     pub post_tidx: usize,
     pub n_max: usize,
     pub n_logup: usize,
+    // TODO remove l_skip
     pub l_skip: usize,
     pub fork_start_tidx: usize,
     pub alpha_tidx: usize,
@@ -68,6 +69,8 @@ pub struct ProofShapePreflight {
     /// The Poseidon2 sponge state at the fork point (trunk state just before
     /// forking). All forks clone this state as their starting point.
     pub fork_start_state: PoseidonWord,
+    /// The Poseidon2 challenge sample at the end of fork state
+    pub after_fork_challenge: PoseidonWord,
 }
 
 #[derive(Clone, Debug, Default)]

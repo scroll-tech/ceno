@@ -43,6 +43,7 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
 
         for (proof_idx, proof) in proofs.iter().enumerate() {
             let mut is_first_in_proof = true;
+            // TODO first tidx start from TranscriptLabel::Riscv.field_len()
             let mut tidx = 0usize;
 
             for (air_idx, (_, circuit_vk)) in child_vk.circuit_vks.iter().enumerate() {
