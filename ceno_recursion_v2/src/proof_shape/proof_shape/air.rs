@@ -694,16 +694,16 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // NUM PUBLIC VALUES
         ///////////////////////////////////////////////////////////////////////////////////////////
-        self.num_pvs_bus.send(
-            builder,
-            local.proof_idx,
-            NumPublicValuesMessage {
-                air_idx: local.idx.into(),
-                tidx: num_pvs_tidx,
-                num_pvs,
-            },
-            local.is_present * has_pvs,
-        );
+        // self.num_pvs_bus.send(
+        //     builder,
+        //     local.proof_idx,
+        //     NumPublicValuesMessage {
+        //         air_idx: local.idx.into(),
+        //         tidx: num_pvs_tidx,
+        //         num_pvs,
+        //     },
+        //     local.is_present * has_pvs,
+        // );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HEIGHT + GKR MESSAGE
