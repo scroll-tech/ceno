@@ -9,7 +9,7 @@ use recursion_circuit::{
 
 use crate::bus::{
     CachedCommitBus as LocalCachedCommitBus, CommitmentsBus as LocalCommitmentsBus,
-    ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus, ForkStateBus as LocalForkStateBus,
+    ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
     ForkedTranscriptBus as LocalForkedTranscriptBus,
     FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
     LiftedHeightsBus as LocalLiftedHeightsBus, MainBus, MainExpressionClaimBus,
@@ -43,7 +43,6 @@ pub struct BusInventory {
     pub right_shift_bus: RightShiftBus,
     pub xi_randomness_bus: XiRandomnessBus,
     pub final_state_bus: FinalTranscriptStateBus,
-    pub fork_state_bus: LocalForkStateBus,
     pub forked_transcript_bus: LocalForkedTranscriptBus,
 }
 
@@ -79,7 +78,6 @@ impl BusInventory {
 
         let cached_commit_bus = LocalCachedCommitBus::new(b.new_bus_idx());
         let final_state_bus = FinalTranscriptStateBus::new(b.new_bus_idx());
-        let fork_state_bus = LocalForkStateBus::new(b.new_bus_idx());
         let forked_transcript_bus = LocalForkedTranscriptBus::new(b.new_bus_idx());
 
         Self {
@@ -107,7 +105,6 @@ impl BusInventory {
             right_shift_bus,
             xi_randomness_bus,
             final_state_bus,
-            fork_state_bus,
             forked_transcript_bus,
         }
     }
