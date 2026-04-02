@@ -323,7 +323,6 @@ where
         // TRANSCRIPT OBSERVATIONS
         ///////////////////////////////////////////////////////////////////////////////////////////
         let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
-        // FIXME: simplify separators
         builder.when(is_first_idx.clone()).assert_eq(
             local.starting_tidx,
             AB::Expr::from_usize(TranscriptLabel::Riscv.field_len()),

@@ -90,6 +90,11 @@ where
 
         let is_same_air = local.is_valid * next.is_valid * not(next.is_first_in_air);
 
+        // first tidx happened here
+        builder
+            .when(local.is_valid * local.is_first_in_proof * local.is_first_in_air)
+            .assert_zero(local.tidx);
+
         // self.num_pvs_bus.receive(
         //     builder,
         //     local.proof_idx,

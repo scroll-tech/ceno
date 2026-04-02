@@ -248,15 +248,15 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
 
         // We provide proof metadata for lookup here to ensure consistency between AIRs that
         // process public values.
-        self.pvs_air_consistency_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            PvsAirConsistencyMessage {
-                deferral_flag,
-                has_verifier_pvs: local.has_verifier_pvs.into(),
-            },
-            local.is_valid * consistency_mult,
-        );
+        // self.pvs_air_consistency_bus.add_key_with_lookups(
+        //     builder,
+        //     local.proof_idx,
+        //     PvsAirConsistencyMessage {
+        //         deferral_flag,
+        //         has_verifier_pvs: local.has_verifier_pvs.into(),
+        //     },
+        //     local.is_valid * consistency_mult,
+        // );
 
         // Finally, we need to constrain that the public values this AIR produces are consistent
         // with the child's. Note that we only impose constraints for layers below the current

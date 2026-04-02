@@ -10,16 +10,16 @@ use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
+use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
-use recursion_circuit::bus::{CachedCommitBus, PublicValuesBus, PublicValuesBusMessage};
+use recursion_circuit::bus::{
+    CachedCommitBus, PublicValuesBus, PublicValuesBusMessage, TranscriptBus, TranscriptBusMessage,
+};
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::circuit::inner::{
-    bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
-    vm_pvs::VmPvs,
-};
+use crate::circuit::inner::{bus::PvsAirConsistencyBus, vm_pvs::VmPvs};
 
 #[repr(C)]
 #[derive(AlignedBorrow)]
@@ -32,6 +32,7 @@ pub struct VmPvsCols<F> {
 }
 
 pub struct VmPvsAir {
+    pub transcript_bus: TranscriptBus,
     pub public_values_bus: PublicValuesBus,
     pub cached_commit_bus: CachedCommitBus,
     pub pvs_air_consistency_bus: PvsAirConsistencyBus,
@@ -179,16 +180,57 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         //     local.is_valid * is_leaf,
         // );
 
+        // Commitments are observed after transcript-visible public values in preflight.
+        let start_tidx_after_commitment = VmPvs::<u8>::width() - 3 * DIGEST_SIZE;
+        for (didx, value) in local.child_pvs.fixed_commit.iter().enumerate() {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: AB::Expr::from_usize(start_tidx_after_commitment + didx),
+                    value: (*value).into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_valid,
+            );
+        }
+        for (didx, value) in local.child_pvs.fixed_no_omc_init_commit.iter().enumerate() {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: AB::Expr::from_usize(start_tidx_after_commitment + DIGEST_SIZE + didx),
+                    value: (*value).into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_valid,
+            );
+        }
+        for (didx, value) in local.child_pvs.witness_commit.iter().enumerate() {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: AB::Expr::from_usize(
+                        start_tidx_after_commitment + 2 * DIGEST_SIZE + didx,
+                    ),
+                    value: (*value).into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_valid,
+            );
+        }
+
         // We look up proof metadata from VerifierPvsAir here to ensure consistency on each row.
-        self.pvs_air_consistency_bus.lookup_key(
-            builder,
-            local.proof_idx,
-            PvsAirConsistencyMessage {
-                deferral_flag,
-                has_verifier_pvs: local.has_verifier_pvs.into(),
-            },
-            local.is_valid,
-        );
+        // self.pvs_air_consistency_bus.lookup_key(
+        //     builder,
+        //     local.proof_idx,
+        //     PvsAirConsistencyMessage {
+        //         deferral_flag,
+        //         has_verifier_pvs: local.has_verifier_pvs.into(),
+        //     },
+        //     local.is_valid,
+        // );
 
         // Finally, constrain that this AIR's output public values are consistent with child_pvs.
         let &VmPvs::<_> {
