@@ -2,19 +2,103 @@ use std::borrow::BorrowMut;
 
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
-use openvm_stark_backend::prover::AirProvingContext;
+use openvm_stark_backend::{StarkProtocolConfig, prover::AirProvingContext};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use verify_stark::pvs::{VerifierBasePvs, VerifierDefPvs};
 
+use super::VerifierModule;
 use crate::{
     circuit::inner::{
         ProofsType,
-        verifier::air::{VerifierDeferralCols, VerifierPvsCols},
+        verifier::air::{CommitAirCols, VerifierDeferralCols, VerifierPvsCols},
     },
-    system::RecursionProof,
+    system::{GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule},
+    tracegen::RowMajorChip,
 };
+
+///////////////////////////////////////////////////////////////////////////////
+// COMMIT TRACE GENERATOR
+///////////////////////////////////////////////////////////////////////////////
+
+pub struct CommitTraceGenerator;
+
+impl RowMajorChip<F> for CommitTraceGenerator {
+    type Ctx<'a> = (&'a [RecursionProof], &'a [Preflight]);
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    fn generate_trace(
+        &self,
+        _ctx: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let rows = required_height.unwrap_or(1).max(1);
+        let width = CommitAirCols::<u8>::width();
+        Some(RowMajorMatrix::new(vec![F::ZERO; rows * width], width))
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// VERIFIER MODULE TRACE GEN
+///////////////////////////////////////////////////////////////////////////////
+
+impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>>
+    for VerifierModule
+{
+    type ModuleSpecificCtx<'a> = ();
+
+    #[tracing::instrument(skip_all)]
+    fn generate_proving_ctxs(
+        &self,
+        _child_vk: &RecursionVk,
+        proofs: &[RecursionProof],
+        preflights: &[Preflight],
+        _ctx: &(),
+        required_heights: Option<&[usize]>,
+    ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
+        let commit_ctx: (&[RecursionProof], &[Preflight]) = (proofs, preflights);
+        let height = required_heights.and_then(|h| h.first().copied());
+        let trace = CommitTraceGenerator.generate_trace(&commit_ctx, height)?;
+        Some(vec![AirProvingContext::simple_no_pis(trace)])
+    }
+}
+
+#[cfg(feature = "cuda")]
+mod cuda_tracegen {
+    use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix};
+
+    use super::*;
+    use crate::cuda::{
+        GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu,
+    };
+
+    impl TraceGenModule<GlobalCtxGpu, GpuBackend> for VerifierModule {
+        type ModuleSpecificCtx<'a> = ();
+
+        #[tracing::instrument(skip_all)]
+        fn generate_proving_ctxs(
+            &self,
+            _child_vk: &VerifyingKeyGpu,
+            _proofs: &[ProofGpu],
+            _preflights: &[PreflightGpu],
+            _ctx: &(),
+            required_heights: Option<&[usize]>,
+        ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
+            let width = CommitAirCols::<u8>::width();
+            let height = required_heights
+                .and_then(|h| h.first().copied())
+                .unwrap_or(1)
+                .max(1);
+            let trace = DeviceMatrix::with_capacity(height, width);
+            Some(vec![AirProvingContext::simple_no_pis(trace)])
+        }
+    }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// VERIFIER PVS TRACE GENERATOR
+///////////////////////////////////////////////////////////////////////////////
 
 pub fn generate_proving_ctx(
     proofs: &[RecursionProof],

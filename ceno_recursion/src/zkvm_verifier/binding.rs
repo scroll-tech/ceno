@@ -32,7 +32,7 @@ use openvm_native_recursion::{
     hints::{Hintable, VecAutoHintable},
     vars::HintSlice,
 };
-use openvm_stark_backend::p3_field::{FieldAlgebra, extension::BinomialExtensionField};
+use openvm_stark_backend::p3_field::{PrimeCharacteristicRing as FieldAlgebra, extension::BinomialExtensionField};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldExtensionAlgebra;
 use std::cmp::max;

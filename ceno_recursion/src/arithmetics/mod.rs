@@ -13,7 +13,8 @@ use openvm_native_recursion::{
     challenger::{FeltChallenger, duplex::DuplexChallengerVariable},
     vars::HintSlice,
 };
-use openvm_stark_backend::p3_field::{FieldAlgebra, FieldExtensionAlgebra};
+use openvm_stark_backend::p3_field::{FieldExtensionAlgebra, PrimeCharacteristicRing as FieldAlgebra};
+use crate::field_ext::CanonicalFieldExt;
 
 type E = BabyBearExt4;
 const MAX_NUM_VARS: usize = 25;

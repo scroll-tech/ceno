@@ -6,6 +6,7 @@ use openvm_circuit_primitives::{
     encoder::Encoder,
     utils::{and, not, or},
 };
+use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
@@ -18,17 +19,17 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 use crate::{
     bus::{
         AirShapeBus, AirShapeBusMessage, CachedCommitBus, ExpressionClaimNMaxBus,
-        ExpressionClaimNMaxMessage, FractionFolderInputBus, FractionFolderInputMessage,
-        HyperdimBus, HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus,
-        NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
+        ExpressionClaimNMaxMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
+        FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage,
+        LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus, NLiftMessage, TowerModuleBus,
+        TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
         AirMetadata,
         bus::{
-            AirShapeProperty, CommitmentsBus, CommitmentsBusMessage, NumPublicValuesBus,
-            NumPublicValuesMessage, ProofShapePermutationBus, ProofShapePermutationMessage,
-            StartingTidxBus, StartingTidxMessage,
+            AirShapeProperty, NumPublicValuesBus, NumPublicValuesMessage, ProofShapePermutationBus,
+            ProofShapePermutationMessage, StartingTidxBus, StartingTidxMessage,
         },
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
@@ -79,6 +80,10 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
 
     pub num_air_id_lookups: F,
     pub num_columns: F,
+
+    /// The Poseidon2 sponge state at the fork point (trunk state just before
+    /// forking). Constrained to be identical across all rows within a proof.
+    pub current_snapshot_state: [F; POSEIDON2_WIDTH],
 }
 
 // Variable-length columns are stored at the end
@@ -104,7 +109,6 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
 
     // Internal buses
     pub permutation_bus: ProofShapePermutationBus,
-    pub commitments_tidx_bus: CommitmentsBus,
     pub starting_tidx_bus: StartingTidxBus,
     pub num_pvs_bus: NumPublicValuesBus,
 
@@ -117,6 +121,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub lifted_heights_bus: LiftedHeightsBus,
     // pub commitments_bus: GlobalCommitmentsBus,
     pub transcript_bus: TranscriptBus,
+    pub forked_transcript_bus: ForkedTranscriptBus,
     pub n_lift_bus: NLiftBus,
 
     // For continuations
@@ -408,16 +413,6 @@ where
             local.is_valid,
         );
 
-        // One commit-row seed per proof: CommitAir consumes this tidx on is_first rows.
-        self.commitments_tidx_bus.send(
-            builder,
-            local.proof_idx,
-            CommitmentsBusMessage {
-                tidx: AB::Expr::ZERO,
-            },
-            and(local.is_first, local.is_valid),
-        );
-
         for didx in 0..DIGEST_SIZE {
             self.transcript_bus.receive(
                 builder,
@@ -439,6 +434,43 @@ where
                     is_sample: AB::Expr::ZERO,
                 },
                 is_min_cached.clone() * local.is_valid,
+            );
+        }
+
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        // SNAPSHOT STATE CONTINUITY (forked transcript)
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        // The sponge state at the fork point is identical for all forks.
+        // Constrain: local.current_snapshot_state == next.current_snapshot_state
+        // for all valid rows within the same proof.
+        for i in 0..POSEIDON2_WIDTH {
+            builder
+                .when(and(local.is_valid, not(next.is_last)))
+                .assert_eq(
+                    local.current_snapshot_state[i],
+                    next.current_snapshot_state[i],
+                );
+        }
+
+        // Each present AIR corresponds to one fork whose fork_id equals
+        // num_present (1-based position among present AIRs in sorted order).
+        // This assumes a 1:1 mapping between present AIRs and forks, which
+        // holds when each chip has exactly one proof instance. Multi-instance
+        // chips would require a separate fork_id column.
+        // Receive the trunk's sponge state at the fork point from the
+        // ForkedTranscriptBus, cross-checking current_snapshot_state against
+        // TranscriptAir's trunk_fork_state.
+        for i in 0..POSEIDON2_WIDTH {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.num_present.into(),
+                    fork_tidx: AB::Expr::from_usize(i),
+                    value: local.current_snapshot_state[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_present * local.is_valid,
             );
         }
 

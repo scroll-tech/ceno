@@ -205,11 +205,15 @@ where
         );
 
         // Transcript index increment
+        use crate::tower::tower_transcript_len::{
+            ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
+        };
         let tidx_after_sumcheck = local.tidx
-            // Sample lambda on non-root layer
-            + (AB::Expr::ONE - local.is_first) * AB::Expr::from_usize(D_EF)
-            + local.layer_idx * AB::Expr::from_usize(4 * D_EF);
-        let tidx_end = tidx_after_sumcheck.clone() + AB::Expr::from_usize(5 * D_EF);
+            // Sample lambda label+sample on non-root layer
+            + (AB::Expr::ONE - local.is_first)
+                * AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN)
+            + local.layer_idx * AB::Expr::from_usize(ROUND_LEN);
+        let tidx_end = tidx_after_sumcheck.clone() + AB::Expr::from_usize(POST_SUMCHECK_LEN);
         builder
             .when(is_transition.clone())
             .assert_eq(next.tidx, tidx_end.clone());
@@ -388,7 +392,7 @@ where
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 is_last_layer: is_last.clone(),
-                tidx: local.tidx + AB::Expr::from_usize(D_EF),
+                tidx: local.tidx + AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN),
                 claim: local.sumcheck_claim_in.map(Into::into),
             },
             is_non_root_layer.clone() * is_not_dummy.clone(),
@@ -434,13 +438,14 @@ where
         // sample lambda and mu
         // in root & intermediate layer: for next.sumcheck_claim_in
         // in last layer: for send back to GKR input layer
-        // 1a. Sample `lambda`
+        // 1a. Sample `lambda` — only on non-root layers.
+        //     Root layer uses alpha_logup (set in trace), not a transcript sample.
         self.transcript_bus.sample_ext(
             builder,
             local.proof_idx,
             local.tidx,
             local.lambda,
-            local.is_enabled * is_not_dummy.clone(),
+            is_non_root_layer.clone() * is_not_dummy.clone(),
         );
         // 1b. Observe layer claims
         let tidx = tidx_after_sumcheck;

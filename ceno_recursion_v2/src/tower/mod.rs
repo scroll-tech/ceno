@@ -78,9 +78,9 @@ use crate::{
             TowerProdWriteSumCheckClaimTraceGenerator,
         },
         sumcheck::{TowerLayerSumcheckAir, TowerSumcheckRecord, TowerSumcheckTraceGenerator},
-        tower::replay_tower_proof,
     },
     tracegen::{ModuleChip, RowMajorChip},
+    utils::transcript_observe_label,
 };
 use ceno_zkvm::{scheme::ZKVMChipProof, structs::VerifyingKey};
 use eyre::Result;
@@ -96,13 +96,90 @@ pub use bus::{
     TowerSumcheckOutputMessage,
 };
 
+/// Transcript field-element lengths per tower operation.
+///
+/// These match the native verifier (gkr-backend `BasicTranscript`) which absorbs
+/// labels before each sample via `sample_and_append_challenge` /
+/// `sample_and_append_vec`.  The recursion transcript must reproduce the exact
+/// same sponge sequence.
+pub mod tower_transcript_len {
+    use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
+
+    // Label field-element counts: ceil(byte_len / 4).
+    // b"combine subset evals" = 20 bytes → 5 field elements
+    const LABEL_COMBINE: usize = 5;
+    // b"product_sum" = 11 bytes → 3 field elements
+    const LABEL_PRODUCT_SUM: usize = 3;
+    // b"Internal round" = 14 bytes → 4 field elements
+    const LABEL_INTERNAL_ROUND: usize = 4;
+    // b"merge" = 5 bytes → 2 field elements
+    const LABEL_MERGE: usize = 2;
+    // usize::to_le_bytes() = 8 bytes → 2 field elements (64-bit platform)
+    const LABEL_USIZE: usize = 2;
+
+    /// label "combine subset evals" (5) + sample alpha (D_EF)
+    pub const ALPHA_LEN: usize = LABEL_COMBINE + D_EF;
+    /// label "product_sum" (3) + sample initial_rt (D_EF)
+    pub const BETA_LEN: usize = LABEL_PRODUCT_SUM + D_EF;
+    /// Alpha + beta: total elements before the GKR layer loop.
+    pub const ALPHA_BETA_LEN: usize = ALPHA_LEN + BETA_LEN;
+    /// Sumcheck init: label max_num_variables (2) + label max_degree (2)
+    pub const SUMCHECK_INIT_LEN: usize = LABEL_USIZE + LABEL_USIZE;
+    /// Per sumcheck round: 3 observe (3*D_EF) + label "Internal round" (4) + sample (D_EF)
+    pub const ROUND_LEN: usize = 3 * D_EF + LABEL_INTERNAL_ROUND + D_EF;
+    /// Merge: label "merge" (2) + sample mu (D_EF)
+    pub const MERGE_LEN: usize = LABEL_MERGE + D_EF;
+
+    /// Post-sumcheck tidx span: claim observation slots (4*D_EF) + MERGE_LEN.
+    /// This is the tidx gap from `tidx_after_sumcheck` to `tidx_end`.
+    pub const POST_SUMCHECK_LEN: usize = 4 * D_EF + MERGE_LEN;
+
+    /// Gap between consecutive sumcheck blocks across GKR layers:
+    /// post-sumcheck of previous layer + pre-sumcheck of next layer.
+    pub const LAYER_GAP_LEN: usize = POST_SUMCHECK_LEN + ALPHA_LEN + SUMCHECK_INIT_LEN;
+
+    /// Tidx span of layer `layer_idx` (includes claim slots + transcript ops).
+    /// Layer 0 (root): POST_SUMCHECK_LEN (no lambda sample — uses alpha_logup).
+    /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + j*ROUND_LEN + POST_SUMCHECK_LEN.
+    pub const fn layer_span(layer_idx: usize) -> usize {
+        if layer_idx == 0 {
+            POST_SUMCHECK_LEN
+        } else {
+            ALPHA_LEN + SUMCHECK_INIT_LEN + layer_idx * ROUND_LEN + POST_SUMCHECK_LEN
+        }
+    }
+
+    /// Cumulative tidx span for layers 0..layer_idx (exclusive).
+    pub const fn layers_cumulative(layer_idx: usize) -> usize {
+        let mut total = 0;
+        let mut i = 0;
+        while i < layer_idx {
+            total += layer_span(i);
+            i += 1;
+        }
+        total
+    }
+
+    /// Offset from the start of layer `layer_idx` to `tidx_after_sumcheck`
+    /// (where claims start).
+    /// Layer 0: 0.
+    /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + j*ROUND_LEN.
+    pub const fn claim_offset_in_layer(layer_idx: usize) -> usize {
+        if layer_idx == 0 {
+            0
+        } else {
+            ALPHA_LEN + SUMCHECK_INIT_LEN + layer_idx * ROUND_LEN
+        }
+    }
+}
+
 // Sub-modules for different AIRs
 pub mod input;
 pub mod layer;
 pub mod sumcheck;
 #[allow(clippy::module_inception)]
 mod tower;
-pub(crate) use tower::TowerReplayResult;
+pub(crate) use tower::{TowerReplayResult, replay_tower_proof, replay_tower_proof_poseidon};
 pub struct TowerModule {
     // Global bus inventory
     bus_inventory: BusInventory,
@@ -140,11 +217,12 @@ pub(crate) struct TowerBlobCpu {
 }
 
 #[derive(Debug, Clone, Default)]
-struct TowerTranscriptSchedule {
-    alpha_logup: EF,
-    lambdas: Vec<EF>,
-    mus: Vec<EF>,
-    ris: Vec<EF>,
+pub(crate) struct TowerTranscriptSchedule {
+    pub(crate) alpha_logup: EF,
+    pub(crate) beta: EF,
+    pub(crate) lambdas: Vec<EF>,
+    pub(crate) mus: Vec<EF>,
+    pub(crate) ris: Vec<EF>,
 }
 
 impl TowerModule {
@@ -190,24 +268,17 @@ impl TowerModule {
                                 ?err,
                                 chip_idx, "failed to replay tower proof during preflight"
                             );
-                            eprintln!(
-                                "failed to replay tower proof during preflight for chip {chip_idx}: {err:?}"
-                            );
                             TowerReplayResult::default()
                         }
                     },
-                    None => {
-                        eprintln!(
-                            "missing circuit verifying key during GKR preflight for chip {chip_idx}"
-                        );
-                        TowerReplayResult::default()
-                    }
+                    None => TowerReplayResult::default(),
                 };
 
                 preflight.gkr.chips.push(TowerChipTranscriptRange {
                     chip_idx,
                     instance_idx,
                     tidx,
+                    fork_idx: 0, // unused in forked flow
                     tower_replay,
                 });
             }
@@ -286,7 +357,10 @@ fn accumulate_logup_claims(rows: &[[EF; 4]], lambda: EF, lambda_prime: EF, mu: E
     (acc_sum, acc_q)
 }
 
-fn circuit_vk_for_idx(vk: &RecursionVk, chip_idx: usize) -> Option<&VerifyingKey<RecursionField>> {
+pub(crate) fn circuit_vk_for_idx(
+    vk: &RecursionVk,
+    chip_idx: usize,
+) -> Option<&VerifyingKey<RecursionField>> {
     vk.circuit_index_to_name
         .get(&chip_idx)
         .and_then(|name| vk.circuit_vks.get(name))
@@ -367,8 +441,8 @@ fn build_chip_records(
         proof_idx,
         idx,
         is_first_air_idx,
-        // TowerLayerAir starts after alpha/beta sampling and q0 observe in TowerInputAir.
-        tidx: tidx + 3 * D_EF,
+        // TowerLayerAir starts after alpha/beta labels+sampling.
+        tidx: tidx + tower_transcript_len::ALPHA_BETA_LEN,
         layer_claims: Vec::with_capacity(layer_count),
         lambdas: vec![EF::ZERO; layer_count],
         eq_at_r_primes: vec![EF::ZERO; layer_count],
@@ -426,19 +500,32 @@ fn build_chip_records(
         proof_idx,
         idx,
         is_first_air_idx,
-        // First sumcheck transcript row starts at layer_tidx(1) + D_EF.
-        tidx: tidx + 9 * D_EF,
+        // First sumcheck transcript row starts at layer_tidx(1) + ALPHA_LEN + SUMCHECK_INIT_LEN.
+        tidx: tidx
+            + tower_transcript_len::ALPHA_BETA_LEN
+            + tower_transcript_len::POST_SUMCHECK_LEN
+            + tower_transcript_len::ALPHA_LEN
+            + tower_transcript_len::SUMCHECK_INIT_LEN,
         evals: Vec::new(),
         ris: Vec::new(),
         claims: vec![EF::ZERO; layer_count.saturating_sub(1)],
     };
 
-    for round_msgs in chip_proof
-        .tower_proof
-        .proofs
-        .iter()
-        .take(chip_proof.tower_proof.proofs.len().saturating_sub(1))
-    {
+    // The sumcheck trace processes num_sumcheck_layers = layer_count - 1 layers.
+    // Layer k (0-indexed) has layer_rounds(k) = k+1 sumcheck rounds.
+    // Total rounds = num_sumcheck_layers*(num_sumcheck_layers+1)/2.
+    // record_gkr_transcript produces ris/evals for ALL layer_count layers,
+    // but the last layer is not processed by the sumcheck AIR (it corresponds
+    // to the final input layer claim, not a sumcheck). Truncate to
+    // total_rounds.
+    let num_sumcheck_layers = layer_count.saturating_sub(1);
+    let total_sumcheck_rounds = num_sumcheck_layers * (num_sumcheck_layers + 1) / 2;
+
+    for (k, round_msgs) in chip_proof.tower_proof.proofs.iter().enumerate() {
+        // Only include sumcheck evals for the first num_sumcheck_layers layers
+        if k >= num_sumcheck_layers {
+            break;
+        }
         for msg in round_msgs {
             sumcheck_record.evals.push(convert_sumcheck_evals(msg));
         }
@@ -464,8 +551,9 @@ fn build_chip_records(
         layer_output_lambda,
         layer_output_mu,
     };
-    sumcheck_record.ris = schedule.ris.clone();
-    if !replay.layers.is_empty() {
+    // Truncate ris to match the sumcheck trace's expected total_rounds.
+    sumcheck_record.ris = schedule.ris[..total_sumcheck_rounds.min(schedule.ris.len())].to_vec();
+    if !replay.layers.is_empty() && total_sumcheck_rounds > 0 {
         eyre::ensure!(
             sumcheck_record.ris.len() == sumcheck_record.evals.len(),
             "tower replay produced mismatched round counts: replay challenges={}, sumcheck eval rounds={}",
@@ -684,18 +772,28 @@ pub(crate) fn build_gkr_blob(
                 eyre::eyre!("missing chip proof instance {instance_idx} for chip {chip_idx}")
             })?;
             has_chip = true;
-            let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
+            // Access the fork log directly using fork_idx and fork-local tidx.
+            let mut ts = {
+                let fork_log = preflight.fork_log(pf_entry.fork_idx);
+                ReadOnlyTranscript::new(fork_log, pf_entry.tidx)
+            };
             let schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
 
             let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
                 .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_idx}"))?;
+
+            // Re-run the tower replay with Poseidon2-derived challenges from the
+            // schedule so that eq_at_r / claim_in / mu / lambda match the native
+            // DuplexSponge verifier (the preflight replay used a fresh keccak
+            // BasicTranscript and is wrong).
+            let poseidon_replay = replay_tower_proof_poseidon(chip_proof, circuit_vk, &schedule)
+                .unwrap_or_else(|_err| TowerReplayResult::default());
+
             // Use sequential index for NestedForLoop compatibility (idx must increment
             // by 0 or 1 within each proof_idx group).
             let idx = entry_idx;
-            println!(
-                "processing chip name: {:?}",
-                child_vk.circuit_index_to_name.get(&chip_idx)
-            );
+            // Compute global tidx from fork-local tidx for trace column values.
+            let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
             let (
                 chip_input_record,
                 layer_record,
@@ -709,9 +807,9 @@ pub(crate) fn build_gkr_blob(
                 entry_idx == 0,
                 chip_proof,
                 circuit_vk,
-                &pf_entry.tower_replay,
+                &poseidon_replay,
                 &schedule,
-                pf_entry.tidx,
+                global_tidx,
             )?;
 
             // Capture first chip's alpha and q0 for the proof-level record
@@ -785,7 +883,7 @@ pub(crate) fn build_gkr_blob(
     })
 }
 
-fn record_gkr_transcript<TS>(
+pub(crate) fn record_gkr_transcript<TS>(
     ts: &mut TS,
     _chip_idx: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
@@ -793,16 +891,30 @@ fn record_gkr_transcript<TS>(
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
-    let alpha_logup = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-    // Keep transcript index alignment with TowerInputAir's `tidx + 2 * D_EF` for q0.
-    let _beta_placeholder = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-    if let Some(q0) = chip_proof
-        .lk_out_evals
-        .first()
-        .and_then(|evals| evals.get(2))
+    // Bind read/write/lookup out evals into transcript before deriving tower
+    // challenges. Mirrors v1 verifier: append_field_element_ext for each eval.
+    let mut _out_eval_count = 0usize;
+    for eval in chip_proof
+        .r_out_evals
+        .iter()
+        .chain(chip_proof.w_out_evals.iter())
+        .chain(chip_proof.lk_out_evals.iter())
+        .flatten()
     {
-        ts.observe_ext(*q0);
+        ts.observe_ext(*eval);
+        _out_eval_count += 1;
     }
+
+    // Mirror native: get_challenge_pows calls
+    // transcript.sample_and_append_challenge(b"combine subset evals")
+    // which does append_message(label) then read_challenge().
+    transcript_observe_label(ts, b"combine subset evals");
+    let alpha_logup = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+
+    // Mirror native: transcript.sample_and_append_vec(b"product_sum", log2_num_fanin)
+    // which does append_message(label) then sample_vec(1).
+    transcript_observe_label(ts, b"product_sum");
+    let beta = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
 
     // Reconstruct the transcript events consumed by tower-related AIRs.
     // This keeps preflight transcript history aligned with TowerLayer/Sumcheck/
@@ -817,26 +929,48 @@ where
         .max()
         .unwrap_or(0);
 
+    let log2_num_fanin: usize = 1; // ceil_log2(NUM_FANIN=2) = 1
+
     let mut lambdas = Vec::with_capacity(layer_count);
     let mut mus = Vec::with_capacity(layer_count);
     let mut ris = Vec::new();
 
     for layer_idx in 0..layer_count {
-        let lambda = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+        // For layer 0, there is no transcript lambda sample — the native verifier
+        // goes straight from beta to sumcheck. Use alpha_logup as the weighting
+        // challenge for the root layer (matching native's initial alpha_pows).
+        // For layers > 0, this sample corresponds to get_challenge_pows in the
+        // native verifier (the "next alpha" after the previous round's merge).
+        let lambda = if layer_idx > 0 {
+            transcript_observe_label(ts, b"combine subset evals");
+            FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts)
+        } else {
+            alpha_logup
+        };
         lambdas.push(lambda);
 
-        if layer_idx + 1 < layer_count
-            && let Some(round_msgs) = chip_proof.tower_proof.proofs.get(layer_idx)
-        {
-            for msg in round_msgs {
-                for eval in msg.evaluations.iter().take(3) {
+        if let Some(round_msgs) = chip_proof.tower_proof.proofs.get(layer_idx) {
+            // Mirror native sumcheck IOPVerifierState::verify init:
+            // append_message(max_num_variables.to_leBytes())
+            // append_message(max_degree.to_leBytes())
+            let max_num_variables = (layer_idx + 1) * log2_num_fanin;
+            let max_degree: usize = 3; // NUM_FANIN + 1
+            transcript_observe_label(ts, &max_num_variables.to_le_bytes());
+            transcript_observe_label(ts, &max_degree.to_le_bytes());
+
+            for (_ri_idx, msg) in round_msgs.iter().enumerate() {
+                for eval in &msg.evaluations {
                     ts.observe_ext(*eval);
                 }
+                // Mirror native: sample_and_append_challenge(b"Internal round")
+                transcript_observe_label(ts, b"Internal round");
                 let ri = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
                 ris.push(ri);
             }
         }
 
+        // Mirror native: sample_and_append_vec(b"merge", log2_num_fanin)
+        transcript_observe_label(ts, b"merge");
         let mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         mus.push(mu);
     }
@@ -844,6 +978,7 @@ where
     let _ = read_count;
     TowerTranscriptSchedule {
         alpha_logup,
+        beta,
         lambdas,
         mus,
         ris,
@@ -866,7 +1001,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             Ok(blob) => blob,
             Err(err) => {
                 error!(?err, "failed to build GKR trace blob");
-                eprintln!("failed to build GKR trace blob: {err:?}");
                 return None;
             }
         };

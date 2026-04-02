@@ -6,7 +6,7 @@ use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::TowerLayerCols;
-use crate::tracegen::RowMajorChip;
+use crate::{tower::tower_transcript_len, tracegen::RowMajorChip};
 
 /// Minimal record for parallel tower layer trace generation
 #[derive(Debug, Clone, Default)]
@@ -111,12 +111,7 @@ impl TowerLayerRecord {
 
     #[inline]
     pub(crate) fn layer_tidx(&self, layer_idx: usize) -> usize {
-        if layer_idx == 0 {
-            self.tidx
-        } else {
-            let j = layer_idx;
-            self.tidx + D_EF * (2 * j * j + 4 * j - 1)
-        }
+        self.tidx + tower_transcript_len::layers_cumulative(layer_idx)
     }
 
     #[inline]
@@ -136,9 +131,7 @@ impl TowerLayerRecord {
 
     #[inline]
     pub(crate) fn claim_tidx(&self, layer_idx: usize) -> usize {
-        let base = self.layer_tidx(layer_idx);
-        let extra = if layer_idx == 0 { 0 } else { D_EF };
-        base + extra + layer_idx * 4 * D_EF
+        self.layer_tidx(layer_idx) + tower_transcript_len::claim_offset_in_layer(layer_idx)
     }
 }
 

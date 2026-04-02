@@ -95,13 +95,18 @@ impl MainModule {
                         );
                     }
                     let claim = input_layer_claim(chip_proof);
-                    let mut ts = ReadOnlyTranscript::new(&preflight.transcript, pf_entry.tidx);
+                    // Access the fork log directly using fork_idx and fork-local tidx.
+                    let fork_log = preflight.fork_log(pf_entry.fork_idx);
+                    let mut ts = ReadOnlyTranscript::new(fork_log, pf_entry.tidx);
                     record_main_transcript(&mut ts, chip_idx, chip_proof);
 
+                    // Compute global tidx for trace column values.
+                    let global_tidx =
+                        preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
                     let main_record = MainRecord {
                         proof_idx,
                         idx: chip_idx,
-                        tidx: pf_entry.tidx,
+                        tidx: global_tidx,
                         claim,
                     };
                     let sumcheck_record = build_sumcheck_record_from_chip(
@@ -109,7 +114,7 @@ impl MainModule {
                         chip_idx,
                         claim,
                         chip_proof,
-                        pf_entry.tidx,
+                        global_tidx,
                     );
                     paired.push((main_record, sumcheck_record));
                 }
@@ -174,6 +179,7 @@ impl MainModule {
                     chip_idx,
                     instance_idx,
                     tidx,
+                    fork_idx: 0, // unused in forked flow
                 });
             }
         }
@@ -193,6 +199,22 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         let mut paired = self.collect_records(child_vk, proofs, preflights).ok()?;
         paired.sort_by_key(|(record, _)| (record.proof_idx, record.idx));
+        // Replace chip_idx with sequential index per proof_idx group to satisfy
+        // NestedForLoopSubAir counter constraints (must increment by 0 or 1).
+        // This matches the tower module which also uses entry_idx.
+        {
+            let mut prev_proof_idx = usize::MAX;
+            let mut seq_idx = 0usize;
+            for (record, sumcheck_record) in paired.iter_mut() {
+                if record.proof_idx != prev_proof_idx {
+                    seq_idx = 0;
+                    prev_proof_idx = record.proof_idx;
+                }
+                record.idx = seq_idx;
+                sumcheck_record.idx = seq_idx;
+                seq_idx += 1;
+            }
+        }
         let (main_records, sumcheck_records): (Vec<_>, Vec<_>) = paired.into_iter().unzip();
         let ctx = MainTraceCtx {
             main_records: &main_records,
@@ -303,7 +325,7 @@ fn build_sumcheck_record_from_chip(
     }
 }
 
-fn record_main_transcript<TS>(
+pub(crate) fn record_main_transcript<TS>(
     ts: &mut TS,
     _chip_idx: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,

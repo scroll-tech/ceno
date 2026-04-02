@@ -4,8 +4,8 @@ mod types;
 
 pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
-    BatchConstraintPreflight, ChipTranscriptRange, MainPreflight, Preflight, ProofShapePreflight,
-    TowerChipTranscriptRange, TowerPreflight, TraceVData,
+    BatchConstraintPreflight, ChipTranscriptRange, ForkTranscriptLog, MainPreflight, Preflight,
+    ProofShapePreflight, TowerChipTranscriptRange, TowerPreflight, TraceVData,
 };
 pub use recursion_circuit::system::{
     AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule, VerifierConfig,
@@ -25,6 +25,7 @@ use std::{iter, mem, sync::Arc};
 use self::utils::test_system_params_zero_pow;
 use crate::{
     batch_constraint::{self, BatchConstraintModule},
+    circuit::inner::verifier::VerifierModule,
     main::MainModule,
     tower::TowerModule,
     transcript::TranscriptModule,
@@ -131,6 +132,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
     pub(crate) bus_idx_manager: BusIndexManager,
     pub(crate) transcript: TranscriptModule,
     pub(crate) proof_shape: ProofShapeModule,
+    pub(crate) verifier: VerifierModule,
     pub(crate) main_module: MainModule,
     pub(crate) gkr: TowerModule,
     #[allow(dead_code)]
@@ -141,6 +143,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
 enum TraceModuleRef<'a> {
     Transcript(&'a TranscriptModule),
     ProofShape(&'a ProofShapeModule),
+    Verifier(&'a VerifierModule),
     Main(&'a MainModule),
     Tower(&'a TowerModule),
     #[allow(dead_code)]
@@ -152,6 +155,7 @@ impl<'a> TraceModuleRef<'a> {
         match self {
             TraceModuleRef::Transcript(_) => "Transcript",
             TraceModuleRef::ProofShape(_) => "ProofShape",
+            TraceModuleRef::Verifier(_) => "Verifier",
             TraceModuleRef::Main(_) => "Main",
             TraceModuleRef::Tower(_) => "Tower",
             TraceModuleRef::BatchConstraint(_) => "BatchConstraint",
@@ -170,9 +174,6 @@ impl<'a> TraceModuleRef<'a> {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         match self {
-            TraceModuleRef::ProofShape(module) => {
-                module.run_preflight(child_vk, proof, preflight, sponge)
-            }
             TraceModuleRef::Main(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
@@ -182,8 +183,13 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::BatchConstraint(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
-            TraceModuleRef::Transcript(_) => {
-                panic!("Transcript module does not participate in preflight")
+            TraceModuleRef::Transcript(_)
+            | TraceModuleRef::Verifier(_)
+            | TraceModuleRef::ProofShape(_) => {
+                panic!(
+                    "{} module does not participate in per-module preflight",
+                    self.name()
+                )
             }
         }
     }
@@ -234,6 +240,9 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::BatchConstraint(module) => {
                 module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
             }
+            TraceModuleRef::Verifier(module) => {
+                module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
+            }
         }
     }
 }
@@ -280,6 +289,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             bus_inventory.clone(),
             config.continuations_enabled,
         );
+        let verifier = VerifierModule::new(&mut bus_idx_manager, bus_inventory.clone());
         let main_module = MainModule::new(&mut bus_idx_manager, bus_inventory.clone());
         let gkr = TowerModule::new(
             child_vk.as_ref(),
@@ -294,13 +304,20 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             bus_idx_manager,
             transcript,
             proof_shape,
+            verifier,
             main_module,
             gkr,
             batch_constraint,
         }
     }
 
-    /// Runs preflight for a single proof.
+    /// Runs preflight for a single proof, with proper transcript forking.
+    ///
+    /// This mirrors the native verifier's `verify_proof_validity` fork protocol:
+    /// 1. Trunk: Run verifier preflight first (fixed + witness commits), then
+    ///    proof-shape preflight (public values + per-AIR shape + α/β)
+    /// 2. Fork: clone sponge per chip, observe fork index, run Tower + Main
+    /// 3. Merge: each fork samples 1 ext element → observe into trunk
     #[tracing::instrument(name = "execute_preflight", skip_all)]
     fn run_preflight<TS>(
         &self,
@@ -313,18 +330,140 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         let mut preflight = Preflight::default();
-        let modules = [
-            TraceModuleRef::ProofShape(&self.proof_shape),
-            TraceModuleRef::Tower(&self.gkr),
-            TraceModuleRef::Main(&self.main_module),
-            // TODO(batch-constraint): uncomment after fixing SymbolicExpressionAir trace/preprocessed
-            // shape assumptions that currently trigger SymbolicEvaluator OOB in release tests.
-            // TraceModuleRef::BatchConstraint(&self.batch_constraint),
-        ];
-        for module in modules {
-            module.run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+
+        // Phase 1: Trunk operations.
+        // 1a. Verifier-owned commitment observations.
+        self.verifier
+            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+
+        // 1b. Proof-shape metadata and alpha/beta sampling.
+        self.proof_shape.run_preflight(
+            child_vk,
+            proof,
+            &mut preflight,
+            &mut sponge,
+        );
+
+        // Phase 2: Fork — clone sponge for each chip proof instance.
+        let chip_proof_list: Vec<(
+            usize,
+            usize,
+            &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
+        )> = proof
+            .chip_proofs
+            .iter()
+            .flat_map(|(&chip_idx, instances)| {
+                instances
+                    .iter()
+                    .enumerate()
+                    .map(move |(instance_idx, chip_proof)| (chip_idx, instance_idx, chip_proof))
+            })
+            .collect();
+
+        let num_forks = chip_proof_list.len();
+        let fork_offset = sponge.len(); // tidx of the fork point in the trunk
+
+        let mut fork_sponges: Vec<TS> = (0..num_forks)
+            .map(|i| {
+                let mut forked = sponge.clone();
+                forked.observe(F::from_u64(i as u64));
+                forked
+            })
+            .collect();
+
+        // Phase 3: Run Tower + Main on each fork.
+        // Each fork sponge processes independently. We record fork-local tidx
+        // directly — global offsets are computed on the fly at trace gen time.
+
+        for (fork_idx, &(chip_idx, instance_idx, chip_proof)) in chip_proof_list.iter().enumerate()
+        {
+            let fs = &mut fork_sponges[fork_idx];
+            let fork_start_len = fs.len();
+            // Observe circuit_idx into the fork transcript.
+            // Mirrors v1 verifier: transcript.append_field_element(circuit_idx)
+            fs.observe(F::from_u64(chip_idx as u64));
+
+            // Fork-local tidx: position within the fork's extracted log.
+            let tower_local = fs.len() - fork_start_len;
+            let _ = crate::tower::record_gkr_transcript(fs, chip_idx, chip_proof);
+
+            let tower_replay = match crate::tower::circuit_vk_for_idx(child_vk, chip_idx) {
+                Some(circuit_vk) => {
+                    match crate::tower::replay_tower_proof(chip_proof, circuit_vk) {
+                        Ok(replay) => replay,
+                        Err(_err) => crate::tower::TowerReplayResult::default(),
+                    }
+                }
+                None => crate::tower::TowerReplayResult::default(),
+            };
+
+            // Record tower with fork-local tidx.
+            // Fork log layout: [0]=fork_id observe, [1..]=circuit_idx + tower + main.
+            // tower_local is relative to fork_start_len (after fork_id), so
+            // fork-log-local position = 1 (fork_id) + tower_local.
+            preflight.gkr.chips.push(TowerChipTranscriptRange {
+                chip_idx,
+                instance_idx,
+                tidx: 1 + tower_local,
+                fork_idx,
+                tower_replay,
+            });
+
+            // Main preflight for this chip.
+            let main_local = fs.len() - fork_start_len;
+            crate::main::record_main_transcript(fs, chip_idx, chip_proof);
+
+            preflight.main.chips.push(ChipTranscriptRange {
+                chip_idx,
+                instance_idx,
+                tidx: 1 + main_local,
+                fork_idx,
+            });
         }
-        preflight.transcript = sponge.into_log();
+
+        // Phase 4: Merge — sample 1 ext element from each fork, observe into trunk.
+        for (i, fork_sponge) in fork_sponges.iter_mut().enumerate() {
+            let sample: <BabyBearPoseidon2Config as StarkProtocolConfig>::EF =
+                FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(fork_sponge);
+            sponge.observe_ext(sample);
+        }
+
+        // The trunk log now contains pre-fork ops (0..fork_offset) and merge
+        // ops (fork_offset..trunk_len). The merge phase adds D_EF samples per
+        // fork (from sample_ext on each fork) and D_EF observations per fork
+        // (from observe_ext on trunk).
+        let trunk_log = sponge.into_log();
+
+        preflight.proof_shape.fork_start_tidx = fork_offset;
+
+        // Compute the sponge state at the fork point by replaying the trunk log.
+        preflight.proof_shape.fork_start_state =
+            crate::utils::replay_sponge_state_from_log(&trunk_log, fork_offset);
+
+        // Store fork transcript logs. Each fork sponge log contains the
+        // trunk's history (0..fork_offset) followed by fork-only operations
+        // (fork_id observe + phase 3 ops + phase 4 sample_ext). Extract the
+        // fork portion. Global offsets are NOT stored — they are computed on
+        // the fly via Preflight::fork_global_offset().
+        for (_fork_idx, fork_sponge) in fork_sponges.into_iter().enumerate() {
+            let full_fork_log = fork_sponge.into_log();
+            let fork_values = full_fork_log.values()[fork_offset..].to_vec();
+            let fork_samples = full_fork_log.samples()[fork_offset..].to_vec();
+            let fork_log = openvm_stark_backend::TranscriptLog::new(fork_values, fork_samples);
+
+            // Compute the fork's initial sponge state by replaying the
+            // full log up to fork_offset + 1 (trunk ops + fork_id observe).
+            let initial_state =
+                crate::utils::replay_sponge_state_from_log(&full_fork_log, fork_offset + 1);
+
+            preflight.fork_transcripts.push(ForkTranscriptLog {
+                log: fork_log,
+                initial_state,
+                fork_id: _fork_idx + 1, // 1-based fork IDs (0 = trunk)
+            });
+        }
+
+        preflight.transcript = trunk_log;
         preflight
     }
 
@@ -335,9 +474,10 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     ) -> (Vec<Option<&'a [usize]>>, Option<usize>, Option<usize>) {
         let t_n = self.transcript.num_airs();
         let ps_n = self.proof_shape.num_airs();
+        let v_n = self.verifier.num_airs();
         let gkr_n = self.gkr.num_airs();
         let main_n = self.main_module.num_airs();
-        let module_air_counts = [t_n, ps_n, gkr_n, main_n];
+        let module_air_counts = [t_n, ps_n, v_n, gkr_n, main_n];
 
         let Some(heights) = required_heights else {
             return (vec![None; module_air_counts.len()], None, None);
@@ -424,6 +564,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         let modules = [
             TraceModuleRef::Transcript(&self.transcript),
             TraceModuleRef::ProofShape(&self.proof_shape),
+            TraceModuleRef::Verifier(&self.verifier),
             TraceModuleRef::Tower(&self.gkr),
             TraceModuleRef::Main(&self.main_module),
             // TODO(batch-constraint): re-enable once batch tracegen/preflight alignment is fixed.
@@ -449,12 +590,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             .collect::<Vec<_>>();
 
         for (module, module_ctxs) in modules.into_iter().zip(ctxs_by_module.iter()) {
-            if module_ctxs.is_none() {
-                eprintln!(
-                    "subcircuit_generate_proving_ctxs: module {} returned None",
-                    module.name()
-                );
-            }
+            if module_ctxs.is_none() {}
         }
 
         let ctxs_by_module: Vec<Vec<AirProvingContext<CpuBackend<SC>>>> =
@@ -496,6 +632,7 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
         iter::empty()
             .chain(self.transcript.airs())
             .chain(self.proof_shape.airs())
+            .chain(self.verifier.airs())
             .chain(self.gkr.airs())
             .chain(self.main_module.airs())
             // TODO(batch-constraint): re-chain batch AIRs after BatchConstraintModule is stable.

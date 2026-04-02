@@ -12,7 +12,8 @@ use openvm_native_recursion::{
     challenger::{FeltChallenger, duplex::DuplexChallengerVariable},
     vars::HintSlice,
 };
-use openvm_stark_backend::p3_field::FieldAlgebra;
+use openvm_stark_backend::p3_field::PrimeCharacteristicRing as FieldAlgebra;
+use crate::field_ext::CanonicalFieldExt;
 const NATIVE_SUMCHECK_CTX_LEN: usize = 10;
 
 pub fn iop_verifier_state_verify<C: Config>(

@@ -19,8 +19,10 @@ use crate::system::{
 use recursion_circuit::transcript::{
     merkle_verify::{MerkleVerifyAir, MerkleVerifyCols},
     poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols},
-    transcript::{TranscriptAir, TranscriptCols},
 };
+
+mod transcript_air;
+pub use transcript_air::{ForkedTranscriptAir, ForkedTranscriptCols};
 
 // Should be 1 when 3 <= max_constraint_degree < 7.
 const SBOX_REGISTERS: usize = 1;
@@ -50,37 +52,17 @@ impl TranscriptModule {
         }
     }
 
-    #[tracing::instrument(name = "generate_trace.transcript", level = "trace", skip_all)]
-    fn build_transcript_trace(
-        &self,
-        preflights: &[Preflight],
-        required_height: Option<usize>,
-    ) -> Option<(RowMajorMatrix<F>, Vec<[F; POSEIDON2_WIDTH]>)> {
-        let transcript_width = TranscriptCols::<F>::width();
-        let mut valid_rows = Vec::with_capacity(preflights.len());
+    /// Count the number of valid trace rows needed for a single transcript log.
+    fn count_log_rows(log: &openvm_stark_backend::TranscriptLog<F, [F; POSEIDON2_WIDTH]>) -> usize {
+        let mut cur_is_sample = false;
+        let mut count = 0usize;
+        let mut num_valid_rows = 0usize;
 
-        let mut transcript_valid_rows = 0usize;
-        for preflight in preflights {
-            let mut cur_is_sample = false;
-            let mut count = 0usize;
-            let mut num_valid_rows = 0usize;
-
-            for op_is_sample in preflight.transcript.samples() {
-                if *op_is_sample {
-                    if !cur_is_sample {
-                        num_valid_rows += 1;
-                        cur_is_sample = true;
-                        count = 1;
-                    } else {
-                        if count == CHUNK {
-                            num_valid_rows += 1;
-                            count = 0;
-                        }
-                        count += 1;
-                    }
-                } else if cur_is_sample {
+        for op_is_sample in log.samples() {
+            if *op_is_sample {
+                if !cur_is_sample {
                     num_valid_rows += 1;
-                    cur_is_sample = false;
+                    cur_is_sample = true;
                     count = 1;
                 } else {
                     if count == CHUNK {
@@ -89,102 +71,261 @@ impl TranscriptModule {
                     }
                     count += 1;
                 }
+            } else if cur_is_sample {
+                num_valid_rows += 1;
+                cur_is_sample = false;
+                count = 1;
+            } else {
+                if count == CHUNK {
+                    num_valid_rows += 1;
+                    count = 0;
+                }
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            num_valid_rows += 1;
+        }
+        num_valid_rows
+    }
+
+    /// Replay the sponge for the first `up_to` entries of a transcript log,
+    /// returning the sponge state at that point.
+    ///
+    /// This matches the DuplexSponge's overwrite-mode behavior.
+    fn replay_sponge_state(
+        &self,
+        log: &openvm_stark_backend::TranscriptLog<F, [F; POSEIDON2_WIDTH]>,
+        up_to: usize,
+    ) -> [F; POSEIDON2_WIDTH] {
+        let mut state = [F::ZERO; POSEIDON2_WIDTH];
+        let mut absorb_idx = 0usize;
+        let mut sample_idx = 0usize;
+
+        for i in 0..up_to {
+            if log.samples()[i] {
+                // Matches DuplexSponge::sample()
+                let needs_perm = absorb_idx != 0 || sample_idx == 0;
+                if needs_perm {
+                    self.perm.permute_mut(&mut state);
+                    absorb_idx = 0;
+                    sample_idx = CHUNK; // RATE = CHUNK
+                }
+                sample_idx -= 1;
+                // sampled value = state[sample_idx]; we don't need it
+            } else {
+                // Matches DuplexSponge::observe()
+                state[absorb_idx] = log.values()[i];
+                absorb_idx += 1;
+                if absorb_idx == CHUNK {
+                    self.perm.permute_mut(&mut state);
+                    absorb_idx = 0;
+                    sample_idx = CHUNK;
+                }
+            }
+        }
+
+        state
+    }
+
+    /// Fill transcript trace rows from a single transcript log.
+    ///
+    /// `tidx_offset` is added to the local tidx so fork logs can use global tidx.
+    ///
+    /// Returns the final sponge state after processing the log.
+    #[allow(clippy::too_many_arguments)]
+    fn fill_log_rows(
+        &self,
+        trace: &mut [F],
+        transcript_width: usize,
+        log: &openvm_stark_backend::TranscriptLog<F, [F; POSEIDON2_WIDTH]>,
+        proof_idx: usize,
+        fork_id: usize,
+        is_proof_start: bool,
+        is_fork_start: bool,
+        initial_state: [F; POSEIDON2_WIDTH],
+        tidx_offset: usize,
+        poseidon2_perm_inputs: &mut Vec<[F; POSEIDON2_WIDTH]>,
+    ) -> [F; POSEIDON2_WIDTH] {
+        let mut tidx = 0usize;
+        let mut prev_poseidon_state = initial_state;
+
+        for (i, row) in trace.chunks_exact_mut(transcript_width).enumerate() {
+            let cols: &mut ForkedTranscriptCols<F> = row.borrow_mut();
+            cols.proof_idx = F::from_usize(proof_idx);
+            cols.fork_id = F::from_usize(fork_id);
+
+            if i == 0 && is_proof_start {
+                cols.is_proof_start = F::ONE;
+            }
+            if i == 0 && is_fork_start {
+                cols.is_fork_start = F::ONE;
             }
 
-            if count > 0 {
-                num_valid_rows += 1;
+            let is_sample = log.samples()[tidx];
+            cols.is_sample = F::from_bool(is_sample);
+            cols.tidx = F::from_usize(tidx + tidx_offset);
+            cols.mask[0] = F::ONE;
+            cols.prev_state = prev_poseidon_state;
+
+            if is_sample {
+                debug_assert_eq!(cols.prev_state[CHUNK - 1], log.values()[tidx]);
+            } else {
+                cols.prev_state[0] = log.values()[tidx];
             }
-            valid_rows.push(num_valid_rows);
-            transcript_valid_rows += num_valid_rows;
+
+            tidx += 1;
+            let mut idx = 1usize;
+            let mut permuted = false;
+            loop {
+                if tidx >= log.len() {
+                    break;
+                }
+
+                if log.samples()[tidx] != is_sample {
+                    permuted = log.samples()[tidx];
+                    break;
+                }
+
+                cols.mask[idx] = F::ONE;
+                if is_sample {
+                    debug_assert_eq!(cols.prev_state[CHUNK - 1 - idx], log.values()[tidx]);
+                } else {
+                    cols.prev_state[idx] = log.values()[tidx];
+                }
+
+                tidx += 1;
+                idx += 1;
+                if idx == CHUNK {
+                    permuted = tidx < log.len() && (!is_sample || log.samples()[tidx]);
+                    break;
+                }
+            }
+
+            prev_poseidon_state = cols.prev_state;
+            if permuted {
+                self.perm.permute_mut(&mut prev_poseidon_state);
+                poseidon2_perm_inputs.push(cols.prev_state);
+            }
+            cols.post_state = prev_poseidon_state;
+        }
+
+        debug_assert_eq!(tidx, log.len());
+        prev_poseidon_state
+    }
+
+    #[tracing::instrument(name = "generate_trace.transcript", level = "trace", skip_all)]
+    fn build_transcript_trace(
+        &self,
+        preflights: &[Preflight],
+        required_height: Option<usize>,
+    ) -> Option<(RowMajorMatrix<F>, Vec<[F; POSEIDON2_WIDTH]>)> {
+        let transcript_width = ForkedTranscriptCols::<F>::width();
+
+        // Count valid rows for each proof (trunk + all forks).
+        struct ProofRowInfo {
+            trunk_rows: usize,
+            fork_rows: Vec<usize>,
+        }
+        let mut proof_infos: Vec<ProofRowInfo> = Vec::with_capacity(preflights.len());
+        let mut total_valid_rows = 0usize;
+
+        for preflight in preflights {
+            let trunk_rows = Self::count_log_rows(&preflight.transcript);
+            let fork_rows: Vec<usize> = preflight
+                .fork_transcripts
+                .iter()
+                .map(|ft| Self::count_log_rows(&ft.log))
+                .collect();
+            let proof_total = trunk_rows + fork_rows.iter().sum::<usize>();
+            total_valid_rows += proof_total;
+            proof_infos.push(ProofRowInfo {
+                trunk_rows,
+                fork_rows,
+            });
         }
 
         let transcript_num_rows = if let Some(height) = required_height {
-            if height == 0 || height < transcript_valid_rows {
+            if height == 0 || height < total_valid_rows {
                 return None;
             }
             height
-        } else if transcript_valid_rows == 0 {
+        } else if total_valid_rows == 0 {
             1
         } else {
-            transcript_valid_rows.next_power_of_two()
+            total_valid_rows.next_power_of_two()
         };
 
         let mut transcript_trace = vec![F::ZERO; transcript_num_rows * transcript_width];
         let mut poseidon2_perm_inputs = vec![];
 
-        let mut skip = 0usize;
+        let mut offset = 0usize;
         for (pidx, preflight) in preflights.iter().enumerate() {
-            let mut tidx = 0usize;
-            let mut prev_poseidon_state = [F::ZERO; POSEIDON2_WIDTH];
-            let off = skip * transcript_width;
-            let end = off + valid_rows[pidx] * transcript_width;
+            let info = &proof_infos[pidx];
 
-            for (i, row) in transcript_trace[off..end]
-                .chunks_exact_mut(transcript_width)
-                .enumerate()
-            {
-                let cols: &mut TranscriptCols<F> = row.borrow_mut();
-                cols.proof_idx = F::from_usize(pidx);
-                if i == 0 {
-                    cols.is_proof_start = F::ONE;
-                }
-                let is_sample = preflight.transcript.samples()[tidx];
-                cols.is_sample = F::from_bool(is_sample);
-                cols.tidx = F::from_usize(tidx);
-                cols.mask[0] = F::ONE;
-                cols.prev_state = prev_poseidon_state;
+            // Fill trunk rows (fork_id = 0, tidx_offset = 0).
+            let trunk_end = offset + info.trunk_rows;
+            let trunk_slice =
+                &mut transcript_trace[offset * transcript_width..trunk_end * transcript_width];
+            let _trunk_final_state = self.fill_log_rows(
+                trunk_slice,
+                transcript_width,
+                &preflight.transcript,
+                pidx,
+                0,                          // fork_id
+                true,                       // is_proof_start
+                false,                      // is_fork_start
+                [F::ZERO; POSEIDON2_WIDTH], // trunk starts with zero state
+                0,                          // tidx_offset: trunk starts at global tidx 0
+                &mut poseidon2_perm_inputs,
+            );
+            offset = trunk_end;
 
-                if is_sample {
-                    debug_assert_eq!(
-                        cols.prev_state[CHUNK - 1],
-                        preflight.transcript.values()[tidx]
-                    );
-                } else {
-                    cols.prev_state[0] = preflight.transcript.values()[tidx];
-                }
+            // Compute the sponge state at the fork point by replaying
+            // the trunk's pre-fork operations.
+            let fork_point_state = self
+                .replay_sponge_state(&preflight.transcript, preflight.proof_shape.fork_start_tidx);
 
-                tidx += 1;
-                let mut idx = 1usize;
-                let mut permuted = false;
-                loop {
-                    if tidx >= preflight.transcript.len() {
-                        break;
-                    }
-
-                    if preflight.transcript.samples()[tidx] != is_sample {
-                        permuted = preflight.transcript.samples()[tidx];
-                        break;
-                    }
-
-                    cols.mask[idx] = F::ONE;
-                    if is_sample {
-                        debug_assert_eq!(
-                            cols.prev_state[CHUNK - 1 - idx],
-                            preflight.transcript.values()[tidx]
-                        );
-                    } else {
-                        cols.prev_state[idx] = preflight.transcript.values()[tidx];
-                    }
-
-                    tidx += 1;
-                    idx += 1;
-                    if idx == CHUNK {
-                        permuted = tidx < preflight.transcript.len()
-                            && (!is_sample || preflight.transcript.samples()[tidx]);
-                        break;
-                    }
-                }
-
-                prev_poseidon_state = cols.prev_state;
-                if permuted {
-                    self.perm.permute_mut(&mut prev_poseidon_state);
-                    poseidon2_perm_inputs.push(cols.prev_state);
-                }
-                cols.post_state = prev_poseidon_state;
+            // Fill fork rows. Global tidx offsets for each fork are computed
+            // on the fly (trunk_len + sum of preceding fork lengths).
+            let trunk_len = preflight.transcript.len();
+            let mut fork_tidx_cursor = trunk_len;
+            for (fi, fork_log) in preflight.fork_transcripts.iter().enumerate() {
+                let fork_rows = info.fork_rows[fi];
+                let fork_end = offset + fork_rows;
+                let fork_slice =
+                    &mut transcript_trace[offset * transcript_width..fork_end * transcript_width];
+                // Each fork starts from the trunk's sponge state at the fork
+                // point (NOT the trunk's final state, which includes merge ops).
+                let _ = self.fill_log_rows(
+                    fork_slice,
+                    transcript_width,
+                    &fork_log.log,
+                    pidx,
+                    fork_log.fork_id,
+                    false,            // is_proof_start
+                    true,             // is_fork_start
+                    fork_point_state, // trunk state at fork point
+                    fork_tidx_cursor, // computed global tidx offset
+                    &mut poseidon2_perm_inputs,
+                );
+                fork_tidx_cursor += fork_log.log.len();
+                offset = fork_end;
             }
 
-            skip += valid_rows[pidx];
-            debug_assert_eq!(tidx, preflight.transcript.len());
+            // Fill trunk_fork_state on all rows for this proof.
+            // This is the trunk's sponge state at the fork point (before any
+            // fork-specific operations, but after all pre-fork trunk ops).
+            let proof_start = trunk_end - info.trunk_rows;
+            let proof_end = offset;
+            for row in transcript_trace
+                [proof_start * transcript_width..proof_end * transcript_width]
+                .chunks_exact_mut(transcript_width)
+            {
+                let cols: &mut ForkedTranscriptCols<F> = row.borrow_mut();
+                cols.trunk_fork_state = fork_point_state;
+            }
         }
 
         Some((
@@ -248,8 +389,9 @@ impl AirModule for TranscriptModule {
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
-        let transcript_air = TranscriptAir {
+        let transcript_air = ForkedTranscriptAir {
             transcript_bus: self.bus_inventory.transcript_bus,
+            forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             poseidon2_permute_bus: self.bus_inventory.poseidon2_permute_bus,
             final_state_bus: self
                 .final_state_bus_enabled
@@ -309,8 +451,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 (None, None, None)
             };
 
-        // TODO(recursion-proof-bridge): Implement MerkleVerify trace generation using
-        // RecursionProof/RecursionVk once those fields are available in local bridge APIs.
         let merkle_rows = required_merkle_verify.unwrap_or(1);
         if merkle_rows == 0 {
             return None;
