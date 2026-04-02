@@ -63,8 +63,7 @@ impl VerifierModule {
     }
 
     /// Observe the witness commitment (`witin_commit`) into the Fiat-Shamir transcript.
-    /// Called during the trunk phase, after per-AIR shape and chip-index observations,
-    /// before alpha/beta sampling.
+    /// Called during the verifier-owned trunk preflight.
     pub fn observe_witness_commit<TS>(&self, proof: &RecursionProof, ts: &mut TS)
     where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
@@ -74,6 +73,21 @@ impl VerifierModule {
             ts.observe(elem);
         }
         ts.observe(F::from_u64(witin.log2_max_codeword_size as u64));
+    }
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    pub fn run_preflight<TS>(
+        &self,
+        child_vk: &RecursionVk,
+        proof: &RecursionProof,
+        _preflight: &mut Preflight,
+        ts: &mut TS,
+    ) where
+        TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
+    {
+        // Verifier-only trunk phase observations.
+        self.observe_fixed_commits(child_vk, ts);
+        self.observe_witness_commit(proof, ts);
     }
 }
 

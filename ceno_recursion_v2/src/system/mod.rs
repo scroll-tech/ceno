@@ -314,8 +314,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     /// Runs preflight for a single proof, with proper transcript forking.
     ///
     /// This mirrors the native verifier's `verify_proof_validity` fork protocol:
-    /// 1. Trunk: Observe fixed commits (verifier), per-AIR shape (proof_shape),
-    ///    witness commit (verifier), sample α/β (proof_shape)
+    /// 1. Trunk: Run verifier preflight first (fixed + witness commits), then
+    ///    proof-shape preflight (public values + per-AIR shape + α/β)
     /// 2. Fork: clone sponge per chip, observe fork index, run Tower + Main
     /// 3. Merge: each fork samples 1 ext element → observe into trunk
     #[tracing::instrument(name = "execute_preflight", skip_all)]
@@ -332,16 +332,16 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let mut preflight = Preflight::default();
 
         // Phase 1: Trunk operations.
-        // 1a. ProofShape observes raw PIs and per-AIR metadata; the verifier
-        //     module observes fixed + witness commitments at the correct
-        //     Fiat-Shamir positions (interleaved by the ProofShape preflight
-        //     which delegates back to the verifier).
-        self.proof_shape.run_preflight_with_verifier(
+        // 1a. Verifier-owned commitment observations.
+        self.verifier
+            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+
+        // 1b. Proof-shape metadata and alpha/beta sampling.
+        self.proof_shape.run_preflight(
             child_vk,
             proof,
             &mut preflight,
             &mut sponge,
-            &self.verifier,
         );
 
         // Phase 2: Fork — clone sponge for each chip proof instance.

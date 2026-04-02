@@ -108,13 +108,12 @@ impl ProofShapeModule {
     }
 
     #[tracing::instrument(level = "trace", skip_all)]
-    pub fn run_preflight_with_verifier<TS>(
+    pub fn run_preflight<TS>(
         &self,
         child_vk: &RecursionVk,
         proof: &RecursionProof,
         preflight: &mut Preflight,
         ts: &mut TS,
-        verifier: &crate::circuit::inner::verifier::VerifierModule,
     ) where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
@@ -130,10 +129,6 @@ impl ProofShapeModule {
                 );
             }
         }
-
-        // Fixed commitment observations (fixed_commit, fixed_no_omc_init_commit)
-        // are handled by VerifierModule, which owns the CommitAir constraints.
-        verifier.observe_fixed_commits(child_vk, ts);
 
         // Build per-air shape metadata from present chip proofs.
         let mut sorted_trace_vdata = proof
@@ -214,11 +209,6 @@ impl ProofShapeModule {
             .max()
             .unwrap_or(0);
 
-        // Verifier preprocess: absorb fixed commitment.
-        // Mirrors v1 verifier order: fixed_commit → (chip_idx, num_instance) → witin_commit → α, β
-        // TODO(recursion-proof-bridge): absorb fixed commitment digest + log2_max_codeword_size
-        // once basefold module is integrated. See v1: PCS::write_commitment(fixed_commit, transcript)
-
         // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
             ts.observe(F::from_usize(chip_idx));
@@ -230,10 +220,6 @@ impl ProofShapeModule {
             }
         }
 
-        // TODO(recursion-proof-bridge): absorb witness commitment digest + log2_max_codeword_size
-        // once basefold module is integrated. See v1: PCS::write_commitment(&witin_commit, transcript)
-        // Witness commitment observation is handled by VerifierModule.
-        verifier.observe_witness_commit(proof, ts);
 
         preflight.proof_shape.alpha_tidx = ts.len();
         let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
