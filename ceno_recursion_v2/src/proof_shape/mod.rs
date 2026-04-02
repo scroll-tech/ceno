@@ -22,7 +22,7 @@ use crate::{
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        RecursionField, RecursionProof, RecursionVk, TraceGenModule, TraceVData,
+        RecursionProof, RecursionVk, TraceGenModule, TraceVData,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
@@ -119,17 +119,6 @@ impl ProofShapeModule {
     {
         let _ = self;
 
-        // Verifier preprocess: absorb public values in canonical circuit-instance order.
-        for (_, circuit_vk) in child_vk.circuit_vks.iter() {
-            for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
-                ts.observe(
-                    proof
-                        .public_values
-                        .query_by_index::<RecursionField>(instance_value.0),
-                );
-            }
-        }
-
         // Build per-air shape metadata from present chip proofs.
         let mut sorted_trace_vdata = proof
             .chip_proofs
@@ -220,12 +209,13 @@ impl ProofShapeModule {
             }
         }
 
-
         preflight.proof_shape.alpha_tidx = ts.len();
         let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         preflight.proof_shape.beta_tidx = ts.len();
         let _beta = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         preflight.proof_shape.fork_start_tidx = ts.len();
+
+        eprintln!("_alpha {} _beta {}", _alpha, _beta);
 
         let _ = child_vk;
     }
@@ -313,7 +303,6 @@ impl AirModule for ProofShapeModule {
             air_shape_bus: self.bus_inventory.air_shape_bus,
             hyperdim_bus: self.bus_inventory.hyperdim_bus,
             lifted_heights_bus: self.bus_inventory.lifted_heights_bus,
-            // commitments_bus: self.bus_inventory.commitments_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             n_lift_bus: self.bus_inventory.n_lift_bus,

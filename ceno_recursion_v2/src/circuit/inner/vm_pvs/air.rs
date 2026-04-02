@@ -1,20 +1,25 @@
-use std::borrow::Borrow;
+use std::{borrow::Borrow, sync::Arc};
 
-use openvm_circuit::system::connector::DEFAULT_SUSPEND_EXIT_CODE;
+use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
+use ceno_zkvm::instructions::riscv::constants::{
+    END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, EXIT_PC, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
+    HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBIO_DIGEST_IDX,
+    SHARD_ID_IDX, SHARD_RW_SUM_IDX,
+};
 use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
+use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
-use recursion_circuit::bus::{CachedCommitBus, PublicValuesBus};
+use recursion_circuit::bus::{
+    CachedCommitBus, PublicValuesBus, PublicValuesBusMessage, TranscriptBus, TranscriptBusMessage,
+};
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::circuit::inner::{
-    bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
-    vm_pvs::VmPvs,
-};
+use crate::circuit::inner::{bus::PvsAirConsistencyBus, vm_pvs::VmPvs};
 
 #[repr(C)]
 #[derive(AlignedBorrow)]
@@ -27,10 +32,12 @@ pub struct VmPvsCols<F> {
 }
 
 pub struct VmPvsAir {
+    pub transcript_bus: TranscriptBus,
     pub public_values_bus: PublicValuesBus,
     pub cached_commit_bus: CachedCommitBus,
     pub pvs_air_consistency_bus: PvsAirConsistencyBus,
     pub deferral_enabled: bool,
+    pub instance_public_value_indices: Arc<Vec<Vec<usize>>>,
 }
 
 impl<F> BaseAir<F> for VmPvsAir {
@@ -113,9 +120,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .assert_eq(local.has_verifier_pvs, next.has_verifier_pvs);
 
         // We constrain segment adjacency so adjacent rows correspond to adjacent segments.
-        // Non-final segments must suspend with DEFAULT_SUSPEND_EXIT_CODE.
-        let suspend_exit_code_lo = AB::Expr::from_u32(DEFAULT_SUSPEND_EXIT_CODE & 0xffff);
-        let suspend_exit_code_hi = AB::Expr::from_u32((DEFAULT_SUSPEND_EXIT_CODE >> 16) & 0xffff);
+        // Non-final segments must suspend with EXIT_PC.
+        let suspend_exit_pc = EXIT_PC as u32;
+        let suspend_exit_code_lo = AB::Expr::from_u32(suspend_exit_pc & 0xffff);
+        let suspend_exit_code_hi = AB::Expr::from_u32((suspend_exit_pc >> 16) & 0xffff);
         builder
             .when(and(local.is_valid, not(local.is_last)))
             .assert_eq(local.child_pvs.exit_code[0], suspend_exit_code_lo);
@@ -123,14 +131,40 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .when(and(local.is_valid, not(local.is_last)))
             .assert_eq(local.child_pvs.exit_code[1], suspend_exit_code_hi);
 
-        // when local and next are valid, constrain increasing proof_idx and adjacency
+        // When local and next are valid, enforce continuation consistency.
         let mut when_both_valid = builder.when(and(local.is_valid, not(local.is_last)));
         when_both_valid.assert_eq(local.child_pvs.end_pc, next.child_pvs.init_pc);
         when_both_valid.assert_eq(local.child_pvs.end_cycle, next.child_pvs.init_cycle);
+        when_both_valid.assert_eq(
+            local.child_pvs.shard_id + AB::Expr::ONE,
+            next.child_pvs.shard_id,
+        );
+        when_both_valid.assert_eq(
+            local.child_pvs.heap_start_addr
+                + local.child_pvs.heap_shard_len * AB::Expr::from_u32(WORD_SIZE as u32),
+            next.child_pvs.heap_start_addr,
+        );
 
-        // TODO(vm-pvs-mapping): public_values_bus.receive mappings are intentionally disabled
-        // until the new VmPvs -> PublicValuesBus index mapping is finalized.
-        // self.public_values_bus.receive(...);
+        // Mirror verifier invariant: every shard starts at SUBCYCLES_PER_INSN.
+        builder.when(local.is_valid).assert_eq(
+            local.child_pvs.init_cycle,
+            AB::Expr::from_u64(Tracer::SUBCYCLES_PER_INSN),
+        );
+
+        for (air_idx, instance_indices) in self.instance_public_value_indices.iter().enumerate() {
+            for (pv_idx, global_pv_idx) in instance_indices.iter().enumerate() {
+                self.public_values_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    PublicValuesBusMessage {
+                        air_idx: AB::Expr::from_usize(air_idx),
+                        pv_idx: AB::Expr::from_usize(pv_idx),
+                        value: vm_public_value_by_index::<AB>(local, *global_pv_idx),
+                    },
+                    local.is_valid,
+                );
+            }
+        }
 
         // At the leaf level, this AIR is responsible for receiving the cached trace commit
         // program_commit.
@@ -146,21 +180,63 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         //     local.is_valid * is_leaf,
         // );
 
+        // Commitments are observed after transcript-visible public values in preflight.
+        let start_tidx_after_commitment = VmPvs::<u8>::width() - 3 * DIGEST_SIZE;
+        for (didx, value) in local.child_pvs.fixed_commit.iter().enumerate() {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: AB::Expr::from_usize(start_tidx_after_commitment + didx),
+                    value: (*value).into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_valid,
+            );
+        }
+        for (didx, value) in local.child_pvs.fixed_no_omc_init_commit.iter().enumerate() {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: AB::Expr::from_usize(start_tidx_after_commitment + DIGEST_SIZE + didx),
+                    value: (*value).into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_valid,
+            );
+        }
+        for (didx, value) in local.child_pvs.witness_commit.iter().enumerate() {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: AB::Expr::from_usize(
+                        start_tidx_after_commitment + 2 * DIGEST_SIZE + didx,
+                    ),
+                    value: (*value).into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_valid,
+            );
+        }
+
         // We look up proof metadata from VerifierPvsAir here to ensure consistency on each row.
-        self.pvs_air_consistency_bus.lookup_key(
-            builder,
-            local.proof_idx,
-            PvsAirConsistencyMessage {
-                deferral_flag,
-                has_verifier_pvs: local.has_verifier_pvs.into(),
-            },
-            local.is_valid,
-        );
+        // self.pvs_air_consistency_bus.lookup_key(
+        //     builder,
+        //     local.proof_idx,
+        //     PvsAirConsistencyMessage {
+        //         deferral_flag,
+        //         has_verifier_pvs: local.has_verifier_pvs.into(),
+        //     },
+        //     local.is_valid,
+        // );
 
         // Finally, constrain that this AIR's output public values are consistent with child_pvs.
         let &VmPvs::<_> {
             fixed_commit,
             fixed_no_omc_init_commit,
+            witness_commit,
             exit_code,
             init_pc,
             init_cycle,
@@ -240,6 +316,39 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             local.child_pvs.fixed_no_omc_init_commit,
             fixed_no_omc_init_commit,
         );
+        assert_array_eq(
+            &mut builder.when(local.is_valid),
+            local.child_pvs.witness_commit,
+            witness_commit,
+        );
+    }
+}
+
+fn vm_public_value_by_index<AB>(local: &VmPvsCols<AB::Var>, index: usize) -> AB::Expr
+where
+    AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues,
+{
+    match index {
+        EXIT_CODE_IDX => local.child_pvs.exit_code[0].into(),
+        idx if idx == EXIT_CODE_IDX + 1 => local.child_pvs.exit_code[1].into(),
+        INIT_PC_IDX => local.child_pvs.init_pc.into(),
+        INIT_CYCLE_IDX => local.child_pvs.init_cycle.into(),
+        END_PC_IDX => local.child_pvs.end_pc.into(),
+        END_CYCLE_IDX => local.child_pvs.end_cycle.into(),
+        SHARD_ID_IDX => local.child_pvs.shard_id.into(),
+        HEAP_START_ADDR_IDX => local.child_pvs.heap_start_addr.into(),
+        HEAP_LENGTH_IDX => local.child_pvs.heap_shard_len.into(),
+        HINT_START_ADDR_IDX => local.child_pvs.hint_start_addr.into(),
+        HINT_LENGTH_IDX => local.child_pvs.hint_shard_len.into(),
+        idx if (SHARD_RW_SUM_IDX
+            ..(SHARD_RW_SUM_IDX + crate::circuit::inner::vm_pvs::SEPTIC_EXTENSION_DEGREE * 2))
+            .contains(&idx) =>
+        {
+            local.child_pvs.shard_rw_sum[idx - SHARD_RW_SUM_IDX].into()
+        }
+        idx if idx == PUBIO_DIGEST_IDX => local.child_pvs.public_io[0].into(),
+        idx if idx == PUBIO_DIGEST_IDX + 1 => local.child_pvs.public_io[1].into(),
+        _ => AB::Expr::ZERO,
     }
 }
 

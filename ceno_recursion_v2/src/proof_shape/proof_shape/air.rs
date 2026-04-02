@@ -119,7 +119,6 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub fraction_folder_input_bus: FractionFolderInputBus,
     pub hyperdim_bus: HyperdimBus,
     pub lifted_heights_bus: LiftedHeightsBus,
-    // pub commitments_bus: GlobalCommitmentsBus,
     pub transcript_bus: TranscriptBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub n_lift_bus: NLiftBus,
@@ -257,7 +256,7 @@ where
         let mut preprocessed_stacked_width = AB::Expr::ZERO;
         let mut cached_widths = vec![AB::Expr::ZERO; self.max_cached];
 
-        // Select values for CommitmentsBus
+        // Select values for transcript commitment material.
         let mut preprocessed_commit = [AB::Expr::ZERO; DIGEST_SIZE];
 
         // Select values for NumPublicValuesBus
@@ -324,7 +323,6 @@ where
         // TRANSCRIPT OBSERVATIONS
         ///////////////////////////////////////////////////////////////////////////////////////////
         let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
-        // FIXME: simplify separators
         builder.when(is_first_idx.clone()).assert_eq(
             local.starting_tidx,
             AB::Expr::from_usize(TranscriptLabel::Riscv.field_len()),
@@ -617,11 +615,11 @@ where
         //     local.is_present * preprocessed_stacked_width,
         // );
 
-        // NOTE: this is non-used if has_preprocessed == 0
-        // self.commitments_bus.add_key_with_lookups(
+        // NOTE: historical commit-index bus path intentionally removed.
+        // legacy_lookup(
         //     builder,
         //     local.proof_idx,
-        //     CommitmentsBusMessage {
+        //     commitment message
         //         major_idx: AB::Expr::ZERO,
         //         minor_idx: cidx_offset.clone() + local.starting_cidx,
         //         commitment: preprocessed_commit,
@@ -648,10 +646,10 @@ where
         //         local.is_present * cached_widths[cached_idx].clone(),
         //     );
         //
-        //     // self.commitments_bus.add_key_with_lookups(
+        //     // legacy_lookup(
         //     //     builder,
         //     //     local.proof_idx,
-        //     //     CommitmentsBusMessage {
+        //     //     commitment message
         //     //         major_idx: AB::Expr::ZERO,
         //     //         minor_idx: cidx_offset.clone() + local.starting_cidx,
         //     //         commitment: localv.cached_commits[cached_idx].map(Into::into),
@@ -681,10 +679,10 @@ where
         //     .when(and(local.is_valid, not(next.is_last)))
         //     .assert_eq(local.starting_cidx + cidx_offset, next.starting_cidx);
         //
-        // self.commitments_bus.add_key_with_lookups(
+        // legacy_lookup(
         //     builder,
         //     local.proof_idx,
-        //     GlobalCommitmentsBusMessage {
+        //     commitment message
         //         major_idx: AB::Expr::ZERO,
         //         minor_idx: AB::Expr::ZERO,
         //         commitment: localv.cached_commits[self.max_cached - 1].map(Into::into),
@@ -695,16 +693,16 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // NUM PUBLIC VALUES
         ///////////////////////////////////////////////////////////////////////////////////////////
-        self.num_pvs_bus.send(
-            builder,
-            local.proof_idx,
-            NumPublicValuesMessage {
-                air_idx: local.idx.into(),
-                tidx: num_pvs_tidx,
-                num_pvs,
-            },
-            local.is_present * has_pvs,
-        );
+        // self.num_pvs_bus.send(
+        //     builder,
+        //     local.proof_idx,
+        //     NumPublicValuesMessage {
+        //         air_idx: local.idx.into(),
+        //         tidx: num_pvs_tidx,
+        //         num_pvs,
+        //     },
+        //     local.is_present * has_pvs,
+        // );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HEIGHT + GKR MESSAGE

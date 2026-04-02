@@ -8,8 +8,7 @@ use recursion_circuit::{
 };
 
 use crate::bus::{
-    CachedCommitBus as LocalCachedCommitBus, CommitmentsBus as LocalCommitmentsBus,
-    ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
+    CachedCommitBus as LocalCachedCommitBus, ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
     ForkedTranscriptBus as LocalForkedTranscriptBus,
     FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
     LiftedHeightsBus as LocalLiftedHeightsBus, MainBus, MainExpressionClaimBus,
@@ -29,7 +28,6 @@ pub struct BusInventory {
     pub air_shape_bus: AirShapeBus,
     pub hyperdim_bus: LocalHyperdimBus,
     pub lifted_heights_bus: LocalLiftedHeightsBus,
-    pub commitments_bus: LocalCommitmentsBus,
     pub n_lift_bus: LocalNLiftBus,
     pub cached_commit_bus: LocalCachedCommitBus,
     pub public_values_bus: LocalPublicValuesBus,
@@ -59,7 +57,6 @@ impl BusInventory {
         let air_shape_bus = AirShapeBus::new(b.new_bus_idx());
         let hyperdim_bus = LocalHyperdimBus::new(b.new_bus_idx());
         let lifted_heights_bus = LocalLiftedHeightsBus::new(b.new_bus_idx());
-        let commitments_bus = LocalCommitmentsBus::new(b.new_bus_idx());
         let public_values_bus = LocalPublicValuesBus::new(b.new_bus_idx());
         let range_checker_bus = RangeCheckerBus::new(b.new_bus_idx());
         let power_checker_bus = PowerCheckerBus::new(b.new_bus_idx());
@@ -91,7 +88,6 @@ impl BusInventory {
             air_shape_bus,
             hyperdim_bus,
             lifted_heights_bus,
-            commitments_bus,
             n_lift_bus,
             cached_commit_bus,
             public_values_bus,

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Recursion V2 Diff-Driven Task"
+  short_description: "Implement recursion-v2 work from newly added git-diff comments with upstream skeleton and verifier-truth alignment"
+  default_prompt: "Follow recursion-v2-git-diff-driven-task: harvest staged+unstaged diff comments, condense into target/behavior/acceptance checklist, use upstream openvm continuation/recursion constraint-bus skeletons, fill real data per ceno_zkvm/src/scheme/verifier.rs, then run required completion gate commands in order."
+

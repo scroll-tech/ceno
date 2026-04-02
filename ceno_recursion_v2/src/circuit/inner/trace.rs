@@ -2,11 +2,14 @@ use openvm_cpu_backend::CpuBackend;
 #[cfg(feature = "cuda")]
 use openvm_cuda_backend::GpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
-use openvm_stark_backend::prover::{AirProvingContext, ProverBackend};
+use openvm_stark_backend::{
+    FiatShamirTranscript, TranscriptHistory,
+    prover::{AirProvingContext, ProverBackend},
+};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use verify_stark::pvs::DeferralPvs;
 
-use crate::system::RecursionProof;
+use crate::system::{Preflight, RecursionProof, RecursionVk};
 
 #[derive(Copy, Clone)]
 pub enum ProofsType {
@@ -19,14 +22,24 @@ pub enum ProofsType {
 // Trait that inner and compression provers use to remain generic in PB
 pub trait InnerTraceGen<PB: ProverBackend> {
     fn new(deferral_enabled: bool) -> Self;
-    fn generate_pre_verifier_subcircuit_ctxs(
+    fn generate_pre_verifier_subcircuit_ctxs<TS>(
         &self,
         proofs: &[RecursionProof],
         proofs_type: ProofsType,
         absent_trace_pvs: Option<(DeferralPvs<F>, bool)>,
         child_is_app: bool,
+        child_vk: &RecursionVk,
         child_dag_commit: PB::Commitment,
-    ) -> (Vec<AirProvingContext<PB>>, Vec<[F; POSEIDON2_WIDTH]>);
+        initial_transcript: TS,
+    ) -> (
+        Vec<AirProvingContext<PB>>,
+        Vec<[F; POSEIDON2_WIDTH]>,
+        Vec<TS>,
+    )
+    where
+        TS: Clone
+            + FiatShamirTranscript<BabyBearPoseidon2Config>
+            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>;
     fn generate_post_verifier_subcircuit_ctxs(
         &self,
         proofs: &[RecursionProof],
@@ -44,17 +57,25 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
         Self { deferral_enabled }
     }
 
-    fn generate_pre_verifier_subcircuit_ctxs(
+    fn generate_pre_verifier_subcircuit_ctxs<TS>(
         &self,
         proofs: &[RecursionProof],
         proofs_type: ProofsType,
         absent_trace_pvs: Option<(DeferralPvs<F>, bool)>,
         child_is_app: bool,
+        child_vk: &RecursionVk,
         child_dag_commit: [F; DIGEST_SIZE],
+        initial_transcript: TS,
     ) -> (
         Vec<AirProvingContext<CpuBackend<BabyBearPoseidon2Config>>>,
         Vec<[F; POSEIDON2_WIDTH]>,
-    ) {
+        Vec<TS>,
+    )
+    where
+        TS: Clone
+            + FiatShamirTranscript<BabyBearPoseidon2Config>
+            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
+    {
         let (verifier_ctx, poseidon2_inputs) = super::verifier::generate_proving_ctx(
             proofs,
             proofs_type,
@@ -63,6 +84,7 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             self.deferral_enabled,
         );
         let vm_ctx = super::vm_pvs::generate_proving_ctx(
+            child_vk,
             proofs,
             proofs_type,
             child_is_app,
@@ -83,7 +105,22 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             super::unset::generate_proving_ctx(&[], child_is_app)
         };
 
-        (vec![verifier_ctx, vm_ctx, idx2_ctx], poseidon2_inputs)
+        let per_proof_initial_transcripts = proofs
+            .iter()
+            .map(|proof| {
+                let mut sponge = initial_transcript.clone();
+                let mut preflight = Preflight::default();
+                super::verifier::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+                super::vm_pvs::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+                sponge
+            })
+            .collect();
+
+        (
+            vec![verifier_ctx, vm_ctx, idx2_ctx],
+            poseidon2_inputs,
+            per_proof_initial_transcripts,
+        )
     }
 
     fn generate_post_verifier_subcircuit_ctxs(
@@ -115,26 +152,35 @@ impl InnerTraceGen<GpuBackend> for InnerTraceGenImpl {
         Self { deferral_enabled }
     }
 
-    fn generate_pre_verifier_subcircuit_ctxs(
+    fn generate_pre_verifier_subcircuit_ctxs<TS>(
         &self,
         proofs: &[RecursionProof],
         proofs_type: ProofsType,
         absent_trace_pvs: Option<(DeferralPvs<F>, bool)>,
         child_is_app: bool,
+        child_vk: &RecursionVk,
         child_dag_commit: [F; DIGEST_SIZE],
+        initial_transcript: TS,
     ) -> (
         Vec<AirProvingContext<GpuBackend>>,
         Vec<[F; POSEIDON2_WIDTH]>,
-    ) {
+        Vec<TS>,
+    )
+    where
+        TS: Clone
+            + FiatShamirTranscript<BabyBearPoseidon2Config>
+            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
+    {
         let _ = (
             self,
             proofs,
             proofs_type,
             absent_trace_pvs,
             child_is_app,
+            child_vk,
             child_dag_commit,
         );
-        (vec![], vec![])
+        (vec![], vec![], vec![initial_transcript; proofs.len()])
     }
 
     fn generate_post_verifier_subcircuit_ctxs(

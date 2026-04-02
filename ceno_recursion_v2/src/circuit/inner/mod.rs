@@ -29,11 +29,13 @@ pub use trace::*;
 pub struct InnerCircuit<S: AggregationSubCircuit> {
     pub verifier_circuit: Arc<S>,
     pub def_hook_commit: Option<CommitBytes>,
+    pub instance_public_value_indices: Arc<Vec<Vec<usize>>>,
 }
 
 impl<SC: StarkProtocolConfig<F = F>, S: AggregationSubCircuit> Circuit<SC> for InnerCircuit<S> {
     fn airs(&self) -> Vec<AirRef<SC>> {
         let bus_inventory = self.verifier_circuit.bus_inventory();
+        let transcript_bus = bus_inventory.transcript_bus;
         let public_values_bus = bus_inventory.public_values_bus;
         let cached_commit_bus = bus_inventory.cached_commit_bus;
         let poseidon2_compress_bus = bus_inventory.poseidon2_compress_bus;
@@ -58,10 +60,12 @@ impl<SC: StarkProtocolConfig<F = F>, S: AggregationSubCircuit> Circuit<SC> for I
         }) as AirRef<SC>;
 
         let vm_pvs_air = Arc::new(vm_pvs::VmPvsAir {
+            transcript_bus,
             public_values_bus,
             cached_commit_bus,
             pvs_air_consistency_bus,
             deferral_enabled,
+            instance_public_value_indices: self.instance_public_value_indices.clone(),
         }) as AirRef<SC>;
 
         let (idx2_air, post_airs): (AirRef<SC>, Vec<AirRef<SC>>) = if deferral_enabled {

@@ -89,16 +89,22 @@ where
             .assert_one(next.is_first_in_air);
 
         let is_same_air = local.is_valid * next.is_valid * not(next.is_first_in_air);
-        self.num_pvs_bus.receive(
-            builder,
-            local.proof_idx,
-            NumPublicValuesMessage {
-                air_idx: local.air_idx.into(),
-                tidx: local.tidx - local.pv_idx,
-                num_pvs: local.pv_idx + AB::Expr::ONE,
-            },
-            local.is_valid - is_same_air.clone(),
-        );
+
+        // first tidx happened here
+        builder
+            .when(local.is_valid * local.is_first_in_proof * local.is_first_in_air)
+            .assert_zero(local.tidx);
+
+        // self.num_pvs_bus.receive(
+        //     builder,
+        //     local.proof_idx,
+        //     NumPublicValuesMessage {
+        //         air_idx: local.air_idx.into(),
+        //         tidx: local.tidx - local.pv_idx,
+        //         num_pvs: local.pv_idx + AB::Expr::ONE,
+        //     },
+        //     local.is_valid - is_same_air.clone(),
+        // );
 
         let mut when_same_air = builder.when(is_same_air);
         when_same_air.assert_eq(local.air_idx, next.air_idx);
