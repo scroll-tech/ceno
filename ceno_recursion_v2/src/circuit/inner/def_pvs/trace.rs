@@ -79,7 +79,6 @@ pub fn generate_proving_ctx(
         } else {
             DEF_PVS_AIR_ID
         };
-
         // TODO(recursion-proof-bridge): RecursionProof does not expose per-air public values yet.
         // Use zeroed child deferral PVS until proof -> verifier-PVS extraction is implemented.
         cols.child_pvs = DeferralPvs {
