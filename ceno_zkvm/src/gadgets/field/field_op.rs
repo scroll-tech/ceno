@@ -38,7 +38,7 @@ use crate::{
     gadgets::{
         field::FieldOperation,
         util::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
-        util_expr::eval_field_operation,
+        util_expr::{eval_field_operation, poly_mul_expr, poly_scale_expr},
     },
     witness::LkMultiplicity,
 };
@@ -119,7 +119,7 @@ impl<F: SmallField, P: FieldParameters> FieldOpCols<F, P> {
         let p_modulus_limbs = modulus
             .to_bytes_le()
             .iter()
-            .map(|x| F::from_canonical_u8(*x))
+            .map(|x| F::from_u8(*x))
             .collect::<Vec<F>>();
         let p_modulus: Polynomial<F> = p_modulus_limbs.iter().into();
         let p_result: Polynomial<F> = P::to_limbs_field::<F, _>(&result).into();
@@ -267,14 +267,17 @@ impl<Expr: Clone, P: FieldParameters> FieldOpCols<Expr, P> {
         let is_mul: Expression<E> = is_mul.expr();
         let is_div: Expression<E> = is_div.expr();
 
-        let p_result = p_res_param.clone() * (is_add.clone() + is_mul.clone())
-            + p_a_param.clone() * (is_sub.clone() + is_div.clone());
+        let p_result = poly_scale_expr(&p_res_param, is_add.clone() + is_mul.clone())
+            + poly_scale_expr(&p_a_param, is_sub.clone() + is_div.clone());
 
         let p_add = p_a_param.clone() + p_b.clone();
         let p_sub = p_res_param.clone() + p_b.clone();
-        let p_mul = p_a_param.clone() * p_b.clone();
-        let p_div = p_res_param * p_b.clone();
-        let p_op = p_add * is_add + p_sub * is_sub + p_mul * is_mul + p_div * is_div;
+        let p_mul = poly_mul_expr(&p_a_param, &p_b);
+        let p_div = poly_mul_expr(&p_res_param, &p_b);
+        let p_op = poly_scale_expr(&p_add, is_add)
+            + poly_scale_expr(&p_sub, is_sub)
+            + poly_scale_expr(&p_mul, is_mul)
+            + poly_scale_expr(&p_div, is_div);
 
         self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result)
     }
@@ -298,7 +301,7 @@ impl<Expr: Clone, P: FieldParameters> FieldOpCols<Expr, P> {
         let p_c: Polynomial<Expression<E>> = (c).clone().into();
 
         let p_result: Polynomial<_> = self.result.clone().into();
-        let p_op = p_a * p_b + p_c;
+        let p_op = poly_mul_expr(&p_a, &p_b) + p_c;
 
         self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result)
     }
@@ -326,7 +329,7 @@ impl<Expr: Clone, P: FieldParameters> FieldOpCols<Expr, P> {
         };
         let p_op: Polynomial<Expression<E>> = match op {
             FieldOperation::Add | FieldOperation::Sub => p_a + p_b,
-            FieldOperation::Mul | FieldOperation::Div => p_a * p_b,
+            FieldOperation::Mul | FieldOperation::Div => poly_mul_expr(&p_a, &p_b),
         };
         self.eval_with_polynomials(builder, p_op, modulus.clone(), p_result)
     }
@@ -349,7 +352,7 @@ impl<Expr: Clone, P: FieldParameters> FieldOpCols<Expr, P> {
         let p_modulus: Polynomial<Expression<E>> = modulus.into();
         let p_carry: Polynomial<Expression<E>> = self.carry.clone().into();
         let p_op_minus_result: Polynomial<Expression<E>> = p_op - &p_result;
-        let p_vanishing = p_op_minus_result - &(&p_carry * &p_modulus);
+        let p_vanishing = p_op_minus_result - &poly_mul_expr(&p_carry, &p_modulus);
         let p_witness_low = self.witness_low.0.iter().into();
         let p_witness_high = self.witness_high.0.iter().into();
         eval_field_operation::<E, P>(builder, &p_vanishing, &p_witness_low, &p_witness_high)?;

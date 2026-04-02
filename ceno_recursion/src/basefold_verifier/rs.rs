@@ -4,7 +4,8 @@ use std::{cell::RefCell, collections::BTreeMap};
 use openvm_native_compiler::{asm::AsmConfig, prelude::*};
 use openvm_native_recursion::hints::Hintable;
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
-use p3::field::{FieldAlgebra, extension::BinomialExtensionField};
+use p3::field::extension::BinomialExtensionField;
+use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 use serde::Deserialize;
 
 use super::{structs::*, utils::pow_felt_bits};
@@ -230,7 +231,8 @@ pub mod tests {
     use openvm_stark_sdk::{
         config::baby_bear_poseidon2::BabyBearPoseidon2Config, p3_baby_bear::BabyBear,
     };
-    use p3::field::{FieldAlgebra, extension::BinomialExtensionField};
+    use p3::field::extension::BinomialExtensionField;
+    use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 
     type SC = BabyBearPoseidon2Config;
 

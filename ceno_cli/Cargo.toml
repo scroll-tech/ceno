@@ -28,7 +28,6 @@ tikv-jemallocator = { version = "0.6", optional = true }
 
 ceno_emul = { path = "../ceno_emul" }
 ceno_host = { path = "../ceno_host" }
-ceno_recursion = { path = "../ceno_recursion" }
 ceno_zkvm = { path = "../ceno_zkvm" }
 
 openvm-circuit.workspace = true
@@ -49,7 +48,7 @@ mpcs.workspace = true
 vergen-git2 = { version = "9.1.0", features = ["build", "cargo", "rustc", "emit_and_set"] }
 
 [features]
-gpu = ["gkr_iop/gpu", "ceno_zkvm/gpu", "ceno_recursion/gpu", "dep:openvm-cuda-backend", "openvm-native-circuit/cuda"]
+gpu = ["gkr_iop/gpu", "ceno_zkvm/gpu", "dep:openvm-cuda-backend", "openvm-native-circuit/cuda"]
 jemalloc = ["dep:tikv-jemallocator", "ceno_zkvm/jemalloc"]
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 nightly-features = [

@@ -21,7 +21,7 @@ use ceno_emul::{ByteAddr, InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {
@@ -75,15 +75,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
         }?;
 
         // rs1 + imm = mem_addr
-        let inv = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
+        let inv = E::BaseField::from_u32(1 << UInt::<E>::LIMB_BITS).inverse();
 
         let carry = (rs1_read.expr()[0].expr() + imm.expr()
             - memory_addr.uint_unaligned().expr()[0].expr())
             * inv.expr();
         circuit_builder.assert_bit(|| "carry_lo_bit", carry.expr())?;
 
-        let imm_extend_limb = imm_sign.expr()
-            * E::BaseField::from_canonical_u32((1 << UInt::<E>::LIMB_BITS) - 1).expr();
+        let imm_extend_limb =
+            imm_sign.expr() * E::BaseField::from_u32((1 << UInt::<E>::LIMB_BITS) - 1).expr();
         let carry = (rs1_read.expr()[1].expr() + imm_extend_limb.expr() + carry
             - memory_addr.uint_unaligned().expr()[1].expr())
             * inv.expr();
@@ -223,11 +223,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             .memory_addr
             .assign_instance(instance, lk_multiplicity, unaligned_addr.into())?;
         if let Some(&limb) = config.target_limb.as_ref() {
-            set_val!(
-                instance,
-                limb,
-                E::BaseField::from_canonical_u16(target_limb)
-            );
+            set_val!(instance, limb, E::BaseField::from_u16(target_limb));
         }
         if let Some(limb_bytes) = config.target_limb_bytes.as_ref() {
             if addr_low_bits[0] == 1 {
@@ -237,7 +233,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
             }
             for (&col, byte) in izip!(limb_bytes.iter(), target_limb_bytes.into_iter()) {
                 lk_multiplicity.assert_ux::<8>(byte as u64);
-                set_val!(instance, col, E::BaseField::from_canonical_u8(byte));
+                set_val!(instance, col, E::BaseField::from_u8(byte));
             }
         }
         let val = match I::INST_KIND {

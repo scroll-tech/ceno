@@ -1,0 +1,20 @@
+use std::sync::Arc;
+
+use openvm_stark_backend::{AirRef, StarkProtocolConfig};
+use recursion_circuit::prelude::F;
+
+pub mod deferral;
+pub mod inner;
+
+pub const CONSTRAINT_EVAL_CACHED_INDEX: usize = 0;
+
+// TODO: move to stark-backend-v2
+pub trait Circuit<SC: StarkProtocolConfig<F = F>> {
+    fn airs(&self) -> Vec<AirRef<SC>>;
+}
+
+impl<SC: StarkProtocolConfig<F = F>, C: Circuit<SC>> Circuit<SC> for Arc<C> {
+    fn airs(&self) -> Vec<AirRef<SC>> {
+        self.as_ref().airs()
+    }
+}

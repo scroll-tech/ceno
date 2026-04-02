@@ -81,15 +81,15 @@ impl<F: SmallField, P: FieldParameters> FieldLtCols<F, P> {
             assert!(byte <= modulus_byte);
             if byte < modulus_byte {
                 *flag = 1;
-                self.lhs_comparison_byte = F::from_canonical_u8(*byte);
-                self.rhs_comparison_byte = F::from_canonical_u8(*modulus_byte);
+                self.lhs_comparison_byte = F::from_u8(*byte);
+                self.rhs_comparison_byte = F::from_u8(*modulus_byte);
                 record.lookup_ltu_byte(*byte as u64, *modulus_byte as u64);
                 break;
             }
         }
 
         for (byte, flag) in izip!(byte_flags.iter(), self.byte_flags.0.iter_mut()) {
-            *flag = F::from_canonical_u8(*byte);
+            *flag = F::from_u8(*byte);
         }
     }
 }

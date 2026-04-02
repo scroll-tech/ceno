@@ -3,9 +3,8 @@ use openvm_native_compiler::prelude::*;
 use openvm_native_recursion::challenger::{
     CanObserveVariable, CanSampleBitsVariable, duplex::DuplexChallengerVariable,
 };
-use openvm_stark_backend::p3_field::FieldAlgebra;
-
 use crate::arithmetics::challenger_multi_observe;
+use crate::field_ext::CanonicalFieldExt;
 
 pub fn transcript_observe_label<C: Config>(
     builder: &mut Builder<C>,

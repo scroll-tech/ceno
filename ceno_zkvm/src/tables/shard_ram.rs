@@ -24,7 +24,7 @@ use gkr_iop::{
 use itertools::{Itertools, chain};
 use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
 use p3::{
-    field::{Field, FieldAlgebra},
+    field::{Field, PrimeCharacteristicRing as FieldAlgebra},
     matrix::{Matrix, dense::RowMajorMatrix},
     symmetric::Permutation,
 };
@@ -108,13 +108,13 @@ impl ShardRamRecord {
     ) -> ECPoint<E> {
         let mut nonce = 0;
         let mut input = vec![
-            E::BaseField::from_canonical_u32(self.addr),
-            E::BaseField::from_canonical_u32(self.ram_type as u32),
-            E::BaseField::from_canonical_u32(self.value & 0xFFFF), // lower 16 bits
-            E::BaseField::from_canonical_u32((self.value >> 16) & 0xFFFF), // higher 16 bits
-            E::BaseField::from_canonical_u64(self.shard),
-            E::BaseField::from_canonical_u64(self.global_clk),
-            E::BaseField::from_canonical_u32(nonce),
+            E::BaseField::from_u32(self.addr),
+            E::BaseField::from_u32(self.ram_type as u32),
+            E::BaseField::from_u32(self.value & 0xFFFF), // lower 16 bits
+            E::BaseField::from_u32((self.value >> 16) & 0xFFFF), // higher 16 bits
+            E::BaseField::from_u64(self.shard),
+            E::BaseField::from_u64(self.global_clk),
+            E::BaseField::from_u32(nonce),
             E::BaseField::ZERO,
             E::BaseField::ZERO,
             E::BaseField::ZERO,
@@ -148,7 +148,7 @@ impl ShardRamRecord {
             } else {
                 // try again with different nonce
                 nonce += 1;
-                input[6] = E::BaseField::from_canonical_u32(nonce);
+                input[6] = E::BaseField::from_u32(nonce);
             }
         }
     }
@@ -349,19 +349,19 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
                 instance[witin.id as usize] = *fe;
             });
 
-        let ram_type = E::BaseField::from_canonical_u32(record.ram_type as u32);
+        let ram_type = E::BaseField::from_u32(record.ram_type as u32);
         let mut input = [E::BaseField::ZERO; 16];
 
         let k = UINT_LIMBS;
-        input[0] = E::BaseField::from_canonical_u32(record.addr);
+        input[0] = E::BaseField::from_u32(record.addr);
         input[1] = ram_type;
         input[2..(k + 2)]
             .iter_mut()
             .zip(value.as_u16_limbs().iter())
-            .for_each(|(i, v)| *i = E::BaseField::from_canonical_u16(*v));
-        input[2 + k] = E::BaseField::from_canonical_u64(record.shard);
-        input[2 + k + 1] = E::BaseField::from_canonical_u64(record.global_clk);
-        input[2 + k + 2] = E::BaseField::from_canonical_u32(*nonce);
+            .for_each(|(i, v)| *i = E::BaseField::from_u16(*v));
+        input[2 + k] = E::BaseField::from_u64(record.shard);
+        input[2 + k + 1] = E::BaseField::from_u64(record.global_clk);
+        input[2 + k + 2] = E::BaseField::from_u32(*nonce);
 
         config
             .perm_config

@@ -13,7 +13,7 @@ use openvm_native_recursion::challenger::{
     duplex::DuplexChallengerVariable,
 };
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
-use p3::field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 
 pub type F = BabyBear;
 pub type E = BabyBearExt4;
@@ -176,7 +176,8 @@ pub mod tests {
     use openvm_native_recursion::{challenger::duplex::DuplexChallengerVariable, hints::Hintable};
     use openvm_stark_backend::p3_challenger::GrindingChallenger;
     use openvm_stark_sdk::{config::baby_bear_poseidon2::Challenger, p3_baby_bear::BabyBear};
-    use p3::field::{Field, FieldAlgebra};
+    use p3::field::Field;
+    use p3_field::PrimeCharacteristicRing as FieldAlgebra;
     use rand::thread_rng;
     use serde::Deserialize;
     use transcript::{BasicTranscript, Transcript};

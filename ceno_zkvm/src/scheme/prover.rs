@@ -16,7 +16,7 @@ use either::Either;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -171,42 +171,38 @@ impl<
             }
             exit_span!(span);
 
-            // only keep track of circuits that have non-zero instances
-            for (name, chip_inputs) in &witnesses.witnesses {
-                let pk = self.pk.circuit_pks.get(name).ok_or(ZKVMError::VKNotFound(
-                    format!("proving key for circuit {} not found", name).into(),
-                ))?;
-
-                // include omc init tables iff it's in first shard
-                if !shard_ctx.is_first_shard() && pk.get_cs().with_omc_init_only() {
-                    continue;
-                }
-
-                // num_instance from witness might include rotation
-                let num_instances = chip_inputs
-                    .iter()
-                    .flat_map(|chip_input| chip_input.num_instances)
-                    .collect_vec();
-
-                if num_instances.iter().sum::<usize>() == 0 {
-                    continue;
-                }
-
-                let circuit_idx = self.pk.circuit_name_to_index.get(name).unwrap();
-                // write (circuit_idx, num_var) to transcript
-                transcript.append_field_element(&E::BaseField::from_canonical_usize(*circuit_idx));
-                for num_instance in num_instances {
-                    transcript
-                        .append_field_element(&E::BaseField::from_canonical_usize(num_instance));
-                }
-            }
-
-            // extract chip meta info before consuming witnesses
-            // (circuit_name, num_instances)
-            let name_and_instances = witnesses.get_witnesses_name_instance();
-
             let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
             let mut wits_rmms = BTreeMap::new();
+
+            // Extract chip metadata before consuming witnesses.
+            // We reuse this for both transcript appends and task construction.
+            let name_and_instances = witnesses.get_witnesses_name_instance();
+            let transcript_instances = name_and_instances.iter().try_fold(
+                Vec::new(),
+                |mut acc, (name, num_instances)| -> Result<_, ZKVMError> {
+                    let pk = self.pk.circuit_pks.get(name).ok_or(ZKVMError::VKNotFound(
+                        format!("proving key for circuit {} not found", name).into(),
+                    ))?;
+
+                    // Skip OMC-init-only circuits in non-first shards.
+                    if !shard_ctx.is_first_shard() && pk.get_cs().with_omc_init_only() {
+                        return Ok(acc);
+                    }
+
+                    if num_instances.iter().sum::<usize>() == 0 {
+                        return Ok(acc);
+                    }
+
+                    let circuit_idx = self.pk.circuit_name_to_index.get(name).copied().ok_or(
+                        ZKVMError::VKNotFound(
+                            format!("circuit index for {} not found", name).into(),
+                        ),
+                    )?;
+
+                    acc.push((circuit_idx, *num_instances));
+                    Ok(acc)
+                },
+            )?;
 
             let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
             // commit to opcode circuits first and then commit to table circuits, sorted by name
@@ -252,6 +248,14 @@ impl<
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
 
+            // Write (circuit_idx, num_instances) after all commitments are absorbed.
+            for (circuit_idx, num_instances) in &transcript_instances {
+                transcript.append_field_element(&E::BaseField::from_usize(*circuit_idx));
+                for num_instance in num_instances {
+                    transcript.append_field_element(&E::BaseField::from_usize(*num_instance));
+                }
+            }
+
             // Use pre-loaded fixed_mles (extracted before in_scope to avoid lifetime issues)
             let fixed_mles = fixed_mles_preload;
 
@@ -261,7 +265,6 @@ impl<
                 transcript.read_challenge().elements,
             ];
             tracing::debug!("global challenges in prover: {:?}", challenges);
-
             let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
 
             // Phase 1: Build all ChipTasks
@@ -353,9 +356,8 @@ impl<
 
                 return scheduler.execute(tasks, transcript, |task, transcript| {
                     // Append circuit_idx to per-task forked transcript (matching verifier)
-                    transcript.append_field_element(&E::BaseField::from_canonical_u64(
-                        task.circuit_idx as u64,
-                    ));
+                    transcript
+                        .append_field_element(&E::BaseField::from_u64(task.circuit_idx as u64));
 
                     // SAFETY: TypeId check above (before closure) guarantees PB = GpuBackend<E, PCS>.
                     let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
@@ -390,8 +392,7 @@ impl<
         // Uses execute_sequentially directly to avoid Send+Sync requirement on the closure.
         scheduler.execute_sequentially(tasks, transcript, |mut task, transcript| {
             // Append circuit_idx to per-task forked transcript (matching verifier)
-            transcript
-                .append_field_element(&E::BaseField::from_canonical_u64(task.circuit_idx as u64));
+            transcript.append_field_element(&E::BaseField::from_u64(task.circuit_idx as u64));
 
             // Prepare: deferred extraction for GPU, no-op for CPU
             self.device.prepare_chip_input(&mut task, witness_data);

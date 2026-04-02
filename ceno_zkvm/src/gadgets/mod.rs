@@ -28,5 +28,6 @@ pub use poseidon2::{Poseidon2BabyBearConfig, Poseidon2Config};
 pub use signed::Signed;
 pub use signed_ext::SignedExtendConfig;
 pub use signed_limbs::{UIntLimbsLT, UIntLimbsLTConfig};
+pub(crate) use util_expr::poly_scale_expr;
 pub use word::*;
 pub use xor::*;

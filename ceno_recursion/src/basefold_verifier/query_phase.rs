@@ -9,12 +9,14 @@ use openvm_native_recursion::{
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::{
     commit::ExtensionMmcs,
-    field::{Field, FieldAlgebra},
+    field::Field,
 };
+use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 use serde::Deserialize;
 
 use super::{basefold::*, extension_mmcs::*, mmcs::*, rs::*, utils::*};
 use crate::{arithmetics::eq_eval_with_index, tower_verifier::binding::*};
+use crate::field_ext::CanonicalFieldExt;
 
 pub type F = BabyBear;
 pub type E = BabyBearExt4;

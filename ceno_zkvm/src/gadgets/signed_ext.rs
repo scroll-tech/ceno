@@ -6,7 +6,8 @@ use crate::{
 use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::error::CircuitBuilderError;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::FieldAlgebra;
+
+use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 use witness::set_val;
 
@@ -91,7 +92,7 @@ impl<E: ExtensionField> SignedExtendConfig<E> {
     ) -> Result<(), CircuitBuilderError> {
         let msb = val >> (self.n_bits - 1);
         lk_multiplicity.assert_const_range(2 * val - (msb << self.n_bits), self.n_bits);
-        set_val!(instance, self.msb, E::BaseField::from_canonical_u64(msb));
+        set_val!(instance, self.msb, E::BaseField::from_u64(msb));
 
         Ok(())
     }

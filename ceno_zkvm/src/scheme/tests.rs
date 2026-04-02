@@ -25,6 +25,7 @@ use gkr_iop::cpu::default_backend_config;
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 use multilinear_extensions::{ToExpr, WitIn, mle::MultilinearExtension};
+use p3::field::PrimeCharacteristicRing;
 use std::marker::PhantomData;
 #[cfg(feature = "gpu")]
 use std::sync::Arc;
@@ -48,7 +49,7 @@ use mpcs::{
     PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits, WhirDefault,
 };
 use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
-use p3::field::FieldAlgebra;
+
 use rand::thread_rng;
 use transcript::{BasicTranscript, Transcript};
 

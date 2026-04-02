@@ -20,7 +20,8 @@ use crate::{
 };
 use ceno_emul::InsnKind;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::FieldAlgebra;
+
+use p3::field::PrimeCharacteristicRing;
 use witness::set_val;
 
 pub struct LuiConfig<E: ExtensionField> {
@@ -75,14 +76,14 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
                 .enumerate()
                 .fold(Expression::ZERO, |acc, (i, val)| {
                     acc + val.expr()
-                        * E::BaseField::from_canonical_u32(1 << (i * UInt8::<E>::LIMB_BITS)).expr()
+                        * E::BaseField::from_u32(1 << (i * UInt8::<E>::LIMB_BITS)).expr()
                 });
 
         // imm * 2^4 is the correct composition of intermed_val in case of LUI
         circuit_builder.require_equal(
             || "imm * 2^4 is the correct composition of intermed_val in case of LUI",
             intermed_val.expr(),
-            imm.expr() * E::BaseField::from_canonical_u32(1 << (12 - UInt8::<E>::LIMB_BITS)).expr(),
+            imm.expr() * E::BaseField::from_u32(1 << (12 - UInt8::<E>::LIMB_BITS)).expr(),
         )?;
 
         Ok(LuiConfig {
@@ -106,7 +107,7 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
         let rd_written = split_to_u8(step.rd().unwrap().value.after);
         for (val, witin) in izip!(rd_written.iter().skip(1), config.rd_written) {
             lk_multiplicity.assert_ux::<8>(*val as u64);
-            set_val!(instance, witin, E::BaseField::from_canonical_u8(*val));
+            set_val!(instance, witin, E::BaseField::from_u8(*val));
         }
         let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u64;
         set_val!(instance, config.imm, imm);
