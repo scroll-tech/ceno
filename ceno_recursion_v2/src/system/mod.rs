@@ -36,8 +36,8 @@ use openvm_stark_backend::{
     p3_maybe_rayon::prelude::*,
     prover::{AirProvingContext, CommittedTraceData, ProverBackend},
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
-use p3_field::PrimeCharacteristicRing;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::primitives::{
     exp_bits_len::{ExpBitsLenAir, ExpBitsLenTraceGenerator},
@@ -438,9 +438,11 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
         preflight.proof_shape.fork_start_tidx = fork_offset;
 
-        // Compute the sponge state at the fork point by replaying the trunk log.
-        preflight.proof_shape.fork_start_state =
-            crate::utils::replay_sponge_state_from_log(&trunk_log, fork_offset);
+        // Reuse the fork-point sponge prefix as D_EF-sized challenge limbs.
+        let fork_point_state = crate::utils::replay_sponge_state_from_log(&trunk_log, fork_offset);
+        let fork_point_challenge = poseidon_prefix_to_ef_limbs(fork_point_state);
+        preflight.proof_shape.lookup_challenge_alpha = fork_point_challenge;
+        preflight.proof_shape.lookup_challenge_beta = fork_point_challenge;
 
         // Store fork transcript logs. Each fork sponge log contains the
         // trunk's history (0..fork_offset) followed by fork-only operations
@@ -464,6 +466,27 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 fork_id: _fork_idx + 1, // 1-based fork IDs (0 = trunk)
             });
         }
+
+        preflight.proof_shape.after_forked_challenge_1 = preflight
+            .fork_transcripts
+            .first()
+            .and_then(|f| {
+                f.log
+                    .values()
+                    .get(f.log.len().saturating_sub(D_EF)..)
+                    .and_then(EF::from_basis_coefficients_slice)
+            })
+            .unwrap_or(EF::ZERO);
+        preflight.proof_shape.after_forked_challenge_2 = preflight
+            .fork_transcripts
+            .get(1)
+            .and_then(|f| {
+                f.log
+                    .values()
+                    .get(f.log.len().saturating_sub(D_EF)..)
+                    .and_then(EF::from_basis_coefficients_slice)
+            })
+            .unwrap_or(preflight.proof_shape.after_forked_challenge_1);
 
         preflight.transcript = trunk_log;
         preflight
@@ -498,6 +521,12 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
         (per_module, Some(heights[offset]), Some(heights[offset + 1]))
     }
+}
+
+fn poseidon_prefix_to_ef_limbs(state: [F; POSEIDON2_WIDTH]) -> [F; D_EF] {
+    let mut out = [F::ZERO; D_EF];
+    out.copy_from_slice(&state[..D_EF]);
+    out
 }
 
 impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>

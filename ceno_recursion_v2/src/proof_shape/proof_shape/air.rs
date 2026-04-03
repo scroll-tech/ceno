@@ -6,10 +6,10 @@ use openvm_circuit_primitives::{
     encoder::Encoder,
     utils::{and, not, or},
 };
-use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
+use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
@@ -20,8 +20,9 @@ use crate::{
         AirShapeBus, AirShapeBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
         ForkedTranscriptBus, ForkedTranscriptBusMessage, FractionFolderInputBus,
         FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage, LiftedHeightsBus,
-        LiftedHeightsBusMessage, NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage,
-        TranscriptBus, TranscriptBusMessage,
+        LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage,
+        NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
+        TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
@@ -78,7 +79,10 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
 
     /// The Poseidon2 sponge state at the fork point (trunk state just before
     /// forking). Constrained to be identical across all rows within a proof.
-    pub lookup_challenge_beta: [F; POSEIDON2_WIDTH],
+    pub lookup_challenge_alpha: [F; D_EF],
+    pub lookup_challenge_beta: [F; D_EF],
+    pub after_forked_challenge_1: [F; D_EF],
+    pub after_forked_challenge_2: [F; D_EF],
 }
 
 // Variable-length columns are stored at the end
@@ -101,6 +105,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     // Internal buses
     pub permutation_bus: ProofShapePermutationBus,
     pub starting_tidx_bus: StartingTidxBus,
+    pub lookup_challenge_bus: LookupChallengeBus,
 
     // Inter-module buses
     pub tower_module_bus: TowerModuleBus,
@@ -269,9 +274,39 @@ where
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
+        // LOOKUP CHALLENGE
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        for i in 0..D_EF {
+            self.lookup_challenge_bus.lookup_key(
+                builder,
+                local.proof_idx,
+                LookupChallengeMessage {
+                    kind: AB::Expr::from_usize(LookupChallengeKind::Alpha.as_usize()),
+                    word_idx: AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_alpha[i].into(),
+                },
+                local.is_present * local.is_valid,
+            );
+        }
+        for i in 0..D_EF {
+            self.lookup_challenge_bus.lookup_key(
+                builder,
+                local.proof_idx,
+                LookupChallengeMessage {
+                    kind: AB::Expr::from_usize(LookupChallengeKind::Beta.as_usize()),
+                    word_idx: AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_beta[i].into(),
+                },
+                local.is_present * local.is_valid,
+            );
+        }
+
+        ///////////////////////////////////////////////////////////////////////////////////////////
         // TRANSCRIPT OBSERVATIONS
         ///////////////////////////////////////////////////////////////////////////////////////////
+
         let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
+
         builder.when(is_first_idx.clone()).assert_eq(
             local.starting_tidx,
             AB::Expr::from_usize(TranscriptLabel::Riscv.field_len()),
@@ -292,6 +327,7 @@ where
         );
 
         let mut tidx = local.starting_tidx.into();
+
         self.transcript_bus.receive(
             builder,
             local.proof_idx,
@@ -331,18 +367,6 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // SNAPSHOT STATE CONTINUITY (forked transcript)
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // The sponge state at the fork point is identical for all forks.
-        // Constrain: local.lookup_challenge_beta == next.lookup_challenge_beta
-        // for all valid rows within the same proof.
-        for i in 0..POSEIDON2_WIDTH {
-            builder
-                .when(and(local.is_valid, not(next.is_last)))
-                .assert_eq(
-                    local.lookup_challenge_beta[i],
-                    next.lookup_challenge_beta[i],
-                );
-        }
-
         // Each present AIR corresponds to one fork whose fork_id equals
         // num_present (1-based position among present AIRs in sorted order).
         // This assumes a 1:1 mapping between present AIRs and forks, which
@@ -351,15 +375,53 @@ where
         // Receive the trunk's sponge state at the fork point from the
         // ForkedTranscriptBus, cross-checking lookup_challenge_beta against
         // TranscriptAir's trunk_fork_state.
-        for i in 0..POSEIDON2_WIDTH {
+        let fork_tidx_base = 0usize;
+        // observe lookup alpha/beta
+        for i in 0..D_EF {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.num_present.into(),
-                    fork_tidx: AB::Expr::from_usize(i),
+                    tidx: AB::Expr::from_usize(fork_tidx_base + i),
+                    value: local.lookup_challenge_alpha[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_present * local.is_valid,
+            );
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.num_present.into(),
+                    tidx: AB::Expr::from_usize(fork_tidx_base + D_EF + i),
                     value: local.lookup_challenge_beta[i].into(),
                     is_sample: AB::Expr::ZERO,
+                },
+                local.is_present * local.is_valid,
+            );
+        }
+
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.num_present.into(),
+                    tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + i),
+                    value: local.after_forked_challenge_1[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_present * local.is_valid,
+            );
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.num_present.into(),
+                    tidx: AB::Expr::from_usize(fork_tidx_base + 3 * D_EF + i),
+                    value: local.after_forked_challenge_2[i].into(),
+                    is_sample: AB::Expr::ONE,
                 },
                 local.is_present * local.is_valid,
             );

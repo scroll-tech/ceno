@@ -1,8 +1,8 @@
 use std::{borrow::BorrowMut, sync::Arc};
 
 use openvm_circuit_primitives::encoder::Encoder;
-use openvm_stark_sdk::config::baby_bear_poseidon2::F;
-use p3_field::PrimeCharacteristicRing;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::air::ProofShapeCols;
@@ -106,7 +106,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
                 cols.num_columns = F::ZERO;
-                cols.lookup_challenge_beta = preflight.proof_shape.fork_start_state;
+                cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
+                cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
+                cols.after_forked_challenge_1 =
+                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_1);
+                cols.after_forked_challenge_2 =
+                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_2);
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -145,7 +150,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
                 cols.num_columns = F::ZERO;
-                cols.lookup_challenge_beta = preflight.proof_shape.fork_start_state;
+                cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
+                cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
+                cols.after_forked_challenge_1 =
+                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_1);
+                cols.after_forked_challenge_2 =
+                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_2);
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -179,7 +189,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 F::from_bool(preflight.proof_shape.n_max > preflight.proof_shape.n_logup);
             cols.num_air_id_lookups = F::ZERO;
             cols.num_columns = F::ZERO;
-            cols.lookup_challenge_beta = preflight.proof_shape.fork_start_state;
+            cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
+            cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
+            cols.after_forked_challenge_1 =
+                ef_to_limbs(preflight.proof_shape.after_forked_challenge_1);
+            cols.after_forked_challenge_2 =
+                ef_to_limbs(preflight.proof_shape.after_forked_challenge_2);
         }
 
         for chunk in chunks {
@@ -189,4 +204,10 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
 
         Some(RowMajorMatrix::new(trace, width))
     }
+}
+
+fn ef_to_limbs(value: EF) -> [F; D_EF] {
+    let mut out = [F::ZERO; D_EF];
+    out.copy_from_slice(value.as_basis_coefficients_slice());
+    out
 }
