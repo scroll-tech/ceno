@@ -83,9 +83,20 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             child_dag_commit,
             self.deferral_enabled,
         );
+        let (preflights, per_proof_initial_transcripts): (Vec<Preflight>, Vec<TS>) = proofs
+            .iter()
+            .map(|proof| {
+                let mut sponge = initial_transcript.clone();
+                let mut preflight = Preflight::default();
+                super::verifier::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+                super::vm_pvs::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+                (preflight, sponge)
+            })
+            .unzip();
         let vm_ctx = super::vm_pvs::generate_proving_ctx(
             child_vk,
             proofs,
+            &preflights,
             proofs_type,
             child_is_app,
             self.deferral_enabled,
@@ -104,17 +115,6 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
         } else {
             super::unset::generate_proving_ctx(&[], child_is_app)
         };
-
-        let per_proof_initial_transcripts = proofs
-            .iter()
-            .map(|proof| {
-                let mut sponge = initial_transcript.clone();
-                let mut preflight = Preflight::default();
-                super::verifier::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
-                super::vm_pvs::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
-                sponge
-            })
-            .collect();
 
         (
             vec![verifier_ctx, vm_ctx, idx2_ctx],

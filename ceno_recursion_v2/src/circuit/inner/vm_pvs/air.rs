@@ -10,7 +10,7 @@ use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, DIGEST_SIZE};
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
@@ -19,7 +19,10 @@ use recursion_circuit::bus::{
 };
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::circuit::inner::{bus::PvsAirConsistencyBus, vm_pvs::VmPvs};
+use crate::{
+    bus::{LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage},
+    circuit::inner::{bus::PvsAirConsistencyBus, vm_pvs::VmPvs},
+};
 
 #[repr(C)]
 #[derive(AlignedBorrow)]
@@ -28,6 +31,10 @@ pub struct VmPvsCols<F> {
     pub is_valid: F,
     pub is_last: F,
     pub has_verifier_pvs: F,
+    pub lookup_challenge_alpha: [F; D_EF],
+    pub lookup_challenge_beta: [F; D_EF],
+    pub lookup_challenge_alpha_lookup_count: F,
+    pub lookup_challenge_beta_lookup_count: F,
     pub child_pvs: VmPvs<F>,
 }
 
@@ -35,6 +42,7 @@ pub struct VmPvsAir {
     pub transcript_bus: TranscriptBus,
     pub public_values_bus: PublicValuesBus,
     pub cached_commit_bus: CachedCommitBus,
+    pub lookup_challenge_bus: LookupChallengeBus,
     pub pvs_air_consistency_bus: PvsAirConsistencyBus,
     pub deferral_enabled: bool,
     pub instance_public_value_indices: Arc<Vec<Vec<usize>>>,
@@ -181,13 +189,13 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         // );
 
         // Commitments are observed after transcript-visible public values in preflight.
-        let start_tidx_after_commitment = VmPvs::<u8>::width() - 3 * DIGEST_SIZE;
+        let start_tidx_after_public_value = VmPvs::<u8>::width() - 3 * DIGEST_SIZE;
         for (didx, value) in local.child_pvs.fixed_commit.iter().enumerate() {
             self.transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(start_tidx_after_commitment + didx),
+                    tidx: AB::Expr::from_usize(start_tidx_after_public_value + didx),
                     value: (*value).into(),
                     is_sample: AB::Expr::ZERO,
                 },
@@ -199,7 +207,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
                 builder,
                 local.proof_idx,
                 TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(start_tidx_after_commitment + DIGEST_SIZE + didx),
+                    tidx: AB::Expr::from_usize(start_tidx_after_public_value + DIGEST_SIZE + didx),
                     value: (*value).into(),
                     is_sample: AB::Expr::ZERO,
                 },
@@ -212,12 +220,35 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
                 local.proof_idx,
                 TranscriptBusMessage {
                     tidx: AB::Expr::from_usize(
-                        start_tidx_after_commitment + 2 * DIGEST_SIZE + didx,
+                        start_tidx_after_public_value + 2 * DIGEST_SIZE + didx,
                     ),
                     value: (*value).into(),
                     is_sample: AB::Expr::ZERO,
                 },
                 local.is_valid,
+            );
+        }
+
+        for i in 0..D_EF {
+            self.lookup_challenge_bus.add_key_with_lookups(
+                builder,
+                local.proof_idx,
+                LookupChallengeMessage {
+                    kind: AB::Expr::from_usize(LookupChallengeKind::Alpha.as_usize()),
+                    word_idx: AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_alpha[i].into(),
+                },
+                local.is_valid * local.lookup_challenge_alpha_lookup_count,
+            );
+            self.lookup_challenge_bus.add_key_with_lookups(
+                builder,
+                local.proof_idx,
+                LookupChallengeMessage {
+                    kind: AB::Expr::from_usize(LookupChallengeKind::Beta.as_usize()),
+                    word_idx: AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_beta[i].into(),
+                },
+                local.is_valid * local.lookup_challenge_beta_lookup_count,
             );
         }
 

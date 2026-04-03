@@ -105,8 +105,6 @@ impl ProofShapeModule {
         let _ = self;
 
         let transcript_start_tidx = ts.len();
-        let _alpha = ts.sample_ext();
-        let _beta = ts.sample_ext();
         preflight.proof_shape.fork_start_tidx = ts.len();
 
         // Build per-air shape metadata from present chip proofs.
@@ -251,6 +249,7 @@ impl AirModule for ProofShapeModule {
             range_bus: self.range_bus,
             permutation_bus: self.permutation_bus,
             starting_tidx_bus: self.starting_tidx_bus,
+            lookup_challenge_bus: self.bus_inventory.lookup_challenge_bus,
             fraction_folder_input_bus: self.bus_inventory.fraction_folder_input_bus,
             expression_claim_n_max_bus: self.bus_inventory.expression_claim_n_max_bus,
             tower_module_bus: self.bus_inventory.tower_module_bus,

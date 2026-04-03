@@ -38,6 +38,7 @@ impl<SC: StarkProtocolConfig<F = F>, S: AggregationSubCircuit> Circuit<SC> for I
         let transcript_bus = bus_inventory.transcript_bus;
         let public_values_bus = bus_inventory.public_values_bus;
         let cached_commit_bus = bus_inventory.cached_commit_bus;
+        let lookup_challenge_bus = bus_inventory.lookup_challenge_bus;
         let poseidon2_compress_bus = bus_inventory.poseidon2_compress_bus;
         let pvs_air_consistency_bus =
             PvsAirConsistencyBus::new(self.verifier_circuit.next_bus_idx());
@@ -63,6 +64,7 @@ impl<SC: StarkProtocolConfig<F = F>, S: AggregationSubCircuit> Circuit<SC> for I
             transcript_bus,
             public_values_bus,
             cached_commit_bus,
+            lookup_challenge_bus,
             pvs_air_consistency_bus,
             deferral_enabled,
             instance_public_value_indices: self.instance_public_value_indices.clone(),
