@@ -204,9 +204,9 @@ impl ProofShapeModule {
             .unwrap_or(0);
 
         preflight.proof_shape.alpha_tidx = ts.len();
-        let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+        let _alpha = ts.sample_ext();
         preflight.proof_shape.beta_tidx = ts.len();
-        let _beta = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+        let _beta = ts.sample_ext();
         preflight.proof_shape.fork_start_tidx = ts.len();
 
         eprintln!("_alpha {} _beta {}", _alpha, _beta);
