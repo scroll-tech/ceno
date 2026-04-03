@@ -252,15 +252,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         PCS::write_commitment(&vm_proof.witin_commit, &mut transcript)
             .map_err(ZKVMError::PCSError)?;
 
-        // write (circuit_idx, num_instance) to transcript
-        for (circuit_idx, proofs) in vm_proof.chip_proofs.iter() {
-            transcript.append_field_element(&E::BaseField::from_canonical_u32(*circuit_idx as u32));
-            // length of proof.num_instances will be constrained in verify_chip_proof
-            for num_instance in proofs.iter().flat_map(|proof| &proof.num_instances) {
-                transcript.append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
-            }
-        }
-
         #[cfg(debug_assertions)]
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::log_label(
@@ -353,6 +344,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .sum::<E>();
 
             transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
+            for num_instance in &proof.num_instances {
+                transcript.append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
+            }
 
             // compute logup_sum padding
             // getting the number of dummy padding item that we used in this opcode circuit
