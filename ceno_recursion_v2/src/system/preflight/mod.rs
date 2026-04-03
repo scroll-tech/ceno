@@ -56,8 +56,6 @@ pub struct ForkTranscriptLog {
 pub struct ProofShapePreflight {
     pub sorted_trace_vdata: Vec<(usize, TraceVData)>,
     pub starting_tidx: Vec<usize>,
-    pub starting_cidx: Vec<usize>,
-    pub pvs_tidx: Vec<usize>,
     pub post_tidx: usize,
     pub n_max: usize,
     pub n_logup: usize,

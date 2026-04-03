@@ -1,7 +1,7 @@
 use std::{borrow::BorrowMut, sync::Arc};
 
 use openvm_circuit_primitives::encoder::Encoder;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{DIGEST_SIZE, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::F;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -14,24 +14,11 @@ use crate::{
 
 pub(in crate::proof_shape) struct ProofShapeVarColsMut<'a, F> {
     pub idx_flags: &'a mut [F],
-    pub cached_commits: &'a mut [[F; DIGEST_SIZE]],
 }
 
-fn borrow_var_cols_mut<F>(
-    slice: &mut [F],
-    idx_flags: usize,
-    max_cached: usize,
-) -> ProofShapeVarColsMut<'_, F> {
-    let (idx_flags_slice, cached_flat) = slice.split_at_mut(idx_flags);
-    let cached_commits: &mut [[F; DIGEST_SIZE]] = unsafe {
-        std::slice::from_raw_parts_mut(
-            cached_flat.as_mut_ptr() as *mut [F; DIGEST_SIZE],
-            max_cached,
-        )
-    };
+fn borrow_var_cols_mut<F>(slice: &mut [F], idx_flags: usize) -> ProofShapeVarColsMut<'_, F> {
     ProofShapeVarColsMut {
-        idx_flags: idx_flags_slice,
-        cached_commits,
+        idx_flags: &mut slice[..idx_flags],
     }
 }
 
@@ -50,18 +37,13 @@ fn decompose_usize<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
 #[allow(dead_code)]
 pub(in crate::proof_shape) struct ProofShapeChip<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     idx_encoder: Arc<Encoder>,
-    min_cached_idx: usize,
-    max_cached: usize,
-    cidx_deltas: Vec<usize>,
     range_checker: Arc<RangeCheckerCpuTraceGenerator<LIMB_BITS>>,
     pow_checker: Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
 }
 
 impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> ProofShapeChip<NUM_LIMBS, LIMB_BITS> {
     pub(in crate::proof_shape) fn placeholder_width(&self) -> usize {
-        ProofShapeCols::<u8, NUM_LIMBS>::width()
-            + self.idx_encoder.width()
-            + self.max_cached * DIGEST_SIZE
+        ProofShapeCols::<u8, NUM_LIMBS>::width() + self.idx_encoder.width()
     }
 }
 
@@ -96,17 +78,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
             let mut sorted_idx = 0usize;
             let mut num_present = 0usize;
-            let mut _current_cidx = 1usize;
 
             for (air_idx, vdata) in &preflight.proof_shape.sorted_trace_vdata {
                 let chunk = chunks.next().unwrap();
                 let (fixed_cols, variable_cols) = chunk.split_at_mut(cols_width);
                 let cols: &mut ProofShapeCols<F, NUM_LIMBS> = fixed_cols.borrow_mut();
-                let var_cols = &mut borrow_var_cols_mut(
-                    variable_cols,
-                    self.idx_encoder.width(),
-                    self.max_cached,
-                );
+                let var_cols = &mut borrow_var_cols_mut(variable_cols, self.idx_encoder.width());
 
                 let log_height = vdata.log_height;
                 let trace_height = 1usize << log_height;
@@ -116,7 +93,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_valid = F::ONE;
                 cols.is_first = F::from_bool(sorted_idx == 0);
                 cols.is_last = F::ZERO;
-                cols.idx = F::from_usize(*air_idx);
                 cols.sorted_idx = F::from_usize(sorted_idx);
                 cols.log_height = F::from_usize(log_height);
                 cols.need_rot = F::ZERO;
@@ -130,7 +106,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
                 cols.num_columns = F::ZERO;
-                cols.current_snapshot_state = preflight.proof_shape.fork_start_state;
+                cols.lookup_challenge_beta = preflight.proof_shape.fork_start_state;
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -140,11 +116,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     *dst = F::from_u32(*src);
                 }
 
-                if *air_idx == self.min_cached_idx {
-                    var_cols.cached_commits[self.max_cached - 1] = [F::ZERO; DIGEST_SIZE];
-                }
-
-                _current_cidx += self.cidx_deltas.get(*air_idx).copied().unwrap_or(0);
                 self.pow_checker.add_pow(log_height);
                 sorted_idx += 1;
             }
@@ -156,17 +127,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 let chunk = chunks.next().unwrap();
                 let (fixed_cols, variable_cols) = chunk.split_at_mut(cols_width);
                 let cols: &mut ProofShapeCols<F, NUM_LIMBS> = fixed_cols.borrow_mut();
-                let var_cols = &mut borrow_var_cols_mut(
-                    variable_cols,
-                    self.idx_encoder.width(),
-                    self.max_cached,
-                );
+                let var_cols = &mut borrow_var_cols_mut(variable_cols, self.idx_encoder.width());
 
                 cols.proof_idx = F::from_usize(proof_idx);
                 cols.is_valid = F::ONE;
                 cols.is_first = F::from_bool(sorted_idx == 0);
                 cols.is_last = F::ZERO;
-                cols.idx = F::from_usize(air_idx);
                 cols.sorted_idx = F::from_usize(sorted_idx);
                 cols.log_height = F::ZERO;
                 cols.need_rot = F::ZERO;
@@ -179,7 +145,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
                 cols.num_columns = F::ZERO;
-                cols.current_snapshot_state = preflight.proof_shape.fork_start_state;
+                cols.lookup_challenge_beta = preflight.proof_shape.fork_start_state;
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -189,24 +155,17 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     *dst = F::from_u32(*src);
                 }
 
-                if air_idx == self.min_cached_idx {
-                    var_cols.cached_commits[self.max_cached - 1] = [F::ZERO; DIGEST_SIZE];
-                }
-
-                _current_cidx += self.cidx_deltas.get(air_idx).copied().unwrap_or(0);
                 sorted_idx += 1;
             }
 
             let chunk = chunks.next().unwrap();
             let (fixed_cols, variable_cols) = chunk.split_at_mut(cols_width);
             let cols: &mut ProofShapeCols<F, NUM_LIMBS> = fixed_cols.borrow_mut();
-            let var_cols =
-                &mut borrow_var_cols_mut(variable_cols, self.idx_encoder.width(), self.max_cached);
+            let _var_cols = &mut borrow_var_cols_mut(variable_cols, self.idx_encoder.width());
             cols.proof_idx = F::from_usize(proof_idx);
             cols.is_valid = F::ZERO;
             cols.is_first = F::ZERO;
             cols.is_last = F::ONE;
-            cols.idx = F::ZERO;
             cols.sorted_idx = F::ZERO;
             cols.log_height = F::from_usize(preflight.proof_shape.n_logup);
             cols.need_rot = F::ZERO;
@@ -220,10 +179,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 F::from_bool(preflight.proof_shape.n_max > preflight.proof_shape.n_logup);
             cols.num_air_id_lookups = F::ZERO;
             cols.num_columns = F::ZERO;
-            cols.current_snapshot_state = preflight.proof_shape.fork_start_state;
-            if self.max_cached != 0 {
-                var_cols.cached_commits[self.max_cached - 1] = [F::ZERO; DIGEST_SIZE];
-            }
+            cols.lookup_challenge_beta = preflight.proof_shape.fork_start_state;
         }
 
         for chunk in chunks {

@@ -303,7 +303,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         ///////////////////////////////////////////////////////////////////////
         // On is_fork_start rows, send the trunk_fork_state (the sponge state
         // at the fork point) on the ForkedTranscriptBus. ProofShapeAir
-        // receives these to cross-check its current_snapshot_state.
+        // receives these to cross-check its lookup_challenge_beta.
         for i in 0..POSEIDON2_WIDTH {
             self.forked_transcript_bus.send(
                 builder,
