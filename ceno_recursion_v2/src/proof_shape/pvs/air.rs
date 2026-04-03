@@ -12,8 +12,8 @@ use crate::{
     bus::{PublicValuesBus, PublicValuesBusMessage, TranscriptBus, TranscriptBusMessage},
     proof_shape::bus::{NumPublicValuesBus, NumPublicValuesMessage},
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
+    utils::TranscriptLabel,
 };
-use crate::utils::TranscriptLabel;
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]

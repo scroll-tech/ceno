@@ -177,33 +177,6 @@ impl<
             // Extract chip metadata before consuming witnesses.
             // We reuse this for both transcript appends and task construction.
             let name_and_instances = witnesses.get_witnesses_name_instance();
-            let transcript_instances = name_and_instances.iter().try_fold(
-                Vec::new(),
-                |mut acc, (name, num_instances)| -> Result<_, ZKVMError> {
-                    let pk = self.pk.circuit_pks.get(name).ok_or(ZKVMError::VKNotFound(
-                        format!("proving key for circuit {} not found", name).into(),
-                    ))?;
-
-                    // Skip OMC-init-only circuits in non-first shards.
-                    if !shard_ctx.is_first_shard() && pk.get_cs().with_omc_init_only() {
-                        return Ok(acc);
-                    }
-
-                    if num_instances.iter().sum::<usize>() == 0 {
-                        return Ok(acc);
-                    }
-
-                    let circuit_idx = self.pk.circuit_name_to_index.get(name).copied().ok_or(
-                        ZKVMError::VKNotFound(
-                            format!("circuit index for {} not found", name).into(),
-                        ),
-                    )?;
-
-                    acc.push((circuit_idx, *num_instances));
-                    Ok(acc)
-                },
-            )?;
-
             let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
             // commit to opcode circuits first and then commit to table circuits, sorted by name
             for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
@@ -247,14 +220,6 @@ impl<
                 .in_scope(|| self.device.commit_traces(wits_rmms));
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
-
-            // Write (circuit_idx, num_instances) after all commitments are absorbed.
-            for (circuit_idx, num_instances) in &transcript_instances {
-                transcript.append_field_element(&E::BaseField::from_usize(*circuit_idx));
-                for num_instance in num_instances {
-                    transcript.append_field_element(&E::BaseField::from_usize(*num_instance));
-                }
-            }
 
             // Use pre-loaded fixed_mles (extracted before in_scope to avoid lifetime issues)
             let fixed_mles = fixed_mles_preload;
@@ -358,6 +323,9 @@ impl<
                     // Append circuit_idx to per-task forked transcript (matching verifier)
                     transcript
                         .append_field_element(&E::BaseField::from_u64(task.circuit_idx as u64));
+                    for num_instance in task.input.num_instances {
+                        transcript.append_field_element(&E::BaseField::from_usize(num_instance));
+                    }
 
                     // SAFETY: TypeId check above (before closure) guarantees PB = GpuBackend<E, PCS>.
                     let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
@@ -393,6 +361,9 @@ impl<
         scheduler.execute_sequentially(tasks, transcript, |mut task, transcript| {
             // Append circuit_idx to per-task forked transcript (matching verifier)
             transcript.append_field_element(&E::BaseField::from_u64(task.circuit_idx as u64));
+            for num_instance in task.input.num_instances {
+                transcript.append_field_element(&E::BaseField::from_usize(num_instance));
+            }
 
             // Prepare: deferred extraction for GPU, no-op for CPU
             self.device.prepare_chip_input(&mut task, witness_data);

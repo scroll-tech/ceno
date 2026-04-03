@@ -167,22 +167,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     );
     challenger.observe(builder, log2_max_codeword_size_felt);
 
-    iter_zip!(builder, zkvm_proof_input.chip_proofs).for_each(|ptr_vec, builder| {
-        let chip_proofs = builder.iter_ptr_get(&zkvm_proof_input.chip_proofs, ptr_vec[0]);
-        let chip_idx = builder.get(&chip_proofs, 0).idx_felt;
-        challenger.observe(builder, chip_idx);
-
-        iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
-            let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
-
-            iter_zip!(builder, chip_proof.num_instances).for_each(|ptr_vec, builder| {
-                let num_instance = builder.iter_ptr_get(&chip_proof.num_instances, ptr_vec[0]);
-                let num_instance = builder.unsafe_cast_var_to_felt(num_instance);
-                challenger.observe(builder, num_instance);
-            });
-        });
-    });
-
     let alpha = challenger.sample_ext(builder);
     let beta = challenger.sample_ext(builder);
 
@@ -267,6 +251,11 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     Usize::from(circuit_vk.get_cs().num_lks() * 4),
                 );
                 chip_challenger.observe(builder, chip_proof.idx_felt);
+                iter_zip!(builder, chip_proof.num_instances).for_each(|ptr_vec, builder| {
+                    let num_instance = builder.iter_ptr_get(&chip_proof.num_instances, ptr_vec[0]);
+                    let num_instance = builder.unsafe_cast_var_to_felt(num_instance);
+                    chip_challenger.observe(builder, num_instance);
+                });
 
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks: Var<C::N> =
