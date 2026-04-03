@@ -119,17 +119,6 @@ impl ProofShapeModule {
     {
         let _ = self;
 
-        // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
-        for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            ts.observe(F::from_usize(chip_idx));
-            for num_instance in chip_instances
-                .iter()
-                .flat_map(|instance| &instance.num_instances)
-            {
-                ts.observe(F::from_usize(*num_instance));
-            }
-        }
-
         // Build per-air shape metadata from present chip proofs.
         let mut sorted_trace_vdata = proof
             .chip_proofs

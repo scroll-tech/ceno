@@ -357,6 +357,9 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             // Observe circuit_idx into the fork transcript.
             // Mirrors v1 verifier: transcript.append_field_element(circuit_idx)
             fs.observe(F::from_u64(chip_idx as u64));
+            for num_instance in chip_proof.num_instances {
+                fs.observe(F::from_usize(num_instance));
+            }
 
             // Fork-local tidx: position within the fork's extracted log.
             let tower_local = fs.len() - fork_start_len;
