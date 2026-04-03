@@ -1,6 +1,6 @@
 ---
 name: recursion-v2-git-diff-driven-task
-description: Diff-driven execution protocol for ceno_recursion_v2 tasks. Harvest newly added code comments from git diff, condense into an implementation checklist, implement against upstream OpenVM skeleton patterns, and fill real data from ceno_zkvm verifier source-of-truth.
+description: Diff-driven execution protocol for ceno_recursion_v2 tasks. Harvest TODO/task comments from current git diff, align strictly with the user's change request, implement against upstream OpenVM skeleton patterns, and fill real data from ceno_zkvm verifier source-of-truth.
 ---
 
 # Recursion V2 Git Diff Driven Task
@@ -10,7 +10,8 @@ description: Diff-driven execution protocol for ceno_recursion_v2 tasks. Harvest
 Use this skill when task intent is written into newly added source comments and implementation should be driven directly by `git diff`.
 
 This protocol enforces:
-- comment-first task intake from staged and unstaged diffs,
+- TODO/comment-first task intake from staged and unstaged diffs,
+- explicit alignment to the user's current change request,
 - condensed, reviewable implementation plans,
 - upstream-compatible constraint/bus skeleton wiring,
 - source-of-truth data fill from the verifier path,
@@ -27,21 +28,22 @@ Use this skill when any of the following applies:
 ## Diff Intake Protocol (Required)
 
 1. Read `git diff` from both unstaged and staged changes.
-2. Extract only newly added task comments that describe behavior changes.
-3. Convert comments into a condensed checklist item format:
+2. Extract only newly added TODO/task comments that describe behavior changes.
+3. Restate the explicit user change request and filter out out-of-scope TODOs/comments.
+4. Convert in-scope items into a condensed checklist format:
    - `target`: file and symbol,
    - `behavior`: what must be implemented,
    - `acceptance`: concrete condition proving completion.
-4. Remove duplicate or ambiguous items and keep only executable work items.
-5. Present the condensed plan for review before editing logic.
+5. Remove duplicate or ambiguous items and keep only executable work items.
+6. Present the condensed plan for review before editing logic.
 
 ## Implementation Protocol (Required)
 
 1. Implement checklist items in priority order.
-2. Keep implementation scoped to the comment-defined behavior.
-3. Resolve temporary task comments by either:
-   - replacing them with finished code, or
-   - retaining a minimal explicit TODO with ownership if blocked.
+2. Keep implementation scoped to the user-approved request and in-scope diff TODOs.
+3. Resolve every in-scope diff TODO by either:
+   - replacing it with finished code, or
+   - retaining a minimal explicit TODO with ownership and blocker rationale.
 4. Preserve existing AIR ordering and bus key invariants unless checklist items explicitly request changes.
 
 ## Reference Hierarchy
@@ -59,7 +61,7 @@ Use references in this order:
 ## Plan Quality Bar
 
 A valid plan must:
-- map every actionable diff comment to exactly one checklist item,
+- map every actionable in-scope diff TODO/comment to exactly one checklist item,
 - state file/symbol targets explicitly,
 - include acceptance conditions that can be verified by code reading or test execution,
 - and call out any blocker assumptions before implementation starts.
@@ -77,6 +79,7 @@ cargo fmt --all
 
 Task is done only when all are true:
 - All condensed checklist items are implemented or explicitly marked blocked with rationale.
+- All in-scope TODOs introduced by the current `git diff` are resolved or explicitly owned/blocked.
 - No unresolved implementation comments remain from the task diff without ownership.
 - Constraint/bus skeleton usage follows upstream-compatible patterns.
 - Real data fill aligns with `ceno_zkvm/src/scheme/verifier.rs` semantics.
@@ -85,12 +88,12 @@ Task is done only when all are true:
 ## Quick Reusable Checklist Template
 
 ```markdown
-- [ ] Collect unstaged + staged git diff comments
+- [ ] Collect unstaged + staged git diff TODO/task comments
+- [ ] Restate user request and mark in-scope items only
 - [ ] Condense into target/behavior/acceptance checklist
 - [ ] Share plan and get implementation go-ahead
 - [ ] Implement using upstream continuation/recursion skeleton patterns
 - [ ] Fill real data per ceno_zkvm verifier source-of-truth
-- [ ] Remove or resolve task comments/TODOs introduced in this diff
+- [ ] Resolve in-scope TODOs introduced in this diff
 - [ ] Run required completion gate commands
 ```
-
