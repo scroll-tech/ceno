@@ -119,6 +119,11 @@ impl ProofShapeModule {
     {
         let _ = self;
 
+        let transcript_start_tidx = ts.len();
+        let _alpha = ts.sample_ext();
+        let _beta = ts.sample_ext();
+        preflight.proof_shape.fork_start_tidx = ts.len();
+
         // Build per-air shape metadata from present chip proofs.
         let mut sorted_trace_vdata = proof
             .chip_proofs
@@ -139,7 +144,7 @@ impl ProofShapeModule {
         // TODO remove l_skip
         preflight.proof_shape.l_skip = 0;
 
-        let mut current_tidx = ts.len();
+        let mut current_tidx = transcript_start_tidx;
         // TODO remove cidx related
         let mut current_cidx = 1usize;
         let mut starting_tidx = vec![0usize; child_vk.circuit_vks.len()];
@@ -202,14 +207,6 @@ impl ProofShapeModule {
             .map(|entry| entry.tower_replay.layers.len())
             .max()
             .unwrap_or(0);
-
-        preflight.proof_shape.alpha_tidx = ts.len();
-        let _alpha = ts.sample_ext();
-        preflight.proof_shape.beta_tidx = ts.len();
-        let _beta = ts.sample_ext();
-        preflight.proof_shape.fork_start_tidx = ts.len();
-
-        eprintln!("_alpha {} _beta {}", _alpha, _beta);
 
         let _ = child_vk;
     }
