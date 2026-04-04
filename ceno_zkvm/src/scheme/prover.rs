@@ -23,7 +23,7 @@ use sumcheck::{
     structs::IOPProverMessage,
 };
 use tracing::info_span;
-use transcript::{ForkableTranscript, Transcript};
+use transcript::{BasicTranscript, ForkableTranscript, Transcript};
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
 #[cfg(feature = "gpu")]
@@ -251,8 +251,9 @@ impl<
             // GPU concurrent: memory-aware backfilling with standalone impl.
             // Sequential (GPU + CPU): unified path via self.create_chip_proof.
             let execute_tasks_span = entered_span!("execute_chip_tasks", profiling_1 = true);
+            let fork_transcript = BasicTranscript::<E>::new(b"fork");
             let (results, forked_samples) =
-                self.run_chip_proofs(tasks, &transcript, &witness_data)?;
+                self.run_chip_proofs(tasks, &fork_transcript, &witness_data)?;
             exit_span!(execute_tasks_span);
 
             // Phase 3: Collect results
@@ -320,13 +321,19 @@ impl<
                 let gpu_wd = SyncRef(gpu_witness_data);
 
                 return scheduler.execute(tasks, transcript, |task, transcript| {
+                    // Bind global challenges and metadata in the same order as verifier.
+                    transcript.append_field_element_ext(&task.challenges[0]);
+                    transcript.append_field_element_ext(&task.challenges[1]);
+                    transcript
+                        .append_field_element(&E::BaseField::from_canonical_usize(task.task_id));
                     // Append circuit_idx to per-task forked transcript (matching verifier)
                     transcript.append_field_element(&E::BaseField::from_canonical_u64(
                         task.circuit_idx as u64,
                     ));
                     for num_instance in task.input.num_instances {
-                        transcript
-                            .append_field_element(&E::BaseField::from_canonical_usize(num_instance));
+                        transcript.append_field_element(&E::BaseField::from_canonical_usize(
+                            num_instance,
+                        ));
                     }
 
                     // SAFETY: TypeId check above (before closure) guarantees PB = GpuBackend<E, PCS>.
@@ -361,6 +368,10 @@ impl<
         // Sequential path (GPU + CPU unified):
         // Uses execute_sequentially directly to avoid Send+Sync requirement on the closure.
         scheduler.execute_sequentially(tasks, transcript, |mut task, transcript| {
+            // Bind global challenges and metadata in the same order as verifier.
+            transcript.append_field_element_ext(&task.challenges[0]);
+            transcript.append_field_element_ext(&task.challenges[1]);
+            transcript.append_field_element(&E::BaseField::from_canonical_usize(task.task_id));
             // Append circuit_idx to per-task forked transcript (matching verifier)
             transcript
                 .append_field_element(&E::BaseField::from_canonical_u64(task.circuit_idx as u64));
