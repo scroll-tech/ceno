@@ -24,6 +24,7 @@ use crate::{
         NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
         TranscriptBusMessage,
     },
+    circuit::inner::vm_pvs::VmPvs,
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
         AirMetadata,
@@ -307,9 +308,11 @@ where
 
         let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
 
+        // The first AIR starts immediately after the fixed trunk transcript prefix.
         builder.when(is_first_idx.clone()).assert_eq(
             local.starting_tidx,
-            AB::Expr::from_usize(TranscriptLabel::Riscv.field_len()),
+            AB::Expr::from_usize(TranscriptLabel::Riscv.field_len() + VmPvs::<u8>::width())
+                + AB::Expr::from_usize(2 * D_EF),
         );
 
         self.starting_tidx_bus.receive(
@@ -326,32 +329,38 @@ where
             ),
         );
 
-        let mut tidx = local.starting_tidx.into();
+        // Challenges are laid out in trunk transcript as contiguous EF limbs per present AIR.
+        // We jump directly to this AIR's segment using num_present (1-based among present AIRs).
+        let mut tidx =
+            local.starting_tidx.into() + local.num_present * AB::Expr::from_usize(2 * D_EF);
 
-        self.transcript_bus.receive(
-            builder,
-            local.proof_idx,
-            TranscriptBusMessage {
-                tidx: tidx.clone(),
-                value: local.is_present.into(),
-                is_sample: AB::Expr::ZERO,
-            },
-            not::<AB::Expr>(is_required.clone()) * local.is_valid,
-        );
-        tidx += not::<AB::Expr>(is_required) * local.is_valid;
+        for i in 0..D_EF {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: tidx.clone() + AB::Expr::from_usize(i),
+                    value: local.after_forked_challenge_1[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_present,
+            );
+        }
+        tidx += AB::Expr::from_usize(D_EF) * local.is_present;
 
-        self.transcript_bus.receive(
-            builder,
-            local.proof_idx,
-            TranscriptBusMessage {
-                tidx: tidx.clone(),
-                value: local.log_height.into(),
-                is_sample: AB::Expr::ZERO,
-            },
-            local.is_present,
-        );
-        tidx += local.is_present;
-        tidx += num_pvs.clone() * local.is_present;
+        for i in 0..D_EF {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: tidx.clone() + AB::Expr::from_usize(i),
+                    value: local.after_forked_challenge_2[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_present,
+            );
+        }
+        tidx += AB::Expr::from_usize(D_EF) * local.is_present;
 
         // constrain next air tid
         self.starting_tidx_bus.send(
@@ -372,10 +381,8 @@ where
         // This assumes a 1:1 mapping between present AIRs and forks, which
         // holds when each chip has exactly one proof instance. Multi-instance
         // chips would require a separate fork_id column.
-        // Receive the trunk's sponge state at the fork point from the
-        // ForkedTranscriptBus, cross-checking lookup_challenge_beta against
-        // TranscriptAir's trunk_fork_state.
-        let fork_tidx_base = 0usize;
+        // Receive fork transcript words after the fork label prefix.
+        let fork_tidx_base = TranscriptLabel::Fork.field_len();
         // observe lookup alpha/beta
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
@@ -401,6 +408,40 @@ where
                 local.is_present * local.is_valid,
             );
         }
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: local.num_present.into(),
+                tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF),
+                value: local.num_present.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
+        );
+        // Fork transcript metadata order is fixed: num_present, air_idx, then log_height.
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: local.num_present.into(),
+                tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 1),
+                value: air_idx.clone(),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
+        );
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: local.num_present.into(),
+                tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 2),
+                value: local.log_height.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
+        );
 
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
@@ -408,7 +449,7 @@ where
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.num_present.into(),
-                    tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + i),
+                    tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3 + i),
                     value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
@@ -419,7 +460,7 @@ where
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.num_present.into(),
-                    tidx: AB::Expr::from_usize(fork_tidx_base + 3 * D_EF + i),
+                    tidx: AB::Expr::from_usize(fork_tidx_base + 3 * D_EF + 3 + i),
                     value: local.after_forked_challenge_2[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
