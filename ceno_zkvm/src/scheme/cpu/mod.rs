@@ -482,6 +482,41 @@ impl CpuTowerProver {
 
             proofs.push_sumcheck_proofs(sumcheck_proofs.proofs);
 
+            let evals = state.get_mle_flatten_final_evaluations();
+            // Bind prod/logup evals into transcript before sampling r_merge (Fiat-Shamir soundness).
+            // retrieve final evaluation to proof
+            let mut prod_evals_per_spec = Vec::with_capacity(prod_specs_len);
+            for (i, witness_prod_expr) in witness_prod_expr.iter().enumerate().take(prod_specs_len)
+            {
+                let spec_evals = witness_prod_expr
+                    .iter()
+                    .map(|expr| match expr {
+                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
+                        _ => unreachable!(),
+                    })
+                    .collect_vec();
+                if !spec_evals.is_empty() {
+                    assert_eq!(spec_evals.len(), num_fanin);
+                    transcript.append_field_element_exts(&spec_evals);
+                }
+                prod_evals_per_spec.push((i, spec_evals));
+            }
+            let mut logup_evals_per_spec = Vec::with_capacity(logup_specs_len);
+            for (i, witness_lk_expr) in witness_lk_expr.iter().enumerate().take(logup_specs_len) {
+                let spec_evals = witness_lk_expr
+                    .iter()
+                    .map(|expr| match expr {
+                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
+                        _ => unreachable!(),
+                    })
+                    .collect_vec();
+                if !spec_evals.is_empty() {
+                    assert_eq!(spec_evals.len(), 4); // p1, p2, q1, q2
+                    transcript.append_field_element_exts(&spec_evals);
+                }
+                logup_evals_per_spec.push((i, spec_evals));
+            }
+
             // rt' = r_merge || rt
             let r_merge = transcript.sample_and_append_vec(b"merge", log_num_fanin);
             let rt_prime = [state.collect_raw_challenges(), r_merge].concat();
@@ -491,33 +526,14 @@ impl CpuTowerProver {
                 prod_specs_len + logup_specs_len * 2, /* logup occupy 2 sumcheck: numerator and denominator */
                 transcript,
             );
-            let evals = state.get_mle_flatten_final_evaluations();
-            // retrieve final evaluation to proof
-            for (i, witness_prod_expr) in witness_prod_expr.iter().enumerate().take(prod_specs_len)
-            {
-                let evals = witness_prod_expr
-                    .iter()
-                    .map(|expr| match expr {
-                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
-                        _ => unreachable!(),
-                    })
-                    .collect_vec();
-                if !evals.is_empty() {
-                    assert_eq!(evals.len(), num_fanin);
-                    proofs.push_prod_evals_and_point(i, evals, rt_prime.clone());
+            for (i, spec_evals) in prod_evals_per_spec {
+                if !spec_evals.is_empty() {
+                    proofs.push_prod_evals_and_point(i, spec_evals, rt_prime.clone());
                 }
             }
-            for (i, witness_lk_expr) in witness_lk_expr.iter().enumerate().take(logup_specs_len) {
-                let evals = witness_lk_expr
-                    .iter()
-                    .map(|expr| match expr {
-                        Expression::WitIn(wit_id) => evals[*wit_id as usize],
-                        _ => unreachable!(),
-                    })
-                    .collect_vec();
-                if !evals.is_empty() {
-                    assert_eq!(evals.len(), 4); // p1, p2, q1, q2
-                    proofs.push_logup_evals_and_point(i, evals, rt_prime.clone());
+            for (i, spec_evals) in logup_evals_per_spec {
+                if !spec_evals.is_empty() {
+                    proofs.push_logup_evals_and_point(i, spec_evals, rt_prime.clone());
                 }
             }
             out_rt = rt_prime;

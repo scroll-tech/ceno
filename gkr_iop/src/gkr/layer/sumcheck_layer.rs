@@ -106,6 +106,9 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
             transcript,
         );
 
+        // Bind the prover-supplied evaluations into the transcript (Fiat-Shamir soundness).
+        transcript.append_field_element_exts(&evals);
+
         // Check the final evaluations.
         let got_claim =
             eval_by_expr_with_instance(&[], &evals, &[], &[], challenges, &self.exprs[0])

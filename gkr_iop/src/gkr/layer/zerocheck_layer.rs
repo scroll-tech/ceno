@@ -320,6 +320,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         );
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
+        // Bind the prover-supplied evaluations into the transcript (Fiat-Shamir soundness).
+        transcript.append_field_element_exts(&main_evals);
+
         let structural_witin_offset = self.n_witin + self.n_fixed + self.n_instance;
         // eval selector and set to respective witin
         izip!(
@@ -741,6 +744,9 @@ fn verify_rotation<E: ExtensionField>(
         transcript,
     );
     let origin_point = in_point.into_iter().map(|c| c.elements).collect_vec();
+
+    // Bind the prover-supplied rotation evaluations into the transcript (Fiat-Shamir soundness).
+    transcript.append_field_element_exts(&evals);
 
     // compute the selector evaluation
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
