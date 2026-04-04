@@ -36,6 +36,7 @@ pub mod cpu;
 #[cfg(feature = "gpu")]
 pub mod gpu;
 pub mod hal;
+pub mod open_reduction;
 pub mod prover;
 pub mod scheduler;
 pub mod septic_curve;
