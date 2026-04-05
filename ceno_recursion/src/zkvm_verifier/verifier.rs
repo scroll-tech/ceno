@@ -29,7 +29,6 @@ use crate::{
 use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
 
-use crate::transcript::{challenger_add_forked_index, clone_challenger_state};
 use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{
@@ -237,9 +236,15 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
             iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
                 let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
-                // fork transcript to support chip concurrently proved
-                let mut chip_challenger = clone_challenger_state(builder, &challenger);
-                challenger_add_forked_index(builder, &mut chip_challenger, &forked_sample_index);
+                // Fork chip transcript independently and bind challenges/metadata in verifier order.
+                let mut chip_challenger = DuplexChallengerVariable::new(builder);
+                transcript_observe_label(builder, &mut chip_challenger, b"fork");
+                let alpha_felts = builder.ext2felt(alpha);
+                chip_challenger.observe_slice(builder, alpha_felts);
+                let beta_felts = builder.ext2felt(beta);
+                chip_challenger.observe_slice(builder, beta_felts);
+                let fork_id_felt = builder.unsafe_cast_var_to_felt(forked_sample_index.get_var());
+                chip_challenger.observe(builder, fork_id_felt);
                 builder.assert_usize_eq(
                     chip_proof.rw_out_evals.length.clone(),
                     Usize::from(
