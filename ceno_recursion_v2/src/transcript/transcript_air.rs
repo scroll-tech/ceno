@@ -7,7 +7,7 @@
 //!   When set, the sponge state is initialised from the provided initial fork state.
 //!
 //! * **`fork_id`** column — identifies which fork this row belongs to.
-//!   `fork_id = 0` is the trunk (pre-fork), `fork_id ≥ 1` are the per-chip forks.
+//!   Fork rows use 0-based identifiers (0..N-1) across per-chip forks.
 //!
 //! Fork rows otherwise follow upstream transcript constraints.
 
@@ -59,7 +59,7 @@ pub struct ForkedTranscriptCols<T> {
     // --- fork extensions ---
     /// 1 on the first row of a forked transcript chain.
     pub is_fork_start: T,
-    /// Fork identifier. 0 = trunk, 1..N = per-chip forks.
+    /// Fork identifier (0-based across forked chip transcripts).
     pub fork_id: T,
 }
 

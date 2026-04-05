@@ -376,9 +376,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         // Fork-local tidx values are recorded directly; global offsets are
         // computed on demand during trace generation.
 
-        for (fork_idx, &(chip_idx, instance_idx, chip_proof)) in chip_proof_list.iter().enumerate()
-        {
-            let fs = &mut fork_sponges[fork_idx];
+        for (fork_id, &(chip_idx, instance_idx, chip_proof)) in chip_proof_list.iter().enumerate() {
+            let fs = &mut fork_sponges[fork_id];
 
             // Strict upstream semantics: each fork transcript starts from a
             // fresh domain-separated transcript (label "fork").
@@ -390,10 +389,9 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             fs.observe_ext(beta_ext);
             // Fork IDs intentionally follow current chip/instance iteration
             // order from `build_chip_proof_list` (not proof-shape sorted order).
-            // Keep 1-based indexing for now because transcript AIR currently
-            // uses fork_id=0 for trunk rows. Fork-id normalization is tracked
-            // as a separate follow-up task.
-            fs.observe(F::from_usize(fork_idx + 1));
+            // Fork IDs are normalized to 0-based indexing for forked
+            // transcripts (fork_id in 0..num_forks).
+            fs.observe(F::from_usize(fork_id));
             fs.observe(F::from_u64(chip_idx as u64));
             for num_instance in chip_proof.num_instances {
                 fs.observe(F::from_usize(num_instance));
@@ -408,7 +406,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 chip_idx,
                 instance_idx,
                 tidx: tower_tidx,
-                fork_idx,
+                fork_idx: fork_id,
                 tower_replay,
             });
 
@@ -420,7 +418,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 chip_idx,
                 instance_idx,
                 tidx: main_tidx,
-                fork_idx,
+                fork_idx: fork_id,
             });
         }
 
@@ -441,12 +439,12 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
         // Store fork transcript logs directly. Fork transcripts are fresh
         // domain-separated sponges, so no trunk slicing or inherited state.
-        for (_fork_idx, fork_sponge) in fork_sponges.into_iter().enumerate() {
+        for (fork_id, fork_sponge) in fork_sponges.into_iter().enumerate() {
             let fork_log = fork_sponge.into_log();
 
             preflight.fork_transcripts.push(ForkTranscriptLog {
                 log: fork_log,
-                fork_id: _fork_idx + 1, // 1-based fork IDs (0 = trunk)
+                fork_id,
             });
         }
 

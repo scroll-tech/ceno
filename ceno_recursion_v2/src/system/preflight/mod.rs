@@ -46,7 +46,7 @@ impl Preflight {
 pub struct ForkTranscriptLog {
     /// The log of observe/sample operations in this fork.
     pub log: TranscriptLog<F, PoseidonWord>,
-    /// The fork identifier (1-based: fork 0 = trunk, 1..N = chip forks).
+    /// The fork identifier (0-based across forked chip transcripts).
     pub fork_id: usize,
 }
 

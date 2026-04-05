@@ -377,19 +377,20 @@ where
         // SNAPSHOT STATE CONTINUITY (forked transcript)
         ///////////////////////////////////////////////////////////////////////////////////////////
         // Each present AIR corresponds to one fork whose fork_id equals
-        // num_present (1-based position among present AIRs in sorted order).
+        // num_present - 1 (0-based position among present AIRs in sorted order).
         // This assumes a 1:1 mapping between present AIRs and forks, which
         // holds when each chip has exactly one proof instance. Multi-instance
         // chips would require a separate fork_id column.
         // Receive fork transcript words after the fork label prefix.
         let fork_tidx_base = TranscriptLabel::Fork.field_len();
+        let fork_id = local.num_present - AB::F::ONE;
         // observe lookup alpha/beta
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: local.num_present.into(),
+                    fork_id: fork_id.clone().into(),
                     tidx: AB::Expr::from_usize(fork_tidx_base + i),
                     value: local.lookup_challenge_alpha[i].into(),
                     is_sample: AB::Expr::ZERO,
@@ -400,7 +401,7 @@ where
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: local.num_present.into(),
+                    fork_id: fork_id.clone().into(),
                     tidx: AB::Expr::from_usize(fork_tidx_base + D_EF + i),
                     value: local.lookup_challenge_beta[i].into(),
                     is_sample: AB::Expr::ZERO,
@@ -412,9 +413,9 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: local.num_present.into(),
+                fork_id: fork_id.clone().into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF),
-                value: local.num_present.into(),
+                value: fork_id.clone(),
                 is_sample: AB::Expr::ZERO,
             },
             local.is_present * local.is_valid,
@@ -424,7 +425,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: local.num_present.into(),
+                fork_id: fork_id.clone().into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 1),
                 value: air_idx.clone(),
                 is_sample: AB::Expr::ZERO,
@@ -435,7 +436,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: local.num_present.into(),
+                fork_id: fork_id.clone().into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 2),
                 value: local.log_height.into(),
                 is_sample: AB::Expr::ZERO,
@@ -448,7 +449,7 @@ where
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: local.num_present.into(),
+                    fork_id: fork_id.clone().into(),
                     tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3 + i),
                     value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ONE,
@@ -459,7 +460,7 @@ where
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: local.num_present.into(),
+                    fork_id: fork_id.clone().into(),
                     tidx: AB::Expr::from_usize(fork_tidx_base + 3 * D_EF + 3 + i),
                     value: local.after_forked_challenge_2[i].into(),
                     is_sample: AB::Expr::ONE,
