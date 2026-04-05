@@ -5,12 +5,9 @@ use openvm_circuit_primitives::encoder::Encoder;
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
-    keygen::types::VerifierSinglePreprocessedData, p3_maybe_rayon::prelude::*,
-    prover::AirProvingContext,
+    p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    BabyBearPoseidon2Config, DIGEST_SIZE, Digest, F,
-};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -44,13 +41,12 @@ mod cuda_abi;
 pub struct AirMetadata {
     is_required: bool,
     num_public_values: usize,
-    main_width: usize,
-    cached_widths: Vec<usize>,
+    num_witin: usize,
+    num_structural_witin: usize,
+    num_fixed: usize,
     num_read_count: usize,
     num_write_count: usize,
     num_logup_count: usize,
-    preprocessed_width: Option<usize>,
-    preprocessed_data: Option<VerifierSinglePreprocessedData<Digest>>,
 }
 
 pub struct ProofShapeModule {
@@ -66,9 +62,6 @@ pub struct ProofShapeModule {
 
     // Required for ProofShapeAir tracegen + constraints
     idx_encoder: Arc<Encoder>,
-    min_cached_idx: usize,
-    max_cached: usize,
-    commit_mult: usize,
 
     // Module sends extra public values message for use outside of verifier
     // sub-circuit if true
@@ -84,12 +77,7 @@ impl ProofShapeModule {
     ) -> Self {
         let num_airs = child_vk.circuit_vks.len();
         let idx_encoder = Arc::new(Encoder::new(num_airs, 2, true));
-
-        let min_cached_idx = 0;
-        let _min_cached = 1;
-        let max_cached = 2;
-
-        let per_air = extract_air_metadata_from_vk(child_vk, max_cached);
+        let per_air = extract_air_metadata_from_vk(child_vk);
 
         let range_bus = bus_inventory.range_checker_bus;
         Self {
@@ -100,9 +88,6 @@ impl ProofShapeModule {
             starting_tidx_bus: StartingTidxBus::new(b.new_bus_idx()),
             num_pvs_bus: NumPublicValuesBus::new(b.new_bus_idx()),
             idx_encoder,
-            min_cached_idx,
-            max_cached,
-            commit_mult: 100,
             continuations_enabled,
         }
     }
@@ -118,6 +103,9 @@ impl ProofShapeModule {
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
         let _ = self;
+
+        let transcript_start_tidx = ts.len();
+        preflight.proof_shape.fork_start_tidx = ts.len();
 
         // Build per-air shape metadata from present chip proofs.
         let mut sorted_trace_vdata = proof
@@ -136,13 +124,11 @@ impl ProofShapeModule {
             .collect_vec();
         sorted_trace_vdata.sort_by_key(|(air_idx, v)| (usize::MAX - v.log_height, *air_idx));
         preflight.proof_shape.sorted_trace_vdata = sorted_trace_vdata;
+        // TODO remove l_skip
         preflight.proof_shape.l_skip = 0;
 
-        let mut current_tidx = crate::utils::TranscriptLabel::Riscv.field_len();
-        let mut current_cidx = 1usize;
+        let mut current_tidx = transcript_start_tidx;
         let mut starting_tidx = vec![0usize; child_vk.circuit_vks.len()];
-        let mut starting_cidx = vec![0usize; child_vk.circuit_vks.len()];
-        let mut pvs_tidx = Vec::new();
         let n_max = preflight
             .proof_shape
             .sorted_trace_vdata
@@ -155,38 +141,21 @@ impl ProofShapeModule {
             let metadata = &self.per_air[air_idx];
             let is_present = proof.chip_proofs.contains_key(&air_idx);
             starting_tidx[air_idx] = current_tidx;
-            starting_cidx[air_idx] = current_cidx;
-
-            current_cidx += usize::from(metadata.preprocessed_data.is_some());
-            current_cidx += metadata.cached_widths.len();
 
             if !metadata.is_required {
                 current_tidx += 1;
             }
 
             if is_present {
-                if metadata.preprocessed_data.is_some() {
-                    current_tidx += DIGEST_SIZE;
-                } else {
-                    current_tidx += 1;
-                }
-
-                for cached_width in &metadata.cached_widths {
-                    if *cached_width != 0 {
-                        current_tidx += DIGEST_SIZE;
-                    }
-                }
+                current_tidx += 1;
 
                 if metadata.num_public_values != 0 {
-                    pvs_tidx.push(current_tidx);
                     current_tidx += metadata.num_public_values;
                 }
             }
         }
 
         preflight.proof_shape.starting_tidx = starting_tidx;
-        preflight.proof_shape.starting_cidx = starting_cidx;
-        preflight.proof_shape.pvs_tidx = pvs_tidx;
         preflight.proof_shape.post_tidx = current_tidx;
         preflight.proof_shape.n_max = n_max;
         preflight.proof_shape.n_logup = preflight
@@ -198,33 +167,13 @@ impl ProofShapeModule {
             .max()
             .unwrap_or(0);
 
-        // Verifier preprocess: absorb (circuit_idx, num_instance...) for all chip proofs.
-        for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            ts.observe(F::from_usize(chip_idx));
-            for num_instance in chip_instances
-                .iter()
-                .flat_map(|instance| &instance.num_instances)
-            {
-                ts.observe(F::from_usize(*num_instance));
-            }
-        }
-
-        preflight.proof_shape.alpha_tidx = ts.len();
-        let _alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-        preflight.proof_shape.beta_tidx = ts.len();
-        let _beta = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-        preflight.proof_shape.fork_start_tidx = ts.len();
-
-        eprintln!("_alpha {} _beta {}", _alpha, _beta);
-
         let _ = child_vk;
     }
 
     #[allow(dead_code)]
     fn placeholder_air_widths(&self) -> Vec<usize> {
-        let proof_shape_width = proof_shape::ProofShapeCols::<u8, 4>::width()
-            + self.idx_encoder.width()
-            + self.max_cached * DIGEST_SIZE;
+        let proof_shape_width =
+            proof_shape::ProofShapeCols::<u8, 4>::width() + self.idx_encoder.width();
         let pvs_width = pvs::PublicValuesCols::<u8>::width();
         let range_width = RangeCheckerCols::<u8>::width();
         // TODO(recursion-proof-bridge): replace proof-shape module placeholder contexts with
@@ -252,30 +201,37 @@ fn extract_rwlk_counts(child_vk: &RecursionVk, expected_len: usize) -> Vec<(usiz
         .collect()
 }
 
-fn extract_air_metadata_from_vk(child_vk: &RecursionVk, max_cached: usize) -> Vec<AirMetadata> {
+fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
     let rwlk_counts = extract_rwlk_counts(child_vk, child_vk.circuit_vks.len());
     (0..child_vk.circuit_vks.len())
         .map(|idx| {
             let (num_read_count, num_write_count, num_logup_count) =
                 rwlk_counts.get(idx).copied().unwrap_or((0, 0, 0));
 
-            let num_public_values = child_vk
+            let (num_public_values, num_witin, num_structural_witin, num_fixed) = child_vk
                 .circuit_index_to_name
                 .get(&idx)
                 .and_then(|name| child_vk.circuit_vks.get(name))
-                .map(|circuit_vk| circuit_vk.get_cs().zkvm_v1_css.instance.len())
-                .unwrap_or(0);
+                .map(|circuit_vk| {
+                    let css = &circuit_vk.get_cs().zkvm_v1_css;
+                    (
+                        css.instance.len(),
+                        css.num_witin as usize,
+                        css.num_structural_witin as usize,
+                        css.num_fixed,
+                    )
+                })
+                .unwrap_or((0, 0, 0, 0));
 
             AirMetadata {
                 is_required: false,
                 num_public_values,
-                main_width: 0,
-                cached_widths: vec![0; max_cached],
+                num_witin,
+                num_structural_witin,
+                num_fixed,
                 num_read_count,
                 num_write_count,
                 num_logup_count,
-                preprocessed_width: None,
-                preprocessed_data: None,
             }
         })
         .collect_vec()
@@ -289,14 +245,11 @@ impl AirModule for ProofShapeModule {
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
         let proof_shape_air = ProofShapeAir::<4, 8> {
             per_air: self.per_air.clone(),
-            min_cached_idx: self.min_cached_idx,
-            max_cached: self.max_cached,
-            commit_mult: self.commit_mult,
             idx_encoder: self.idx_encoder.clone(),
             range_bus: self.range_bus,
             permutation_bus: self.permutation_bus,
             starting_tidx_bus: self.starting_tidx_bus,
-            num_pvs_bus: self.num_pvs_bus,
+            lookup_challenge_bus: self.bus_inventory.lookup_challenge_bus,
             fraction_folder_input_bus: self.bus_inventory.fraction_folder_input_bus,
             expression_claim_n_max_bus: self.bus_inventory.expression_claim_n_max_bus,
             tower_module_bus: self.bus_inventory.tower_module_bus,
@@ -306,8 +259,6 @@ impl AirModule for ProofShapeModule {
             transcript_bus: self.bus_inventory.transcript_bus,
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             n_lift_bus: self.bus_inventory.n_lift_bus,
-            cached_commit_bus: self.bus_inventory.cached_commit_bus,
-            continuations_enabled: self.continuations_enabled,
         };
         let pvs_air = PublicValuesAir {
             public_values_bus: self.bus_inventory.public_values_bus,
@@ -346,20 +297,10 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         let pow_checker = &ctx.0;
         let external_range_checks = ctx.1;
-        let cidx_deltas = self
-            .per_air
-            .iter()
-            .map(|metadata| {
-                usize::from(metadata.preprocessed_data.is_some()) + metadata.cached_widths.len()
-            })
-            .collect();
 
         let range_checker = Arc::new(RangeCheckerCpuTraceGenerator::<8>::default());
         let proof_shape = proof_shape::ProofShapeChip::<4, 8>::new(
             self.idx_encoder.clone(),
-            self.min_cached_idx,
-            self.max_cached,
-            cidx_deltas,
             range_checker.clone(),
             pow_checker.clone(),
         );

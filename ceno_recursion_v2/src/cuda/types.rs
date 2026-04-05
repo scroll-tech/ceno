@@ -11,7 +11,6 @@ pub struct TraceHeight {
 #[derive(Debug, Default)]
 pub struct TraceMetadata {
     pub cached_idx: usize,
-    pub starting_cidx: usize,
     pub total_interactions: usize,
     pub num_air_id_lookups: usize,
 }

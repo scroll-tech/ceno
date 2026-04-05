@@ -4,16 +4,12 @@
 //! fork support.  The key additions:
 //!
 //! * **`is_fork_start`** column — marks the first row of a forked transcript chain.
-//!   When set, the sponge state is initialised from the trunk's fork-point state
-//!   (propagated through `trunk_fork_state` auxiliary columns) instead of
-//!   being constrained to all-zeros.
+//!   When set, the sponge state is initialised from the provided initial fork state.
 //!
 //! * **`fork_id`** column — identifies which fork this row belongs to.
 //!   `fork_id = 0` is the trunk (pre-fork), `fork_id ≥ 1` are the per-chip forks.
 //!
-//! * **`trunk_fork_state`** auxiliary columns — carry the trunk's sponge state at
-//!   the fork point. These are propagated unchanged across all rows within a proof
-//!   and used to constrain each fork's initial sponge state.
+//! Fork rows otherwise follow upstream transcript constraints.
 
 use core::borrow::Borrow;
 
@@ -24,6 +20,7 @@ use openvm_circuit_primitives::{
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
+use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
@@ -64,9 +61,6 @@ pub struct ForkedTranscriptCols<T> {
     pub is_fork_start: T,
     /// Fork identifier. 0 = trunk, 1..N = per-chip forks.
     pub fork_id: T,
-    /// The trunk's sponge state at the fork point, propagated to all rows within
-    /// a proof so fork starts can constrain their initial sponge state.
-    pub trunk_fork_state: [T; POSEIDON2_WIDTH],
 }
 
 impl<T: Copy> ForkedTranscriptCols<T> {
@@ -76,8 +70,7 @@ impl<T: Copy> ForkedTranscriptCols<T> {
         // prev_state = POSEIDON2_WIDTH
         // post_state = POSEIDON2_WIDTH
         // is_fork_start, fork_id = 2
-        // trunk_fork_state = POSEIDON2_WIDTH
-        4 + CHUNK + 3 * POSEIDON2_WIDTH + 2
+        4 + CHUNK + 2 * POSEIDON2_WIDTH + 2
     }
 }
 
@@ -185,44 +178,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         }
 
         ///////////////////////////////////////////////////////////////////////
-        // Fork state: trunk_fork_state propagation and anchoring
-        ///////////////////////////////////////////////////////////////////////
-
-        // Propagation: trunk_fork_state is constant within a proof.
-        // When next is valid and not a new proof, propagate.
-        for i in 0..POSEIDON2_WIDTH {
-            builder
-                .when(next_valid)
-                .when(not::<AB::Expr>(next.is_proof_start))
-                .assert_eq(local.trunk_fork_state[i], next.trunk_fork_state[i]);
-        }
-
-        // Anchor: the trace generator fills trunk_fork_state with the trunk's
-        // sponge state at the fork point. Because the trunk includes merge
-        // operations after the fork point, the trunk→fork row transition does
-        // NOT have the fork-point state in post_state. Instead, we rely on:
-        //   (a) trunk_fork_state is propagated/constant within a proof, and
-        //   (b) the TranscriptBus checks that fork operations produce values
-        //       consistent with the consumer AIRs.
-        // A direct AIR anchoring constraint would require a marker column at
-        // the exact fork-point row within the trunk, which we omit for now.
-
-        // Fork start: the fork's initial sponge state must match
-        // trunk_fork_state for capacity positions and unmasked rate positions.
-        for i in 0..CHUNK {
-            // Capacity: always constrained
-            builder.when(local.is_fork_start).assert_eq(
-                local.prev_state[i + CHUNK],
-                local.trunk_fork_state[i + CHUNK],
-            );
-            // Rate: constrained where mask[i] == 0 (position not overwritten by absorption)
-            builder
-                .when(local.is_fork_start)
-                .when(not::<AB::Expr>(local.mask[i]))
-                .assert_eq(local.prev_state[i], local.trunk_fork_state[i]);
-        }
-
-        ///////////////////////////////////////////////////////////////////////
         // Intra-chain continuity (sponge state propagation)
         ///////////////////////////////////////////////////////////////////////
         // Two consecutive rows are in the same chain iff next row is valid,
@@ -301,18 +256,49 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         ///////////////////////////////////////////////////////////////////////
         // Forked transcript bus interactions (send fork state)
         ///////////////////////////////////////////////////////////////////////
-        // On is_fork_start rows, send the trunk_fork_state (the sponge state
-        // at the fork point) on the ForkedTranscriptBus. ProofShapeAir
-        // receives these to cross-check its current_snapshot_state.
-        for i in 0..POSEIDON2_WIDTH {
+        // On is_fork_start rows, send fork-local transcript words with fork_id.
+        for i in 0..D_EF {
             self.forked_transcript_bus.send(
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.fork_id.into(),
-                    fork_tidx: AB::Expr::from_usize(i),
-                    value: local.trunk_fork_state[i].into(),
+                    tidx: local.tidx + AB::Expr::from_usize(i),
+                    value: local.prev_state[i].into(),
                     is_sample: AB::Expr::ZERO,
+                },
+                local.is_fork_start,
+            );
+            self.forked_transcript_bus.send(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(D_EF + i),
+                    value: local.prev_state[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_fork_start,
+            );
+            self.forked_transcript_bus.send(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(2 * D_EF + i),
+                    value: local.prev_state[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_fork_start,
+            );
+            self.forked_transcript_bus.send(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(3 * D_EF + i),
+                    value: local.prev_state[i].into(),
+                    is_sample: AB::Expr::ONE,
                 },
                 local.is_fork_start,
             );

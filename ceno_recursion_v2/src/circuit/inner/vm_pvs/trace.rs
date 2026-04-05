@@ -1,7 +1,9 @@
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::prover::AirProvingContext;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
-use p3_field::PrimeCharacteristicRing;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{
+    BabyBearPoseidon2Config, D_EF, DIGEST_SIZE, EF, F,
+};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
@@ -10,16 +12,18 @@ use crate::{
         ProofsType,
         vm_pvs::{VmPvs, air::VmPvsCols},
     },
-    system::{RecursionProof, RecursionVk},
+    system::{Preflight, RecursionProof, RecursionVk},
 };
 
 pub fn generate_proving_ctx(
     child_vk: &RecursionVk,
     proofs: &[RecursionProof],
+    preflights: &[Preflight],
     proofs_type: ProofsType,
     child_is_app: bool,
     deferral_enabled: bool,
 ) -> AirProvingContext<CpuBackend<BabyBearPoseidon2Config>> {
+    debug_assert_eq!(proofs.len(), preflights.len());
     let _ = (proofs_type, child_is_app);
     assert!(
         !deferral_enabled,
@@ -50,9 +54,16 @@ pub fn generate_proving_ctx(
 
         if row_idx < proofs.len() {
             let proof = &proofs[row_idx];
+            let preflight = &preflights[row_idx];
             cols.is_valid = F::ONE;
             cols.is_last = F::from_bool(row_idx + 1 == proofs.len());
             cols.has_verifier_pvs = F::ZERO;
+            cols.lookup_challenge_alpha = ef_to_limbs(preflight.vm_pvs.lookup_challenge_alpha);
+            cols.lookup_challenge_beta = ef_to_limbs(preflight.vm_pvs.lookup_challenge_beta);
+            cols.lookup_challenge_alpha_lookup_count =
+                F::from_usize(preflight.vm_pvs.lookup_challenge_alpha_lookup_count);
+            cols.lookup_challenge_beta_lookup_count =
+                F::from_usize(preflight.vm_pvs.lookup_challenge_beta_lookup_count);
             cols.child_pvs = build_vm_pvs(fixed_commit, fixed_no_omc_init_commit, proof);
         }
 
@@ -118,4 +129,10 @@ fn split_u32_lo_hi(value: u32) -> [F; 2] {
         F::from_u32(value & 0xffff),
         F::from_u32((value >> 16) & 0xffff),
     ]
+}
+
+fn ef_to_limbs(value: EF) -> [F; D_EF] {
+    let mut out = [F::ZERO; D_EF];
+    out.copy_from_slice(value.as_basis_coefficients_slice());
+    out
 }
