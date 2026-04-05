@@ -45,7 +45,7 @@ pub fn replay_tower_proof(
     vk: &VerifyingKey<RecursionField>,
 ) -> Result<TowerReplayResult> {
     let mut transcript = BasicTranscript::<RecursionField>::new(b"ceno-recursion-tower-tower");
-    replay_tower_proof_inner(chip_proof, vk, &mut transcript)
+    build_tower_replay_result(chip_proof, vk, &mut transcript)
 }
 
 // ---------------------------------------------------------------------------
@@ -150,11 +150,11 @@ pub fn replay_tower_proof_poseidon(
     schedule: &TowerTranscriptSchedule,
 ) -> Result<TowerReplayResult> {
     let mut transcript = PrecomputedTranscript::from_schedule(schedule);
-    replay_tower_proof_inner(chip_proof, vk, &mut transcript)
+    build_tower_replay_result(chip_proof, vk, &mut transcript)
 }
 
-/// Core replay logic, generic over transcript type.
-fn replay_tower_proof_inner(
+/// Core tower replay builder, generic over transcript type.
+fn build_tower_replay_result(
     chip_proof: &ZKVMChipProof<RecursionField>,
     vk: &VerifyingKey<RecursionField>,
     transcript: &mut impl Transcript<RecursionField>,

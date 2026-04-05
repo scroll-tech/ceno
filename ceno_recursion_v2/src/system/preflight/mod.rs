@@ -41,14 +41,11 @@ impl Preflight {
     }
 }
 
-/// A single forked transcript chain with its initial sponge state.
+/// A single forked transcript chain.
 #[derive(Clone, Debug)]
 pub struct ForkTranscriptLog {
     /// The log of observe/sample operations in this fork.
     pub log: TranscriptLog<F, PoseidonWord>,
-    /// The sponge state this fork inherits from the trunk (after observing
-    /// the fork index into it).
-    pub initial_state: PoseidonWord,
     /// The fork identifier (1-based: fork 0 = trunk, 1..N = chip forks).
     pub fork_id: usize,
 }

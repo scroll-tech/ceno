@@ -81,45 +81,6 @@ impl TranscriptModule {
         num_valid_rows
     }
 
-    /// Replay the sponge for the first `up_to` entries of a transcript log,
-    /// returning the sponge state at that point.
-    ///
-    /// This matches the DuplexSponge's overwrite-mode behavior.
-    fn replay_sponge_state(
-        &self,
-        log: &openvm_stark_backend::TranscriptLog<F, [F; POSEIDON2_WIDTH]>,
-        up_to: usize,
-    ) -> [F; POSEIDON2_WIDTH] {
-        let mut state = [F::ZERO; POSEIDON2_WIDTH];
-        let mut absorb_idx = 0usize;
-        let mut sample_idx = 0usize;
-
-        for i in 0..up_to {
-            if log.samples()[i] {
-                // Matches DuplexSponge::sample()
-                let needs_perm = absorb_idx != 0 || sample_idx == 0;
-                if needs_perm {
-                    self.perm.permute_mut(&mut state);
-                    absorb_idx = 0;
-                    sample_idx = CHUNK; // RATE = CHUNK
-                }
-                sample_idx -= 1;
-                // sampled value = state[sample_idx]; we don't need it
-            } else {
-                // Matches DuplexSponge::observe()
-                state[absorb_idx] = log.values()[i];
-                absorb_idx += 1;
-                if absorb_idx == CHUNK {
-                    self.perm.permute_mut(&mut state);
-                    absorb_idx = 0;
-                    sample_idx = CHUNK;
-                }
-            }
-        }
-
-        state
-    }
-
     /// Fill transcript trace rows from a single transcript log.
     ///
     /// `tidx_offset` is added to the local tidx.
@@ -273,28 +234,23 @@ impl TranscriptModule {
             );
             offset = trunk_end;
 
-            // Compute the sponge state at the fork point by replaying
-            // the trunk's pre-fork operations.
-            let fork_point_state = self
-                .replay_sponge_state(&preflight.transcript, preflight.proof_shape.fork_start_tidx);
-
             // Fill fork rows with fork-local tidx offsets.
             for (fi, fork_log) in preflight.fork_transcripts.iter().enumerate() {
                 let fork_rows = info.fork_rows[fi];
                 let fork_end = offset + fork_rows;
                 let fork_slice =
                     &mut transcript_trace[offset * transcript_width..fork_end * transcript_width];
-                // Each fork starts from the trunk's sponge state at the fork
-                // point (NOT the trunk's final state, which includes merge ops).
+                // Fresh fork semantics: every fork transcript starts from a
+                // clean sponge state and is domain-separated by "fork".
                 let _ = self.fill_log_rows(
                     fork_slice,
                     transcript_width,
                     &fork_log.log,
                     pidx,
                     fork_log.fork_id,
-                    false,            // is_proof_start
-                    true,             // is_fork_start
-                    fork_point_state, // trunk state at fork point
+                    false, // is_proof_start
+                    true,  // is_fork_start
+                    [F::ZERO; POSEIDON2_WIDTH],
                     0,
                     &mut poseidon2_perm_inputs,
                 );

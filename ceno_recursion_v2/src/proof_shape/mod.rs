@@ -158,12 +158,13 @@ impl ProofShapeModule {
         preflight.proof_shape.starting_tidx = starting_tidx;
         preflight.proof_shape.post_tidx = current_tidx;
         preflight.proof_shape.n_max = n_max;
-        preflight.proof_shape.n_logup = preflight
-            .gkr
-            .chips
-            .iter()
-            .filter(|entry| proof.chip_proofs.contains_key(&entry.chip_idx))
-            .map(|entry| entry.tower_replay.layers.len())
+        // n_logup is the per-proof max number of tower layers (num_layers).
+        // Keep this independent from tower replay side effects.
+        preflight.proof_shape.n_logup = proof
+            .chip_proofs
+            .values()
+            .flat_map(|instances| instances.iter())
+            .map(|chip_proof| chip_proof.tower_proof.proofs.len())
             .max()
             .unwrap_or(0);
 
