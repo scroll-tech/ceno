@@ -27,6 +27,7 @@ use crate::{
     main::MainModule,
     tower::TowerModule,
     transcript::TranscriptModule,
+    utils::{TranscriptLabel, transcript_observe_label},
 };
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
@@ -36,8 +37,11 @@ use openvm_stark_backend::{
     p3_maybe_rayon::prelude::*,
     prover::{AirProvingContext, CommittedTraceData, ProverBackend},
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
-use p3_field::PrimeCharacteristicRing;
+use openvm_stark_sdk::{
+    config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F, poseidon2_perm},
+    p3_baby_bear::Poseidon2BabyBear,
+};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::primitives::{
     exp_bits_len::{ExpBitsLenAir, ExpBitsLenTraceGenerator},
@@ -79,7 +83,8 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
     #[allow(clippy::ptr_arg)]
     fn generate_proving_ctxs<
         TS: FiatShamirTranscript<BabyBearPoseidon2Config>
-            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
+            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>
+            + From<Poseidon2BabyBear<POSEIDON2_WIDTH>>,
     >(
         &self,
         child_vk: &RecursionVk,
@@ -92,6 +97,7 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
     fn generate_proving_ctxs_base<
         TS: FiatShamirTranscript<BabyBearPoseidon2Config>
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>
+            + From<Poseidon2BabyBear<POSEIDON2_WIDTH>>
             + Clone,
     >(
         &self,
@@ -295,31 +301,16 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         }
     }
 
-    /// Runs preflight for a single proof, with proper transcript forking.
-    ///
-    /// This mirrors the native verifier's `verify_proof_validity` fork protocol:
-    /// 1. Trunk: proof-shape (per-AIR shape + α/β)
-    /// 2. Fork: clone sponge per chip, observe fork index, run Tower + Main
-    /// 3. Merge: each fork samples 1 ext element → observe into trunk
-    #[tracing::instrument(name = "execute_preflight", skip_all)]
-    fn run_preflight<TS>(
-        &self,
-        mut sponge: TS,
-        child_vk: &RecursionVk,
-        proof: &RecursionProof,
-    ) -> Preflight
-    where
-        TS: FiatShamirTranscript<BabyBearPoseidon2Config>
-            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
-    {
-        let mut preflight = Preflight::default();
-
-        // Phase 1: Trunk operations.
-        // Proof-shape metadata and alpha/beta sampling after pre-verifier transcript observes.
-        self.proof_shape
-            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
-
-        // Phase 2: Fork — clone sponge for each chip proof instance.
+    #[allow(clippy::type_complexity)]
+    fn build_chip_proof_list<'a>(
+        proof: &'a RecursionProof,
+    ) -> Vec<(
+        usize,
+        usize,
+        &'a ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
+    )> {
+        // Keep current deterministic ordering: iterate chip map order, then
+        // instance order within each chip. Fork IDs are assigned in this order.
         let chip_proof_list: Vec<(
             usize,
             usize,
@@ -334,70 +325,105 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                     .map(move |(instance_idx, chip_proof)| (chip_idx, instance_idx, chip_proof))
             })
             .collect();
+        chip_proof_list
+    }
 
-        let num_forks = chip_proof_list.len();
-        let fork_offset = sponge.len(); // tidx of the fork point in the trunk
+    /// Runs preflight for a single proof, with proper transcript forking.
+    ///
+    /// This mirrors the native verifier's `verify_proof_validity` fork protocol:
+    /// 1. Trunk: proof-shape metadata only (VmPvs preflight already observed/sampled α/β)
+    /// 2. Fork: fresh transcript per chip, observe fork prelude, run Tower + Main
+    /// 3. Merge: each fork samples 1 ext element → observe into trunk
+    #[tracing::instrument(name = "execute_preflight", skip_all)]
+    fn run_preflight<TS>(
+        &self,
+        mut sponge: TS,
+        child_vk: &RecursionVk,
+        proof: &RecursionProof,
+    ) -> Preflight
+    where
+        TS: FiatShamirTranscript<BabyBearPoseidon2Config>
+            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>
+            + From<Poseidon2BabyBear<POSEIDON2_WIDTH>>
+            + Clone,
+    {
+        let mut preflight = Preflight::default();
 
-        let mut fork_sponges: Vec<TS> = (0..num_forks)
-            .map(|i| {
-                let mut forked = sponge.clone();
-                forked.observe(F::from_u64(i as u64));
-                forked
-            })
+        // Phase 1: Trunk operations.
+        // Proof-shape metadata and alpha/beta sampling after pre-verifier transcript observes.
+        self.proof_shape
+            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+
+        // VmPvs is owned by pre-system preflight. Consume vm_pvs challenge
+        // fields directly here.
+        let alpha_ext = preflight.vm_pvs.lookup_challenge_alpha;
+        let beta_ext = preflight.vm_pvs.lookup_challenge_beta;
+        preflight.proof_shape.lookup_challenge_alpha = ef_to_limbs(alpha_ext);
+        preflight.proof_shape.lookup_challenge_beta = ef_to_limbs(beta_ext);
+
+        // Mark where merge observations begin in the trunk transcript.
+        let fork_offset = sponge.len();
+
+        // Phase 2: Fork — fresh transcript per chip proof instance.
+        let chip_proof_list = Self::build_chip_proof_list(proof);
+        // `TS::from(poseidon2_perm())` is the generic equivalent of
+        // `default_duplex_sponge_recorder()` used by the inner prover.
+        let mut fork_sponges: Vec<TS> = (0..chip_proof_list.len())
+            .map(|_| TS::from(poseidon2_perm().clone()))
             .collect();
 
         // Phase 3: Run Tower + Main on each fork.
-        // Each fork sponge processes independently. We record fork-local tidx
-        // directly — global offsets are computed on the fly at trace gen time.
+        // Fork-local tidx values are recorded directly; global offsets are
+        // computed on demand during trace generation.
 
-        for (fork_idx, &(chip_idx, instance_idx, chip_proof)) in chip_proof_list.iter().enumerate()
-        {
-            let fs = &mut fork_sponges[fork_idx];
-            let fork_start_len = fs.len();
-            // Observe circuit_idx into the fork transcript.
-            // Mirrors v1 verifier: transcript.append_field_element(circuit_idx)
+        for (fork_id, &(chip_idx, instance_idx, chip_proof)) in chip_proof_list.iter().enumerate() {
+            let fs = &mut fork_sponges[fork_id];
+
+            // Strict upstream semantics: each fork transcript starts from a
+            // fresh domain-separated transcript (label "fork").
+            transcript_observe_label(fs, TranscriptLabel::Fork.as_bytes());
+
+            // Proof-shape-owned fork prelude:
+            // alpha, beta, fork_index, circuit_index, num_instances...
+            fs.observe_ext(alpha_ext);
+            fs.observe_ext(beta_ext);
+            // Fork IDs intentionally follow current chip/instance iteration
+            // order from `build_chip_proof_list` (not proof-shape sorted order).
+            // Fork IDs are normalized to 0-based indexing for forked
+            // transcripts (fork_id in 0..num_forks).
+            fs.observe(F::from_usize(fork_id));
             fs.observe(F::from_u64(chip_idx as u64));
+            for num_instance in chip_proof.num_instances {
+                fs.observe(F::from_usize(num_instance));
+            }
 
-            // Fork-local tidx: position within the fork's extracted log.
-            let tower_local = fs.len() - fork_start_len;
-            let _ = crate::tower::record_gkr_transcript(fs, chip_idx, chip_proof);
+            let tower_tidx = fs.len();
+            let tower_replay =
+                crate::tower::record_and_replay_tower_preflight(fs, child_vk, chip_idx, chip_proof);
 
-            let tower_replay = match crate::tower::circuit_vk_for_idx(child_vk, chip_idx) {
-                Some(circuit_vk) => {
-                    match crate::tower::replay_tower_proof(chip_proof, circuit_vk) {
-                        Ok(replay) => replay,
-                        Err(_err) => crate::tower::TowerReplayResult::default(),
-                    }
-                }
-                None => crate::tower::TowerReplayResult::default(),
-            };
-
-            // Record tower with fork-local tidx.
-            // Fork log layout: [0]=fork_id observe, [1..]=circuit_idx + tower + main.
-            // tower_local is relative to fork_start_len (after fork_id), so
-            // fork-log-local position = 1 (fork_id) + tower_local.
+            // Record tower entry with fork-local tidx at tower stage start.
             preflight.gkr.chips.push(TowerChipTranscriptRange {
                 chip_idx,
                 instance_idx,
-                tidx: 1 + tower_local,
-                fork_idx,
+                tidx: tower_tidx,
+                fork_idx: fork_id,
                 tower_replay,
             });
 
             // Main preflight for this chip.
-            let main_local = fs.len() - fork_start_len;
+            let main_tidx = fs.len();
             crate::main::record_main_transcript(fs, chip_idx, chip_proof);
 
             preflight.main.chips.push(ChipTranscriptRange {
                 chip_idx,
                 instance_idx,
-                tidx: 1 + main_local,
-                fork_idx,
+                tidx: main_tidx,
+                fork_idx: fork_id,
             });
         }
 
         // Phase 4: Merge — sample 1 ext element from each fork, observe into trunk.
-        for (i, fork_sponge) in fork_sponges.iter_mut().enumerate() {
+        for fork_sponge in &mut fork_sponges {
             let sample: <BabyBearPoseidon2Config as StarkProtocolConfig>::EF =
                 FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(fork_sponge);
             sponge.observe_ext(sample);
@@ -411,32 +437,37 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
         preflight.proof_shape.fork_start_tidx = fork_offset;
 
-        // Compute the sponge state at the fork point by replaying the trunk log.
-        preflight.proof_shape.fork_start_state =
-            crate::utils::replay_sponge_state_from_log(&trunk_log, fork_offset);
-
-        // Store fork transcript logs. Each fork sponge log contains the
-        // trunk's history (0..fork_offset) followed by fork-only operations
-        // (fork_id observe + phase 3 ops + phase 4 sample_ext). Extract the
-        // fork portion. Global offsets are NOT stored — they are computed on
-        // the fly via Preflight::fork_global_offset().
-        for (_fork_idx, fork_sponge) in fork_sponges.into_iter().enumerate() {
-            let full_fork_log = fork_sponge.into_log();
-            let fork_values = full_fork_log.values()[fork_offset..].to_vec();
-            let fork_samples = full_fork_log.samples()[fork_offset..].to_vec();
-            let fork_log = openvm_stark_backend::TranscriptLog::new(fork_values, fork_samples);
-
-            // Compute the fork's initial sponge state by replaying the
-            // full log up to fork_offset + 1 (trunk ops + fork_id observe).
-            let initial_state =
-                crate::utils::replay_sponge_state_from_log(&full_fork_log, fork_offset + 1);
+        // Store fork transcript logs directly. Fork transcripts are fresh
+        // domain-separated sponges, so no trunk slicing or inherited state.
+        for (fork_id, fork_sponge) in fork_sponges.into_iter().enumerate() {
+            let fork_log = fork_sponge.into_log();
 
             preflight.fork_transcripts.push(ForkTranscriptLog {
                 log: fork_log,
-                initial_state,
-                fork_id: _fork_idx + 1, // 1-based fork IDs (0 = trunk)
+                fork_id,
             });
         }
+
+        preflight.proof_shape.after_forked_challenge_1 = preflight
+            .fork_transcripts
+            .first()
+            .and_then(|f| {
+                f.log
+                    .values()
+                    .get(f.log.len().saturating_sub(D_EF)..)
+                    .and_then(EF::from_basis_coefficients_slice)
+            })
+            .unwrap_or(EF::ZERO);
+        preflight.proof_shape.after_forked_challenge_2 = preflight
+            .fork_transcripts
+            .get(1)
+            .and_then(|f| {
+                f.log
+                    .values()
+                    .get(f.log.len().saturating_sub(D_EF)..)
+                    .and_then(EF::from_basis_coefficients_slice)
+            })
+            .unwrap_or(preflight.proof_shape.after_forked_challenge_1);
 
         preflight.transcript = trunk_log;
         preflight
@@ -473,6 +504,12 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     }
 }
 
+fn ef_to_limbs(value: EF) -> [F; D_EF] {
+    let mut out = [F::ZERO; D_EF];
+    out.copy_from_slice(value.as_basis_coefficients_slice());
+    out
+}
+
 impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
     VerifierTraceGen<CpuBackend<SC>, SC> for VerifierSubCircuit<MAX_NUM_PROOFS>
 {
@@ -491,7 +528,8 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
     #[tracing::instrument(name = "subcircuit_generate_proving_ctxs", skip_all)]
     fn generate_proving_ctxs<
         TS: FiatShamirTranscript<BabyBearPoseidon2Config>
-            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
+            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>
+            + From<Poseidon2BabyBear<POSEIDON2_WIDTH>>,
     >(
         &self,
         child_vk: &RecursionVk,

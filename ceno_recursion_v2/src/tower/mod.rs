@@ -254,25 +254,12 @@ impl TowerModule {
         TS: FiatShamirTranscript<BabyBearPoseidon2Config>
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
-        let _ = (self, child_vk);
+        let _ = self;
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
             for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
                 let tidx = ts.len();
-                let _ = record_gkr_transcript(ts, chip_idx, chip_proof);
-
-                let tower_replay = match circuit_vk_for_idx(child_vk, chip_idx) {
-                    Some(circuit_vk) => match replay_tower_proof(chip_proof, circuit_vk) {
-                        Ok(replay) => replay,
-                        Err(err) => {
-                            error!(
-                                ?err,
-                                chip_idx, "failed to replay tower proof during preflight"
-                            );
-                            TowerReplayResult::default()
-                        }
-                    },
-                    None => TowerReplayResult::default(),
-                };
+                let tower_replay =
+                    record_and_replay_tower_preflight(ts, child_vk, chip_idx, chip_proof);
 
                 preflight.gkr.chips.push(TowerChipTranscriptRange {
                     chip_idx,
@@ -364,6 +351,34 @@ pub(crate) fn circuit_vk_for_idx(
     vk.circuit_index_to_name
         .get(&chip_idx)
         .and_then(|name| vk.circuit_vks.get(name))
+}
+
+/// Record all tower transcript events for one chip proof, then replay tower proof.
+/// Keeping this in the tower module avoids preflight callsites duplicating
+/// transcript/replay wiring logic.
+pub(crate) fn record_and_replay_tower_preflight<TS>(
+    ts: &mut TS,
+    child_vk: &RecursionVk,
+    chip_idx: usize,
+    chip_proof: &ZKVMChipProof<RecursionField>,
+) -> TowerReplayResult
+where
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
+{
+    let _ = record_gkr_transcript(ts, chip_idx, chip_proof);
+    match circuit_vk_for_idx(child_vk, chip_idx) {
+        Some(circuit_vk) => match replay_tower_proof(chip_proof, circuit_vk) {
+            Ok(replay) => replay,
+            Err(err) => {
+                error!(
+                    ?err,
+                    chip_idx, "failed to replay tower proof during preflight"
+                );
+                TowerReplayResult::default()
+            }
+        },
+        None => TowerReplayResult::default(),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

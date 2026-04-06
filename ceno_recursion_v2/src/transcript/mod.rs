@@ -81,48 +81,9 @@ impl TranscriptModule {
         num_valid_rows
     }
 
-    /// Replay the sponge for the first `up_to` entries of a transcript log,
-    /// returning the sponge state at that point.
-    ///
-    /// This matches the DuplexSponge's overwrite-mode behavior.
-    fn replay_sponge_state(
-        &self,
-        log: &openvm_stark_backend::TranscriptLog<F, [F; POSEIDON2_WIDTH]>,
-        up_to: usize,
-    ) -> [F; POSEIDON2_WIDTH] {
-        let mut state = [F::ZERO; POSEIDON2_WIDTH];
-        let mut absorb_idx = 0usize;
-        let mut sample_idx = 0usize;
-
-        for i in 0..up_to {
-            if log.samples()[i] {
-                // Matches DuplexSponge::sample()
-                let needs_perm = absorb_idx != 0 || sample_idx == 0;
-                if needs_perm {
-                    self.perm.permute_mut(&mut state);
-                    absorb_idx = 0;
-                    sample_idx = CHUNK; // RATE = CHUNK
-                }
-                sample_idx -= 1;
-                // sampled value = state[sample_idx]; we don't need it
-            } else {
-                // Matches DuplexSponge::observe()
-                state[absorb_idx] = log.values()[i];
-                absorb_idx += 1;
-                if absorb_idx == CHUNK {
-                    self.perm.permute_mut(&mut state);
-                    absorb_idx = 0;
-                    sample_idx = CHUNK;
-                }
-            }
-        }
-
-        state
-    }
-
     /// Fill transcript trace rows from a single transcript log.
     ///
-    /// `tidx_offset` is added to the local tidx so fork logs can use global tidx.
+    /// `tidx_offset` is added to the local tidx.
     ///
     /// Returns the final sponge state after processing the log.
     #[allow(clippy::too_many_arguments)]
@@ -273,49 +234,27 @@ impl TranscriptModule {
             );
             offset = trunk_end;
 
-            // Compute the sponge state at the fork point by replaying
-            // the trunk's pre-fork operations.
-            let fork_point_state = self
-                .replay_sponge_state(&preflight.transcript, preflight.proof_shape.fork_start_tidx);
-
-            // Fill fork rows. Global tidx offsets for each fork are computed
-            // on the fly (trunk_len + sum of preceding fork lengths).
-            let trunk_len = preflight.transcript.len();
-            let mut fork_tidx_cursor = trunk_len;
+            // Fill fork rows with fork-local tidx offsets.
             for (fi, fork_log) in preflight.fork_transcripts.iter().enumerate() {
                 let fork_rows = info.fork_rows[fi];
                 let fork_end = offset + fork_rows;
                 let fork_slice =
                     &mut transcript_trace[offset * transcript_width..fork_end * transcript_width];
-                // Each fork starts from the trunk's sponge state at the fork
-                // point (NOT the trunk's final state, which includes merge ops).
+                // Fresh fork semantics: every fork transcript starts from a
+                // clean sponge state and is domain-separated by "fork".
                 let _ = self.fill_log_rows(
                     fork_slice,
                     transcript_width,
                     &fork_log.log,
                     pidx,
                     fork_log.fork_id,
-                    false,            // is_proof_start
-                    true,             // is_fork_start
-                    fork_point_state, // trunk state at fork point
-                    fork_tidx_cursor, // computed global tidx offset
+                    false, // is_proof_start
+                    true,  // is_fork_start
+                    [F::ZERO; POSEIDON2_WIDTH],
+                    0,
                     &mut poseidon2_perm_inputs,
                 );
-                fork_tidx_cursor += fork_log.log.len();
                 offset = fork_end;
-            }
-
-            // Fill trunk_fork_state on all rows for this proof.
-            // This is the trunk's sponge state at the fork point (before any
-            // fork-specific operations, but after all pre-fork trunk ops).
-            let proof_start = trunk_end - info.trunk_rows;
-            let proof_end = offset;
-            for row in transcript_trace
-                [proof_start * transcript_width..proof_end * transcript_width]
-                .chunks_exact_mut(transcript_width)
-            {
-                let cols: &mut ForkedTranscriptCols<F> = row.borrow_mut();
-                cols.trunk_fork_state = fork_point_state;
             }
         }
 

@@ -6,11 +6,10 @@ use openvm_circuit_primitives::{
     encoder::Encoder,
     utils::{and, not, or},
 };
-use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
+use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
@@ -18,21 +17,24 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirShapeBus, AirShapeBusMessage, CachedCommitBus, ExpressionClaimNMaxBus,
-        ExpressionClaimNMaxMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
-        FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage,
-        LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus, NLiftMessage, TowerModuleBus,
-        TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
+        AirShapeBus, AirShapeBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
+        ForkedTranscriptBus, ForkedTranscriptBusMessage, FractionFolderInputBus,
+        FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage, LiftedHeightsBus,
+        LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage,
+        NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
+        TranscriptBusMessage,
     },
+    circuit::inner::vm_pvs::VmPvs,
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
         AirMetadata,
         bus::{
-            AirShapeProperty, NumPublicValuesBus, NumPublicValuesMessage, ProofShapePermutationBus,
-            ProofShapePermutationMessage, StartingTidxBus, StartingTidxMessage,
+            AirShapeProperty, ProofShapePermutationBus, ProofShapePermutationMessage,
+            StartingTidxBus, StartingTidxMessage,
         },
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
+    tower::tower_transcript_len,
     utils::TranscriptLabel,
 };
 
@@ -44,8 +46,6 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     pub is_first: F,
     pub is_last: F,
 
-    // loop: proof_idx -> idx (air idx)
-    pub idx: F,
     pub sorted_idx: F,
     /// Represents `log2(next_pow_2(height))` when `is_present`.
     ///
@@ -54,24 +54,24 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     /// Whether this AIR needs rotation openings.
     pub need_rot: F,
 
-    // First possible tidx and non-main cidx of the current AIR
+    // First possible transcript index of the current AIR.
     pub starting_tidx: F,
-    // pub starting_cidx: F,
 
-    // Columns that may be read from the transcript. Note that cached_commits is also read
-    // from the transcript.
+    // Columns that may be read from the transcript.
     pub is_present: F,
 
     /// Lifted trace height (`2^log_height`) used in downstream lookups when `is_present`.
     ///
     /// Has a special use on summary row (when `is_last`).
-    pub height: F,
+    pub height_1: F,
+    pub height_2: F,
 
     // Number of present AIRs so far
     pub num_present: F,
 
-    /// Limb decomposition of `height` used for range/decomposition checks.
-    pub height_limbs: [F; NUM_LIMBS],
+    /// Limb decomposition of per-instance heights used for range/decomposition checks.
+    pub height_1_limbs: [F; NUM_LIMBS],
+    pub height_2_limbs: [F; NUM_LIMBS],
 
     /// The maximum hypercube dimension across all present AIR traces, or zero.
     /// Computed as max(0, n0, n1, ...) where ni = log_height_i for each present trace.
@@ -83,13 +83,15 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
 
     /// The Poseidon2 sponge state at the fork point (trunk state just before
     /// forking). Constrained to be identical across all rows within a proof.
-    pub current_snapshot_state: [F; POSEIDON2_WIDTH],
+    pub lookup_challenge_alpha: [F; D_EF],
+    pub lookup_challenge_beta: [F; D_EF],
+    pub after_forked_challenge_1: [F; D_EF],
+    pub after_forked_challenge_2: [F; D_EF],
 }
 
 // Variable-length columns are stored at the end
 pub struct ProofShapeVarCols<'a, F> {
-    pub idx_flags: &'a [F],                     // [F; IDX_FLAGS]
-    pub cached_commits: &'a [[F; DIGEST_SIZE]], // [[F; DIGEST_SIZE]; MAX_CACHED]
+    pub idx_flags: &'a [F], // [F; IDX_FLAGS]
 }
 
 /// AIR for verifying the proof shape (trace heights, widths, commitments) of a child proof
@@ -99,9 +101,6 @@ pub struct ProofShapeVarCols<'a, F> {
 pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     // Parameters derived from vk
     pub per_air: Vec<AirMetadata>,
-    pub min_cached_idx: usize,
-    pub max_cached: usize,
-    pub commit_mult: usize,
 
     // Primitives
     pub idx_encoder: Arc<Encoder>,
@@ -110,7 +109,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     // Internal buses
     pub permutation_bus: ProofShapePermutationBus,
     pub starting_tidx_bus: StartingTidxBus,
-    pub num_pvs_bus: NumPublicValuesBus,
+    pub lookup_challenge_bus: LookupChallengeBus,
 
     // Inter-module buses
     pub tower_module_bus: TowerModuleBus,
@@ -122,19 +121,13 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub transcript_bus: TranscriptBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub n_lift_bus: NLiftBus,
-
-    // For continuations
-    pub cached_commit_bus: CachedCommitBus,
-    pub continuations_enabled: bool,
 }
 
 impl<F, const NUM_LIMBS: usize, const LIMB_BITS: usize> BaseAir<F>
     for ProofShapeAir<NUM_LIMBS, LIMB_BITS>
 {
     fn width(&self) -> usize {
-        ProofShapeCols::<F, NUM_LIMBS>::width()
-            + self.idx_encoder.width()
-            + self.max_cached * DIGEST_SIZE
+        ProofShapeCols::<F, NUM_LIMBS>::width() + self.idx_encoder.width()
     }
 }
 impl<F, const NUM_LIMBS: usize, const LIMB_BITS: usize> BaseAirWithPublicValues<F>
@@ -160,11 +153,7 @@ where
         );
         let const_width = ProofShapeCols::<AB::Var, NUM_LIMBS>::width();
 
-        let localv = borrow_var_cols::<AB::Var>(
-            &local[const_width..],
-            self.idx_encoder.width(),
-            self.max_cached,
-        );
+        let localv = borrow_var_cols::<AB::Var>(&local[const_width..], self.idx_encoder.width());
         let local: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*local)[..const_width].borrow();
         let next: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*next)[..const_width].borrow();
         let n = local.log_height.into();
@@ -202,6 +191,63 @@ where
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
+        // VK FIELD SELECTION
+        ///////////////////////////////////////////////////////////////////////////////////////////
+        // Select values for TranscriptBus
+        let mut is_required = AB::Expr::ZERO;
+        let mut air_idx = AB::Expr::ZERO;
+
+        // Select values for LiftedHeightsBus
+        let mut num_witin = AB::Expr::ZERO;
+        let mut num_structural_witin = AB::Expr::ZERO;
+        let mut num_fixed = AB::Expr::ZERO;
+
+        // Select values for NumPublicValuesBus
+        let mut num_pvs = AB::Expr::ZERO;
+        let mut num_read_count = AB::Expr::ZERO;
+        let mut num_write_count = AB::Expr::ZERO;
+        let mut num_logup_count = AB::Expr::ZERO;
+        // Per-selected-air tower transcript span (used for fork challenge tidx bump).
+        let mut tower_tidx_bump = AB::Expr::ZERO;
+
+        for (i, air_data) in self.per_air.iter().enumerate() {
+            // We keep a running tally of how many transcript reads there should be up to any
+            // given point, and use that to constrain initial_tidx
+            let is_current_air = self.idx_encoder.get_flag_expr::<AB>(i, localv.idx_flags);
+            let mut when_current = builder.when(is_current_air.clone());
+            air_idx += is_current_air.clone() * AB::F::from_usize(i);
+            num_witin += is_current_air.clone() * AB::F::from_usize(air_data.num_witin);
+            num_structural_witin +=
+                is_current_air.clone() * AB::F::from_usize(air_data.num_structural_witin);
+            num_fixed += is_current_air.clone() * AB::F::from_usize(air_data.num_fixed);
+
+            num_pvs += is_current_air.clone() * AB::F::from_usize(air_data.num_public_values);
+
+            if air_data.is_required {
+                is_required += is_current_air.clone();
+                when_current.assert_one(local.is_present);
+            }
+
+            num_read_count +=
+                is_current_air.clone() * AB::Expr::from_usize(air_data.num_read_count);
+            num_write_count +=
+                is_current_air.clone() * AB::Expr::from_usize(air_data.num_write_count);
+            num_logup_count +=
+                is_current_air.clone() * AB::Expr::from_usize(air_data.num_logup_count);
+
+            // Keep this aligned with TowerInputAir's `tidx_after_gkr_layers`
+            // arithmetic so fork challenge placement and tower buses share one
+            // transcript span model.
+            tower_tidx_bump += is_current_air
+                * per_air_tower_span::<AB>(
+                    n.clone(),
+                    air_data.num_read_count,
+                    air_data.num_write_count,
+                    air_data.num_logup_count,
+                );
+        }
+
+        ///////////////////////////////////////////////////////////////////////////////////////////
         // PERMUTATION AND SORTING
         ///////////////////////////////////////////////////////////////////////////////////////////
         builder.when(local.is_first).assert_zero(local.sorted_idx);
@@ -221,13 +267,18 @@ where
         self.permutation_bus.receive(
             builder,
             local.proof_idx,
-            ProofShapePermutationMessage { idx: local.idx },
+            ProofShapePermutationMessage {
+                idx: air_idx.clone(),
+            },
             local.is_valid,
         );
 
         builder
             .when(and(not(local.is_present), local.is_valid))
-            .assert_zero(local.height);
+            .assert_zero(local.height_1);
+        builder
+            .when(and(not(local.is_present), local.is_valid))
+            .assert_zero(local.height_2);
         builder
             .when(and(not(local.is_present), local.is_valid))
             .assert_zero(local.log_height);
@@ -243,96 +294,51 @@ where
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // VK FIELD SELECTION
+        // LOOKUP CHALLENGE
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // Select values for TranscriptBus
-        let mut is_required = AB::Expr::ZERO;
-        let mut is_min_cached = AB::Expr::ZERO;
-        let mut has_preprocessed = AB::Expr::ZERO;
-        let mut cached_present = vec![AB::Expr::ZERO; self.max_cached];
-
-        // Select values for LiftedHeightsBus
-        let mut main_common_width = AB::Expr::ZERO;
-        let mut preprocessed_stacked_width = AB::Expr::ZERO;
-        let mut cached_widths = vec![AB::Expr::ZERO; self.max_cached];
-
-        // Select values for transcript commitment material.
-        let mut preprocessed_commit = [AB::Expr::ZERO; DIGEST_SIZE];
-
-        // Select values for NumPublicValuesBus
-        let mut num_pvs = AB::Expr::ZERO;
-        let mut has_pvs = AB::Expr::ZERO;
-        let mut num_read_count = AB::Expr::ZERO;
-        let mut num_write_count = AB::Expr::ZERO;
-        let mut num_logup_count = AB::Expr::ZERO;
-
-        for (i, air_data) in self.per_air.iter().enumerate() {
-            // We keep a running tally of how many transcript reads there should be up to any
-            // given point, and use that to constrain initial_tidx
-            let is_current_air = self.idx_encoder.get_flag_expr::<AB>(i, localv.idx_flags);
-            let mut when_current = builder.when(is_current_air.clone());
-
-            when_current.assert_eq(local.idx, AB::F::from_usize(i));
-
-            main_common_width += is_current_air.clone() * AB::F::from_usize(air_data.main_width);
-
-            if air_data.num_public_values != 0 {
-                has_pvs += is_current_air.clone();
-            }
-            num_pvs += is_current_air.clone() * AB::F::from_usize(air_data.num_public_values);
-
-            if air_data.is_required {
-                is_required += is_current_air.clone();
-                when_current.assert_one(local.is_present);
-            }
-
-            if i == self.min_cached_idx {
-                is_min_cached += is_current_air.clone();
-            }
-
-            assert!(air_data.preprocessed_data.is_none());
-            if let Some(preprocessed) = &air_data.preprocessed_data {
-                when_current.assert_eq(
-                    local.log_height,
-                    AB::Expr::from_usize(0usize.wrapping_add_signed(preprocessed.hypercube_dim)),
-                );
-                has_preprocessed += is_current_air.clone();
-
-                preprocessed_stacked_width += is_current_air.clone()
-                    * AB::F::from_usize(air_data.preprocessed_width.unwrap());
-                (0..DIGEST_SIZE).for_each(|didx| {
-                    preprocessed_commit[didx] += is_current_air.clone()
-                        * AB::F::from_u32(preprocessed.commit[didx].as_canonical_u32());
-                });
-            }
-
-            for (cached_idx, width) in air_data.cached_widths.iter().enumerate() {
-                cached_present[cached_idx] += is_current_air.clone();
-                cached_widths[cached_idx] += is_current_air.clone() * AB::Expr::from_usize(*width);
-            }
-
-            num_read_count +=
-                is_current_air.clone() * AB::Expr::from_usize(air_data.num_read_count);
-            num_write_count +=
-                is_current_air.clone() * AB::Expr::from_usize(air_data.num_write_count);
-            num_logup_count +=
-                is_current_air.clone() * AB::Expr::from_usize(air_data.num_logup_count);
+        for i in 0..D_EF {
+            self.lookup_challenge_bus.lookup_key(
+                builder,
+                local.proof_idx,
+                LookupChallengeMessage {
+                    kind: AB::Expr::from_usize(LookupChallengeKind::Alpha.as_usize()),
+                    word_idx: AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_alpha[i].into(),
+                },
+                local.is_present * local.is_valid,
+            );
+        }
+        for i in 0..D_EF {
+            self.lookup_challenge_bus.lookup_key(
+                builder,
+                local.proof_idx,
+                LookupChallengeMessage {
+                    kind: AB::Expr::from_usize(LookupChallengeKind::Beta.as_usize()),
+                    word_idx: AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_beta[i].into(),
+                },
+                local.is_present * local.is_valid,
+            );
         }
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // TRANSCRIPT OBSERVATIONS
         ///////////////////////////////////////////////////////////////////////////////////////////
+
         let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
+
+        // The first AIR starts immediately after the fixed trunk transcript prefix.
         builder.when(is_first_idx.clone()).assert_eq(
             local.starting_tidx,
-            AB::Expr::from_usize(TranscriptLabel::Riscv.field_len()),
+            AB::Expr::from_usize(TranscriptLabel::Riscv.field_len() + VmPvs::<u8>::width())
+                + AB::Expr::from_usize(2 * D_EF),
         );
 
         self.starting_tidx_bus.receive(
             builder,
             local.proof_idx,
             StartingTidxMessage {
-                air_idx: local.idx * local.is_valid
+                air_idx: air_idx.clone() * local.is_valid
                     + AB::Expr::from_usize(self.per_air.len()) * local.is_last,
                 tidx: local.starting_tidx.into(),
             },
@@ -342,131 +348,150 @@ where
             ),
         );
 
-        let mut tidx = local.starting_tidx.into();
-        self.transcript_bus.receive(
-            builder,
-            local.proof_idx,
-            TranscriptBusMessage {
-                tidx: tidx.clone(),
-                value: local.is_present.into(),
-                is_sample: AB::Expr::ZERO,
-            },
-            not::<AB::Expr>(is_required.clone()) * local.is_valid,
-        );
-        tidx += not::<AB::Expr>(is_required) * local.is_valid;
+        // Challenges are laid out in trunk transcript as contiguous EF limbs per present AIR.
+        // We jump directly to this AIR's segment using num_present (1-based among present AIRs).
+        let mut tidx =
+            local.starting_tidx.into() + local.num_present * AB::Expr::from_usize(2 * D_EF);
 
-        for (didx, commit_val) in preprocessed_commit.iter().enumerate() {
+        for i in 0..D_EF {
             self.transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 TranscriptBusMessage {
-                    tidx: tidx.clone() + AB::Expr::from_usize(didx),
-                    value: commit_val.clone(),
+                    tidx: tidx.clone() + AB::Expr::from_usize(i),
+                    value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                has_preprocessed.clone() * local.is_present,
+                local.is_present,
             );
         }
-        tidx += has_preprocessed.clone() * AB::Expr::from_usize(DIGEST_SIZE) * local.is_present;
+        tidx += AB::Expr::from_usize(D_EF) * local.is_present;
 
-        self.transcript_bus.receive(
-            builder,
-            local.proof_idx,
-            TranscriptBusMessage {
-                tidx: tidx.clone(),
-                value: local.log_height.into(),
-                is_sample: AB::Expr::ZERO,
-            },
-            not::<AB::Expr>(has_preprocessed.clone()) * local.is_present,
-        );
-        tidx += not::<AB::Expr>(has_preprocessed.clone()) * local.is_present;
-
-        (0..self.max_cached).for_each(|i| {
-            for didx in 0..DIGEST_SIZE {
-                self.transcript_bus.receive(
-                    builder,
-                    local.proof_idx,
-                    TranscriptBusMessage {
-                        tidx: tidx.clone(),
-                        value: localv.cached_commits[i][didx].into(),
-                        is_sample: AB::Expr::ZERO,
-                    },
-                    cached_present[i].clone() * local.is_present,
-                );
-                tidx += cached_present[i].clone() * local.is_present;
-            }
-        });
-
-        let num_pvs_tidx = tidx.clone();
-        tidx += num_pvs.clone() * local.is_present;
+        for i in 0..D_EF {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: tidx.clone() + AB::Expr::from_usize(i),
+                    value: local.after_forked_challenge_2[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_present,
+            );
+        }
+        tidx += AB::Expr::from_usize(D_EF) * local.is_present;
 
         // constrain next air tid
         self.starting_tidx_bus.send(
             builder,
             local.proof_idx,
             StartingTidxMessage {
-                air_idx: local.idx + AB::F::ONE,
+                air_idx: air_idx.clone() + AB::F::ONE,
                 tidx,
             },
             local.is_valid,
         );
 
-        for didx in 0..DIGEST_SIZE {
-            self.transcript_bus.receive(
-                builder,
-                local.proof_idx,
-                TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(didx),
-                    value: localv.cached_commits[self.max_cached - 1][didx].into(),
-                    is_sample: AB::Expr::ZERO,
-                },
-                local.is_last,
-            );
-
-            self.transcript_bus.receive(
-                builder,
-                local.proof_idx,
-                TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(didx + DIGEST_SIZE),
-                    value: localv.cached_commits[self.max_cached - 1][didx].into(),
-                    is_sample: AB::Expr::ZERO,
-                },
-                is_min_cached.clone() * local.is_valid,
-            );
-        }
-
         ///////////////////////////////////////////////////////////////////////////////////////////
         // SNAPSHOT STATE CONTINUITY (forked transcript)
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // The sponge state at the fork point is identical for all forks.
-        // Constrain: local.current_snapshot_state == next.current_snapshot_state
-        // for all valid rows within the same proof.
-        for i in 0..POSEIDON2_WIDTH {
-            builder
-                .when(and(local.is_valid, not(next.is_last)))
-                .assert_eq(
-                    local.current_snapshot_state[i],
-                    next.current_snapshot_state[i],
-                );
-        }
-
         // Each present AIR corresponds to one fork whose fork_id equals
-        // num_present (1-based position among present AIRs in sorted order).
+        // num_present - 1 (0-based position among present AIRs in sorted order).
         // This assumes a 1:1 mapping between present AIRs and forks, which
         // holds when each chip has exactly one proof instance. Multi-instance
         // chips would require a separate fork_id column.
-        // Receive the trunk's sponge state at the fork point from the
-        // ForkedTranscriptBus, cross-checking current_snapshot_state against
-        // TranscriptAir's trunk_fork_state.
-        for i in 0..POSEIDON2_WIDTH {
+        // Receive fork transcript words after the fork label prefix.
+        let fork_tidx_base = TranscriptLabel::Fork.field_len();
+        let fork_id = local.num_present - AB::F::ONE;
+        // observe lookup alpha/beta
+        for i in 0..D_EF {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: local.num_present.into(),
-                    fork_tidx: AB::Expr::from_usize(i),
-                    value: local.current_snapshot_state[i].into(),
+                    fork_id: fork_id.clone().into(),
+                    tidx: AB::Expr::from_usize(fork_tidx_base + i),
+                    value: local.lookup_challenge_alpha[i].into(),
                     is_sample: AB::Expr::ZERO,
+                },
+                local.is_present * local.is_valid,
+            );
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: fork_id.clone().into(),
+                    tidx: AB::Expr::from_usize(fork_tidx_base + D_EF + i),
+                    value: local.lookup_challenge_beta[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_present * local.is_valid,
+            );
+        }
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: fork_id.clone().into(),
+                tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF),
+                value: fork_id.clone(),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
+        );
+        // Fork transcript metadata order is fixed: num_present, air_idx, then log_height.
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: fork_id.clone().into(),
+                tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 1),
+                value: air_idx.clone(),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
+        );
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: fork_id.clone().into(),
+                tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 2),
+                value: local.log_height.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
+        );
+
+        // Skip the full per-air tower transcript span (out-evals, alpha/beta,
+        // and all GKR/sumcheck layer transcript activity) before binding the
+        // post-fork sampled challenges.
+        let forked_challenge_1_tidx =
+            AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3) + tower_tidx_bump;
+        // Challenge 2 starts after challenge 1 plus the product_sum label span.
+        let forked_challenge_2_tidx =
+            forked_challenge_1_tidx.clone() + AB::Expr::from_usize(tower_transcript_len::BETA_LEN);
+
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: fork_id.clone().into(),
+                    tidx: forked_challenge_1_tidx.clone() + AB::Expr::from_usize(i),
+                    value: local.after_forked_challenge_1[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_present * local.is_valid,
+            );
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: fork_id.clone().into(),
+                    tidx: forked_challenge_2_tidx.clone() + AB::Expr::from_usize(i),
+                    value: local.after_forked_challenge_2[i].into(),
+                    is_sample: AB::Expr::ONE,
                 },
                 local.is_present * local.is_valid,
             );
@@ -481,7 +506,7 @@ where
             AirShapeBusMessage {
                 sort_idx: local.sorted_idx.into(),
                 property_idx: AirShapeProperty::AirId.to_field(),
-                value: local.idx.into(),
+                value: air_idx.clone(),
             },
             local.is_present * local.num_air_id_lookups,
         );
@@ -573,11 +598,18 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // LIFTED HEIGHTS LOOKUP + STACKING COMMITMENTS
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let _raw_height = fold(
-            local.height_limbs.iter().enumerate(),
+
+        let _raw_height_1 = fold(
+            local.height_1_limbs.iter().enumerate(),
             AB::Expr::ZERO,
             |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
         );
+        let _raw_height_2 = fold(
+            local.height_2_limbs.iter().enumerate(),
+            AB::Expr::ZERO,
+            |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
+        );
+        let combined_height = local.height_1 + local.height_2;
 
         self.lifted_heights_bus.add_key_with_lookups(
             builder,
@@ -587,122 +619,16 @@ where
                 part_idx: AB::Expr::ZERO,
                 commit_idx: AB::Expr::ZERO,
                 hypercube_dim: n.clone(),
-                lifted_height: local.height.into(),
+                lifted_height: combined_height.into(),
                 log_lifted_height: local.log_height.into(),
             },
-            local.is_present * main_common_width,
+            local.is_present * (num_witin + num_structural_witin + num_fixed),
         );
-
-        // cidx start from 1
-        // TODO(starting-cidx): starting_cidx flow is intentionally disabled in local fork.
-        // builder
-        //     .when(and(local.is_first, local.is_valid))
-        //     .assert_one(local.starting_cidx);
-        // let mut cidx_offset = AB::Expr::ZERO;
-
-        // NOTE: this is non used if preprocessed_stacked_width == 0
-        // self.lifted_heights_bus.add_key_with_lookups(
-        //     builder,
-        //     local.proof_idx,
-        //     LiftedHeightsBusMessage {
-        //         sort_idx: local.sorted_idx.into(),
-        //         part_idx: cidx_offset.clone() + AB::F::ONE,
-        //         commit_idx: cidx_offset.clone() + local.starting_cidx,
-        //         hypercube_dim: n.clone(),
-        //         lifted_height: local.height.into(),
-        //         log_lifted_height: local.log_height.into(),
-        //     },
-        //     local.is_present * preprocessed_stacked_width,
-        // );
-
-        // NOTE: historical commit-index bus path intentionally removed.
-        // legacy_lookup(
-        //     builder,
-        //     local.proof_idx,
-        //     commitment message
-        //         major_idx: AB::Expr::ZERO,
-        //         minor_idx: cidx_offset.clone() + local.starting_cidx,
-        //         commitment: preprocessed_commit,
-        //     },
-        //     has_preprocessed.clone() * local.is_present * AB::Expr::from_usize(self.commit_mult),
-        // );
-        // cidx_offset still be 0
-        // cidx_offset += has_preprocessed.clone();
-        // TODO(starting-cidx): re-enable if/when commit-index stacking flow is restored.
-        // let mut cidx_offset = AB::Expr::ZERO;
-
-        // (0..self.max_cached).for_each(|cached_idx| {
-        //     self.lifted_heights_bus.add_key_with_lookups(
-        //         builder,
-        //         local.proof_idx,
-        //         LiftedHeightsBusMessage {
-        //             sort_idx: local.sorted_idx.into(),
-        //             part_idx: cidx_offset.clone() + AB::F::ONE,
-        //             commit_idx: cidx_offset.clone() + local.starting_cidx,
-        //             hypercube_dim: n.clone(),
-        //             lifted_height: local.height.into(),
-        //             log_lifted_height: local.log_height.into(),
-        //         },
-        //         local.is_present * cached_widths[cached_idx].clone(),
-        //     );
-        //
-        //     // legacy_lookup(
-        //     //     builder,
-        //     //     local.proof_idx,
-        //     //     commitment message
-        //     //         major_idx: AB::Expr::ZERO,
-        //     //         minor_idx: cidx_offset.clone() + local.starting_cidx,
-        //     //         commitment: localv.cached_commits[cached_idx].map(Into::into),
-        //     //     },
-        //     //     cached_present[cached_idx].clone()
-        //     //         * local.is_present
-        //     //         * AB::Expr::from_usize(self.commit_mult),
-        //     // );
-        //     // cidx_offset += cached_present[cached_idx].clone();
-        //
-        //     // self.cached_commit_bus.send(
-        //     //     builder,
-        //     //     local.proof_idx,
-        //     //     CachedCommitBusMessage {
-        //     //         air_idx: local.idx.into(),
-        //     //         cached_idx: AB::Expr::from_usize(cached_idx),
-        //     //         cached_commit: localv.cached_commits[cached_idx].map(Into::into),
-        //     //     },
-        //     //     cached_present[cached_idx].clone()
-        //     //         * local.is_valid
-        //     //         * AB::Expr::from_bool(self.continuations_enabled),
-        //     // );
-        // });
-
-        // TODO(starting-cidx): disabled alongside local starting_cidx removal.
-        // builder
-        //     .when(and(local.is_valid, not(next.is_last)))
-        //     .assert_eq(local.starting_cidx + cidx_offset, next.starting_cidx);
-        //
-        // legacy_lookup(
-        //     builder,
-        //     local.proof_idx,
-        //     commitment message
-        //         major_idx: AB::Expr::ZERO,
-        //         minor_idx: AB::Expr::ZERO,
-        //         commitment: localv.cached_commits[self.max_cached - 1].map(Into::into),
-        //     },
-        //     is_min_cached.clone() * local.is_valid * AB::Expr::from_usize(self.commit_mult),
-        // );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // NUM PUBLIC VALUES
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // self.num_pvs_bus.send(
-        //     builder,
-        //     local.proof_idx,
-        //     NumPublicValuesMessage {
-        //         air_idx: local.idx.into(),
-        //         tidx: num_pvs_tidx,
-        //         num_pvs,
-        //     },
-        //     local.is_present * has_pvs,
-        // );
+        let _ = num_pvs;
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HEIGHT + GKR MESSAGE
@@ -711,7 +637,15 @@ where
             self.range_bus.lookup_key(
                 builder,
                 RangeCheckerBusMessage {
-                    value: local.height_limbs[i].into(),
+                    value: local.height_1_limbs[i].into(),
+                    max_bits: AB::Expr::from_usize(LIMB_BITS),
+                },
+                local.is_valid,
+            );
+            self.range_bus.lookup_key(
+                builder,
+                RangeCheckerBusMessage {
+                    value: local.height_2_limbs[i].into(),
                     max_bits: AB::Expr::from_usize(LIMB_BITS),
                 },
                 local.is_valid,
@@ -759,7 +693,7 @@ where
             builder,
             local.proof_idx,
             TowerModuleMessage {
-                idx: local.idx.into(),
+                idx: air_idx.clone(),
                 tidx: local.starting_tidx.into(),
                 n_logup: n,
             },
@@ -781,7 +715,7 @@ where
             builder,
             local.proof_idx,
             NLiftMessage {
-                air_idx: local.idx.into(),
+                air_idx: air_idx,
                 n_lift: local.log_height.into(),
             },
             local.is_present,
@@ -799,24 +733,43 @@ where
     }
 }
 
-pub(super) fn borrow_var_cols<F>(
-    slice: &[F],
-    idx_flags: usize,
-    max_cached: usize,
-) -> ProofShapeVarCols<'_, F> {
-    let flags_idx = 0;
-    let cached_commits_idx = flags_idx + idx_flags;
-
-    let cached_commits = &slice[cached_commits_idx..cached_commits_idx + max_cached * DIGEST_SIZE];
-    let cached_commits: &[[F; DIGEST_SIZE]] = unsafe {
-        std::slice::from_raw_parts(
-            cached_commits.as_ptr() as *const [F; DIGEST_SIZE],
-            max_cached,
-        )
+fn per_air_tower_span<AB: AirBuilder>(
+    n_logup: AB::Expr,
+    num_read_count: usize,
+    num_write_count: usize,
+    num_logup_count: usize,
+) -> AB::Expr {
+    use tower_transcript_len::{
+        ALPHA_BETA_LEN, ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
     };
 
+    // Derivation notes (matches tower transcript replay order used by verifier):
+    // 1) Out-evals before alpha/beta:
+    //    - read spec contributes 2 EF evals, write spec contributes 2 EF evals,
+    //      logup spec contributes 4 EF evals.
+    //    - each EF observe_ext contributes D_EF base-field transcript words.
+    // 2) Always sample alpha/beta next (ALPHA_BETA_LEN words).
+    // 3) If this air has interactions, add full GKR layer transcript span:
+    //    this is identical to TowerInputAir's closed-form tidx advancement
+    //    from `tidx_after_alpha_beta` to `tidx_after_gkr_layers`.
+    let out_eval_words = 2 * num_read_count + 2 * num_write_count + 4 * num_logup_count;
+    let out_eval_span = AB::Expr::from_usize(out_eval_words * D_EF);
+
+    let gkr_span = if out_eval_words == 0 {
+        AB::Expr::ZERO
+    } else {
+        let gkr_inner = n_logup.clone() * AB::Expr::from_usize(ROUND_LEN / 2)
+            + AB::Expr::from_usize(
+                ALPHA_LEN + SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN - ROUND_LEN / 2,
+            );
+        n_logup * gkr_inner - AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN)
+    };
+
+    out_eval_span + AB::Expr::from_usize(ALPHA_BETA_LEN) + gkr_span
+}
+
+pub(super) fn borrow_var_cols<F>(slice: &[F], idx_flags: usize) -> ProofShapeVarCols<'_, F> {
     ProofShapeVarCols {
-        idx_flags: &slice[flags_idx..cached_commits_idx],
-        cached_commits,
+        idx_flags: &slice[..idx_flags],
     }
 }

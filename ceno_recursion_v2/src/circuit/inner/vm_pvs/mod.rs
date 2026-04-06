@@ -39,7 +39,7 @@ pub use trace::*;
 pub fn run_preflight<TS>(
     child_vk: &RecursionVk,
     proof: &RecursionProof,
-    _preflight: &mut Preflight,
+    preflight: &mut Preflight,
     ts: &mut TS,
 ) where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
@@ -74,4 +74,12 @@ pub fn run_preflight<TS>(
         ts.observe(elem);
     }
     ts.observe(F::from_u64(witin.log2_max_codeword_size as u64));
+
+    let alpha_ext = ts.sample_ext();
+    let beta_ext = ts.sample_ext();
+    eprintln!("vm_pvs alpha {} beta {}", alpha_ext, beta_ext);
+    preflight.vm_pvs.lookup_challenge_alpha = alpha_ext;
+    preflight.vm_pvs.lookup_challenge_beta = beta_ext;
+    preflight.vm_pvs.lookup_challenge_alpha_lookup_count = 0;
+    preflight.vm_pvs.lookup_challenge_beta_lookup_count = 0;
 }

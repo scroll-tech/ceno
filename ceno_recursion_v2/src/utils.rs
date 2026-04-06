@@ -13,12 +13,14 @@ use p3_symmetric::Permutation;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TranscriptLabel {
     Riscv,
+    Fork,
 }
 
 impl TranscriptLabel {
     pub fn as_bytes(self) -> &'static [u8] {
         match self {
             Self::Riscv => b"riscv",
+            Self::Fork => b"fork",
         }
     }
 

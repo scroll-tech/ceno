@@ -1,6 +1,6 @@
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::TranscriptLog;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{EF, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
 
 use crate::tower::TowerReplayResult;
 
@@ -18,6 +18,7 @@ pub struct Preflight {
     pub main: MainPreflight,
     pub gkr: TowerPreflight,
     pub batch_constraint: BatchConstraintPreflight,
+    pub vm_pvs: VmPvsPreflight,
 }
 
 impl Preflight {
@@ -40,15 +41,12 @@ impl Preflight {
     }
 }
 
-/// A single forked transcript chain with its initial sponge state.
+/// A single forked transcript chain.
 #[derive(Clone, Debug)]
 pub struct ForkTranscriptLog {
     /// The log of observe/sample operations in this fork.
     pub log: TranscriptLog<F, PoseidonWord>,
-    /// The sponge state this fork inherits from the trunk (after observing
-    /// the fork index into it).
-    pub initial_state: PoseidonWord,
-    /// The fork identifier (1-based: fork 0 = trunk, 1..N = chip forks).
+    /// The fork identifier (0-based across forked chip transcripts).
     pub fork_id: usize,
 }
 
@@ -56,18 +54,24 @@ pub struct ForkTranscriptLog {
 pub struct ProofShapePreflight {
     pub sorted_trace_vdata: Vec<(usize, TraceVData)>,
     pub starting_tidx: Vec<usize>,
-    pub starting_cidx: Vec<usize>,
-    pub pvs_tidx: Vec<usize>,
     pub post_tidx: usize,
     pub n_max: usize,
     pub n_logup: usize,
+    // TODO remove l_skip
     pub l_skip: usize,
     pub fork_start_tidx: usize,
-    pub alpha_tidx: usize,
-    pub beta_tidx: usize,
-    /// The Poseidon2 sponge state at the fork point (trunk state just before
-    /// forking). All forks clone this state as their starting point.
-    pub fork_start_state: PoseidonWord,
+    pub lookup_challenge_alpha: [F; D_EF],
+    pub lookup_challenge_beta: [F; D_EF],
+    pub after_forked_challenge_1: EF,
+    pub after_forked_challenge_2: EF,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct VmPvsPreflight {
+    pub lookup_challenge_alpha: EF,
+    pub lookup_challenge_beta: EF,
+    pub lookup_challenge_alpha_lookup_count: usize,
+    pub lookup_challenge_beta_lookup_count: usize,
 }
 
 #[derive(Clone, Debug, Default)]
