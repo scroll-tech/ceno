@@ -33,6 +33,26 @@ fn decompose_usize<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
     })
 }
 
+fn two_instance_heights_from_chip_instances(chip_instances: &[impl BorrowNumInstances]) -> (usize, usize) {
+    chip_instances.iter().fold((0usize, 0usize), |(h1, h2), instance| {
+        let num_instances = instance.borrow_num_instances();
+        (
+            h1 + num_instances.first().copied().unwrap_or(0),
+            h2 + num_instances.get(1).copied().unwrap_or(0),
+        )
+    })
+}
+
+trait BorrowNumInstances {
+    fn borrow_num_instances(&self) -> &[usize];
+}
+
+impl BorrowNumInstances for ceno_zkvm::scheme::ZKVMChipProof<crate::system::RecursionField> {
+    fn borrow_num_instances(&self) -> &[usize] {
+        &self.num_instances
+    }
+}
+
 #[derive(derive_new::new)]
 #[allow(dead_code)]
 pub(in crate::proof_shape) struct ProofShapeChip<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
@@ -86,8 +106,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 let var_cols = &mut borrow_var_cols_mut(variable_cols, self.idx_encoder.width());
 
                 let log_height = vdata.log_height;
-                let trace_height = 1usize << log_height;
-                num_present += 1;
+                let (height_1, height_2) = proof
+                    .chip_proofs
+                    .get(air_idx)
+                    .map(|instances| two_instance_heights_from_chip_instances(instances))
+                    .unwrap_or((0, 0));
+                 num_present += 1;
 
                 cols.proof_idx = F::from_usize(proof_idx);
                 cols.is_valid = F::ONE;
@@ -98,10 +122,13 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[*air_idx]);
                 cols.is_present = F::ONE;
-                cols.height = F::from_usize(trace_height);
+                cols.height_1 = F::from_usize(height_1);
+                cols.height_2 = F::from_usize(height_2);
                 cols.num_present = F::from_usize(num_present);
-                cols.height_limbs =
-                    decompose_usize::<NUM_LIMBS, LIMB_BITS>(trace_height).map(F::from_usize);
+                cols.height_1_limbs =
+                    decompose_usize::<NUM_LIMBS, LIMB_BITS>(height_1).map(F::from_usize);
+                cols.height_2_limbs =
+                    decompose_usize::<NUM_LIMBS, LIMB_BITS>(height_2).map(F::from_usize);
                 cols.n_max = F::from_usize(preflight.proof_shape.n_max);
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
@@ -143,9 +170,11 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[air_idx]);
                 cols.is_present = F::ZERO;
-                cols.height = F::ZERO;
+                cols.height_1 = F::ZERO;
+                cols.height_2 = F::ZERO;
                 cols.num_present = F::from_usize(num_present);
-                cols.height_limbs = [F::ZERO; NUM_LIMBS];
+                cols.height_1_limbs = [F::ZERO; NUM_LIMBS];
+                cols.height_2_limbs = [F::ZERO; NUM_LIMBS];
                 cols.n_max = F::from_usize(preflight.proof_shape.n_max);
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
@@ -181,9 +210,11 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.need_rot = F::ZERO;
             cols.starting_tidx = F::from_usize(preflight.proof_shape.post_tidx);
             cols.is_present = F::ZERO;
-            cols.height = F::ZERO;
+            cols.height_1 = F::ZERO;
+            cols.height_2 = F::ZERO;
             cols.num_present = F::from_usize(num_present);
-            cols.height_limbs = [F::ZERO; NUM_LIMBS];
+            cols.height_1_limbs = [F::ZERO; NUM_LIMBS];
+            cols.height_2_limbs = [F::ZERO; NUM_LIMBS];
             cols.n_max = F::from_usize(preflight.proof_shape.n_max);
             cols.is_n_max_greater =
                 F::from_bool(preflight.proof_shape.n_max > preflight.proof_shape.n_logup);

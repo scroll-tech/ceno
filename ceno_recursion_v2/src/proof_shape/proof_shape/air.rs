@@ -63,13 +63,15 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     /// Lifted trace height (`2^log_height`) used in downstream lookups when `is_present`.
     ///
     /// Has a special use on summary row (when `is_last`).
-    pub height: F,
+    pub height_1: F,
+    pub height_2: F,
 
     // Number of present AIRs so far
     pub num_present: F,
 
-    /// Limb decomposition of `height` used for range/decomposition checks.
-    pub height_limbs: [F; NUM_LIMBS],
+    /// Limb decomposition of per-instance heights used for range/decomposition checks.
+    pub height_1_limbs: [F; NUM_LIMBS],
+    pub height_2_limbs: [F; NUM_LIMBS],
 
     /// The maximum hypercube dimension across all present AIR traces, or zero.
     /// Computed as max(0, n0, n1, ...) where ni = log_height_i for each present trace.
@@ -273,7 +275,10 @@ where
 
         builder
             .when(and(not(local.is_present), local.is_valid))
-            .assert_zero(local.height);
+            .assert_zero(local.height_1);
+        builder
+            .when(and(not(local.is_present), local.is_valid))
+            .assert_zero(local.height_2);
         builder
             .when(and(not(local.is_present), local.is_valid))
             .assert_zero(local.log_height);
@@ -593,11 +598,18 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // LIFTED HEIGHTS LOOKUP + STACKING COMMITMENTS
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let _raw_height = fold(
-            local.height_limbs.iter().enumerate(),
+
+        let _raw_height_1 = fold(
+            local.height_1_limbs.iter().enumerate(),
             AB::Expr::ZERO,
             |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
         );
+        let _raw_height_2 = fold(
+            local.height_2_limbs.iter().enumerate(),
+            AB::Expr::ZERO,
+            |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
+        );
+        let combined_height = local.height_1 + local.height_2;
 
         self.lifted_heights_bus.add_key_with_lookups(
             builder,
@@ -607,7 +619,7 @@ where
                 part_idx: AB::Expr::ZERO,
                 commit_idx: AB::Expr::ZERO,
                 hypercube_dim: n.clone(),
-                lifted_height: local.height.into(),
+                lifted_height: combined_height.into(),
                 log_lifted_height: local.log_height.into(),
             },
             local.is_present * (num_witin + num_structural_witin + num_fixed),
@@ -625,7 +637,15 @@ where
             self.range_bus.lookup_key(
                 builder,
                 RangeCheckerBusMessage {
-                    value: local.height_limbs[i].into(),
+                    value: local.height_1_limbs[i].into(),
+                    max_bits: AB::Expr::from_usize(LIMB_BITS),
+                },
+                local.is_valid,
+            );
+            self.range_bus.lookup_key(
+                builder,
+                RangeCheckerBusMessage {
+                    value: local.height_2_limbs[i].into(),
                     max_bits: AB::Expr::from_usize(LIMB_BITS),
                 },
                 local.is_valid,
