@@ -25,7 +25,6 @@ pub struct GKRCircuit<E: ExtensionField> {
     pub layers: Vec<Layer<E>>,
     pub final_out_evals: Vec<usize>,
 
-    pub n_challenges: usize,
     pub n_evaluations: usize,
 }
 

@@ -132,7 +132,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
 
         let (out_evals, mut chip) = layout.finalize(cb);
 
-        let layer = Layer::from_circuit_builder(cb, Self::name(), layout.n_challenges, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Self::name(), out_evals);
         chip.add_layer(layer);
 
         let circuit = chip.gkr_circuit();

@@ -179,12 +179,8 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
 
         let (out_evals, mut chip) = layout.finalize(cb);
 
-        let layer = Layer::from_circuit_builder(
-            cb,
-            "uint256_mul".to_string(),
-            layout.n_challenges,
-            out_evals,
-        );
+        let layer =
+            Layer::from_circuit_builder(cb, "uint256_mul".to_string(), out_evals);
         chip.add_layer(layer);
 
         let circuit = chip.gkr_circuit();
@@ -508,7 +504,7 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
 
         let (out_evals, mut chip) = layout.finalize(cb);
 
-        let layer = Layer::from_circuit_builder(cb, Spec::name(), layout.n_challenges, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Spec::name(), out_evals);
         chip.add_layer(layer);
 
         let circuit = chip.gkr_circuit();

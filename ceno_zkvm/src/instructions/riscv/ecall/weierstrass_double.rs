@@ -152,12 +152,8 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
 
         let (out_evals, mut chip) = layout.finalize(cb);
 
-        let layer = Layer::from_circuit_builder(
-            cb,
-            "weierstrass_double".to_string(),
-            layout.n_challenges,
-            out_evals,
-        );
+        let layer =
+            Layer::from_circuit_builder(cb, "weierstrass_double".to_string(), out_evals);
         chip.add_layer(layer);
 
         let circuit = chip.gkr_circuit();

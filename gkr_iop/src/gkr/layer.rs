@@ -75,8 +75,6 @@ pub struct Layer<E: ExtensionField> {
     pub max_expr_degree: usize,
     /// keep all structural witin which could be evaluated succinctly without PCS
     pub structural_witins: Vec<StructuralWitIn>,
-    /// num challenges dedicated to this layer.
-    pub n_challenges: usize,
     /// Expressions to prove in this layer. For zerocheck and linear layers,
     /// each expression corresponds to an output. While in sumcheck, there
     /// is only 1 expression, which corresponds to the sum of all outputs.
@@ -145,7 +143,6 @@ impl<E: ExtensionField> Layer<E> {
         n_instance: usize,
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
-        n_challenges: usize,
         in_eval_expr: Vec<usize>,
         // first tuple value is eq
         out_sel_and_eval_exprs: Vec<ExprEvalType<E>>,
@@ -175,7 +172,6 @@ impl<E: ExtensionField> Layer<E> {
                     n_instance,
                     max_expr_degree,
                     structural_witins,
-                    n_challenges,
                     exprs,
                     exprs_with_selector_out_eval_monomial_form: vec![],
                     in_eval_expr,
@@ -210,7 +206,6 @@ impl<E: ExtensionField> Layer<E> {
         transcript: &mut T,
         selector_ctxs: &[SelectorContext],
     ) -> (LayerProof<E>, Point<E>) {
-        self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
         let (sumcheck_layer_proof, point) = match self.ty {
@@ -258,7 +253,6 @@ impl<E: ExtensionField> Layer<E> {
         transcript: &mut Trans,
         selector_ctxs: &[SelectorContext],
     ) -> Result<Point<E>, BackendError> {
-        self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
         let LayerClaims { in_point, evals } = match self.ty {
@@ -318,17 +312,6 @@ impl<E: ExtensionField> Layer<E> {
             .collect_vec()
     }
 
-    // generate layer challenge by order, starting from index 2
-    // as challenge id 0, 1 are occupied
-    fn update_challenges(&self, challenges: &mut Vec<E>, transcript: &mut impl Transcript<E>) {
-        if challenges.len() <= self.n_challenges + 2 {
-            challenges.resize(self.n_challenges + 2, E::default());
-        };
-        challenges[2..].copy_from_slice(
-            &transcript.sample_and_append_challenge_pows(self.n_challenges, b"layer challenge"),
-        );
-    }
-
     fn update_claims(&self, claims: &mut [PointAndEval<E>], evals: &[E], point: &Point<E>) {
         for (value, pos) in izip!(chain![evals], chain![&self.in_eval_expr]) {
             claims[*pos] = PointAndEval {
@@ -341,7 +324,6 @@ impl<E: ExtensionField> Layer<E> {
     pub fn from_circuit_builder(
         cb: &CircuitBuilder<E>,
         layer_name: String,
-        n_challenges: usize,
         out_evals: OutEvalGroups,
     ) -> Layer<E> {
         let w_len = cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len();
@@ -533,7 +515,6 @@ impl<E: ExtensionField> Layer<E> {
                 cb.cs.num_fixed,
                 0,
                 expressions,
-                n_challenges,
                 in_eval_expr,
                 expr_evals,
                 ((None, vec![]), 0, 0),
@@ -557,7 +538,6 @@ impl<E: ExtensionField> Layer<E> {
                 cb.cs.num_fixed,
                 0,
                 expressions,
-                n_challenges,
                 in_eval_expr,
                 expr_evals,
                 (

@@ -49,9 +49,6 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
     fn n_fixed(&self) -> usize {
         todo!()
     }
-    fn n_challenges(&self) -> usize {
-        todo!()
-    }
     fn n_evaluations(&self) -> usize {
         todo!()
     }

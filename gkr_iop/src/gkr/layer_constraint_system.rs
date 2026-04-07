@@ -290,7 +290,6 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         mut self,
         layer_name: String,
         in_expr_evals: Vec<usize>,
-        n_challenges: usize,
         ram_write_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
         ram_read_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
         lookup_evals: impl ExactSizeIterator<Item = (SelectorType<E>, usize)>,
@@ -332,15 +331,13 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
             );
         }
 
-        self.into_layer(layer_name, in_expr_evals, n_challenges)
+        self.into_layer(layer_name, in_expr_evals)
     }
 
-    /// n_challenges: num of challenges dedicated to this layer
     pub fn into_layer(
         self,
         layer_name: String,
         in_eval_expr: Vec<usize>,
-        n_challenges: usize,
     ) -> Layer<E> {
         let witin_offset = 0 as WitnessId;
         let structural_witin_offset = witin_offset + (self.num_witin as WitnessId);
@@ -419,7 +416,6 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                 self.num_fixed,
                 0,
                 expressions,
-                n_challenges,
                 in_eval_expr,
                 expr_evals,
                 ((None, vec![]), 0, 0),
@@ -443,7 +439,6 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
                 self.num_fixed,
                 0,
                 expressions,
-                n_challenges,
                 in_eval_expr,
                 expr_evals,
                 (

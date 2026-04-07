@@ -115,7 +115,6 @@ pub struct Fp2AddSubAssignLayout<E: ExtensionField, P: FpOpField> {
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
-    pub n_challenges: usize,
 }
 
 impl<E: ExtensionField, P: FpOpField> Fp2AddSubAssignLayout<E, P> {
@@ -155,7 +154,6 @@ impl<E: ExtensionField, P: FpOpField> Fp2AddSubAssignLayout<E, P> {
             n_fixed: 0,
             n_committed: 0,
             n_structural_witin: 0,
-            n_challenges: 0,
         }
     }
 
@@ -254,7 +252,6 @@ impl<E: ExtensionField, P: FpOpField> ProtocolBuilder<E> for Fp2AddSubAssignLayo
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
-        self.n_challenges = 0;
 
         cb.cs.r_selector = Some(self.selector_type_layout.sel_all.clone());
         cb.cs.w_selector = Some(self.selector_type_layout.sel_all.clone());
@@ -273,7 +270,7 @@ impl<E: ExtensionField, P: FpOpField> ProtocolBuilder<E> for Fp2AddSubAssignLayo
                 (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
                 (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb, self.n_challenges),
+            Chip::new_from_cb(cb),
         )
     }
 }
@@ -364,7 +361,6 @@ mod tests {
         let layer = Layer::from_circuit_builder(
             &cb,
             "fp2_addsub".to_string(),
-            layout.n_challenges,
             out_evals,
         );
         chip.add_layer(layer);
