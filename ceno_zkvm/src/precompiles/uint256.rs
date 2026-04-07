@@ -693,11 +693,7 @@ pub fn setup_uint256mul_gkr_circuit<E: ExtensionField>()
 
     let (out_evals, mut chip) = layout.finalize(&mut cb);
 
-    let layer = Layer::from_circuit_builder(
-        &cb,
-        "weierstrass_add".to_string(),
-        out_evals,
-    );
+    let layer = Layer::from_circuit_builder(&cb, "weierstrass_add".to_string(), out_evals);
     chip.add_layer(layer);
 
     Ok((

@@ -210,8 +210,7 @@ fn build_fp2_add_circuit<E: ExtensionField, P: FpOpField + Fp2AddSpec + NumWords
     );
 
     let (out_evals, mut chip) = layout.finalize(cb);
-    let layer =
-        Layer::from_circuit_builder(cb, "fp2_add".to_string(), out_evals);
+    let layer = Layer::from_circuit_builder(cb, "fp2_add".to_string(), out_evals);
     chip.add_layer(layer);
 
     Ok((

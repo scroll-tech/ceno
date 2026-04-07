@@ -334,11 +334,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         self.into_layer(layer_name, in_expr_evals)
     }
 
-    pub fn into_layer(
-        self,
-        layer_name: String,
-        in_eval_expr: Vec<usize>,
-    ) -> Layer<E> {
+    pub fn into_layer(self, layer_name: String, in_eval_expr: Vec<usize>) -> Layer<E> {
         let witin_offset = 0 as WitnessId;
         let structural_witin_offset = witin_offset + (self.num_witin as WitnessId);
         let fixed_offset = structural_witin_offset + (self.num_structural_witin as WitnessId);

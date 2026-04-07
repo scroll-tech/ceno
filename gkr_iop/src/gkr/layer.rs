@@ -202,7 +202,7 @@ impl<E: ExtensionField> Layer<E> {
         wit: LayerWitness<PB>,
         claims: &mut [PointAndEval<E>],
         pub_io_evals: &[E],
-        challenges: &mut Vec<E>,
+        challenges: &[E],
         transcript: &mut T,
         selector_ctxs: &[SelectorContext],
     ) -> (LayerProof<E>, Point<E>) {
@@ -249,7 +249,7 @@ impl<E: ExtensionField> Layer<E> {
         proof: LayerProof<E>,
         claims: &mut [PointAndEval<E>],
         pub_io_evals: &[E],
-        challenges: &mut Vec<E>,
+        challenges: &[E],
         transcript: &mut Trans,
         selector_ctxs: &[SelectorContext],
     ) -> Result<Point<E>, BackendError> {

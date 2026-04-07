@@ -501,11 +501,7 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve + WeierstrassParam
 
     let (out_evals, mut chip) = layout.finalize(&mut cb);
 
-    let layer = Layer::from_circuit_builder(
-        &cb,
-        "weierstrass_decompress".to_string(),
-        out_evals,
-    );
+    let layer = Layer::from_circuit_builder(&cb, "weierstrass_decompress".to_string(), out_evals);
     chip.add_layer(layer);
 
     Ok((

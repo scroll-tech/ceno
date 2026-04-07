@@ -358,11 +358,7 @@ mod tests {
         let mut layout = Fp2AddSubAssignLayout::<E, P>::build_layer_logic(&mut cb, ())
             .expect("build_layer_logic failed");
         let (out_evals, mut chip) = layout.finalize(&mut cb);
-        let layer = Layer::from_circuit_builder(
-            &cb,
-            "fp2_addsub".to_string(),
-            out_evals,
-        );
+        let layer = Layer::from_circuit_builder(&cb, "fp2_addsub".to_string(), out_evals);
         chip.add_layer(layer);
         let gkr_circuit = chip.gkr_circuit();
 

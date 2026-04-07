@@ -331,8 +331,7 @@ mod tests {
         let mut layout =
             FpOpLayout::<E, P>::build_layer_logic(&mut cb, ()).expect("build_layer_logic failed");
         let (out_evals, mut chip) = layout.finalize(&mut cb);
-        let layer =
-            Layer::from_circuit_builder(&cb, "fp_op".to_string(), out_evals);
+        let layer = Layer::from_circuit_builder(&cb, "fp_op".to_string(), out_evals);
         chip.add_layer(layer);
         let gkr_circuit = chip.gkr_circuit();
 
