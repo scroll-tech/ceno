@@ -934,7 +934,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
                 inputs.push(ChipInput::new(
                     ShardRamCircuit::<E>::name(),
                     witness,
-                    vec![chunk_writes, num_reads],
+                    [chunk_writes, num_reads],
                 ));
 
                 records_offset += chunk_size;
