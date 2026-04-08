@@ -498,8 +498,8 @@ impl CpuTowerProver {
                 if !spec_evals.is_empty() {
                     assert_eq!(spec_evals.len(), num_fanin);
                     transcript.append_field_element_exts(&spec_evals);
+                    prod_evals_per_spec.push((i, spec_evals));
                 }
-                prod_evals_per_spec.push((i, spec_evals));
             }
             let mut logup_evals_per_spec = Vec::with_capacity(logup_specs_len);
             for (i, witness_lk_expr) in witness_lk_expr.iter().enumerate().take(logup_specs_len) {
@@ -513,8 +513,8 @@ impl CpuTowerProver {
                 if !spec_evals.is_empty() {
                     assert_eq!(spec_evals.len(), 4); // p1, p2, q1, q2
                     transcript.append_field_element_exts(&spec_evals);
+                    logup_evals_per_spec.push((i, spec_evals));
                 }
-                logup_evals_per_spec.push((i, spec_evals));
             }
 
             // rt' = r_merge || rt
@@ -527,14 +527,10 @@ impl CpuTowerProver {
                 transcript,
             );
             for (i, spec_evals) in prod_evals_per_spec {
-                if !spec_evals.is_empty() {
-                    proofs.push_prod_evals_and_point(i, spec_evals, rt_prime.clone());
-                }
+                proofs.push_prod_evals_and_point(i, spec_evals, rt_prime.clone());
             }
             for (i, spec_evals) in logup_evals_per_spec {
-                if !spec_evals.is_empty() {
-                    proofs.push_logup_evals_and_point(i, spec_evals, rt_prime.clone());
-                }
+                proofs.push_logup_evals_and_point(i, spec_evals, rt_prime.clone());
             }
             out_rt = rt_prime;
             alpha_pows = next_alpha_pows;

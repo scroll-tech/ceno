@@ -6,6 +6,7 @@ use crate::{
     arithmetics::{
         PolyEvaluator, UniPolyExtrapolator, arr_product, assert_ext_arr_eq,
         build_eq_x_r_vec_sequential, challenger_hint_observe, challenger_multi_observe, concat,
+        exts_to_felts,
         dot_product as ext_dot_product, eq_eval, eq_eval_less_or_equal_than,
         eval_ceno_expr_with_instance, eval_wellform_address_vec, gen_alpha_pows, mask_arr, reverse,
     },
@@ -963,6 +964,12 @@ pub fn verify_gkr_circuit<C: Config>(
             unipoly_extrapolator,
         );
 
+        // Bind prover-supplied evaluations into transcript (Fiat-Shamir soundness).
+        unsafe {
+            let main_evals_felts = exts_to_felts(builder, &main_evals);
+            challenger_multi_observe(builder, challenger, &main_evals_felts);
+        }
+
         let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
 
         // check selector evaluations
@@ -1198,6 +1205,12 @@ pub fn verify_rotation<C: Config>(
         2,
         unipoly_extrapolator,
     );
+
+    // Bind prover-supplied rotation evaluations into transcript (Fiat-Shamir soundness).
+    unsafe {
+        let evals_felts = exts_to_felts(builder, evals);
+        challenger_multi_observe(builder, challenger, &evals_felts);
+    }
 
     // compute the selector evaluation
     let selector_eval = rotation_selector_eval(

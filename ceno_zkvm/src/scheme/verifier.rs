@@ -788,13 +788,13 @@ impl TowerVerify {
                 let eq = eq_eval(out_rt, &rt);
 
                 // Bind prover-supplied prod/logup evals into transcript (Fiat-Shamir soundness).
-                for spec_index in 0..num_prod_spec {
-                    if round < num_variables[spec_index] - 1 {
+                for (spec_index, num_vars) in num_variables.iter().enumerate().take(num_prod_spec) {
+                    if round < *num_vars - 1 {
                         transcript.append_field_element_exts(&tower_proofs.prod_specs_eval[spec_index][round]);
                     }
                 }
-                for spec_index in 0..num_logup_spec {
-                    if round < num_variables[num_prod_spec + spec_index] - 1 {
+                for (spec_index, num_vars) in num_variables.iter().skip(num_prod_spec).enumerate().take(num_logup_spec) {
+                    if round < *num_vars - 1 {
                         transcript.append_field_element_exts(&tower_proofs.logup_specs_eval[spec_index][round]);
                     }
                 }
