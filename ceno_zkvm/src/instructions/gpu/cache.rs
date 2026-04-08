@@ -160,8 +160,6 @@ pub fn invalidate_shard_steps_cache() {
 struct ShardMetadataCache {
     shard_id: usize,
     device_bufs: ShardDeviceBuffers,
-    /// Total number of cross-shard next-access entries (constant across shards).
-    next_access_count: u32,
     /// Shared EC record buffer (owns the GPU memory, pointer stored in device_bufs).
     shared_ec_buf: Option<ceno_gpu::common::buffer::BufferImpl<'static, u32>>,
     /// Shared EC record count buffer (single u32 counter).
@@ -175,17 +173,40 @@ struct ShardMetadataCache {
 thread_local! {
     static SHARD_META_CACHE: RefCell<Option<ShardMetadataCache>> =
         const { RefCell::new(None) };
+
+    /// Test-only override: forces `flush_shared_ec_buffers` to D2H even when
+    /// GPU witgen is enabled (production consumes the buffers on-device instead).
+    static FORCE_FLUSH_D2H: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Per-shard accumulator for compact shard RAM records produced by GPU kernels.
-/// Each record is GPU_SHARD_RAM_RECORD_SIZE bytes (GpuShardRamRecord).
-/// Accumulated during opcode circuit assignment, consumed by assign_shared_circuit.
+/// Test-only: force the D2H in `flush_shared_ec_buffers`.
+#[cfg(test)]
+pub(crate) fn set_force_flush_d2h(force: bool) {
+    FORCE_FLUSH_D2H.with(|f| f.set(force));
+}
+
+#[cfg(test)]
+fn is_force_flush_d2h() -> bool {
+    FORCE_FLUSH_D2H.with(|f| f.get())
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+fn is_force_flush_d2h() -> bool {
+    false
+}
+
+/// CPU mirror of GPU-side compact shard RAM records, populated only when
+/// `CENO_GPU_DEBUG_COMPARE_WITGEN` is set (production has no consumer).
 thread_local! {
     static COMPACT_SHARD_RECORDS: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Append raw compact shard records from a GPU kernel D2H transfer.
+/// Append raw compact shard records; no-op unless debug-compare is enabled.
 pub fn append_compact_shard_records(raw_bytes: &[u8]) {
+    if !crate::instructions::gpu::config::is_debug_compare_enabled() {
+        return;
+    }
     COMPACT_SHARD_RECORDS.with(|cell| {
         cell.borrow_mut().extend_from_slice(raw_bytes);
     });
@@ -349,11 +370,8 @@ fn build_sorted_next_accesses(shard_ctx: &ShardContext) -> Vec<PackedNextAccessE
     })
 }
 
-/// Build and cache shard metadata device buffers for GPU shard records.
-///
-/// Next-access device buffers are global and identical across all shards,
-/// so they are uploaded once and reused via move. Only per-shard data (scalars +
-/// prev_shard_ranges) is re-uploaded when the shard changes.
+/// Build and cache shard metadata device buffers. Must be cleared between
+/// shards via [`invalidate_shard_meta_cache`] so no witgen state leaks into prove.
 pub(crate) fn ensure_shard_metadata_cached(
     hal: &CudaHalBB31,
     shard_ctx: &ShardContext,
@@ -364,42 +382,21 @@ pub(crate) fn ensure_shard_metadata_cached(
         let mut cache = cache.borrow_mut();
         if let Some(c) = cache.as_ref() {
             if c.shard_id == shard_id {
-                return Ok(()); // cache hit
+                return Ok(()); // same shard, subsequent opcode chip
             }
+            // Stale cross-shard cache — previous shard forgot to invalidate.
+            panic!(
+                "SHARD_META_CACHE not invalidated between shards \
+                 (stale shard_id={}, new shard_id={})",
+                c.shard_id, shard_id,
+            );
         }
 
-        // Move next-access device buffer + count from previous cache (reuse across shards).
-        // Next-access data is global — identical across all shards — so we reuse, not re-upload.
-        let (existing_next_access, prev_next_access_count) = match cache.take() {
-            Some(c) => {
-                let count = c.next_access_count;
-                let ShardDeviceBuffers {
-                    next_access_packed,
-                    scalars: _,
-                    prev_shard_cycle_range: _,
-                    prev_shard_heap_range: _,
-                    prev_shard_hint_range: _,
-                    gpu_ec_shard_id: _,
-                    shared_ec_out_ptr: _,
-                    shared_ec_count_ptr: _,
-                    shared_addr_out_ptr: _,
-                    shared_addr_count_ptr: _,
-                    shared_ec_capacity: _,
-                    shared_addr_capacity: _,
-                } = c.device_bufs;
-                (Some(next_access_packed), count)
-            }
-            None => (None, 0),
-        };
-
-        let (next_access_packed_device, next_access_count) = if let Some(buf) = existing_next_access
-        {
-            (buf, prev_next_access_count) // Reuse existing GPU memory
-        } else {
-            // First shard: build sorted packed next-access entries from HashMap and H2D upload
-            let sorted = build_sorted_next_accesses(shard_ctx);
-            let count = sorted.len() as u32;
-            let device = info_span!("next_access_h2d").in_scope(|| -> Result<_, ZKVMError> {
+        // Build sorted packed next-access entries from HashMap and H2D upload.
+        let sorted = build_sorted_next_accesses(shard_ctx);
+        let next_access_count = sorted.len() as u32;
+        let next_access_packed_device =
+            info_span!("next_access_h2d").in_scope(|| -> Result<_, ZKVMError> {
                 let packed_bytes: &[u8] = if sorted.is_empty() {
                     &[0u8; 16] // sentinel for empty
                 } else {
@@ -419,14 +416,13 @@ pub(crate) fn ensure_shard_metadata_cached(
                 let next_access_device = ceno_gpu::common::buffer::BufferImpl::new(buf);
                 let mb = packed_bytes.len() as f64 / (1024.0 * 1024.0);
                 tracing::info!(
-                    "[GPU shard] next-access uploaded once: {} entries, {:.2} MB (packed)",
+                    "[GPU shard] next-access uploaded for shard_id={}: {} entries, {:.2} MB (packed)",
+                    shard_id,
                     sorted.len(),
                     mb,
                 );
                 Ok(next_access_device)
             })?;
-            (device, count)
-        };
 
         // Per-shard: always re-upload scalars + prev_shard_ranges
         let scalars = GpuShardScalars {
@@ -536,7 +532,6 @@ pub(crate) fn ensure_shard_metadata_cached(
 
         *cache = Some(ShardMetadataCache {
             shard_id,
-            next_access_count,
             device_bufs: ShardDeviceBuffers {
                 scalars: scalars_device,
                 next_access_packed: next_access_packed_device,
@@ -585,10 +580,29 @@ pub(crate) fn with_cached_gpu_ctx<R>(
     })
 }
 
-/// Invalidate the shard metadata cache (call when shard processing is complete).
+/// Drop the shard metadata cache. Call at end of each shard's witgen so no
+/// witgen GPU memory survives into prove.
 pub fn invalidate_shard_meta_cache() {
     SHARD_META_CACHE.with(|cache| {
         *cache.borrow_mut() = None;
+    });
+}
+
+/// Panic if either witgen device cache is still populated before prove.
+pub fn assert_caches_released_before_prove() {
+    SHARD_STEPS_DEVICE.with(|cache| {
+        assert!(
+            cache.borrow().is_none(),
+            "SHARD_STEPS_DEVICE still populated before prove — \
+             invalidate_shard_steps_cache was not called"
+        );
+    });
+    SHARD_META_CACHE.with(|cache| {
+        assert!(
+            cache.borrow().is_none(),
+            "SHARD_META_CACHE still populated before prove — \
+             invalidate_shard_meta_cache was not called"
+        );
     });
 }
 
@@ -657,14 +671,22 @@ pub(crate) fn read_shared_addr_range(start: usize, end: usize) -> Vec<u32> {
     })
 }
 
-/// Batch D2H of shared EC records and addr_accessed buffers after all kernel invocations.
-///
-/// Called once per shard after all opcode `gpu_assign_instances_inner` calls complete.
-/// Transfers accumulated EC records and addresses from shared GPU buffers into `shard_ctx`.
-///
-/// If the shared buffers have already been taken by `take_shared_device_buffers`
-/// (for the full GPU pipeline), this is a no-op.
+/// Batch D2H shared EC records and addr_accessed from GPU into `shard_ctx`.
+/// No-op when GPU witgen is on (the device path consumes the same buffers
+/// on-GPU), unless debug-compare is enabled — debug-compare's
+/// `log_shard_ctx_diff` reads `shard_ctx.addr_accessed` to diff against the
+/// CPU baseline, so we keep the D2H alive to avoid false-positive mismatches.
 pub fn flush_shared_ec_buffers(shard_ctx: &mut ShardContext) -> Result<(), ZKVMError> {
+    if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+        && !is_force_flush_d2h()
+        && !crate::instructions::gpu::config::is_debug_compare_enabled()
+    {
+        tracing::debug!(
+            "[GPU shard] flush_shared_ec_buffers: GPU witgen on — skipping D2H \
+             (try_gpu_assign_shared_circuit will consume shared buffers on device)"
+        );
+        return Ok(());
+    }
     SHARD_META_CACHE.with(|cache| {
         let cache = cache.borrow();
         let c = match cache.as_ref() {

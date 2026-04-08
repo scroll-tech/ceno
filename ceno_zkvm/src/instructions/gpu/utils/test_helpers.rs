@@ -70,7 +70,12 @@ pub fn assert_full_gpu_pipeline<
         return;
     };
 
-    crate::instructions::gpu::cache::flush_shared_ec_buffers(&mut gpu_ctx).unwrap();
+    // Single-chip test has no `assign_continuation`, so force the D2H to
+    // populate `gpu_ctx.addr_accessed` for the comparison below.
+    crate::instructions::gpu::cache::set_force_flush_d2h(true);
+    let flush_result = crate::instructions::gpu::cache::flush_shared_ec_buffers(&mut gpu_ctx);
+    crate::instructions::gpu::cache::set_force_flush_d2h(false);
+    flush_result.unwrap();
 
     assert_eq!(
         gpu_rmms[0].values(),

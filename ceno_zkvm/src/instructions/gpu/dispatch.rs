@@ -64,8 +64,8 @@ pub enum GpuWitgenKind {
 
 // Re-exports from device_cache module for external callers (e2e.rs, structs.rs).
 pub use super::cache::{
-    SharedDeviceBufferSet, flush_shared_ec_buffers, invalidate_shard_meta_cache,
-    invalidate_shard_steps_cache, take_shared_device_buffers,
+    SharedDeviceBufferSet, assert_caches_released_before_prove, flush_shared_ec_buffers,
+    invalidate_shard_meta_cache, invalidate_shard_steps_cache, take_shared_device_buffers,
 };
 use super::{
     cache::{

@@ -1428,6 +1428,32 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 #[cfg(not(feature = "gpu"))]
                 { None::<ShardContext<'static>> }
             };
+
+            // Snapshot VRAM before witgen; compared post-witgen to assert
+            // witgen frees every byte it allocates. sync() first so queued
+            // frees from the previous shard's prove are counted.
+            #[cfg(feature = "gpu")]
+            let witgen_mem_baseline: Option<u64> = {
+                if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                    match gkr_iop::gpu::get_cuda_hal() {
+                        Ok(hal) => {
+                            hal.inner
+                                .synchronize()
+                                .expect("cuda synchronize before witgen baseline");
+                            Some(
+                                hal.inner
+                                    .mem_pool()
+                                    .get_used_size()
+                                    .expect("cudaMemPoolGetAttribute UsedMemCurrent"),
+                            )
+                        }
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            };
+
             info_span!("assign_opcode_circuits").in_scope(|| {
                 system_config
                     .config
@@ -1642,6 +1668,50 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         *v = f.to_canonical_u64() as u32;
                     }
                 });
+            }
+
+            // Drop all per-shard GPU buffers before yielding to prove — witgen
+            // and prove must not share VRAM.
+            #[cfg(feature = "gpu")]
+            {
+                crate::instructions::gpu::dispatch::invalidate_shard_meta_cache();
+                crate::instructions::gpu::dispatch::assert_caches_released_before_prove();
+
+                // Post-witgen VRAM must match the pre-witgen baseline exactly.
+                if let Some(baseline) = witgen_mem_baseline {
+                    let hal = gkr_iop::gpu::get_cuda_hal()
+                        .expect("cuda hal must be available if baseline was taken");
+                    hal.inner
+                        .synchronize()
+                        .expect("cuda synchronize before witgen post-check");
+                    let post_witgen = hal
+                        .inner
+                        .mem_pool()
+                        .get_used_size()
+                        .expect("cudaMemPoolGetAttribute UsedMemCurrent");
+                    let delta_bytes = post_witgen as i64 - baseline as i64;
+                    assert_eq!(
+                        post_witgen, baseline,
+                        "shard {} witgen leaked GPU memory: baseline={} B ({} MB), \
+                         post_witgen={} B ({} MB), delta={} B ({:.2} MB)",
+                        shard_ctx.shard_id,
+                        baseline,
+                        baseline >> 20,
+                        post_witgen,
+                        post_witgen >> 20,
+                        delta_bytes,
+                        delta_bytes as f64 / (1024.0 * 1024.0),
+                    );
+                    // println! matches the existing [MemPool] log style and
+                    // is always visible regardless of tracing filters.
+                    println!(
+                        "[witgen memcheck] shard {}: VRAM clean, \
+                         baseline = post_witgen = {} bytes ({} MB)",
+                        shard_ctx.shard_id,
+                        baseline,
+                        baseline >> 20,
+                    );
+                }
             }
 
             Some((zkvm_witness, shard_ctx, pi))
