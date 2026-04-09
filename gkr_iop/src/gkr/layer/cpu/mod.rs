@@ -92,11 +92,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
             builder.to_virtual_polys(&[layer.exprs[0].clone()], challenges),
             transcript,
         );
+        let evals = prover_state.get_mle_flatten_final_evaluations();
+        transcript.append_field_element_exts(&evals);
         LayerProof {
-            main: SumcheckLayerProof {
-                proof,
-                evals: prover_state.get_mle_flatten_final_evaluations(),
-            },
+            main: SumcheckLayerProof { proof, evals },
             rotation: None,
         }
     }
@@ -262,6 +261,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         );
 
         let evals = prover_state.get_mle_flatten_final_evaluations();
+        transcript.append_field_element_exts(&evals);
         exit_span!(span);
         (
             LayerProof {
@@ -409,6 +409,7 @@ pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<
         })
         .collect::<Vec<E>>();
     exit_span!(span);
+    transcript.append_field_element_exts(&evals);
     (
         SumcheckLayerProof {
             proof: rotation_proof,
