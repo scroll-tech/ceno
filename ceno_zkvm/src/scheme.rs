@@ -1,7 +1,6 @@
 use crate::structs::EccQuarkProof;
 use ff_ext::ExtensionField;
-use gkr_iop::gkr::GKRProof;
-use gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof;
+use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::SumcheckLayerProof};
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use p3::field::FieldAlgebra;

@@ -383,7 +383,11 @@ impl<E: ExtensionField> Layer<E> {
         .iter()
         .filter(|selector| selector.is_some())
         .count()
-            + if cb.cs.rotations.is_empty() { 0 } else { ROTATION_OPENING_COUNT };
+            + if cb.cs.rotations.is_empty() {
+                0
+            } else {
+                ROTATION_OPENING_COUNT
+            };
         let mut expr_evals = Vec::with_capacity(selector_group_capacity);
         let mut expr_names = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
         let mut expressions = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
@@ -597,7 +601,10 @@ impl<E: ExtensionField> Layer<E> {
         // Drop selector groups that ended up without eval expressions.
         expr_evals.retain(|(_, evals)| !evals.is_empty());
 
-        let out_eval_count = expr_evals.iter().map(|(_, evals)| evals.len()).sum::<usize>();
+        let out_eval_count = expr_evals
+            .iter()
+            .map(|(_, evals)| evals.len())
+            .sum::<usize>();
         assert_eq!(
             expressions.len(),
             out_eval_count,

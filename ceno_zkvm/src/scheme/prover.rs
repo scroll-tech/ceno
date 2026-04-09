@@ -493,8 +493,14 @@ impl<
         let span = entered_span!("prove_main_constraints", profiling_2 = true);
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
             info_span!("[ceno] prove_main_constraints").in_scope(|| {
-                self.device
-                    .prove_main_constraints(rt_tower, rotation.clone(), input, cs, challenges, transcript)
+                self.device.prove_main_constraints(
+                    rt_tower,
+                    rotation.clone(),
+                    input,
+                    cs,
+                    challenges,
+                    transcript,
+                )
             })?;
         let MainSumcheckEvals {
             wits_in_evals,

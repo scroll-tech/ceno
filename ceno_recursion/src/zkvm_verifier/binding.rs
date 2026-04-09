@@ -654,7 +654,9 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(self.main_sumcheck_proofs.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_gkr_proof));
         stream.extend(self.gkr_iop_proof.write());
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_rotation_proof));
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.has_rotation_proof,
+        ));
         stream.extend(self.rotation_proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());

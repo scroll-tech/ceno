@@ -16,10 +16,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression,
-    mle::Point,
-    monomial::Term,
-    virtual_poly::build_eq_x_r_vec,
+    Expression, mle::Point, monomial::Term, virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use rayon::{
@@ -161,7 +158,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     panic!("selector expression must be StructuralWitIn");
                 };
                 let wit_id = *wit_id as usize;
-                assert!(wit_id < layer.n_structural_witin, "selector wit id out of range");
+                assert!(
+                    wit_id < layer.n_structural_witin,
+                    "selector wit id out of range"
+                );
                 Some((wit_id, eq))
             })
             .collect::<Vec<_>>();
@@ -177,8 +177,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         // `wit` := witin ++ fixed ++ pubio ++ structural
         // selector structural witins are replaced by computed eq MLEs in-place by witness id.
         let base_wit_count = layer.n_witin + layer.n_fixed + layer.n_instance;
-        let mut all_witins =
-            Vec::with_capacity(layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance);
+        let mut all_witins = Vec::with_capacity(
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
+        );
         all_witins.extend(
             wit.iter()
                 .take(base_wit_count)

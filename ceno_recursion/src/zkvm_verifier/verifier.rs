@@ -32,11 +32,7 @@ use ff_ext::BabyBearExt4;
 use crate::transcript::{challenger_add_forked_index, clone_challenger_state};
 use gkr_iop::{
     evaluation::EvalExpression,
-    gkr::{
-        GKRCircuit,
-        booleanhypercube::BooleanHypercube,
-        layer::Layer,
-    },
+    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube, layer::Layer},
     selector::SelectorType,
 };
 use itertools::{Itertools, izip};
@@ -695,8 +691,7 @@ pub fn verify_chip_proof<C: Config>(
             .clone(),
     );
 
-    let mut selector_ctxs =
-        Vec::with_capacity(first_layer.out_sel_and_eval_exprs.len());
+    let mut selector_ctxs = Vec::with_capacity(first_layer.out_sel_and_eval_exprs.len());
     for (selector, _) in &first_layer.out_sel_and_eval_exprs {
         let ctx = if cs.ec_final_sum.is_empty() {
             let non_shard_n1 = Usize::Var(builder.get(&chip_proof.num_instances, 1));
@@ -799,7 +794,10 @@ pub fn verify_chip_proof<C: Config>(
         let right_point: Array<C, Ext<C::F, C::EF>> = builder.eval(right_point);
         let origin_point: Array<C, Ext<C::F, C::EF>> = builder.eval(origin_point);
 
-        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[left_group_idx].1.iter().enumerate()
+        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[left_group_idx]
+            .1
+            .iter()
+            .enumerate()
         {
             let EvalExpression::Single(out_idx) = eval_expr else {
                 panic!("rotation groups must use EvalExpression::Single");
@@ -814,7 +812,10 @@ pub fn verify_chip_proof<C: Config>(
             builder.set(&out_evals, *out_idx, claim);
         }
 
-        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[right_group_idx].1.iter().enumerate()
+        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[right_group_idx]
+            .1
+            .iter()
+            .enumerate()
         {
             let EvalExpression::Single(out_idx) = eval_expr else {
                 panic!("rotation groups must use EvalExpression::Single");
@@ -829,7 +830,10 @@ pub fn verify_chip_proof<C: Config>(
             builder.set(&out_evals, *out_idx, claim);
         }
 
-        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[point_group_idx].1.iter().enumerate()
+        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[point_group_idx]
+            .1
+            .iter()
+            .enumerate()
         {
             let EvalExpression::Single(out_idx) = eval_expr else {
                 panic!("rotation groups must use EvalExpression::Single");
@@ -885,12 +889,8 @@ pub fn verify_gkr_circuit<C: Config>(
         let layer_proof = builder.get(&gkr_proof.layer_proofs, i);
         let layer_challenges: Array<C, Ext<C::F, C::EF>> =
             generate_layer_challenges(builder, challenger, challenges, layer.n_challenges);
-        let eval_and_dedup_points: Array<C, ClaimAndPoint<C>> = extract_claim_and_point(
-            builder,
-            layer,
-            claims,
-            &layer_challenges,
-        );
+        let eval_and_dedup_points: Array<C, ClaimAndPoint<C>> =
+            extract_claim_and_point(builder, layer, claims, &layer_challenges);
         builder.assert_usize_eq(
             Usize::from(layer.out_sel_and_eval_exprs.len()),
             eval_and_dedup_points.len(),
@@ -912,11 +912,7 @@ pub fn verify_gkr_circuit<C: Config>(
         builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
 
         transcript_observe_label(builder, challenger, b"combine subset evals");
-        let alpha_pows = gen_alpha_pows(
-            builder,
-            challenger,
-            Usize::from(layer.exprs.len()),
-        );
+        let alpha_pows = gen_alpha_pows(builder, challenger, Usize::from(layer.exprs.len()));
 
         let sigma: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
         let alpha_idx: Usize<C::N> = Usize::Var(Var::uninit(builder));
@@ -1172,7 +1168,10 @@ pub fn verify_rotation<C: Config>(
     } = rotation_proof;
 
     let rotation_expr_len = Usize::from(num_rotations);
-    builder.assert_usize_eq(Usize::Var(*hinted_rotation_expr_len), Usize::from(num_rotations));
+    builder.assert_usize_eq(
+        Usize::Var(*hinted_rotation_expr_len),
+        Usize::from(num_rotations),
+    );
     let expected_rotation_eval_len = Usize::from(num_rotations * 3);
     builder.assert_usize_eq(evals.len(), expected_rotation_eval_len);
     transcript_observe_label(builder, challenger, b"combine subset evals");

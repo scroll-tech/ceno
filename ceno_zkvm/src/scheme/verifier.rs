@@ -682,7 +682,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                                 eval_exprs: &[gkr_iop::evaluation::EvalExpression<E>],
                                 evals: &[E],
                                 point: &Point<E>| {
-                assert_eq!(eval_exprs.len(), evals.len(), "rotation eval length mismatch");
+                assert_eq!(
+                    eval_exprs.len(),
+                    evals.len(),
+                    "rotation eval length mismatch"
+                );
                 for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
                     let gkr_iop::evaluation::EvalExpression::Single(index) = eval_expr else {
                         panic!("rotation groups must use EvalExpression::Single");

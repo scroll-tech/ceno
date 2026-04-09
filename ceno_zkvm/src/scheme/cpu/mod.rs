@@ -833,8 +833,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> RotationProver<CpuBa
 
         let log2_num_instances = input.log2_num_instances();
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
-        let num_var_with_rotation =
-            log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+        let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
         let wit = LayerWitness(
             chain!(&input.witness, &input.fixed, &input.structural_witness,)
                 .cloned()
@@ -936,7 +935,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             })
             .collect_vec();
 
-        let mut out_evals = vec![PointAndEval::new(rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
+        let mut out_evals =
+            vec![PointAndEval::new(rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
         if let Some(rotation) = rotation.as_ref() {
             let Some([left_group_idx, right_group_idx, point_group_idx]) =
                 first_layer.rotation_selector_group_indices()
@@ -957,7 +957,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                                 eval_exprs: &[EvalExpression<E>],
                                 evals: &[E],
                                 point: &Point<E>| {
-                assert_eq!(eval_exprs.len(), evals.len(), "rotation eval length mismatch");
+                assert_eq!(
+                    eval_exprs.len(),
+                    evals.len(),
+                    "rotation eval length mismatch"
+                );
                 for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
                     let EvalExpression::Single(index) = eval_expr else {
                         panic!("rotation groups must use EvalExpression::Single");

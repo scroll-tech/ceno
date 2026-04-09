@@ -6,8 +6,7 @@ use crate::{
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    gkr::GKRProof,
-    gkr::layer::sumcheck_layer::SumcheckLayerProof,
+    gkr::{GKRProof, layer::sumcheck_layer::SumcheckLayerProof},
     hal::{ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use mpcs::{Point, PolynomialCommitmentScheme};
