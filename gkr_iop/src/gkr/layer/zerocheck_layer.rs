@@ -27,9 +27,7 @@ use crate::{
     evaluation::EvalExpression,
     gkr::{
         booleanhypercube::BooleanHypercube,
-        layer::{
-            hal::ZerocheckLayerProver, sumcheck_layer::SumcheckLayerProof,
-        },
+        layer::{hal::ZerocheckLayerProver, sumcheck_layer::SumcheckLayerProof},
     },
     hal::{ProverBackend, ProverDevice},
     selector::{SelectorContext, SelectorType},

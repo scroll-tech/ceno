@@ -36,11 +36,7 @@ pub struct Chip<E: ExtensionField> {
 
 impl<E: ExtensionField> Chip<E> {
     pub fn new_from_cb(cb: &CircuitBuilder<E>, n_challenges: usize) -> Chip<E> {
-        let rotation_eval_count = if cb.cs.rotations.is_empty() {
-            0
-        } else {
-            ROTATION_OPENING_COUNT
-        };
+        let rotation_eval_count = cb.cs.rotations.len() * ROTATION_OPENING_COUNT;
         let num_non_zero_outputs = cb.cs.w_expressions.len()
             + cb.cs.r_expressions.len()
             + cb.cs.lk_expressions.len()

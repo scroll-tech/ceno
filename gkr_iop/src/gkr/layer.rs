@@ -520,13 +520,13 @@ impl<E: ExtensionField> Layer<E> {
                 panic!("rotation params not set");
             };
 
-            // Rotation claims occupy three dedicated out-eval entries: left, right, target.
-            let rotation_left_eval_idx = next_non_zero_eval_idx;
-            next_non_zero_eval_idx += 1;
-            let rotation_right_eval_idx = next_non_zero_eval_idx;
-            next_non_zero_eval_idx += 1;
-            let rotation_eval_idx = next_non_zero_eval_idx;
-            next_non_zero_eval_idx += 1;
+            // Rotation claims occupy 3 * num_rotations dedicated out-eval entries:
+            // [left_0..left_n][right_0..right_n][target_0..target_n].
+            let num_rotations = cb.cs.rotations.len();
+            let rotation_left_eval_base = next_non_zero_eval_idx;
+            let rotation_right_eval_base = rotation_left_eval_base + num_rotations;
+            let rotation_eval_base = rotation_right_eval_base + num_rotations;
+            next_non_zero_eval_idx = rotation_eval_base + num_rotations;
 
             // Rotation selector groups must be fresh groups (no dedup with preceding
             // r/w/lookup groups) so chip-level rotation claim assignment is unambiguous.
@@ -543,7 +543,7 @@ impl<E: ExtensionField> Layer<E> {
                 expressions.push(rotate_expr.clone());
                 expr_evals[left_group_idx]
                     .1
-                    .push(EvalExpression::Single(rotation_left_eval_idx));
+                    .push(EvalExpression::Single(rotation_left_eval_base + idx));
                 expr_names.push(format!("rotation/left/{idx}"));
             }
 
@@ -551,7 +551,7 @@ impl<E: ExtensionField> Layer<E> {
                 expressions.push(rotate_expr.clone());
                 expr_evals[right_group_idx]
                     .1
-                    .push(EvalExpression::Single(rotation_right_eval_idx));
+                    .push(EvalExpression::Single(rotation_right_eval_base + idx));
                 expr_names.push(format!("rotation/right/{idx}"));
             }
 
@@ -559,7 +559,7 @@ impl<E: ExtensionField> Layer<E> {
                 expressions.push(target_expr.clone());
                 expr_evals[target_group_idx]
                     .1
-                    .push(EvalExpression::Single(rotation_eval_idx));
+                    .push(EvalExpression::Single(rotation_eval_base + idx));
                 expr_names.push(format!("rotation/point/{idx}"));
             }
         }
