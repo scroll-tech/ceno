@@ -2092,7 +2092,7 @@ fn create_proofs_streaming<
 
     // Two pipeline modes:
     //
-    // Default GPU backend (CENO_GPU_ENABLE_WITGEN unset):
+    // Default GPU backend (CENO_GPU_ENABLE_WITGEN=0):
     //   Overlap: CPU witgen (thread A) and GPU prove (thread B) run in parallel.
     //   CPU produces witness for shard N+1 while GPU proves shard N.
     //   Uses a bounded(0) rendezvous channel for back-pressure.

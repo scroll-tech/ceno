@@ -125,7 +125,7 @@ Currently all non-Keccak kinds use **Path A**. Paths B-E are fallback/debug path
 ```
 create_proofs_streaming()
 │
-├─ Default GPU backend (CENO_GPU_ENABLE_WITGEN unset):
+├─ Default GPU backend (CENO_GPU_ENABLE_WITGEN=0):
 │   Overlap pipeline:
 │     Thread A (CPU): witgen(shard 0) → witgen(shard 1) → witgen(shard 2) → ...
 │     Thread B (GPU): ................prove(shard 0) → prove(shard 1) → ...
@@ -141,9 +141,9 @@ create_proofs_streaming()
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CENO_GPU_ENABLE_WITGEN` | unset (CPU witgen) | Set to enable GPU witness generation. Sequential witgen+prove pipeline. |
+| `CENO_GPU_ENABLE_WITGEN` | `0` (CPU witgen) | Set to `1` to enable GPU witness generation. Sequential witgen+prove pipeline. |
 | `CENO_GPU_DISABLE_WITGEN_KINDS` | none | Comma-separated kind tags to disable specific chips' GPU path. Example: `add,keccak,lw`. Falls back to CPU for those chips. |
-| `CENO_GPU_DEBUG_COMPARE_WITGEN` | unset | Enable GPU vs CPU comparison for all chips. Runs both paths and diffs results. |
+| `CENO_GPU_DEBUG_COMPARE_WITGEN` | `0` | Set to `1` to enable GPU vs CPU comparison for all chips. Runs both paths and diffs results. |
 
 ### `CENO_GPU_DEBUG_COMPARE_WITGEN` Coverage
 

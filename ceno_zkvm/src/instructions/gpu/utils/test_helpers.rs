@@ -64,7 +64,7 @@ pub fn assert_full_gpu_pipeline<
         kind,
     )
     .unwrap();
-    // Skip pipeline comparison if GPU witgen is not enabled (CENO_GPU_ENABLE_WITGEN unset)
+    // Skip pipeline comparison if GPU witgen is not enabled (CENO_GPU_ENABLE_WITGEN=0)
     let Some((gpu_rmms, gpu_lkm)) = result else {
         eprintln!("GPU witgen not enabled, skipping full pipeline comparison");
         return;

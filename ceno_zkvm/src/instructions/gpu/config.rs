@@ -59,15 +59,13 @@ pub(crate) fn is_kind_disabled(kind: GpuWitgenKind) -> bool {
     })
 }
 
-/// Returns true if GPU witgen is enabled via `CENO_GPU_ENABLE_WITGEN` env var.
-/// Default is disabled (CPU witgen). Set `CENO_GPU_ENABLE_WITGEN=1` to opt in.
-/// The value is cached at first access.
+/// Set `CENO_GPU_ENABLE_WITGEN=1` to opt in; default disabled.
 pub(crate) fn is_gpu_witgen_enabled() -> bool {
     use std::sync::OnceLock;
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| {
-        let val = std::env::var_os("CENO_GPU_ENABLE_WITGEN");
-        let enabled = val.is_some();
+        let val = std::env::var("CENO_GPU_ENABLE_WITGEN").ok();
+        let enabled = matches!(val.as_deref(), Some("1"));
         eprintln!(
             "[GPU witgen] CENO_GPU_ENABLE_WITGEN={:?} → enabled={}",
             val, enabled
@@ -76,11 +74,12 @@ pub(crate) fn is_gpu_witgen_enabled() -> bool {
     })
 }
 
-/// Returns true if `CENO_GPU_DEBUG_COMPARE_WITGEN` is set (any value).
-/// When enabled, GPU vs CPU comparison runs for ALL categories:
-/// witness, LK multiplicity, shard records, EC points, and E2E shard context.
+/// Set `CENO_GPU_DEBUG_COMPARE_WITGEN=1` to enable GPU vs CPU comparison; default disabled.
 pub(crate) fn is_debug_compare_enabled() -> bool {
     use std::sync::OnceLock;
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| std::env::var_os("CENO_GPU_DEBUG_COMPARE_WITGEN").is_some())
+    *ENABLED.get_or_init(|| {
+        let val = std::env::var("CENO_GPU_DEBUG_COMPARE_WITGEN").ok();
+        matches!(val.as_deref(), Some("1"))
+    })
 }
