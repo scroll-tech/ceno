@@ -111,7 +111,6 @@ pub struct WeierstrassAddAssignLayout<E: ExtensionField, EC: EllipticCurve> {
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
-    pub n_challenges: usize,
 }
 
 impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
@@ -160,7 +159,6 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
             output32_exprs,
             n_fixed: 0,
             n_committed: 0,
-            n_challenges: 0,
             n_structural_witin: 0,
         }
     }
@@ -330,7 +328,6 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E>
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
-        self.n_challenges = 0;
 
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(self.selector_type_layout.sel_all.clone());
@@ -354,7 +351,7 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E>
                 // zero_record
                 (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb, self.n_challenges),
+            Chip::new_from_cb(cb),
         )
     }
 
@@ -363,10 +360,6 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E>
     }
 
     fn n_fixed(&self) -> usize {
-        todo!()
-    }
-
-    fn n_challenges(&self) -> usize {
         todo!()
     }
 
@@ -510,12 +503,7 @@ pub fn setup_gkr_circuit<E: ExtensionField, EC: EllipticCurve>()
 
     let (out_evals, mut chip) = layout.finalize(&mut cb);
 
-    let layer = Layer::from_circuit_builder(
-        &cb,
-        "weierstrass_add".to_string(),
-        layout.n_challenges,
-        out_evals,
-    );
+    let layer = Layer::from_circuit_builder(&cb, "weierstrass_add".to_string(), out_evals);
     chip.add_layer(layer);
 
     Ok((

@@ -157,7 +157,6 @@ pub struct KeccakLayout<E: ExtensionField> {
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
-    pub n_challenges: usize,
 }
 
 const ROTATION_WITNESS_LEN: usize = 196;
@@ -250,7 +249,6 @@ impl<E: ExtensionField> KeccakLayout<E> {
             n_fixed: 0,
             n_committed: 0,
             n_structural_witin: STRUCTURAL_WITIN,
-            n_challenges: 0,
         }
     }
 }
@@ -517,7 +515,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
-        self.n_challenges = 0;
 
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(self.selector_type_layout.sel_first.clone().unwrap());
@@ -541,7 +538,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
                 // zero_record
                 (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb, self.n_challenges),
+            Chip::new_from_cb(cb),
         )
     }
 
@@ -551,10 +548,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
     fn n_fixed(&self) -> usize {
         unimplemented!("retrieve from constrain system")
-    }
-
-    fn n_challenges(&self) -> usize {
-        0
     }
 
     fn n_evaluations(&self) -> usize {
@@ -983,12 +976,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
 
     let (out_evals, mut chip) = layout.finalize(&mut cb);
 
-    let layer = Layer::from_circuit_builder(
-        &cb,
-        "lookup_keccak".to_string(),
-        layout.n_challenges,
-        out_evals,
-    );
+    let layer = Layer::from_circuit_builder(&cb, "lookup_keccak".to_string(), out_evals);
     chip.add_layer(layer);
 
     Ok((
