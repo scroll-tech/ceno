@@ -37,7 +37,7 @@ use std::fmt::Debug;
 use crate::{
     gadgets::{
         util::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
-        util_expr::eval_field_operation,
+        util_expr::{eval_field_operation, poly_mul_expr},
     },
     witness::LkMultiplicity,
 };
@@ -169,7 +169,7 @@ impl<Expr: Clone, P: FieldParameters> FieldInnerProductCols<Expr, P> {
         let p_inner_product = p_a_vec
             .iter()
             .zip(p_b_vec.iter())
-            .map(|(p_a, p_b)| p_a * p_b)
+            .map(|(p_a, p_b)| poly_mul_expr(p_a, p_b))
             .collect::<Vec<_>>()
             .iter()
             .fold(p_zero, |acc, x| acc + x);
@@ -177,7 +177,7 @@ impl<Expr: Clone, P: FieldParameters> FieldInnerProductCols<Expr, P> {
         let p_inner_product_minus_result = &p_inner_product - &p_result;
         let p_limbs =
             Polynomial::from_iter(P::modulus_field_iter::<E::BaseField>().map(|x| x.expr()));
-        let p_vanishing = &p_inner_product_minus_result - &(&p_carry * &p_limbs);
+        let p_vanishing = &p_inner_product_minus_result - &poly_mul_expr(&p_carry, &p_limbs);
 
         let p_witness_low = self.witness_low.0.iter().into();
         let p_witness_high = self.witness_high.0.iter().into();

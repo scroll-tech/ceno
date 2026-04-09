@@ -21,7 +21,6 @@ use crate::{
 use ff_ext::ExtensionField;
 use gkr_iop::hal::ProverBackend;
 use mpcs::Point;
-use p3::field::FieldAlgebra;
 use std::sync::OnceLock;
 use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
@@ -152,8 +151,8 @@ impl ChipScheduler {
 
     /// Execute tasks sequentially with automatic transcript forking and sampling.
     ///
-    /// Each task gets a transcript cloned from `parent_transcript` with `task_id`
-    /// appended (identical to `ForkableTranscript::fork` default impl).
+    /// Each task gets a transcript cloned from `parent_transcript`.
+    /// Task-specific transcript appends are performed by the task closure.
     /// Returns `(results, forked_samples)` both sorted by task_id.
     #[allow(clippy::type_complexity)]
     pub(crate) fn execute_sequentially<'a, PB, T, F>(
@@ -186,12 +185,8 @@ impl ChipScheduler {
 
         for task in tasks {
             let task_id = task.task_id;
-            // Fork: clone parent + append task_id
-            // (identical to ForkableTranscript::fork default impl)
+            // Fork: clone parent transcript template.
             let mut forked = parent_transcript.clone();
-            forked.append_field_element(&<PB::E as ExtensionField>::BaseField::from_canonical_u64(
-                task_id as u64,
-            ));
 
             let result = execute_task(task, &mut forked)?;
             results.push(result);
@@ -213,8 +208,7 @@ impl ChipScheduler {
     /// Tasks are sorted by memory requirement (descending) and scheduled to
     /// maximize GPU utilization while respecting memory constraints.
     ///
-    /// Each worker thread clones the parent `transcript` and appends its task_id
-    /// (reproducing `ForkableTranscript::fork` locally). After proving, the worker
+    /// Each worker thread clones the parent `transcript`. After proving, the worker
     /// samples one extension-field element from its local transcript and returns it.
     /// This avoids sending non-`Send` transcript objects across threads.
     ///
@@ -250,9 +244,6 @@ impl ChipScheduler {
         if tasks.len() == 1 {
             let task = tasks.remove(0);
             let mut fork = transcript.clone();
-            fork.append_field_element(&<PB::E as ExtensionField>::BaseField::from_canonical_u64(
-                task.task_id as u64,
-            ));
             let result = execute_task(task, &mut fork)?;
             let sample = fork.sample_vec(1)[0];
             return Ok((vec![result], vec![sample]));
@@ -347,15 +338,8 @@ impl ChipScheduler {
                         // waiting for a CompletionMessage that never arrives).
                         let outcome =
                             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                                // Fork locally: clone parent transcript + append task_id
-                                // (identical to ForkableTranscript::fork default impl)
+                                // Fork locally: clone parent transcript template.
                                 let mut local_transcript = tr.0.clone();
-                                local_transcript.append_field_element(
-                                    &<PB::E as ExtensionField>::BaseField::from_canonical_u64(
-                                        task_id as u64,
-                                    ),
-                                );
-
                                 let result = execute_fn(task, &mut local_transcript);
 
                                 // Sample from the forked transcript for gather phase

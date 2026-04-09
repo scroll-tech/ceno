@@ -46,7 +46,7 @@ use multilinear_extensions::{
     util::{ceil_log2, max_usable_threads},
 };
 use num::{BigUint, One, Zero};
-use p3::field::FieldAlgebra;
+
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::{IntoParallelRefIterator, ParallelSlice},
@@ -85,6 +85,7 @@ use crate::{
     structs::PointAndEval,
     witness::LkMultiplicity,
 };
+use p3::field::PrimeCharacteristicRing;
 
 #[derive(Clone, Debug, AlignedBorrow)]
 #[repr(C)]
@@ -193,8 +194,8 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
         cols.sign_bit = E::BaseField::from_bool(instance.sign_bit);
         cols.old_output32 = GenericArray::generate(|i| {
             [
-                E::BaseField::from_canonical_u32(instance.old_y_words[i] & ((1 << 16) - 1)),
-                E::BaseField::from_canonical_u32((instance.old_y_words[i] >> 16) & ((1 << 16) - 1)),
+                E::BaseField::from_u32(instance.old_y_words[i] & ((1 << 16) - 1)),
+                E::BaseField::from_u32((instance.old_y_words[i] >> 16) & ((1 << 16) - 1)),
             ]
         });
 

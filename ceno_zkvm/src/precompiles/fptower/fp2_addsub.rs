@@ -34,7 +34,7 @@ use gkr_iop::{
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
 use num::BigUint;
-use p3::field::FieldAlgebra;
+
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::ParallelSlice,
@@ -53,6 +53,7 @@ use crate::{
     precompiles::{SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend},
     witness::LkMultiplicity,
 };
+use p3::field::PrimeCharacteristicRing;
 
 pub const fn num_fp2_addsub_cols<P: FpOpField>() -> usize {
     size_of::<Fp2AddSubAssignWitCols<u8, P>>()
@@ -162,7 +163,7 @@ impl<E: ExtensionField, P: FpOpField> Fp2AddSubAssignLayout<E, P> {
         cols: &mut Fp2AddSubAssignWitCols<E::BaseField, P>,
         lk_multiplicity: &mut LkMultiplicity,
     ) {
-        cols.is_add = E::BaseField::from_canonical_u8((instance.op == FieldOperation::Add) as u8);
+        cols.is_add = E::BaseField::from_u8((instance.op == FieldOperation::Add) as u8);
         cols.a0 = P::to_limbs_field(&instance.a0);
         cols.a1 = P::to_limbs_field(&instance.a1);
         cols.b0 = P::to_limbs_field(&instance.b0);

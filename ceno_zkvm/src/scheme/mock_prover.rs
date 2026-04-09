@@ -29,7 +29,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     utils::{eval_by_expr, eval_by_expr_with_fixed},
 };
-use p3::field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 use rand::thread_rng;
 use std::{
     cmp::max,
@@ -477,9 +477,9 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
 
         (
             challenge.map(|c| {
-                c.as_base_slice()
+                c.as_bases()
                     .iter()
-                    .map(|b| b.to_canonical_u64())
+                    .map(|b: &E::BaseField| b.to_canonical_u64())
                     .collect_vec()
             }),
             table,
@@ -488,7 +488,8 @@ fn load_once_tables<E: ExtensionField + 'static + Sync + Send>(
     // reinitialize per generic type E
     (
         challenges_repr.clone().map(|repr| {
-            E::from_base_iter(repr.iter().copied().map(E::BaseField::from_canonical_u64))
+            E::from_basis_coefficients_iter(repr.iter().copied().map(E::BaseField::from_u64))
+                .expect("challenge repr must describe a valid extension element")
         }),
         table.clone(),
     )
@@ -1213,7 +1214,7 @@ Hints:
                         let w_selector_vec = w_selector.get_base_field_vec();
                         let write_rlc_records =
                             filter_mle_by_predicate(write_rlc_records, |i, _v| {
-                                ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
+                                ram_type_vec[i] == E::from_u32($ram_type as u32)
                                     && w_selector_vec[i] == E::BaseField::ONE
                             });
                         if write_rlc_records.is_empty() {
@@ -1312,7 +1313,7 @@ Hints:
                         );
                         let r_selector_vec = r_selector.get_base_field_vec();
                         let read_records = filter_mle_by_predicate(read_records, |i, _v| {
-                            ram_type_vec[i] == E::from_canonical_u32($ram_type as u32)
+                            ram_type_vec[i] == E::from_u32($ram_type as u32)
                                 && r_selector_vec[i] == E::BaseField::ONE
                         });
                         if read_records.is_empty() {
@@ -1590,7 +1591,7 @@ mod tests {
     };
     use ff_ext::{FieldInto, GoldilocksExt2};
     use multilinear_extensions::{ToExpr, WitIn, mle::IntoMLE};
-    use p3::{field::FieldAlgebra, goldilocks::Goldilocks};
+    use p3::{field::PrimeCharacteristicRing as FieldAlgebra, goldilocks::Goldilocks};
     use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
     #[derive(Debug)]
@@ -1670,12 +1671,9 @@ mod tests {
         let _ = RangeCheckCircuit::construct_circuit(&mut builder).unwrap();
 
         let wits_in = vec![
-            vec![
-                Goldilocks::from_canonical_u64(3u64),
-                Goldilocks::from_canonical_u64(5u64),
-            ]
-            .into_mle()
-            .into(),
+            vec![Goldilocks::from_u64(3u64), Goldilocks::from_u64(5u64)]
+                .into_mle()
+                .into(),
         ];
 
         let challenge = [1.into_f(), 1000.into_f()];
@@ -1710,9 +1708,7 @@ mod tests {
                                 GoldilocksExt2::ONE,
                                 GoldilocksExt2::ZERO,
                             )),
-                            Box::new(
-                                Goldilocks::from_canonical_u64(ROMType::Dynamic as u64).expr()
-                            ),
+                            Box::new(Goldilocks::from_u64(ROMType::Dynamic as u64).expr()),
                         )),
                         Box::new(Expression::Challenge(
                             1,

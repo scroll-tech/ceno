@@ -17,7 +17,7 @@ use ceno_emul::InsnKind;
 use ff_ext::{ExtensionField, FieldInto};
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::{Field, FieldAlgebra};
+use p3::field::{Field, PrimeCharacteristicRing as FieldAlgebra};
 use std::{array, marker::PhantomData};
 use witness::set_val;
 
@@ -70,23 +70,21 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                 bit_shift_marker_i.expr(),
             )?;
             bit_marker_sum += bit_shift_marker_i.expr();
-            bit_shift += E::BaseField::from_canonical_usize(i).expr() * bit_shift_marker_i.expr();
+            bit_shift += E::BaseField::from_usize(i).expr() * bit_shift_marker_i.expr();
 
             match kind {
                 InsnKind::SLL | InsnKind::SLLI => {
                     circuit_builder.condition_require_zero(
                         || "bit_multiplier_left_condition",
                         bit_shift_marker_i.expr(),
-                        bit_multiplier_left.expr()
-                            - E::BaseField::from_canonical_usize(1 << i).expr(),
+                        bit_multiplier_left.expr() - E::BaseField::from_usize(1 << i).expr(),
                     )?;
                 }
                 InsnKind::SRL | InsnKind::SRLI | InsnKind::SRA | InsnKind::SRAI => {
                     circuit_builder.condition_require_zero(
                         || "bit_multiplier_right_condition",
                         bit_shift_marker_i.expr(),
-                        bit_multiplier_right.expr()
-                            - E::BaseField::from_canonical_usize(1 << i).expr(),
+                        bit_multiplier_right.expr() - E::BaseField::from_usize(1 << i).expr(),
                     )?;
                 }
                 _ => unreachable!(),
@@ -104,8 +102,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                 limb_shift_marker[i].expr(),
             )?;
             limb_marker_sum += limb_shift_marker[i].expr();
-            limb_shift +=
-                E::BaseField::from_canonical_usize(i).expr() * limb_shift_marker[i].expr();
+            limb_shift += E::BaseField::from_usize(i).expr() * limb_shift_marker[i].expr();
 
             for j in 0..NUM_LIMBS {
                 match kind {
@@ -122,7 +119,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                             } else {
                                 bit_shift_carry[j - i - 1].expr()
                             } + b[j - i].expr() * bit_multiplier_left.expr()
-                                - E::BaseField::from_canonical_usize(1 << LIMB_BITS).expr()
+                                - E::BaseField::from_usize(1 << LIMB_BITS).expr()
                                     * bit_shift_carry[j - i].expr();
                             circuit_builder.condition_require_zero(
                                 || format!("limb_shift_marker_a_expected_a_left_{i}_{j}",),
@@ -139,17 +136,16 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
                                 limb_shift_marker[i].expr(),
                                 a[j].expr()
                                     - b_sign.expr()
-                                        * E::BaseField::from_canonical_usize((1 << LIMB_BITS) - 1)
-                                            .expr(),
+                                        * E::BaseField::from_usize((1 << LIMB_BITS) - 1).expr(),
                             )?;
                         } else {
-                            let expected_a_right =
-                                if j + i == NUM_LIMBS - 1 {
-                                    b_sign.expr() * (bit_multiplier_right.expr() - Expression::ONE)
-                                } else {
-                                    bit_shift_carry[j + i + 1].expr()
-                                } * E::BaseField::from_canonical_usize(1 << LIMB_BITS).expr()
-                                    + (b[j + i].expr() - bit_shift_carry[j + i].expr());
+                            let expected_a_right = if j + i == NUM_LIMBS - 1 {
+                                b_sign.expr() * (bit_multiplier_right.expr() - Expression::ONE)
+                            } else {
+                                bit_shift_carry[j + i + 1].expr()
+                            } * E::BaseField::from_usize(1 << LIMB_BITS)
+                                .expr()
+                                + (b[j + i].expr() - bit_shift_carry[j + i].expr());
 
                             circuit_builder.condition_require_zero(
                                 || format!("limb_shift_marker_a_expected_a_right_{i}_{j}",),
@@ -165,11 +161,11 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         circuit_builder.require_one(|| "limb_marker_sum_one_hot", limb_marker_sum.expr())?;
 
         // Check that bit_shift and limb_shift are correct.
-        let num_bits = E::BaseField::from_canonical_usize(NUM_LIMBS * LIMB_BITS);
+        let num_bits = E::BaseField::from_usize(NUM_LIMBS * LIMB_BITS);
         circuit_builder.assert_const_range(
             || "bit_shift_vs_limb_shift",
             (c[0].expr()
-                - limb_shift * E::BaseField::from_canonical_usize(LIMB_BITS).expr()
+                - limb_shift * E::BaseField::from_usize(LIMB_BITS).expr()
                 - bit_shift.expr())
                 * num_bits.inverse().expr(),
             LIMB_BITS - ((NUM_LIMBS * LIMB_BITS) as u32).ilog2() as usize,
@@ -177,13 +173,13 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         if !matches!(kind, InsnKind::SRA | InsnKind::SRAI) {
             circuit_builder.require_zero(|| "b_sign_zero", b_sign.expr())?;
         } else {
-            let mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr();
+            let mask = E::BaseField::from_u32(1 << (LIMB_BITS - 1)).expr();
             let b_sign_shifted = b_sign.expr() * mask.expr();
             circuit_builder.lookup_xor_byte(
                 b[NUM_LIMBS - 1].expr(),
                 mask.expr(),
                 b[NUM_LIMBS - 1].expr() + mask.expr()
-                    - (E::BaseField::from_canonical_u32(2).expr()) * b_sign_shifted.expr(),
+                    - (E::BaseField::from_u32(2).expr()) * b_sign_shifted.expr(),
             )?;
         }
 
@@ -226,12 +222,12 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
             InsnKind::SLL | InsnKind::SLLI => set_val!(
                 instance,
                 self.bit_multiplier_left,
-                E::BaseField::from_canonical_usize(1 << bit_shift)
+                E::BaseField::from_usize(1 << bit_shift)
             ),
             _ => set_val!(
                 instance,
                 self.bit_multiplier_right,
-                E::BaseField::from_canonical_usize(1 << bit_shift)
+                E::BaseField::from_usize(1 << bit_shift)
             ),
         };
 
@@ -240,7 +236,7 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
             _ => b[i] % (1 << bit_shift),
         });
         for (val, witin) in bit_shift_carry.iter().zip_eq(&self.bit_shift_carry) {
-            set_val!(instance, witin, E::BaseField::from_canonical_u32(*val));
+            set_val!(instance, witin, E::BaseField::from_u32(*val));
             lk_multiplicity.assert_dynamic_range(*val as u64, bit_shift as u64);
         }
         for (i, witin) in self.bit_shift_marker.iter().enumerate() {
@@ -437,7 +433,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         step: &ceno_emul::StepRecord,
     ) -> Result<(), crate::error::ZKVMError> {
         let imm = step.insn().imm as i16 as u16;
-        set_val!(instance, config.imm, E::BaseField::from_canonical_u16(imm));
+        set_val!(instance, config.imm, E::BaseField::from_u16(imm));
         // rs1
         let rs1_read = split_to_u8::<u16>(step.rs1().unwrap().value);
         // rd

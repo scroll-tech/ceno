@@ -23,7 +23,7 @@ use multilinear_extensions::{
     util::{ceil_log2, max_usable_threads},
 };
 use ndarray::{ArrayView, Ix2, Ix3, s};
-use p3::field::FieldAlgebra;
+
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
@@ -47,6 +47,7 @@ use crate::{
     },
     scheme::utils::gkr_witness,
 };
+use p3::field::PrimeCharacteristicRing;
 
 pub const ROUNDS: usize = 24;
 pub const ROUNDS_CEIL_LOG2: usize = 5; // log_2(24.next_pow2())
@@ -613,7 +614,7 @@ where
         //     RC.iter()
         //         .flat_map(|x| {
         //             (0..8)
-        //                 .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
+        //                 .map(|i| E::BaseField::from_u64((x >> (i << 3)) & 0xFF))
         //                 .collect_vec()
         //         })
         //         .collect_vec(),
@@ -966,7 +967,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
             WriteMEM::construct_circuit(
                 &mut cb,
                 // mem address := state_ptr + i
-                state_ptr.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
+                state_ptr.expr() + E::BaseField::from_u32(i as u32).expr(),
                 val_before.clone(),
                 val_after.clone(),
                 vm_state.ts,
@@ -1185,7 +1186,7 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             //             .to_vec()
             //             .iter()
             //             .flat_map(|e| vec![*e as u32, (e >> 32) as u32])
-            //             .map(|e| Goldilocks::from_canonical_u64(e as u64))
+            //             .map(|e| Goldilocks::from_u64(e as u64))
             //             .collect_vec(),
             //         instance_outputs[i]
             //     );

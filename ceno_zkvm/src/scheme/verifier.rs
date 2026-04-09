@@ -1,5 +1,6 @@
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};
+use p3::field::PrimeCharacteristicRing;
 use std::{
     iter::{self, once, repeat_n},
     marker::PhantomData,
@@ -37,12 +38,12 @@ use multilinear_extensions::{
     util::ceil_log2,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
-use p3::field::FieldAlgebra;
+
 use sumcheck::{
     structs::{IOPProof, IOPVerifierState},
     util::get_challenge_pows,
 };
-use transcript::{ForkableTranscript, Transcript};
+use transcript::{BasicTranscript, ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
@@ -150,7 +151,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 // to satisfy initial reads for all prev_cycle = 0 < init_cycle
                 assert_eq!(
                     vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX),
-                    E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
+                    E::BaseField::from_u64(Tracer::SUBCYCLES_PER_INSN)
                 );
                 // check init_pc match prev end_pc
                 if let Some(prev_pc) = prev_pc {
@@ -162,7 +163,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     // first chunk, check program entry
                     assert_eq!(
                         vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX),
-                        E::BaseField::from_canonical_u32(self.vk.entry_pc)
+                        E::BaseField::from_u32(self.vk.entry_pc)
                     );
                 }
                 let end_pc = vm_proof.public_values.query_by_index::<E>(END_PC_IDX);
@@ -248,15 +249,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
-        // write (circuit_idx, num_instance) to transcript
-        for (circuit_idx, proofs) in vm_proof.chip_proofs.iter() {
-            transcript.append_field_element(&E::BaseField::from_canonical_u32(*circuit_idx as u32));
-            // length of proof.num_instances will be constrained in verify_chip_proof
-            for num_instance in proofs.iter().flat_map(|proof| &proof.num_instances) {
-                transcript.append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
-            }
-        }
-
         // write witin commitment to transcript
         PCS::write_commitment(&vm_proof.witin_commit, &mut transcript)
             .map_err(ZKVMError::PCSError)?;
@@ -306,16 +298,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // fork transcript to support chip concurrently proved
-        let mut forked_transcripts = transcript.fork(num_proofs);
-        for ((index, proof), transcript) in vm_proof
+        let mut forked_transcripts = vec![BasicTranscript::new(b"fork"); num_proofs];
+        for (index, ((circuit_index, proof), transcript)) in vm_proof
             .chip_proofs
             .iter()
             .flat_map(|(index, proofs)| iter::repeat_n(index, proofs.len()).zip(proofs))
             .zip_eq(forked_transcripts.iter_mut())
+            .enumerate()
         {
             let num_instance: usize = proof.num_instances.iter().sum();
             assert!(num_instance > 0);
-            let circuit_name = &self.vk.circuit_index_to_name[index];
+            let circuit_name = &self.vk.circuit_index_to_name[circuit_index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
 
             if proof.r_out_evals.len() != circuit_vk.get_cs().num_reads()
@@ -352,7 +345,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 })
                 .sum::<E>();
 
-            transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
+            transcript.append_field_element_ext(&challenges[0]);
+            transcript.append_field_element_ext(&challenges[1]);
+            transcript.append_field_element(&E::BaseField::from_usize(index));
+            transcript.append_field_element(&E::BaseField::from_u64(*circuit_index as u64));
+            for num_instance in &proof.num_instances {
+                transcript.append_field_element(&E::BaseField::from_usize(*num_instance));
+            }
 
             // compute logup_sum padding
             // getting the number of dummy padding item that we used in this opcode circuit
@@ -403,8 +402,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
             }
         }
-        logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
-            * dummy_table_item.inverse();
+        logup_sum -= E::from_u64(dummy_table_item_multiplicity as u64) * dummy_table_item.inverse();
 
         #[cfg(debug_assertions)]
         {

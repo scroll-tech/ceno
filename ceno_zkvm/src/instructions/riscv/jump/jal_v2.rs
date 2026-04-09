@@ -20,7 +20,7 @@ use crate::{
 use ceno_emul::{InsnKind, PC_STEP_SIZE};
 use gkr_iop::tables::{LookupTable, ops::XorTable};
 use multilinear_extensions::{Expression, ToExpr};
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 
 pub struct JalConfig<E: ExtensionField> {
     pub j_insn: JInstructionConfig<E>,
@@ -69,7 +69,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
         let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UInt8::<E>::NUM_LIMBS - 1);
         let additional_bits =
             (last_limb_bits..UInt8::<E>::LIMB_BITS).fold(0, |acc, x| acc + (1 << x));
-        let additional_bits = E::BaseField::from_canonical_u32(additional_bits);
+        let additional_bits = E::BaseField::from_u32(additional_bits);
         circuit_builder.logic_u8(
             LookupTable::Xor,
             rd_exprs[3].expr(),
@@ -84,7 +84,7 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
                 .enumerate()
                 .fold(Expression::ZERO, |acc, (i, val)| {
                     acc + val.expr()
-                        * E::BaseField::from_canonical_u32(1 << (i * UInt8::<E>::LIMB_BITS)).expr()
+                        * E::BaseField::from_u32(1 << (i * UInt8::<E>::LIMB_BITS)).expr()
                 }),
             j_insn.vm_state.pc.expr() + PC_STEP_SIZE,
         )?;

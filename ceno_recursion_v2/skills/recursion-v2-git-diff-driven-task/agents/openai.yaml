@@ -1,0 +1,4 @@
+interface:
+  display_name: "Recursion V2 Diff-Driven Task"
+  short_description: "Implement recursion-v2 work from current git-diff TODO/task comments while strictly honoring explicit user scope"
+  default_prompt: "Follow recursion-v2-git-diff-driven-task: read staged+unstaged git diff, extract newly added TODO/task comments, restate and enforce explicit user request scope, condense in-scope work into target/behavior/acceptance checklist, implement against upstream openvm continuation/recursion constraint-bus skeletons, fill real data per ceno_zkvm/src/scheme/verifier.rs, resolve all in-scope diff TODOs (or mark owner+blocker), then run required completion gate commands in order."

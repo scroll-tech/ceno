@@ -95,7 +95,7 @@ pub mod tests {
     use openvm_native_circuit::{Native, NativeConfig};
     use openvm_native_compiler::asm::AsmBuilder;
     use openvm_native_recursion::hints::Hintable;
-    use p3::field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing as FieldAlgebra;
 
     use super::{E, F, MmcsCommitment, MmcsVerifierInput, mmcs_verify_batch};
 

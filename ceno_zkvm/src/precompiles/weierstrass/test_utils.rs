@@ -1,6 +1,6 @@
 use generic_array::GenericArray;
-use num::bigint::RandBigInt;
-use rand::{Rng, SeedableRng};
+use num_bigint::BigUint;
+use rand::{Rng, RngCore, SeedableRng};
 use sp1_curves::{
     EllipticCurve,
     params::NumWords,
@@ -16,11 +16,11 @@ pub fn random_point_pairs<WP: WeierstrassParameters>(
     let base = SwCurve::<WP>::generator();
     (0..num_instances)
         .map(|_| {
-            let x = rng.gen_biguint(24);
+            let x = gen_biguint(&mut rng, 24);
 
-            let mut y = rng.gen_biguint(24);
+            let mut y = gen_biguint(&mut rng, 24);
             while y == x {
-                y = rng.gen_biguint(24);
+                y = gen_biguint(&mut rng, 24);
             }
 
             let x_base = base.clone().sw_scalar_mul(&x);
@@ -40,7 +40,7 @@ pub fn random_points<WP: WeierstrassParameters>(
     let base = SwCurve::<WP>::generator();
     (0..num_instances)
         .map(|_| {
-            let x = rng.gen_biguint(24);
+            let x = gen_biguint(&mut rng, 24);
             let x_base = base.clone().sw_scalar_mul(&x);
             x_base.to_words_le().try_into().unwrap()
         })
@@ -55,7 +55,7 @@ pub fn random_decompress_instances<WP: EllipticCurve + WeierstrassParameters>(
     let base = SwCurve::<WP>::generator();
     (0..num_instances)
         .map(|_| {
-            let x = rng.gen_biguint(24);
+            let x = gen_biguint(&mut rng, 24);
             let sign_bit = rng.gen_bool(0.5);
             let x_base = base.clone().sw_scalar_mul(&x);
             EllipticCurveDecompressInstance {
@@ -65,4 +65,21 @@ pub fn random_decompress_instances<WP: EllipticCurve + WeierstrassParameters>(
             }
         })
         .collect()
+}
+
+fn gen_biguint<R: RngCore>(rng: &mut R, bits: u64) -> BigUint {
+    if bits == 0 {
+        return BigUint::from(0u8);
+    }
+    let num_bytes = bits.div_ceil(8) as usize;
+    let mut buf = vec![0u8; num_bytes];
+    rng.fill_bytes(&mut buf);
+    let excess_bits = (num_bytes as u64 * 8) - bits;
+    if excess_bits > 0 {
+        let mask = 0xffu8 >> excess_bits;
+        if let Some(last) = buf.last_mut() {
+            *last &= mask;
+        }
+    }
+    BigUint::from_bytes_be(&buf)
 }

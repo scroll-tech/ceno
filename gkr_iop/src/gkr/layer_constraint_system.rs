@@ -10,8 +10,7 @@ use crate::{
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitnessId, rlc_chip_record};
-use p3::field::FieldAlgebra;
-
+use p3_field::PrimeCharacteristicRing;
 #[derive(Clone, Debug, Default)]
 pub struct RotationParams<E: ExtensionField> {
     pub rotation_eqs: Option<[Expression<E>; ROTATION_OPENING_COUNT]>,
@@ -102,7 +101,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
     pub fn lookup_and8(&mut self, a: Expression<E>, b: Expression<E>, c: Expression<E>) {
         let rlc_record = rlc_chip_record(
             vec![
-                E::BaseField::from_canonical_u64(LookupTable::And as u64).expr(),
+                E::BaseField::from_u64(LookupTable::And as u64).expr(),
                 a,
                 b,
                 c,
@@ -116,7 +115,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
     pub fn lookup_xor8(&mut self, a: Expression<E>, b: Expression<E>, c: Expression<E>) {
         let rlc_record = rlc_chip_record(
             vec![
-                E::BaseField::from_canonical_u64(LookupTable::Xor as u64).expr(),
+                E::BaseField::from_u64(LookupTable::Xor as u64).expr(),
                 a,
                 b,
                 c,
@@ -135,7 +134,7 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         let rlc_record = rlc_chip_record(
             vec![
                 // TODO: layer constrain system is deprecated
-                E::BaseField::from_canonical_u64(LookupTable::Dynamic as u64).expr(),
+                E::BaseField::from_u64(LookupTable::Dynamic as u64).expr(),
                 value.clone(),
             ],
             self.alpha.clone(),
@@ -145,8 +144,8 @@ impl<E: ExtensionField> LayerConstraintSystem<E> {
         if size < 16 {
             let rlc_record = rlc_chip_record(
                 vec![
-                    E::BaseField::from_canonical_u64(LookupTable::Dynamic as u64).expr(),
-                    value * E::BaseField::from_canonical_u64(1 << (16 - size)).expr(),
+                    E::BaseField::from_u64(LookupTable::Dynamic as u64).expr(),
+                    value * E::BaseField::from_u64(1 << (16 - size)).expr(),
                 ],
                 self.alpha.clone(),
                 self.beta.clone(),
@@ -459,7 +458,7 @@ pub fn expansion_expr<E: ExtensionField, const SIZE: usize>(
             .fold((0, E::BaseField::ZERO.expr()), |acc, (sz, felt)| {
                 (
                     acc.0 + sz,
-                    acc.1 * E::BaseField::from_canonical_u64(1 << sz).expr() + felt.expr(),
+                    acc.1 * E::BaseField::from_u64(1 << sz).expr() + felt.expr(),
                 )
             });
 

@@ -27,7 +27,9 @@ use crate::{
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     e2e::ShardContext,
     error::ZKVMError,
-    gadgets::{FieldOperation, IsZeroOperation, field_op::FieldOpCols, range::FieldLtCols},
+    gadgets::{
+        FieldOperation, IsZeroOperation, field_op::FieldOpCols, poly_scale_expr, range::FieldLtCols,
+    },
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend},
     scheme::utils::gkr_witness,
@@ -53,7 +55,8 @@ use multilinear_extensions::{
     util::{ceil_log2, max_usable_threads},
 };
 use num::{BigUint, One, Zero};
-use p3::field::FieldAlgebra;
+
+use p3::field::PrimeCharacteristicRing;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
@@ -228,9 +231,14 @@ impl<E: ExtensionField> ProtocolBuilder<E> for Uint256MulLayout<E> {
         coeff_2_256.resize(32, Expression::ZERO);
         coeff_2_256.push(Expression::ONE);
         let modulus_polynomial: Polynomial<Expression<E>> = (*modulus_limbs).into();
-        let p_modulus: Polynomial<Expression<E>> = modulus_polynomial
-            * (1 - modulus_is_zero.expr())
-            + Polynomial::from_coefficients(&coeff_2_256) * modulus_is_zero.expr();
+        let modulus_is_zero_expr = modulus_is_zero.expr();
+        let p_modulus: Polynomial<Expression<E>> = poly_scale_expr(
+            &modulus_polynomial,
+            Expression::ONE - modulus_is_zero_expr.clone(),
+        ) + poly_scale_expr(
+            &Polynomial::from_coefficients(&coeff_2_256),
+            modulus_is_zero_expr.clone(),
+        );
 
         // Evaluate the uint256 multiplication
         wits.output
@@ -659,7 +667,7 @@ pub fn setup_uint256mul_gkr_circuit<E: ExtensionField>()
             WriteMEM::construct_circuit(
                 &mut cb,
                 // mem address := state_ptr_0 + i
-                number_ptr.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
+                number_ptr.expr() + E::BaseField::from_u32(i as u32).expr(),
                 val_before.clone(),
                 val_after.clone(),
                 vm_state.ts,
@@ -680,7 +688,7 @@ pub fn setup_uint256mul_gkr_circuit<E: ExtensionField>()
                         &mut cb,
                         // mem address := state_ptr_1 + i
                         number_ptr.expr()
-                            + E::BaseField::from_canonical_u32((limb_len * j + i) as u32).expr(),
+                            + E::BaseField::from_u32((limb_len * j + i) as u32).expr(),
                         val_before.clone(),
                         val_before.clone(),
                         vm_state.ts,

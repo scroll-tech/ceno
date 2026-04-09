@@ -13,7 +13,8 @@ use ff_ext::{ExtensionField, FieldInto, SmallField};
 use gkr_iop::utils::i64_to_base;
 use itertools::Itertools;
 use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
-use p3::field::FieldAlgebra;
+
+use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use std::{collections::HashMap, marker::PhantomData};
 use witness::{
@@ -110,10 +111,7 @@ impl<F: SmallField> InsnRecord<F> {
     pub fn imm_internal(insn: &Instruction) -> (i64, F) {
         match (insn.kind, InsnFormat::from(insn.kind)) {
             // logic imm
-            (XORI | ORI | ANDI, _) => (
-                insn.imm as i16 as i64,
-                F::from_canonical_u16(insn.imm as u16),
-            ),
+            (XORI | ORI | ANDI, _) => (insn.imm as i16 as i64, F::from_u16(insn.imm as u16)),
             // for imm operate with program counter => convert to field value
             (_, B | J) => (insn.imm as i64, i64_to_base(insn.imm as i64)),
             // AUIPC
@@ -121,22 +119,16 @@ impl<F: SmallField> InsnRecord<F> {
                 // riv32 u type lower 12 bits are 0
                 // take all except for least significant limb (8 bit)
                 (insn.imm as u32 >> 8) as i64,
-                F::from_wrapped_u32(insn.imm as u32 >> 8),
+                F::from_u32(insn.imm as u32 >> 8),
             ),
             // U type
             (_, U) => (
                 (insn.imm as u32 >> 12) as i64,
-                F::from_wrapped_u32(insn.imm as u32 >> 12),
+                F::from_u32(insn.imm as u32 >> 12),
             ),
-            (JALR, _) => (
-                insn.imm as i16 as i64,
-                F::from_canonical_u16(insn.imm as i16 as u16),
-            ),
+            (JALR, _) => (insn.imm as i16 as i64, F::from_u16(insn.imm as i16 as u16)),
             // for default imm to operate with register value
-            _ => (
-                insn.imm as i16 as i64,
-                F::from_canonical_u16(insn.imm as i16 as u16),
-            ),
+            _ => (insn.imm as i16 as i64, F::from_u16(insn.imm as i16 as u16)),
         }
     }
 
@@ -146,7 +138,7 @@ impl<F: SmallField> InsnRecord<F> {
             // logic imm
             (XORI | ORI | ANDI, _) => (
                 (insn.imm >> LIMB_BITS) as i16 as i64,
-                F::from_canonical_u16((insn.imm >> LIMB_BITS) as u16),
+                F::from_u16((insn.imm >> LIMB_BITS) as u16),
             ),
             // Unsigned view.
             (_, R | U) => (false as i64, F::from_bool(false)),
@@ -296,11 +288,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
             .zip_eq(structural_witness.par_rows_mut())
             .zip(prog_mlt)
             .for_each(|((row, structural_row), mlt)| {
-                set_val!(
-                    row,
-                    config.mlt,
-                    E::BaseField::from_canonical_u64(mlt as u64)
-                );
+                set_val!(row, config.mlt, E::BaseField::from_u64(mlt as u64));
                 *structural_row.last_mut().unwrap() = E::BaseField::ONE;
             });
 

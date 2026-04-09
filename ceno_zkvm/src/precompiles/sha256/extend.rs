@@ -32,7 +32,7 @@ use gkr_iop::{
 };
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
-use p3::field::{FieldAlgebra, TwoAdicField};
+use p3::field::{PrimeCharacteristicRing as FieldAlgebra, TwoAdicField};
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::ParallelSlice,
@@ -440,11 +440,9 @@ mod tests {
                 expected_output.iter().take(SHA_EXTEND_ROUNDS).enumerate()
             {
                 let row_idx = instance_idx * SHA_EXTEND_ROUNDS + round_idx;
-                let output_word: [_; WORD_SIZE] = phase1.row_slice(row_idx)
-                    [out_index..out_index + 4]
-                    .to_vec()
-                    .try_into()
-                    .unwrap();
+                let row = phase1.row_slice(row_idx).expect("phase1 row out of bounds");
+                let output_word: [_; WORD_SIZE] =
+                    row[out_index..out_index + WORD_SIZE].try_into().unwrap();
                 let expected_word = Word::<BabyBear>::from(*expected_word_u32);
                 assert_eq!(
                     output_word, expected_word.0,

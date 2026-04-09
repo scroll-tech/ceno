@@ -20,6 +20,7 @@ use crate::{
 };
 
 use crate::scheme::gpu::BB31Ext;
+use p3::field::PrimeCharacteristicRing;
 
 pub fn expect_basic_transcript<E: ExtensionField, T: Transcript<E>>(
     transcript: &mut T,
@@ -56,7 +57,7 @@ fn read_base_value_from_gpu<'a, E: ExtensionField>(
                 .get(index, stream.as_ref())
                 .map_err(|e| hal_to_backend_error(format!("failed to read GPU buffer: {e:?}")))?;
             let canonical = raw.as_canonical_u32();
-            Ok(E::BaseField::from_canonical_u32(canonical))
+            Ok(E::BaseField::from_u32(canonical))
         }
         GpuFieldType::Ext(_) => Err(hal_to_backend_error(
             "expected base-field polynomial for final-sum extraction",

@@ -12,7 +12,7 @@ use ceno_emul::{InsnKind, StepIndex, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use multilinear_extensions::ToExpr;
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 pub struct GlobalStateConfig;

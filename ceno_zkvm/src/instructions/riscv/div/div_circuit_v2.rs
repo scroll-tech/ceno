@@ -20,7 +20,8 @@ use crate::{
     witness::{LkMultiplicity, set_val},
 };
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::FieldAlgebra;
+
+use p3::field::PrimeCharacteristicRing;
 use std::{array, marker::PhantomData};
 
 pub struct DivRemConfig<E: ExtensionField> {
@@ -97,10 +98,10 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         let dividend_sign = cb.create_bit(|| "dividend_sign".to_string())?;
         let divisor_sign = cb.create_bit(|| "divisor_sign".to_string())?;
         let dividend_ext: Expression<E> =
-            dividend_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
+            dividend_sign.expr() * E::BaseField::from_u32((1 << LIMB_BITS) - 1).expr();
         let divisor_ext: Expression<E> =
-            divisor_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
-        let carry_divide = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
+            divisor_sign.expr() * E::BaseField::from_u32((1 << LIMB_BITS) - 1).expr();
+        let carry_divide = E::BaseField::from_u32(1 << UInt::<E>::LIMB_BITS).inverse();
         let mut carry_expr: [Expression<E>; UINT_LIMBS] =
             array::from_fn(|_| E::BaseField::ZERO.expr());
 
@@ -126,7 +127,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         let quotient_sign = cb.create_bit(|| "quotient_sign".to_string())?;
         let quotient_ext: Expression<E> =
-            quotient_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
+            quotient_sign.expr() * E::BaseField::from_u32((1 << LIMB_BITS) - 1).expr();
         let mut carry_ext: [Expression<E>; UINT_LIMBS] =
             array::from_fn(|_| E::BaseField::ZERO.expr());
 
@@ -172,8 +173,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             cb.condition_require_zero(
                 || "check_quotient_on_divisor_zero".to_string(),
                 divisor_zero.expr(),
-                quotient_expr.clone()
-                    - E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr(),
+                quotient_expr.clone() - E::BaseField::from_u32((1 << LIMB_BITS) - 1).expr(),
             )?;
         }
         // divisor_sum is guaranteed to be non-zero if divisor is non-zero since we assume
@@ -217,9 +217,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         cb.require_equal(
             || "sign_xor_zero",
             dividend_sign.expr() + divisor_sign.expr()
-                - E::BaseField::from_canonical_u32(2).expr()
-                    * dividend_sign.expr()
-                    * divisor_sign.expr(),
+                - E::BaseField::from_u32(2).expr() * dividend_sign.expr() * divisor_sign.expr(),
             sign_xor.expr(),
         )?;
 
@@ -237,7 +235,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             quotient_sign.expr(),
         )?;
 
-        let sign_mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1));
+        let sign_mask = E::BaseField::from_u32(1 << (LIMB_BITS - 1));
 
         let remainder_prime = UInt::<E>::new_unchecked(|| "remainder_prime", cb)?;
         let remainder_prime_expr = remainder_prime.expr();
@@ -276,8 +274,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             cb.condition_require_zero(
                 || "check_remainder_prime_not_max",
                 sign_xor.expr(),
-                (remainder_prime_expr[i].clone()
-                    - E::BaseField::from_canonical_u32(1 << LIMB_BITS).expr())
+                (remainder_prime_expr[i].clone() - E::BaseField::from_u32(1 << LIMB_BITS).expr())
                     * remainder_inv[i].expr()
                     - E::BaseField::ONE.expr(),
             )?;
@@ -297,11 +294,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         for i in (0..UINT_LIMBS).rev() {
             let diff = remainder_prime_expr[i].clone()
-                * (E::BaseField::from_canonical_u8(2).expr() * divisor_sign.expr()
+                * (E::BaseField::from_u8(2).expr() * divisor_sign.expr()
                     - E::BaseField::ONE.expr())
                 + divisor_expr[i].clone()
                     * (E::BaseField::ONE.expr()
-                        - E::BaseField::from_canonical_u8(2).expr() * divisor_sign.expr());
+                        - E::BaseField::from_u8(2).expr() * divisor_sign.expr());
             prefix_sum += lt_marker[i].expr();
             cb.require_zero(
                 || "prefix_sum_not_zero_or_diff_zero",
@@ -326,24 +323,24 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             || "lt_diff_nonzero",
             (lt_diff.expr() - E::BaseField::ONE.expr())
                 * (E::BaseField::ONE.expr() - divisor_zero.expr() - remainder_zero.expr()),
-            E::BaseField::from_canonical_u32(16).expr(),
+            E::BaseField::from_u32(16).expr(),
         )?;
 
         match I::INST_KIND {
             InsnKind::DIV | InsnKind::REM => {
                 cb.assert_dynamic_range(
                     || "div_rem_range_check_dividend_last",
-                    E::BaseField::from_canonical_u32(2).expr()
+                    E::BaseField::from_u32(2).expr()
                         * (dividend_expr[UINT_LIMBS - 1].clone()
                             - dividend_sign.expr() * sign_mask.expr()),
-                    E::BaseField::from_canonical_u32(16).expr(),
+                    E::BaseField::from_u32(16).expr(),
                 )?;
                 cb.assert_dynamic_range(
                     || "div_rem_range_check_divisor_last",
-                    E::BaseField::from_canonical_u32(2).expr()
+                    E::BaseField::from_u32(2).expr()
                         * (divisor_expr[UINT_LIMBS - 1].clone()
                             - divisor_sign.expr() * sign_mask.expr()),
-                    E::BaseField::from_canonical_u32(16).expr(),
+                    E::BaseField::from_u32(16).expr(),
                 )?;
             }
             InsnKind::DIVU | InsnKind::REMU => {
@@ -474,12 +471,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         }
 
         let divisor_sum_f = divisor_limbs.iter().fold(E::BaseField::ZERO, |acc, c| {
-            acc + E::BaseField::from_canonical_u16(*c)
+            acc + E::BaseField::from_u16(*c)
         });
         let divisor_sum_inv_f = divisor_sum_f.try_inverse().unwrap_or(E::BaseField::ZERO);
 
         let remainder_sum_f = remainder.iter().fold(E::BaseField::ZERO, |acc, r| {
-            acc + E::BaseField::from_canonical_u32(*r)
+            acc + E::BaseField::from_u32(*r)
         });
         let remainder_sum_inv_f = remainder_sum_f.try_inverse().unwrap_or(E::BaseField::ZERO);
 
@@ -497,7 +494,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             (UINT_LIMBS, 0)
         };
 
-        let remainder_prime_f = remainder_prime.map(E::BaseField::from_canonical_u32);
+        let remainder_prime_f = remainder_prime.map(E::BaseField::from_u32);
 
         set_val!(instance, config.divisor_sum_inv, divisor_sum_inv_f);
         set_val!(instance, config.remainder_sum_inv, remainder_sum_inv_f);
@@ -505,7 +502,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             set_val!(
                 instance,
                 config.remainder_inv[i],
-                (remainder_prime_f[i] - E::BaseField::from_canonical_u32(1 << LIMB_BITS)).inverse()
+                (remainder_prime_f[i] - E::BaseField::from_u32(1 << LIMB_BITS)).inverse()
             );
             set_val!(instance, config.lt_marker[i], (i == lt_diff_idx) as u64);
         }

@@ -87,7 +87,7 @@ impl IsZeroOperation<WitIn> {
 
 impl<F: SmallField> IsZeroOperation<F> {
     pub fn populate(&mut self, a: u32) -> u32 {
-        self.populate_from_field_element(F::from_canonical_u32(a))
+        self.populate_from_field_element(F::from_u32(a))
     }
 
     pub fn populate_from_field_element(&mut self, a: F) -> u32 {
