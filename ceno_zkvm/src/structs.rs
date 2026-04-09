@@ -19,7 +19,7 @@ use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSlice,
 };
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -336,7 +336,7 @@ impl<E: ExtensionField> ChipInput<E> {
 pub struct ZKVMWitnesses<E: ExtensionField> {
     pub witnesses: BTreeMap<String, Vec<ChipInput<E>>>,
     lk_mlts: BTreeMap<String, Multiplicity<u64>>,
-    combined_lk_mlt: Option<Vec<HashMap<u64, usize>>>,
+    combined_lk_mlt: Option<Vec<FxHashMap<u64, usize>>>,
 }
 
 impl<E: ExtensionField> ZKVMWitnesses<E> {
@@ -346,6 +346,14 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
     pub fn get_lk_mlt(&self, name: &String) -> Option<&Multiplicity<u64>> {
         self.lk_mlts.get(name)
+    }
+
+    pub fn combined_lk_mlt(&self) -> Option<&Vec<FxHashMap<u64, usize>>> {
+        self.combined_lk_mlt.as_ref()
+    }
+
+    pub fn lk_mlts(&self) -> &BTreeMap<String, Multiplicity<u64>> {
+        &self.lk_mlts
     }
 
     pub fn assign_opcode_circuit<OC: Instruction<E>>(
@@ -463,10 +471,25 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         ),
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
-        let perm = <E::BaseField as PoseidonField>::get_default_perm();
-        let addr_accessed = shard_ctx.get_addr_accessed();
+        use tracing::info_span;
 
-        // future shard needed records := shard_ctx.write_records ∪  //
+        // Try the full GPU pipeline: keep data on device, minimal CPU roundtrips.
+        // Only when GPU witgen is enabled (otherwise witgen must not touch GPU).
+        #[cfg(feature = "gpu")]
+        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+            let gpu_result = self.try_assign_shared_circuit_gpu(cs, shard_ctx, final_mem, config);
+            match gpu_result {
+                Ok(true) => return Ok(()),
+                Ok(false) => {} /* GPU pipeline unavailable (no shared buffers), fall through to CPU */
+                Err(e) => return Err(e),
+            }
+        }
+
+        let perm = <E::BaseField as PoseidonField>::get_default_perm();
+        let addr_accessed =
+            info_span!("get_addr_accessed").in_scope(|| shard_ctx.get_addr_accessed());
+
+        // future shard needed records := shard_ctx.write_records ∪
         // (shard_ctx.after_current_shard_cycle(mem_record.cycle) && !addr_accessed.contains(&waddr))
 
         // 1. process final mem which
@@ -588,29 +611,33 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
 
         assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
-        let circuit_inputs = global_input
-            .par_chunks(shard_ctx.max_num_cross_shard_accesses)
-            .map(|shard_accesses| {
-                let witness = ShardRamCircuit::assign_instances(
-                    config,
-                    cs.zkvm_v1_css.num_witin as usize,
-                    cs.zkvm_v1_css.num_structural_witin as usize,
-                    self.combined_lk_mlt.as_ref().unwrap(),
-                    shard_accesses,
-                )?;
-                let num_reads = shard_accesses
-                    .par_iter()
-                    .filter(|access| access.record.is_to_write_set)
-                    .count();
-                let num_writes = shard_accesses.len() - num_reads;
+        let n_global = global_input.len();
+        let circuit_inputs =
+            info_span!("shard_ram_assign_instances", n = n_global).in_scope(|| {
+                global_input
+                    .par_chunks(shard_ctx.max_num_cross_shard_accesses)
+                    .map(|shard_accesses| {
+                        let witness = ShardRamCircuit::assign_instances(
+                            config,
+                            cs.zkvm_v1_css.num_witin as usize,
+                            cs.zkvm_v1_css.num_structural_witin as usize,
+                            self.combined_lk_mlt.as_ref().unwrap(),
+                            shard_accesses,
+                        )?;
+                        let num_reads = shard_accesses
+                            .par_iter()
+                            .filter(|access| access.record.is_to_write_set)
+                            .count();
+                        let num_writes = shard_accesses.len() - num_reads;
 
-                Ok(ChipInput::new(
-                    ShardRamCircuit::<E>::name(),
-                    witness,
-                    [num_reads, num_writes],
-                ))
-            })
-            .collect::<Result<Vec<_>, ZKVMError>>()?;
+                        Ok(ChipInput::new(
+                            ShardRamCircuit::<E>::name(),
+                            witness,
+                            [num_reads, num_writes],
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, ZKVMError>>()
+            })?;
         // set num_read, num_write as separate instance
         assert!(
             self.witnesses
@@ -619,6 +646,42 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         );
 
         Ok(())
+    }
+
+    /// Full GPU pipeline for assign_shared_circuit: keep data on device, minimal CPU roundtrips.
+    ///
+    /// Returns Ok(true) if successful, Ok(false) if unavailable (no shared device buffers).
+    #[cfg(feature = "gpu")]
+    fn try_assign_shared_circuit_gpu(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        shard_ctx: &ShardContext,
+        final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
+        config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
+    ) -> Result<bool, ZKVMError> {
+        assert!(self.combined_lk_mlt.is_some());
+        let cs_inner = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let num_witin = cs_inner.zkvm_v1_css.num_witin as usize;
+        let num_structural_witin = cs_inner.zkvm_v1_css.num_structural_witin as usize;
+
+        match crate::instructions::gpu::chips::shard_ram::try_gpu_assign_shared_circuit::<E>(
+            shard_ctx,
+            final_mem,
+            config,
+            num_witin,
+            num_structural_witin,
+            shard_ctx.max_num_cross_shard_accesses,
+        )? {
+            Some(circuit_inputs) => {
+                assert!(
+                    self.witnesses
+                        .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
+                        .is_none()
+                );
+                Ok(true)
+            }
+            None => Ok(false),
+        }
     }
 
     pub fn get_witnesses_name_instance(&self) -> Vec<(String, [usize; 2])> {
@@ -640,7 +703,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     }
 
     #[inline(always)]
-    fn mem_addresses(mem_record: &MemFinalRecord) -> (WordAddr, Addr) {
+    pub(crate) fn mem_addresses(mem_record: &MemFinalRecord) -> (WordAddr, Addr) {
         match mem_record.ram_type {
             RAMType::Register => (
                 Platform::register_vma(mem_record.addr as RegIdx).into(),
@@ -651,6 +714,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         }
     }
 
+    /// Filter and construct a cross-shard ShardRamInput with EC computation.
+    /// Used by the CPU path where EC is computed per-record via Poseidon2.
     #[inline(always)]
     fn make_cross_shard_input(
         mem_name: &'static str,

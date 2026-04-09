@@ -357,7 +357,8 @@ fn assign_fp_op_instances<E: ExtensionField, P: FpOpField + NumWords>(
                 .zip_eq(indices.iter().copied())
                 .map(|(instance, idx)| {
                     let step = &steps[idx];
-                    let ops = &step.syscall().expect("syscall step");
+                    let sw = shard_ctx.syscall_witnesses.clone();
+                    let ops = &step.syscall(&sw).expect("syscall step");
                     config
                         .vm_state
                         .assign_instance(instance, &shard_ctx, step)?;
@@ -418,7 +419,7 @@ fn assign_fp_op_instances<E: ExtensionField, P: FpOpField + NumWords>(
         .map(|&idx| {
             let step = &steps[idx];
             let values: Vec<u32> = step
-                .syscall()
+                .syscall(&shard_ctx.syscall_witnesses)
                 .unwrap()
                 .mem_ops
                 .iter()

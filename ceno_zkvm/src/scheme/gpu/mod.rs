@@ -1312,17 +1312,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
             GpuDigestLayer,
             GpuMatrix,
             GpuPolynomial,
-        >(&cuda_hal, basefold_commitment);
+        >(&cuda_hal, basefold_commitment)
+        .expect("failed to convert fixed pcs_data to GPU basefold commitment");
+
+        // cuda buffer as view
+        let fixed_mles: Vec<Arc<MultilinearExtensionGpu<'static, E>>> = pcs_data_basefold
+            .trace
+            .as_ref()
+            .expect("trace must be populated by convert_ceno_to_gpu_basefold_commitment")
+            .iter()
+            .flat_map(|poly_group| poly_group.iter())
+            .map(|gpu_poly| {
+                let evals = gpu_poly.evaluations();
+                let byte_len = evals.len() * std::mem::size_of::<BB31Base>();
+                let view = evals.as_slice_range(0..byte_len);
+                let view_buf = BufferImpl::new_from_view(view);
+                let view_poly = GpuPolynomial::new(view_buf, gpu_poly.num_vars());
+                let view_poly_static: GpuPolynomial<'static> =
+                    unsafe { std::mem::transmute(view_poly) };
+                Arc::new(MultilinearExtensionGpu::from_ceno_gpu_base(
+                    view_poly_static,
+                ))
+            })
+            .collect_vec();
+
         let pcs_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
             unsafe { std::mem::transmute_copy(&pcs_data_basefold) };
         std::mem::forget(pcs_data_basefold);
         let pcs_data = Arc::new(pcs_data);
-
-        let fixed_mles = PCS::get_arc_mle_witness_from_commitment(pcs_data_original.as_ref());
-        let fixed_mles = fixed_mles
-            .iter()
-            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
-            .collect_vec();
 
         DeviceProvingKey {
             pcs_data,

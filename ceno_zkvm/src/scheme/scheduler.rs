@@ -440,6 +440,14 @@ impl ChipScheduler {
 
                 // No task launched: either nothing fits (so wait) or we are deadlocked.
                 if tasks_inflight == 0 {
+                    // Not a deadlock — the non-blocking try_recv above may have
+                    // drained the final completion in the same iteration that
+                    // the outer `while` condition still held. With `pending`
+                    // empty and `tasks_inflight` now 0 we're simply done; let
+                    // the outer condition re-check and exit cleanly.
+                    if pending.is_empty() {
+                        continue;
+                    }
                     tracing::error!(
                         "Deadlock: {} remaining tasks are too big for the memory pool \
                          (pool_booked={:.2}MB):",

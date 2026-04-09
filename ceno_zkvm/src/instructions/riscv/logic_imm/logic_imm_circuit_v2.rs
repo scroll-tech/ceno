@@ -9,8 +9,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_logic_u8_ops,
         riscv::{
             constants::{LIMB_BITS, LIMB_MASK, UInt8},
             i_insn::IInstructionConfig,
@@ -32,6 +34,8 @@ pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     type InstructionConfig = LogicConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -124,18 +128,39 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
 
         config.assign_instance(instance, shard_ctx, lkm, step)
     }
+
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, _config, _ctx| {
+        let rs1_lo = step.rs1().unwrap().value & LIMB_MASK;
+        let rs1_hi = (step.rs1().unwrap().value >> LIMB_BITS) & LIMB_MASK;
+        let imm_lo = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32 & LIMB_MASK;
+        let imm_hi = (InsnRecord::<E::BaseField>::imm_signed_internal(&step.insn()).0 as u32
+            >> LIMB_BITS)
+            & LIMB_MASK;
+
+        emit_logic_u8_ops::<I::OpsTable>(sink, rs1_lo.into(), imm_lo.into(), 2);
+        emit_logic_u8_ops::<I::OpsTable>(sink, rs1_hi.into(), imm_hi.into(), 2);
+    });
+
+    impl_collect_shardram!(i_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::LogicI(match I::INST_KIND {
+        InsnKind::ANDI => 0,
+        InsnKind::ORI => 1,
+        InsnKind::XORI => 2,
+        kind => unreachable!("unsupported logic_imm GPU kind: {kind:?}"),
+    }));
 }
 
 /// This config implements I-Instructions that represent registers values as 4 * u8.
 /// Non-generic code shared by several circuits.
 #[derive(Debug)]
 pub struct LogicConfig<E: ExtensionField> {
-    i_insn: IInstructionConfig<E>,
+    pub(crate) i_insn: IInstructionConfig<E>,
 
-    rs1_read: UInt8<E>,
+    pub(crate) rs1_read: UInt8<E>,
     pub(crate) rd_written: UInt8<E>,
-    imm_lo: UIntLimbs<{ LIMB_BITS }, 8, E>,
-    imm_hi: UIntLimbs<{ LIMB_BITS }, 8, E>,
+    pub(crate) imm_lo: UIntLimbs<{ LIMB_BITS }, 8, E>,
+    pub(crate) imm_hi: UIntLimbs<{ LIMB_BITS }, 8, E>,
 }
 
 impl<E: ExtensionField> LogicConfig<E> {

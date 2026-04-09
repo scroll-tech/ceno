@@ -63,7 +63,7 @@ pub struct EcallUint256MulConfig<E: ExtensionField> {
     mem_rw: Vec<WriteMEM>,
 }
 
-/// Uint256MulInstruction can handle any instruction and produce its side-effects.
+/// Uint256MulInstruction can handle any instruction and produce its lk and shardram data.
 pub struct Uint256MulInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
@@ -265,7 +265,8 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
                     .zip_eq(indices.iter().copied())
                     .map(|(instance, idx)| {
                         let step = &steps[idx];
-                        let ops = &step.syscall().expect("syscall step");
+                        let sw = shard_ctx.syscall_witnesses.clone();
+                        let ops = &step.syscall(&sw).expect("syscall step");
 
                         // vm_state
                         config
@@ -331,7 +332,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
             .map(|&idx| {
                 let step = &steps[idx];
                 let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
-                    .syscall()
+                    .syscall(&shard_ctx.syscall_witnesses)
                     .unwrap()
                     .mem_ops
                     .iter()
@@ -366,7 +367,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
     }
 }
 
-/// Uint256InvInstruction can handle any instruction and produce its side-effects.
+/// Uint256InvInstruction can handle any instruction and produce its lk and shardram data.
 pub struct Uint256InvInstruction<E, P>(PhantomData<(E, P)>);
 
 pub struct Secp256K1EcallSpec;
@@ -588,7 +589,8 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
                     .zip_eq(indices.iter().copied())
                     .map(|(instance, idx)| {
                         let step = &steps[idx];
-                        let ops = &step.syscall().expect("syscall step");
+                        let sw = shard_ctx.syscall_witnesses.clone();
+                        let ops = &step.syscall(&sw).expect("syscall step");
 
                         // vm_state
                         config
@@ -641,7 +643,7 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
             .map(|&idx| {
                 let step = &steps[idx];
                 let (instance, _): (Vec<u32>, Vec<Cycle>) = step
-                    .syscall()
+                    .syscall(&shard_ctx.syscall_witnesses)
                     .unwrap()
                     .mem_ops
                     .iter()
