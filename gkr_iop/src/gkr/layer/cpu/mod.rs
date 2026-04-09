@@ -41,6 +41,7 @@ use crate::{
         sumcheck_layer::{LayerProof, SumcheckLayerProof},
     },
     hal::ProverBackend,
+    selector::SelectorType,
 };
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<CpuBackend<E, PCS>>
@@ -139,36 +140,61 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         )
         .collect_vec();
 
-        // zero check eq || rotation eq
-        let mut eqs = layer
+        // Build selector eq MLEs in parallel, then merge deterministically by structural wit id.
+        let selector_eq_pairs = layer
             .out_sel_and_eval_exprs
             .par_iter()
             .zip(out_points.par_iter())
             .zip(selector_ctxs.par_iter())
             .filter_map(|(((sel_type, _), point), selector_ctx)| {
-                sel_type.compute(point, selector_ctx)
+                let eq = sel_type.compute(point, selector_ctx)?;
+                let selector_expr = match sel_type {
+                    SelectorType::Whole(expr)
+                    | SelectorType::Prefix(expr)
+                    | SelectorType::OrderedSparse {
+                        expression: expr, ..
+                    }
+                    | SelectorType::QuarkBinaryTreeLessThan(expr) => expr,
+                    SelectorType::None => return None,
+                };
+                let Expression::StructuralWitIn(wit_id, _) = selector_expr else {
+                    panic!("selector expression must be StructuralWitIn");
+                };
+                let wit_id = *wit_id as usize;
+                assert!(wit_id < layer.n_structural_witin, "selector wit id out of range");
+                Some((wit_id, eq))
             })
             .collect::<Vec<_>>();
+
+        let mut selector_eq_by_wit_id = vec![None; layer.n_structural_witin];
+        for (wit_id, eq) in selector_eq_pairs {
+            if selector_eq_by_wit_id[wit_id].is_none() {
+                selector_eq_by_wit_id[wit_id] = Some(eq);
+            }
+        }
         exit_span!(span);
 
-        // `wit` := witin ++ fixed ++ pubio
-        // we concat eq in between `wit` := witin ++ eqs ++ fixed
-        let all_witins = wit
-            .iter()
-            .take(layer.n_witin + layer.n_fixed + layer.n_instance)
-            .map(|mle| Either::Left(mle.as_ref()))
-            .chain(
-                // some non-selector structural witin
-                wit.iter()
-                    .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
-                    .take(
-                        layer.n_structural_witin
-                            - layer.out_sel_and_eval_exprs.len(),
-                    )
-                    .map(|mle| Either::Left(mle.as_ref())),
-            )
-            .chain(eqs.iter_mut().map(Either::Right))
-            .collect_vec();
+        // `wit` := witin ++ fixed ++ pubio ++ structural
+        // selector structural witins are replaced by computed eq MLEs in-place by witness id.
+        let base_wit_count = layer.n_witin + layer.n_fixed + layer.n_instance;
+        let mut all_witins =
+            Vec::with_capacity(layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance);
+        all_witins.extend(
+            wit.iter()
+                .take(base_wit_count)
+                .map(|mle| Either::Left(mle.as_ref())),
+        );
+        for (selector_eq, mle) in selector_eq_by_wit_id.iter_mut().zip(
+            wit.iter()
+                .skip(base_wit_count)
+                .take(layer.n_structural_witin),
+        ) {
+            if let Some(eq) = selector_eq.as_mut() {
+                all_witins.push(Either::Right(eq));
+            } else {
+                all_witins.push(Either::Left(mle.as_ref()));
+            }
+        }
 
         assert_eq!(
             all_witins.len(),
