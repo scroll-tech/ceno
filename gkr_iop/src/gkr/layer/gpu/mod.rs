@@ -100,7 +100,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         );
 
         let (_, raw_rotation_exprs) = &layer.rotation_exprs;
-        let (rotation_proof, rotation_left, rotation_right, rotation_point) =
+        let (_rotation_proof, rotation_left, rotation_right, rotation_point) =
             if let Some(rotation_sumcheck_expression) =
                 layer.rotation_sumcheck_expression_monomial_terms.as_ref()
             {
@@ -307,7 +307,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     proof: proof_gpu_e,
                     evals: evals_gpu_e,
                 },
-                rotation: rotation_proof,
             },
             row_challenges_e,
         )

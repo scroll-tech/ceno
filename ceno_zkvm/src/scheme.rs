@@ -1,6 +1,7 @@
 use crate::structs::EccQuarkProof;
 use ff_ext::ExtensionField;
 use gkr_iop::gkr::GKRProof;
+use gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof;
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use p3::field::FieldAlgebra;
@@ -66,6 +67,8 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 
     pub main_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
     pub gkr_iop_proof: Option<GKRProof<E>>,
+    // Rotation is proved at chip scope and consumed before layer verification.
+    pub rotation_proof: Option<SumcheckLayerProof<E>>,
 
     pub tower_proof: TowerProofs<E>,
     pub ecc_proof: Option<EccQuarkProof<E>>,

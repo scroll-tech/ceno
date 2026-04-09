@@ -356,12 +356,14 @@ impl<E: ExtensionField> Layer<E> {
         assert_eq!(lookup_evals.len(), lk_len);
         assert_eq!(zero_evals.len(), zero_len);
 
+        let rotation_expr_len = cb.cs.rotations.len() * ROTATION_OPENING_COUNT;
         let non_zero_expr_len = cb.cs.w_expressions.len()
             + cb.cs.w_table_expressions.len()
             + cb.cs.r_expressions.len()
             + cb.cs.r_table_expressions.len()
             + cb.cs.lk_expressions.len()
-            + cb.cs.lk_table_expressions.len() * 2;
+            + cb.cs.lk_table_expressions.len() * 2
+            + rotation_expr_len;
         let zero_expr_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
@@ -492,6 +494,72 @@ impl<E: ExtensionField> Layer<E> {
             }
         }
 
+        if !cb.cs.rotations.is_empty() {
+            let Some(RotationParams {
+                rotation_eqs: Some([rotation_left_eq, rotation_right_eq, rotation_eq]),
+                ..
+            }) = cb.cs.rotation_params.as_ref()
+            else {
+                panic!("rotation params not set");
+            };
+
+            // Rotation claims occupy three dedicated out-eval entries: left, right, target.
+            let mut next_rotation_eval_idx =
+                [&r_record_evals, &w_record_evals, &lookup_evals, &zero_evals]
+                .iter()
+                .flat_map(|evals| evals.iter())
+                .copied()
+                .max()
+                .map_or(0, |max_idx| max_idx + 1);
+            let rotation_left_eval_idx = next_rotation_eval_idx;
+            next_rotation_eval_idx += 1;
+            let rotation_right_eval_idx = next_rotation_eval_idx;
+            next_rotation_eval_idx += 1;
+            let rotation_eval_idx = next_rotation_eval_idx;
+
+            let left_group_idx = {
+                Self::dedup_last_selector_evals(
+                    &SelectorType::Whole(rotation_left_eq.clone()),
+                    &mut expr_evals,
+                );
+                expr_evals.len() - 1
+            };
+            let right_group_idx = {
+                Self::dedup_last_selector_evals(
+                    &SelectorType::Whole(rotation_right_eq.clone()),
+                    &mut expr_evals,
+                );
+                expr_evals.len() - 1
+            };
+            let target_group_idx = {
+                Self::dedup_last_selector_evals(
+                    &SelectorType::Whole(rotation_eq.clone()),
+                    &mut expr_evals,
+                );
+                expr_evals.len() - 1
+            };
+
+            for (idx, (rotate_expr, target_expr)) in cb.cs.rotations.iter().enumerate() {
+                expressions.push(rotate_expr.clone());
+                expr_evals[left_group_idx]
+                    .1
+                    .push(EvalExpression::Single(rotation_left_eval_idx));
+                expr_names.push(format!("rotation/left/{idx}"));
+
+                expressions.push(rotate_expr.clone());
+                expr_evals[right_group_idx]
+                    .1
+                    .push(EvalExpression::Single(rotation_right_eval_idx));
+                expr_names.push(format!("rotation/right/{idx}"));
+
+                expressions.push(target_expr.clone());
+                expr_evals[target_group_idx]
+                    .1
+                    .push(EvalExpression::Single(rotation_eval_idx));
+                expr_names.push(format!("rotation/point/{idx}"));
+            }
+        }
+
         if let Some(zero_selector) = cb.cs.zero_selector.as_ref() {
             // process zero_record
             let evals = Self::dedup_last_selector_evals(zero_selector, &mut expr_evals);
@@ -590,6 +658,35 @@ impl<E: ExtensionField> Layer<E> {
         }
 
         &mut expr_evals.last_mut().unwrap().1
+    }
+
+    pub fn rotation_selector_group_indices(&self) -> Option<[usize; ROTATION_OPENING_COUNT]> {
+        let Some([left_eq, right_eq, point_eq]) = self.rotation_exprs.0.as_ref() else {
+            return None;
+        };
+
+        let find_group = |selector_expr: &Expression<E>| {
+            self.out_sel_and_eval_exprs
+                .iter()
+                .enumerate()
+                .find_map(|(idx, (sel_type, _))| {
+                    let expr = match sel_type {
+                        SelectorType::Whole(expr)
+                        | SelectorType::Prefix(expr)
+                        | SelectorType::OrderedSparse {
+                            expression: expr, ..
+                        }
+                        | SelectorType::QuarkBinaryTreeLessThan(expr) => expr,
+                        SelectorType::None => return None,
+                    };
+                    (expr == selector_expr).then_some(idx)
+                })
+        };
+
+        let left_idx = find_group(left_eq)?;
+        let right_idx = find_group(right_eq)?;
+        let point_idx = find_group(point_eq)?;
+        Some([left_idx, right_idx, point_idx])
     }
 }
 

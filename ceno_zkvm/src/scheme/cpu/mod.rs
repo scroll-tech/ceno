@@ -1,6 +1,6 @@
 use super::hal::{
     DeviceTransporter, MainSumcheckEvals, MainSumcheckProver, OpeningProver, ProverDevice,
-    TowerProver, TraceCommitter,
+    RotationProver, RotationProverOutput, TowerProver, TraceCommitter,
 };
 use crate::{
     error::ZKVMError,
@@ -16,6 +16,7 @@ use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
+    evaluation::EvalExpression,
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
     selector::{SelectorContext, SelectorType},
@@ -803,6 +804,65 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
     }
 }
 
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> RotationProver<CpuBackend<E, PCS>>
+    for CpuProver<CpuBackend<E, PCS>>
+{
+    fn prove_rotation<'a>(
+        &self,
+        composed_cs: &ComposedConstrainSystem<E>,
+        input: &ProofInput<'a, CpuBackend<E, PCS>>,
+        rt_tower: &Point<E>,
+        challenges: &[E; 2],
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<Option<RotationProverOutput<E>>, ZKVMError> {
+        let Some(gkr_circuit) = composed_cs.gkr_circuit.as_ref() else {
+            return Ok(None);
+        };
+        let Some(layer) = gkr_circuit.layers.first() else {
+            return Ok(None);
+        };
+        if layer.rotation_exprs.1.is_empty() {
+            return Ok(None);
+        }
+
+        let Some(rotation_sumcheck_expression) =
+            layer.rotation_sumcheck_expression_monomial_terms.as_ref()
+        else {
+            return Ok(None);
+        };
+
+        let log2_num_instances = input.log2_num_instances();
+        let num_threads = optimal_sumcheck_threads(log2_num_instances);
+        let num_var_with_rotation =
+            log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+        let wit = LayerWitness(
+            chain!(&input.witness, &input.fixed, &input.structural_witness,)
+                .cloned()
+                .collect_vec(),
+        );
+
+        let (proof, points) = gkr_iop::gkr::layer::cpu::prove_rotation::<E, PCS>(
+            num_threads,
+            num_var_with_rotation,
+            layer.rotation_cyclic_subgroup_size,
+            layer.rotation_cyclic_group_log2,
+            &wit,
+            &layer.rotation_exprs.1,
+            rotation_sumcheck_expression.clone(),
+            rt_tower,
+            challenges,
+            transcript,
+        );
+
+        Ok(Some(RotationProverOutput {
+            proof,
+            left_point: points.left,
+            right_point: points.right,
+            point: points.origin,
+        }))
+    }
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<CpuBackend<E, PCS>>
     for CpuProver<CpuBackend<E, PCS>>
 {
@@ -816,6 +876,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
+        rotation: Option<RotationProverOutput<E>>,
         input: &'b ProofInput<'a, CpuBackend<E, PCS>>,
         composed_cs: &ComposedConstrainSystem<E>,
         challenges: &[E; 2],
@@ -842,40 +903,88 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         let Some(gkr_circuit) = gkr_circuit else {
             panic!("empty gkr circuit")
         };
-        let selector_ctxs = if cs.ec_final_sum.is_empty() {
-            // it's not global chip
-            vec![
-                SelectorContext {
-                    offset: 0,
-                    num_instances,
-                    num_vars: num_var_with_rotation,
-                };
-                gkr_circuit
-                    .layers
-                    .first()
-                    .map(|layer| layer.out_sel_and_eval_exprs.len())
-                    .unwrap_or(0)
-            ]
-        } else {
-            // it's global chip
-            vec![
-                SelectorContext {
-                    offset: 0,
-                    num_instances: input.num_instances[0],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: input.num_instances[0],
-                    num_instances: input.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: 0,
-                    num_instances,
-                    num_vars: num_var_with_rotation,
-                },
-            ]
-        };
+        let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+        let selector_ctxs = first_layer
+            .out_sel_and_eval_exprs
+            .iter()
+            .map(|(selector, _)| {
+                if cs.ec_final_sum.is_empty() {
+                    SelectorContext {
+                        offset: 0,
+                        num_instances,
+                        num_vars: num_var_with_rotation,
+                    }
+                } else if cs.r_selector.as_ref() == Some(selector) {
+                    SelectorContext {
+                        offset: 0,
+                        num_instances: input.num_instances[0],
+                        num_vars: num_var_with_rotation,
+                    }
+                } else if cs.w_selector.as_ref() == Some(selector) {
+                    SelectorContext {
+                        offset: input.num_instances[0],
+                        num_instances: input.num_instances[1],
+                        num_vars: num_var_with_rotation,
+                    }
+                } else {
+                    SelectorContext {
+                        offset: 0,
+                        num_instances,
+                        num_vars: num_var_with_rotation,
+                    }
+                }
+            })
+            .collect_vec();
+
+        let mut out_evals = vec![PointAndEval::new(rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
+        if let Some(rotation) = rotation.as_ref() {
+            let Some([left_group_idx, right_group_idx, point_group_idx]) =
+                first_layer.rotation_selector_group_indices()
+            else {
+                panic!("rotation proof provided for non-rotation layer")
+            };
+
+            let mut left_evals = Vec::new();
+            let mut right_evals = Vec::new();
+            let mut point_evals = Vec::new();
+            for chunk in rotation.proof.evals.chunks_exact(3) {
+                left_evals.push(chunk[0]);
+                right_evals.push(chunk[1]);
+                point_evals.push(chunk[2]);
+            }
+
+            let assign_group = |out_evals: &mut [PointAndEval<E>],
+                                eval_exprs: &[EvalExpression<E>],
+                                evals: &[E],
+                                point: &Point<E>| {
+                assert_eq!(eval_exprs.len(), evals.len(), "rotation eval length mismatch");
+                for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
+                    let EvalExpression::Single(index) = eval_expr else {
+                        panic!("rotation groups must use EvalExpression::Single");
+                    };
+                    out_evals[*index] = PointAndEval::new(point.clone(), *eval);
+                }
+            };
+
+            assign_group(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
+                &left_evals,
+                &rotation.left_point,
+            );
+            assign_group(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
+                &right_evals,
+                &rotation.right_point,
+            );
+            assign_group(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
+                &point_evals,
+                &rotation.point,
+            );
+        }
         let GKRProverOutput {
             gkr_proof,
             opening_evaluations,
@@ -890,8 +999,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                         .collect_vec(),
                 )],
             },
-            // eval value doesnt matter as it wont be used by prover
-            &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
+            &out_evals,
             &input
                 .pi
                 .iter()

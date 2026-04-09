@@ -17,7 +17,7 @@ use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     Expression,
-    mle::{MultilinearExtension, Point},
+    mle::Point,
     monomial::Term,
     virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
@@ -37,7 +37,6 @@ use transcript::Transcript;
 
 use crate::{
     gkr::layer::{
-        ROTATION_OPENING_COUNT,
         hal::LinearLayerProver,
         sumcheck_layer::{LayerProof, SumcheckLayerProof},
     },
@@ -65,7 +64,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Cp
                 proof: IOPProof { proofs: vec![] },
                 evals,
             },
-            rotation: None,
         }
     }
 }
@@ -97,7 +95,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
                 proof,
                 evals: prover_state.get_mle_flatten_final_evaluations(),
             },
-            rotation: None,
         }
     }
 }
@@ -134,45 +131,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             selector_ctxs.len()
         );
 
-        let (_, raw_rotation_exprs) = &layer.rotation_exprs;
-        let (rotation_proof, rotation_left, rotation_right, rotation_point) =
-            if let Some(rotation_sumcheck_expression) =
-                layer.rotation_sumcheck_expression_monomial_terms.as_ref()
-            {
-                // 1st sumcheck: process rotation_exprs
-                let rt = out_points.first().unwrap();
-                let (
-                    proof,
-                    RotationPoints {
-                        left,
-                        right,
-                        origin,
-                    },
-                ) = prove_rotation(
-                    num_threads,
-                    max_num_variables,
-                    layer.rotation_cyclic_subgroup_size,
-                    layer.rotation_cyclic_group_log2,
-                    &wit,
-                    raw_rotation_exprs,
-                    rotation_sumcheck_expression.clone(),
-                    rt,
-                    challenges,
-                    transcript,
-                );
-                (Some(proof), Some(left), Some(right), Some(origin))
-            } else {
-                (None, None, None, None)
-            };
-
-        // 2th sumcheck: batch rotation with other constrains
+        // Main sumcheck: constraints are fully unified in out_sel_and_eval_exprs.
         let span = entered_span!("build_out_points_eq", profiling_4 = true);
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
-            get_challenge_pows(
-                layer.exprs.len() + raw_rotation_exprs.len() * ROTATION_OPENING_COUNT,
-                transcript,
-            )
+            get_challenge_pows(layer.exprs.len(), transcript)
         )
         .collect_vec();
 
@@ -185,27 +148,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             .filter_map(|(((sel_type, _), point), selector_ctx)| {
                 sel_type.compute(point, selector_ctx)
             })
-            // for rotation left point
-            .chain(rotation_left.par_iter().map(|rotation_left| {
-                MultilinearExtension::from_evaluations_ext_vec(
-                    rotation_left.len(),
-                    build_eq_x_r_vec(rotation_left),
-                )
-            }))
-            // for rotation right point
-            .chain(rotation_right.par_iter().map(|rotation_right| {
-                MultilinearExtension::from_evaluations_ext_vec(
-                    rotation_right.len(),
-                    build_eq_x_r_vec(rotation_right),
-                )
-            }))
-            // for rotation point
-            .chain(rotation_point.par_iter().map(|rotation_point| {
-                MultilinearExtension::from_evaluations_ext_vec(
-                    rotation_point.len(),
-                    build_eq_x_r_vec(rotation_point),
-                )
-            }))
             .collect::<Vec<_>>();
         exit_span!(span);
 
@@ -221,13 +163,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
                     .take(
                         layer.n_structural_witin
-                            - layer.out_sel_and_eval_exprs.len()
-                            - layer
-                                .rotation_exprs
-                                .0
-                                .as_ref()
-                                .map(|_| ROTATION_OPENING_COUNT)
-                                .unwrap_or(0),
+                            - layer.out_sel_and_eval_exprs.len(),
                     )
                     .map(|mle| Either::Left(mle.as_ref())),
             )
@@ -266,7 +202,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         (
             LayerProof {
                 main: SumcheckLayerProof { proof, evals },
-                rotation: rotation_proof,
             },
             prover_state.collect_raw_challenges(),
         )
@@ -281,7 +216,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 ///     rotated_rotation_expr[i].0(rx) == (1 - rx_4) * rotation_expr[i].1(0, rx_0, rx_1, ..., rx_3, rx_5, ...)
 ///                                     + rx_4 * rotation_expr[i].1(1, rx_0, 1 - rx_1, ..., rx_3, rx_5, ...)
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     num_threads: usize,
     max_num_variables: usize,
     rotation_cyclic_subgroup_size: usize,

@@ -7,6 +7,7 @@ use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     gkr::GKRProof,
+    gkr::layer::sumcheck_layer::SumcheckLayerProof,
     hal::{ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -24,6 +25,7 @@ pub trait ProverDevice<PB>:
     + DeviceTransporter<PB>
     + ProtocolWitnessGeneratorProver<PB>
     + EccQuarkProver<PB>
+    + RotationProver<PB>
     + ChipInputPreparer<PB>
 // + FixedMLEPadder<PB>
 where
@@ -155,6 +157,28 @@ pub struct MainSumcheckEvals<E: ExtensionField> {
     pub fixed_in_evals: Vec<E>,
 }
 
+#[derive(Clone)]
+pub struct RotationProverOutput<E: ExtensionField> {
+    pub proof: SumcheckLayerProof<E>,
+    pub left_point: Point<E>,
+    pub right_point: Point<E>,
+    pub point: Point<E>,
+}
+
+pub trait RotationProver<PB: ProverBackend> {
+    fn prove_rotation<'a>(
+        &self,
+        cs: &ComposedConstrainSystem<PB::E>,
+        input: &ProofInput<'a, PB>,
+        rt_tower: &Point<PB::E>,
+        challenges: &[PB::E; 2],
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> Result<Option<RotationProverOutput<PB::E>>, ZKVMError> {
+        let _ = (cs, input, rt_tower, challenges, transcript);
+        Ok(None)
+    }
+}
+
 pub trait MainSumcheckProver<PB: ProverBackend> {
     // this prover aims to achieve two goals:
     // 1. the validity of last layer in the tower tree is reduced to
@@ -165,6 +189,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<PB::E>,
+        rotation: Option<RotationProverOutput<PB::E>>,
         input: &'b ProofInput<'a, PB>,
         cs: &ComposedConstrainSystem<PB::E>,
         challenges: &[PB::E; 2],

@@ -35,7 +35,7 @@ use gkr_iop::{
     gkr::{
         GKRCircuit,
         booleanhypercube::BooleanHypercube,
-        layer::{Layer, ROTATION_OPENING_COUNT},
+        layer::Layer,
     },
     selector::SelectorType,
 };
@@ -781,6 +781,8 @@ pub fn verify_chip_proof<C: Config>(
         num_var_with_rotation,
         gkr_circuit,
         &chip_proof.gkr_iop_proof,
+        &chip_proof.has_rotation_proof,
+        &chip_proof.rotation_proof,
         challenges,
         &circuit_pi_evals,
         &out_evals,
@@ -799,6 +801,8 @@ pub fn verify_gkr_circuit<C: Config>(
     max_num_variables: Usize<C::N>,
     gkr_circuit: GKRCircuit<E>,
     gkr_proof: &GKRProofVariable<C>,
+    has_rotation_proof: &Usize<C::N>,
+    rotation_proof: &SumcheckLayerProofVariable<C>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
     pub_io_evals: &Array<C, Ext<C::F, C::EF>>,
     claims: &Array<C, PointAndEvalVariable<C>>,
@@ -819,20 +823,11 @@ pub fn verify_gkr_circuit<C: Config>(
             layer,
             claims,
             &layer_challenges,
-            &layer_proof.has_rotation,
         );
-
-        if layer.rotation_sumcheck_expression.is_some() {
-            builder.assert_usize_eq(
-                Usize::from(layer.out_sel_and_eval_exprs.len() + 3),
-                eval_and_dedup_points.len(),
-            );
-        } else {
-            builder.assert_usize_eq(
-                Usize::from(layer.out_sel_and_eval_exprs.len()),
-                eval_and_dedup_points.len(),
-            );
-        }
+        builder.assert_usize_eq(
+            Usize::from(layer.out_sel_and_eval_exprs.len()),
+            eval_and_dedup_points.len(),
+        );
 
         // ZeroCheckLayer verification (might include other layer types in the future)
         let LayerProofVariable {
@@ -842,8 +837,6 @@ pub fn verify_gkr_circuit<C: Config>(
                     evals: main_evals,
                     evals_len_div_3: _main_evals_len_div_3,
                 },
-            rotation: rotation_proof,
-            has_rotation,
         } = layer_proof;
 
         let expected_main_evals_len: Usize<C::N> = Usize::from(
@@ -852,7 +845,12 @@ pub fn verify_gkr_circuit<C: Config>(
         builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
 
         if layer.rotation_sumcheck_expression.is_some() {
-            builder.if_eq(has_rotation, Usize::from(1)).then(|builder| {
+            builder.assert_usize_eq(has_rotation_proof.clone(), Usize::from(1));
+            let [left_group_idx, right_group_idx, point_group_idx] = layer
+                .rotation_selector_group_indices()
+                .expect("rotation selectors missing");
+
+            builder.if_eq(has_rotation_proof.clone(), Usize::from(1)).then(|builder| {
                 let first = builder.get(&eval_and_dedup_points, 0);
                 builder.assert_usize_eq(first.has_point, Usize::from(1)); // Rotation proof should have at least one point
                 let rt = builder.eval(first.point.fs.clone());
@@ -870,7 +868,7 @@ pub fn verify_gkr_circuit<C: Config>(
                     max_num_variables.clone(),
                     layer.rotation_exprs.1.len(),
                     layer.rotation_sumcheck_expression.as_ref().unwrap(),
-                    &rotation_proof,
+                    rotation_proof,
                     layer.rotation_cyclic_subgroup_size,
                     layer.rotation_cyclic_group_log2,
                     rt,
@@ -878,17 +876,11 @@ pub fn verify_gkr_circuit<C: Config>(
                     unipoly_extrapolator,
                 );
 
-                // extend eval_and_dedup_points by
-                //  [
-                //     (left_evals, left_point),
-                //     (right_evals, right_point),
-                //     (target_evals, origin_point),
-                //  ]
-                let last_idx: Usize<C::N> =
-                    builder.eval(eval_and_dedup_points.len() - Usize::from(1));
+                // Rotation claims are written into the pre-registered
+                // selector groups: left, right, then target.
                 builder.set(
                     &eval_and_dedup_points,
-                    last_idx.clone(),
+                    point_group_idx,
                     ClaimAndPoint {
                         evals: target_evals,
                         has_point: Usize::from(1),
@@ -896,10 +888,9 @@ pub fn verify_gkr_circuit<C: Config>(
                     },
                 );
 
-                builder.assign(&last_idx, last_idx.clone() - Usize::from(1));
                 builder.set(
                     &eval_and_dedup_points,
-                    last_idx.clone(),
+                    right_group_idx,
                     ClaimAndPoint {
                         evals: right_evals,
                         has_point: Usize::from(1),
@@ -907,10 +898,9 @@ pub fn verify_gkr_circuit<C: Config>(
                     },
                 );
 
-                builder.assign(&last_idx, last_idx.clone() - Usize::from(1));
                 builder.set(
                     &eval_and_dedup_points,
-                    last_idx.clone(),
+                    left_group_idx,
                     ClaimAndPoint {
                         evals: left_evals,
                         has_point: Usize::from(1),
@@ -920,12 +910,11 @@ pub fn verify_gkr_circuit<C: Config>(
             });
         }
 
-        let rotation_exprs_len = layer.rotation_exprs.1.len();
         transcript_observe_label(builder, challenger, b"combine subset evals");
         let alpha_pows = gen_alpha_pows(
             builder,
             challenger,
-            Usize::from(layer.exprs.len() + rotation_exprs_len * ROTATION_OPENING_COUNT),
+            Usize::from(layer.exprs.len()),
         );
 
         let sigma: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
@@ -1631,13 +1620,8 @@ pub fn extract_claim_and_point<C: Config>(
     layer: &Layer<E>,
     claims: &Array<C, PointAndEvalVariable<C>>,
     challenges: &Array<C, Ext<C::F, C::EF>>,
-    has_rotation: &Usize<C::N>,
 ) -> Array<C, ClaimAndPoint<C>> {
-    let r_len: Usize<C::N> = Usize::Var(Var::uninit(builder));
-    builder.assign(
-        &r_len,
-        has_rotation.clone() * Usize::from(3) + Usize::from(layer.out_sel_and_eval_exprs.len()),
-    );
+    let r_len = Usize::from(layer.out_sel_and_eval_exprs.len());
     let r = builder.dyn_array(r_len);
     layer
         .out_sel_and_eval_exprs
