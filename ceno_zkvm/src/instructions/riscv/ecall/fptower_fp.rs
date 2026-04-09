@@ -292,8 +292,7 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
     );
 
     let (out_evals, mut chip) = layout.finalize(cb);
-    let layer =
-        Layer::from_circuit_builder(cb, layer_name.to_string(), layout.n_challenges, out_evals);
+    let layer = Layer::from_circuit_builder(cb, layer_name.to_string(), out_evals);
     chip.add_layer(layer);
 
     Ok((

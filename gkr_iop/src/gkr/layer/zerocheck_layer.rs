@@ -148,7 +148,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             .take(self.exprs.len())
             .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
             .collect_vec();
-        let mut zero_expr = extend_exprs_with_rotation(self, &alpha_pows_expr)
+        let mut zero_expr = rlc_zero_expr(self, &alpha_pows_expr)
             .into_iter()
             .sum::<Expression<E>>();
 
@@ -766,7 +766,7 @@ pub fn verify_rotation<E: ExtensionField>(
     })
 }
 
-pub fn extend_exprs_with_rotation<E: ExtensionField>(
+pub fn rlc_zero_expr<E: ExtensionField>(
     layer: &Layer<E>,
     alpha_pows: &[Expression<E>],
 ) -> Vec<Expression<E>> {

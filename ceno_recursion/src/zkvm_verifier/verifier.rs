@@ -887,10 +887,8 @@ pub fn verify_gkr_circuit<C: Config>(
 
     for (i, layer) in gkr_circuit.layers.iter().enumerate() {
         let layer_proof = builder.get(&gkr_proof.layer_proofs, i);
-        let layer_challenges: Array<C, Ext<C::F, C::EF>> =
-            generate_layer_challenges(builder, challenger, challenges, layer.n_challenges);
         let eval_and_dedup_points: Array<C, ClaimAndPoint<C>> =
-            extract_claim_and_point(builder, layer, claims, &layer_challenges);
+            extract_claim_and_point(builder, layer, claims, challenges);
         builder.assert_usize_eq(
             Usize::from(layer.out_sel_and_eval_exprs.len()),
             eval_and_dedup_points.len(),
@@ -1691,33 +1689,6 @@ pub fn extract_claim_and_point<C: Config>(
                 );
             }
         });
-
-    r
-}
-
-pub fn generate_layer_challenges<C: Config>(
-    builder: &mut Builder<C>,
-    challenger: &mut DuplexChallengerVariable<C>,
-    challenges: &Array<C, Ext<C::F, C::EF>>,
-    n_challenges: usize,
-) -> Array<C, Ext<C::F, C::EF>> {
-    let r = builder.dyn_array(n_challenges + 2);
-
-    let alpha = builder.get(challenges, 0);
-    let beta = builder.get(challenges, 1);
-
-    builder.set(&r, 0, alpha);
-    builder.set(&r, 1, beta);
-
-    // TODO: skip if n_challenges <= 2
-    transcript_observe_label(builder, challenger, b"layer challenge");
-    let c = gen_alpha_pows(builder, challenger, Usize::from(n_challenges));
-
-    for i in 0..n_challenges {
-        let idx = i + 2;
-        let e = builder.get(&c, i);
-        builder.set(&r, idx, e);
-    }
 
     r
 }
