@@ -1,12 +1,14 @@
 use super::hal::{
     DeviceTransporter, EccQuarkProver, MainSumcheckProver, OpeningProver, ProverDevice,
-    TowerProver, TraceCommitter,
+    RotationProver, TowerProver, TraceCommitter,
 };
 use crate::{
     error::ZKVMError,
     scheme::{
         cpu::TowerRelationOutput,
-        hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
+        hal::{
+            DeviceProvingKey, MainSumcheckEvals, ProofInput, RotationProverOutput, TowerProverSpec,
+        },
     },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
@@ -14,6 +16,7 @@ use ceno_gpu::bb31::{CudaHalBB31, GpuPolynomial};
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
+    evaluation::EvalExpression,
     gkr::{
         self, Evaluation, GKRProof, GKRProverOutput,
         layer::{LayerWitness, gpu::utils::extract_mle_relationships_from_monomial_terms},
@@ -216,6 +219,61 @@ fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     (r_out_evals, w_out_evals, lk_out_evals)
 }
 
+/// Standalone function for prove_rotation that doesn't require &self.
+/// This allows rotation proof generation from parallel task code paths.
+pub fn prove_rotation_impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'_, GpuBackend<E, PCS>>,
+    rt_tower: &Point<E>,
+    challenges: &[E; 2],
+    transcript: &mut impl Transcript<E>,
+) -> Result<Option<RotationProverOutput<E>>, ZKVMError> {
+    let Some(gkr_circuit) = composed_cs.gkr_circuit.as_ref() else {
+        return Ok(None);
+    };
+    let Some(layer) = gkr_circuit.layers.first() else {
+        return Ok(None);
+    };
+    if layer.rotation_exprs.1.is_empty() {
+        return Ok(None);
+    }
+
+    let Some(rotation_sumcheck_expression) =
+        layer.rotation_sumcheck_expression_monomial_terms.as_ref()
+    else {
+        return Ok(None);
+    };
+
+    let log2_num_instances = input.log2_num_instances();
+    let num_threads = optimal_sumcheck_threads(log2_num_instances);
+    let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+    let wit = LayerWitness(
+        chain!(&input.witness, &input.fixed, &input.structural_witness)
+            .cloned()
+            .collect_vec(),
+    );
+
+    let (proof, points) = gkr_iop::gkr::layer::gpu::prove_rotation_gpu::<E, PCS>(
+        num_threads,
+        num_var_with_rotation,
+        layer.rotation_cyclic_subgroup_size,
+        layer.rotation_cyclic_group_log2,
+        &wit,
+        &layer.rotation_exprs.1,
+        rotation_sumcheck_expression.clone(),
+        rt_tower,
+        challenges,
+        transcript,
+    );
+
+    Ok(Some(RotationProverOutput {
+        proof,
+        left_point: points.left,
+        right_point: points.right,
+        point: points.origin,
+    }))
+}
+
 /// Standalone function for prove_main_constraints that doesn't require &self
 /// This allows it to be called from parallel threads without Send/Sync bounds on GpuProver
 #[allow(clippy::type_complexity)]
@@ -230,6 +288,7 @@ pub fn prove_main_constraints_impl<
     PCS: PolynomialCommitmentScheme<E> + 'static,
 >(
     rt_tower: Vec<E>,
+    rotation: Option<RotationProverOutput<E>>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     composed_cs: &ComposedConstrainSystem<E>,
     challenges: &[E; 2],
@@ -256,40 +315,94 @@ pub fn prove_main_constraints_impl<
     let Some(gkr_circuit) = gkr_circuit else {
         panic!("empty gkr circuit")
     };
-    let selector_ctxs = if cs.ec_final_sum.is_empty() {
-        // it's not global chip
-        vec![
-            SelectorContext {
-                offset: 0,
-                num_instances,
-                num_vars: num_var_with_rotation,
-            };
-            gkr_circuit
-                .layers
-                .first()
-                .map(|layer| layer.out_sel_and_eval_exprs.len())
-                .unwrap_or(0)
-        ]
-    } else {
-        // it's global chip
-        vec![
-            SelectorContext {
-                offset: 0,
-                num_instances: input.num_instances[0],
-                num_vars: num_var_with_rotation,
-            },
-            SelectorContext {
-                offset: input.num_instances[0],
-                num_instances: input.num_instances[1],
-                num_vars: num_var_with_rotation,
-            },
-            SelectorContext {
-                offset: 0,
-                num_instances,
-                num_vars: num_var_with_rotation,
-            },
-        ]
-    };
+    let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+    let selector_ctxs = first_layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .map(|(selector, _)| {
+            if cs.ec_final_sum.is_empty() {
+                SelectorContext {
+                    offset: 0,
+                    num_instances,
+                    num_vars: num_var_with_rotation,
+                }
+            } else if cs.r_selector.as_ref() == Some(selector) {
+                SelectorContext {
+                    offset: 0,
+                    num_instances: input.num_instances[0],
+                    num_vars: num_var_with_rotation,
+                }
+            } else if cs.w_selector.as_ref() == Some(selector) {
+                SelectorContext {
+                    offset: input.num_instances[0],
+                    num_instances: input.num_instances[1],
+                    num_vars: num_var_with_rotation,
+                }
+            } else {
+                SelectorContext {
+                    offset: 0,
+                    num_instances,
+                    num_vars: num_var_with_rotation,
+                }
+            }
+        })
+        .collect_vec();
+
+    let mut out_evals =
+        vec![PointAndEval::new(rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
+    if let Some(rotation) = rotation.as_ref() {
+        let Some([left_group_idx, right_group_idx, point_group_idx]) =
+            first_layer.rotation_selector_group_indices()
+        else {
+            panic!("rotation proof provided for non-rotation layer")
+        };
+
+        let mut left_evals = Vec::new();
+        let mut right_evals = Vec::new();
+        let mut point_evals = Vec::new();
+        for chunk in rotation.proof.evals.chunks_exact(3) {
+            left_evals.push(chunk[0]);
+            right_evals.push(chunk[1]);
+            point_evals.push(chunk[2]);
+        }
+
+        let assign_group = |out_evals: &mut [PointAndEval<E>],
+                            eval_exprs: &[EvalExpression<E>],
+                            evals: &[E],
+                            point: &Point<E>| {
+            assert_eq!(
+                eval_exprs.len(),
+                evals.len(),
+                "rotation eval length mismatch"
+            );
+            for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
+                let EvalExpression::Single(index) = eval_expr else {
+                    panic!("rotation groups must use EvalExpression::Single");
+                };
+                out_evals[*index] = PointAndEval::new(point.clone(), *eval);
+            }
+        };
+
+        assign_group(
+            &mut out_evals,
+            &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
+            &left_evals,
+            &rotation.left_point,
+        );
+        assign_group(
+            &mut out_evals,
+            &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
+            &right_evals,
+            &rotation.right_point,
+        );
+        assign_group(
+            &mut out_evals,
+            &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
+            &point_evals,
+            &rotation.point,
+        );
+    }
+
     let GKRProverOutput {
         gkr_proof,
         opening_evaluations,
@@ -304,8 +417,7 @@ pub fn prove_main_constraints_impl<
                     .collect_vec(),
             )],
         },
-        // eval value doesn't matter as it won't be used by prover
-        &vec![PointAndEval::new(rt_tower, E::ZERO); gkr_circuit.final_out_evals.len()],
+        &out_evals,
         &input
             .pi
             .iter()
@@ -1124,6 +1236,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<E>,
+        rotation: Option<RotationProverOutput<E>>,
         // _records: Vec<ArcMultilinearExtensionGpu<'b, E>>, // not used by GPU after delegation
         input: &'b ProofInput<'a, GpuBackend<E, PCS>>,
         composed_cs: &ComposedConstrainSystem<E>,
@@ -1143,6 +1256,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
 
         let res = prove_main_constraints_impl::<E, PCS>(
             rt_tower,
+            rotation,
             input,
             composed_cs,
             challenges,
@@ -1153,6 +1267,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
 
         res
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> RotationProver<GpuBackend<E, PCS>>
+    for GpuProver<GpuBackend<E, PCS>>
+{
+    fn prove_rotation<'a>(
+        &self,
+        composed_cs: &ComposedConstrainSystem<E>,
+        input: &ProofInput<'a, GpuBackend<E, PCS>>,
+        rt_tower: &Point<E>,
+        challenges: &[E; 2],
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<Option<RotationProverOutput<E>>, ZKVMError> {
+        prove_rotation_impl::<E, PCS>(composed_cs, input, rt_tower, challenges, transcript)
     }
 }
 

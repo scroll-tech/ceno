@@ -16,7 +16,6 @@ use gkr_iop::gpu::{
     },
 };
 use mpcs::PolynomialCommitmentScheme;
-use std::sync::OnceLock;
 
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
