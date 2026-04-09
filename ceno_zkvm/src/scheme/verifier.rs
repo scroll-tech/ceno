@@ -605,7 +605,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         debug_assert_eq!(logup_p_evals.len(), lk_counts_per_instance);
         debug_assert_eq!(logup_q_evals.len(), lk_counts_per_instance);
 
-        let evals = record_evals
+        let base_evals = record_evals
             .iter()
             // append p_evals if there got lk table expressions
             .chain(if cs.lk_table_expressions.is_empty() {
@@ -618,43 +618,103 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .collect_vec();
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
-        let selector_ctxs = if cs.ec_final_sum.is_empty() {
-            assert_eq!(proof.num_instances[1], 0);
-            // it's not shard chip
-            vec![
-                SelectorContext::new(0, num_instances, num_var_with_rotation);
-                gkr_circuit
-                    .layers
-                    .first()
-                    .map(|layer| layer.out_sel_and_eval_exprs.len())
-                    .unwrap_or(0)
-            ]
-        } else {
-            // it's shard chip
-            tracing::debug!(
-                "num_reads: {}, num_writes: {}, total: {}",
-                proof.num_instances[0],
-                proof.num_instances[1],
-                proof.num_instances[0] + proof.num_instances[1],
+        let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+        let selector_ctxs = first_layer
+            .out_sel_and_eval_exprs
+            .iter()
+            .map(|(selector, _)| {
+                if cs.ec_final_sum.is_empty() {
+                    SelectorContext::new(0, num_instances, num_var_with_rotation)
+                } else if cs.r_selector.as_ref() == Some(selector) {
+                    SelectorContext::new(0, proof.num_instances[0], num_var_with_rotation)
+                } else if cs.w_selector.as_ref() == Some(selector) {
+                    SelectorContext::new(
+                        proof.num_instances[0],
+                        proof.num_instances[1],
+                        num_var_with_rotation,
+                    )
+                } else {
+                    SelectorContext::new(0, num_instances, num_var_with_rotation)
+                }
+            })
+            .collect_vec();
+
+        let mut out_evals = vec![PointAndEval::default(); gkr_circuit.n_evaluations];
+        for (idx, point_and_eval) in base_evals.into_iter().enumerate() {
+            out_evals[idx] = point_and_eval;
+        }
+
+        if !first_layer.rotation_exprs.1.is_empty() {
+            let rotation_proof = proof
+                .rotation_proof
+                .as_ref()
+                .ok_or_else(|| ZKVMError::InvalidProof("missing rotation proof".into()))?
+                .clone();
+
+            let rt_tower = out_evals
+                .first()
+                .map(|point_and_eval| point_and_eval.point.clone())
+                .ok_or_else(|| ZKVMError::InvalidProof("missing tower output point".into()))?;
+            let rotation_claims = gkr_iop::gkr::layer::zerocheck_layer::verify_rotation(
+                num_var_with_rotation,
+                first_layer.rotation_exprs.1.len(),
+                first_layer
+                    .rotation_sumcheck_expression
+                    .as_ref()
+                    .expect("missing rotation sumcheck expression"),
+                rotation_proof,
+                first_layer.rotation_cyclic_subgroup_size,
+                first_layer.rotation_cyclic_group_log2,
+                &rt_tower,
+                challenges,
+                transcript,
+            )?;
+
+            let Some([left_group_idx, right_group_idx, point_group_idx]) =
+                first_layer.rotation_selector_group_indices()
+            else {
+                return Err(ZKVMError::InvalidProof(
+                    "rotation claims expected but selectors are missing".into(),
+                ));
+            };
+
+            let assign_group = |out_evals: &mut [PointAndEval<E>],
+                                eval_exprs: &[gkr_iop::evaluation::EvalExpression<E>],
+                                evals: &[E],
+                                point: &Point<E>| {
+                assert_eq!(
+                    eval_exprs.len(),
+                    evals.len(),
+                    "rotation eval length mismatch"
+                );
+                for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
+                    let gkr_iop::evaluation::EvalExpression::Single(index) = eval_expr else {
+                        panic!("rotation groups must use EvalExpression::Single");
+                    };
+                    out_evals[*index] = PointAndEval::new(point.clone(), *eval);
+                }
+            };
+
+            assign_group(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
+                &rotation_claims.left_evals,
+                &rotation_claims.rotation_points.left,
             );
-            vec![
-                SelectorContext {
-                    offset: 0,
-                    num_instances: proof.num_instances[0],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: proof.num_instances[0],
-                    num_instances: proof.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: 0,
-                    num_instances: proof.num_instances[0] + proof.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                },
-            ]
-        };
+            assign_group(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
+                &rotation_claims.right_evals,
+                &rotation_claims.rotation_points.right,
+            );
+            assign_group(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
+                &rotation_claims.target_evals,
+                &rotation_claims.rotation_points.origin,
+            );
+        }
+
         let pi = cs
             .instance
             .iter()
@@ -664,7 +724,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
-            &evals,
+            &out_evals,
             &pi,
             challenges,
             transcript,

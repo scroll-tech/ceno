@@ -6,10 +6,11 @@ use gkr_iop::{
     circuit_builder::{CircuitBuilder, ConstraintSystem, expansion_expr, rotation_split},
     cpu::{CpuBackend, CpuProver},
     error::{BackendError, CircuitBuilderError},
+    evaluation::EvalExpression,
     gkr::{
         GKRCircuit, GKRProof, GKRProverOutput,
         booleanhypercube::{BooleanHypercube, CYCLIC_POW2_5},
-        layer::Layer,
+        layer::{Layer, cpu::prove_rotation, zerocheck_layer::verify_rotation},
         mock::MockProver,
     },
     selector::{SelectorContext, SelectorType},
@@ -1146,14 +1147,37 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     exit_span!(span);
 
     let span = entered_span!("out_eval", profiling_2 = true);
-    let out_evals = {
-        let mut point = Vec::with_capacity(log2_num_instance_rounds);
-        point.extend(
-            prover_transcript
-                .sample_vec(log2_num_instance_rounds)
-                .to_vec(),
-        );
+    let mut point = Vec::with_capacity(log2_num_instance_rounds);
+    point.extend(
+        prover_transcript
+            .sample_vec(log2_num_instance_rounds)
+            .to_vec(),
+    );
 
+    let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+    assert!(
+        !first_layer.rotation_exprs.1.is_empty(),
+        "lookup_keccakf unittest expects rotation-enabled circuit"
+    );
+    let rotation_terms = first_layer
+        .rotation_sumcheck_expression_monomial_terms
+        .as_ref()
+        .expect("missing rotation sumcheck terms")
+        .clone();
+    let (rotation_proof, rotation_points) = prove_rotation::<E, PCS>(
+        num_threads,
+        log2_num_instance_rounds,
+        first_layer.rotation_cyclic_subgroup_size,
+        first_layer.rotation_cyclic_group_log2,
+        &gkr_witness.layers[0],
+        &first_layer.rotation_exprs.1,
+        rotation_terms,
+        &point,
+        &challenges,
+        &mut prover_transcript,
+    );
+
+    let mut out_evals = {
         if test_outputs {
             // Confront outputs with tiny_keccak::keccakf call
             let mut instance_outputs = vec![vec![]; num_instances];
@@ -1204,6 +1228,60 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             })
             .collect::<Vec<_>>()
     };
+
+    let Some([left_group_idx, right_group_idx, point_group_idx]) =
+        first_layer.rotation_selector_group_indices()
+    else {
+        panic!("rotation selectors missing");
+    };
+
+    let mut left_evals = Vec::new();
+    let mut right_evals = Vec::new();
+    let mut point_evals = Vec::new();
+    for chunk in rotation_proof.evals.chunks_exact(3) {
+        left_evals.push(chunk[0]);
+        right_evals.push(chunk[1]);
+        point_evals.push(chunk[2]);
+    }
+
+    let assign_group = |out_evals: &mut [PointAndEval<E>],
+                        eval_exprs: &[EvalExpression<E>],
+                        evals: &[E],
+                        point: &[E]| {
+        assert_eq!(
+            eval_exprs.len(),
+            evals.len(),
+            "rotation eval length mismatch"
+        );
+        for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
+            let EvalExpression::Single(index) = eval_expr else {
+                panic!("rotation groups must use EvalExpression::Single");
+            };
+            out_evals[*index] = PointAndEval {
+                point: point.to_vec(),
+                eval: *eval,
+            };
+        }
+    };
+
+    assign_group(
+        &mut out_evals,
+        &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
+        &left_evals,
+        &rotation_points.left,
+    );
+    assign_group(
+        &mut out_evals,
+        &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
+        &right_evals,
+        &rotation_points.right,
+    );
+    assign_group(
+        &mut out_evals,
+        &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
+        &point_evals,
+        &rotation_points.origin,
+    );
     exit_span!(span);
 
     if cfg!(debug_assertions) {
@@ -1214,7 +1292,15 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
-    let selector_ctxs = vec![SelectorContext::new(0, num_instances, log2_num_instance_rounds); 3];
+    let first_layer_selector_groups = gkr_circuit
+        .layers
+        .first()
+        .map(|layer| layer.out_sel_and_eval_exprs.len())
+        .unwrap_or(0);
+    let selector_ctxs = vec![
+        SelectorContext::new(0, num_instances, log2_num_instance_rounds);
+        first_layer_selector_groups
+    ];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -1244,6 +1330,22 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                     .sample_vec(log2_num_instance_rounds)
                     .to_vec(),
             );
+
+            verify_rotation(
+                log2_num_instance_rounds,
+                first_layer.rotation_exprs.1.len(),
+                first_layer
+                    .rotation_sumcheck_expression
+                    .as_ref()
+                    .expect("missing rotation sumcheck expression"),
+                rotation_proof.clone(),
+                first_layer.rotation_cyclic_subgroup_size,
+                first_layer.rotation_cyclic_group_log2,
+                &point,
+                &challenges,
+                &mut verifier_transcript,
+            )
+            .expect("rotation verify failed");
 
             gkr_circuit
                 .verify(

@@ -27,7 +27,6 @@ use transcript::{BasicTranscript, Transcript};
 
 use crate::{
     gkr::layer::{
-        ROTATION_OPENING_COUNT,
         hal::LinearLayerProver,
         sumcheck_layer::{LayerProof, SumcheckLayerProof},
     },
@@ -38,7 +37,7 @@ use ceno_gpu::common::sumcheck::CommonTermPlan;
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
 pub mod utils;
-use crate::selector::SelectorContext;
+use crate::selector::{SelectorContext, SelectorType};
 use utils::*;
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<GpuBackend<E, PCS>>
@@ -88,7 +87,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
     ) {
         let stream = crate::gpu::get_thread_stream();
         let span = entered_span!("ZerocheckLayerProver", profiling_2 = true);
-        let num_threads = 1; // VP builder for GPU: do not use _num_threads
+        let _num_threads = 1; // VP builder for GPU: do not use host thread parallelism
 
         assert_eq!(challenges.len(), 2);
         assert_eq!(
@@ -99,98 +98,74 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             out_points.len(),
         );
 
-        let (_, raw_rotation_exprs) = &layer.rotation_exprs;
-        let (rotation_proof, rotation_left, rotation_right, rotation_point) =
-            if let Some(rotation_sumcheck_expression) =
-                layer.rotation_sumcheck_expression_monomial_terms.as_ref()
-            {
-                // 1st sumcheck: process rotation_exprs
-                let rt = out_points.first().unwrap();
-                let (
-                    proof,
-                    RotationPoints {
-                        left,
-                        right,
-                        origin,
-                    },
-                ) = prove_rotation_gpu(
-                    num_threads,
-                    max_num_variables,
-                    layer.rotation_cyclic_subgroup_size,
-                    layer.rotation_cyclic_group_log2,
-                    &wit,
-                    raw_rotation_exprs,
-                    rotation_sumcheck_expression.clone(),
-                    rt,
-                    challenges,
-                    transcript,
-                );
-                (Some(proof), Some(left), Some(right), Some(origin))
-            } else {
-                (None, None, None, None)
-            };
-
-        // 2th sumcheck: batch rotation with other constrains
+        // Main sumcheck: constraints are fully unified in out_sel_and_eval_exprs.
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
-            get_challenge_pows(
-                layer.exprs.len() + raw_rotation_exprs.len() * ROTATION_OPENING_COUNT,
-                transcript,
-            )
+            get_challenge_pows(layer.exprs.len(), transcript)
         )
         .collect_vec();
 
         let span_eq = entered_span!("build eqs", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
-        let eqs_gpu = layer
+        let selector_eq_pairs = layer
             .out_sel_and_eval_exprs
             .iter()
             .zip(out_points.iter())
             .zip(selector_ctxs.iter())
-            .map(|(((sel_type, _), point), selector_ctx)| {
-                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type)
+            .filter_map(|(((sel_type, _), point), selector_ctx)| {
+                let eq = build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type);
+                let selector_expr = match sel_type {
+                    SelectorType::Whole(expr)
+                    | SelectorType::Prefix(expr)
+                    | SelectorType::OrderedSparse {
+                        expression: expr, ..
+                    }
+                    | SelectorType::QuarkBinaryTreeLessThan(expr) => expr,
+                    SelectorType::None => return None,
+                };
+                let Expression::StructuralWitIn(wit_id, _) = selector_expr else {
+                    panic!("selector expression must be StructuralWitIn");
+                };
+                let wit_id = *wit_id as usize;
+                assert!(
+                    wit_id < layer.n_structural_witin,
+                    "selector wit id out of range"
+                );
+                Some((wit_id, eq))
             })
-            // for rotation left point
-            .chain(
-                rotation_left
-                    .iter()
-                    .map(|rotation_left| build_eq_x_r_gpu(&cuda_hal, rotation_left)),
-            )
-            // for rotation right point
-            .chain(
-                rotation_right
-                    .iter()
-                    .map(|rotation_right| build_eq_x_r_gpu(&cuda_hal, rotation_right)),
-            )
-            // for rotation point
-            .chain(
-                rotation_point
-                    .iter()
-                    .map(|rotation_point| build_eq_x_r_gpu(&cuda_hal, rotation_point)),
-            )
             .collect::<Vec<_>>();
-        // `wit` := witin ++ fixed ++ pubio
+
+        let mut selector_eq_by_wit_id: Vec<Option<MultilinearExtensionGpu<'static, E>>> =
+            vec![None; layer.n_structural_witin];
+        for (wit_id, eq) in selector_eq_pairs {
+            if selector_eq_by_wit_id[wit_id].is_none() {
+                selector_eq_by_wit_id[wit_id] = Some(eq);
+            }
+        }
+
+        // `wit` := witin ++ fixed ++ pubio ++ structural
+        // selector structural witins are replaced by computed eq MLEs in-place by witness id.
+        let base_wit_count = layer.n_witin + layer.n_fixed + layer.n_instance;
         let all_witins_gpu = wit
             .iter()
-            .take(layer.n_witin + layer.n_fixed + layer.n_instance)
+            .take(base_wit_count)
             .map(|mle| mle.as_ref())
             .chain(
-                // some non-selector structural witin
-                wit.iter()
-                    .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
-                    .take(
-                        layer.n_structural_witin
-                            - layer.out_sel_and_eval_exprs.len()
-                            - layer
-                                .rotation_exprs
-                                .0
-                                .as_ref()
-                                .map(|_| ROTATION_OPENING_COUNT)
-                                .unwrap_or(0),
+                selector_eq_by_wit_id
+                    .iter_mut()
+                    .zip(
+                        wit.iter()
+                            .skip(base_wit_count)
+                            .take(layer.n_structural_witin),
                     )
-                    .map(|mle| mle.as_ref()),
+                    .map(|(selector_eq, mle)| {
+                        if let Some(eq) = selector_eq.as_mut() {
+                            eq
+                        } else {
+                            mle.as_ref()
+                        }
+                    }),
             )
-            .chain(eqs_gpu.iter())
             .collect_vec();
         assert_eq!(
             all_witins_gpu.len(),
@@ -307,7 +282,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     proof: proof_gpu_e,
                     evals: evals_gpu_e,
                 },
-                rotation: rotation_proof,
             },
             row_challenges_e,
         )
@@ -323,7 +297,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 ///                                     + rx_4 * rotation_expr[i].1(1, rx_0, 1 - rx_1, ..., rx_3, rx_5, ...)
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all, name = "prove_rotation_gpu", level = "info")]
-pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     _num_threads: usize,
     max_num_variables: usize,
     rotation_cyclic_subgroup_size: usize,

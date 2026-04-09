@@ -21,7 +21,6 @@ use super::{Layer, LayerWitness, linear_layer::LayerClaims};
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct LayerProof<E: ExtensionField> {
-    pub rotation: Option<SumcheckLayerProof<E>>,
     pub main: SumcheckLayerProof<E>,
 }
 

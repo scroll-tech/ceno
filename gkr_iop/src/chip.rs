@@ -1,4 +1,7 @@
-use crate::{circuit_builder::CircuitBuilder, gkr::layer::Layer};
+use crate::{
+    circuit_builder::CircuitBuilder,
+    gkr::layer::{Layer, ROTATION_OPENING_COUNT},
+};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -30,24 +33,19 @@ pub struct Chip<E: ExtensionField> {
 
 impl<E: ExtensionField> Chip<E> {
     pub fn new_from_cb(cb: &CircuitBuilder<E>) -> Chip<E> {
+        let rotation_eval_count = cb.cs.rotations.len() * ROTATION_OPENING_COUNT;
+        let num_non_zero_outputs = cb.cs.w_expressions.len()
+            + cb.cs.r_expressions.len()
+            + cb.cs.lk_expressions.len()
+            + cb.cs.w_table_expressions.len()
+            + cb.cs.r_table_expressions.len()
+            + cb.cs.lk_table_expressions.len() * 2
+            + rotation_eval_count;
         Self {
             n_fixed: cb.cs.num_fixed,
             n_committed: cb.cs.num_witin as usize,
-            n_evaluations: cb.cs.w_expressions.len()
-                + cb.cs.r_expressions.len()
-                + cb.cs.lk_expressions.len()
-                + cb.cs.w_table_expressions.len()
-                + cb.cs.r_table_expressions.len()
-                + cb.cs.lk_table_expressions.len() * 2
-                + cb.cs.num_fixed
-                + cb.cs.num_witin as usize,
-            final_out_evals: (0..cb.cs.w_expressions.len()
-                + cb.cs.r_expressions.len()
-                + cb.cs.lk_expressions.len()
-                + cb.cs.w_table_expressions.len()
-                + cb.cs.r_table_expressions.len()
-                + cb.cs.lk_table_expressions.len() * 2)
-                .collect_vec(),
+            n_evaluations: num_non_zero_outputs + cb.cs.num_fixed + cb.cs.num_witin as usize,
+            final_out_evals: (0..num_non_zero_outputs).collect_vec(),
             layers: vec![],
         }
     }

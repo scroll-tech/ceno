@@ -481,13 +481,26 @@ impl<
             num_var_with_rotation,
         );
 
+        let span = entered_span!("prove_rotation", profiling_2 = true);
+        let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
+            self.device
+                .prove_rotation(cs, input, &rt_tower, challenges, transcript)
+        })?;
+        exit_span!(span);
+
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
         let span = entered_span!("prove_main_constraints", profiling_2 = true);
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
             info_span!("[ceno] prove_main_constraints").in_scope(|| {
-                self.device
-                    .prove_main_constraints(rt_tower, input, cs, challenges, transcript)
+                self.device.prove_main_constraints(
+                    rt_tower,
+                    rotation.clone(),
+                    input,
+                    cs,
+                    challenges,
+                    transcript,
+                )
             })?;
         let MainSumcheckEvals {
             wits_in_evals,
@@ -502,6 +515,7 @@ impl<
                 lk_out_evals,
                 main_sumcheck_proofs,
                 gkr_iop_proof,
+                rotation_proof: rotation.map(|r| r.proof),
                 tower_proof,
                 ecc_proof,
                 num_instances: input.num_instances,
@@ -736,7 +750,7 @@ where
 {
     use crate::scheme::gpu::{
         extract_witness_mles_for_trace, prove_ec_sum_quark_impl, prove_main_constraints_impl,
-        prove_tower_relation_impl, transport_structural_witness_to_gpu,
+        prove_rotation_impl, prove_tower_relation_impl, transport_structural_witness_to_gpu,
     };
     use gkr_iop::gpu::{GpuBackend, get_cuda_hal};
 
@@ -828,11 +842,24 @@ where
 
     assert_eq!(rt_tower.len(), num_var_with_rotation,);
 
+    let span = entered_span!("prove_rotation", profiling_2 = true);
+    let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
+        prove_rotation_impl::<E, PCS>(cs, &input, &rt_tower, challenges, transcript)
+    })?;
+    exit_span!(span);
+
     // prove main constraints using _impl function
     let span = entered_span!("prove_main_constraints", profiling_2 = true);
     let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
         info_span!("[ceno] prove_main_constraints").in_scope(|| {
-            prove_main_constraints_impl::<E, PCS>(rt_tower, &input, cs, challenges, transcript)
+            prove_main_constraints_impl::<E, PCS>(
+                rt_tower,
+                rotation.clone(),
+                &input,
+                cs,
+                challenges,
+                transcript,
+            )
         })?;
     let MainSumcheckEvals {
         wits_in_evals,
@@ -847,6 +874,7 @@ where
             lk_out_evals,
             main_sumcheck_proofs,
             gkr_iop_proof,
+            rotation_proof: rotation.map(|r| r.proof),
             tower_proof,
             ecc_proof,
             num_instances: input.num_instances,

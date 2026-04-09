@@ -27,9 +27,7 @@ use crate::{
     evaluation::EvalExpression,
     gkr::{
         booleanhypercube::BooleanHypercube,
-        layer::{
-            ROTATION_OPENING_COUNT, hal::ZerocheckLayerProver, sumcheck_layer::SumcheckLayerProof,
-        },
+        layer::{hal::ZerocheckLayerProver, sumcheck_layer::SumcheckLayerProof},
     },
     hal::{ProverBackend, ProverDevice},
     selector::{SelectorContext, SelectorType},
@@ -40,17 +38,17 @@ use crate::{
     },
 };
 
-pub(crate) struct RotationPoints<E: ExtensionField> {
+pub struct RotationPoints<E: ExtensionField> {
     pub left: Point<E>,
     pub right: Point<E>,
     pub origin: Point<E>,
 }
 
-pub(crate) struct RotationClaims<E: ExtensionField> {
-    left_evals: Vec<E>,
-    right_evals: Vec<E>,
-    target_evals: Vec<E>,
-    rotation_points: RotationPoints<E>,
+pub struct RotationClaims<E: ExtensionField> {
+    pub left_evals: Vec<E>,
+    pub right_evals: Vec<E>,
+    pub target_evals: Vec<E>,
+    pub rotation_points: RotationPoints<E>,
 }
 
 pub trait ZerocheckLayer<E: ExtensionField> {
@@ -147,10 +145,10 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
 
         // build main sumcheck expression
         let alpha_pows_expr = (2..)
-            .take(self.exprs.len() + num_rotations * ROTATION_OPENING_COUNT)
+            .take(self.exprs.len())
             .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))
             .collect_vec();
-        let mut zero_expr = extend_exprs_with_rotation(self, &alpha_pows_expr)
+        let mut zero_expr = rlc_zero_expr(self, &alpha_pows_expr)
             .into_iter()
             .sum::<Expression<E>>();
 
@@ -227,7 +225,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         &self,
         max_num_variables: usize,
         proof: LayerProof<E>,
-        mut eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
+        eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
         pub_io_evals: &[E],
         challenges: &[E],
         transcript: &mut impl Transcript<E>,
@@ -246,7 +244,6 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     proof: IOPProof { proofs },
                     evals: main_evals,
                 },
-            rotation: rotation_proof,
         } = proof;
 
         assert_eq!(
@@ -255,45 +252,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             "invalid main_evals length",
         );
 
-        if let Some(rotation_proof) = rotation_proof {
-            // verify rotation proof
-            let rt = eval_and_dedup_points
-                .first()
-                .and_then(|(_, rt)| rt.as_ref())
-                .expect("rotation proof should have at least one point");
-            let RotationClaims {
-                left_evals,
-                right_evals,
-                target_evals,
-                rotation_points:
-                    RotationPoints {
-                        left: left_point,
-                        right: right_point,
-                        origin: origin_point,
-                    },
-            } = verify_rotation(
-                max_num_variables,
-                self.rotation_exprs.1.len(),
-                self.rotation_sumcheck_expression.as_ref().unwrap(),
-                rotation_proof,
-                self.rotation_cyclic_subgroup_size,
-                self.rotation_cyclic_group_log2,
-                rt,
-                challenges,
-                transcript,
-            )?;
-            eval_and_dedup_points.push((left_evals, Some(left_point)));
-            eval_and_dedup_points.push((right_evals, Some(right_point)));
-            eval_and_dedup_points.push((target_evals, Some(origin_point)));
-        }
-
-        let rotation_exprs_len = self.rotation_exprs.1.len();
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
-            get_challenge_pows(
-                self.exprs.len() + rotation_exprs_len * ROTATION_OPENING_COUNT,
-                transcript,
-            )
+            get_challenge_pows(self.exprs.len(), transcript)
         )
         .collect_vec();
 
@@ -706,7 +667,7 @@ fn log_common_term_plan_stats<E: ExtensionField>(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn verify_rotation<E: ExtensionField>(
+pub fn verify_rotation<E: ExtensionField>(
     max_num_variables: usize,
     num_rotations: usize,
     rotation_sumcheck_expression: &Expression<E>,
@@ -805,7 +766,7 @@ fn verify_rotation<E: ExtensionField>(
     })
 }
 
-pub fn extend_exprs_with_rotation<E: ExtensionField>(
+pub fn rlc_zero_expr<E: ExtensionField>(
     layer: &Layer<E>,
     alpha_pows: &[Expression<E>],
 ) -> Vec<Expression<E>> {
@@ -840,72 +801,6 @@ pub fn extend_exprs_with_rotation<E: ExtensionField>(
         zero_check_exprs.push(expr);
     }
 
-    // prepare rotation expr
-    let (rotation_eq, rotation_exprs) = &layer.rotation_exprs;
-    if rotation_eq.is_none() {
-        return zero_check_exprs;
-    }
-
-    let left_rotation_expr: Expression<E> = izip!(
-        rotation_exprs.iter(),
-        alpha_pows_iter.by_ref().take(rotation_exprs.len())
-    )
-    .map(|((rotate_expr, _), alpha)| {
-        assert!(matches!(rotate_expr, Expression::WitIn(_)));
-        alpha * rotate_expr
-    })
-    .sum();
-    let right_rotation_expr: Expression<E> = izip!(
-        rotation_exprs.iter(),
-        alpha_pows_iter.by_ref().take(rotation_exprs.len())
-    )
-    .map(|((rotate_expr, _), alpha)| {
-        assert!(matches!(rotate_expr, Expression::WitIn(_)));
-        alpha * rotate_expr
-    })
-    .sum();
-    let rotation_expr: Expression<E> = izip!(
-        rotation_exprs.iter(),
-        alpha_pows_iter.by_ref().take(rotation_exprs.len())
-    )
-    .map(|((_, expr), alpha)| {
-        assert!(matches!(expr, Expression::WitIn(_)));
-        alpha * expr
-    })
-    .sum();
-
-    // push rotation expr to zerocheck expr
-    if let Some(
-        [
-            rotation_left_eq_expr,
-            rotation_right_eq_expr,
-            rotation_eq_expr,
-        ],
-    ) = rotation_eq.as_ref()
-    {
-        let (rotation_left_eq_expr, rotation_right_eq_expr, rotation_eq_expr) = match (
-            rotation_left_eq_expr,
-            rotation_right_eq_expr,
-            rotation_eq_expr,
-        ) {
-            (
-                Expression::StructuralWitIn(left_eq_id, ..),
-                Expression::StructuralWitIn(right_eq_id, ..),
-                Expression::StructuralWitIn(eq_id, ..),
-            ) => (
-                Expression::WitIn(offset_structural_witid + *left_eq_id),
-                Expression::WitIn(offset_structural_witid + *right_eq_id),
-                Expression::WitIn(offset_structural_witid + *eq_id),
-            ),
-            invalid => panic!("invalid eq format {:?}", invalid),
-        };
-        // add rotation left expr
-        zero_check_exprs.push(rotation_left_eq_expr * left_rotation_expr);
-        // add rotation right expr
-        zero_check_exprs.push(rotation_right_eq_expr * right_rotation_expr);
-        // add target expr
-        zero_check_exprs.push(rotation_eq_expr * rotation_expr);
-    }
     assert!(expr_iter.next().is_none() && alpha_pows_iter.next().is_none());
 
     zero_check_exprs
