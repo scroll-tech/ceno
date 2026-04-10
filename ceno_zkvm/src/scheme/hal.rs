@@ -108,12 +108,10 @@ pub trait TraceCommitter<PB: ProverBackend> {
 pub trait EccQuarkProver<PB: ProverBackend> {
     fn prove_ec_sum_quark<'a>(
         &self,
-        num_instances: usize,
-        xs: Vec<Arc<PB::MultilinearPoly<'a>>>,
-        ys: Vec<Arc<PB::MultilinearPoly<'a>>>,
-        invs: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        cs: &ComposedConstrainSystem<PB::E>,
+        input: &ProofInput<'a, PB>,
         transcript: &mut impl Transcript<PB::E>,
-    ) -> Result<EccQuarkProof<PB::E>, ZKVMError>;
+    ) -> Result<Option<EccQuarkProof<PB::E>>, ZKVMError>;
 }
 
 pub trait TowerProver<PB: ProverBackend> {

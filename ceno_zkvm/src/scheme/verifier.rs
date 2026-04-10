@@ -17,6 +17,7 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
+        utils::{assign_group_evals, derive_ecc_bridge_claims},
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
@@ -47,59 +48,6 @@ use witness::next_pow2_instance_padding;
 
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vk: ZKVMVerifyingKey<E, PCS>,
-}
-
-struct EccBridgeClaims<E: ExtensionField> {
-    xy_point: Point<E>,
-    s_point: Point<E>,
-    x_evals: Vec<E>,
-    y_evals: Vec<E>,
-    s_evals: Vec<E>,
-}
-
-fn derive_ecc_bridge_claims<E: ExtensionField>(
-    ecc_proof: &EccQuarkProof<E>,
-    sample_r: E,
-    num_var_with_rotation: usize,
-) -> EccBridgeClaims<E> {
-    let degree = SEPTIC_EXTENSION_DEGREE;
-    let evals = &ecc_proof.evals[3..];
-    assert_eq!(evals.len(), degree * 7);
-
-    let s1 = &evals[0..degree];
-    let x0 = &evals[degree..2 * degree];
-    let y0 = &evals[2 * degree..3 * degree];
-    let x1 = &evals[3 * degree..4 * degree];
-    let y1 = &evals[4 * degree..5 * degree];
-
-    let one_minus_r = E::ONE - sample_r;
-    let x_evals = x0
-        .iter()
-        .zip_eq(x1.iter())
-        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
-        .collect_vec();
-    let y_evals = y0
-        .iter()
-        .zip_eq(y1.iter())
-        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
-        .collect_vec();
-    let s_evals = s1.iter().map(|v| *v * sample_r).collect_vec();
-
-    let mut xy_point = vec![sample_r];
-    xy_point.extend(ecc_proof.rt.iter().copied());
-    assert_eq!(xy_point.len(), num_var_with_rotation);
-
-    let mut s_point = ecc_proof.rt.clone();
-    s_point.push(sample_r);
-    assert_eq!(s_point.len(), num_var_with_rotation);
-
-    EccBridgeClaims {
-        xy_point,
-        s_point,
-        x_evals,
-        y_evals,
-        s_evals,
-    }
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
@@ -589,19 +537,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert_eq!(num_vars, log2_num_instances);
         });
 
-        // verify ecc proof if exists
-        let shard_ec_sum: Option<SepticPoint<E::BaseField>> = if composed_cs.has_ecc_ops() {
-            tracing::debug!("verifying ecc proof...");
-            assert!(proof.ecc_proof.is_some());
-            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
-            assert!(!ecc_proof.sum.is_infinity);
-
-            EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
-            tracing::debug!("ecc proof verified.");
-            Some(ecc_proof.sum.clone())
-        } else {
-            None
-        };
+        let mut shard_ec_sum: Option<SepticPoint<E::BaseField>> = None;
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -644,6 +580,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         Ok(())
                     }
                 })?;
+        }
+
+        if composed_cs.has_ecc_ops() {
+            tracing::debug!("verifying ecc proof...");
+            assert!(proof.ecc_proof.is_some());
+            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
+            assert!(!ecc_proof.sum.is_infinity);
+
+            EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
+            tracing::debug!("ecc proof verified.");
+            shard_ec_sum = Some(ecc_proof.sum.clone());
         }
 
         debug_assert!(
@@ -697,19 +644,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             out_evals[idx] = point_and_eval;
         }
 
-        let assign_group = |out_evals: &mut [PointAndEval<E>],
-                            eval_exprs: &[gkr_iop::evaluation::EvalExpression<E>],
-                            evals: &[E],
-                            point: &Point<E>| {
-            assert_eq!(eval_exprs.len(), evals.len(), "group eval length mismatch");
-            for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
-                let gkr_iop::evaluation::EvalExpression::Single(index) = eval_expr else {
-                    panic!("group must use EvalExpression::Single");
-                };
-                out_evals[*index] = PointAndEval::new(point.clone(), *eval);
-            }
-        };
-
         if !first_layer.rotation_exprs.1.is_empty() {
             let rotation_proof = proof
                 .rotation_proof
@@ -744,19 +678,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 ));
             };
 
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
                 &rotation_claims.left_evals,
                 &rotation_claims.rotation_points.left,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
                 &rotation_claims.right_evals,
                 &rotation_claims.rotation_points.right,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
                 &rotation_claims.target_evals,
@@ -776,19 +710,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
             let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation);
 
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[x_group_idx].1,
                 &claims.x_evals,
                 &claims.xy_point,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[y_group_idx].1,
                 &claims.y_evals,
                 &claims.xy_point,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[slope_group_idx].1,
                 &claims.s_evals,
