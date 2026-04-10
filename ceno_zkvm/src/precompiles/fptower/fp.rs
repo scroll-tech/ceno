@@ -235,7 +235,7 @@ impl<E: ExtensionField, P: FpOpField> ProtocolBuilder<E> for FpOpLayout<E, P> {
         cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
 
         let out_evals = default_out_eval_groups(cb);
-        let mut chip = Chip::new_from_cb(cb, 0);
+        let mut chip = Chip::new_from_cb(cb);
         let layer = Layer::from_circuit_builder(cb, name, out_evals);
         chip.add_layer(layer);
         chip

@@ -125,7 +125,7 @@ impl<E: ExtensionField, const MAX_BITS_1: usize, const MAX_BITS_2: usize, R: Ran
                 // zero_record
                 vec![],
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
         // register selector to legacy constrain system

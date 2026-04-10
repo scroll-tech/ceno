@@ -302,7 +302,7 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
                 // zero_record
                 vec![],
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
         // register selector to legacy constrain system
