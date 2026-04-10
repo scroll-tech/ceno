@@ -29,7 +29,6 @@ use crate::{
 use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
 
-use crate::transcript::{challenger_add_forked_index, clone_challenger_state};
 use gkr_iop::{
     evaluation::EvalExpression,
     gkr::{
@@ -153,22 +152,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         challenger.observe(builder, log2_max_codeword_size_felt);
     }
 
-    iter_zip!(builder, zkvm_proof_input.chip_proofs).for_each(|ptr_vec, builder| {
-        let chip_proofs = builder.iter_ptr_get(&zkvm_proof_input.chip_proofs, ptr_vec[0]);
-        let chip_idx = builder.get(&chip_proofs, 0).idx_felt;
-        challenger.observe(builder, chip_idx);
-
-        iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
-            let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
-
-            iter_zip!(builder, chip_proof.num_instances).for_each(|ptr_vec, builder| {
-                let num_instance = builder.iter_ptr_get(&chip_proof.num_instances, ptr_vec[0]);
-                let num_instance = builder.unsafe_cast_var_to_felt(num_instance);
-                challenger.observe(builder, num_instance);
-            });
-        });
-    });
-
     challenger_multi_observe(
         builder,
         &mut challenger,
@@ -252,9 +235,15 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
             iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
                 let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
-                // fork transcript to support chip concurrently proved
-                let mut chip_challenger = clone_challenger_state(builder, &challenger);
-                challenger_add_forked_index(builder, &mut chip_challenger, &forked_sample_index);
+                // Fork chip transcript independently and bind challenges/metadata in verifier order.
+                let mut chip_challenger = DuplexChallengerVariable::new(builder);
+                transcript_observe_label(builder, &mut chip_challenger, b"fork");
+                let alpha_felts = builder.ext2felt(alpha);
+                chip_challenger.observe_slice(builder, alpha_felts);
+                let beta_felts = builder.ext2felt(beta);
+                chip_challenger.observe_slice(builder, beta_felts);
+                let fork_id_felt = builder.unsafe_cast_var_to_felt(forked_sample_index.get_var());
+                chip_challenger.observe(builder, fork_id_felt);
                 builder.assert_usize_eq(
                     chip_proof.rw_out_evals.length.clone(),
                     Usize::from(
@@ -266,6 +255,11 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     Usize::from(circuit_vk.get_cs().num_lks() * 4),
                 );
                 chip_challenger.observe(builder, chip_proof.idx_felt);
+                iter_zip!(builder, chip_proof.num_instances).for_each(|ptr_vec, builder| {
+                    let num_instance = builder.iter_ptr_get(&chip_proof.num_instances, ptr_vec[0]);
+                    let num_instance = builder.unsafe_cast_var_to_felt(num_instance);
+                    chip_challenger.observe(builder, num_instance);
+                });
 
                 // getting the number of dummy padding item that we used in this opcode circuit
                 let num_lks: Var<C::N> =
