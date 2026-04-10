@@ -184,11 +184,12 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
     //    the validity of read/write/logup records through sumchecks;
     // 2. multiple multiplication relations between witness multilinear polynomials
     //    achieved via zerochecks.
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<PB::E>,
         rotation: Option<RotationProverOutput<PB::E>>,
+        ecc_proof: Option<&EccQuarkProof<PB::E>>,
         input: &'b ProofInput<'a, PB>,
         cs: &ComposedConstrainSystem<PB::E>,
         challenges: &[PB::E; 2],

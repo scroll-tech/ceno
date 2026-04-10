@@ -496,6 +496,7 @@ impl<
                 self.device.prove_main_constraints(
                     rt_tower,
                     rotation.clone(),
+                    ecc_proof.as_ref(),
                     input,
                     cs,
                     challenges,
@@ -855,6 +856,7 @@ where
             prove_main_constraints_impl::<E, PCS>(
                 rt_tower,
                 rotation.clone(),
+                ecc_proof.as_ref(),
                 &input,
                 cs,
                 challenges,
