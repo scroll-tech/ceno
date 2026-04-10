@@ -29,7 +29,7 @@ pub struct Chip<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> Chip<E> {
-    pub fn new_from_cb(cb: &CircuitBuilder<E>) -> Chip<E> {
+    pub fn new_from_cb(cb: &CircuitBuilder<E>, _n_challenges: usize) -> Chip<E> {
         Self {
             n_fixed: cb.cs.num_fixed,
             n_committed: cb.cs.num_witin as usize,

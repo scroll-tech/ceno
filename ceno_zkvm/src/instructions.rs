@@ -65,7 +65,7 @@ pub trait Instruction<E: ExtensionField> {
                 // zero_record
                 (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb),
+            Chip::new_from_cb(cb, 0),
         );
 
         // register selector to legacy constrain system
