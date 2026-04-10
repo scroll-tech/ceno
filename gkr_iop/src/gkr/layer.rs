@@ -572,11 +572,10 @@ impl<E: ExtensionField> Layer<E> {
 
             // ECC bridge selector groups must be explicitly supplied and independent.
             // Do not fall back to (or reuse) preceding r/w/lk/zero selectors.
-            let [ecc_sel_x, ecc_sel_y, ecc_sel_s] = cb
-                .cs
-                .ec_bridge_selectors
-                .clone()
-                .expect("ecc bridge selectors must be provided when ec_point_exprs is non-empty");
+            let [ecc_sel_x, ecc_sel_y, ecc_sel_s] =
+                cb.cs.ec_bridge_selectors.clone().expect(
+                    "ecc bridge selectors must be provided when ec_point_exprs is non-empty",
+                );
 
             let x_eval_base = next_non_zero_eval_idx;
             let y_eval_base = x_eval_base + septic_degree;
@@ -619,16 +618,7 @@ impl<E: ExtensionField> Layer<E> {
 
         if let Some(zero_selector) = cb.cs.zero_selector.as_ref() {
             // process zero_record
-            // Keep zero constraints in their own group when ECC bridge groups are present.
-            // Otherwise, dedup could merge zero constraints into the ECC slope group because
-            // they often share the same selector (e.g. sel_all / prefix selector).
-            let evals = if ecc_bridge_group_indices.is_some() {
-                expr_evals.push((zero_selector.clone(), vec![]));
-                &mut expr_evals.last_mut().unwrap().1
-            } else {
-                // Intentionally dedup with the previous selector group when selector matches.
-                Self::dedup_last_selector_evals(zero_selector, &mut expr_evals)
-            };
+            let evals = Self::dedup_last_selector_evals(zero_selector, &mut expr_evals);
             for (idx, (zero_expr, name)) in izip!(
                 0..,
                 chain!(
@@ -660,12 +650,13 @@ impl<E: ExtensionField> Layer<E> {
 
         if let Some([x_base, y_base, s_base]) = ecc_bridge_eval_bases {
             let find_group_by_base = |base: usize| {
-                expr_evals.iter().enumerate().find_map(|(idx, (_, evals))| {
-                    match evals.first() {
+                expr_evals
+                    .iter()
+                    .enumerate()
+                    .find_map(|(idx, (_, evals))| match evals.first() {
                         Some(EvalExpression::Single(pos)) if *pos == base => Some(idx),
                         _ => None,
-                    }
-                })
+                    })
             };
             let x_idx = find_group_by_base(x_base)
                 .expect("missing x ecc bridge selector group after retain");
