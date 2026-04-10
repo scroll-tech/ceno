@@ -189,6 +189,7 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
         &self,
         rt_tower: Vec<PB::E>,
         rotation: Option<RotationProverOutput<PB::E>>,
+        ecc_proof: Option<&EccQuarkProof<PB::E>>,
         input: &'b ProofInput<'a, PB>,
         cs: &ComposedConstrainSystem<PB::E>,
         challenges: &[PB::E; 2],

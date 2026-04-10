@@ -44,7 +44,7 @@ pub struct EccQuarkProof<E: ExtensionField> {
     pub zerocheck_proof: IOPProof<E>,
     /// Number of EC points being summed
     pub num_instances: usize,
-    pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[0,rt], y[0,rt], s[0,rt]
+    pub evals: Vec<E>, // [sel_add, sel_bypass, sel_export] ++ [s[1,rt], x[rt,0], y[rt,0], x[rt,1], y[rt,1], x[1,rt], y[1,rt]]
     pub rt: Point<E>,
     pub sum: SepticPoint<E::BaseField>,
 }

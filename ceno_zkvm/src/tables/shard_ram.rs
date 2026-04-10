@@ -418,6 +418,9 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         let selector_r = cb.create_placeholder_structural_witin(|| "selector_r");
         let selector_w = cb.create_placeholder_structural_witin(|| "selector_w");
         let selector_zero = cb.create_placeholder_structural_witin(|| "selector_zero");
+        let selector_ecc_x = cb.create_placeholder_structural_witin(|| "selector_ecc_x");
+        let selector_ecc_y = cb.create_placeholder_structural_witin(|| "selector_ecc_y");
+        let selector_ecc_s = cb.create_placeholder_structural_witin(|| "selector_ecc_s");
 
         let config = Self::construct_circuit(cb, param)?;
 
@@ -439,6 +442,11 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         cb.cs.w_selector = Some(selector_w);
         cb.cs.zero_selector = Some(selector_zero.clone());
         cb.cs.lk_selector = Some(selector_zero);
+        cb.cs.ec_bridge_selectors = Some([
+            SelectorType::Whole(selector_ecc_x.expr()),
+            SelectorType::Whole(selector_ecc_y.expr()),
+            SelectorType::Whole(selector_ecc_s.expr()),
+        ]);
 
         // all shared the same selector
         let (out_evals, mut chip) = (
@@ -487,7 +495,7 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
 
-        assert_eq!(num_structural_witin, 3);
+        assert!(num_structural_witin >= 3);
         let selector_r_witin = WitIn { id: 0 };
         let selector_w_witin = WitIn { id: 1 };
         let selector_zero_witin = WitIn { id: 2 };
