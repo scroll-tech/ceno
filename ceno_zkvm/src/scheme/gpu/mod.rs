@@ -29,6 +29,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
+use p3::matrix::Matrix;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,
