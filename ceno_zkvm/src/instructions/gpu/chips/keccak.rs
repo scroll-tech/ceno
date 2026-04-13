@@ -454,7 +454,10 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
             num_witin,
             InstancePaddingStrategy::Default,
         );
-        rmm.set_device_backing(gpu_result.witness.device_buffer, DeviceMatrixLayout::ColMajor);
+        rmm.set_device_backing(
+            gpu_result.witness.device_buffer,
+            DeviceMatrixLayout::ColMajor,
+        );
         rmm
     };
 

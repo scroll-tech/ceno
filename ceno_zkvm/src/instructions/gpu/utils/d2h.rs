@@ -278,4 +278,3 @@ pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
     rmm.set_device_backing(gpu_result.device_buffer, DeviceMatrixLayout::ColMajor);
     rmm
 }
-

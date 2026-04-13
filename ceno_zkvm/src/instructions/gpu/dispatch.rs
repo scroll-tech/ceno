@@ -364,7 +364,12 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             )
         })?
     } else {
-        gpu_witness_to_rmm::<E>(gpu_witness, total_instances, num_witin, I::padding_strategy())
+        gpu_witness_to_rmm::<E>(
+            gpu_witness,
+            total_instances,
+            num_witin,
+            I::padding_strategy(),
+        )
     };
     raw_witin.padding_by_strategy();
     debug_compare_witness::<E, I>(

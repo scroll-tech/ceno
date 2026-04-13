@@ -783,14 +783,54 @@ where
     E: ExtensionField,
 {
     let cuda_hal = get_cuda_hal().unwrap();
-    let structural_mles = structural_rmm.to_mles();
-
     let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "transport_structural_witness_to_gpu");
 
-    let result = structural_mles
-        .iter()
-        .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
-        .collect();
+    let result = if structural_rmm.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor) {
+        assert_eq!(
+            std::any::TypeId::of::<E::BaseField>(),
+            std::any::TypeId::of::<BB31Base>(),
+            "GPU structural fast path only supports BabyBear base field"
+        );
+        let device_buffer = structural_rmm
+            .device_backing_ref::<BufferImpl<'static, BB31Base>>()
+            .unwrap_or_else(|| panic!("col-major structural device backing type mismatch"));
+        let rows = structural_rmm.height();
+        let cols = structural_rmm.width();
+        let poly_len_bytes = rows * std::mem::size_of::<BB31Base>();
+        let total_bytes = cols * poly_len_bytes;
+        assert_eq!(
+            device_buffer.len() * std::mem::size_of::<BB31Base>(),
+            total_bytes,
+            "structural col-major buffer size mismatch"
+        );
+        let num_vars_in_poly = rows.trailing_zeros() as usize;
+        assert_eq!(rows, 1usize << num_vars_in_poly);
+
+        (0..cols)
+            .map(|col_idx| {
+                let src_byte_offset = col_idx * poly_len_bytes;
+                let view =
+                    device_buffer.as_slice_range(src_byte_offset..src_byte_offset + poly_len_bytes);
+                let view_buf = BufferImpl::new_from_view(view);
+                let view_poly = GpuPolynomial::new(view_buf, num_vars_in_poly);
+                let view_poly_static: GpuPolynomial<'static> =
+                    unsafe { std::mem::transmute(view_poly) };
+                let mle_static = MultilinearExtensionGpu::from_ceno_gpu_base(view_poly_static);
+                Arc::new(unsafe {
+                    std::mem::transmute::<
+                        MultilinearExtensionGpu<'static, E>,
+                        MultilinearExtensionGpu<'a, E>,
+                    >(mle_static)
+                })
+            })
+            .collect()
+    } else {
+        let structural_mles = structural_rmm.to_mles();
+        structural_mles
+            .iter()
+            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
+            .collect()
+    };
 
     let estimated_bytes = estimate_structural_mle_bytes(num_structural_witin, num_vars);
     check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);

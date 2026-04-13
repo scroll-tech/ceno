@@ -383,88 +383,108 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
             Ok(witness_buf)
         })?;
 
-    // 5. Keep witness on device in normal mode; keep structural witness host-resident.
-    let struct_data = tracing::info_span!(
-        "gpu_shard_ram_structural_transpose_d2h",
-        num_rows_padded,
-        num_structural_witin,
-    )
-    .in_scope(|| -> Result<_, ZKVMError> {
-        let wit_num_rows = num_rows_padded;
-        let struct_num_cols = num_structural_witin;
-        let mut struct_rmm_buf = hal
-            .witgen
-            .alloc_elems_on_device(wit_num_rows * struct_num_cols, false, None)
-            .map_err(|e| {
-                ZKVMError::InvalidWitness(
-                    format!("GPU alloc for struct transpose failed: {e}").into(),
-                )
-            })?;
-        matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
-            &hal.inner,
-            &mut struct_rmm_buf,
-            &gpu_structural.device_buffer,
-            wit_num_rows,
-            struct_num_cols,
+    // 5. Structural witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        let struct_data = tracing::info_span!(
+            "gpu_shard_ram_structural_transpose_d2h",
+            num_rows_padded,
+            num_structural_witin,
         )
-        .map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU struct transpose failed: {e}").into())
-        })?;
-
-        let gpu_struct_data: Vec<BB> = struct_rmm_buf
-            .to_vec()
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU D2H struct failed: {e}").into()))?;
-        let out: Vec<E::BaseField> = unsafe {
-            let mut data = std::mem::ManuallyDrop::new(gpu_struct_data);
-            Vec::from_raw_parts(
-                data.as_mut_ptr() as *mut E::BaseField,
-                data.len(),
-                data.capacity(),
-            )
-        };
-
-        Ok(out)
-    })?;
-
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
-        tracing::info_span!("gpu_shard_ram_witness_transpose_d2h", num_rows_padded, num_witin)
-            .in_scope(|| -> Result<_, ZKVMError> {
-                let mut rmm_buf = hal
-                    .witgen
-                    .alloc_elems_on_device(num_rows_padded * num_witin, false, None)
-                    .map_err(|e| {
-                        ZKVMError::InvalidWitness(
-                            format!("GPU alloc for witness transpose failed: {e}").into(),
-                        )
-                    })?;
-                matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
-                    &hal.inner,
-                    &mut rmm_buf,
-                    &witness_buf,
-                    num_rows_padded,
-                    num_witin,
-                )
+        .in_scope(|| -> Result<_, ZKVMError> {
+            let wit_num_rows = num_rows_padded;
+            let struct_num_cols = num_structural_witin;
+            let mut struct_rmm_buf = hal
+                .witgen
+                .alloc_elems_on_device(wit_num_rows * struct_num_cols, false, None)
                 .map_err(|e| {
-                    ZKVMError::InvalidWitness(format!("GPU witness transpose failed: {e}").into())
-                })?;
-
-                let gpu_wit_data: Vec<BB> = rmm_buf.to_vec().map_err(|e| {
-                    ZKVMError::InvalidWitness(format!("GPU D2H witness failed: {e}").into())
-                })?;
-                let wit_data: Vec<E::BaseField> = unsafe {
-                    let mut data = std::mem::ManuallyDrop::new(gpu_wit_data);
-                    Vec::from_raw_parts(
-                        data.as_mut_ptr() as *mut E::BaseField,
-                        data.len(),
-                        data.capacity(),
+                    ZKVMError::InvalidWitness(
+                        format!("GPU alloc for struct transpose failed: {e}").into(),
                     )
-                };
-                Ok(witness::RowMajorMatrix::new_by_values(
-                    wit_data,
-                    num_witin,
-                    InstancePaddingStrategy::Default,
-                ))
-            })?
+                })?;
+            matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+                &hal.inner,
+                &mut struct_rmm_buf,
+                &gpu_structural.device_buffer,
+                wit_num_rows,
+                struct_num_cols,
+            )
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU struct transpose failed: {e}").into())
+            })?;
+
+            let gpu_struct_data: Vec<BB> = struct_rmm_buf.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU D2H struct failed: {e}").into())
+            })?;
+            let out: Vec<E::BaseField> = unsafe {
+                let mut data = std::mem::ManuallyDrop::new(gpu_struct_data);
+                Vec::from_raw_parts(
+                    data.as_mut_ptr() as *mut E::BaseField,
+                    data.len(),
+                    data.capacity(),
+                )
+            };
+
+            Ok(out)
+        })?;
+        witness::RowMajorMatrix::new_by_values(
+            struct_data,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        )
+    } else {
+        let mut rmm = witness::RowMajorMatrix::new(
+            num_rows_padded,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
+        rmm.set_device_backing(gpu_structural.device_buffer, DeviceMatrixLayout::ColMajor);
+        rmm
+    };
+
+    // 6. Main witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        tracing::info_span!(
+            "gpu_shard_ram_witness_transpose_d2h",
+            num_rows_padded,
+            num_witin
+        )
+        .in_scope(|| -> Result<_, ZKVMError> {
+            let mut rmm_buf = hal
+                .witgen
+                .alloc_elems_on_device(num_rows_padded * num_witin, false, None)
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(
+                        format!("GPU alloc for witness transpose failed: {e}").into(),
+                    )
+                })?;
+            matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+                &hal.inner,
+                &mut rmm_buf,
+                &witness_buf,
+                num_rows_padded,
+                num_witin,
+            )
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU witness transpose failed: {e}").into())
+            })?;
+
+            let gpu_wit_data: Vec<BB> = rmm_buf.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU D2H witness failed: {e}").into())
+            })?;
+            let wit_data: Vec<E::BaseField> = unsafe {
+                let mut data = std::mem::ManuallyDrop::new(gpu_wit_data);
+                Vec::from_raw_parts(
+                    data.as_mut_ptr() as *mut E::BaseField,
+                    data.len(),
+                    data.capacity(),
+                )
+            };
+            Ok(witness::RowMajorMatrix::new_by_values(
+                wit_data,
+                num_witin,
+                InstancePaddingStrategy::Default,
+            ))
+        })?
     } else {
         let mut rmm = witness::RowMajorMatrix::new(
             num_rows_padded,
@@ -474,12 +494,6 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
         rmm.set_device_backing(witness_buf, DeviceMatrixLayout::ColMajor);
         rmm
     };
-
-    let raw_structural_witin = witness::RowMajorMatrix::new_by_values(
-        struct_data,
-        num_structural_witin,
-        InstancePaddingStrategy::Default,
-    );
 
     tracing::info!(
         "GPU shard_ram assign_instances done: {} records, {} padded rows",
@@ -608,49 +622,65 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
         },
     )?;
 
-    // Keep witness on device in normal mode; keep structural witness host-resident.
-    let struct_data = tracing::info_span!(
-        "gpu_shard_ram_structural_transpose_d2h_from_device",
-        num_rows_padded,
-        num_structural_witin,
-    )
-    .in_scope(|| -> Result<_, ZKVMError> {
-        let wit_num_rows = num_rows_padded;
-        let struct_num_cols = num_structural_witin;
-        let mut struct_rmm_buf = hal
-            .witgen
-            .alloc_elems_on_device(wit_num_rows * struct_num_cols, false, None)
-            .map_err(|e| {
-                ZKVMError::InvalidWitness(
-                    format!("GPU alloc for struct transpose failed: {e}").into(),
-                )
-            })?;
-        matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
-            &hal.inner,
-            &mut struct_rmm_buf,
-            &gpu_structural.device_buffer,
-            wit_num_rows,
-            struct_num_cols,
+    // Structural witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        let struct_data = tracing::info_span!(
+            "gpu_shard_ram_structural_transpose_d2h_from_device",
+            num_rows_padded,
+            num_structural_witin,
         )
-        .map_err(|e| {
-            ZKVMError::InvalidWitness(format!("GPU struct transpose failed: {e}").into())
-        })?;
-
-        let gpu_struct_data: Vec<BB> = struct_rmm_buf
-            .to_vec()
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU D2H struct failed: {e}").into()))?;
-        let out: Vec<E::BaseField> = unsafe {
-            let mut data = std::mem::ManuallyDrop::new(gpu_struct_data);
-            Vec::from_raw_parts(
-                data.as_mut_ptr() as *mut E::BaseField,
-                data.len(),
-                data.capacity(),
+        .in_scope(|| -> Result<_, ZKVMError> {
+            let wit_num_rows = num_rows_padded;
+            let struct_num_cols = num_structural_witin;
+            let mut struct_rmm_buf = hal
+                .witgen
+                .alloc_elems_on_device(wit_num_rows * struct_num_cols, false, None)
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(
+                        format!("GPU alloc for struct transpose failed: {e}").into(),
+                    )
+                })?;
+            matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+                &hal.inner,
+                &mut struct_rmm_buf,
+                &gpu_structural.device_buffer,
+                wit_num_rows,
+                struct_num_cols,
             )
-        };
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU struct transpose failed: {e}").into())
+            })?;
 
-        Ok(out)
-    })?;
+            let gpu_struct_data: Vec<BB> = struct_rmm_buf.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU D2H struct failed: {e}").into())
+            })?;
+            let out: Vec<E::BaseField> = unsafe {
+                let mut data = std::mem::ManuallyDrop::new(gpu_struct_data);
+                Vec::from_raw_parts(
+                    data.as_mut_ptr() as *mut E::BaseField,
+                    data.len(),
+                    data.capacity(),
+                )
+            };
 
+            Ok(out)
+        })?;
+        witness::RowMajorMatrix::new_by_values(
+            struct_data,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        )
+    } else {
+        let mut rmm = witness::RowMajorMatrix::new(
+            num_rows_padded,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
+        rmm.set_device_backing(gpu_structural.device_buffer, DeviceMatrixLayout::ColMajor);
+        rmm
+    };
+
+    // Witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
     let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
         tracing::info_span!(
             "gpu_shard_ram_witness_transpose_d2h_from_device",
@@ -703,12 +733,6 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
         rmm.set_device_backing(witness_buf, DeviceMatrixLayout::ColMajor);
         rmm
     };
-
-    let raw_structural_witin = witness::RowMajorMatrix::new_by_values(
-        struct_data,
-        num_structural_witin,
-        InstancePaddingStrategy::Default,
-    );
 
     tracing::info!(
         "GPU shard_ram assign_instances (from_device) done: {} records, {} padded rows",
