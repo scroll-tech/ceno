@@ -47,6 +47,7 @@ use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
 use tracing::info_span;
+use witness::DeviceMatrixLayout;
 
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::gpu_prover::*;
@@ -601,6 +602,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         let (mles, pcs_data, commit) = if is_pcs_match {
             let vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
                 traces.into_values().collect();
+
+            for (idx, trace) in vec_traces.iter().enumerate() {
+                assert!(
+                    trace.has_device_backing(),
+                    "GPU mode requires device-backed witness trace at index {idx}"
+                );
+                assert_eq!(
+                    trace.device_backing_layout(),
+                    Some(DeviceMatrixLayout::ColMajor),
+                    "GPU mode requires col-major device-backed witness trace at index {idx}"
+                );
+            }
 
             let span = entered_span!("[gpu] hal init", profiling_2 = true);
             let cuda_hal = get_cuda_hal().unwrap();

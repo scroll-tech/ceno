@@ -16,7 +16,7 @@ use ceno_gpu::{
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::FieldAlgebra;
 use tracing::info_span;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     e2e::ShardContext,
@@ -406,9 +406,9 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
         })?;
     }
 
-    // Step 8: Transpose GPU witness (column-major -> row-major) + D2H
-    let raw_witin = info_span!("transpose_d2h", rows = num_padded_rows, cols = num_witin)
-        .in_scope(|| {
+    // Step 8: Keep witness on device in normal mode; D2H only for debug compare.
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        info_span!("transpose_d2h", rows = num_padded_rows, cols = num_witin).in_scope(|| {
             let mut rmm_buffer = hal
                 .alloc_elems_on_device(num_padded_rows * num_witin, false, None)
                 .map_err(|e| {
@@ -438,18 +438,25 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
                 )
             };
 
-            // Construct a rotation-aware matrix and fill with GPU-transposed data.
-            // new_by_rotation allocates the correct padded size; we overwrite the real portion.
             let mut rmm = RowMajorMatrix::<E::BaseField>::new_by_rotation(
                 num_instances,
                 rotation,
                 num_witin,
                 InstancePaddingStrategy::Default,
             );
-            // Access inner p3 matrix's values via DerefMut
             std::ops::DerefMut::deref_mut(&mut rmm).values[..data.len()].copy_from_slice(&data);
             Ok::<_, ZKVMError>(rmm)
-        })?;
+        })?
+    } else {
+        let mut rmm = RowMajorMatrix::<E::BaseField>::new_by_rotation(
+            num_instances,
+            rotation,
+            num_witin,
+            InstancePaddingStrategy::Default,
+        );
+        rmm.set_device_backing(gpu_result.witness.device_buffer, DeviceMatrixLayout::ColMajor);
+        rmm
+    };
 
     // Step 9: Build structural witness on CPU with selector indices
     let raw_structural = info_span!("structural_witness").in_scope(|| {

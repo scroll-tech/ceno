@@ -21,7 +21,7 @@ use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity
 use p3::field::FieldAlgebra;
 use rustc_hash::FxHashMap;
 use tracing::info_span;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     e2e::{RAMRecord, ShardContext},
@@ -215,7 +215,7 @@ pub(crate) fn gpu_lk_counters_to_multiplicity(
 ///
 /// GPU witgen kernels output column-major layout for better memory coalescing.
 /// This function transposes to row-major on GPU before copying to host.
-pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
+pub(crate) fn gpu_witness_to_rmm_d2h<E: ExtensionField>(
     hal: &CudaHalBB31,
     gpu_result: ceno_gpu::common::witgen::types::GpuWitnessResult<
         ceno_gpu::common::BufferImpl<'static, <ff_ext::BabyBearExt4 as ExtensionField>::BaseField>,
@@ -260,3 +260,22 @@ pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
         data, num_cols, padding,
     ))
 }
+
+/// Build a host RowMajorMatrix placeholder while keeping source witness on device.
+///
+/// This avoids the GPU->CPU copy in normal GPU mode. Downstream GPU commit
+/// reads from device backing directly.
+pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
+    gpu_result: ceno_gpu::common::witgen::types::GpuWitnessResult<
+        ceno_gpu::common::BufferImpl<'static, <ff_ext::BabyBearExt4 as ExtensionField>::BaseField>,
+    >,
+    num_rows: usize,
+    num_cols: usize,
+    padding: InstancePaddingStrategy,
+) -> RowMajorMatrix<E::BaseField> {
+    let mut rmm = RowMajorMatrix::<E::BaseField>::new(num_rows, num_cols, padding);
+    // Keep the original col-major witness buffer as the source of truth for GPU commit.
+    rmm.set_device_backing(gpu_result.device_buffer, DeviceMatrixLayout::ColMajor);
+    rmm
+}
+

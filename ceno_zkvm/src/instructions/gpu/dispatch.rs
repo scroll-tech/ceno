@@ -75,7 +75,7 @@ use super::{
     },
     utils::d2h::{
         CompactEcBuf, LkResult, RamBuf, WitResult, gpu_collect_shard_records, gpu_compact_ec_d2h,
-        gpu_lk_counters_to_multiplicity, gpu_witness_to_rmm,
+        gpu_lk_counters_to_multiplicity, gpu_witness_to_rmm, gpu_witness_to_rmm_d2h,
     },
 };
 
@@ -352,17 +352,20 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     }
     raw_structural.padding_by_strategy();
 
-    // Step 4: Transpose (column-major → row-major) on GPU, then D2H copy to RowMajorMatrix
-    let mut raw_witin = info_span!("transpose_d2h", rows = total_instances, cols = num_witin)
-        .in_scope(|| {
-            gpu_witness_to_rmm::<E>(
+    // Step 4: Keep witness on device in normal mode; D2H only for debug comparison.
+    let mut raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+        info_span!("transpose_d2h", rows = total_instances, cols = num_witin).in_scope(|| {
+            gpu_witness_to_rmm_d2h::<E>(
                 hal,
                 gpu_witness,
                 total_instances,
                 num_witin,
                 I::padding_strategy(),
             )
-        })?;
+        })?
+    } else {
+        gpu_witness_to_rmm::<E>(gpu_witness, total_instances, num_witin, I::padding_strategy())
+    };
     raw_witin.padding_by_strategy();
     debug_compare_witness::<E, I>(
         config,
