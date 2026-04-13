@@ -10,7 +10,10 @@ use crate::{
     },
     structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
 };
-use ceno_gpu::bb31::{CudaHalBB31, GpuPolynomial};
+use ceno_gpu::{
+    Buffer, CudaHal,
+    bb31::{CudaHalBB31, GpuPolynomial},
+};
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
@@ -47,6 +50,7 @@ use sumcheck::{
 use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
+use ceno_gpu::common::transpose::matrix_transpose;
 use tracing::info_span;
 use witness::DeviceMatrixLayout;
 
@@ -569,6 +573,55 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
     })
 }
 
+fn normalize_traces_to_device_col_major<E: ExtensionField>(
+    cuda_hal: &Arc<CudaHalBB31>,
+    vec_traces: &mut [witness::RowMajorMatrix<E::BaseField>],
+) {
+    let mut already_col_major = 0usize;
+    let mut cpu_upload_and_transpose = 0usize;
+    let device_retranspose_todo = 0usize;
+
+    for (idx, trace) in vec_traces.iter_mut().enumerate() {
+        if trace.has_device_backing() {
+            if trace.device_backing_layout() != Some(DeviceMatrixLayout::ColMajor) {
+                panic!("TODO: GPU trace at index {idx} is device-backed but not col-major");
+            }
+            already_col_major += 1;
+            continue;
+        }
+
+        let rows = trace.height();
+        let cols = trace.width();
+        let host_vals_bb31: &[BB31Base] = unsafe { std::mem::transmute(trace.values()) };
+
+        let row_major_buf = cuda_hal
+            .alloc_elems_from_host(host_vals_bb31, None)
+            .unwrap_or_else(|e| panic!("failed to upload cpu trace {idx} to gpu: {e}"));
+        let mut col_major_buf = cuda_hal
+            .alloc_elems_on_device(rows * cols, false, None)
+            .unwrap_or_else(|e| panic!("failed to alloc col-major buffer for trace {idx}: {e}"));
+        matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+            &cuda_hal.inner,
+            &mut col_major_buf,
+            &row_major_buf,
+            rows,
+            cols,
+        )
+        .unwrap_or_else(|e| panic!("failed to transpose trace {idx} to col-major: {e}"));
+
+        trace.set_device_backing(col_major_buf, DeviceMatrixLayout::ColMajor);
+        cpu_upload_and_transpose += 1;
+    }
+
+    tracing::debug!(
+        total_traces = vec_traces.len(),
+        already_col_major,
+        cpu_upload_and_transpose,
+        device_retranspose_todo,
+        "normalized gpu trace backing to device col-major"
+    );
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
@@ -601,19 +654,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
             == std::mem::size_of::<PCS::CommitmentWithWitness>();
         let (mles, pcs_data, commit) = if is_pcs_match {
-            let vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
+            let mut vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
                 traces.into_values().collect();
 
-            for (idx, trace) in vec_traces.iter().enumerate() {
-                assert!(
-                    trace.has_device_backing(),
-                    "GPU mode requires device-backed witness trace at index {idx}"
-                );
-                assert_eq!(
-                    trace.device_backing_layout(),
-                    Some(DeviceMatrixLayout::ColMajor),
-                    "GPU mode requires col-major device-backed witness trace at index {idx}"
-                );
+            if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                let span = entered_span!("[gpu] normalize_trace_backing", profiling_2 = true);
+                let cuda_hal = get_cuda_hal().unwrap();
+                normalize_traces_to_device_col_major::<E>(&cuda_hal, &mut vec_traces);
+                drop(cuda_hal);
+                for (idx, trace) in vec_traces.iter().enumerate() {
+                    assert!(
+                        trace.has_device_backing(),
+                        "GPU mode requires device-backed witness trace at index {idx}"
+                    );
+                    assert_eq!(
+                        trace.device_backing_layout(),
+                        Some(DeviceMatrixLayout::ColMajor),
+                        "GPU mode requires col-major device-backed witness trace at index {idx}"
+                    );
+                }
+                exit_span!(span);
             }
 
             let span = entered_span!("[gpu] hal init", profiling_2 = true);
