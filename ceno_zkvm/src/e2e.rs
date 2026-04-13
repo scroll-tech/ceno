@@ -1328,7 +1328,14 @@ pub fn generate_witness<'a, E: ExtensionField>(
     init_mem_state: &InitMemState,
     // this is for debug purpose, which only run target shard id and skip all others
     target_shard_id: Option<usize>,
-) -> impl Iterator<Item = (ZKVMWitnesses<E>, ShardContext<'a>, PublicValues)> {
+) -> impl Iterator<
+    Item = (
+        ZKVMWitnesses<E>,
+        ShardContext<'a>,
+        PublicValues,
+        Option<u64>,
+    ),
+> {
     let mut shard_ctx_builder = std::mem::take(&mut emul_result.shard_ctx_builder);
     assert!(
         emul_result.executed_steps > 0,
@@ -1408,7 +1415,7 @@ pub fn generate_witness<'a, E: ExtensionField>(
             if let Some(target_shard_id) = target_shard_id {
                 if shard_ctx.shard_id < target_shard_id {
                     tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
-                    return Some((zkvm_witness, shard_ctx, pi));
+                    return Some((zkvm_witness, shard_ctx, pi, None));
                 } else if shard_ctx.shard_id > target_shard_id {
                     tracing::debug!("{}th shard skipped", shard_ctx.shard_id);
                     return None;
@@ -1453,6 +1460,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     None
                 }
             };
+            #[cfg(not(feature = "gpu"))]
+            let witgen_mem_baseline: Option<u64> = None;
 
             info_span!("assign_opcode_circuits").in_scope(|| {
                 system_config
@@ -1677,46 +1686,47 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 crate::instructions::gpu::dispatch::invalidate_shard_meta_cache();
                 crate::instructions::gpu::dispatch::assert_caches_released_before_prove();
 
-                // Post-witgen VRAM must match the pre-witgen baseline exactly.
-                if let Some(baseline) = witgen_mem_baseline {
-                    let hal = gkr_iop::gpu::get_cuda_hal()
-                        .expect("cuda hal must be available if baseline was taken");
-                    hal.inner
-                        .synchronize()
-                        .expect("cuda synchronize before witgen post-check");
-                    let post_witgen = hal
-                        .inner
-                        .mem_pool()
-                        .get_used_size()
-                        .expect("cudaMemPoolGetAttribute UsedMemCurrent");
-                    let delta_bytes = post_witgen as i64 - baseline as i64;
-                    assert_eq!(
-                        post_witgen, baseline,
-                        "shard {} witgen leaked GPU memory: baseline={} B ({} MB), \
-                         post_witgen={} B ({} MB), delta={} B ({:.2} MB)",
-                        shard_ctx.shard_id,
-                        baseline,
-                        baseline >> 20,
-                        post_witgen,
-                        post_witgen >> 20,
-                        delta_bytes,
-                        delta_bytes as f64 / (1024.0 * 1024.0),
-                    );
-                    // println! matches the existing [MemPool] log style and
-                    // is always visible regardless of tracing filters.
-                    println!(
-                        "[witgen memcheck] shard {}: VRAM clean, \
-                         baseline = post_witgen = {} bytes ({} MB)",
-                        shard_ctx.shard_id,
-                        baseline,
-                        baseline >> 20,
-                    );
-                }
             }
 
-            Some((zkvm_witness, shard_ctx, pi))
+            Some((zkvm_witness, shard_ctx, pi, witgen_mem_baseline))
         })
     })
+}
+
+#[cfg(feature = "gpu")]
+fn assert_witgen_mem_released(shard_id: usize, baseline: u64) {
+    use gkr_iop::gpu::gpu_prover::*;
+
+    let hal = get_cuda_hal().expect("cuda hal must be available if baseline was taken");
+    hal.inner
+        .synchronize()
+        .expect("cuda synchronize before witgen post-check");
+    let post_witgen = hal
+        .inner
+        .mem_pool()
+        .get_used_size()
+        .expect("cudaMemPoolGetAttribute UsedMemCurrent");
+    let delta_bytes = post_witgen as i64 - baseline as i64;
+    assert_eq!(
+        post_witgen,
+        baseline,
+        "shard {} witgen leaked GPU memory: baseline={} B ({} MB), \
+         post_witgen={} B ({} MB), delta={} B ({:.2} MB)",
+        shard_id,
+        baseline,
+        baseline >> 20,
+        post_witgen,
+        post_witgen >> 20,
+        delta_bytes,
+        delta_bytes as f64 / (1024.0 * 1024.0),
+    );
+    println!(
+        "[witgen memcheck] shard {}: VRAM clean, \
+         baseline = post_witgen = {} bytes ({} MB)",
+        shard_id,
+        baseline,
+        baseline >> 20,
+    );
 }
 
 // Encodes useful early return points of the e2e pipeline
@@ -2140,7 +2150,7 @@ fn create_proofs_streaming<
 
                     // GPU consumer: prove each shard as it arrives
                     let mut proofs = Vec::new();
-                    while let Ok((zkvm_witness, shard_ctx, pi)) = rx.recv() {
+                    while let Ok((zkvm_witness, shard_ctx, pi, witgen_mem_baseline)) = rx.recv() {
                         if is_mock_proving {
                             MockProver::assert_satisfied_full(
                                 &shard_ctx,
@@ -2163,6 +2173,10 @@ fn create_proofs_streaming<
                             shard_ctx.shard_id,
                             start.elapsed()
                         );
+                        #[cfg(feature = "gpu")]
+                        if let Some(baseline) = witgen_mem_baseline {
+                            assert_witgen_mem_released(shard_ctx.shard_id, baseline);
+                        }
                         proofs.push(zkvm_proof);
                     }
                     proofs
@@ -2191,7 +2205,7 @@ fn create_proofs_streaming<
                 };
 
             wit_iter
-                .map(|(zkvm_witness, shard_ctx, pi)| {
+                .map(|(zkvm_witness, shard_ctx, pi, witgen_mem_baseline)| {
                     if is_mock_proving {
                         MockProver::assert_satisfied_full(
                             &shard_ctx,
@@ -2214,6 +2228,10 @@ fn create_proofs_streaming<
                         shard_ctx.shard_id,
                         start.elapsed()
                     );
+                    #[cfg(feature = "gpu")]
+                    if let Some(baseline) = witgen_mem_baseline {
+                        assert_witgen_mem_released(shard_ctx.shard_id, baseline);
+                    }
                     tracing::info!("e2e proof stat: {}", zkvm_proof);
                     zkvm_proof
                 })
