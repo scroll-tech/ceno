@@ -220,16 +220,27 @@ pub(crate) fn gpu_witness_to_rmm_d2h<E: ExtensionField>(
     gpu_result: ceno_gpu::common::witgen::types::GpuWitnessResult<
         ceno_gpu::common::BufferImpl<'static, <ff_ext::BabyBearExt4 as ExtensionField>::BaseField>,
     >,
-    num_rows: usize,
+    logical_num_rows: usize,
     num_cols: usize,
     padding: InstancePaddingStrategy,
 ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    // Kernel output may be power-of-two padded; always use the actual produced row count.
+    let produced_rows = gpu_result.num_rows;
+    if produced_rows < logical_num_rows {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "GPU witness rows ({produced_rows}) smaller than logical rows ({logical_num_rows})"
+            )
+            .into(),
+        ));
+    }
+
     // Transpose from column-major to row-major on GPU.
     // Column-major (num_rows x num_cols) is stored as num_cols groups of num_rows elements,
     // which is equivalent to a (num_cols x num_rows) row-major matrix.
     // Transposing with cols=num_rows, rows=num_cols produces (num_rows x num_cols) row-major.
     let mut rmm_buffer = hal
-        .alloc_elems_on_device(num_rows * num_cols, false, None)
+        .alloc_elems_on_device(produced_rows * num_cols, false, None)
         .map_err(|e| {
             ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
         })?;
@@ -237,7 +248,7 @@ pub(crate) fn gpu_witness_to_rmm_d2h<E: ExtensionField>(
         &hal.inner,
         &mut rmm_buffer,
         &gpu_result.device_buffer,
-        num_rows,
+        produced_rows,
         num_cols,
     )
     .map_err(|e| ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into()))?;

@@ -21,7 +21,7 @@ use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use super::{
-    config::{is_gpu_witgen_enabled, is_kind_disabled},
+    config::{is_gpu_witgen_enabled, is_kind_disabled, should_keep_witness_device_backing},
     utils::debug_compare::{
         debug_compare_final_lk, debug_compare_shard_ec, debug_compare_shardram,
         debug_compare_witness,
@@ -353,7 +353,9 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     raw_structural.padding_by_strategy();
 
     // Step 4: Keep witness on device in normal mode; D2H only for debug comparison.
-    let mut raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+    let mut raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+        || !should_keep_witness_device_backing()
+    {
         info_span!("transpose_d2h", rows = total_instances, cols = num_witin).in_scope(|| {
             gpu_witness_to_rmm_d2h::<E>(
                 hal,

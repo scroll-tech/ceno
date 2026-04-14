@@ -74,6 +74,19 @@ pub(crate) fn is_gpu_witgen_enabled() -> bool {
     })
 }
 
+/// Device-backed witness matrices are only beneficial when GPU cache keeps trace/codeword
+/// artifacts for reuse. In cache-none mode, prefer D2H host materialization to avoid
+/// retaining large device-backed RMMs beyond commit.
+pub(crate) fn should_keep_witness_device_backing() -> bool {
+    if !is_gpu_witgen_enabled() {
+        return false;
+    }
+    !matches!(
+        gkr_iop::gpu::gpu_prover::get_gpu_cache_level(),
+        gkr_iop::gpu::gpu_prover::CacheLevel::None
+    )
+}
+
 /// Set `CENO_GPU_DEBUG_COMPARE_WITGEN=1` to enable GPU vs CPU comparison; default disabled.
 pub(crate) fn is_debug_compare_enabled() -> bool {
     use std::sync::OnceLock;

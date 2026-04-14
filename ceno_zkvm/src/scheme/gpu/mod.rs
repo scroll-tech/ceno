@@ -657,7 +657,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             let mut vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
                 traces.into_values().collect();
 
-            if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+            if crate::instructions::gpu::config::should_keep_witness_device_backing() {
                 let span = entered_span!("[gpu] normalize_trace_backing", profiling_2 = true);
                 let cuda_hal = get_cuda_hal().unwrap();
                 normalize_traces_to_device_col_major::<E>(&cuda_hal, &mut vec_traces);

@@ -26,7 +26,10 @@ use crate::{
             ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,
             with_cached_shard_meta,
         },
-        config::{is_debug_compare_enabled, is_gpu_witgen_enabled, is_kind_disabled},
+        config::{
+            is_debug_compare_enabled, is_gpu_witgen_enabled, is_kind_disabled,
+            should_keep_witness_device_backing,
+        },
         dispatch::{GpuWitgenKind, compute_fetch_params, is_force_cpu_path},
         utils::{
             d2h::{gpu_compact_ec_d2h, gpu_lk_counters_to_multiplicity},
@@ -407,7 +410,9 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     }
 
     // Step 8: Keep witness on device in normal mode; D2H only for debug compare.
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+        || !should_keep_witness_device_backing()
+    {
         info_span!("transpose_d2h", rows = num_padded_rows, cols = num_witin).in_scope(|| {
             let mut rmm_buffer = hal
                 .alloc_elems_on_device(num_padded_rows * num_witin, false, None)

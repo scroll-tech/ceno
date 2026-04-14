@@ -384,7 +384,9 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
         })?;
 
     // 5. Structural witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
-    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+        || !crate::instructions::gpu::config::should_keep_witness_device_backing()
+    {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_structural_transpose_d2h",
             num_rows_padded,
@@ -442,7 +444,9 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
     };
 
     // 6. Main witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+        || !crate::instructions::gpu::config::should_keep_witness_device_backing()
+    {
         tracing::info_span!(
             "gpu_shard_ram_witness_transpose_d2h",
             num_rows_padded,
@@ -623,7 +627,9 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
     )?;
 
     // Structural witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
-    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+        || !crate::instructions::gpu::config::should_keep_witness_device_backing()
+    {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_structural_transpose_d2h_from_device",
             num_rows_padded,
@@ -681,7 +687,9 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
     };
 
     // Witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled() {
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+        || !crate::instructions::gpu::config::should_keep_witness_device_backing()
+    {
         tracing::info_span!(
             "gpu_shard_ram_witness_transpose_d2h_from_device",
             num_rows_padded,
