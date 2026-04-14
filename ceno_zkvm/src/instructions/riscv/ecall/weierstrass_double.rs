@@ -7,8 +7,7 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use generic_array::{GenericArray, typenum::Unsigned};
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -150,10 +149,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(cb, "weierstrass_double".to_string(), out_evals);
-        chip.add_layer(layer);
+        let chip = layout.finalize("weierstrass_double".to_string(), cb);
 
         let circuit = chip.gkr_circuit();
 

@@ -27,8 +27,8 @@ use std::{array, borrow::BorrowMut, mem::size_of};
 use derive::AlignedBorrow;
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator, chip::Chip,
-    circuit_builder::CircuitBuilder, error::CircuitBuilderError, selector::SelectorType,
+    ProtocolBuilder, ProtocolWitnessGenerator, chip::Chip, circuit_builder::CircuitBuilder,
+    default_out_eval_groups, error::CircuitBuilderError, gkr::layer::Layer, selector::SelectorType,
 };
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
@@ -266,7 +266,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for ShaExtendLayout<E> {
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
+    fn finalize(&mut self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
@@ -276,20 +276,11 @@ impl<E: ExtensionField> ProtocolBuilder<E> for ShaExtendLayout<E> {
         cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
         cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
 
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-        (
-            [
-                (0..r_len).collect_vec(),
-                (r_len..r_len + w_len).collect_vec(),
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb),
-        )
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb);
+        let layer = Layer::from_circuit_builder(cb, name, out_evals);
+        chip.add_layer(layer);
+        chip
     }
 }
 
@@ -367,7 +358,7 @@ mod tests {
     use ff_ext::BabyBearExt4;
     use gkr_iop::{
         cpu::{CpuBackend, CpuProver},
-        gkr::{GKRProverOutput, layer::Layer},
+        gkr::GKRProverOutput,
         selector::SelectorContext,
     };
     use itertools::Itertools;
@@ -388,9 +379,7 @@ mod tests {
         let mut cb = CircuitBuilder::<E>::new(&mut cs);
         let mut layout =
             ShaExtendLayout::<E>::build_layer_logic(&mut cb, ()).expect("build_layer_logic failed");
-        let (out_evals, mut chip) = layout.finalize(&mut cb);
-        let layer = Layer::from_circuit_builder(&cb, "sha_extend".to_string(), out_evals);
-        chip.add_layer(layer);
+        let chip = layout.finalize("sha_extend".to_string(), &mut cb);
         let gkr_circuit = chip.gkr_circuit();
 
         let mut rng = StdRng::seed_from_u64(1);
