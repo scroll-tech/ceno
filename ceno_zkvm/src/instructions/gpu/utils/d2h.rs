@@ -258,7 +258,7 @@ pub(crate) fn gpu_witness_to_rmm_d2h<E: ExtensionField>(
         .map_err(|e| ZKVMError::InvalidWitness(format!("GPU D2H copy failed: {e}").into()))?;
 
     // Safety: BabyBear is the only supported GPU field, and E::BaseField must match
-    let data: Vec<E::BaseField> = unsafe {
+    let mut data: Vec<E::BaseField> = unsafe {
         let mut data = std::mem::ManuallyDrop::new(gpu_data);
         Vec::from_raw_parts(
             data.as_mut_ptr() as *mut E::BaseField,
@@ -266,6 +266,26 @@ pub(crate) fn gpu_witness_to_rmm_d2h<E: ExtensionField>(
             data.capacity(),
         )
     };
+
+    // Keep logical instance count consistent with CPU/structural witnesses.
+    // GPU kernels may emit power-of-two padded rows; here we drop extra padded rows
+    // and let RowMajorMatrix apply normal padding policy afterward.
+    let logical_elems = logical_num_rows
+        .checked_mul(num_cols)
+        .ok_or_else(|| ZKVMError::InvalidWitness("logical witness shape overflow".into()))?;
+    if data.len() < logical_elems {
+        return Err(ZKVMError::InvalidWitness(
+            format!(
+                "GPU D2H witness has too few elements: got {}, need {} (rows={}, cols={})",
+                data.len(),
+                logical_elems,
+                logical_num_rows,
+                num_cols
+            )
+            .into(),
+        ));
+    }
+    data.truncate(logical_elems);
 
     Ok(RowMajorMatrix::<E::BaseField>::new_by_values(
         data, num_cols, padding,
