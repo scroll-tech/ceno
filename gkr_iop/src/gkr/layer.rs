@@ -598,8 +598,13 @@ impl<E: ExtensionField> Layer<E> {
             expr_evals.push((ecc_sel_x3, vec![]));
             let y3_group_idx = expr_evals.len();
             expr_evals.push((ecc_sel_y3, vec![]));
-            ecc_bridge_group_indices =
-                Some([x_group_idx, y_group_idx, s_group_idx, x3_group_idx, y3_group_idx]);
+            ecc_bridge_group_indices = Some([
+                x_group_idx,
+                y_group_idx,
+                s_group_idx,
+                x3_group_idx,
+                y3_group_idx,
+            ]);
 
             for (idx, x_expr) in cb.cs.ec_point_exprs[..septic_degree].iter().enumerate() {
                 expressions.push(x_expr.clone());

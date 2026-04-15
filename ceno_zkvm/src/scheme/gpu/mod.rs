@@ -386,14 +386,22 @@ pub fn prove_main_constraints_impl<
     }
 
     if let Some(ecc_proof) = ecc_proof {
-        let Some([x_group_idx, y_group_idx, slope_group_idx, x3_group_idx, y3_group_idx]) =
-            first_layer.ecc_bridge_group_indices()
+        let Some(
+            [
+                x_group_idx,
+                y_group_idx,
+                slope_group_idx,
+                x3_group_idx,
+                y3_group_idx,
+            ],
+        ) = first_layer.ecc_bridge_group_indices()
         else {
             panic!("ecc proof provided for non-ecc layer")
         };
 
         let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
-        let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation);
+        let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation)
+            .expect("invalid internal ecc bridge claims");
 
         assign_group_evals(
             &mut out_evals,

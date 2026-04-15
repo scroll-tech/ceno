@@ -584,9 +584,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
 
         if composed_cs.has_ecc_ops() {
             tracing::debug!("verifying ecc proof...");
-            assert!(proof.ecc_proof.is_some());
-            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
-            assert!(!ecc_proof.sum.is_infinity);
+            let ecc_proof = proof
+                .ecc_proof
+                .as_ref()
+                .ok_or_else(|| ZKVMError::InvalidProof("missing ecc proof".into()))?;
+            if ecc_proof.sum.is_infinity {
+                return Err(ZKVMError::InvalidProof(
+                    "invalid ecc proof: infinity shard sum".into(),
+                ));
+            }
 
             EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
             tracing::debug!("ecc proof verified.");
@@ -699,8 +705,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         if let Some(ecc_proof) = proof.ecc_proof.as_ref() {
-            let Some([x_group_idx, y_group_idx, slope_group_idx, x3_group_idx, y3_group_idx]) =
-                first_layer.ecc_bridge_group_indices()
+            let Some(
+                [
+                    x_group_idx,
+                    y_group_idx,
+                    slope_group_idx,
+                    x3_group_idx,
+                    y3_group_idx,
+                ],
+            ) = first_layer.ecc_bridge_group_indices()
             else {
                 return Err(ZKVMError::InvalidProof(
                     "ecc bridge claims expected but selectors are missing".into(),
@@ -708,7 +721,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             };
 
             let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
-            let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation);
+            let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation)?;
 
             assign_group_evals(
                 &mut out_evals,

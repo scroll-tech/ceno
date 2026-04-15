@@ -850,7 +850,13 @@ pub fn verify_chip_proof<C: Config>(
     }
 
     if composed_cs.has_ecc_ops() {
-        let [x_group_idx, y_group_idx, slope_group_idx, x3_group_idx, y3_group_idx] = first_layer
+        let [
+            x_group_idx,
+            y_group_idx,
+            slope_group_idx,
+            x3_group_idx,
+            y3_group_idx,
+        ] = first_layer
             .ecc_bridge_group_indices()
             .expect("ecc bridge selectors missing");
 

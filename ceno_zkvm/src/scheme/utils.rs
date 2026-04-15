@@ -1,4 +1,5 @@
 use crate::{
+    error::ZKVMError,
     scheme::{
         constants::{MIN_PAR_SIZE, SEPTIC_EXTENSION_DEGREE},
         hal::{ProofInput, ProverDevice},
@@ -9,7 +10,10 @@ use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     evaluation::EvalExpression,
-    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness},
+    gkr::{
+        GKRCircuit, GKRCircuitOutput, GKRCircuitWitness,
+        layer::{LayerWitness, ROTATION_OPENING_COUNT},
+    },
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use itertools::Itertools;
@@ -84,10 +88,24 @@ pub(crate) fn derive_ecc_bridge_claims<E: ExtensionField>(
     ecc_proof: &EccQuarkProof<E>,
     sample_r: E,
     num_var_with_rotation: usize,
-) -> EccBridgeClaims<E> {
+) -> Result<EccBridgeClaims<E>, ZKVMError> {
     let degree = SEPTIC_EXTENSION_DEGREE;
+    if ecc_proof.evals.len() < 3 {
+        return Err(ZKVMError::InvalidProof(
+            "ecc proof evals shorter than selector prefix".into(),
+        ));
+    }
     let evals = &ecc_proof.evals[3..];
-    assert_eq!(evals.len(), degree * 7);
+    if evals.len() != degree * 7 {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc proof eval length: expected {}, got {}",
+                degree * 7,
+                evals.len()
+            )
+            .into(),
+        ));
+    }
 
     let s1 = &evals[0..degree];
     let x0 = &evals[degree..2 * degree];
@@ -114,17 +132,44 @@ pub(crate) fn derive_ecc_bridge_claims<E: ExtensionField>(
 
     let mut xy_point = vec![sample_r];
     xy_point.extend(ecc_proof.rt.iter().copied());
-    assert_eq!(xy_point.len(), num_var_with_rotation);
+    if xy_point.len() != num_var_with_rotation {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc xy point length: expected {}, got {}",
+                num_var_with_rotation,
+                xy_point.len()
+            )
+            .into(),
+        ));
+    }
 
     let mut s_point = ecc_proof.rt.clone();
     s_point.push(sample_r);
-    assert_eq!(s_point.len(), num_var_with_rotation);
+    if s_point.len() != num_var_with_rotation {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc slope point length: expected {}, got {}",
+                num_var_with_rotation,
+                s_point.len()
+            )
+            .into(),
+        ));
+    }
 
     let mut x3y3_point = ecc_proof.rt.clone();
     x3y3_point.push(E::ONE);
-    assert_eq!(x3y3_point.len(), num_var_with_rotation);
+    if x3y3_point.len() != num_var_with_rotation {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc x3/y3 point length: expected {}, got {}",
+                num_var_with_rotation,
+                x3y3_point.len()
+            )
+            .into(),
+        ));
+    }
 
-    EccBridgeClaims {
+    Ok(EccBridgeClaims {
         xy_point,
         s_point,
         x3y3_point,
@@ -133,14 +178,21 @@ pub(crate) fn derive_ecc_bridge_claims<E: ExtensionField>(
         s_evals,
         x3_evals,
         y3_evals,
-    }
+    })
 }
 
 pub(crate) fn split_rotation_evals<E: ExtensionField>(evals: &[E]) -> (Vec<E>, Vec<E>, Vec<E>) {
+    assert_eq!(
+        evals.len() % ROTATION_OPENING_COUNT,
+        0,
+        "rotation evals length must be a multiple of {}, got {}",
+        ROTATION_OPENING_COUNT,
+        evals.len()
+    );
     let mut left_evals = Vec::new();
     let mut right_evals = Vec::new();
     let mut point_evals = Vec::new();
-    for chunk in evals.chunks_exact(3) {
+    for chunk in evals.chunks_exact(ROTATION_OPENING_COUNT) {
         left_evals.push(chunk[0]);
         right_evals.push(chunk[1]);
         point_evals.push(chunk[2]);
