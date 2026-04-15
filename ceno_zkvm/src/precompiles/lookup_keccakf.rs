@@ -1,10 +1,11 @@
 use ceno_emul::{ByteAddr, Cycle, MemOp, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     circuit_builder::{CircuitBuilder, ConstraintSystem, expansion_expr, rotation_split},
     cpu::{CpuBackend, CpuProver},
+    default_out_eval_groups,
     error::{BackendError, CircuitBuilderError},
     gkr::{
         GKRCircuit, GKRProof, GKRProverOutput,
@@ -157,7 +158,6 @@ pub struct KeccakLayout<E: ExtensionField> {
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
-    pub n_challenges: usize,
 }
 
 const ROTATION_WITNESS_LEN: usize = 196;
@@ -250,7 +250,6 @@ impl<E: ExtensionField> KeccakLayout<E> {
             n_fixed: 0,
             n_committed: 0,
             n_structural_witin: STRUCTURAL_WITIN,
-            n_challenges: 0,
         }
     }
 }
@@ -514,10 +513,9 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
+    fn finalize(&mut self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
-        self.n_challenges = 0;
 
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(self.selector_type_layout.sel_first.clone().unwrap());
@@ -525,24 +523,11 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
         cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
 
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-        (
-            [
-                // r_record
-                (0..r_len).collect_vec(),
-                // w_record
-                (r_len..r_len + w_len).collect_vec(),
-                // lk_record
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                // zero_record
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, self.n_challenges),
-        )
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb);
+        let layer = Layer::from_circuit_builder(cb, name, out_evals);
+        chip.add_layer(layer);
+        chip
     }
 
     fn n_committed(&self) -> usize {
@@ -551,10 +536,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
     fn n_fixed(&self) -> usize {
         unimplemented!("retrieve from constrain system")
-    }
-
-    fn n_challenges(&self) -> usize {
-        0
     }
 
     fn n_evaluations(&self) -> usize {
@@ -981,15 +962,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
         })
         .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-    let (out_evals, mut chip) = layout.finalize(&mut cb);
-
-    let layer = Layer::from_circuit_builder(
-        &cb,
-        "lookup_keccak".to_string(),
-        layout.n_challenges,
-        out_evals,
-    );
-    chip.add_layer(layer);
+    let chip = layout.finalize("lookup_keccak".to_string(), &mut cb);
 
     Ok((
         TestKeccakLayout {

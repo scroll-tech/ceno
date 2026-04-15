@@ -18,9 +18,6 @@ pub struct Chip<E: ExtensionField> {
     /// The number of base inputs committed in the whole protocol.
     pub n_committed: usize,
 
-    /// The number of challenges generated through the whole protocols
-    /// (except the ones inside sumcheck protocols).
-    pub n_challenges: usize,
     /// All input evaluations generated at the end of layer protocols will be stored
     /// in a vector and this is the length.
     pub n_evaluations: usize,
@@ -32,11 +29,10 @@ pub struct Chip<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> Chip<E> {
-    pub fn new_from_cb(cb: &CircuitBuilder<E>, n_challenges: usize) -> Chip<E> {
+    pub fn new_from_cb(cb: &CircuitBuilder<E>) -> Chip<E> {
         Self {
             n_fixed: cb.cs.num_fixed,
             n_committed: cb.cs.num_witin as usize,
-            n_challenges,
             n_evaluations: cb.cs.w_expressions.len()
                 + cb.cs.r_expressions.len()
                 + cb.cs.lk_expressions.len()

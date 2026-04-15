@@ -452,10 +452,10 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
                 // zero_record
                 (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
-        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))

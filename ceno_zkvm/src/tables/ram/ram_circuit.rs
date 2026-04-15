@@ -302,13 +302,13 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
                 // zero_record
                 vec![],
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(selector_type.clone());
 
-        let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Self::name(), out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))
