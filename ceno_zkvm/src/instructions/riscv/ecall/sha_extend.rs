@@ -5,8 +5,7 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -130,10 +129,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
             vm_state.ts,
         )?);
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(cb, Self::name(), out_evals);
-        chip.add_layer(layer);
+        let chip = layout.finalize(Self::name(), cb);
 
         let circuit = chip.gkr_circuit();
 
