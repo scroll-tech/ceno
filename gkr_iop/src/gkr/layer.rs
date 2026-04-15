@@ -41,6 +41,7 @@ pub type RotateExprs<E> = (
 // rotation contribute
 // left + right + target, overall 3
 pub const ROTATION_OPENING_COUNT: usize = 3;
+pub const ECC_BRIDGE_OPENING_COUNT: usize = 3;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerType {
@@ -71,7 +72,6 @@ pub struct Layer<E: ExtensionField> {
     pub n_witin: usize,
     pub n_structural_witin: usize,
     pub n_fixed: usize,
-    pub n_instance: usize,
     pub max_expr_degree: usize,
     /// keep all structural witin which could be evaluated succinctly without PCS
     pub structural_witins: Vec<StructuralWitIn>,
@@ -100,6 +100,7 @@ pub struct Layer<E: ExtensionField> {
     // there got 3 different eq for (left, right, target) during rotation argument
     // refer https://hackmd.io/HAAj1JTQQiKfu0SIwOJDRw?view#Rotation
     pub rotation_exprs: RotateExprs<E>,
+    pub ecc_bridge_group_indices: Option<[usize; ECC_BRIDGE_OPENING_COUNT]>,
     pub rotation_cyclic_group_log2: usize,
     pub rotation_cyclic_subgroup_size: usize,
 
@@ -140,7 +141,6 @@ impl<E: ExtensionField> Layer<E> {
         n_witin: usize,
         n_structural_witin: usize,
         n_fixed: usize,
-        n_instance: usize,
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
         in_eval_expr: Vec<usize>,
@@ -169,7 +169,6 @@ impl<E: ExtensionField> Layer<E> {
                     n_witin,
                     n_structural_witin,
                     n_fixed,
-                    n_instance,
                     max_expr_degree,
                     structural_witins,
                     exprs,
@@ -177,6 +176,7 @@ impl<E: ExtensionField> Layer<E> {
                     in_eval_expr,
                     out_sel_and_eval_exprs,
                     rotation_exprs: (rotation_eq, rotation_exprs),
+                    ecc_bridge_group_indices: None,
                     rotation_cyclic_group_log2,
                     rotation_cyclic_subgroup_size,
                     expr_names,
@@ -339,6 +339,11 @@ impl<E: ExtensionField> Layer<E> {
         assert_eq!(zero_evals.len(), zero_len);
 
         let rotation_expr_len = cb.cs.rotations.len() * ROTATION_OPENING_COUNT;
+        let ecc_bridge_expr_len = if cb.cs.ec_point_exprs.is_empty() {
+            0
+        } else {
+            cb.cs.ec_slope_exprs.len() * ECC_BRIDGE_OPENING_COUNT
+        };
         let mut next_non_zero_eval_idx = r_record_evals
             .iter()
             .chain(w_record_evals.iter())
@@ -352,7 +357,8 @@ impl<E: ExtensionField> Layer<E> {
             + cb.cs.r_table_expressions.len()
             + cb.cs.lk_expressions.len()
             + cb.cs.lk_table_expressions.len() * 2
-            + rotation_expr_len;
+            + rotation_expr_len
+            + ecc_bridge_expr_len;
         let zero_expr_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
@@ -369,10 +375,17 @@ impl<E: ExtensionField> Layer<E> {
                 0
             } else {
                 ROTATION_OPENING_COUNT
+            }
+            + if cb.cs.ec_point_exprs.is_empty() {
+                0
+            } else {
+                ECC_BRIDGE_OPENING_COUNT
             };
         let mut expr_evals = Vec::with_capacity(selector_group_capacity);
         let mut expr_names = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
         let mut expressions = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
+        let mut ecc_bridge_group_indices: Option<[usize; ECC_BRIDGE_OPENING_COUNT]> = None;
+        let mut ecc_bridge_eval_bases: Option<[usize; ECC_BRIDGE_OPENING_COUNT]> = None;
 
         if let Some(r_selector) = cb.cs.r_selector.as_ref() {
             // process r_record
@@ -550,9 +563,58 @@ impl<E: ExtensionField> Layer<E> {
             }
         }
 
+        if !cb.cs.ec_point_exprs.is_empty() {
+            let septic_degree = cb.cs.ec_slope_exprs.len();
+            assert_eq!(cb.cs.ec_point_exprs.len(), septic_degree * 2);
+
+            // ECC bridge selector groups must be explicitly supplied and independent.
+            // Do not fall back to (or reuse) preceding r/w/lk/zero selectors.
+            let [ecc_sel_x, ecc_sel_y, ecc_sel_s] =
+                cb.cs.ec_bridge_selectors.clone().expect(
+                    "ecc bridge selectors must be provided when ec_point_exprs is non-empty",
+                );
+
+            let x_eval_base = next_non_zero_eval_idx;
+            let y_eval_base = x_eval_base + septic_degree;
+            let s_eval_base = y_eval_base + septic_degree;
+            next_non_zero_eval_idx = s_eval_base + septic_degree;
+            ecc_bridge_eval_bases = Some([x_eval_base, y_eval_base, s_eval_base]);
+
+            let x_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_x, vec![]));
+            let y_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_y, vec![]));
+            let s_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_s, vec![]));
+            ecc_bridge_group_indices = Some([x_group_idx, y_group_idx, s_group_idx]);
+
+            for (idx, x_expr) in cb.cs.ec_point_exprs[..septic_degree].iter().enumerate() {
+                expressions.push(x_expr.clone());
+                expr_evals[x_group_idx]
+                    .1
+                    .push(EvalExpression::Single(x_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/x/{idx}"));
+            }
+
+            for (idx, y_expr) in cb.cs.ec_point_exprs[septic_degree..].iter().enumerate() {
+                expressions.push(y_expr.clone());
+                expr_evals[y_group_idx]
+                    .1
+                    .push(EvalExpression::Single(y_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/y/{idx}"));
+            }
+
+            for (idx, slope_expr) in cb.cs.ec_slope_exprs.iter().enumerate() {
+                expressions.push(slope_expr.clone());
+                expr_evals[s_group_idx]
+                    .1
+                    .push(EvalExpression::Single(s_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/slope/{idx}"));
+            }
+        }
+
         if let Some(zero_selector) = cb.cs.zero_selector.as_ref() {
             // process zero_record
-            // Intentionally dedup with the previous selector group when selector matches.
             let evals = Self::dedup_last_selector_evals(zero_selector, &mut expr_evals);
             for (idx, (zero_expr, name)) in izip!(
                 0..,
@@ -583,6 +645,25 @@ impl<E: ExtensionField> Layer<E> {
         // Drop selector groups that ended up without eval expressions.
         expr_evals.retain(|(_, evals)| !evals.is_empty());
 
+        if let Some([x_base, y_base, s_base]) = ecc_bridge_eval_bases {
+            let find_group_by_base = |base: usize| {
+                expr_evals
+                    .iter()
+                    .enumerate()
+                    .find_map(|(idx, (_, evals))| match evals.first() {
+                        Some(EvalExpression::Single(pos)) if *pos == base => Some(idx),
+                        _ => None,
+                    })
+            };
+            let x_idx = find_group_by_base(x_base)
+                .expect("missing x ecc bridge selector group after retain");
+            let y_idx = find_group_by_base(y_base)
+                .expect("missing y ecc bridge selector group after retain");
+            let s_idx = find_group_by_base(s_base)
+                .expect("missing slope ecc bridge selector group after retain");
+            ecc_bridge_group_indices = Some([x_idx, y_idx, s_idx]);
+        }
+
         let out_eval_count = expr_evals
             .iter()
             .map(|(_, evals)| evals.len())
@@ -599,20 +680,21 @@ impl<E: ExtensionField> Layer<E> {
             .take(cb.cs.num_witin as usize + cb.cs.num_fixed)
             .collect_vec();
         if rotations.is_empty() {
-            Layer::new(
+            let mut layer = Layer::new(
                 layer_name,
                 LayerType::Zerocheck,
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
-                0,
                 expressions,
                 in_eval_expr,
                 expr_evals,
                 ((None, vec![]), 0, 0),
                 expr_names,
                 cb.cs.structural_witins.clone(),
-            )
+            );
+            layer.ecc_bridge_group_indices = ecc_bridge_group_indices;
+            layer
         } else {
             let Some(RotationParams {
                 rotation_eqs,
@@ -622,13 +704,12 @@ impl<E: ExtensionField> Layer<E> {
             else {
                 panic!("rotation params not set");
             };
-            Layer::new(
+            let mut layer = Layer::new(
                 layer_name,
                 LayerType::Zerocheck,
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
-                0,
                 expressions,
                 in_eval_expr,
                 expr_evals,
@@ -639,7 +720,9 @@ impl<E: ExtensionField> Layer<E> {
                 ),
                 expr_names,
                 cb.cs.structural_witins.clone(),
-            )
+            );
+            layer.ecc_bridge_group_indices = ecc_bridge_group_indices;
+            layer
         }
     }
 
@@ -689,6 +772,10 @@ impl<E: ExtensionField> Layer<E> {
         let right_idx = find_group(right_eq)?;
         let point_idx = find_group(point_eq)?;
         Some([left_idx, right_idx, point_idx])
+    }
+
+    pub fn ecc_bridge_group_indices(&self) -> Option<[usize; ECC_BRIDGE_OPENING_COUNT]> {
+        self.ecc_bridge_group_indices
     }
 }
 

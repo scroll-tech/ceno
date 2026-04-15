@@ -108,12 +108,10 @@ pub trait TraceCommitter<PB: ProverBackend> {
 pub trait EccQuarkProver<PB: ProverBackend> {
     fn prove_ec_sum_quark<'a>(
         &self,
-        num_instances: usize,
-        xs: Vec<Arc<PB::MultilinearPoly<'a>>>,
-        ys: Vec<Arc<PB::MultilinearPoly<'a>>>,
-        invs: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        cs: &ComposedConstrainSystem<PB::E>,
+        input: &ProofInput<'a, PB>,
         transcript: &mut impl Transcript<PB::E>,
-    ) -> Result<EccQuarkProof<PB::E>, ZKVMError>;
+    ) -> Result<Option<EccQuarkProof<PB::E>>, ZKVMError>;
 }
 
 pub trait TowerProver<PB: ProverBackend> {
@@ -184,11 +182,12 @@ pub trait MainSumcheckProver<PB: ProverBackend> {
     //    the validity of read/write/logup records through sumchecks;
     // 2. multiple multiplication relations between witness multilinear polynomials
     //    achieved via zerochecks.
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<PB::E>,
         rotation: Option<RotationProverOutput<PB::E>>,
+        ecc_proof: Option<&EccQuarkProof<PB::E>>,
         input: &'b ProofInput<'a, PB>,
         cs: &ComposedConstrainSystem<PB::E>,
         challenges: &[PB::E; 2],

@@ -17,6 +17,7 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
+        utils::{assign_group_evals, derive_ecc_bridge_claims},
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
@@ -536,19 +537,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert_eq!(num_vars, log2_num_instances);
         });
 
-        // verify ecc proof if exists
-        let shard_ec_sum: Option<SepticPoint<E::BaseField>> = if composed_cs.has_ecc_ops() {
-            tracing::debug!("verifying ecc proof...");
-            assert!(proof.ecc_proof.is_some());
-            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
-            assert!(!ecc_proof.sum.is_infinity);
-
-            EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
-            tracing::debug!("ecc proof verified.");
-            Some(ecc_proof.sum.clone())
-        } else {
-            None
-        };
+        let mut shard_ec_sum: Option<SepticPoint<E::BaseField>> = None;
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -591,6 +580,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         Ok(())
                     }
                 })?;
+        }
+
+        if composed_cs.has_ecc_ops() {
+            tracing::debug!("verifying ecc proof...");
+            assert!(proof.ecc_proof.is_some());
+            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
+            assert!(!ecc_proof.sum.is_infinity);
+
+            EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
+            tracing::debug!("ecc proof verified.");
+            shard_ec_sum = Some(ecc_proof.sum.clone());
         }
 
         debug_assert!(
@@ -678,40 +678,55 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 ));
             };
 
-            let assign_group = |out_evals: &mut [PointAndEval<E>],
-                                eval_exprs: &[gkr_iop::evaluation::EvalExpression<E>],
-                                evals: &[E],
-                                point: &Point<E>| {
-                assert_eq!(
-                    eval_exprs.len(),
-                    evals.len(),
-                    "rotation eval length mismatch"
-                );
-                for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
-                    let gkr_iop::evaluation::EvalExpression::Single(index) = eval_expr else {
-                        panic!("rotation groups must use EvalExpression::Single");
-                    };
-                    out_evals[*index] = PointAndEval::new(point.clone(), *eval);
-                }
-            };
-
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
                 &rotation_claims.left_evals,
                 &rotation_claims.rotation_points.left,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
                 &rotation_claims.right_evals,
                 &rotation_claims.rotation_points.right,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
                 &rotation_claims.target_evals,
                 &rotation_claims.rotation_points.origin,
+            );
+        }
+
+        if let Some(ecc_proof) = proof.ecc_proof.as_ref() {
+            let Some([x_group_idx, y_group_idx, slope_group_idx]) =
+                first_layer.ecc_bridge_group_indices()
+            else {
+                return Err(ZKVMError::InvalidProof(
+                    "ecc bridge claims expected but selectors are missing".into(),
+                ));
+            };
+
+            let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
+            let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation);
+
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[x_group_idx].1,
+                &claims.x_evals,
+                &claims.xy_point,
+            );
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[y_group_idx].1,
+                &claims.y_evals,
+                &claims.xy_point,
+            );
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[slope_group_idx].1,
+                &claims.s_evals,
+                &claims.s_point,
             );
         }
 

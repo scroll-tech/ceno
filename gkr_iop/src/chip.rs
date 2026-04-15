@@ -1,6 +1,6 @@
 use crate::{
     circuit_builder::CircuitBuilder,
-    gkr::layer::{Layer, ROTATION_OPENING_COUNT},
+    gkr::layer::{ECC_BRIDGE_OPENING_COUNT, Layer, ROTATION_OPENING_COUNT},
 };
 use ff_ext::ExtensionField;
 use itertools::Itertools;
@@ -34,13 +34,19 @@ pub struct Chip<E: ExtensionField> {
 impl<E: ExtensionField> Chip<E> {
     pub fn new_from_cb(cb: &CircuitBuilder<E>) -> Chip<E> {
         let rotation_eval_count = cb.cs.rotations.len() * ROTATION_OPENING_COUNT;
+        let ecc_eval_count = if cb.cs.ec_point_exprs.is_empty() {
+            0
+        } else {
+            cb.cs.ec_slope_exprs.len() * ECC_BRIDGE_OPENING_COUNT
+        };
         let num_non_zero_outputs = cb.cs.w_expressions.len()
             + cb.cs.r_expressions.len()
             + cb.cs.lk_expressions.len()
             + cb.cs.w_table_expressions.len()
             + cb.cs.r_table_expressions.len()
             + cb.cs.lk_table_expressions.len() * 2
-            + rotation_eval_count;
+            + rotation_eval_count
+            + ecc_eval_count;
         Self {
             n_fixed: cb.cs.num_fixed,
             n_committed: cb.cs.num_witin as usize,

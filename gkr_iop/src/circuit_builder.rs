@@ -107,6 +107,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub ec_point_exprs: Vec<Expression<E>>,
     pub ec_slope_exprs: Vec<Expression<E>>,
     pub ec_final_sum: Vec<Expression<E>>,
+    pub ec_bridge_selectors: Option<[SelectorType<E>; 3]>,
 
     pub r_selector: Option<SelectorType<E>>,
     pub r_expressions: Vec<Expression<E>>,
@@ -179,6 +180,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             ec_final_sum: vec![],
             ec_slope_exprs: vec![],
             ec_point_exprs: vec![],
+            ec_bridge_selectors: None,
             r_selector: None,
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],

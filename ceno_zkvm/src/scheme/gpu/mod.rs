@@ -5,18 +5,22 @@ use super::hal::{
 use crate::{
     error::ZKVMError,
     scheme::{
+        constants::SEPTIC_EXTENSION_DEGREE,
         cpu::TowerRelationOutput,
         hal::{
             DeviceProvingKey, MainSumcheckEvals, ProofInput, RotationProverOutput, TowerProverSpec,
         },
+        utils::{
+            assign_group_evals, derive_ecc_bridge_claims, extract_ecc_quark_witness_inputs,
+            split_rotation_evals,
+        },
     },
-    structs::{ComposedConstrainSystem, PointAndEval, TowerProofs},
+    structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
 use ceno_gpu::bb31::{CudaHalBB31, GpuPolynomial};
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    evaluation::EvalExpression,
     gkr::{
         self, Evaluation, GKRProof, GKRProverOutput,
         layer::{LayerWitness, gpu::utils::extract_mle_relationships_from_monomial_terms},
@@ -289,6 +293,7 @@ pub fn prove_main_constraints_impl<
 >(
     rt_tower: Vec<E>,
     rotation: Option<RotationProverOutput<E>>,
+    ecc_proof: Option<&EccQuarkProof<E>>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     composed_cs: &ComposedConstrainSystem<E>,
     challenges: &[E; 2],
@@ -350,6 +355,7 @@ pub fn prove_main_constraints_impl<
 
     let mut out_evals =
         vec![PointAndEval::new(rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
+
     if let Some(rotation) = rotation.as_ref() {
         let Some([left_group_idx, right_group_idx, point_group_idx]) =
             first_layer.rotation_selector_group_indices()
@@ -357,49 +363,55 @@ pub fn prove_main_constraints_impl<
             panic!("rotation proof provided for non-rotation layer")
         };
 
-        let mut left_evals = Vec::new();
-        let mut right_evals = Vec::new();
-        let mut point_evals = Vec::new();
-        for chunk in rotation.proof.evals.chunks_exact(3) {
-            left_evals.push(chunk[0]);
-            right_evals.push(chunk[1]);
-            point_evals.push(chunk[2]);
-        }
+        let (left_evals, right_evals, point_evals) = split_rotation_evals(&rotation.proof.evals);
 
-        let assign_group = |out_evals: &mut [PointAndEval<E>],
-                            eval_exprs: &[EvalExpression<E>],
-                            evals: &[E],
-                            point: &Point<E>| {
-            assert_eq!(
-                eval_exprs.len(),
-                evals.len(),
-                "rotation eval length mismatch"
-            );
-            for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
-                let EvalExpression::Single(index) = eval_expr else {
-                    panic!("rotation groups must use EvalExpression::Single");
-                };
-                out_evals[*index] = PointAndEval::new(point.clone(), *eval);
-            }
-        };
-
-        assign_group(
+        assign_group_evals(
             &mut out_evals,
             &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
             &left_evals,
             &rotation.left_point,
         );
-        assign_group(
+        assign_group_evals(
             &mut out_evals,
             &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
             &right_evals,
             &rotation.right_point,
         );
-        assign_group(
+        assign_group_evals(
             &mut out_evals,
             &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
             &point_evals,
             &rotation.point,
+        );
+    }
+
+    if let Some(ecc_proof) = ecc_proof {
+        let Some([x_group_idx, y_group_idx, slope_group_idx]) =
+            first_layer.ecc_bridge_group_indices()
+        else {
+            panic!("ecc proof provided for non-ecc layer")
+        };
+
+        let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
+        let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation);
+
+        assign_group_evals(
+            &mut out_evals,
+            &first_layer.out_sel_and_eval_exprs[x_group_idx].1,
+            &claims.x_evals,
+            &claims.xy_point,
+        );
+        assign_group_evals(
+            &mut out_evals,
+            &first_layer.out_sel_and_eval_exprs[y_group_idx].1,
+            &claims.y_evals,
+            &claims.xy_point,
+        );
+        assign_group_evals(
+            &mut out_evals,
+            &first_layer.out_sel_and_eval_exprs[slope_group_idx].1,
+            &claims.s_evals,
+            &claims.s_point,
         );
     }
 
@@ -459,12 +471,20 @@ pub fn prove_main_constraints_impl<
     level = "trace"
 )]
 pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
-    num_instances: usize,
-    xs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
-    ys: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
-    invs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'a, GpuBackend<E, PCS>>,
     transcript: &mut impl Transcript<E>,
-) -> Result<EccQuarkProof<E>, ZKVMError> {
+) -> Result<Option<EccQuarkProof<E>>, ZKVMError> {
+    let Some(ecc_inputs) =
+        extract_ecc_quark_witness_inputs::<GpuBackend<E, PCS>>(composed_cs, input)
+    else {
+        return Ok(None);
+    };
+    let xs = ecc_inputs.xs;
+    let ys = ecc_inputs.ys;
+    let invs = ecc_inputs.slopes;
+
+    let num_instances = input.num_instances();
     let stream = gkr_iop::gpu::get_thread_stream();
     assert_eq!(xs.len(), SEPTIC_EXTENSION_DEGREE);
     assert_eq!(ys.len(), SEPTIC_EXTENSION_DEGREE);
@@ -670,13 +690,13 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
     assert_eq!(evals.len(), 3 + SEPTIC_EXTENSION_DEGREE * 7);
     let final_sum = SepticPoint::from_affine(final_sum_x.clone(), final_sum_y.clone());
 
-    Ok(EccQuarkProof {
+    Ok(Some(EccQuarkProof {
         zerocheck_proof: proof_gpu_e,
         num_instances,
         evals,
         rt,
         sum: final_sum,
-    })
+    }))
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBackend<E, PCS>>
@@ -1237,6 +1257,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         &self,
         rt_tower: Vec<E>,
         rotation: Option<RotationProverOutput<E>>,
+        ecc_proof: Option<&EccQuarkProof<E>>,
         // _records: Vec<ArcMultilinearExtensionGpu<'b, E>>, // not used by GPU after delegation
         input: &'b ProofInput<'a, GpuBackend<E, PCS>>,
         composed_cs: &ComposedConstrainSystem<E>,
@@ -1257,6 +1278,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         let res = prove_main_constraints_impl::<E, PCS>(
             rt_tower,
             rotation,
+            ecc_proof,
             input,
             composed_cs,
             challenges,
@@ -1290,21 +1312,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBa
 {
     fn prove_ec_sum_quark<'a>(
         &self,
-        num_instances: usize,
-        xs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
-        ys: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
-        invs: Vec<Arc<MultilinearExtensionGpu<'a, E>>>,
+        composed_cs: &ComposedConstrainSystem<E>,
+        input: &ProofInput<'a, GpuBackend<E, PCS>>,
         transcript: &mut impl Transcript<E>,
-    ) -> Result<EccQuarkProof<E>, ZKVMError> {
-        // n = num_vars of the ecc quark sumcheck (xs[0].num_vars - 1)
-        let n = xs[0].mle.num_vars() - 1;
+    ) -> Result<Option<EccQuarkProof<E>>, ZKVMError> {
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
         let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "prove_ec_sum_quark");
 
-        let res = prove_ec_sum_quark_impl::<E, PCS>(num_instances, xs, ys, invs, transcript);
+        let res = prove_ec_sum_quark_impl::<E, PCS>(composed_cs, input, transcript);
 
-        let estimated_bytes = estimate_ecc_quark_bytes_from_num_vars(n);
-        check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
+        if let Ok(Some(proof)) = &res {
+            let estimated_bytes = estimate_ecc_quark_bytes_from_num_vars(proof.rt.len());
+            check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
+        }
 
         res
     }

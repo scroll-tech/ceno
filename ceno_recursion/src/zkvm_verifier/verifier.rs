@@ -579,15 +579,7 @@ pub fn verify_chip_proof<C: Config>(
         is_infinity: Usize::uninit(builder),
     };
 
-    if composed_cs.has_ecc_ops() {
-        builder.assert_nonzero(&chip_proof.has_ecc_proof);
-        let ecc_proof = &chip_proof.ecc_proof;
-        builder.assert_usize_eq(ecc_proof.sum.is_infinity.clone(), Usize::from(0));
-        verify_ecc_proof(builder, challenger, ecc_proof, unipoly_extrapolator);
-        builder.assign(&shard_ec_sum, ecc_proof.sum.clone());
-    } else {
-        builder.assign(&shard_ec_sum.is_infinity, Usize::from(1));
-    }
+    builder.assign(&shard_ec_sum.is_infinity, Usize::from(1));
 
     let tower_proof = &chip_proof.tower_proof;
     let num_variables: Array<C, Usize<C::N>> = builder.dyn_array(num_batched);
@@ -629,6 +621,14 @@ pub fn verify_chip_proof<C: Config>(
                 let eval = builder.get(&logup_p_evals, idx_vec[0]).eval;
                 builder.assert_ext_eq(eval, one);
             });
+    }
+
+    if composed_cs.has_ecc_ops() {
+        builder.assert_nonzero(&chip_proof.has_ecc_proof);
+        let ecc_proof = &chip_proof.ecc_proof;
+        builder.assert_usize_eq(ecc_proof.sum.is_infinity.clone(), Usize::from(0));
+        verify_ecc_proof(builder, challenger, ecc_proof, unipoly_extrapolator);
+        builder.assign(&shard_ec_sum, ecc_proof.sum.clone());
     }
 
     let num_rw_records: Usize<C::N> = builder.eval(r_counts_per_instance + w_counts_per_instance);
@@ -849,6 +849,101 @@ pub fn verify_chip_proof<C: Config>(
         }
     }
 
+    if composed_cs.has_ecc_ops() {
+        let [x_group_idx, y_group_idx, slope_group_idx] = first_layer
+            .ecc_bridge_group_indices()
+            .expect("ecc bridge selectors missing");
+
+        transcript_observe_label(builder, challenger, b"ecc_gkr_bridge_r");
+        let sample_r: Ext<C::F, C::EF> = challenger.sample_ext(builder);
+        let one_minus_r: Ext<C::F, C::EF> = builder.eval(one - sample_r);
+        let ecc_proof = &chip_proof.ecc_proof;
+
+        let xy_point_len: Usize<C::N> = builder.eval(ecc_proof.rt.fs.len() + Usize::from(1));
+        let xy_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(xy_point_len);
+        builder.set(&xy_point, 0, sample_r);
+        builder
+            .range(0, ecc_proof.rt.fs.len())
+            .for_each(|idx_vec, builder| {
+                let idx = idx_vec[0];
+                let v = builder.get(&ecc_proof.rt.fs, idx);
+                let shifted_idx = Usize::Var(Var::uninit(builder));
+                builder.assign(&shifted_idx, idx + Usize::from(1));
+                builder.set(&xy_point, shifted_idx, v);
+            });
+
+        let s_point_len: Usize<C::N> = builder.eval(ecc_proof.rt.fs.len() + Usize::from(1));
+        let s_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(s_point_len);
+        builder
+            .range(0, ecc_proof.rt.fs.len())
+            .for_each(|idx_vec, builder| {
+                let idx = idx_vec[0];
+                let v = builder.get(&ecc_proof.rt.fs, idx);
+                builder.set(&s_point, idx, v);
+            });
+        builder.set(&s_point, ecc_proof.rt.fs.len(), sample_r);
+
+        let degree = SEPTIC_EXTENSION_DEGREE;
+        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[x_group_idx]
+            .1
+            .iter()
+            .enumerate()
+        {
+            let EvalExpression::Single(out_idx) = eval_expr else {
+                panic!("ecc bridge x group must use EvalExpression::Single");
+            };
+            let x0 = builder.get(&ecc_proof.evals, 3 + degree + idx);
+            let x1 = builder.get(&ecc_proof.evals, 3 + degree * 3 + idx);
+            let eval = builder.eval(x0 * one_minus_r + x1 * sample_r);
+            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: PointVariable {
+                    fs: xy_point.clone(),
+                },
+                eval,
+            });
+            builder.set(&out_evals, *out_idx, claim);
+        }
+
+        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[y_group_idx]
+            .1
+            .iter()
+            .enumerate()
+        {
+            let EvalExpression::Single(out_idx) = eval_expr else {
+                panic!("ecc bridge y group must use EvalExpression::Single");
+            };
+            let y0 = builder.get(&ecc_proof.evals, 3 + degree * 2 + idx);
+            let y1 = builder.get(&ecc_proof.evals, 3 + degree * 4 + idx);
+            let eval = builder.eval(y0 * one_minus_r + y1 * sample_r);
+            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: PointVariable {
+                    fs: xy_point.clone(),
+                },
+                eval,
+            });
+            builder.set(&out_evals, *out_idx, claim);
+        }
+
+        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[slope_group_idx]
+            .1
+            .iter()
+            .enumerate()
+        {
+            let EvalExpression::Single(out_idx) = eval_expr else {
+                panic!("ecc bridge slope group must use EvalExpression::Single");
+            };
+            let s1 = builder.get(&ecc_proof.evals, 3 + idx);
+            let eval = builder.eval(s1 * sample_r);
+            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: PointVariable {
+                    fs: s_point.clone(),
+                },
+                eval,
+            });
+            builder.set(&out_evals, *out_idx, claim);
+        }
+    }
+
     builder.cycle_tracker_start("Verify GKR Circuit");
     let rt = verify_gkr_circuit(
         builder,
@@ -904,9 +999,8 @@ pub fn verify_gkr_circuit<C: Config>(
                 },
         } = layer_proof;
 
-        let expected_main_evals_len: Usize<C::N> = Usize::from(
-            layer.n_witin + layer.n_fixed + layer.n_instance + layer.n_structural_witin,
-        );
+        let expected_main_evals_len: Usize<C::N> =
+            Usize::from(layer.n_witin + layer.n_fixed + layer.n_structural_witin);
         builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
 
         transcript_observe_label(builder, challenger, b"combine subset evals");
@@ -947,7 +1041,7 @@ pub fn verify_gkr_circuit<C: Config>(
             unipoly_extrapolator,
         );
 
-        let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
+        let structural_witin_offset = layer.n_witin + layer.n_fixed;
 
         // check selector evaluations
         layer

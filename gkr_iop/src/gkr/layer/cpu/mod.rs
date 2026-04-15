@@ -174,12 +174,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         }
         exit_span!(span);
 
-        // `wit` := witin ++ fixed ++ pubio ++ structural
+        // `wit` := witin ++ fixed ++ structural
         // selector structural witins are replaced by computed eq MLEs in-place by witness id.
-        let base_wit_count = layer.n_witin + layer.n_fixed + layer.n_instance;
-        let mut all_witins = Vec::with_capacity(
-            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
-        );
+        let base_wit_count = layer.n_witin + layer.n_fixed;
+        let mut all_witins =
+            Vec::with_capacity(layer.n_witin + layer.n_structural_witin + layer.n_fixed);
         all_witins.extend(
             wit.iter()
                 .take(base_wit_count)
@@ -199,13 +198,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 
         assert_eq!(
             all_witins.len(),
-            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
-            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {} + layer.n_instance {}",
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {}",
             all_witins.len(),
             layer.n_witin,
             layer.n_structural_witin,
             layer.n_fixed,
-            layer.n_instance,
         );
 
         let builder =
