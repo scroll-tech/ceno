@@ -421,6 +421,8 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         let selector_ecc_x = cb.create_placeholder_structural_witin(|| "selector_ecc_x");
         let selector_ecc_y = cb.create_placeholder_structural_witin(|| "selector_ecc_y");
         let selector_ecc_s = cb.create_placeholder_structural_witin(|| "selector_ecc_s");
+        let selector_ecc_x3 = cb.create_placeholder_structural_witin(|| "selector_ecc_x3");
+        let selector_ecc_y3 = cb.create_placeholder_structural_witin(|| "selector_ecc_y3");
 
         let config = Self::construct_circuit(cb, param)?;
 
@@ -446,6 +448,8 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
             SelectorType::Whole(selector_ecc_x.expr()),
             SelectorType::Whole(selector_ecc_y.expr()),
             SelectorType::Whole(selector_ecc_s.expr()),
+            SelectorType::Whole(selector_ecc_x3.expr()),
+            SelectorType::Whole(selector_ecc_y3.expr()),
         ]);
 
         // all shared the same selector
@@ -496,10 +500,10 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
 
         // ShardRam expects exactly these structural selectors:
-        // r, w, zero, ecc_x, ecc_y, ecc_s.
+        // r, w, zero, ecc_x, ecc_y, ecc_s, ecc_x3, ecc_y3.
         assert_eq!(
-            num_structural_witin, 6,
-            "ShardRam requires exactly 6 structural selectors (r,w,zero,ecc_x,ecc_y,ecc_s)"
+            num_structural_witin, 8,
+            "ShardRam requires exactly 8 structural selectors (r,w,zero,ecc_x,ecc_y,ecc_s,ecc_x3,ecc_y3)"
         );
         let selector_r_witin = WitIn { id: 0 };
         let selector_w_witin = WitIn { id: 1 };
@@ -507,6 +511,8 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         let selector_ecc_x_witin = WitIn { id: 3 };
         let selector_ecc_y_witin = WitIn { id: 4 };
         let selector_ecc_s_witin = WitIn { id: 5 };
+        let selector_ecc_x3_witin = WitIn { id: 6 };
+        let selector_ecc_y3_witin = WitIn { id: 7 };
 
         let nthreads = max_usable_threads();
 
@@ -563,6 +569,8 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
                 set_val!(row, selector_ecc_x_witin, E::BaseField::ONE);
                 set_val!(row, selector_ecc_y_witin, E::BaseField::ONE);
                 set_val!(row, selector_ecc_s_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_x3_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_y3_witin, E::BaseField::ONE);
             });
         let raw_witin_iter = raw_witin.values[0..steps.len() * num_witin]
             .par_chunks_mut(num_instance_per_batch * num_witin);

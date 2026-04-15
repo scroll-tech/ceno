@@ -41,7 +41,7 @@ pub type RotateExprs<E> = (
 // rotation contribute
 // left + right + target, overall 3
 pub const ROTATION_OPENING_COUNT: usize = 3;
-pub const ECC_BRIDGE_OPENING_COUNT: usize = 3;
+pub const ECC_BRIDGE_OPENING_COUNT: usize = 5;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerType {
@@ -569,7 +569,7 @@ impl<E: ExtensionField> Layer<E> {
 
             // ECC bridge selector groups must be explicitly supplied and independent.
             // Do not fall back to (or reuse) preceding r/w/lk/zero selectors.
-            let [ecc_sel_x, ecc_sel_y, ecc_sel_s] =
+            let [ecc_sel_x, ecc_sel_y, ecc_sel_s, ecc_sel_x3, ecc_sel_y3] =
                 cb.cs.ec_bridge_selectors.clone().expect(
                     "ecc bridge selectors must be provided when ec_point_exprs is non-empty",
                 );
@@ -577,16 +577,29 @@ impl<E: ExtensionField> Layer<E> {
             let x_eval_base = next_non_zero_eval_idx;
             let y_eval_base = x_eval_base + septic_degree;
             let s_eval_base = y_eval_base + septic_degree;
-            next_non_zero_eval_idx = s_eval_base + septic_degree;
-            ecc_bridge_eval_bases = Some([x_eval_base, y_eval_base, s_eval_base]);
+            let x3_eval_base = s_eval_base + septic_degree;
+            let y3_eval_base = x3_eval_base + septic_degree;
+            next_non_zero_eval_idx = y3_eval_base + septic_degree;
+            ecc_bridge_eval_bases = Some([
+                x_eval_base,
+                y_eval_base,
+                s_eval_base,
+                x3_eval_base,
+                y3_eval_base,
+            ]);
 
             let x_group_idx = expr_evals.len();
-            expr_evals.push((ecc_sel_x, vec![]));
+            expr_evals.push((ecc_sel_x.clone(), vec![]));
             let y_group_idx = expr_evals.len();
-            expr_evals.push((ecc_sel_y, vec![]));
+            expr_evals.push((ecc_sel_y.clone(), vec![]));
             let s_group_idx = expr_evals.len();
-            expr_evals.push((ecc_sel_s, vec![]));
-            ecc_bridge_group_indices = Some([x_group_idx, y_group_idx, s_group_idx]);
+            expr_evals.push((ecc_sel_s.clone(), vec![]));
+            let x3_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_x3, vec![]));
+            let y3_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_y3, vec![]));
+            ecc_bridge_group_indices =
+                Some([x_group_idx, y_group_idx, s_group_idx, x3_group_idx, y3_group_idx]);
 
             for (idx, x_expr) in cb.cs.ec_point_exprs[..septic_degree].iter().enumerate() {
                 expressions.push(x_expr.clone());
@@ -610,6 +623,23 @@ impl<E: ExtensionField> Layer<E> {
                     .1
                     .push(EvalExpression::Single(s_eval_base + idx));
                 expr_names.push(format!("ecc_bridge/slope/{idx}"));
+            }
+
+            // x3/y3 reuse x/y expressions but are opened at rt||1 instead of [r]||rt.
+            for (idx, x_expr) in cb.cs.ec_point_exprs[..septic_degree].iter().enumerate() {
+                expressions.push(x_expr.clone());
+                expr_evals[x3_group_idx]
+                    .1
+                    .push(EvalExpression::Single(x3_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/x3/{idx}"));
+            }
+
+            for (idx, y_expr) in cb.cs.ec_point_exprs[septic_degree..].iter().enumerate() {
+                expressions.push(y_expr.clone());
+                expr_evals[y3_group_idx]
+                    .1
+                    .push(EvalExpression::Single(y3_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/y3/{idx}"));
             }
         }
 
@@ -645,7 +675,7 @@ impl<E: ExtensionField> Layer<E> {
         // Drop selector groups that ended up without eval expressions.
         expr_evals.retain(|(_, evals)| !evals.is_empty());
 
-        if let Some([x_base, y_base, s_base]) = ecc_bridge_eval_bases {
+        if let Some([x_base, y_base, s_base, x3_base, y3_base]) = ecc_bridge_eval_bases {
             let find_group_by_base = |base: usize| {
                 expr_evals
                     .iter()
@@ -661,7 +691,11 @@ impl<E: ExtensionField> Layer<E> {
                 .expect("missing y ecc bridge selector group after retain");
             let s_idx = find_group_by_base(s_base)
                 .expect("missing slope ecc bridge selector group after retain");
-            ecc_bridge_group_indices = Some([x_idx, y_idx, s_idx]);
+            let x3_idx = find_group_by_base(x3_base)
+                .expect("missing x3 ecc bridge selector group after retain");
+            let y3_idx = find_group_by_base(y3_base)
+                .expect("missing y3 ecc bridge selector group after retain");
+            ecc_bridge_group_indices = Some([x_idx, y_idx, s_idx, x3_idx, y3_idx]);
         }
 
         let out_eval_count = expr_evals

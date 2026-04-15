@@ -33,9 +33,12 @@ use witness::next_pow2_instance_padding;
 pub(crate) struct EccBridgeClaims<E: ExtensionField> {
     pub(crate) xy_point: Point<E>,
     pub(crate) s_point: Point<E>,
+    pub(crate) x3y3_point: Point<E>,
     pub(crate) x_evals: Vec<E>,
     pub(crate) y_evals: Vec<E>,
     pub(crate) s_evals: Vec<E>,
+    pub(crate) x3_evals: Vec<E>,
+    pub(crate) y3_evals: Vec<E>,
 }
 
 pub(crate) struct EccQuarkWitnessInputs<'a, PB: ProverBackend> {
@@ -91,6 +94,8 @@ pub(crate) fn derive_ecc_bridge_claims<E: ExtensionField>(
     let y0 = &evals[2 * degree..3 * degree];
     let x1 = &evals[3 * degree..4 * degree];
     let y1 = &evals[4 * degree..5 * degree];
+    let x3 = &evals[5 * degree..6 * degree];
+    let y3 = &evals[6 * degree..7 * degree];
 
     let one_minus_r = E::ONE - sample_r;
     let x_evals = x0
@@ -104,6 +109,8 @@ pub(crate) fn derive_ecc_bridge_claims<E: ExtensionField>(
         .map(|(a, b)| *a * one_minus_r + *b * sample_r)
         .collect_vec();
     let s_evals = s1.iter().map(|v| *v * sample_r).collect_vec();
+    let x3_evals = x3.to_vec();
+    let y3_evals = y3.to_vec();
 
     let mut xy_point = vec![sample_r];
     xy_point.extend(ecc_proof.rt.iter().copied());
@@ -113,12 +120,19 @@ pub(crate) fn derive_ecc_bridge_claims<E: ExtensionField>(
     s_point.push(sample_r);
     assert_eq!(s_point.len(), num_var_with_rotation);
 
+    let mut x3y3_point = ecc_proof.rt.clone();
+    x3y3_point.push(E::ONE);
+    assert_eq!(x3y3_point.len(), num_var_with_rotation);
+
     EccBridgeClaims {
         xy_point,
         s_point,
+        x3y3_point,
         x_evals,
         y_evals,
         s_evals,
+        x3_evals,
+        y3_evals,
     }
 }
 

@@ -699,7 +699,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         if let Some(ecc_proof) = proof.ecc_proof.as_ref() {
-            let Some([x_group_idx, y_group_idx, slope_group_idx]) =
+            let Some([x_group_idx, y_group_idx, slope_group_idx, x3_group_idx, y3_group_idx]) =
                 first_layer.ecc_bridge_group_indices()
             else {
                 return Err(ZKVMError::InvalidProof(
@@ -727,6 +727,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 &first_layer.out_sel_and_eval_exprs[slope_group_idx].1,
                 &claims.s_evals,
                 &claims.s_point,
+            );
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[x3_group_idx].1,
+                &claims.x3_evals,
+                &claims.x3y3_point,
+            );
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[y3_group_idx].1,
+                &claims.y3_evals,
+                &claims.x3y3_point,
             );
         }
 

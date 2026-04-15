@@ -850,7 +850,7 @@ pub fn verify_chip_proof<C: Config>(
     }
 
     if composed_cs.has_ecc_ops() {
-        let [x_group_idx, y_group_idx, slope_group_idx] = first_layer
+        let [x_group_idx, y_group_idx, slope_group_idx, x3_group_idx, y3_group_idx] = first_layer
             .ecc_bridge_group_indices()
             .expect("ecc bridge selectors missing");
 
@@ -873,7 +873,7 @@ pub fn verify_chip_proof<C: Config>(
             });
 
         let s_point_len: Usize<C::N> = builder.eval(ecc_proof.rt.fs.len() + Usize::from(1));
-        let s_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(s_point_len);
+        let s_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(s_point_len.clone());
         builder
             .range(0, ecc_proof.rt.fs.len())
             .for_each(|idx_vec, builder| {
@@ -882,6 +882,16 @@ pub fn verify_chip_proof<C: Config>(
                 builder.set(&s_point, idx, v);
             });
         builder.set(&s_point, ecc_proof.rt.fs.len(), sample_r);
+
+        let x3y3_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(s_point_len.clone());
+        builder
+            .range(0, ecc_proof.rt.fs.len())
+            .for_each(|idx_vec, builder| {
+                let idx = idx_vec[0];
+                let v = builder.get(&ecc_proof.rt.fs, idx);
+                builder.set(&x3y3_point, idx, v);
+            });
+        builder.set(&x3y3_point, ecc_proof.rt.fs.len(), one);
 
         let degree = SEPTIC_EXTENSION_DEGREE;
         for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[x_group_idx]
@@ -937,6 +947,42 @@ pub fn verify_chip_proof<C: Config>(
             let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
                 point: PointVariable {
                     fs: s_point.clone(),
+                },
+                eval,
+            });
+            builder.set(&out_evals, *out_idx, claim);
+        }
+
+        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[x3_group_idx]
+            .1
+            .iter()
+            .enumerate()
+        {
+            let EvalExpression::Single(out_idx) = eval_expr else {
+                panic!("ecc bridge x3 group must use EvalExpression::Single");
+            };
+            let eval = builder.get(&ecc_proof.evals, 3 + degree * 5 + idx);
+            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: PointVariable {
+                    fs: x3y3_point.clone(),
+                },
+                eval,
+            });
+            builder.set(&out_evals, *out_idx, claim);
+        }
+
+        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[y3_group_idx]
+            .1
+            .iter()
+            .enumerate()
+        {
+            let EvalExpression::Single(out_idx) = eval_expr else {
+                panic!("ecc bridge y3 group must use EvalExpression::Single");
+            };
+            let eval = builder.get(&ecc_proof.evals, 3 + degree * 6 + idx);
+            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: PointVariable {
+                    fs: x3y3_point.clone(),
                 },
                 eval,
             });
