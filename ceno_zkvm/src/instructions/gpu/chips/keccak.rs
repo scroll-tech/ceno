@@ -409,7 +409,8 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
         })?;
     }
 
-    // Step 8: Keep witness on device in normal mode; D2H only for debug compare.
+    // Step 8: Keep witness on device only when cache policy keeps device backing.
+    // In debug mode or cache-none mode, do transpose + D2H.
     let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !should_keep_witness_device_backing()
     {

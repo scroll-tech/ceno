@@ -352,7 +352,8 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     }
     raw_structural.padding_by_strategy();
 
-    // Step 4: Keep witness on device in normal mode; D2H only for debug comparison.
+    // Step 4: Keep witness on device only when cache policy keeps device backing.
+    // In debug mode or cache-none mode, do transpose + D2H to build host-backed RMM.
     let mut raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !should_keep_witness_device_backing()
     {

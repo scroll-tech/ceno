@@ -383,7 +383,8 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
             Ok(witness_buf)
         })?;
 
-    // 5. Structural witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
+    // 5. Structural witness: keep device-resident only when cache policy keeps device backing.
+    // In debug mode or cache-none mode, do transpose + D2H.
     let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !crate::instructions::gpu::config::should_keep_witness_device_backing()
     {
@@ -443,7 +444,8 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
         rmm
     };
 
-    // 6. Main witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
+    // 6. Main witness: keep device-resident only when cache policy keeps device backing.
+    // In debug mode or cache-none mode, do transpose + D2H.
     let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !crate::instructions::gpu::config::should_keep_witness_device_backing()
     {
@@ -626,7 +628,8 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
         },
     )?;
 
-    // Structural witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
+    // Structural witness: keep device-resident only when cache policy keeps device backing.
+    // In debug mode or cache-none mode, do transpose + D2H.
     let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !crate::instructions::gpu::config::should_keep_witness_device_backing()
     {
@@ -686,7 +689,8 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
         rmm
     };
 
-    // Witness: keep device-resident in normal mode; do transpose+D2H only for debug compare.
+    // Witness: keep device-resident only when cache policy keeps device backing.
+    // In debug mode or cache-none mode, do transpose + D2H.
     let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !crate::instructions::gpu::config::should_keep_witness_device_backing()
     {
