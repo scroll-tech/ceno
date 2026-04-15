@@ -313,7 +313,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // c[i] = XOR (state[j][i]) for j in 0..5
         // We unroll it into
         // c_aux[i][j] = XOR (state[k][i]) for k in 0..j
-        // We store only j = 1..4, i.e. c_aux[i][j - 1] for j in 1..5.
+        // We store only j = 1..=4, i.e. c_aux[i][j - 1] for j in 1..=4.
         // We use c_aux[i][3] instead of c[i].
         // c_aux is also stored in 8-bit chunks
         let c_aux: ArrayView<WitIn, Ix3> = ArrayView::from_shape((5, 4, 8), c_aux).unwrap();
