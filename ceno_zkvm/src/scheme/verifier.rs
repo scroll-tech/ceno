@@ -553,7 +553,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.append_field_element_ext(eval);
         }
 
-        let (_, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
+        let (rt_tower, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
             proof
                 .r_out_evals
                 .iter()
@@ -657,10 +657,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .ok_or_else(|| ZKVMError::InvalidProof("missing rotation proof".into()))?
                 .clone();
 
-            let rt_tower = out_evals
-                .first()
-                .map(|point_and_eval| point_and_eval.point.clone())
-                .ok_or_else(|| ZKVMError::InvalidProof("missing tower output point".into()))?;
             let rotation_claims = gkr_iop::gkr::layer::zerocheck_layer::verify_rotation(
                 num_var_with_rotation,
                 first_layer.rotation_exprs.1.len(),
