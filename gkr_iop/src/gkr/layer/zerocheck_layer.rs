@@ -138,7 +138,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     &expr,
                     self.n_witin as WitnessId,
                     self.n_fixed as WitnessId,
-                    self.n_instance,
+                    0,
                 )
             })
             .collect::<Vec<_>>();
@@ -159,7 +159,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
                     expr,
                     self.n_witin as WitnessId,
                     self.n_fixed as WitnessId,
-                    self.n_instance,
+                    0,
                 )
             });
 
@@ -167,7 +167,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             &mut zero_expr,
             self.n_witin as WitnessId,
             self.n_fixed as WitnessId,
-            self.n_instance,
+            0,
         );
         tracing::trace!("{} main sumcheck degree: {}", self.name, zero_expr.degree());
         self.main_sumcheck_expression = Some(zero_expr);
@@ -248,7 +248,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
 
         assert_eq!(
             main_evals.len(),
-            self.n_witin + self.n_fixed + self.n_instance + self.n_structural_witin,
+            self.n_witin + self.n_fixed + self.n_structural_witin,
             "invalid main_evals length",
         );
 
@@ -281,7 +281,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         );
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
-        let structural_witin_offset = self.n_witin + self.n_fixed + self.n_instance;
+        let structural_witin_offset = self.n_witin + self.n_fixed;
         // eval selector and set to respective witin
         izip!(
             &self.out_sel_and_eval_exprs,
@@ -770,7 +770,7 @@ pub fn rlc_zero_expr<E: ExtensionField>(
     layer: &Layer<E>,
     alpha_pows: &[Expression<E>],
 ) -> Vec<Expression<E>> {
-    let offset_structural_witid = (layer.n_witin + layer.n_fixed + layer.n_instance) as WitnessId;
+    let offset_structural_witid = (layer.n_witin + layer.n_fixed) as WitnessId;
     let mut alpha_pows_iter = alpha_pows.iter();
     let mut expr_iter = layer.exprs.iter();
     let mut zero_check_exprs = Vec::with_capacity(layer.out_sel_and_eval_exprs.len());

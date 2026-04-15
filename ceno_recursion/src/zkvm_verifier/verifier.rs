@@ -579,15 +579,7 @@ pub fn verify_chip_proof<C: Config>(
         is_infinity: Usize::uninit(builder),
     };
 
-    if composed_cs.has_ecc_ops() {
-        builder.assert_nonzero(&chip_proof.has_ecc_proof);
-        let ecc_proof = &chip_proof.ecc_proof;
-        builder.assert_usize_eq(ecc_proof.sum.is_infinity.clone(), Usize::from(0));
-        verify_ecc_proof(builder, challenger, ecc_proof, unipoly_extrapolator);
-        builder.assign(&shard_ec_sum, ecc_proof.sum.clone());
-    } else {
-        builder.assign(&shard_ec_sum.is_infinity, Usize::from(1));
-    }
+    builder.assign(&shard_ec_sum.is_infinity, Usize::from(1));
 
     let tower_proof = &chip_proof.tower_proof;
     let num_variables: Array<C, Usize<C::N>> = builder.dyn_array(num_batched);
@@ -629,6 +621,14 @@ pub fn verify_chip_proof<C: Config>(
                 let eval = builder.get(&logup_p_evals, idx_vec[0]).eval;
                 builder.assert_ext_eq(eval, one);
             });
+    }
+
+    if composed_cs.has_ecc_ops() {
+        builder.assert_nonzero(&chip_proof.has_ecc_proof);
+        let ecc_proof = &chip_proof.ecc_proof;
+        builder.assert_usize_eq(ecc_proof.sum.is_infinity.clone(), Usize::from(0));
+        verify_ecc_proof(builder, challenger, ecc_proof, unipoly_extrapolator);
+        builder.assign(&shard_ec_sum, ecc_proof.sum.clone());
     }
 
     let num_rw_records: Usize<C::N> = builder.eval(r_counts_per_instance + w_counts_per_instance);
@@ -999,9 +999,8 @@ pub fn verify_gkr_circuit<C: Config>(
                 },
         } = layer_proof;
 
-        let expected_main_evals_len: Usize<C::N> = Usize::from(
-            layer.n_witin + layer.n_fixed + layer.n_instance + layer.n_structural_witin,
-        );
+        let expected_main_evals_len: Usize<C::N> =
+            Usize::from(layer.n_witin + layer.n_fixed + layer.n_structural_witin);
         builder.assert_usize_eq(expected_main_evals_len, main_evals.len());
 
         transcript_observe_label(builder, challenger, b"combine subset evals");
@@ -1042,7 +1041,7 @@ pub fn verify_gkr_circuit<C: Config>(
             unipoly_extrapolator,
         );
 
-        let structural_witin_offset = layer.n_witin + layer.n_fixed + layer.n_instance;
+        let structural_witin_offset = layer.n_witin + layer.n_fixed;
 
         // check selector evaluations
         layer

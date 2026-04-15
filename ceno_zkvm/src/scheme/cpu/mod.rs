@@ -8,7 +8,10 @@ use crate::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         hal::{DeviceProvingKey, EccQuarkProver, ProofInput, TowerProverSpec},
         septic_curve::{SepticExtension, SepticPoint, SymbolicSepticExtension},
-        utils::{infer_tower_logup_witness, infer_tower_product_witness},
+        utils::{
+            assign_group_evals, derive_ecc_bridge_claims, extract_ecc_quark_witness_inputs,
+            infer_tower_logup_witness, infer_tower_product_witness, split_rotation_evals,
+        },
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
@@ -16,7 +19,6 @@ use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
-    evaluation::EvalExpression,
     gkr::{self, Evaluation, GKRProof, GKRProverOutput, layer::LayerWitness},
     hal::ProverBackend,
     selector::{SelectorContext, SelectorType},
@@ -54,59 +56,6 @@ pub type TowerRelationOutput<E> = (
     Vec<Vec<E>>,
     Vec<Vec<E>>,
 );
-
-struct EccBridgeClaims<E: ExtensionField> {
-    xy_point: Point<E>,
-    s_point: Point<E>,
-    x_evals: Vec<E>,
-    y_evals: Vec<E>,
-    s_evals: Vec<E>,
-}
-
-fn derive_ecc_bridge_claims<E: ExtensionField>(
-    ecc_proof: &EccQuarkProof<E>,
-    sample_r: E,
-    num_var_with_rotation: usize,
-) -> EccBridgeClaims<E> {
-    let degree = SEPTIC_EXTENSION_DEGREE;
-    let evals = &ecc_proof.evals[3..];
-    assert_eq!(evals.len(), degree * 7);
-
-    let s1 = &evals[0..degree];
-    let x0 = &evals[degree..2 * degree];
-    let y0 = &evals[2 * degree..3 * degree];
-    let x1 = &evals[3 * degree..4 * degree];
-    let y1 = &evals[4 * degree..5 * degree];
-
-    let one_minus_r = E::ONE - sample_r;
-    let x_evals = x0
-        .iter()
-        .zip_eq(x1.iter())
-        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
-        .collect_vec();
-    let y_evals = y0
-        .iter()
-        .zip_eq(y1.iter())
-        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
-        .collect_vec();
-    let s_evals = s1.iter().map(|v| *v * sample_r).collect_vec();
-
-    let mut xy_point = vec![sample_r];
-    xy_point.extend(ecc_proof.rt.iter().copied());
-    assert_eq!(xy_point.len(), num_var_with_rotation);
-
-    let mut s_point = ecc_proof.rt.clone();
-    s_point.push(sample_r);
-    assert_eq!(s_point.len(), num_var_with_rotation);
-
-    EccBridgeClaims {
-        xy_point,
-        s_point,
-        x_evals,
-        y_evals,
-        s_evals,
-    }
-}
 
 // accumulate N=2^n EC points into one EC point using affine coordinates
 // in one layer which borrows ideas from the [Quark paper](https://eprint.iacr.org/2020/1275.pdf)
@@ -365,19 +314,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<CpuBa
 {
     fn prove_ec_sum_quark<'a>(
         &self,
-        num_instances: usize,
-        xs: Vec<Arc<MultilinearExtension<'a, E>>>,
-        ys: Vec<Arc<MultilinearExtension<'a, E>>>,
-        invs: Vec<Arc<MultilinearExtension<'a, E>>>,
+        cs: &ComposedConstrainSystem<E>,
+        input: &ProofInput<'a, CpuBackend<E, PCS>>,
         transcript: &mut impl Transcript<E>,
-    ) -> Result<EccQuarkProof<E>, ZKVMError> {
-        Ok(CpuEccProver::create_ecc_proof(
-            num_instances,
-            xs,
-            ys,
-            invs,
+    ) -> Result<Option<EccQuarkProof<E>>, ZKVMError> {
+        let Some(ecc_inputs) = extract_ecc_quark_witness_inputs::<CpuBackend<E, PCS>>(cs, input)
+        else {
+            return Ok(None);
+        };
+
+        Ok(Some(CpuEccProver::create_ecc_proof(
+            input.num_instances(),
+            ecc_inputs.xs,
+            ecc_inputs.ys,
+            ecc_inputs.slopes,
             transcript,
-        ))
+        )))
     }
 }
 
@@ -991,18 +943,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
 
         let mut out_evals =
             vec![PointAndEval::new(rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
-        let assign_group = |out_evals: &mut [PointAndEval<E>],
-                            eval_exprs: &[EvalExpression<E>],
-                            evals: &[E],
-                            point: &Point<E>| {
-            assert_eq!(eval_exprs.len(), evals.len(), "group eval length mismatch");
-            for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
-                let EvalExpression::Single(index) = eval_expr else {
-                    panic!("group must use EvalExpression::Single");
-                };
-                out_evals[*index] = PointAndEval::new(point.clone(), *eval);
-            }
-        };
 
         if let Some(rotation) = rotation.as_ref() {
             let Some([left_group_idx, right_group_idx, point_group_idx]) =
@@ -1011,28 +951,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
                 panic!("rotation proof provided for non-rotation layer")
             };
 
-            let mut left_evals = Vec::new();
-            let mut right_evals = Vec::new();
-            let mut point_evals = Vec::new();
-            for chunk in rotation.proof.evals.chunks_exact(3) {
-                left_evals.push(chunk[0]);
-                right_evals.push(chunk[1]);
-                point_evals.push(chunk[2]);
-            }
+            let (left_evals, right_evals, point_evals) =
+                split_rotation_evals(&rotation.proof.evals);
 
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
                 &left_evals,
                 &rotation.left_point,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
                 &right_evals,
                 &rotation.right_point,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
                 &point_evals,
@@ -1050,19 +984,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
             let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation);
 
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[x_group_idx].1,
                 &claims.x_evals,
                 &claims.xy_point,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[y_group_idx].1,
                 &claims.y_evals,
                 &claims.xy_point,
             );
-            assign_group(
+            assign_group_evals(
                 &mut out_evals,
                 &first_layer.out_sel_and_eval_exprs[slope_group_idx].1,
                 &claims.s_evals,

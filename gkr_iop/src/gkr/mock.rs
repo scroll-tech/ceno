@@ -74,7 +74,7 @@ impl<E: ExtensionField> MockProver<E> {
                         &(sel.selector_expr() * expr),
                         layer.n_witin as WitnessId,
                         layer.n_fixed as WitnessId,
-                        layer.n_instance,
+                        0,
                         &[],
                         &wits,
                         &structural_wits,
@@ -93,7 +93,6 @@ impl<E: ExtensionField> MockProver<E> {
                         out.mock_evaluate(
                             layer.n_witin as WitnessId,
                             layer.n_fixed as WitnessId,
-                            layer.n_instance,
                             &evaluations,
                             &challenges,
                             num_vars,
@@ -148,7 +147,6 @@ impl<E: ExtensionField> EvalExpression<E> {
         &self,
         n_witin: WitnessId,
         n_fixed: WitnessId,
-        n_instance: usize,
         evals: &[ArcMultilinearExtension<'a, E>],
         challenges: &[E],
         num_vars: usize,
@@ -162,7 +160,7 @@ impl<E: ExtensionField> EvalExpression<E> {
                 &(Expression::WitIn(*i as WitnessId) * *c0.clone() + *c1.clone()),
                 n_witin,
                 n_fixed,
-                n_instance,
+                0,
                 &[],
                 evals,
                 &[],
@@ -174,11 +172,7 @@ impl<E: ExtensionField> EvalExpression<E> {
                 assert_eq!(parts.len(), 1 << indices.len());
                 let parts = parts
                     .iter()
-                    .map(|part| {
-                        part.mock_evaluate(
-                            n_witin, n_fixed, n_instance, evals, challenges, num_vars,
-                        )
-                    })
+                    .map(|part| part.mock_evaluate(n_witin, n_fixed, evals, challenges, num_vars))
                     .collect::<Result<Vec<_>, _>>()?;
                 indices
                     .iter()
