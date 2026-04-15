@@ -240,7 +240,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.dyn_array(proof.prod_specs_eval.data.length.clone());
     let logup_specs_eval: Array<C, Ext<C::F, C::EF>> =
         builder.dyn_array(proof.logup_specs_eval.data.length.clone());
-    builder.set(&input_ctx, 9, Usize::from(0));
+    builder.set(&input_ctx, 9, Usize::from(1)); // writeback: copy hint data into local arrays
 
     builder.range(0, op_range).for_each(|i_vec, builder| {
         let round_var = i_vec[0];
@@ -288,6 +288,43 @@ pub fn verify_tower_proof<C: Config>(
         builder.assign(&expected_evaluation, expected_evaluation * eq_e);
         builder.assert_ext_eq(expected_evaluation, sub_e);
         builder.cycle_tracker_end("check expected evaluation");
+
+        // Bind prover-supplied prod/logup evals into transcript (Fiat-Shamir soundness).
+        // After sumcheck_layer_eval with writeback=1, the local arrays contain the hint data.
+        let prod_stride: Var<C::N> = builder.eval(
+            proof.prod_specs_eval.inner_length * proof.prod_specs_eval.inner_inner_length,
+        );
+        builder
+            .range(0, num_prod_spec.get_var())
+            .for_each(|idx, builder| {
+                let offset: Var<C::N> = builder.eval(
+                    idx[0] * prod_stride + round_var * proof.prod_specs_eval.inner_inner_length,
+                );
+                let end: Var<C::N> =
+                    builder.eval(offset + proof.prod_specs_eval.inner_inner_length);
+                let slice = prod_specs_eval.slice(builder, offset, end);
+                unsafe {
+                    let felts = exts_to_felts(builder, &slice);
+                    challenger_multi_observe(builder, challenger, &felts);
+                }
+            });
+        let logup_stride: Var<C::N> = builder.eval(
+            proof.logup_specs_eval.inner_length * proof.logup_specs_eval.inner_inner_length,
+        );
+        builder
+            .range(0, num_logup_spec.get_var())
+            .for_each(|idx, builder| {
+                let offset: Var<C::N> = builder.eval(
+                    idx[0] * logup_stride + round_var * proof.logup_specs_eval.inner_inner_length,
+                );
+                let end: Var<C::N> =
+                    builder.eval(offset + proof.logup_specs_eval.inner_inner_length);
+                let slice = logup_specs_eval.slice(builder, offset, end);
+                unsafe {
+                    let felts = exts_to_felts(builder, &slice);
+                    challenger_multi_observe(builder, challenger, &felts);
+                }
+            });
 
         builder.cycle_tracker_start("derive next layer's expected sum");
         // derive single eval

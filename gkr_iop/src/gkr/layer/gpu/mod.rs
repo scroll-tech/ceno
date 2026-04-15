@@ -300,6 +300,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         let row_challenges_e =
             unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(row_challenges) };
 
+        transcript.append_field_element_exts(&evals_gpu_e);
         exit_span!(span);
         (
             LayerProof {
@@ -467,6 +468,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
         })
         .collect::<Vec<E>>();
     exit_span!(span);
+    transcript.append_field_element_exts(&evals);
 
     (
         SumcheckLayerProof {

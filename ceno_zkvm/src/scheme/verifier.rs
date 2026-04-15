@@ -787,6 +787,18 @@ impl TowerVerify {
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
                 let eq = eq_eval(out_rt, &rt);
 
+                // Bind prover-supplied prod/logup evals into transcript (Fiat-Shamir soundness).
+                for (spec_index, num_vars) in num_variables.iter().enumerate().take(num_prod_spec) {
+                    if round < *num_vars - 1 {
+                        transcript.append_field_element_exts(&tower_proofs.prod_specs_eval[spec_index][round]);
+                    }
+                }
+                for (spec_index, num_vars) in num_variables.iter().skip(num_prod_spec).enumerate().take(num_logup_spec) {
+                    if round < *num_vars - 1 {
+                        transcript.append_field_element_exts(&tower_proofs.logup_specs_eval[spec_index][round]);
+                    }
+                }
+
                 let expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())
