@@ -6,7 +6,7 @@ In Ceno, grand product checks (used for offline memory checking, permutation arg
 require computing a product of the form $\prod_{i} a_i$. We use a **complete binary tree of
 multiplication gates** — called a **tower tree** — and verify its computation via the
 [GKR protocol](https://people.cs.georgetown.edu/jthaler/GKRNote.pdf), following the approach of
-[Thaler13, Section 5.3.1].
+[[Thaler13, Section 5.3.1]](#thaler13).
 
 ### The Tree Structure
 
@@ -88,6 +88,6 @@ proves this computation correct with a linear-time prover and a logarithmic-time
 
 ### References
 
-- Justin Thaler. *Time-Optimal Interactive Proofs for Circuit Evaluation*. 2013.
+- <a id="thaler13"></a> Justin Thaler. *Time-Optimal Interactive Proofs for Circuit Evaluation*. 2013.
   Section 5.3.1: "The Polynomial for a Binary Tree".
   Available at: <https://eprint.iacr.org/2013/351.pdf>
