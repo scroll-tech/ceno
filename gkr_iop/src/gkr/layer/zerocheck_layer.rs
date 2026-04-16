@@ -143,7 +143,12 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
             })
             .collect::<Vec<_>>();
 
-        // build main sumcheck expression
+        // Build the concrete main-sumcheck polynomial:
+        //   For each selector group g with expressions expr_{g,0..k-1},
+        //     group_expr_g(x) = sel_g(x) * Σ_j (α_{2+offset(g,j)} * expr_{g,j}(x))
+        //   and the final polynomial is:
+        //     main_sumcheck_expr(x) = Σ_g group_expr_g(x).
+        // `rlc_zero_expr` returns those per-group `group_expr_g`, then we sum them here.
         let alpha_pows_expr = (2..)
             .take(self.exprs.len())
             .map(|id| Expression::Challenge(id as ChallengeId, 1, E::ONE, E::ZERO))

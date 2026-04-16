@@ -98,7 +98,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             out_points.len(),
         );
 
-        // Main sumcheck: constraints are fully unified in out_sel_and_eval_exprs.
+        // Main sumcheck polynomial shape:
+        //   Σ_g sel_g(x) * (Σ_j α_{2+offset(g,j)} * expr_{g,j}(x))
+        // where selector groups `(sel_g, expr_{g,*})` come from `out_sel_and_eval_exprs`.
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
             get_challenge_pows(layer.exprs.len(), transcript)
