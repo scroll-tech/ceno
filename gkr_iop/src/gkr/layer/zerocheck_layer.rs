@@ -148,8 +148,9 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         //   p_g(x) = sel_g(x) * Σ_j (α_{2+offset(g,j)} * expr_{g,j}(x)).
         // The corresponding smaller sumcheck target is:
         //   S_g = Σ_{x in {0,1}^n} p_g(x).
+        // For zerocheck constraints contributed by each chip, the expected target is S_g = 0.
         // Main sumcheck batches them into:
-        //   p(x) = Σ_g p_g(x), so Σ_{x in {0,1}^n} p(x) = Σ_g S_g.
+        //   p(x) = Σ_g p_g(x), so Σ_{x in {0,1}^n} p(x) = Σ_g S_g = 0.
         // `rlc_zero_expr` returns the per-group p_g terms, then we sum them into p.
         let alpha_pows_expr = (2..)
             .take(self.exprs.len())
