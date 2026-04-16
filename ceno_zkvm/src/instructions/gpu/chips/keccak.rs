@@ -355,22 +355,18 @@ fn replay_keccak_witness_from_packed<E: ExtensionField>(
 
     let col_map = info_span!("col_map").in_scope(|| extract_keccak_column_map(config, num_witin));
     let gpu_result = info_span!("gpu_kernel").in_scope(|| {
-        with_cached_shard_meta(|shard_bufs| {
-            hal.witgen
-                .witgen_keccak(
-                    &col_map,
-                    packed_instances,
-                    num_padded_rows,
-                    shard_offset,
-                    fetch_base_pc,
-                    fetch_num_slots,
-                    None,
-                    Some(shard_bufs),
-                )
-                .map_err(|e| {
-                    ZKVMError::InvalidWitness(format!("GPU witgen_keccak failed: {e}").into())
-                })
-        })
+        hal.witgen
+            .witgen_keccak(
+                &col_map,
+                packed_instances,
+                num_padded_rows,
+                shard_offset,
+                fetch_base_pc,
+                fetch_num_slots,
+                None,
+                None,
+            )
+            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU witgen_keccak failed: {e}").into()))
     })?;
 
     let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()

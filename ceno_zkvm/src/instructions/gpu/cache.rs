@@ -661,6 +661,21 @@ pub(crate) fn with_cached_gpu_ctx<R>(
     })
 }
 
+/// Borrow cached shard steps and optionally shard metadata.
+///
+/// Replay-time witness restoration uses only the raw step buffer and must not
+/// rebind shard side-effect outputs, so `include_meta = false` returns `None`
+/// for shard metadata even though the resident shard session still exists.
+pub(crate) fn with_cached_gpu_ctx_opt<R>(
+    include_meta: bool,
+    f: impl FnOnce(&CudaSlice<u8>, Option<&ShardDeviceBuffers>) -> R,
+) -> R {
+    if include_meta {
+        return with_cached_gpu_ctx(|steps, meta| f(steps, Some(meta)));
+    }
+    with_cached_shard_steps(|steps| f(steps, None))
+}
+
 /// Drop the shard metadata cache. Call at end of each shard's witgen so no
 /// witgen GPU memory survives into prove.
 pub fn invalidate_shard_meta_cache() {
