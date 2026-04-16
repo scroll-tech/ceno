@@ -133,7 +133,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         // Per group g (from `out_sel_and_eval_exprs`):
         //   p_g(x) = sel_g(x) * Σ_j (α_{2+offset(g,j)} * expr_{g,j}(x)),
         //   S_g = Σ_{x in {0,1}^n} p_g(x).
-        // The batched polynomial is p(x) = Σ_g p_g(x), so Σ_x p(x) = Σ_g S_g.
+        // For zerocheck constraints (from each chip), S_g is expected to be 0.
+        // The batched polynomial is p(x) = Σ_g p_g(x), so Σ_x p(x) = Σ_g S_g = 0.
         let span = entered_span!("build_out_points_eq", profiling_4 = true);
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
