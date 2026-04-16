@@ -20,6 +20,7 @@
   - [Architecture Overview](./architecture-overview.md)
   - [Optimizations](./optimizations.md)
   - [Appendix](./appendix.md)
+    - [GKR Protocol for Tower Tree](./appendix/tower_tree.md)
 - [Integration with Ethereum](./integration-with-ethereum.md)
   - [Prover Network](./prover-network.md)
   - [On-chain verification](./on-chain-verification.md)
