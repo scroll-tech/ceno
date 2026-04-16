@@ -19,7 +19,9 @@ use mpcs::PolynomialCommitmentScheme;
 use std::sync::OnceLock;
 
 #[cfg(feature = "gpu")]
-use crate::instructions::gpu::config::should_materialize_witness_on_gpu;
+use crate::instructions::gpu::config::{
+    should_materialize_witness_on_gpu, should_retain_witness_device_backing_after_commit,
+};
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
 pub fn init_gpu_mem_tracker<'a>(
@@ -327,19 +329,28 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 /// Returns `(0, 0)` when trace is cached (`CacheLevel::Trace` or `CacheLevel::Full`),
 /// When cache is disabled (`CacheLevel::None`, the default), estimates actual allocation costs.
 pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize) -> (usize, usize) {
+    let base_elem_size = std::mem::size_of::<BB31Base>();
+    let mle_len = 1usize << num_vars;
+    let poly_bytes = num_witin * mle_len * base_elem_size;
+
     if should_materialize_witness_on_gpu() {
-        // GPU witgen keeps witness traces device-backed in col-major form.
-        // `get_trace` then builds view-based polynomials directly from the
-        // resident device buffer, so there is no per-task extraction buffer or
-        // additional resident witness allocation to account for here.
-        return (0, 0);
+        if should_retain_witness_device_backing_after_commit() {
+            // Eager GPU cache path: committed traces stay resident and
+            // extraction builds view-based polynomials directly from the
+            // already-live device buffer.
+            return (0, 0);
+        }
+
+        // Cache-none replay path: the task regenerates one witness/device
+        // backing on demand and keeps that col-major buffer resident for the
+        // duration of the chip proof. There is no separate extraction temp
+        // buffer, but the replayed witness itself must be accounted for as
+        // resident task memory.
+        return (poly_bytes, 0);
     }
 
     if matches!(get_gpu_cache_level(), CacheLevel::None) {
         // Default cache level is None
-        let base_elem_size = std::mem::size_of::<BB31Base>();
-        let mle_len = 1usize << num_vars;
-        let poly_bytes = num_witin * mle_len * base_elem_size;
         // get_trace allocates poly copies (resident) + temp_buffer (2x, freed after)
         (poly_bytes, 2 * poly_bytes)
     } else {

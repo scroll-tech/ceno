@@ -346,6 +346,12 @@ impl ChipScheduler {
                         };
                         let memory = task.estimated_memory_bytes;
                         let task_id = task.task_id;
+                        tracing::info!(
+                            "[scheduler] worker starting task {} ({}), estimated={:.2}MB",
+                            task_id,
+                            task.circuit_name,
+                            memory as f64 / (1024.0 * 1024.0)
+                        );
 
                         // Catch panics so a single worker crash doesn't deadlock
                         // the scheduler (which would block forever on done_rx.recv()

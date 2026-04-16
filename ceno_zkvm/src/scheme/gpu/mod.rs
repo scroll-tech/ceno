@@ -268,6 +268,22 @@ pub fn prove_main_constraints_impl<
     let Some(gkr_circuit) = gkr_circuit else {
         panic!("empty gkr circuit")
     };
+    let estimated_main_constraints_bytes =
+        estimate_main_constraints_bytes::<E, PCS>(composed_cs, input);
+    if let Ok(cuda_hal) = get_cuda_hal() {
+        let mem_pool = cuda_hal.inner.mem_pool();
+        let used_bytes = mem_pool.get_used_size().unwrap_or(0);
+        let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
+        tracing::info!(
+            "[gpu] entering prove_main_constraints: estimated={:.2}MB, used={:.2}MB, reserved={:.2}MB, witness={}, fixed={}, structural={}",
+            estimated_main_constraints_bytes as f64 / (1024.0 * 1024.0),
+            used_bytes as f64 / (1024.0 * 1024.0),
+            reserved_bytes as f64 / (1024.0 * 1024.0),
+            input.witness.len(),
+            input.fixed.len(),
+            input.structural_witness.len(),
+        );
+    }
     let selector_ctxs = if cs.ec_final_sum.is_empty() {
         // it's not global chip
         vec![
