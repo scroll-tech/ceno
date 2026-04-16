@@ -350,6 +350,8 @@ impl<E: ExtensionField> Layer<E> {
         //
         // The final batched main-sumcheck polynomial is formed as:
         //   p(x) = Σ_g sel_g(x) * (Σ_i α^{offset(g,i)} * (expr_{g,i}(x) - eval_{g,i})).
+        // `offset(g,i)` is the global challenge-power index of the i-th expression in group g,
+        // i.e. the contiguous position after flattening all groups in `expr_evals` order.
         // Here, `expr_evals` below constructs (g -> {(expr_{g,i}, eval_{g,i})_i}) for all groups.
 
         let rotation_expr_len = cb.cs.rotations.len() * ROTATION_OPENING_COUNT;
