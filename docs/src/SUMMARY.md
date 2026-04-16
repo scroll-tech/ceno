@@ -16,7 +16,7 @@
   - [Profiling & Performance](./profiling.md)
   - [Concurrent Chip Proving](./concurrent-chip-proving.md)
   - [Differences from RISC-V](./differences-from-risc-v.md)
-- [Technical Overview](./architecture-overview.md)
+- [Technical Overview](./technical-overview.md)
   - [Architecture Overview](./architecture-overview.md)
   - [Optimizations](./optimizations.md)
   - [Appendix](./appendix.md)
