@@ -28,7 +28,7 @@ use crate::{
         },
         config::{
             is_debug_compare_enabled, is_gpu_witgen_enabled, is_kind_disabled,
-            should_materialize_witness_on_gpu,
+            should_materialize_witness_on_gpu, should_materialize_witness_on_initial_assign,
         },
         dispatch::{GpuWitgenKind, compute_fetch_params, is_force_cpu_path},
         utils::{
@@ -506,6 +506,8 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     let num_padded_instances = num_instances.next_power_of_two().max(2);
     let num_padded_rows = num_padded_instances * 32; // 2^5 = 32 rows per instance
     let rotation = KECCAK_ROUNDS_CEIL_LOG2; // = 5
+    let materialize_initial_witness = crate::instructions::gpu::config::is_debug_compare_enabled()
+        || should_materialize_witness_on_initial_assign();
 
     // Step 1: Extract column map
     let col_map = info_span!("col_map").in_scope(|| extract_keccak_column_map(config, num_witin));
@@ -615,7 +617,9 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
 
     // Step 8: Keep witness on device only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+    let raw_witin = if !materialize_initial_witness {
+        RowMajorMatrix::<E::BaseField>::empty()
+    } else if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !should_materialize_witness_on_gpu()
     {
         info_span!("transpose_d2h", rows = num_padded_rows, cols = num_witin).in_scope(|| {

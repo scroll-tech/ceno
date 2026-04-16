@@ -21,7 +21,10 @@ use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use super::{
-    config::{is_gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
+    config::{
+        is_gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu,
+        should_materialize_witness_on_initial_assign,
+    },
     utils::debug_compare::{
         debug_compare_final_lk, debug_compare_shard_ec, debug_compare_shardram,
         debug_compare_witness,
@@ -215,6 +218,8 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     let num_structural_witin = num_structural_witin.max(1);
     let total_instances = step_indices.len();
+    let materialize_initial_witness = crate::instructions::gpu::config::is_debug_compare_enabled()
+        || should_materialize_witness_on_initial_assign();
 
     // Step 1: GPU fills witness matrix (+ LK counters + shard records for merged kinds)
     let (gpu_witness, gpu_lk_counters, gpu_ram_slots, gpu_compact_ec, gpu_compact_addr) =
@@ -391,7 +396,9 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
 
     // Step 4: Keep witness on device only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H to build host-backed RMM.
-    let mut raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+    let mut raw_witin = if !materialize_initial_witness {
+        RowMajorMatrix::<E::BaseField>::empty()
+    } else if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !should_materialize_witness_on_gpu()
     {
         info_span!("transpose_d2h", rows = total_instances, cols = num_witin).in_scope(|| {
@@ -411,17 +418,19 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             I::padding_strategy(),
         )
     };
-    raw_witin.padding_by_strategy();
-    debug_compare_witness::<E, I>(
-        config,
-        shard_ctx,
-        num_witin,
-        num_structural_witin,
-        shard_steps,
-        step_indices,
-        kind,
-        &raw_witin,
-    )?;
+    if materialize_initial_witness {
+        raw_witin.padding_by_strategy();
+        debug_compare_witness::<E, I>(
+            config,
+            shard_ctx,
+            num_witin,
+            num_structural_witin,
+            shard_steps,
+            step_indices,
+            kind,
+            &raw_witin,
+        )?;
+    }
 
     Ok(([raw_witin, raw_structural], lk_multiplicity))
 }

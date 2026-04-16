@@ -85,6 +85,16 @@ pub(crate) fn should_materialize_witness_on_gpu() -> bool {
     is_gpu_witgen_enabled()
 }
 
+/// Whether the initial opcode-assignment pass should eagerly materialize the
+/// witness RMM/device backing.
+///
+/// In cache-none + GPU-witgen mode we keep only replay metadata plus the
+/// shard-resident raw GPU state, and all witness materialization is deferred to
+/// commit / chip proof / opening replay.
+pub(crate) fn should_materialize_witness_on_initial_assign() -> bool {
+    should_materialize_witness_on_gpu() && should_retain_witness_device_backing_after_commit()
+}
+
 /// Whether replayable witness device backing should remain resident after commit.
 ///
 /// Policy:

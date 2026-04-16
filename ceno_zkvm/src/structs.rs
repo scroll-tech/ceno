@@ -466,7 +466,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         if crate::instructions::gpu::config::is_gpu_witgen_enabled()
             && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit(
             )
-            && input.witness_rmms[0].has_device_backing()
+            && (input.witness_rmms[0].has_device_backing()
+                || (num_instances[0] > 0
+                    && input.witness_rmms[0].num_instances() == 0
+                    && crate::instructions::gpu::config::should_materialize_witness_on_gpu()))
         {
             // The initial witness assignment already happened above. Building
             // the replay plan here only records how to reconstruct this chip's
@@ -479,6 +482,12 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 cs.zkvm_v1_css.num_structural_witin as usize,
                 shard_steps,
                 indices,
+            );
+            assert_eq!(
+                input.witness_rmms[0].num_instances(),
+                0,
+                "{}: cache-none GPU replay path must not keep an eager witness RMM after initial assign",
+                OC::name()
             );
         }
         assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());

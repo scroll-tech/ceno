@@ -207,6 +207,8 @@ impl<
 
             let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
             let mut wits_rmms = BTreeMap::new();
+            #[cfg(feature = "gpu")]
+            let mut deferred_gpu_traces = BTreeMap::new();
 
             let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
             #[cfg(feature = "gpu")]
@@ -220,6 +222,24 @@ impl<
                 } = chip_input;
                 let [witness_rmm, structural_witness_rmm] = witness_rmms;
 
+                #[cfg(feature = "gpu")]
+                let use_deferred_gpu_commit = crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                    && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit();
+
+                #[cfg(feature = "gpu")]
+                if use_deferred_gpu_commit {
+                    if let Some(plan) = gpu_replay_plan.clone() {
+                        deferred_gpu_traces
+                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Replay(plan));
+                    } else if witness_rmm.num_instances() > 0 {
+                        deferred_gpu_traces
+                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Eager(witness_rmm));
+                    }
+                } else if witness_rmm.num_instances() > 0 {
+                    wits_rmms.insert(i, witness_rmm);
+                }
+
+                #[cfg(not(feature = "gpu"))]
                 if witness_rmm.num_instances() > 0 {
                     wits_rmms.insert(i, witness_rmm);
                 }
@@ -244,7 +264,17 @@ impl<
                 let mut next_trace = 0usize;
                 (0..name_and_instances.len())
                     .map(|i| {
-                        if wits_rmms.contains_key(&i) {
+                        #[cfg(feature = "gpu")]
+                        let has_trace = if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                            && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                        {
+                            deferred_gpu_traces.contains_key(&i)
+                        } else {
+                            wits_rmms.contains_key(&i)
+                        };
+                        #[cfg(not(feature = "gpu"))]
+                        let has_trace = wits_rmms.contains_key(&i);
+                        if has_trace {
                             let idx = next_trace;
                             next_trace += 1;
                             Some(idx)
@@ -255,9 +285,36 @@ impl<
                     .collect()
             };
 
+            #[cfg(feature = "gpu")]
+            let use_deferred_gpu_commit = crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                && std::any::TypeId::of::<PB>()
+                    == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>();
+            #[cfg(not(feature = "gpu"))]
+            let use_deferred_gpu_commit = false;
+
             // commit to witness traces in batch
-            let (witness_mles, mut witness_data, witin_commit) = info_span!("[ceno] commit_traces")
-                .in_scope(|| self.device.commit_traces(wits_rmms));
+            let (witness_mles, mut witness_data, witin_commit): (
+                Vec<PB::MultilinearPoly<'_>>,
+                PB::PcsData,
+                PCS::Commitment,
+            ) = if use_deferred_gpu_commit {
+                info_span!("[ceno] commit_traces").in_scope(|| {
+                    let gpu_device: &gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>> =
+                        unsafe { std::mem::transmute(&self.device) };
+                    let (gpu_witness_mles, gpu_witness_data, witin_commit) =
+                        crate::scheme::gpu::commit_traces_deferred_cache_none::<E, PCS>(
+                            gpu_device,
+                            deferred_gpu_traces,
+                        );
+                    let witness_mles = unsafe { std::mem::transmute(gpu_witness_mles) };
+                    let witness_data = unsafe { std::mem::transmute_copy(&gpu_witness_data) };
+                    std::mem::forget(gpu_witness_data);
+                    (witness_mles, witness_data, witin_commit)
+                })
+            } else {
+                info_span!("[ceno] commit_traces").in_scope(|| self.device.commit_traces(wits_rmms))
+            };
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
 

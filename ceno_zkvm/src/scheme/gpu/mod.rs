@@ -74,6 +74,12 @@ use util::{
 
 pub struct GpuTowerProver;
 
+#[derive(Clone)]
+pub enum DeferredGpuTrace<E: ExtensionField> {
+    Eager(witness::RowMajorMatrix<E::BaseField>),
+    Replay(crate::structs::GpuReplayPlan<E>),
+}
+
 use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
@@ -622,6 +628,104 @@ fn normalize_traces_to_device_col_major<E: ExtensionField>(
     );
 }
 
+pub fn commit_traces_deferred_cache_none<E, PCS>(
+    prover: &GpuProver<GpuBackend<E, PCS>>,
+    traces: BTreeMap<usize, DeferredGpuTrace<E>>,
+) -> (
+    Vec<MultilinearExtensionGpu<'static, E>>,
+    <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    PCS::Commitment,
+)
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
+        panic!("GPU backend only supports BabyBear base field");
+    }
+
+    let ordered_sources = traces.into_values().collect_vec();
+    let max_poly_size_log2 = ordered_sources
+        .iter()
+        .map(|source| match source {
+            DeferredGpuTrace::Eager(rmm) => {
+                ceil_log2(next_pow2_instance_padding(rmm.num_instances()))
+            }
+            DeferredGpuTrace::Replay(plan) => {
+                ceil_log2(next_pow2_instance_padding(plan.step_indices.len()))
+            }
+        })
+        .max()
+        .unwrap();
+    if max_poly_size_log2 > prover.backend.max_poly_size_log2 {
+        panic!(
+            "max_poly_size_log2 {} > max_poly_size_log2 backend {}",
+            max_poly_size_log2, prover.backend.max_poly_size_log2
+        );
+    }
+
+    let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
+        == std::mem::size_of::<PCS::CommitmentWithWitness>();
+    if !is_pcs_match {
+        panic!("GPU commitment data is not compatible with the PCS");
+    }
+
+    let cuda_hal = get_cuda_hal().unwrap();
+    cuda_hal
+        .inner
+        .synchronize()
+        .expect("cuda synchronize before deferred batch_commit mem snapshot");
+    let mem_pool = cuda_hal.inner.mem_pool();
+    let used_bytes = mem_pool
+        .get_used_size()
+        .expect("cudaMemPoolGetAttribute UsedMemCurrent before deferred batch_commit");
+    let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
+    tracing::info!(
+        "[gpu] entering deferred batch_commit: traces={}, used={:.2}MB, reserved={:.2}MB",
+        ordered_sources.len(),
+        used_bytes as f64 / (1024.0 * 1024.0),
+        reserved_bytes as f64 / (1024.0 * 1024.0),
+    );
+
+    let specs = ordered_sources
+        .iter()
+        .map(|source| match source {
+            DeferredGpuTrace::Eager(rmm) => ceno_gpu::common::poseidon2::DeferredRmmSpec {
+                height: next_pow2_instance_padding(rmm.num_instances()),
+                persist_actual: true,
+            },
+            DeferredGpuTrace::Replay(plan) => ceno_gpu::common::poseidon2::DeferredRmmSpec {
+                height: next_pow2_instance_padding(plan.step_indices.len()),
+                persist_actual: false,
+            },
+        })
+        .collect_vec();
+    let mut ordered_sources = ordered_sources.into_iter().map(Some).collect_vec();
+    let pcs_data = cuda_hal
+        .basefold
+        .batch_commit_cache_none_deferred(&cuda_hal, specs, |trace_idx| {
+            let source = ordered_sources[trace_idx]
+                .take()
+                .expect("deferred commit source reused");
+            let witness_rmm: witness::RowMajorMatrix<E::BaseField> = match source {
+                DeferredGpuTrace::Eager(rmm) => rmm,
+                DeferredGpuTrace::Replay(plan) => plan
+                    .replay()
+                    .map(|[witness_rmm, _]| witness_rmm)
+                    .map_err(|e| ceno_gpu::HalError::InvalidInput(format!("{e:?}")))?,
+            };
+            Ok(unsafe { std::mem::transmute(witness_rmm) })
+        })
+        .unwrap();
+
+    let basefold_commit = cuda_hal.basefold.get_pure_commitment(&pcs_data);
+    let commit: PCS::Commitment = unsafe { std::mem::transmute_copy(&basefold_commit) };
+    let pcs_data_generic: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
+        unsafe { std::mem::transmute_copy(&pcs_data) };
+    std::mem::forget(pcs_data);
+    (vec![], pcs_data_generic, commit)
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
@@ -684,6 +788,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 unsafe { std::mem::transmute(vec_traces) };
 
             let span = entered_span!("[gpu] batch_commit", profiling_2 = true);
+            cuda_hal
+                .inner
+                .synchronize()
+                .expect("cuda synchronize before batch_commit mem snapshot");
+            let mem_pool = cuda_hal.inner.mem_pool();
+            let used_bytes = mem_pool
+                .get_used_size()
+                .expect("cudaMemPoolGetAttribute UsedMemCurrent before batch_commit");
+            let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
+            tracing::info!(
+                "[gpu] entering batch_commit: traces={}, used={:.2}MB, reserved={:.2}MB",
+                traces_gl64.len(),
+                used_bytes as f64 / (1024.0 * 1024.0),
+                reserved_bytes as f64 / (1024.0 * 1024.0),
+            );
             let pcs_data = cuda_hal
                 .basefold
                 .batch_commit(&cuda_hal, traces_gl64)
