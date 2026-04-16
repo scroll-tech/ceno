@@ -18,6 +18,8 @@ use gkr_iop::gpu::{
 use mpcs::PolynomialCommitmentScheme;
 use std::sync::OnceLock;
 
+#[cfg(feature = "gpu")]
+use crate::instructions::gpu::config::should_materialize_witness_on_gpu;
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
 pub fn init_gpu_mem_tracker<'a>(
@@ -325,6 +327,14 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 /// Returns `(0, 0)` when trace is cached (`CacheLevel::Trace` or `CacheLevel::Full`),
 /// When cache is disabled (`CacheLevel::None`, the default), estimates actual allocation costs.
 pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize) -> (usize, usize) {
+    if should_materialize_witness_on_gpu() {
+        // GPU witgen keeps witness traces device-backed in col-major form.
+        // `get_trace` then builds view-based polynomials directly from the
+        // resident device buffer, so there is no per-task extraction buffer or
+        // additional resident witness allocation to account for here.
+        return (0, 0);
+    }
+
     if matches!(get_gpu_cache_level(), CacheLevel::None) {
         // Default cache level is None
         let base_elem_size = std::mem::size_of::<BB31Base>();

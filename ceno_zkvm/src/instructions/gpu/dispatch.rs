@@ -21,7 +21,7 @@ use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use super::{
-    config::{is_gpu_witgen_enabled, is_kind_disabled, should_keep_witness_device_backing},
+    config::{is_gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
     utils::debug_compare::{
         debug_compare_final_lk, debug_compare_shard_ec, debug_compare_shardram,
         debug_compare_witness,
@@ -31,6 +31,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     instructions::{Instruction, cpu_collect_lk_and_shardram, cpu_collect_shardram},
+    structs::GpuReplayPlan,
     tables::RMMCollections,
     witness::LkMultiplicity,
 };
@@ -69,9 +70,8 @@ pub use super::cache::{
 };
 use super::{
     cache::{
-        ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,
-        upload_shard_steps_cached, with_cached_gpu_ctx, with_cached_shard_meta,
-        with_cached_shard_steps,
+        begin_gpu_shard_session, read_shared_addr_count, read_shared_addr_range,
+        with_cached_gpu_ctx, with_cached_shard_meta,
     },
     utils::d2h::{
         CompactEcBuf, LkResult, RamBuf, WitResult, gpu_collect_shard_records, gpu_compact_ec_d2h,
@@ -169,6 +169,40 @@ pub(crate) fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
     })
 }
 
+#[cfg(feature = "gpu")]
+pub(crate) fn build_gpu_replay_plan<E: ExtensionField, I: Instruction<E>>(
+    config: &I::InstructionConfig,
+    shard_ctx: &ShardContext,
+    num_witin: usize,
+    num_structural_witin: usize,
+    shard_steps: &[StepRecord],
+    step_indices: &[StepIndex],
+    kind: GpuWitgenKind,
+) -> GpuReplayPlan<E> {
+    // Replay plans are intentionally split into:
+    // - shared shard state: referenced by pointer / cached separately in the
+    //   shard GPU session (`shard_ctx`, `shard_steps`, resident raw buffers)
+    // - per-chip state: owned here (`step_indices`, kind, shape metadata)
+    //
+    // This keeps per-chip replay metadata small while allowing many chips in
+    // the same shard to reconstruct witness on demand from one resident raw
+    // shard session.
+    let (fetch_base_pc, fetch_num_slots) = compute_fetch_params(shard_steps, step_indices);
+    GpuReplayPlan::new(
+        shard_ctx.shard_id,
+        kind,
+        std::sync::Arc::<[StepIndex]>::from(step_indices.to_vec()),
+        num_witin,
+        num_structural_witin,
+        shard_ctx.current_shard_offset_cycle(),
+        fetch_base_pc,
+        fetch_num_slots,
+        None,
+        config as *const I::InstructionConfig as usize,
+        replay_gpu_witness_from_resident_raw::<E, I>,
+    )
+}
+
 fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     config: &I::InstructionConfig,
     shard_ctx: &mut ShardContext,
@@ -185,14 +219,17 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     // Step 1: GPU fills witness matrix (+ LK counters + shard records for merged kinds)
     let (gpu_witness, gpu_lk_counters, gpu_ram_slots, gpu_compact_ec, gpu_compact_addr) =
         info_span!("gpu_kernel").in_scope(|| {
+            let fetch_params = compute_fetch_params(shard_steps, step_indices);
             gpu_fill_witness::<E, I>(
                 hal,
                 config,
-                shard_ctx,
+                Some(shard_ctx),
                 num_witin,
-                shard_steps,
+                Some(shard_steps),
                 step_indices,
                 kind,
+                shard_ctx.current_shard_offset_cycle(),
+                fetch_params,
             )
         })?;
 
@@ -355,7 +392,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     // Step 4: Keep witness on device only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H to build host-backed RMM.
     let mut raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !should_keep_witness_device_backing()
+        || !should_materialize_witness_on_gpu()
     {
         info_span!("transpose_d2h", rows = total_instances, cols = num_witin).in_scope(|| {
             gpu_witness_to_rmm_d2h::<E>(
@@ -416,11 +453,13 @@ pub(crate) fn compute_fetch_params(
 fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     hal: &CudaHalBB31,
     config: &I::InstructionConfig,
-    shard_ctx: &ShardContext,
+    shard_ctx: Option<&ShardContext>,
     num_witin: usize,
-    shard_steps: &[StepRecord],
+    shard_steps: Option<&[StepRecord]>,
     step_indices: &[StepIndex],
     kind: GpuWitgenKind,
+    shard_offset: u64,
+    fetch_params: (u32, usize),
 ) -> Result<
     (
         WitResult,
@@ -431,15 +470,15 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     ),
     ZKVMError,
 > {
-    // Upload shard_steps to GPU once (cached across ADD/LW calls within same shard).
-    let shard_id = shard_ctx.shard_id;
-    info_span!("upload_shard_steps")
-        .in_scope(|| upload_shard_steps_cached(hal, shard_steps, shard_id))?;
+    if let (Some(shard_ctx), Some(shard_steps)) = (shard_ctx, shard_steps) {
+        // Ensure shard-scoped GPU raw data is ready for this kernel dispatch.
+        let _session = info_span!("begin_shard_session")
+            .in_scope(|| begin_gpu_shard_session(hal, shard_ctx, shard_steps))?;
+    }
 
     // Convert step_indices from usize to u32 for GPU.
     let indices_u32: Vec<u32> = info_span!("indices_u32", n = step_indices.len())
         .in_scope(|| step_indices.iter().map(|&i| i as u32).collect());
-    let shard_offset = shard_ctx.current_shard_offset_cycle();
 
     // Helper to split GpuWitgenFullResult into (witness, Some(lk_counters), ram_slots, compact_ec, compact_addr)
     macro_rules! split_full {
@@ -456,11 +495,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     }
 
     // Compute fetch params for all GPU kinds (LK counters are merged into all kernels)
-    let (fetch_base_pc, fetch_num_slots) = compute_fetch_params(shard_steps, step_indices);
-
-    // Ensure shard metadata is cached for GPU shard records (shared across all kernel kinds)
-    info_span!("ensure_shard_meta")
-        .in_scope(|| ensure_shard_metadata_cached(hal, shard_ctx, shard_steps.len()))?;
+    let (fetch_base_pc, fetch_num_slots) = fetch_params;
 
     match kind {
         GpuWitgenKind::Add => {
@@ -486,7 +521,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                             )
                             .map_err(|e| {
                                 ZKVMError::InvalidWitness(
-                                    format!("GPU witgen_add failed: {e}").into(),
+                                    format!("GPU witgen_add failed: {e:?}").into(),
                                 )
                             })
                     )
@@ -516,7 +551,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                             )
                             .map_err(|e| {
                                 ZKVMError::InvalidWitness(
-                                    format!("GPU witgen_sub failed: {e}").into(),
+                                    format!("GPU witgen_sub failed: {e:?}").into(),
                                 )
                             })
                     )
@@ -548,7 +583,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                             )
                             .map_err(|e| {
                                 ZKVMError::InvalidWitness(
-                                    format!("GPU witgen_logic_r failed: {e}").into(),
+                                    format!("GPU witgen_logic_r failed: {e:?}").into(),
                                 )
                             })
                     )
@@ -581,7 +616,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                             )
                             .map_err(|e| {
                                 ZKVMError::InvalidWitness(
-                                    format!("GPU witgen_logic_i failed: {e}").into(),
+                                    format!("GPU witgen_logic_i failed: {e:?}").into(),
                                 )
                             })
                     )
@@ -612,7 +647,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                             )
                             .map_err(|e| {
                                 ZKVMError::InvalidWitness(
-                                    format!("GPU witgen_addi failed: {e}").into(),
+                                    format!("GPU witgen_addi failed: {e:?}").into(),
                                 )
                             })
                     )
@@ -1191,4 +1226,52 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
             unreachable!("keccak uses gpu_assign_keccak_instances, not try_gpu_assign_instances")
         }
     }
+}
+
+#[cfg(feature = "gpu")]
+fn replay_gpu_witness_from_resident_raw<E: ExtensionField, I: Instruction<E>>(
+    config_ptr: usize,
+    replay: &GpuReplayPlan<E>,
+) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+    use gkr_iop::gpu::get_cuda_hal;
+
+    let hal = get_cuda_hal()
+        .map_err(|e| ZKVMError::InvalidWitness(format!("Failed to get CUDA HAL: {e}").into()))?;
+    let config = unsafe { &*(config_ptr as *const I::InstructionConfig) };
+    // Replay is not recursive through `assign_opcode_circuit` / the trait-level
+    // `assign_instances`. It reconstructs only the transient witness/device
+    // backing from the shard-resident raw GPU session and this chip's replay
+    // metadata, without touching shard_ctx or re-running LK/shardram collection.
+    let total_instances = replay.step_indices.len();
+    let (gpu_witness, _, _, _, _) = gpu_fill_witness::<E, I>(
+        &hal,
+        config,
+        None,
+        replay.num_witin,
+        None,
+        replay.step_indices.as_ref(),
+        replay.kind,
+        replay.shard_offset,
+        (replay.fetch_base_pc, replay.fetch_num_slots),
+    )?;
+
+    let mut raw_structural = RowMajorMatrix::<E::BaseField>::new(
+        total_instances,
+        replay.num_structural_witin.max(1),
+        I::padding_strategy(),
+    );
+    for row in raw_structural.iter_mut() {
+        *row.last_mut().unwrap() = E::BaseField::ONE;
+    }
+    raw_structural.padding_by_strategy();
+
+    let mut raw_witin = gpu_witness_to_rmm::<E>(
+        gpu_witness,
+        total_instances,
+        replay.num_witin,
+        I::padding_strategy(),
+    );
+    raw_witin.padding_by_strategy();
+
+    Ok([raw_witin, raw_structural])
 }

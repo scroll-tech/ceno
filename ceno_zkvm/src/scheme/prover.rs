@@ -209,14 +209,23 @@ impl<
             let mut wits_rmms = BTreeMap::new();
 
             let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
+            #[cfg(feature = "gpu")]
+            let mut gpu_replay_plans = Vec::with_capacity(name_and_instances.len());
             // commit to opcode circuits first and then commit to table circuits, sorted by name
             for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
-                let [witness_rmm, structural_witness_rmm] = chip_input.witness_rmms;
+                let crate::structs::ChipInput {
+                    witness_rmms,
+                    gpu_replay_plan,
+                    ..
+                } = chip_input;
+                let [witness_rmm, structural_witness_rmm] = witness_rmms;
 
                 if witness_rmm.num_instances() > 0 {
                     wits_rmms.insert(i, witness_rmm);
                 }
                 structural_rmms.push(structural_witness_rmm);
+                #[cfg(feature = "gpu")]
+                gpu_replay_plans.push(gpu_replay_plan);
             }
 
             tracing::debug!(
@@ -247,7 +256,7 @@ impl<
             };
 
             // commit to witness traces in batch
-            let (witness_mles, witness_data, witin_commit) = info_span!("[ceno] commit_traces")
+            let (witness_mles, mut witness_data, witin_commit) = info_span!("[ceno] commit_traces")
                 .in_scope(|| self.device.commit_traces(wits_rmms));
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
@@ -270,6 +279,8 @@ impl<
                 shard_ctx,
                 name_and_instances,
                 structural_rmms,
+                #[cfg(feature = "gpu")]
+                gpu_replay_plans,
                 witness_mles,
                 &witness_data,
                 fixed_mles,
@@ -277,6 +288,30 @@ impl<
                 &pi,
                 &circuit_trace_indices,
             );
+            #[cfg(feature = "gpu")]
+            let replayable_traces: Vec<(usize, crate::structs::GpuReplayPlan<E>)> = tasks
+                .iter()
+                .filter_map(|task| {
+                    task.gpu_replay_plan
+                        .as_ref()
+                        .and_then(|plan| plan.trace_idx.map(|trace_idx| (trace_idx, plan.clone())))
+                })
+                .collect();
+            #[cfg(feature = "gpu")]
+            if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+            {
+                if std::any::TypeId::of::<PB>()
+                    == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+                {
+                    let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                        unsafe { std::mem::transmute(&mut witness_data) };
+                    crate::scheme::gpu::clear_replayable_trace_device_backing::<E, PCS>(
+                        gpu_witness_data,
+                        &replayable_traces,
+                    );
+                }
+            }
             exit_span!(build_tasks_span);
 
             // Phase 2: Execute chip proof tasks
@@ -301,7 +336,23 @@ impl<
             // batch opening pcs
             // generate static info from prover key for expected num variable
             let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
+            #[cfg(feature = "gpu")]
+            if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                && std::any::TypeId::of::<PB>()
+                    == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+            {
+                let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                    unsafe { std::mem::transmute(&mut witness_data) };
+                crate::scheme::gpu::restore_replayable_trace_device_backing::<E, PCS>(
+                    gpu_witness_data,
+                    &replayable_traces,
+                )?;
+            }
             let mpcs_opening_proof = info_span!("[ceno] pcs_opening").in_scope(|| {
+                #[cfg(feature = "gpu")]
+                {
+                }
                 self.device.open(
                     witness_data,
                     self.get_device_proving_key(shard_ctx)
@@ -370,6 +421,7 @@ impl<
                             &task.challenges,
                             gpu_wd.0,
                             task.witness_trace_idx,
+                            task.gpu_replay_plan.clone(),
                             task.num_witin,
                             task.structural_rmm,
                         )?;
@@ -522,6 +574,7 @@ impl<
         shard_ctx: &ShardContext,
         name_and_instances: Vec<(String, [usize; 2])>,
         structural_rmms: Vec<witness::RowMajorMatrix<E::BaseField>>,
+        #[cfg(feature = "gpu")] gpu_replay_plans: Vec<Option<crate::structs::GpuReplayPlan<E>>>,
         #[allow(unused_mut)] mut witness_mles: Vec<PB::MultilinearPoly<'data>>,
         witness_data: &PB::PcsData,
         mut fixed_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
@@ -653,6 +706,11 @@ impl<
             } else {
                 None
             };
+            #[cfg(feature = "gpu")]
+            let gpu_replay_plan = gpu_replay_plans[this_idx].clone().map(|mut plan| {
+                plan.trace_idx = witness_trace_idx;
+                plan
+            });
 
             tasks.push(ChipTask {
                 task_id,
@@ -664,6 +722,8 @@ impl<
                 has_witness_or_fixed: cs.num_witin() > 0 || cs.num_fixed() > 0,
                 challenges,
                 witness_trace_idx,
+                #[cfg(feature = "gpu")]
+                gpu_replay_plan,
                 num_witin: cs.num_witin(),
                 structural_rmm: task_structural_rmm,
             });
@@ -727,6 +787,7 @@ pub fn create_chip_proof_gpu_impl<'a, E, PCS>(
     // Deferred extraction params:
     pcs_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     witness_trace_idx: Option<usize>,
+    #[cfg(feature = "gpu")] gpu_replay_plan: Option<crate::structs::GpuReplayPlan<E>>,
     num_witin: usize,
     structural_rmm: Option<witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
 ) -> Result<CreateTableProof<E>, ZKVMError>
@@ -748,6 +809,31 @@ where
     let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(_stream.clone());
 
     // Deferred witness extraction: extract from committed pcs_data just-in-time
+    #[cfg(feature = "gpu")]
+    if let Some(replay_plan) = gpu_replay_plan.as_ref() {
+        let [witness_rmm, structural_rmm_from_replay] = replay_plan.replay()?;
+        input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
+            .in_scope(|| crate::scheme::gpu::extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
+        if structural_rmm.is_none() {
+            input.structural_witness =
+                info_span!("[ceno] transport_structural_witness").in_scope(|| {
+                    transport_structural_witness_to_gpu::<E>(
+                        structural_rmm_from_replay,
+                        circuit_pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
+                        input.log2_num_instances()
+                            + circuit_pk.get_cs().rotation_vars().unwrap_or(0),
+                    )
+                });
+        }
+    } else if let Some(trace_idx) = witness_trace_idx {
+        let num_vars =
+            input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
+        input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
+            extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin, num_vars)
+        });
+    }
+
+    #[cfg(not(feature = "gpu"))]
     if let Some(trace_idx) = witness_trace_idx {
         let num_vars =
             input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);

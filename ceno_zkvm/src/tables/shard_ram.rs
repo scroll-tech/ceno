@@ -896,6 +896,8 @@ mod tests {
             has_witness_or_fixed: true,
             challenges,
             witness_trace_idx: None,
+            #[cfg(feature = "gpu")]
+            gpu_replay_plan: None,
             num_witin: 0,
             structural_rmm: None,
         };

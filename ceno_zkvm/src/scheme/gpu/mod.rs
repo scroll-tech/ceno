@@ -657,7 +657,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
             let mut vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
                 traces.into_values().collect();
 
-            if crate::instructions::gpu::config::should_keep_witness_device_backing() {
+            if crate::instructions::gpu::config::should_materialize_witness_on_gpu() {
                 let span = entered_span!("[gpu] normalize_trace_backing", profiling_2 = true);
                 let cuda_hal = get_cuda_hal().unwrap();
                 normalize_traces_to_device_col_major::<E>(&cuda_hal, &mut vec_traces);
@@ -830,6 +830,109 @@ where
     mles
 }
 
+pub fn extract_witness_mles_for_trace_rmm<'a, E>(
+    witness_rmm: witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
+where
+    E: ExtensionField,
+{
+    assert_eq!(
+        witness_rmm.device_backing_layout(),
+        Some(DeviceMatrixLayout::ColMajor),
+        "replayed witness RMM must keep col-major device backing",
+    );
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU replay only supports BabyBear base field",
+    );
+
+    let device_buffer = witness_rmm
+        .device_backing_ref::<BufferImpl<'static, BB31Base>>()
+        .unwrap_or_else(|| panic!("col-major replay witness device backing type mismatch"));
+    let rows = witness_rmm.height();
+    let cols = witness_rmm.width();
+    let poly_len_bytes = rows * std::mem::size_of::<BB31Base>();
+
+    (0..cols)
+        .map(|col_idx| {
+            let src_byte_offset = col_idx * poly_len_bytes;
+            // Keep an owned handle to the parent GPU allocation instead of a
+            // borrowed CudaView. The resulting MLE outlives this helper.
+            let view_buf =
+                device_buffer.owned_subrange(src_byte_offset..src_byte_offset + poly_len_bytes);
+            let view_poly = GpuPolynomial::new(view_buf, rows.trailing_zeros() as usize);
+            let view_poly_static: GpuPolynomial<'static> =
+                unsafe { std::mem::transmute(view_poly) };
+            let mle_static = MultilinearExtensionGpu::from_ceno_gpu_base(view_poly_static);
+            Arc::new(unsafe {
+                std::mem::transmute::<
+                    MultilinearExtensionGpu<'static, E>,
+                    MultilinearExtensionGpu<'a, E>,
+                >(mle_static)
+            })
+        })
+        .collect()
+}
+
+pub fn clear_replayable_trace_device_backing<E, PCS>(
+    pcs_data: &mut <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
+) where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    let pcs_data_basefold: &mut BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(pcs_data) };
+
+    let Some(rmms) = pcs_data_basefold.rmms.as_mut() else {
+        return;
+    };
+
+    for (trace_idx, _) in replayable_traces {
+        rmms[*trace_idx].clear_device_backing();
+    }
+}
+
+pub fn restore_replayable_trace_device_backing<E, PCS>(
+    pcs_data: &mut <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
+) -> Result<(), ZKVMError>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU replay restore only supports BabyBear base field",
+    );
+    let pcs_data_basefold: &mut BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(pcs_data) };
+
+    let Some(rmms) = pcs_data_basefold.rmms.as_mut() else {
+        return Ok(());
+    };
+
+    for (trace_idx, replay_plan) in replayable_traces {
+        let [witness_rmm, _] = replay_plan.replay()?;
+        let witness_rmm_bb31: witness::RowMajorMatrix<BB31Base> =
+            unsafe { std::mem::transmute(witness_rmm) };
+        rmms[*trace_idx] = witness_rmm_bb31;
+    }
+    Ok(())
+}
+
 /// Transport a CPU-side structural witness RowMajorMatrix to GPU MLEs.
 /// Standalone version that doesn't require `&self` on GpuProver, enabling
 /// just-in-time GPU upload inside parallel task closures.
@@ -870,9 +973,10 @@ where
         (0..cols)
             .map(|col_idx| {
                 let src_byte_offset = col_idx * poly_len_bytes;
-                let view =
-                    device_buffer.as_slice_range(src_byte_offset..src_byte_offset + poly_len_bytes);
-                let view_buf = BufferImpl::new_from_view(view);
+                // Structural MLEs also escape this helper; use an owned-range
+                // buffer handle rather than a borrowed view into `structural_rmm`.
+                let view_buf =
+                    device_buffer.owned_subrange(src_byte_offset..src_byte_offset + poly_len_bytes);
                 let view_poly = GpuPolynomial::new(view_buf, num_vars_in_poly);
                 let view_poly_static: GpuPolynomial<'static> =
                     unsafe { std::mem::transmute(view_poly) };
@@ -1439,8 +1543,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
             .map(|gpu_poly| {
                 let evals = gpu_poly.evaluations();
                 let byte_len = evals.len() * std::mem::size_of::<BB31Base>();
-                let view = evals.as_slice_range(0..byte_len);
-                let view_buf = BufferImpl::new_from_view(view);
+                // Fixed-trace MLEs live for the whole proving key lifetime on
+                // the GPU side, so they must not borrow a temporary CudaView.
+                let view_buf = evals.owned_subrange(0..byte_len);
                 let view_poly = GpuPolynomial::new(view_buf, gpu_poly.num_vars());
                 let view_poly_static: GpuPolynomial<'static> =
                     unsafe { std::mem::transmute(view_poly) };
@@ -1480,6 +1585,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         task: &mut crate::scheme::scheduler::ChipTask<'_, GpuBackend<E, PCS>>,
         pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     ) {
+        if let Some(replay_plan) = task.gpu_replay_plan.as_ref() {
+            let [witness_rmm, structural_rmm] =
+                replay_plan.replay().expect("GPU raw replay failed");
+            task.input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
+                .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
+            task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
+                .in_scope(|| {
+                    transport_structural_witness_to_gpu::<E>(
+                        structural_rmm,
+                        task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
+                        task.input.log2_num_instances()
+                            + task.pk.get_cs().rotation_vars().unwrap_or(0),
+                    )
+                });
+            return;
+        }
+
         let num_vars =
             task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
 

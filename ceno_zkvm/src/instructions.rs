@@ -220,6 +220,18 @@ pub trait Instruction<E: ExtensionField> {
             &indices,
         )
     }
+
+    #[cfg(feature = "gpu")]
+    fn build_gpu_replay_plan(
+        _config: &Self::InstructionConfig,
+        _shard_ctx: &ShardContext,
+        _num_witin: usize,
+        _num_structural_witin: usize,
+        _shard_steps: &[StepRecord],
+        _step_indices: &[StepIndex],
+    ) -> Option<crate::structs::GpuReplayPlan<E>> {
+        None
+    }
 }
 
 pub fn full_step_indices(steps: &[StepRecord]) -> Vec<StepIndex> {
@@ -367,6 +379,30 @@ macro_rules! impl_gpu_assign {
                 shard_steps,
                 step_indices,
             )
+        }
+
+        #[cfg(feature = "gpu")]
+        fn build_gpu_replay_plan(
+            config: &Self::InstructionConfig,
+            shard_ctx: &$crate::e2e::ShardContext,
+            num_witin: usize,
+            num_structural_witin: usize,
+            shard_steps: &[ceno_emul::StepRecord],
+            step_indices: &[ceno_emul::StepIndex],
+        ) -> Option<$crate::structs::GpuReplayPlan<E>> {
+            use $crate::instructions::gpu::dispatch;
+            let gpu_kind: Option<dispatch::GpuWitgenKind> = $kind_expr;
+            gpu_kind.map(|kind| {
+                dispatch::build_gpu_replay_plan::<E, Self>(
+                    config,
+                    shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    shard_steps,
+                    step_indices,
+                    kind,
+                )
+            })
         }
     };
 }

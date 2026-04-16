@@ -19,7 +19,7 @@ cudarc = { workspace = true, optional = true }
 either.workspace = true
 ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
-mpcs.workspace = true
+mpcs = { workspace = true, features = ["whir"] }
 multilinear_extensions.workspace = true
 once_cell.workspace = true
 p3.workspace = true

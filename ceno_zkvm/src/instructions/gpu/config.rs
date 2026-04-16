@@ -6,6 +6,7 @@
 /// - `CENO_GPU_DISABLE_WITGEN_KINDS=add,sub,keccak,...` — per-kind disable (comma-separated tags)
 /// - `CENO_GPU_DEBUG_COMPARE_WITGEN` — enable GPU vs CPU comparison for all chips (witness, LK, shard, EC)
 use super::dispatch::GpuWitgenKind;
+use ceno_gpu::common::{CacheLevel, get_gpu_cache_level};
 
 pub(crate) fn kind_tag(kind: GpuWitgenKind) -> &'static str {
     match kind {
@@ -74,17 +75,25 @@ pub(crate) fn is_gpu_witgen_enabled() -> bool {
     })
 }
 
-/// Device-backed witness matrices are only beneficial when GPU cache keeps trace/codeword
-/// artifacts for reuse. In cache-none mode, prefer D2H host materialization to avoid
-/// retaining large device-backed RMMs beyond commit.
-pub(crate) fn should_keep_witness_device_backing() -> bool {
-    if !is_gpu_witgen_enabled() {
-        return false;
-    }
-    !matches!(
-        gkr_iop::gpu::gpu_prover::get_gpu_cache_level(),
-        gkr_iop::gpu::gpu_prover::CacheLevel::None
-    )
+/// Whether initial witness assignment should materialize a GPU-backed trace RMM.
+///
+/// This is independent from the later retention policy:
+/// - with GPU witgen off, witness is materialized in CPU form as before
+/// - with GPU witgen on, witness is first produced as device-backed so commit
+///   can consume the col-major GPU trace directly without a D2H/H2D round-trip
+pub(crate) fn should_materialize_witness_on_gpu() -> bool {
+    is_gpu_witgen_enabled()
+}
+
+/// Whether replayable witness device backing should remain resident after commit.
+///
+/// Policy:
+/// - `GPU_WITGEN=0`: no special retention
+/// - `GPU_WITGEN=1` and `CACHE_LEVEL > 0`: keep device backing resident
+/// - `GPU_WITGEN=1` and `CACHE_LEVEL = 0`: clear after commit and regenerate on
+///   demand from shard-resident raw data during chip proof / PCS open
+pub(crate) fn should_retain_witness_device_backing_after_commit() -> bool {
+    is_gpu_witgen_enabled() && !matches!(get_gpu_cache_level(), CacheLevel::None)
 }
 
 /// Set `CENO_GPU_DEBUG_COMPARE_WITGEN=1` to enable GPU vs CPU comparison; default disabled.

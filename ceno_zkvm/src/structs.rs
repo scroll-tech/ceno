@@ -10,6 +10,8 @@ use crate::{
     },
 };
 use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepIndex, StepRecord, WordAddr};
+#[cfg(feature = "gpu")]
+use ceno_gpu::common::witgen::types::GpuKeccakInstance;
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
 use itertools::Itertools;
@@ -312,6 +314,73 @@ pub struct ChipInput<E: ExtensionField> {
     pub name: String,
     pub witness_rmms: RMMCollections<E::BaseField>,
     pub num_instances: [usize; 2],
+    // Built after the initial chip witness assignment succeeds. It is not used
+    // by assign_opcode_circuit itself; later prove/open stages use it to
+    // regenerate transient witness buffers from shard-resident raw data.
+    pub gpu_replay_plan: Option<GpuReplayPlan<E>>,
+}
+
+#[cfg(feature = "gpu")]
+#[derive(Clone)]
+pub struct GpuReplayPlan<E: ExtensionField> {
+    pub shard_id: usize,
+    pub trace_idx: Option<usize>,
+    pub kind: crate::instructions::gpu::dispatch::GpuWitgenKind,
+    // Per-chip payload: each replay plan owns only its step-index slice plus
+    // small shape/config metadata. Shared shard state stays resident in the
+    // shard-global GPU caches and is rehydrated on worker threads on demand.
+    pub step_indices: Arc<[StepIndex]>,
+    pub num_witin: usize,
+    pub num_structural_witin: usize,
+    pub shard_offset: u64,
+    pub fetch_base_pc: u32,
+    pub fetch_num_slots: usize,
+    // Keccak replay needs a compact packed-input slice because its kernel does
+    // not consume plain step indices directly. Standard opcode chips leave this
+    // empty and rebuild from resident StepRecord + shard metadata on device.
+    pub keccak_instances: Option<Arc<[GpuKeccakInstance]>>,
+    config_ptr: usize,
+    replay_fn: fn(usize, &GpuReplayPlan<E>) -> Result<RMMCollections<E::BaseField>, ZKVMError>,
+}
+
+#[cfg(not(feature = "gpu"))]
+#[derive(Clone)]
+pub struct GpuReplayPlan<E: ExtensionField>(std::marker::PhantomData<E>);
+
+#[cfg(feature = "gpu")]
+impl<E: ExtensionField> GpuReplayPlan<E> {
+    pub fn new(
+        shard_id: usize,
+        kind: crate::instructions::gpu::dispatch::GpuWitgenKind,
+        step_indices: Arc<[StepIndex]>,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_offset: u64,
+        fetch_base_pc: u32,
+        fetch_num_slots: usize,
+        keccak_instances: Option<Arc<[GpuKeccakInstance]>>,
+        config_ptr: usize,
+        replay_fn: fn(usize, &GpuReplayPlan<E>) -> Result<RMMCollections<E::BaseField>, ZKVMError>,
+    ) -> Self {
+        Self {
+            shard_id,
+            trace_idx: None,
+            kind,
+            step_indices,
+            num_witin,
+            num_structural_witin,
+            shard_offset,
+            fetch_base_pc,
+            fetch_num_slots,
+            keccak_instances,
+            config_ptr,
+            replay_fn,
+        }
+    }
+
+    pub fn replay(&self) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        (self.replay_fn)(self.config_ptr, self)
+    }
 }
 
 impl<E: ExtensionField> ChipInput<E> {
@@ -324,6 +393,7 @@ impl<E: ExtensionField> ChipInput<E> {
             name,
             witness_rmms,
             num_instances,
+            gpu_replay_plan: None,
         }
     }
 
@@ -391,7 +461,26 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             structural_instances
         };
         let num_instances = [num_instances, 0];
-        let input = ChipInput::new(OC::name(), witness, num_instances);
+        let mut input = ChipInput::new(OC::name(), witness, num_instances);
+        #[cfg(feature = "gpu")]
+        if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+            && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit(
+            )
+            && input.witness_rmms[0].has_device_backing()
+        {
+            // The initial witness assignment already happened above. Building
+            // the replay plan here only records how to reconstruct this chip's
+            // witness later from shard-resident raw data; it is not used during
+            // this first assign pass.
+            input.gpu_replay_plan = OC::build_gpu_replay_plan(
+                config,
+                shard_ctx,
+                cs.zkvm_v1_css.num_witin as usize,
+                cs.zkvm_v1_css.num_structural_witin as usize,
+                shard_steps,
+                indices,
+            );
+        }
         assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
         assert!(
             self.lk_mlts

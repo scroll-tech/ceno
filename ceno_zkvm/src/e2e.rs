@@ -1484,9 +1484,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 )
             }).unwrap();
 
-            // Free GPU shard_steps cache after all opcode circuits are done.
-            #[cfg(feature = "gpu")]
-            crate::instructions::gpu::cache::invalidate_shard_steps_cache();
+            // Keep shard_steps cache alive across witgen and prove for this shard.
+            // It is released at shard-end after create_proof.
 
             info_span!("assign_dummy_circuits").in_scope(|| {
                 system_config
@@ -1679,14 +1678,8 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 });
             }
 
-            // Drop all per-shard GPU buffers before yielding to prove — witgen
-            // and prove must not share VRAM.
-            #[cfg(feature = "gpu")]
-            {
-                crate::instructions::gpu::dispatch::invalidate_shard_meta_cache();
-                crate::instructions::gpu::dispatch::assert_caches_released_before_prove();
-
-            }
+            // Keep per-shard GPU caches alive for prove-time reuse in this shard.
+            // They are explicitly released at shard-end after create_proof.
 
             Some((zkvm_witness, shard_ctx, pi, witgen_mem_baseline))
         })
@@ -2150,7 +2143,7 @@ fn create_proofs_streaming<
 
                     // GPU consumer: prove each shard as it arrives
                     let mut proofs = Vec::new();
-                    while let Ok((zkvm_witness, shard_ctx, pi, witgen_mem_baseline)) = rx.recv() {
+                    while let Ok((zkvm_witness, shard_ctx, pi, _witgen_mem_baseline)) = rx.recv() {
                         if is_mock_proving {
                             MockProver::assert_satisfied_full(
                                 &shard_ctx,
@@ -2174,7 +2167,11 @@ fn create_proofs_streaming<
                             start.elapsed()
                         );
                         #[cfg(feature = "gpu")]
-                        if let Some(baseline) = witgen_mem_baseline {
+                        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                            crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                        }
+                        #[cfg(feature = "gpu")]
+                        if let Some(baseline) = _witgen_mem_baseline {
                             assert_witgen_mem_released(shard_ctx.shard_id, baseline);
                         }
                         proofs.push(zkvm_proof);
@@ -2205,7 +2202,7 @@ fn create_proofs_streaming<
                 };
 
             wit_iter
-                .map(|(zkvm_witness, shard_ctx, pi, witgen_mem_baseline)| {
+                .map(|(zkvm_witness, shard_ctx, pi, _witgen_mem_baseline)| {
                     if is_mock_proving {
                         MockProver::assert_satisfied_full(
                             &shard_ctx,
@@ -2229,7 +2226,11 @@ fn create_proofs_streaming<
                         start.elapsed()
                     );
                     #[cfg(feature = "gpu")]
-                    if let Some(baseline) = witgen_mem_baseline {
+                    if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                        crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                    }
+                    #[cfg(feature = "gpu")]
+                    if let Some(baseline) = _witgen_mem_baseline {
                         assert_witgen_mem_released(shard_ctx.shard_id, baseline);
                     }
                     tracing::info!("e2e proof stat: {}", zkvm_proof);
