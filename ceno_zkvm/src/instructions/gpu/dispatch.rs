@@ -18,7 +18,7 @@ use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::FieldAlgebra;
 use std::cell::Cell;
 use tracing::info_span;
-use witness::{InstancePaddingStrategy, RowMajorMatrix};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
 
 use super::{
     config::{
@@ -195,6 +195,7 @@ pub(crate) fn build_gpu_replay_plan<E: ExtensionField, I: Instruction<E>>(
         shard_ctx.shard_id,
         kind,
         std::sync::Arc::<[StepIndex]>::from(step_indices.to_vec()),
+        next_pow2_instance_padding(step_indices.len()),
         num_witin,
         num_structural_witin,
         shard_ctx.current_shard_offset_cycle(),

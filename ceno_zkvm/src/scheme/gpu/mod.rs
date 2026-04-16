@@ -664,12 +664,8 @@ where
     let max_poly_size_log2 = ordered_sources
         .iter()
         .map(|source| match source {
-            DeferredGpuTrace::Eager(rmm) => {
-                ceil_log2(next_pow2_instance_padding(rmm.num_instances()))
-            }
-            DeferredGpuTrace::Replay(plan) => {
-                ceil_log2(next_pow2_instance_padding(plan.step_indices.len()))
-            }
+            DeferredGpuTrace::Eager(rmm) => ceil_log2(rmm.height()),
+            DeferredGpuTrace::Replay(plan) => ceil_log2(plan.trace_height),
         })
         .max()
         .unwrap();
@@ -707,11 +703,11 @@ where
         .iter()
         .map(|source| match source {
             DeferredGpuTrace::Eager(rmm) => ceno_gpu::common::poseidon2::DeferredRmmSpec {
-                height: next_pow2_instance_padding(rmm.num_instances()),
+                height: rmm.height(),
                 persist_actual: true,
             },
             DeferredGpuTrace::Replay(plan) => ceno_gpu::common::poseidon2::DeferredRmmSpec {
-                height: next_pow2_instance_padding(plan.step_indices.len()),
+                height: plan.trace_height,
                 persist_actual: false,
             },
         })
@@ -727,7 +723,14 @@ where
                 DeferredGpuTrace::Eager(rmm) => rmm,
                 DeferredGpuTrace::Replay(plan) => plan
                     .replay()
-                    .map(|[witness_rmm, _]| witness_rmm)
+                    .map(|[witness_rmm, _]| {
+                        assert_eq!(
+                            witness_rmm.height(),
+                            plan.trace_height,
+                            "replayed trace height changed between plan build and deferred commit",
+                        );
+                        witness_rmm
+                    })
                     .map_err(|e| ceno_gpu::HalError::InvalidInput(format!("{e:?}")))?,
             };
             Ok(unsafe { std::mem::transmute(witness_rmm) })
@@ -1071,6 +1074,11 @@ where
 
     for (trace_idx, replay_plan) in replayable_traces {
         let [witness_rmm, _] = replay_plan.replay()?;
+        assert_eq!(
+            witness_rmm.height(),
+            replay_plan.trace_height,
+            "replayed trace height changed before PCS opening restore",
+        );
         let witness_rmm_bb31: witness::RowMajorMatrix<BB31Base> =
             unsafe { std::mem::transmute(witness_rmm) };
         rmms[*trace_idx] = witness_rmm_bb31;

@@ -16,7 +16,9 @@ use ceno_gpu::{
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::FieldAlgebra;
 use tracing::info_span;
-use witness::{DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix};
+use witness::{
+    DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding,
+};
 
 use crate::{
     e2e::ShardContext,
@@ -295,6 +297,7 @@ pub fn build_keccak_replay_plan<E: ExtensionField>(
         shard_ctx.shard_id,
         GpuWitgenKind::Keccak,
         std::sync::Arc::<[StepIndex]>::from(step_indices.to_vec()),
+        next_pow2_instance_padding(step_indices.len()) * 32,
         num_witin,
         num_structural_witin,
         shard_ctx.current_shard_offset_cycle(),

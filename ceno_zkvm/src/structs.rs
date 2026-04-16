@@ -330,6 +330,10 @@ pub struct GpuReplayPlan<E: ExtensionField> {
     // small shape/config metadata. Shared shard state stays resident in the
     // shard-global GPU caches and is rehydrated on worker threads on demand.
     pub step_indices: Arc<[StepIndex]>,
+    // Actual committed/opened witness row height after per-chip padding. This
+    // is not always equal to `step_indices.len()`: rotation-heavy chips like
+    // Keccak expand each logical instance into multiple witness rows.
+    pub trace_height: usize,
     pub num_witin: usize,
     pub num_structural_witin: usize,
     pub shard_offset: u64,
@@ -353,6 +357,7 @@ impl<E: ExtensionField> GpuReplayPlan<E> {
         shard_id: usize,
         kind: crate::instructions::gpu::dispatch::GpuWitgenKind,
         step_indices: Arc<[StepIndex]>,
+        trace_height: usize,
         num_witin: usize,
         num_structural_witin: usize,
         shard_offset: u64,
@@ -367,6 +372,7 @@ impl<E: ExtensionField> GpuReplayPlan<E> {
             trace_idx: None,
             kind,
             step_indices,
+            trace_height,
             num_witin,
             num_structural_witin,
             shard_offset,
