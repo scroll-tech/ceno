@@ -337,6 +337,22 @@ impl<E: ExtensionField> Layer<E> {
         assert_eq!(w_record_evals.len(), w_len);
         assert_eq!(lookup_evals.len(), lk_len);
         assert_eq!(zero_evals.len(), zero_len);
+        // Construction of output-evaluation groups used by the main zerocheck:
+        // - Read group (`r_selector`):      sel_r(x) * (r_i(x) - 1) = (claim^r_i - 1)
+        // - Write group (`w_selector`):     sel_w(x) * (w_i(x) - 1) = (claim^w_i - 1)
+        // - Lookup group (`lk_selector`):   sel_lk(x) * f_i(x) = claim^lk_i
+        //   where f_i is normalized to absorb lookup padding alpha:
+        //     non-negated: f_i = lookup_i - alpha, claim^lk_i = claim_i - alpha
+        //     negated:     f_i = lookup_i + alpha, claim^lk_i = alpha - claim_i
+        // - Rotation groups (3 groups): left/right/target claims, each one eq-selected.
+        // - ECC bridge groups (5 groups): x/y/slope/x3/y3 claims, each one selector-separated.
+        // - Zero group (`zero_selector`):  sel_0(x) * z_i(x) = 0  (encoded via EvalExpression::Zero).
+        //
+        // The final batched main-sumcheck polynomial is formed as:
+        //   p(x) = Σ_g sel_g(x) * (Σ_i α^{offset(g,i)} * (expr_{g,i}(x) - eval_{g,i})).
+        // `offset(g,i)` is the global challenge-power index of the i-th expression in group g,
+        // i.e. the contiguous position after flattening all groups in `expr_evals` order.
+        // Here, `expr_evals` below constructs (g -> {(expr_{g,i}, eval_{g,i})_i}) for all groups.
 
         let rotation_expr_len = cb.cs.rotations.len() * ROTATION_OPENING_COUNT;
         let ecc_bridge_expr_len = if cb.cs.ec_point_exprs.is_empty() {
