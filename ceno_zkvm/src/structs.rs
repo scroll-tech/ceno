@@ -463,7 +463,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let num_instances = [num_instances, 0];
         let mut input = ChipInput::new(OC::name(), witness, num_instances);
         #[cfg(feature = "gpu")]
-        if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+        if cs.zkvm_v1_css.num_witin > 0
+            && crate::instructions::gpu::config::is_gpu_witgen_enabled()
             && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit(
             )
             && (input.witness_rmms[0].has_device_backing()

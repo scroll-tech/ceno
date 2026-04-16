@@ -363,6 +363,7 @@ fn replay_keccak_witness_from_packed<E: ExtensionField>(
                 shard_offset,
                 fetch_base_pc,
                 fetch_num_slots,
+                true,
                 None,
                 None,
             )
@@ -537,6 +538,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
                     shard_ctx.current_shard_offset_cycle(),
                     fetch_base_pc,
                     fetch_num_slots,
+                    false,
                     None,
                     Some(shard_bufs),
                 )

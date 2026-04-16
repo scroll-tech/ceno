@@ -61,7 +61,7 @@ mod memory;
 mod util;
 pub use memory::{
     check_gpu_mem_estimation, estimate_chip_proof_memory, estimate_main_witness_bytes,
-    init_gpu_mem_tracker,
+    estimate_replay_materialization_bytes, init_gpu_mem_tracker,
 };
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
@@ -895,7 +895,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                     0
                 };
 
-                let (resident, temporary) = estimate_trace_extraction_bytes(num_witin, num_vars);
+                let (resident, temporary) =
+                    estimate_trace_extraction_bytes(num_witin, num_vars, true);
                 check_gpu_mem_estimation(gpu_mem_tracker, resident + temporary);
 
                 trace_idx += 1;
@@ -945,7 +946,7 @@ where
         .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, stream.as_ref())
         .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
 
-    let (resident, temporary) = estimate_trace_extraction_bytes(expected_num, num_vars);
+    let (resident, temporary) = estimate_trace_extraction_bytes(expected_num, num_vars, false);
     check_gpu_mem_estimation(gpu_mem_tracker, resident + temporary);
 
     let mles: Vec<Arc<MultilinearExtensionGpu<'a, E>>> = poly_group
@@ -971,6 +972,9 @@ pub fn extract_witness_mles_for_trace_rmm<'a, E>(
 where
     E: ExtensionField,
 {
+    let cuda_hal = get_cuda_hal().unwrap();
+    let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "extract_witness_mles_for_trace_rmm");
+
     assert_eq!(
         witness_rmm.device_backing_layout(),
         Some(DeviceMatrixLayout::ColMajor),
@@ -988,6 +992,12 @@ where
     let rows = witness_rmm.height();
     let cols = witness_rmm.width();
     let poly_len_bytes = rows * std::mem::size_of::<BB31Base>();
+
+    // This helper only wraps already-materialized col-major device backing in
+    // owned subrange handles. The replay() call that produced `witness_rmm`
+    // paid the actual witness-buffer allocation cost; converting those columns
+    // into MLE handles does not allocate more VRAM here.
+    check_gpu_mem_estimation(gpu_mem_tracker, 0);
 
     (0..cols)
         .map(|col_idx| {
@@ -1721,8 +1731,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     ) {
         if let Some(replay_plan) = task.gpu_replay_plan.as_ref() {
+            let cuda_hal = get_cuda_hal().unwrap();
+            let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
+            let num_vars =
+                task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
+            let estimated_replay_bytes = estimate_replay_materialization_bytes(
+                task.pk.get_cs().zkvm_v1_css.num_witin as usize,
+                task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
+                num_vars,
+            );
+            tracing::info!(
+                "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
+                task.circuit_name,
+                estimated_replay_bytes as f64 / (1024.0 * 1024.0),
+            );
             let [witness_rmm, structural_rmm] =
                 replay_plan.replay().expect("GPU raw replay failed");
+            check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
             task.input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
                 .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
             task.input.structural_witness = info_span!("[ceno] transport_structural_witness")

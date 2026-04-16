@@ -90,12 +90,13 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     circuit_name: &str,
+    witness_replayable: bool,
 ) -> u64 {
     let num_var_with_rotation =
         input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
 
     // Part 1: trace (base usage: witness & structural mles)
-    let trace_est = estimate_trace_bytes(composed_cs, input);
+    let trace_est = estimate_trace_bytes(composed_cs, input, witness_replayable);
 
     // Part 2: main witness (base usage)
     let main_witness_bytes = estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
@@ -166,9 +167,20 @@ pub(crate) fn estimate_structural_mle_bytes(num_structural_witin: usize, num_var
     num_structural_witin * mle_len * base_elem_size
 }
 
+pub fn estimate_replay_materialization_bytes(
+    num_witin: usize,
+    num_structural_witin: usize,
+    num_vars: usize,
+) -> usize {
+    let base_elem_size = std::mem::size_of::<BB31Base>();
+    let mle_len = 1usize << num_vars;
+    (num_witin + num_structural_witin) * mle_len * base_elem_size
+}
+
 pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
+    witness_replayable: bool,
 ) -> TraceEstimate {
     let cs = &composed_cs.zkvm_v1_css;
     let num_var_with_rotation =
@@ -176,8 +188,11 @@ pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 
     let structural_mle_bytes =
         estimate_structural_mle_bytes(cs.num_structural_witin as usize, num_var_with_rotation);
-    let (witness_mle_bytes, trace_temporary_bytes) =
-        estimate_trace_extraction_bytes(cs.num_witin as usize, num_var_with_rotation);
+    let (witness_mle_bytes, trace_temporary_bytes) = estimate_trace_extraction_bytes(
+        cs.num_witin as usize,
+        num_var_with_rotation,
+        witness_replayable,
+    );
 
     TraceEstimate {
         trace_resident_bytes: witness_mle_bytes + structural_mle_bytes,
@@ -328,7 +343,11 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 ///
 /// Returns `(0, 0)` when trace is cached (`CacheLevel::Trace` or `CacheLevel::Full`),
 /// When cache is disabled (`CacheLevel::None`, the default), estimates actual allocation costs.
-pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize) -> (usize, usize) {
+pub(crate) fn estimate_trace_extraction_bytes(
+    num_witin: usize,
+    num_vars: usize,
+    witness_replayable: bool,
+) -> (usize, usize) {
     let base_elem_size = std::mem::size_of::<BB31Base>();
     let mle_len = 1usize << num_vars;
     let poly_bytes = num_witin * mle_len * base_elem_size;
@@ -341,12 +360,19 @@ pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize)
             return (0, 0);
         }
 
-        // Cache-none replay path: the task regenerates one witness/device
-        // backing on demand and keeps that col-major buffer resident for the
-        // duration of the chip proof. There is no separate extraction temp
-        // buffer, but the replayed witness itself must be accounted for as
-        // resident task memory.
-        return (poly_bytes, 0);
+        if witness_replayable {
+            // Cache-none replay path: the task regenerates one witness/device
+            // backing on demand and keeps that col-major buffer resident for the
+            // duration of the chip proof. There is no separate extraction temp
+            // buffer, but the replayed witness itself must be accounted for as
+            // resident task memory.
+            return (poly_bytes, 0);
+        }
+
+        // GPU witgen alone does not imply replayability. Non-replayable traces
+        // still go through basefold::get_trace in cache-none mode, which
+        // allocates the extracted witness plus a temporary 2x transpose buffer.
+        return (poly_bytes, 2 * poly_bytes);
     }
 
     if matches!(get_gpu_cache_level(), CacheLevel::None) {

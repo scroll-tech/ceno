@@ -243,6 +243,10 @@ impl GpuFillMode {
     fn binds_shard_side_effects(self) -> bool {
         matches!(self, Self::AssignWithSideEffects)
     }
+
+    fn is_replay_witness_only(self) -> bool {
+        matches!(self, Self::ReplayWitnessOnly)
+    }
 }
 
 fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
@@ -567,6 +571,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -600,6 +605,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -635,6 +641,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     logic_kind,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -671,6 +678,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     logic_kind,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -705,6 +713,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -739,6 +748,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -774,6 +784,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -808,6 +819,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -846,6 +858,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     shift_kind,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -884,6 +897,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     shift_kind,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -919,6 +933,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     is_signed,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -954,6 +969,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     is_signed,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -992,6 +1008,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     is_beq,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -1030,6 +1047,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     is_signed,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -1064,6 +1082,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -1100,6 +1119,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     mem_max_bits,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -1136,6 +1156,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     mem_max_bits,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -1172,6 +1193,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     mem_max_bits,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -1214,6 +1236,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     mem_max_bits,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -1249,6 +1272,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     mul_kind,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -1284,6 +1308,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     div_kind,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )
@@ -1324,6 +1349,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     mem_max_bits,
                                     fetch_base_pc,
                                     fetch_num_slots,
+                                    fill_mode.is_replay_witness_only(),
                                     None,
                                     shard_bufs,
                                 )

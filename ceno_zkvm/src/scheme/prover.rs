@@ -752,7 +752,12 @@ impl<
                 );
                 let gpu_input: &ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>> =
                     unsafe { std::mem::transmute(&input) };
-                estimate_chip_proof_memory::<E, PCS>(cs, gpu_input, &circuit_name)
+                estimate_chip_proof_memory::<E, PCS>(
+                    cs,
+                    gpu_input,
+                    &circuit_name,
+                    gpu_replay_plans[this_idx].is_some(),
+                )
             };
             #[cfg(not(feature = "gpu"))]
             let estimated_memory = 0u64; // CPU path doesn't need memory tracking
@@ -853,6 +858,7 @@ where
     PCS: PolynomialCommitmentScheme<E> + 'static,
 {
     use crate::scheme::gpu::{
+        check_gpu_mem_estimation, estimate_replay_materialization_bytes,
         extract_witness_mles_for_trace, prove_ec_sum_quark_impl, prove_main_constraints_impl,
         prove_tower_relation_impl, transport_structural_witness_to_gpu,
     };
@@ -868,7 +874,23 @@ where
     // Deferred witness extraction: extract from committed pcs_data just-in-time
     #[cfg(feature = "gpu")]
     if let Some(replay_plan) = gpu_replay_plan.as_ref() {
+        let gpu_mem_tracker =
+            crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
+        let num_vars =
+            input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
+        let estimated_replay_bytes = estimate_replay_materialization_bytes(
+            circuit_pk.get_cs().zkvm_v1_css.num_witin as usize,
+            circuit_pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
+            num_vars,
+        );
+        let estimated_replay_mb = estimated_replay_bytes as f64 / (1024.0 * 1024.0);
+        tracing::info!(
+            "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
+            name,
+            estimated_replay_mb,
+        );
         let [witness_rmm, structural_rmm_from_replay] = replay_plan.replay()?;
+        check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
         input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
             .in_scope(|| crate::scheme::gpu::extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
         if structural_rmm.is_none() {
