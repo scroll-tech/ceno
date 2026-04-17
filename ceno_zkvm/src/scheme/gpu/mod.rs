@@ -148,6 +148,38 @@ fn pcs_resident_stats(
     }
 }
 
+pub fn log_gpu_pcs_baseline<E, PCS>(
+    label: &str,
+    pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
+) where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU PCS baseline logging only supports BabyBear base field",
+    );
+    let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(pcs_data) };
+    let pcs = pcs_resident_stats(pcs_data_basefold);
+    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+    tracing::info!(
+        "[gpu pcs baseline][{label}] digest_tree={:.2}MB leaves={:.2}MB trace_gpu={:.2}MB rmms_device={:.2}MB ({}/{})",
+        mb(pcs.digest_tree_bytes),
+        mb(pcs.codeword_leaves_bytes),
+        mb(pcs.trace_gpu_bytes),
+        mb(pcs.rmms_device_bytes),
+        pcs.rmms_device_count,
+        pcs.total_rmms,
+    );
+}
+
 pub fn log_gpu_proof_baseline<E, PCS>(
     label: &str,
     witness_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,

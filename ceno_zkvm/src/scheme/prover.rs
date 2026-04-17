@@ -1,3 +1,4 @@
+use ceno_gpu::Buffer;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
@@ -373,6 +374,35 @@ impl<
             if std::any::TypeId::of::<PB>()
                 == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
             {
+                if let Some(active_dpk) = self.get_device_proving_key(shard_ctx) {
+                    let active_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                        unsafe { std::mem::transmute(active_dpk.pcs_data.as_ref()) };
+                    crate::scheme::gpu::log_gpu_pcs_baseline::<E, PCS>(
+                        if shard_ctx.is_first_shard() {
+                            "fixed_active_first"
+                        } else {
+                            "fixed_active_non_first"
+                        },
+                        active_fixed_pcs,
+                    );
+                }
+                let inactive_dpk = if shard_ctx.is_first_shard() {
+                    self.device_non_first_shard_pk.as_ref()
+                } else {
+                    self.device_first_shard_pk.as_ref()
+                };
+                if let Some(inactive_dpk) = inactive_dpk {
+                    let inactive_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                        unsafe { std::mem::transmute(inactive_dpk.pcs_data.as_ref()) };
+                    crate::scheme::gpu::log_gpu_pcs_baseline::<E, PCS>(
+                        if shard_ctx.is_first_shard() {
+                            "fixed_inactive_non_first"
+                        } else {
+                            "fixed_inactive_first"
+                        },
+                        inactive_fixed_pcs,
+                    );
+                }
                 let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
                     unsafe { std::mem::transmute(&witness_data) };
                 let gpu_fixed_mles: &[std::sync::Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>] =
@@ -390,10 +420,28 @@ impl<
                     .count();
                 let task_structural_device_mb =
                     task_structural_device_bytes as f64 / (1024.0 * 1024.0);
+                let task_shard_ram_replay_raw_bytes = tasks
+                    .iter()
+                    .filter_map(|task| task.gpu_replay_plan.as_ref())
+                    .filter_map(|plan| plan.shard_ram_records.as_ref())
+                    .map(|buf| buf.len() * std::mem::size_of::<u32>())
+                    .sum::<usize>();
+                let task_shard_ram_replay_raw_count = tasks
+                    .iter()
+                    .filter_map(|task| task.gpu_replay_plan.as_ref())
+                    .filter(|plan| plan.shard_ram_records.is_some())
+                    .count();
+                let task_shard_ram_replay_raw_mb =
+                    task_shard_ram_replay_raw_bytes as f64 / (1024.0 * 1024.0);
                 tracing::info!(
                     "[gpu baseline][before_scheduler] task_structural_device={:.2}MB ({})",
                     task_structural_device_mb,
                     task_structural_device_count,
+                );
+                tracing::info!(
+                    "[gpu baseline][before_scheduler] task_shard_ram_replay_raw={:.2}MB ({})",
+                    task_shard_ram_replay_raw_mb,
+                    task_shard_ram_replay_raw_count,
                 );
                 crate::scheme::gpu::log_gpu_proof_baseline::<E, PCS>(
                     "before_scheduler",
