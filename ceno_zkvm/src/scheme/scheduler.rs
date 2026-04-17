@@ -346,10 +346,11 @@ impl ChipScheduler {
                         };
                         let memory = task.estimated_memory_bytes;
                         let task_id = task.task_id;
+                        let circuit_name = task.circuit_name.clone();
                         tracing::info!(
                             "[scheduler] worker starting task {} ({}), estimated={:.2}MB",
                             task_id,
-                            task.circuit_name,
+                            circuit_name,
                             memory as f64 / (1024.0 * 1024.0)
                         );
 
@@ -378,11 +379,15 @@ impl ChipScheduler {
                             Ok((r, s)) => (r, s),
                             Err(panic_info) => {
                                 let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                                    format!("Worker panicked on task {task_id}: {s}")
+                                    format!(
+                                        "Worker panicked on task {task_id} ({circuit_name}): {s}"
+                                    )
                                 } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                                    format!("Worker panicked on task {task_id}: {s}")
+                                    format!(
+                                        "Worker panicked on task {task_id} ({circuit_name}): {s}"
+                                    )
                                 } else {
-                                    format!("Worker panicked on task {task_id}")
+                                    format!("Worker panicked on task {task_id} ({circuit_name})")
                                 };
                                 tracing::error!("{}", msg);
                                 (
@@ -430,7 +435,8 @@ impl ChipScheduler {
                     let task = pending.remove(vec_idx);
                     let booked_mem = task.estimated_memory_bytes;
                     tracing::info!(
-                        "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
+                        "[scheduler] Launching task_id={}, circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
+                        task.task_id,
                         task.circuit_name,
                         booked_mem as f64 / (1024.0 * 1024.0),
                         mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0)
