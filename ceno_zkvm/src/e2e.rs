@@ -73,6 +73,22 @@ fn log_gpu_mem_pool_after_shard(label: &str, shard_id: usize) {
     });
 }
 
+#[cfg(feature = "gpu")]
+fn maybe_trim_gpu_mem_pool_after_shard() {
+    use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
+
+    if get_chip_proving_mode() != ChipProvingMode::Concurrent {
+        return;
+    }
+
+    use gkr_iop::gpu::gpu_prover::*;
+    info_span!("[ceno] trim_gpu_mem_pool_after_shard").in_scope(|| {
+        let cuda_hal = get_cuda_hal().unwrap();
+        cuda_hal.inner().trim_mem_pool().unwrap();
+        cuda_hal.inner().synchronize().unwrap();
+    });
+}
+
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
@@ -2189,6 +2205,7 @@ fn create_proofs_streaming<
                             log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                             crate::instructions::gpu::cache::release_all_shard_gpu_caches();
                             log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
+                            maybe_trim_gpu_mem_pool_after_shard();
                         }
                         #[cfg(feature = "gpu")]
                         if let Some(baseline) = _witgen_mem_baseline {
@@ -2250,6 +2267,7 @@ fn create_proofs_streaming<
                         log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                         crate::instructions::gpu::cache::release_all_shard_gpu_caches();
                         log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
+                        maybe_trim_gpu_mem_pool_after_shard();
                     }
                     #[cfg(feature = "gpu")]
                     if let Some(baseline) = _witgen_mem_baseline {
