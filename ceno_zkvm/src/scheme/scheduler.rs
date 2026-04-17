@@ -521,6 +521,8 @@ impl ChipScheduler {
             Ok(())
         });
 
+        let scope_result = scope_result;
+        mem_pool.reset_booking();
         scope_result?;
 
         // 6. Sort by task_id to restore original order
