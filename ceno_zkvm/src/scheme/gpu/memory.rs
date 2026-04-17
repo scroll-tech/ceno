@@ -122,7 +122,9 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         // so the peak is the max of those stage-local lifetimes.
         let tower_build_stage_bytes =
             trace_est.trace_resident_bytes + main_witness_bytes + tower_build_bytes;
-        let tower_prove_stage_bytes = tower_prove_bytes;
+        // TowerInput stays resident through create_proof, so tower prove overlaps
+        // the built tower buffers with the proof-time working set.
+        let tower_prove_stage_bytes = tower_build_bytes + tower_prove_bytes;
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
         let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
         let replay_stage_bytes = trace_est.trace_resident_bytes + trace_est.trace_temporary_bytes;

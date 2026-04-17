@@ -523,29 +523,17 @@ impl<
 
         #[cfg(feature = "gpu")]
         {
-            if ChipScheduler::is_concurrent_mode() {
-                // GPU concurrent: standalone function path (no &self needed for Send+Sync)
-                // Verify at runtime that PB is indeed GpuBackend<E, PCS> before transmuting.
-                assert_eq!(
-                    std::any::TypeId::of::<PB>(),
-                    std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>(),
-                    "Concurrent GPU path requires PB = GpuBackend<E, PCS>"
-                );
-                // SAFETY: TypeId check above guarantees PB = GpuBackend<E, PCS>, so PcsData types match.
+            if std::any::TypeId::of::<PB>()
+                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+            {
                 let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData =
                     unsafe { std::mem::transmute(witness_data) };
 
-                // SAFETY: pcs_data is only read (via get_trace) during concurrent execution.
-                use crate::scheme::utils::SyncRef;
-                let gpu_wd = SyncRef(gpu_witness_data);
-
-                return scheduler.execute(tasks, transcript, |task, transcript| {
-                    // Append circuit_idx to per-task forked transcript (matching verifier)
+                let exec_gpu_task = |task: ChipTask<'data, PB>, transcript: &mut T| {
                     transcript.append_field_element(&E::BaseField::from_canonical_u64(
                         task.circuit_idx as u64,
                     ));
 
-                    // SAFETY: TypeId check above (before closure) guarantees PB = GpuBackend<E, PCS>.
                     let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
                         unsafe { std::mem::transmute(task.input) };
 
@@ -556,7 +544,7 @@ impl<
                             gpu_input,
                             transcript,
                             &task.challenges,
-                            gpu_wd.0,
+                            gpu_witness_data,
                             task.witness_trace_idx,
                             task.gpu_replay_plan.clone(),
                             task.num_witin,
@@ -571,7 +559,19 @@ impl<
                         input_opening_point,
                         has_witness_or_fixed: task.has_witness_or_fixed,
                     })
-                });
+                };
+
+                if ChipScheduler::is_concurrent_mode() {
+                    // SAFETY: pcs_data is only read (via get_trace) during concurrent execution.
+                    use crate::scheme::utils::SyncRef;
+                    let gpu_wd = SyncRef(gpu_witness_data);
+                    return scheduler.execute(tasks, transcript, |task, transcript| {
+                        let _ = gpu_wd;
+                        exec_gpu_task(task, transcript)
+                    });
+                } else {
+                    return scheduler.execute_sequentially(tasks, transcript, exec_gpu_task);
+                }
             }
         }
 
@@ -582,8 +582,30 @@ impl<
             transcript
                 .append_field_element(&E::BaseField::from_canonical_u64(task.circuit_idx as u64));
 
+            #[cfg(feature = "gpu")]
+            let log_keccak_pool = task.gpu_replay_plan.as_ref().is_some_and(|plan| {
+                matches!(
+                    plan.kind,
+                    crate::instructions::gpu::dispatch::GpuWitgenKind::Keccak
+                )
+            });
+
             // Prepare: deferred extraction for GPU, no-op for CPU
+            #[cfg(feature = "gpu")]
+            if log_keccak_pool {
+                crate::scheme::gpu::log_gpu_pool_usage(&format!(
+                    "{}:before_replay",
+                    task.circuit_name
+                ));
+            }
             self.device.prepare_chip_input(&mut task, witness_data);
+            #[cfg(feature = "gpu")]
+            if log_keccak_pool {
+                crate::scheme::gpu::log_gpu_pool_usage(&format!(
+                    "{}:after_replay",
+                    task.circuit_name
+                ));
+            }
 
             let (proof, opening_evals, input_opening_point) =
                 self.create_chip_proof(&task, transcript)?;
@@ -654,15 +676,51 @@ impl<
         // build main witness
         let records = info_span!("[ceno] build_main_witness")
             .in_scope(|| build_main_witness::<E, PCS, PB, PD>(cs, input, challenges));
+        #[cfg(feature = "gpu")]
+        if task.gpu_replay_plan.as_ref().is_some_and(|plan| {
+            matches!(
+                plan.kind,
+                crate::instructions::gpu::dispatch::GpuWitgenKind::Keccak
+            )
+        }) {
+            crate::scheme::gpu::log_gpu_pool_usage(&format!(
+                "{}:after_build_main_witness",
+                task.circuit_name
+            ));
+        }
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
         // (internally calls build_tower_witness)
+        #[cfg(feature = "gpu")]
+        if task.gpu_replay_plan.as_ref().is_some_and(|plan| {
+            matches!(
+                plan.kind,
+                crate::instructions::gpu::dispatch::GpuWitgenKind::Keccak
+            )
+        }) {
+            crate::scheme::gpu::log_gpu_pool_usage(&format!(
+                "{}:before_prove_tower",
+                task.circuit_name
+            ));
+        }
         let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
             info_span!("[ceno] prove_tower_relation").in_scope(|| {
                 self.device
                     .prove_tower_relation(cs, input, &records, challenges, transcript)
             });
+        #[cfg(feature = "gpu")]
+        if task.gpu_replay_plan.as_ref().is_some_and(|plan| {
+            matches!(
+                plan.kind,
+                crate::instructions::gpu::dispatch::GpuWitgenKind::Keccak
+            )
+        }) {
+            crate::scheme::gpu::log_gpu_pool_usage(&format!(
+                "{}:after_prove_tower",
+                task.circuit_name
+            ));
+        }
         exit_span!(span);
 
         assert_eq!(
@@ -673,11 +731,35 @@ impl<
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
         let span = entered_span!("prove_main_constraints", profiling_2 = true);
+        #[cfg(feature = "gpu")]
+        if task.gpu_replay_plan.as_ref().is_some_and(|plan| {
+            matches!(
+                plan.kind,
+                crate::instructions::gpu::dispatch::GpuWitgenKind::Keccak
+            )
+        }) {
+            crate::scheme::gpu::log_gpu_pool_usage(&format!(
+                "{}:before_prove_main",
+                task.circuit_name
+            ));
+        }
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
             info_span!("[ceno] prove_main_constraints").in_scope(|| {
                 self.device
                     .prove_main_constraints(rt_tower, input, cs, challenges, transcript)
             })?;
+        #[cfg(feature = "gpu")]
+        if task.gpu_replay_plan.as_ref().is_some_and(|plan| {
+            matches!(
+                plan.kind,
+                crate::instructions::gpu::dispatch::GpuWitgenKind::Keccak
+            )
+        }) {
+            crate::scheme::gpu::log_gpu_pool_usage(&format!(
+                "{}:after_prove_main",
+                task.circuit_name
+            ));
+        }
         let MainSumcheckEvals {
             wits_in_evals,
             fixed_in_evals,
