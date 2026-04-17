@@ -1049,9 +1049,9 @@ where
         .get_pool_stream()
         .expect("should acquire stream");
     let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(_stream.clone());
-    let keccak_stage_split = gpu_replay_plan
+    let replay_stage_split = gpu_replay_plan
         .as_ref()
-        .is_some_and(|plan| matches!(plan.kind, GpuWitgenKind::Keccak));
+        .is_some_and(|plan| matches!(plan.kind, GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam));
     let structural_from_replay = structural_rmm.is_none();
 
     // Deferred witness extraction: extract from committed pcs_data just-in-time
@@ -1104,7 +1104,7 @@ where
     };
 
     #[cfg(feature = "gpu")]
-    if !keccak_stage_split {
+    if !replay_stage_split {
         if gpu_replay_plan.is_some() {
             materialize_replay_input(&mut input)?;
         } else if let Some(trace_idx) = witness_trace_idx {
@@ -1130,7 +1130,7 @@ where
     let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
     // Deferred structural witness transport: CPU -> GPU just-in-time
-    if !keccak_stage_split {
+    if !replay_stage_split {
         if let Some(rmm) = structural_rmm {
             let num_structural_witin = cs.zkvm_v1_css.num_structural_witin as usize;
             input.structural_witness =
@@ -1144,7 +1144,7 @@ where
         }
     }
 
-    if keccak_stage_split {
+    if replay_stage_split {
         materialize_replay_input(&mut input)?;
         let cs = circuit_pk.get_cs();
 

@@ -112,9 +112,10 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     // Part 5: main constraints (temporary usage)
     let main_constraints_temporary_bytes = estimate_main_constraints_bytes(composed_cs, input);
 
-    let keccak_stage_split = witness_replayable && circuit_name == "Ecall_Keccak";
-    let (resident_bytes, stage_peak_usage_bytes, total_usage_bytes) = if keccak_stage_split {
-        // Keccak replay is materialized twice:
+    let replay_stage_split =
+        witness_replayable && matches!(circuit_name, "Ecall_Keccak" | "ShardRamCircuit");
+    let (resident_bytes, stage_peak_usage_bytes, total_usage_bytes) = if replay_stage_split {
+        // Replayable large-memory chips are materialized twice:
         // - once for build_main_witness + build_tower_witness
         // - once again for main constraints
         // The replayed trace/device backing is explicitly released before the
@@ -159,12 +160,12 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     tracing::info!(
         "[mem estimate][{}] resident: trace={:.2}MB, main_witness={:.2}MB",
         circuit_name,
-        to_mb(if keccak_stage_split {
+        to_mb(if replay_stage_split {
             0
         } else {
             trace_est.trace_resident_bytes
         }),
-        to_mb(if keccak_stage_split {
+        to_mb(if replay_stage_split {
             0
         } else {
             main_witness_bytes
