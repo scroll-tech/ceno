@@ -304,6 +304,9 @@ pub fn build_keccak_replay_plan<E: ExtensionField>(
         fetch_base_pc,
         fetch_num_slots,
         Some(Arc::<[GpuKeccakInstance]>::from(packed_instances)),
+        None,
+        0,
+        0,
         config as *const crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E> as usize,
         replay_keccak_witness_from_resident_raw::<E>,
     )

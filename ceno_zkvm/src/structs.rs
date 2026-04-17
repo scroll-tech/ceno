@@ -11,6 +11,8 @@ use crate::{
 };
 use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepIndex, StepRecord, WordAddr};
 #[cfg(feature = "gpu")]
+use ceno_gpu::common::buffer::BufferImpl;
+#[cfg(feature = "gpu")]
 use ceno_gpu::common::witgen::types::GpuKeccakInstance;
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
@@ -343,6 +345,12 @@ pub struct GpuReplayPlan<E: ExtensionField> {
     // not consume plain step indices directly. Standard opcode chips leave this
     // empty and rebuild from resident StepRecord + shard metadata on device.
     pub keccak_instances: Option<Arc<[GpuKeccakInstance]>>,
+    // Shared-circuit replay keeps a compact owned view of the per-chunk
+    // `GpuShardRamRecord` buffer so ShardRam witness can be rebuilt on demand
+    // without keeping its eager witness/device backing resident.
+    pub shard_ram_records: Option<Arc<BufferImpl<'static, u32>>>,
+    pub shard_ram_num_records: usize,
+    pub shard_ram_num_local_writes: usize,
     config_ptr: usize,
     replay_fn: fn(usize, &GpuReplayPlan<E>) -> Result<RMMCollections<E::BaseField>, ZKVMError>,
 }
@@ -364,6 +372,9 @@ impl<E: ExtensionField> GpuReplayPlan<E> {
         fetch_base_pc: u32,
         fetch_num_slots: usize,
         keccak_instances: Option<Arc<[GpuKeccakInstance]>>,
+        shard_ram_records: Option<Arc<BufferImpl<'static, u32>>>,
+        shard_ram_num_records: usize,
+        shard_ram_num_local_writes: usize,
         config_ptr: usize,
         replay_fn: fn(usize, &GpuReplayPlan<E>) -> Result<RMMCollections<E::BaseField>, ZKVMError>,
     ) -> Self {
@@ -379,6 +390,9 @@ impl<E: ExtensionField> GpuReplayPlan<E> {
             fetch_base_pc,
             fetch_num_slots,
             keccak_instances,
+            shard_ram_records,
+            shard_ram_num_records,
+            shard_ram_num_local_writes,
             config_ptr,
             replay_fn,
         }

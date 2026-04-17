@@ -33,6 +33,7 @@ pub(crate) fn kind_tag(kind: GpuWitgenKind) -> &'static str {
         GpuWitgenKind::Mul(_) => "mul",
         GpuWitgenKind::Div(_) => "div",
         GpuWitgenKind::Keccak => "keccak",
+        GpuWitgenKind::ShardRam => "shard_ram",
     }
 }
 

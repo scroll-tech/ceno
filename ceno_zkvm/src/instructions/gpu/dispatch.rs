@@ -64,6 +64,7 @@ pub enum GpuWitgenKind {
     Div(u32), // 0=DIV, 1=DIVU, 2=REM, 3=REMU
     Lw,
     Keccak,
+    ShardRam,
 }
 
 // Re-exports from device_cache module for external callers (e2e.rs, structs.rs).
@@ -202,6 +203,9 @@ pub(crate) fn build_gpu_replay_plan<E: ExtensionField, I: Instruction<E>>(
         fetch_base_pc,
         fetch_num_slots,
         None,
+        None,
+        0,
+        0,
         config as *const I::InstructionConfig as usize,
         replay_gpu_witness_from_resident_raw::<E, I>,
     )
@@ -287,7 +291,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
     //
     // Keccak never enters this function (it has `gpu_assign_keccak_inner`).
     // Guard defensively in case the enum value is ever passed here by mistake.
-    let is_standard_kind = !matches!(kind, GpuWitgenKind::Keccak);
+    let is_standard_kind = !matches!(kind, GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam);
 
     let lk_multiplicity = if gpu_lk_counters.is_some() && is_standard_kind {
         let lk_multiplicity = info_span!("gpu_lk_d2h")
@@ -1366,6 +1370,9 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
         }
         GpuWitgenKind::Keccak => {
             unreachable!("keccak uses gpu_assign_keccak_instances, not try_gpu_assign_instances")
+        }
+        GpuWitgenKind::ShardRam => {
+            unreachable!("shard ram uses its own replay path, not try_gpu_assign_instances")
         }
     }
 }

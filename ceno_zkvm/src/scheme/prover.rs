@@ -16,7 +16,7 @@ use either::Either;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance};
-use p3::field::FieldAlgebra;
+use p3::{field::FieldAlgebra, matrix::Matrix};
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -377,6 +377,24 @@ impl<
                     unsafe { std::mem::transmute(&witness_data) };
                 let gpu_fixed_mles: &[std::sync::Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>] =
                     unsafe { std::mem::transmute(fixed_mles_preload.as_slice()) };
+                let task_structural_device_bytes = tasks
+                    .iter()
+                    .filter_map(|task| task.structural_rmm.as_ref())
+                    .filter(|rmm| rmm.has_device_backing())
+                    .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<E::BaseField>())
+                    .sum::<usize>();
+                let task_structural_device_count = tasks
+                    .iter()
+                    .filter_map(|task| task.structural_rmm.as_ref())
+                    .filter(|rmm| rmm.has_device_backing())
+                    .count();
+                let task_structural_device_mb =
+                    task_structural_device_bytes as f64 / (1024.0 * 1024.0);
+                tracing::info!(
+                    "[gpu baseline][before_scheduler] task_structural_device={:.2}MB ({})",
+                    task_structural_device_mb,
+                    task_structural_device_count,
+                );
                 crate::scheme::gpu::log_gpu_proof_baseline::<E, PCS>(
                     "before_scheduler",
                     gpu_witness_data,
@@ -698,7 +716,16 @@ impl<
             #[cfg(feature = "gpu")]
             let (witness_mle, structural_witness, task_structural_rmm) = {
                 let _ = &structural_rmm; // suppress unused warning on structural_rmm binding
-                (vec![], vec![], Some(structural_rmm))
+                let keep_structural_rmm = gpu_replay_plans[this_idx].is_none();
+                (
+                    vec![],
+                    vec![],
+                    if keep_structural_rmm {
+                        Some(structural_rmm)
+                    } else {
+                        None
+                    },
+                )
             };
 
             // CPU path: eagerly extract witness and structural witness

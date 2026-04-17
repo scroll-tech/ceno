@@ -1,14 +1,64 @@
 use ceno_emul::WordAddr;
-use ceno_gpu::common::witgen::types::ShardRamColumnMap;
+use ceno_gpu::common::{buffer::BufferImpl, witgen::types::ShardRamColumnMap};
 use ff_ext::ExtensionField;
 use gkr_iop::RAMType;
 use rustc_hash::FxHashSet;
+use std::sync::Arc;
 
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    tables::{MemFinalRecord, ShardRamConfig, ShardRamRecord},
+    tables::{MemFinalRecord, ShardRamCircuit, ShardRamConfig, ShardRamRecord},
 };
+
+#[cfg(feature = "gpu")]
+pub fn build_shard_ram_replay_plan<E: ExtensionField>(
+    shard_id: usize,
+    config: &ShardRamConfig<E>,
+    num_witin: usize,
+    num_structural_witin: usize,
+    device_records: Arc<BufferImpl<'static, u32>>,
+    num_records: usize,
+    num_local_writes: usize,
+) -> crate::structs::GpuReplayPlan<E> {
+    crate::structs::GpuReplayPlan::new(
+        shard_id,
+        crate::instructions::gpu::dispatch::GpuWitgenKind::ShardRam,
+        Arc::<[ceno_emul::StepIndex]>::from(Vec::<ceno_emul::StepIndex>::new()),
+        witness::next_pow2_instance_padding(num_records) * 2,
+        num_witin,
+        num_structural_witin,
+        0,
+        0,
+        0,
+        None,
+        Some(device_records),
+        num_records,
+        num_local_writes,
+        config as *const ShardRamConfig<E> as usize,
+        replay_shard_ram_witness_from_device::<E>,
+    )
+}
+
+#[cfg(feature = "gpu")]
+fn replay_shard_ram_witness_from_device<E: ExtensionField>(
+    config_ptr: usize,
+    replay: &crate::structs::GpuReplayPlan<E>,
+) -> Result<crate::tables::RMMCollections<E::BaseField>, ZKVMError> {
+    let config = unsafe { &*(config_ptr as *const ShardRamConfig<E>) };
+    let device_records = replay.shard_ram_records.as_ref().ok_or_else(|| {
+        ZKVMError::InvalidWitness("ShardRam replay missing device records".into())
+    })?;
+    ShardRamCircuit::<E>::try_gpu_assign_instances_from_device(
+        config,
+        replay.num_witin,
+        replay.num_structural_witin,
+        device_records.as_ref(),
+        replay.shard_ram_num_records,
+        replay.shard_ram_num_local_writes,
+    )?
+    .ok_or_else(|| ZKVMError::InvalidWitness("ShardRam replay returned None".into()))
+}
 
 /// Filter and construct a cross-shard ShardRamRecord without EC computation.
 /// EC is computed in batch on device by the GPU pipeline.
@@ -982,12 +1032,8 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
 
                 let chunk_byte_start = records_offset * record_u32s * 4;
                 let chunk_byte_end = (records_offset + chunk_size) * record_u32s * 4;
-                let chunk_view = partitioned_buf.as_slice_range(chunk_byte_start..chunk_byte_end);
-                let chunk_buf: ceno_gpu::common::buffer::BufferImpl<'static, u32> = unsafe {
-                    std::mem::transmute(ceno_gpu::common::buffer::BufferImpl::<u32>::new_from_view(
-                        chunk_view,
-                    ))
-                };
+                let chunk_buf: ceno_gpu::common::buffer::BufferImpl<'static, u32> =
+                    partitioned_buf.owned_subrange(chunk_byte_start..chunk_byte_end);
 
                 let witness = ShardRamCircuit::<E>::try_gpu_assign_instances_from_device(
                     config,
@@ -1003,11 +1049,26 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
                 })?;
 
                 let num_reads = chunk_size - chunk_writes;
-                inputs.push(ChipInput::new(
+                let mut input = ChipInput::new(
                     ShardRamCircuit::<E>::name(),
                     witness,
                     [chunk_writes, num_reads],
-                ));
+                );
+                if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                    && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                    && num_witin > 0
+                {
+                    input.gpu_replay_plan = Some(build_shard_ram_replay_plan(
+                        shard_ctx.shard_id,
+                        config,
+                        num_witin,
+                        num_structural_witin,
+                        Arc::new(chunk_buf),
+                        chunk_size,
+                        chunk_writes,
+                    ));
+                }
+                inputs.push(input);
 
                 records_offset += chunk_size;
             }
