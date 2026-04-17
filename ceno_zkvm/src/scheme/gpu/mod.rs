@@ -60,17 +60,19 @@ use gkr_iop::gpu::gpu_prover::*;
 
 mod memory;
 mod util;
-pub use memory::{
+pub(crate) use memory::{
     check_gpu_mem_estimation, estimate_chip_proof_memory, estimate_main_witness_bytes,
-    estimate_replay_materialization_bytes, init_gpu_mem_tracker,
+    estimate_replay_materialization_bytes, estimate_tower_bytes, estimate_tower_stage_bytes,
+    init_gpu_mem_tracker,
 };
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
-    estimate_structural_mle_bytes, estimate_tower_bytes, estimate_trace_extraction_bytes,
+    estimate_structural_mle_bytes, estimate_trace_extraction_bytes,
 };
+pub(crate) use util::expect_basic_transcript;
 use util::{
-    WitnessRegistry, batch_mles_take_half, expect_basic_transcript, hal_to_backend_error,
-    mle_filter_even_odd_batch, mle_host_to_gpu, read_septic_value_from_gpu, symbolic_from_mle,
+    WitnessRegistry, batch_mles_take_half, hal_to_backend_error, mle_filter_even_odd_batch,
+    mle_host_to_gpu, read_septic_value_from_gpu, symbolic_from_mle,
 };
 
 pub struct GpuTowerProver;
@@ -247,6 +249,19 @@ pub fn log_gpu_proof_baseline<E, PCS>(
     );
 }
 
+pub fn log_gpu_pool_usage(label: &str) {
+    let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu pool logging");
+    let pool = cuda_hal.inner.mem_pool();
+    let used_bytes = pool.get_used_size().unwrap_or(0);
+    let reserved_bytes = pool.get_reserved_size().unwrap_or(0);
+    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+    tracing::info!(
+        "[gpu pool][{label}] used={:.2}MB reserved={:.2}MB",
+        mb(used_bytes as usize),
+        mb(reserved_bytes as usize),
+    );
+}
+
 use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
@@ -346,7 +361,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
 
 // Extract out_evals from GPU-built tower witnesses
 #[allow(clippy::type_complexity)]
-fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
+pub(crate) fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     prod_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built product towers
     logup_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built logup towers
     r_set_len: usize,
@@ -1346,7 +1361,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_tower_witness_gpu<'buf, E: ExtensionField>(
+pub(crate) fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
     records: &[ArcMultilinearExtensionGpu<'_, E>],

@@ -946,10 +946,18 @@ where
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E> + 'static,
 {
-    use crate::scheme::gpu::{
-        check_gpu_mem_estimation, estimate_replay_materialization_bytes,
-        extract_witness_mles_for_trace, prove_ec_sum_quark_impl, prove_main_constraints_impl,
-        prove_tower_relation_impl, transport_structural_witness_to_gpu,
+    use crate::{
+        instructions::gpu::dispatch::GpuWitgenKind,
+        scheme::{
+            constants::NUM_FANIN,
+            gpu::{
+                build_tower_witness_gpu, check_gpu_mem_estimation,
+                estimate_replay_materialization_bytes, estimate_tower_stage_bytes,
+                extract_out_evals_from_gpu_towers, extract_witness_mles_for_trace,
+                log_gpu_pool_usage, prove_ec_sum_quark_impl, prove_main_constraints_impl,
+                prove_tower_relation_impl, transport_structural_witness_to_gpu,
+            },
+        },
     };
     use gkr_iop::gpu::{GpuBackend, get_cuda_hal};
 
@@ -959,46 +967,71 @@ where
         .get_pool_stream()
         .expect("should acquire stream");
     let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(_stream.clone());
+    let keccak_stage_split = gpu_replay_plan
+        .as_ref()
+        .is_some_and(|plan| matches!(plan.kind, GpuWitgenKind::Keccak));
+    let structural_from_replay = structural_rmm.is_none();
 
     // Deferred witness extraction: extract from committed pcs_data just-in-time
     #[cfg(feature = "gpu")]
-    if let Some(replay_plan) = gpu_replay_plan.as_ref() {
-        let gpu_mem_tracker =
-            crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
-        let num_vars =
-            input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
-        let estimated_replay_bytes = estimate_replay_materialization_bytes(
-            circuit_pk.get_cs().zkvm_v1_css.num_witin as usize,
-            circuit_pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
-            num_vars,
-        );
-        let estimated_replay_mb = estimated_replay_bytes as f64 / (1024.0 * 1024.0);
-        tracing::info!(
-            "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
-            name,
-            estimated_replay_mb,
-        );
-        let [witness_rmm, structural_rmm_from_replay] = replay_plan.replay()?;
-        check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
-        input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
-            .in_scope(|| crate::scheme::gpu::extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
-        if structural_rmm.is_none() {
-            input.structural_witness =
-                info_span!("[ceno] transport_structural_witness").in_scope(|| {
-                    transport_structural_witness_to_gpu::<E>(
-                        structural_rmm_from_replay,
-                        circuit_pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
-                        input.log2_num_instances()
-                            + circuit_pk.get_cs().rotation_vars().unwrap_or(0),
-                    )
-                });
+    let materialize_replay_input =
+        |input: &mut ProofInput<'a, GpuBackend<E, PCS>>| -> Result<(), ZKVMError> {
+            let Some(replay_plan) = gpu_replay_plan.as_ref() else {
+                return Ok(());
+            };
+            let gpu_mem_tracker =
+                crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
+            let num_vars =
+                input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
+            let estimated_replay_bytes = estimate_replay_materialization_bytes(
+                circuit_pk.get_cs().zkvm_v1_css.num_witin as usize,
+                circuit_pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
+                num_vars,
+            );
+            let estimated_replay_mb = estimated_replay_bytes as f64 / (1024.0 * 1024.0);
+            tracing::info!(
+                "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
+                name,
+                estimated_replay_mb,
+            );
+            log_gpu_pool_usage(&format!("{name}:before_replay"));
+            let [witness_rmm, structural_rmm_from_replay] = replay_plan.replay()?;
+            check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
+            input.witness = info_span!("[ceno] replay_gpu_witness_from_raw").in_scope(|| {
+                crate::scheme::gpu::extract_witness_mles_for_trace_rmm::<E>(witness_rmm)
+            });
+            if structural_from_replay {
+                input.structural_witness = info_span!("[ceno] transport_structural_witness")
+                    .in_scope(|| {
+                        transport_structural_witness_to_gpu::<E>(
+                            structural_rmm_from_replay,
+                            circuit_pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
+                            input.log2_num_instances()
+                                + circuit_pk.get_cs().rotation_vars().unwrap_or(0),
+                        )
+                    });
+            }
+            log_gpu_pool_usage(&format!("{name}:after_replay"));
+            Ok(())
+        };
+
+    #[cfg(feature = "gpu")]
+    let clear_materialized_input = |input: &mut ProofInput<'a, GpuBackend<E, PCS>>| {
+        input.witness = vec![];
+        input.structural_witness = vec![];
+    };
+
+    #[cfg(feature = "gpu")]
+    if !keccak_stage_split {
+        if gpu_replay_plan.is_some() {
+            materialize_replay_input(&mut input)?;
+        } else if let Some(trace_idx) = witness_trace_idx {
+            let num_vars =
+                input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
+            input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
+                extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin, num_vars)
+            });
         }
-    } else if let Some(trace_idx) = witness_trace_idx {
-        let num_vars =
-            input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
-        input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
-            extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin, num_vars)
-        });
     }
 
     #[cfg(not(feature = "gpu"))]
@@ -1015,16 +1048,175 @@ where
     let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
     // Deferred structural witness transport: CPU -> GPU just-in-time
-    if let Some(rmm) = structural_rmm {
-        let num_structural_witin = cs.zkvm_v1_css.num_structural_witin as usize;
-        input.structural_witness =
-            info_span!("[ceno] transport_structural_witness").in_scope(|| {
-                transport_structural_witness_to_gpu::<E>(
-                    rmm,
-                    num_structural_witin,
-                    num_var_with_rotation,
+    if !keccak_stage_split {
+        if let Some(rmm) = structural_rmm {
+            let num_structural_witin = cs.zkvm_v1_css.num_structural_witin as usize;
+            input.structural_witness =
+                info_span!("[ceno] transport_structural_witness").in_scope(|| {
+                    transport_structural_witness_to_gpu::<E>(
+                        rmm,
+                        num_structural_witin,
+                        num_var_with_rotation,
+                    )
+                });
+        }
+    }
+
+    if keccak_stage_split {
+        materialize_replay_input(&mut input)?;
+        let cs = circuit_pk.get_cs();
+
+        let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
+            let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
+            let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
+            assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
+            let mut xs_ys = ec_point_exprs
+                .iter()
+                .map(|expr| match expr {
+                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
+                    _ => unreachable!("ec point's expression must be WitIn"),
+                })
+                .collect_vec();
+            let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
+            let xs = xs_ys;
+            let slopes = cs
+                .zkvm_v1_css
+                .ec_slope_exprs
+                .iter()
+                .map(|expr| match expr {
+                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
+                    _ => unreachable!("slope's expression must be WitIn"),
+                })
+                .collect_vec();
+            let ecc_proof = Some(info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
+                prove_ec_sum_quark_impl::<E, PCS>(input.num_instances(), xs, ys, slopes, transcript)
+            })?);
+            exit_span!(span);
+            ecc_proof
+        } else {
+            None
+        };
+
+        let records = info_span!("[ceno] build_main_witness").in_scope(|| {
+            build_main_witness::<
+                E,
+                PCS,
+                GpuBackend<E, PCS>,
+                gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>,
+            >(cs, &input, challenges)
+        });
+        log_gpu_pool_usage(&format!("{name}:after_build_main_witness"));
+
+        let span = entered_span!("prove_tower_relation", profiling_2 = true);
+        let r_set_len =
+            cs.zkvm_v1_css.r_expressions.len() + cs.zkvm_v1_css.r_table_expressions.len();
+        let (tower_build_estimated_bytes, tower_prove_estimated_bytes) =
+            estimate_tower_stage_bytes::<E, PCS>(cs, &input);
+        tracing::info!(
+            "[gpu tower][{}] estimated: build_tower={:.2}MB, prove_tower={:.2}MB",
+            name,
+            tower_build_estimated_bytes as f64 / (1024.0 * 1024.0),
+            tower_prove_estimated_bytes as f64 / (1024.0 * 1024.0),
+        );
+        let tower_build_mem_tracker =
+            crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "build_tower_witness_gpu");
+        let mut big_buffers = Vec::new();
+        let mut ones_buffer = Vec::new();
+        let mut view_last_layers = Vec::new();
+        log_gpu_pool_usage(&format!("{name}:before_build_tower_witness"));
+        let (prod_gpu, logup_gpu, lk_out_evals, w_out_evals, r_out_evals) =
+            info_span!("[ceno] build_tower_witness_gpu").in_scope(|| {
+                let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
+                    cs,
+                    &input,
+                    &records,
+                    challenges,
+                    &cuda_hal,
+                    &mut big_buffers,
+                    &mut ones_buffer,
+                    &mut view_last_layers,
                 )
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(format!("build_tower_witness_gpu failed: {e}").into())
+                })?;
+                let (r_out_evals, w_out_evals, lk_out_evals) =
+                    extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
+                Ok::<_, ZKVMError>((prod_gpu, logup_gpu, lk_out_evals, w_out_evals, r_out_evals))
+            })?;
+        check_gpu_mem_estimation(tower_build_mem_tracker, tower_build_estimated_bytes);
+        log_gpu_pool_usage(&format!("{name}:after_build_tower_witness"));
+
+        for eval in r_out_evals
+            .iter()
+            .chain(w_out_evals.iter())
+            .chain(lk_out_evals.iter())
+            .flatten()
+        {
+            transcript.append_field_element_ext(eval);
+        }
+
+        clear_materialized_input(&mut input);
+
+        let basic_tr = crate::scheme::gpu::expect_basic_transcript(transcript);
+        let tower_input = ceno_gpu::TowerInput {
+            prod_specs: prod_gpu,
+            logup_specs: logup_gpu,
+        };
+        let tower_prove_mem_tracker =
+            crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "prove_tower_relation_gpu");
+        log_gpu_pool_usage(&format!("{name}:before_prove_tower"));
+        let (rt_tower_gl, tower_proof_gpu) = info_span!("[ceno] prove_tower_relation_gpu")
+            .in_scope(|| {
+                cuda_hal
+                    .tower
+                    .create_proof(
+                        &cuda_hal,
+                        &tower_input,
+                        NUM_FANIN,
+                        basic_tr,
+                        gkr_iop::gpu::get_thread_stream().as_ref(),
+                    )
+                    .expect("gpu tower create_proof failed")
             });
+        log_gpu_pool_usage(&format!("{name}:after_prove_tower"));
+        let rt_tower: Point<E> = unsafe { std::mem::transmute(rt_tower_gl) };
+        let tower_proof: TowerProofs<E> = unsafe { std::mem::transmute(tower_proof_gpu) };
+        check_gpu_mem_estimation(tower_prove_mem_tracker, tower_prove_estimated_bytes);
+        drop(records);
+        exit_span!(span);
+
+        assert_eq!(rt_tower.len(), num_var_with_rotation);
+
+        materialize_replay_input(&mut input)?;
+        let span = entered_span!("prove_main_constraints", profiling_2 = true);
+        let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
+            info_span!("[ceno] prove_main_constraints").in_scope(|| {
+                prove_main_constraints_impl::<E, PCS>(rt_tower, &input, cs, challenges, transcript)
+            })?;
+        let MainSumcheckEvals {
+            wits_in_evals,
+            fixed_in_evals,
+        } = evals;
+        clear_materialized_input(&mut input);
+        exit_span!(span);
+
+        return Ok((
+            ZKVMChipProof {
+                r_out_evals,
+                w_out_evals,
+                lk_out_evals,
+                main_sumcheck_proofs,
+                gkr_iop_proof,
+                tower_proof,
+                ecc_proof,
+                num_instances: input.num_instances,
+            },
+            MainSumcheckEvals {
+                wits_in_evals,
+                fixed_in_evals,
+            },
+            input_opening_point,
+        ));
     }
 
     // run ecc quark prover using _impl function

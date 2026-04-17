@@ -105,40 +105,77 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     let n = num_var_with_rotation.saturating_sub(1);
     let ecc_quark_temporary_bytes = estimate_ecc_quark_bytes_from_num_vars(n);
 
-    // Part 4: build & prove tower (temporary usage)
-    let tower_temporary_bytes = estimate_tower_bytes(composed_cs, input);
+    // Part 4: build/prove tower (temporary usage)
+    let (tower_build_bytes, tower_prove_bytes) = estimate_tower_stage_bytes(composed_cs, input);
+    let tower_temporary_bytes = tower_build_bytes + tower_prove_bytes;
 
     // Part 5: main constraints (temporary usage)
     let main_constraints_temporary_bytes = estimate_main_constraints_bytes(composed_cs, input);
 
-    // Peak is max across all stages (extraction, tower, ecc, main).
-    // Each stage's temporary memory is on top of the resident usage (records + deferred_resident).
-    let stage_peak_usage_bytes = trace_est
-        .trace_temporary_bytes
-        .max(tower_temporary_bytes)
-        .max(ecc_quark_temporary_bytes)
-        .max(main_constraints_temporary_bytes);
-
-    let total_usage_bytes = trace_est.trace_resident_bytes
-        + main_witness_bytes
-        + stage_peak_usage_bytes
-        + ESTIMATION_SAFETY_MARGIN_BYTES;
+    let keccak_stage_split = witness_replayable && circuit_name == "Ecall_Keccak";
+    let (resident_bytes, stage_peak_usage_bytes, total_usage_bytes) = if keccak_stage_split {
+        // Keccak replay is materialized twice:
+        // - once for build_main_witness + build_tower_witness
+        // - once again for main constraints
+        // The replayed trace/device backing is explicitly released before the
+        // standalone tower prove and again before the main-constraints stage,
+        // so the peak is the max of those stage-local lifetimes.
+        let tower_build_stage_bytes =
+            trace_est.trace_resident_bytes + main_witness_bytes + tower_build_bytes;
+        let tower_prove_stage_bytes = tower_prove_bytes;
+        let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
+        let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
+        let replay_stage_bytes = trace_est.trace_resident_bytes + trace_est.trace_temporary_bytes;
+        let stage_peak = tower_build_stage_bytes
+            .max(tower_prove_stage_bytes)
+            .max(ecc_stage_bytes)
+            .max(main_stage_bytes)
+            .max(replay_stage_bytes);
+        (
+            0usize,
+            stage_peak,
+            stage_peak + ESTIMATION_SAFETY_MARGIN_BYTES,
+        )
+    } else {
+        // Peak is max across all stages (extraction, tower, ecc, main).
+        // Each stage's temporary memory is on top of the resident usage (records + deferred_resident).
+        let stage_peak = trace_est
+            .trace_temporary_bytes
+            .max(tower_temporary_bytes)
+            .max(ecc_quark_temporary_bytes)
+            .max(main_constraints_temporary_bytes);
+        let resident = trace_est.trace_resident_bytes + main_witness_bytes;
+        (
+            resident,
+            stage_peak,
+            resident + stage_peak + ESTIMATION_SAFETY_MARGIN_BYTES,
+        )
+    };
 
     let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
     // Resident memory (always occupied during chip proof)
     tracing::info!(
         "[mem estimate][{}] resident: trace={:.2}MB, main_witness={:.2}MB",
         circuit_name,
-        to_mb(trace_est.trace_resident_bytes),
-        to_mb(main_witness_bytes),
+        to_mb(if keccak_stage_split {
+            0
+        } else {
+            trace_est.trace_resident_bytes
+        }),
+        to_mb(if keccak_stage_split {
+            0
+        } else {
+            main_witness_bytes
+        }),
     );
     // Temporary memory per stage (only one active at a time, peak = max)
     tracing::info!(
-        "[mem estimate][{}] temporary: extract_trace={:.2}MB, ecc_quark={:.2}MB, prove_tower={:.2}MB,  prove_main={:.2}MB",
+        "[mem estimate][{}] temporary: extract_trace={:.2}MB, ecc_quark={:.2}MB, build_tower={:.2}MB, prove_tower={:.2}MB, prove_main={:.2}MB",
         circuit_name,
         to_mb(trace_est.trace_temporary_bytes),
         to_mb(ecc_quark_temporary_bytes),
-        to_mb(tower_temporary_bytes),
+        to_mb(tower_build_bytes),
+        to_mb(tower_prove_bytes),
         to_mb(main_constraints_temporary_bytes),
     );
     // Total peak = resident + max(stage temporaries)
@@ -146,7 +183,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         "[mem estimate][{}] total_usage={:.2}MB (resident={:.2}MB + temporary={:.2}MB)",
         circuit_name,
         to_mb(total_usage_bytes),
-        to_mb(trace_est.trace_resident_bytes + main_witness_bytes),
+        to_mb(resident_bytes),
         to_mb(stage_peak_usage_bytes),
     );
 
@@ -298,10 +335,10 @@ pub(crate) fn estimate_main_constraints_bytes<
 
 /// Estimate temporary GPU memory for the tower proving stage (build + prove).
 /// Used by prove_tower_relation to validate against actual mem_tracker measurements.
-pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub(crate) fn estimate_tower_stage_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
-) -> usize {
+) -> (usize, usize) {
     let cs = &composed_cs.zkvm_v1_css;
     let num_prod_towers = composed_cs.num_reads() + composed_cs.num_writes();
     let num_logup_towers = if composed_cs.is_with_lk_table() {
@@ -333,7 +370,15 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
         elem_size,
     );
 
-    build_est.total_bytes + prove_est.total_bytes
+    (build_est.total_bytes, prove_est.total_bytes)
+}
+
+pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'_, GpuBackend<E, PCS>>,
+) -> usize {
+    let (build_bytes, prove_bytes) = estimate_tower_stage_bytes(composed_cs, input);
+    build_bytes + prove_bytes
 }
 
 /// Estimate GPU memory for trace extraction (get_trace).
