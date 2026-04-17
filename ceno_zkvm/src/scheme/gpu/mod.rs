@@ -4,6 +4,7 @@ use super::hal::{
 };
 use crate::{
     error::ZKVMError,
+    instructions::gpu::cache::current_replay_cache_stats,
     scheme::{
         cpu::TowerRelationOutput,
         hal::{DeviceProvingKey, MainSumcheckEvals, ProofInput, TowerProverSpec},
@@ -78,6 +79,140 @@ pub struct GpuTowerProver;
 pub enum DeferredGpuTrace<E: ExtensionField> {
     Eager(witness::RowMajorMatrix<E::BaseField>),
     Replay(crate::structs::GpuReplayPlan<E>),
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct PcsResidentStats {
+    digest_tree_bytes: usize,
+    codeword_leaves_bytes: usize,
+    trace_gpu_bytes: usize,
+    rmms_device_bytes: usize,
+    rmms_device_count: usize,
+    total_rmms: usize,
+}
+
+fn pcs_resident_stats(
+    pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    >,
+) -> PcsResidentStats {
+    let digest_tree_bytes =
+        pcs_data_basefold.codeword.digest_buf.len() * std::mem::size_of::<BB31Base>();
+    let codeword_leaves_bytes = pcs_data_basefold
+        .codeword
+        .leaves
+        .as_ref()
+        .map(|leaves| {
+            leaves
+                .iter()
+                .map(|leaf| leaf.values().len() * std::mem::size_of::<BB31Base>())
+                .sum::<usize>()
+        })
+        .unwrap_or(0);
+    let trace_gpu_bytes = pcs_data_basefold
+        .trace
+        .as_ref()
+        .map(|traces| {
+            traces
+                .iter()
+                .flatten()
+                .map(|poly| poly.evaluations().len() * std::mem::size_of::<BB31Base>())
+                .sum::<usize>()
+        })
+        .unwrap_or(0);
+    let (rmms_device_bytes, rmms_device_count, total_rmms) = pcs_data_basefold
+        .rmms
+        .as_ref()
+        .map(|rmms| {
+            (
+                rmms.iter()
+                    .filter(|rmm| rmm.has_device_backing())
+                    .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<BB31Base>())
+                    .sum::<usize>(),
+                rmms.iter().filter(|rmm| rmm.has_device_backing()).count(),
+                rmms.len(),
+            )
+        })
+        .unwrap_or((0, 0, 0));
+    PcsResidentStats {
+        digest_tree_bytes,
+        codeword_leaves_bytes,
+        trace_gpu_bytes,
+        rmms_device_bytes,
+        rmms_device_count,
+        total_rmms,
+    }
+}
+
+pub fn log_gpu_proof_baseline<E, PCS>(
+    label: &str,
+    witness_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    fixed_mles: &[Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>],
+) where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU baseline logging only supports BabyBear base field",
+    );
+    let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu baseline logging");
+    let pool = cuda_hal.inner.mem_pool();
+    let used_bytes = pool.get_used_size().unwrap_or(0);
+    let reserved_bytes = pool.get_reserved_size().unwrap_or(0);
+
+    let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(witness_data) };
+
+    let pcs = pcs_resident_stats(pcs_data_basefold);
+    let fixed_mle_bytes = fixed_mles
+        .iter()
+        .map(|mle| match &mle.mle {
+            gkr_iop::gpu::gpu_prover::GpuFieldType::Base(poly) => {
+                poly.evaluations().len() * std::mem::size_of::<BB31Base>()
+            }
+            gkr_iop::gpu::gpu_prover::GpuFieldType::Ext(poly) => {
+                poly.evaluations().len() * std::mem::size_of::<BB31Ext>()
+            }
+            gkr_iop::gpu::gpu_prover::GpuFieldType::Unreachable => 0,
+        })
+        .sum::<usize>();
+    let replay_cache = current_replay_cache_stats();
+    let accounted_bytes = replay_cache.total_bytes()
+        + pcs.digest_tree_bytes
+        + pcs.codeword_leaves_bytes
+        + pcs.trace_gpu_bytes
+        + pcs.rmms_device_bytes
+        + fixed_mle_bytes;
+    let unaccounted_bytes = (used_bytes as usize).saturating_sub(accounted_bytes);
+    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+    tracing::info!(
+        "[gpu baseline][{label}] pool: used={:.2}MB reserved={:.2}MB | replay: steps={:.2}MB meta={:.2}MB shared={:.2}MB total={:.2}MB | pcs: digest_tree={:.2}MB leaves={:.2}MB trace_gpu={:.2}MB rmms_device={:.2}MB ({}/{}) | fixed_mles={:.2}MB | unaccounted={:.2}MB",
+        mb(used_bytes as usize),
+        mb(reserved_bytes as usize),
+        mb(replay_cache.shard_steps_bytes),
+        mb(replay_cache.shard_meta_bytes),
+        mb(replay_cache.shared_side_effect_bytes),
+        mb(replay_cache.total_bytes()),
+        mb(pcs.digest_tree_bytes),
+        mb(pcs.codeword_leaves_bytes),
+        mb(pcs.trace_gpu_bytes),
+        mb(pcs.rmms_device_bytes),
+        pcs.rmms_device_count,
+        pcs.total_rmms,
+        mb(fixed_mle_bytes),
+        mb(unaccounted_bytes),
+    );
 }
 
 use crate::{
@@ -1042,9 +1177,31 @@ pub fn clear_replayable_trace_device_backing<E, PCS>(
         return;
     };
 
+    let before_device_count = rmms.iter().filter(|rmm| rmm.has_device_backing()).count();
+    let before_device_bytes = rmms
+        .iter()
+        .filter(|rmm| rmm.has_device_backing())
+        .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<BB31Base>())
+        .sum::<usize>();
+
     for (trace_idx, _) in replayable_traces {
         rmms[*trace_idx].clear_device_backing();
     }
+
+    let after_device_count = rmms.iter().filter(|rmm| rmm.has_device_backing()).count();
+    let after_device_bytes = rmms
+        .iter()
+        .filter(|rmm| rmm.has_device_backing())
+        .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<BB31Base>())
+        .sum::<usize>();
+    tracing::info!(
+        "[gpu] cleared replayable PCS RMM device backing: replayable_traces={}, rmms_device_before={:.2}MB ({}) -> after={:.2}MB ({})",
+        replayable_traces.len(),
+        before_device_bytes as f64 / (1024.0 * 1024.0),
+        before_device_count,
+        after_device_bytes as f64 / (1024.0 * 1024.0),
+        after_device_count,
+    );
 }
 
 pub fn restore_replayable_trace_device_backing<E, PCS>(

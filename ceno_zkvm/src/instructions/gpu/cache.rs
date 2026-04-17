@@ -18,6 +18,19 @@ use tracing::info_span;
 
 use crate::{e2e::ShardContext, error::ZKVMError};
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct GpuReplayCacheStats {
+    pub shard_steps_bytes: usize,
+    pub shard_meta_bytes: usize,
+    pub shared_side_effect_bytes: usize,
+}
+
+impl GpuReplayCacheStats {
+    pub fn total_bytes(self) -> usize {
+        self.shard_steps_bytes + self.shard_meta_bytes + self.shared_side_effect_bytes
+    }
+}
+
 /// Compatibility session handle for shard-scoped GPU cache lifetime.
 ///
 /// This is a lightweight API wrapper over the existing thread-local caches,
@@ -207,6 +220,51 @@ pub fn invalidate_shard_steps_cache() {
     });
     // End-of-shard teardown for cross-thread replay visibility.
     *global_replay_session().lock().unwrap() = None;
+}
+
+pub fn current_replay_cache_stats() -> GpuReplayCacheStats {
+    let shard_steps_bytes = SHARD_STEPS_DEVICE.with(|cache| {
+        cache
+            .borrow()
+            .as_ref()
+            .map(|c| c.device_buf.len())
+            .unwrap_or(0)
+    });
+    let (shard_meta_bytes, shared_side_effect_bytes) = SHARD_META_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        let Some(c) = cache.as_ref() else {
+            return (0usize, 0usize);
+        };
+        let meta_bytes = c.device_bufs.scalars.len()
+            + c.device_bufs.next_access_packed.len()
+            + c.device_bufs.prev_shard_cycle_range.len() * std::mem::size_of::<u64>()
+            + c.device_bufs.prev_shard_heap_range.len() * std::mem::size_of::<u32>()
+            + c.device_bufs.prev_shard_hint_range.len() * std::mem::size_of::<u32>();
+        let shared_bytes = c
+            .shared_ec_buf
+            .as_ref()
+            .map(|buf| buf.len() * std::mem::size_of::<u32>())
+            .unwrap_or(0)
+            + c.shared_ec_count
+                .as_ref()
+                .map(|buf| buf.len() * std::mem::size_of::<u32>())
+                .unwrap_or(0)
+            + c.shared_addr_buf
+                .as_ref()
+                .map(|buf| buf.len() * std::mem::size_of::<u32>())
+                .unwrap_or(0)
+            + c.shared_addr_count
+                .as_ref()
+                .map(|buf| buf.len() * std::mem::size_of::<u32>())
+                .unwrap_or(0);
+        (meta_bytes, shared_bytes)
+    });
+
+    GpuReplayCacheStats {
+        shard_steps_bytes,
+        shard_meta_bytes,
+        shared_side_effect_bytes,
+    }
 }
 
 /// Cached shard metadata device buffers for GPU shard records.

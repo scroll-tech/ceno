@@ -319,7 +319,7 @@ impl<
             exit_span!(commit_to_traces_span);
 
             // Use pre-loaded fixed_mles (extracted before in_scope to avoid lifetime issues)
-            let fixed_mles = fixed_mles_preload;
+            let fixed_mles = fixed_mles_preload.clone();
 
             // squeeze two challenges from transcript
             let challenges = [
@@ -368,6 +368,20 @@ impl<
                         &replayable_traces,
                     );
                 }
+            }
+            #[cfg(feature = "gpu")]
+            if std::any::TypeId::of::<PB>()
+                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+            {
+                let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                    unsafe { std::mem::transmute(&witness_data) };
+                let gpu_fixed_mles: &[std::sync::Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>] =
+                    unsafe { std::mem::transmute(fixed_mles_preload.as_slice()) };
+                crate::scheme::gpu::log_gpu_proof_baseline::<E, PCS>(
+                    "before_scheduler",
+                    gpu_witness_data,
+                    gpu_fixed_mles,
+                );
             }
             exit_span!(build_tasks_span);
 
