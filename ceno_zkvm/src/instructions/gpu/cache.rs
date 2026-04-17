@@ -111,7 +111,7 @@ struct ShardStepsCache {
     byte_len: usize,
     shard_id: usize,
     n_steps: usize,
-    device_buf: CudaSlice<u8>,
+    device_buf: Arc<CudaSlice<u8>>,
 }
 
 #[derive(Clone)]
@@ -174,9 +174,9 @@ pub(crate) fn upload_shard_steps_cached(
         );
         let bytes: &[u8] =
             unsafe { std::slice::from_raw_parts(shard_steps.as_ptr() as *const u8, byte_len) };
-        let device_buf = hal.inner.htod_copy_stream(None, bytes).map_err(|e| {
+        let device_buf = Arc::new(hal.inner.htod_copy_stream(None, bytes).map_err(|e| {
             ZKVMError::InvalidWitness(format!("shard_steps H2D failed: {e}").into())
-        })?;
+        })?);
         *cache = Some(ShardStepsCache {
             host_ptr: ptr,
             byte_len,
@@ -194,11 +194,11 @@ pub(crate) fn with_cached_shard_steps<R>(f: impl FnOnce(&CudaSlice<u8>) -> R) ->
     SHARD_STEPS_DEVICE.with(|cache| {
         let cache = cache.borrow();
         if let Some(c) = cache.as_ref() {
-            return f(&c.device_buf);
+            return f(c.device_buf.as_ref());
         }
         let global = global_replay_session().lock().unwrap();
         let session = global.as_ref().expect("shard_steps not uploaded");
-        f(&session.shard_steps.device_buf)
+        f(session.shard_steps.device_buf.as_ref())
     })
 }
 
@@ -967,7 +967,7 @@ pub(crate) fn begin_gpu_shard_session(
                     byte_len: steps.byte_len,
                     shard_id: steps.shard_id,
                     n_steps: steps.n_steps,
-                    device_buf: steps.device_buf.clone(),
+                    device_buf: Arc::clone(&steps.device_buf),
                 },
                 device_bufs: raw_only_meta,
             }));
