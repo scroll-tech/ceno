@@ -55,6 +55,24 @@ use tracing::info_span;
 use transcript::BasicTranscript as Transcript;
 use witness::next_pow2_instance_padding;
 
+#[cfg(feature = "gpu")]
+fn log_gpu_mem_pool_after_shard(label: &str, shard_id: usize) {
+    use gkr_iop::gpu::gpu_prover::*;
+
+    info_span!("[ceno] log_gpu_mem_pool_after_shard").in_scope(|| {
+        let cuda_hal = get_cuda_hal().unwrap();
+        let mem_pool = cuda_hal.inner().mem_pool();
+        let used_bytes = mem_pool.get_used_size().unwrap_or(0);
+        let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
+        tracing::info!(
+            "[gpu shard end][{label}] shard_id={} used={:.2}MB reserved={:.2}MB",
+            shard_id,
+            used_bytes as f64 / (1024.0 * 1024.0),
+            reserved_bytes as f64 / (1024.0 * 1024.0),
+        );
+    });
+}
+
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
@@ -2168,7 +2186,9 @@ fn create_proofs_streaming<
                         );
                         #[cfg(feature = "gpu")]
                         if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                            log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                             crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                            log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
                         }
                         #[cfg(feature = "gpu")]
                         if let Some(baseline) = _witgen_mem_baseline {
@@ -2227,7 +2247,9 @@ fn create_proofs_streaming<
                     );
                     #[cfg(feature = "gpu")]
                     if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                        log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                         crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                        log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
                     }
                     #[cfg(feature = "gpu")]
                     if let Some(baseline) = _witgen_mem_baseline {
