@@ -8,6 +8,8 @@ use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 #[cfg(feature = "gpu")]
 use crate::scheme::gpu::estimate_chip_proof_memory;
+#[cfg(feature = "gpu")]
+use crate::scheme::scheduler::get_chip_proving_mode;
 use crate::scheme::{
     constants::SEPTIC_EXTENSION_DEGREE,
     hal::MainSumcheckEvals,
@@ -933,6 +935,22 @@ impl<
             #[cfg(not(feature = "gpu"))]
             let estimated_memory = 0u64; // CPU path doesn't need memory tracking
 
+            #[cfg(feature = "gpu")]
+            let booked_memory = {
+                let margin = if matches!(circuit_name.as_str(), "Ecall_Keccak" | "ShardRamCircuit")
+                    && matches!(
+                        get_chip_proving_mode(),
+                        crate::scheme::scheduler::ChipProvingMode::Concurrent
+                    ) {
+                    crate::scheme::scheduler::large_gpu_task_booking_margin_bytes()
+                } else {
+                    0
+                };
+                estimated_memory.saturating_add(margin)
+            };
+            #[cfg(not(feature = "gpu"))]
+            let booked_memory = estimated_memory;
+
             // Look up trace index for deferred extraction (GPU uses this; CPU ignores it)
             let witness_trace_idx = if cs.num_witin() > 0 {
                 circuit_trace_indices[this_idx]
@@ -952,6 +970,7 @@ impl<
                 pk,
                 input,
                 estimated_memory_bytes: estimated_memory,
+                booked_memory_bytes: booked_memory,
                 has_witness_or_fixed: cs.num_witin() > 0 || cs.num_fixed() > 0,
                 challenges,
                 witness_trace_idx,

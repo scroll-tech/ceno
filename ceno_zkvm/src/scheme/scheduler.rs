@@ -27,6 +27,8 @@ use p3::field::FieldAlgebra;
 use std::sync::OnceLock;
 use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
+#[cfg(feature = "gpu")]
+static LARGE_GPU_TASK_BOOKING_MARGIN_MB: OnceLock<u64> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChipProvingMode {
@@ -41,6 +43,16 @@ pub fn get_chip_proving_mode() -> ChipProvingMode {
             _ => ChipProvingMode::Concurrent,
         }
     })
+}
+
+#[cfg(feature = "gpu")]
+pub fn large_gpu_task_booking_margin_bytes() -> u64 {
+    *LARGE_GPU_TASK_BOOKING_MARGIN_MB.get_or_init(|| {
+        std::env::var("CENO_GPU_LARGE_TASK_BOOKING_MARGIN_MB")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1024)
+    }) << 20
 }
 
 #[cfg(feature = "gpu")]
@@ -62,6 +74,8 @@ pub struct ChipTask<'a, PB: ProverBackend> {
     pub input: ProofInput<'static, PB>,
     /// Estimated GPU memory requirement in bytes
     pub estimated_memory_bytes: u64,
+    /// Scheduler-only booked GPU memory in bytes (may include extra concurrency margin)
+    pub booked_memory_bytes: u64,
     /// Whether this circuit has witness or fixed polynomials
     pub has_witness_or_fixed: bool,
     /// Challenges for this proof
@@ -345,6 +359,7 @@ impl ChipScheduler {
                             }
                         };
                         let memory = task.estimated_memory_bytes;
+                        let booked_memory = task.booked_memory_bytes;
                         let task_id = task.task_id;
                         let circuit_name = task.circuit_name.clone();
                         tracing::info!(
@@ -401,7 +416,7 @@ impl ChipScheduler {
 
                         let _ = tx.send(CompletionMessage {
                             result,
-                            memory_reserved: memory,
+                            memory_reserved: booked_memory,
                             task_id,
                             forked_sample,
                         });
@@ -428,16 +443,17 @@ impl ChipScheduler {
                 if tasks_inflight < stream_pool_size
                     && let Some(vec_idx) = pending.iter().position(|task| {
                         mem_pool
-                            .try_book_capacity(task.estimated_memory_bytes)
+                            .try_book_capacity(task.booked_memory_bytes)
                             .is_some()
                     })
                 {
                     let task = pending.remove(vec_idx);
-                    let booked_mem = task.estimated_memory_bytes;
+                    let booked_mem = task.booked_memory_bytes;
                     tracing::info!(
-                        "[scheduler] Launching task_id={}, circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
+                        "[scheduler] Launching task_id={}, circuit={}, estimated_mem={:.2}MB, booked_mem={:.2}MB, pool_booked={:.2}MB",
                         task.task_id,
                         task.circuit_name,
+                        task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
                         booked_mem as f64 / (1024.0 * 1024.0),
                         mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0)
                     );
@@ -473,11 +489,12 @@ impl ChipScheduler {
                     );
                     for (i, task) in pending.iter().enumerate() {
                         tracing::error!(
-                            "  task[{}]: id={}, circuit={}, estimated_mem={:.2}MB",
+                            "  task[{}]: id={}, circuit={}, estimated_mem={:.2}MB, booked_mem={:.2}MB",
                             i,
                             task.task_id,
                             task.circuit_name,
                             task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                            task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
                         );
                     }
                     return Err(ZKVMError::BackendError(BackendError::CircuitError(
