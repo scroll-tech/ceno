@@ -106,14 +106,15 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     let n = num_var_with_rotation.saturating_sub(1);
     let ecc_quark_temporary_bytes = estimate_ecc_quark_bytes_from_num_vars(n);
 
-    // Part 4: build/prove tower (scheduler-facing live peak)
+    // Part 4: build/prove tower
     //
-    // `tower_prove_bytes` already includes the TowerInput buffers that remain
-    // live while `create_proof` runs, so the top-level model must combine the
-    // build and prove phases as overlapping live sets, not treat prove as only
-    // "new allocations inside create_proof".
-    let (tower_build_bytes, tower_prove_bytes) = estimate_tower_stage_bytes(composed_cs, input);
-    let tower_temporary_bytes = tower_build_bytes.max(tower_prove_bytes);
+    // `tower_prove_local_bytes` is only the new allocation occupancy inside
+    // `create_proof`, while `tower_input_live_bytes` tracks the already-built
+    // TowerInput buffers that remain live during that stage.
+    let (tower_build_bytes, tower_prove_local_bytes, tower_input_live_bytes) =
+        estimate_tower_stage_components(composed_cs, input);
+    let tower_prove_peak_bytes = tower_input_live_bytes + tower_prove_local_bytes;
+    let tower_temporary_bytes = tower_build_bytes.max(tower_prove_peak_bytes);
 
     // Part 5: main constraints (temporary usage)
     let main_constraints_temporary_bytes = estimate_main_constraints_bytes(composed_cs, input);
@@ -129,11 +130,10 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         // so the peak is the max of those stage-local lifetimes.
         let tower_build_stage_bytes =
             trace_est.trace_resident_bytes + main_witness_bytes + tower_build_bytes;
-        // `tower_prove_bytes` is already an inclusive live-peak for create_proof:
-        // it counts the TowerInput buffers that remain live plus the proof-time
-        // scratch allocated inside create_proof. Do not add tower_build_bytes
-        // again here or the TowerInput backing gets double-counted.
-        let tower_prove_stage_bytes = tower_prove_bytes;
+        // During tower prove, the replayed witness/device backing has already
+        // been cleared, but the built TowerInput buffers remain live and
+        // overlap with the fresh create_proof allocations.
+        let tower_prove_stage_bytes = tower_prove_peak_bytes;
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
         let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
         let replay_stage_bytes = trace_est.trace_resident_bytes + trace_est.trace_temporary_bytes;
@@ -186,7 +186,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         to_mb(trace_est.trace_temporary_bytes),
         to_mb(ecc_quark_temporary_bytes),
         to_mb(tower_build_bytes),
-        to_mb(tower_prove_bytes),
+        to_mb(tower_prove_peak_bytes),
         to_mb(main_constraints_temporary_bytes),
     );
     // Total peak = resident + max(stage temporaries)
@@ -389,12 +389,10 @@ pub(crate) fn estimate_main_constraints_bytes<
     eqs_bytes + sumcheck_bytes
 }
 
-/// Estimate temporary GPU memory for the tower proving stage (build + prove).
-/// Used by prove_tower_relation to validate against actual mem_tracker measurements.
-pub(crate) fn estimate_tower_stage_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
-) -> (usize, usize) {
+) -> (usize, usize, usize) {
     let cs = &composed_cs.zkvm_v1_css;
     let num_prod_towers = composed_cs.num_reads() + composed_cs.num_writes();
     let num_logup_towers = if composed_cs.is_with_lk_table() {
@@ -426,15 +424,30 @@ pub(crate) fn estimate_tower_stage_bytes<E: ExtensionField, PCS: PolynomialCommi
         elem_size,
     );
 
-    (build_est.total_bytes, prove_est.total_bytes)
+    let tower_input_live_bytes =
+        prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
+    let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes);
+
+    (build_est.total_bytes, prove_local_bytes, tower_input_live_bytes)
+}
+
+/// Estimate temporary GPU memory for the tower proving stage (build + prove).
+/// Used by prove_tower_relation to validate against actual mem_tracker measurements.
+pub(crate) fn estimate_tower_stage_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'_, GpuBackend<E, PCS>>,
+) -> (usize, usize) {
+    let (build_bytes, prove_local_bytes, _) = estimate_tower_stage_components(composed_cs, input);
+    (build_bytes, prove_local_bytes)
 }
 
 pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
 ) -> usize {
-    let (build_bytes, prove_bytes) = estimate_tower_stage_bytes(composed_cs, input);
-    build_bytes + prove_bytes
+    let (build_bytes, prove_local_bytes, tower_input_live_bytes) =
+        estimate_tower_stage_components(composed_cs, input);
+    build_bytes.max(tower_input_live_bytes + prove_local_bytes)
 }
 
 /// Estimate GPU memory for trace extraction (get_trace).
