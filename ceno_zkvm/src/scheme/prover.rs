@@ -481,6 +481,11 @@ impl<
                 && std::any::TypeId::of::<PB>()
                     == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
             {
+                let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+                cuda_hal
+                    .inner
+                    .synchronize()
+                    .expect("cuda synchronize before pcs_opening");
                 let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
                     unsafe { std::mem::transmute(&mut witness_data) };
                 crate::scheme::gpu::restore_replayable_trace_device_backing::<E, PCS>(
@@ -1281,6 +1286,10 @@ where
         let tower_proof: TowerProofs<E> = unsafe { std::mem::transmute(tower_proof_gpu) };
         check_gpu_mem_estimation(tower_prove_mem_tracker, tower_prove_estimated_bytes);
         drop(records);
+        drop(tower_input);
+        drop(big_buffers);
+        drop(ones_buffer);
+        drop(view_last_layers);
         exit_span!(span);
 
         assert_eq!(rt_tower.len(), num_var_with_rotation);
