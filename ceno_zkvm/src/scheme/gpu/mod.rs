@@ -63,8 +63,8 @@ mod memory;
 mod util;
 pub(crate) use memory::{
     check_gpu_mem_estimation, estimate_chip_proof_memory, estimate_main_witness_bytes,
-    estimate_replay_materialization_bytes, estimate_tower_bytes, estimate_tower_stage_bytes,
-    init_gpu_mem_tracker,
+    estimate_replay_materialization_bytes_for_plan, estimate_tower_bytes,
+    estimate_tower_stage_bytes, init_gpu_mem_tracker,
 };
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
@@ -1367,7 +1367,12 @@ where
             .collect()
     };
 
-    let estimated_bytes = estimate_structural_mle_bytes(num_structural_witin, num_vars);
+    let estimated_bytes =
+        if structural_rmm.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor) {
+            0
+        } else {
+            estimate_structural_mle_bytes(num_structural_witin, num_vars)
+        };
     check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
 
     result
@@ -1960,11 +1965,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
             let num_vars =
                 task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
-            let estimated_replay_bytes = estimate_replay_materialization_bytes(
-                task.pk.get_cs().zkvm_v1_css.num_witin as usize,
-                task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
-                num_vars,
-            );
+            let estimated_replay_bytes =
+                estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
             tracing::info!(
                 "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
                 task.circuit_name,

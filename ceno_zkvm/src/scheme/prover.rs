@@ -1034,7 +1034,7 @@ where
             constants::NUM_FANIN,
             gpu::{
                 build_tower_witness_gpu, check_gpu_mem_estimation,
-                estimate_replay_materialization_bytes, estimate_tower_stage_bytes,
+                estimate_replay_materialization_bytes_for_plan, estimate_tower_stage_bytes,
                 extract_out_evals_from_gpu_towers, extract_witness_mles_for_trace,
                 log_gpu_pool_usage, prove_ec_sum_quark_impl, prove_main_constraints_impl,
                 prove_tower_relation_impl, transport_structural_witness_to_gpu,
@@ -1065,11 +1065,8 @@ where
                 crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
             let num_vars =
                 input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
-            let estimated_replay_bytes = estimate_replay_materialization_bytes(
-                circuit_pk.get_cs().zkvm_v1_css.num_witin as usize,
-                circuit_pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
-                num_vars,
-            );
+            let estimated_replay_bytes =
+                estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
             let estimated_replay_mb = estimated_replay_bytes as f64 / (1024.0 * 1024.0);
             tracing::info!(
                 "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",

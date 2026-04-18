@@ -1,9 +1,10 @@
 use crate::{
+    instructions::gpu::dispatch::GpuWitgenKind,
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         hal::ProofInput,
     },
-    structs::ComposedConstrainSystem,
+    structs::{ComposedConstrainSystem, GpuReplayPlan},
 };
 use ceno_gpu::{
     estimate_build_tower_memory, estimate_prove_tower_memory, estimate_sumcheck_memory,
@@ -215,6 +216,51 @@ pub fn estimate_replay_materialization_bytes(
     let base_elem_size = std::mem::size_of::<BB31Base>();
     let mle_len = 1usize << num_vars;
     (num_witin + num_structural_witin) * mle_len * base_elem_size
+}
+
+pub fn estimate_replay_materialization_bytes_for_plan<E: ExtensionField>(
+    replay_plan: &GpuReplayPlan<E>,
+    _num_vars: usize,
+) -> usize {
+    let elem_size = std::mem::size_of::<BB31Base>();
+    let witness_bytes = replay_plan.trace_height * replay_plan.num_witin * elem_size;
+    let structural_bytes = match replay_plan.kind {
+        // Standard opcode replay rebuilds structural witness on CPU and only
+        // uploads it later in `transport_structural_witness_to_gpu`, so the
+        // replay scope itself should not charge structural GPU bytes.
+        GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam => {
+            replay_plan.trace_height * replay_plan.num_structural_witin * elem_size
+        }
+        _ => 0,
+    };
+    let base_bytes = witness_bytes + structural_bytes;
+    let standard_indices_temp_bytes = match replay_plan.kind {
+        GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam => 0,
+        _ => replay_plan.step_indices.len() * std::mem::size_of::<u32>(),
+    };
+    let keccak_instances_temp_bytes = match replay_plan.kind {
+        GpuWitgenKind::Keccak => replay_plan
+            .keccak_instances
+            .as_ref()
+            .map(|instances| {
+                instances.len()
+                    * std::mem::size_of::<ceno_gpu::common::witgen::types::GpuKeccakInstance>()
+            })
+            .unwrap_or(0),
+        _ => 0,
+    };
+
+    match replay_plan.kind {
+        GpuWitgenKind::ShardRam => {
+            let n = replay_plan.shard_ram_num_records.next_power_of_two();
+            // ShardRam replay constructs an EC tree on GPU from the device records.
+            // Peak temp occurs at the first layer when cur_x/cur_y and next_x/next_y
+            // coexist. Each point coordinate stores 7 BabyBear limbs.
+            let ec_tree_temp_bytes = (2 * n * 7 * elem_size) + (2 * (n / 2) * 7 * elem_size);
+            base_bytes + ec_tree_temp_bytes
+        }
+        _ => base_bytes + standard_indices_temp_bytes + keccak_instances_temp_bytes,
+    }
 }
 
 pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
