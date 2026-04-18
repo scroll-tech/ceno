@@ -106,7 +106,12 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     let n = num_var_with_rotation.saturating_sub(1);
     let ecc_quark_temporary_bytes = estimate_ecc_quark_bytes_from_num_vars(n);
 
-    // Part 4: build/prove tower (temporary usage)
+    // Part 4: build/prove tower (scheduler-facing live peak)
+    //
+    // `tower_prove_bytes` already includes the TowerInput buffers that remain
+    // live while `create_proof` runs, so the top-level model must combine the
+    // build and prove phases as overlapping live sets, not treat prove as only
+    // "new allocations inside create_proof".
     let (tower_build_bytes, tower_prove_bytes) = estimate_tower_stage_bytes(composed_cs, input);
     let tower_temporary_bytes = tower_build_bytes + tower_prove_bytes;
 
