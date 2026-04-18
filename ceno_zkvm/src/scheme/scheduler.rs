@@ -325,6 +325,11 @@ impl ChipScheduler {
                 mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                 *tasks_inflight
             );
+            crate::scheme::gpu::log_gpu_device_state(&format!(
+                "task_done{}:{}",
+                label.replace(' ', ""),
+                msg.task_id
+            ));
             samples.push((msg.task_id, msg.forked_sample));
             match msg.result {
                 Ok(r) => {
@@ -368,6 +373,10 @@ impl ChipScheduler {
                             circuit_name,
                             memory as f64 / (1024.0 * 1024.0)
                         );
+                        crate::scheme::gpu::log_gpu_device_state(&format!(
+                            "task_start:{}:{}",
+                            task_id, circuit_name
+                        ));
 
                         // Catch panics so a single worker crash doesn't deadlock
                         // the scheduler (which would block forever on done_rx.recv()
@@ -457,6 +466,10 @@ impl ChipScheduler {
                         booked_mem as f64 / (1024.0 * 1024.0),
                         mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0)
                     );
+                    crate::scheme::gpu::log_gpu_device_state(&format!(
+                        "launch:{}:{}",
+                        task.task_id, task.circuit_name
+                    ));
                     tasks_inflight += 1;
                     if task_tx.send(task).is_err() {
                         mem_pool.unbook_capacity(booked_mem);
@@ -509,6 +522,7 @@ impl ChipScheduler {
                     mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                     tasks_inflight
                 );
+                crate::scheme::gpu::log_gpu_device_state("pool_full_wait");
 
                 // Second call site blocks instead of busy-waiting when the pool is full; this
                 // waits for the next completion to free memory before trying to launch again.

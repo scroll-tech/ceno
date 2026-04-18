@@ -1060,7 +1060,8 @@ where
                 build_tower_witness_gpu, check_gpu_mem_estimation,
                 estimate_replay_materialization_bytes_for_plan, estimate_tower_stage_bytes,
                 extract_out_evals_from_gpu_towers, extract_witness_mles_for_trace,
-                log_gpu_pool_usage, prove_ec_sum_quark_impl, prove_main_constraints_impl,
+                log_gpu_device_state, log_gpu_pool_usage, prove_ec_sum_quark_impl,
+                prove_main_constraints_impl,
                 prove_tower_relation_impl, transport_structural_witness_to_gpu,
             },
         },
@@ -1097,6 +1098,7 @@ where
                 name,
                 estimated_replay_mb,
             );
+            log_gpu_device_state(&format!("{name}:before_replay"));
             log_gpu_pool_usage(&format!("{name}:before_replay"));
             let [witness_rmm, structural_rmm_from_replay] = replay_plan.replay()?;
             check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
@@ -1114,6 +1116,7 @@ where
                         )
                     });
             }
+            log_gpu_device_state(&format!("{name}:after_replay"));
             log_gpu_pool_usage(&format!("{name}:after_replay"));
             Ok(())
         };
@@ -1208,6 +1211,7 @@ where
                 gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>,
             >(cs, &input, challenges)
         });
+        log_gpu_device_state(&format!("{name}:after_build_main_witness"));
         log_gpu_pool_usage(&format!("{name}:after_build_main_witness"));
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
@@ -1226,6 +1230,7 @@ where
         let mut big_buffers = Vec::new();
         let mut ones_buffer = Vec::new();
         let mut view_last_layers = Vec::new();
+        log_gpu_device_state(&format!("{name}:before_build_tower_witness"));
         log_gpu_pool_usage(&format!("{name}:before_build_tower_witness"));
         let (prod_gpu, logup_gpu, lk_out_evals, w_out_evals, r_out_evals) =
             info_span!("[ceno] build_tower_witness_gpu").in_scope(|| {
@@ -1247,6 +1252,7 @@ where
                 Ok::<_, ZKVMError>((prod_gpu, logup_gpu, lk_out_evals, w_out_evals, r_out_evals))
             })?;
         check_gpu_mem_estimation(tower_build_mem_tracker, tower_build_estimated_bytes);
+        log_gpu_device_state(&format!("{name}:after_build_tower_witness"));
         log_gpu_pool_usage(&format!("{name}:after_build_tower_witness"));
 
         for eval in r_out_evals
@@ -1267,6 +1273,7 @@ where
         };
         let tower_prove_mem_tracker =
             crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "prove_tower_relation_gpu");
+        log_gpu_device_state(&format!("{name}:before_prove_tower"));
         log_gpu_pool_usage(&format!("{name}:before_prove_tower"));
         let (rt_tower_gl, tower_proof_gpu) = info_span!("[ceno] prove_tower_relation_gpu")
             .in_scope(|| {
@@ -1281,6 +1288,7 @@ where
                     )
                     .expect("gpu tower create_proof failed")
             });
+        log_gpu_device_state(&format!("{name}:after_prove_tower"));
         log_gpu_pool_usage(&format!("{name}:after_prove_tower"));
         let rt_tower: Point<E> = unsafe { std::mem::transmute(rt_tower_gl) };
         let tower_proof: TowerProofs<E> = unsafe { std::mem::transmute(tower_proof_gpu) };
@@ -1290,11 +1298,13 @@ where
         drop(big_buffers);
         drop(ones_buffer);
         drop(view_last_layers);
+        log_gpu_device_state(&format!("{name}:after_drop_tower"));
         exit_span!(span);
 
         assert_eq!(rt_tower.len(), num_var_with_rotation);
 
         materialize_replay_input(&mut input)?;
+        log_gpu_device_state(&format!("{name}:before_main_constraints"));
         let span = entered_span!("prove_main_constraints", profiling_2 = true);
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
             info_span!("[ceno] prove_main_constraints").in_scope(|| {
@@ -1305,6 +1315,7 @@ where
             fixed_in_evals,
         } = evals;
         clear_materialized_input(&mut input);
+        log_gpu_device_state(&format!("{name}:after_main_constraints"));
         exit_span!(span);
 
         return Ok((

@@ -275,6 +275,28 @@ pub fn log_gpu_pool_usage(label: &str) {
     );
 }
 
+pub fn log_gpu_device_state(label: &str) {
+    let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu device logging");
+    let pool = cuda_hal.inner.mem_pool();
+    let used_bytes = pool.get_used_size().unwrap_or(0);
+    let reserved_bytes = pool.get_reserved_size().unwrap_or(0);
+    let booked_bytes = pool.get_booked_total();
+    let max_bytes = pool.get_max_size();
+    let (cuda_free_bytes, cuda_total_bytes) = get_cuda_mem_info().unwrap_or((0usize, 0usize));
+    let cuda_used_bytes = cuda_total_bytes.saturating_sub(cuda_free_bytes);
+    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+    tracing::info!(
+        "[gpu device][{label}] cuda_used={:.2}MB cuda_free={:.2}MB cuda_total={:.2}MB | pool_used={:.2}MB pool_reserved={:.2}MB pool_booked={:.2}MB pool_max={:.2}MB",
+        mb(cuda_used_bytes),
+        mb(cuda_free_bytes),
+        mb(cuda_total_bytes),
+        mb(used_bytes as usize),
+        mb(reserved_bytes as usize),
+        mb(booked_bytes as usize),
+        mb(max_bytes as usize),
+    );
+}
+
 use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
