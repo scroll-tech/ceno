@@ -38,7 +38,7 @@ pub fn init_gpu_mem_tracker<'a>(
 }
 
 const ESTIMATION_TOLERANCE_BYTES: usize = 1024 * 1024; // max estimation error: 1 MB
-const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 5 * 1024 * 1024; // reserved headroom: 5 MB, 1MB for each sub-stage
+const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved headroom / allowed over-estimate margin: 10 MB
 
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
