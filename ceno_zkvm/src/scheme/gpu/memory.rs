@@ -1,9 +1,10 @@
 use crate::{
+    instructions::gpu::dispatch::GpuWitgenKind,
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         hal::ProofInput,
     },
-    structs::ComposedConstrainSystem,
+    structs::{ComposedConstrainSystem, GpuReplayPlan},
 };
 use ceno_gpu::{
     estimate_build_tower_memory, estimate_prove_tower_memory, estimate_sumcheck_memory,
@@ -18,6 +19,10 @@ use gkr_iop::gpu::{
 use mpcs::PolynomialCommitmentScheme;
 use std::sync::OnceLock;
 
+#[cfg(feature = "gpu")]
+use crate::instructions::gpu::config::{
+    should_materialize_witness_on_gpu, should_retain_witness_device_backing_after_commit,
+};
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
 pub fn init_gpu_mem_tracker<'a>(
@@ -33,8 +38,8 @@ pub fn init_gpu_mem_tracker<'a>(
     }
 }
 
-const ESTIMATION_TOLERANCE_BYTES: usize = 1024 * 1024; // max estimation error: 1 MB
-const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 5 * 1024 * 1024; // reserved headroom: 5 MB, 1MB for each sub-stage
+const ESTIMATION_TOLERANCE_BYTES: usize = 2 * 1024 * 1024; // max under-estimation error: 2 MB
+const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved headroom / allowed over-estimate margin: 10 MB
 
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
@@ -86,12 +91,19 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     circuit_name: &str,
+    witness_replayable: bool,
+    structural_cached_on_device: bool,
 ) -> u64 {
     let num_var_with_rotation =
         input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
 
     // Part 1: trace (base usage: witness & structural mles)
-    let trace_est = estimate_trace_bytes(composed_cs, input);
+    let trace_est = estimate_trace_bytes(
+        composed_cs,
+        input,
+        witness_replayable,
+        structural_cached_on_device,
+    );
 
     // Part 2: main witness (base usage)
     let main_witness_bytes = estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
@@ -100,40 +112,87 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     let n = num_var_with_rotation.saturating_sub(1);
     let ecc_quark_temporary_bytes = estimate_ecc_quark_bytes_from_num_vars(n);
 
-    // Part 4: build & prove tower (temporary usage)
-    let tower_temporary_bytes = estimate_tower_bytes(composed_cs, input);
+    // Part 4: build/prove tower
+    //
+    // `tower_prove_local_bytes` is only the new allocation occupancy inside
+    // `create_proof`, while `tower_input_live_bytes` tracks the already-built
+    // TowerInput buffers that remain live during that stage.
+    let (tower_build_bytes, tower_prove_local_bytes, tower_input_live_bytes) =
+        estimate_tower_stage_components(composed_cs, input);
+    let tower_prove_peak_bytes = tower_input_live_bytes + tower_prove_local_bytes;
+    let tower_temporary_bytes = tower_build_bytes.max(tower_prove_peak_bytes);
 
     // Part 5: main constraints (temporary usage)
     let main_constraints_temporary_bytes = estimate_main_constraints_bytes(composed_cs, input);
 
-    // Peak is max across all stages (extraction, tower, ecc, main).
-    // Each stage's temporary memory is on top of the resident usage (records + deferred_resident).
-    let stage_peak_usage_bytes = trace_est
-        .trace_temporary_bytes
-        .max(tower_temporary_bytes)
-        .max(ecc_quark_temporary_bytes)
-        .max(main_constraints_temporary_bytes);
-
-    let total_usage_bytes = trace_est.trace_resident_bytes
-        + main_witness_bytes
-        + stage_peak_usage_bytes
-        + ESTIMATION_SAFETY_MARGIN_BYTES;
+    let replay_stage_split =
+        witness_replayable && matches!(circuit_name, "Ecall_Keccak" | "ShardRamCircuit");
+    let (resident_bytes, stage_peak_usage_bytes, total_usage_bytes) = if replay_stage_split {
+        // Replayable large-memory chips are materialized twice:
+        // - once for build_main_witness + build_tower_witness
+        // - once again for main constraints
+        // The replayed trace/device backing is explicitly released before the
+        // standalone tower prove and again before the main-constraints stage,
+        // so the peak is the max of those stage-local lifetimes.
+        let tower_build_stage_bytes =
+            trace_est.trace_resident_bytes + main_witness_bytes + tower_build_bytes;
+        // During tower prove, the replayed witness/device backing has already
+        // been cleared, but the built TowerInput buffers remain live and
+        // overlap with the fresh create_proof allocations.
+        let tower_prove_stage_bytes = tower_prove_peak_bytes;
+        let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
+        let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
+        let replay_stage_bytes = trace_est.trace_resident_bytes + trace_est.trace_temporary_bytes;
+        let stage_peak = tower_build_stage_bytes
+            .max(tower_prove_stage_bytes)
+            .max(ecc_stage_bytes)
+            .max(main_stage_bytes)
+            .max(replay_stage_bytes);
+        (
+            0usize,
+            stage_peak,
+            stage_peak + ESTIMATION_SAFETY_MARGIN_BYTES,
+        )
+    } else {
+        // Peak is max across all stages (extraction, tower, ecc, main).
+        // Each stage's temporary memory is on top of the resident usage (records + deferred_resident).
+        let stage_peak = trace_est
+            .trace_temporary_bytes
+            .max(tower_temporary_bytes)
+            .max(ecc_quark_temporary_bytes)
+            .max(main_constraints_temporary_bytes);
+        let resident = trace_est.trace_resident_bytes + main_witness_bytes;
+        (
+            resident,
+            stage_peak,
+            resident + stage_peak + ESTIMATION_SAFETY_MARGIN_BYTES,
+        )
+    };
 
     let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
     // Resident memory (always occupied during chip proof)
     tracing::info!(
         "[mem estimate][{}] resident: trace={:.2}MB, main_witness={:.2}MB",
         circuit_name,
-        to_mb(trace_est.trace_resident_bytes),
-        to_mb(main_witness_bytes),
+        to_mb(if replay_stage_split {
+            0
+        } else {
+            trace_est.trace_resident_bytes
+        }),
+        to_mb(if replay_stage_split {
+            0
+        } else {
+            main_witness_bytes
+        }),
     );
     // Temporary memory per stage (only one active at a time, peak = max)
     tracing::info!(
-        "[mem estimate][{}] temporary: extract_trace={:.2}MB, ecc_quark={:.2}MB, prove_tower={:.2}MB,  prove_main={:.2}MB",
+        "[mem estimate][{}] temporary: extract_trace={:.2}MB, ecc_quark={:.2}MB, build_tower={:.2}MB, prove_tower={:.2}MB, prove_main={:.2}MB",
         circuit_name,
         to_mb(trace_est.trace_temporary_bytes),
         to_mb(ecc_quark_temporary_bytes),
-        to_mb(tower_temporary_bytes),
+        to_mb(tower_build_bytes),
+        to_mb(tower_prove_peak_bytes),
         to_mb(main_constraints_temporary_bytes),
     );
     // Total peak = resident + max(stage temporaries)
@@ -141,7 +200,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         "[mem estimate][{}] total_usage={:.2}MB (resident={:.2}MB + temporary={:.2}MB)",
         circuit_name,
         to_mb(total_usage_bytes),
-        to_mb(trace_est.trace_resident_bytes + main_witness_bytes),
+        to_mb(resident_bytes),
         to_mb(stage_peak_usage_bytes),
     );
 
@@ -162,18 +221,71 @@ pub(crate) fn estimate_structural_mle_bytes(num_structural_witin: usize, num_var
     num_structural_witin * mle_len * base_elem_size
 }
 
+pub fn estimate_replay_materialization_bytes(
+    num_witin: usize,
+    _num_structural_witin: usize,
+    num_vars: usize,
+) -> usize {
+    let base_elem_size = std::mem::size_of::<BB31Base>();
+    let mle_len = 1usize << num_vars;
+    num_witin * mle_len * base_elem_size
+}
+
+pub fn estimate_replay_materialization_bytes_for_plan<E: ExtensionField>(
+    replay_plan: &GpuReplayPlan<E>,
+    _num_vars: usize,
+) -> usize {
+    let elem_size = std::mem::size_of::<BB31Base>();
+    let witness_bytes = replay_plan.trace_height * replay_plan.num_witin * elem_size;
+    let standard_indices_temp_bytes = match replay_plan.kind {
+        GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam => 0,
+        _ => replay_plan.step_indices.len() * std::mem::size_of::<u32>(),
+    };
+    let keccak_instances_temp_bytes = match replay_plan.kind {
+        GpuWitgenKind::Keccak => replay_plan
+            .keccak_instances
+            .as_ref()
+            .map(|instances| {
+                instances.len()
+                    * std::mem::size_of::<ceno_gpu::common::witgen::types::GpuKeccakInstance>()
+            })
+            .unwrap_or(0),
+        _ => 0,
+    };
+
+    match replay_plan.kind {
+        GpuWitgenKind::ShardRam => {
+            let n = replay_plan.shard_ram_num_records.next_power_of_two();
+            // ShardRam replay constructs an EC tree on GPU from the device records.
+            // Peak temp occurs at the first layer when cur_x/cur_y and next_x/next_y
+            // coexist. Each point coordinate stores 7 BabyBear limbs.
+            let ec_tree_temp_bytes = (2 * n * 7 * elem_size) + (2 * (n / 2) * 7 * elem_size);
+            witness_bytes + ec_tree_temp_bytes
+        }
+        _ => witness_bytes + standard_indices_temp_bytes + keccak_instances_temp_bytes,
+    }
+}
+
 pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
+    witness_replayable: bool,
+    structural_cached_on_device: bool,
 ) -> TraceEstimate {
     let cs = &composed_cs.zkvm_v1_css;
     let num_var_with_rotation =
         input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
 
-    let structural_mle_bytes =
-        estimate_structural_mle_bytes(cs.num_structural_witin as usize, num_var_with_rotation);
-    let (witness_mle_bytes, trace_temporary_bytes) =
-        estimate_trace_extraction_bytes(cs.num_witin as usize, num_var_with_rotation);
+    let structural_mle_bytes = if structural_cached_on_device {
+        0
+    } else {
+        estimate_structural_mle_bytes(cs.num_structural_witin as usize, num_var_with_rotation)
+    };
+    let (witness_mle_bytes, trace_temporary_bytes) = estimate_trace_extraction_bytes(
+        cs.num_witin as usize,
+        num_var_with_rotation,
+        witness_replayable,
+    );
 
     TraceEstimate {
         trace_resident_bytes: witness_mle_bytes + structural_mle_bytes,
@@ -277,12 +389,10 @@ pub(crate) fn estimate_main_constraints_bytes<
     eqs_bytes + sumcheck_bytes
 }
 
-/// Estimate temporary GPU memory for the tower proving stage (build + prove).
-/// Used by prove_tower_relation to validate against actual mem_tracker measurements.
-pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
-) -> usize {
+) -> (usize, usize, usize) {
     let cs = &composed_cs.zkvm_v1_css;
     let num_prod_towers = composed_cs.num_reads() + composed_cs.num_writes();
     let num_logup_towers = if composed_cs.is_with_lk_table() {
@@ -314,7 +424,34 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
         elem_size,
     );
 
-    build_est.total_bytes + prove_est.total_bytes
+    let tower_input_live_bytes =
+        prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
+    let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes);
+
+    (
+        build_est.total_bytes,
+        prove_local_bytes,
+        tower_input_live_bytes,
+    )
+}
+
+/// Estimate temporary GPU memory for the tower proving stage (build + prove).
+/// Used by prove_tower_relation to validate against actual mem_tracker measurements.
+pub(crate) fn estimate_tower_stage_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'_, GpuBackend<E, PCS>>,
+) -> (usize, usize) {
+    let (build_bytes, prove_local_bytes, _) = estimate_tower_stage_components(composed_cs, input);
+    (build_bytes, prove_local_bytes)
+}
+
+pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'_, GpuBackend<E, PCS>>,
+) -> usize {
+    let (build_bytes, prove_local_bytes, tower_input_live_bytes) =
+        estimate_tower_stage_components(composed_cs, input);
+    build_bytes.max(tower_input_live_bytes + prove_local_bytes)
 }
 
 /// Estimate GPU memory for trace extraction (get_trace).
@@ -324,12 +461,40 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 ///
 /// Returns `(0, 0)` when trace is cached (`CacheLevel::Trace` or `CacheLevel::Full`),
 /// When cache is disabled (`CacheLevel::None`, the default), estimates actual allocation costs.
-pub(crate) fn estimate_trace_extraction_bytes(num_witin: usize, num_vars: usize) -> (usize, usize) {
+pub(crate) fn estimate_trace_extraction_bytes(
+    num_witin: usize,
+    num_vars: usize,
+    witness_replayable: bool,
+) -> (usize, usize) {
+    let base_elem_size = std::mem::size_of::<BB31Base>();
+    let mle_len = 1usize << num_vars;
+    let poly_bytes = num_witin * mle_len * base_elem_size;
+
+    if should_materialize_witness_on_gpu() {
+        if should_retain_witness_device_backing_after_commit() {
+            // Eager GPU cache path: committed traces stay resident and
+            // extraction builds view-based polynomials directly from the
+            // already-live device buffer.
+            return (0, 0);
+        }
+
+        if witness_replayable {
+            // Cache-none replay path: the task regenerates one witness/device
+            // backing on demand and keeps that col-major buffer resident for the
+            // duration of the chip proof. There is no separate extraction temp
+            // buffer, but the replayed witness itself must be accounted for as
+            // resident task memory.
+            return (poly_bytes, 0);
+        }
+
+        // GPU witgen alone does not imply replayability. Non-replayable traces
+        // still go through basefold::get_trace in cache-none mode, which
+        // allocates the extracted witness plus a temporary 2x transpose buffer.
+        return (poly_bytes, 2 * poly_bytes);
+    }
+
     if matches!(get_gpu_cache_level(), CacheLevel::None) {
         // Default cache level is None
-        let base_elem_size = std::mem::size_of::<BB31Base>();
-        let mle_len = 1usize << num_vars;
-        let poly_bytes = num_witin * mle_len * base_elem_size;
         // get_trace allocates poly copies (resident) + temp_buffer (2x, freed after)
         (poly_bytes, 2 * poly_bytes)
     } else {

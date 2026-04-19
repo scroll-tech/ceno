@@ -2,7 +2,8 @@
 
 use super::ops_impl::OpTableConfig;
 
-use std::{collections::HashMap, marker::PhantomData};
+use rustc_hash::FxHashMap;
+use std::marker::PhantomData;
 
 use crate::{
     circuit_builder::CircuitBuilder,
@@ -47,7 +48,7 @@ impl<E: ExtensionField, OP: OpsTable> TableCircuit<E> for OpsTableCircuit<E, OP>
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        multiplicity: &[HashMap<u64, usize>],
+        multiplicity: &[FxHashMap<u64, usize>],
         _input: &(),
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         let multiplicity = &multiplicity[OP::ROM_TYPE as usize];

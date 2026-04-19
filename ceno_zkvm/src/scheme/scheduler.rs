@@ -10,6 +10,8 @@
 //! This approach eliminates long-tail latency by prioritizing large tasks and
 //! maximizes GPU utilization through backfilling with smaller tasks.
 
+#[cfg(feature = "gpu")]
+use crate::structs::GpuReplayPlan;
 use crate::{
     error::ZKVMError,
     scheme::{
@@ -25,6 +27,8 @@ use p3::field::FieldAlgebra;
 use std::sync::OnceLock;
 use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
+#[cfg(feature = "gpu")]
+static LARGE_GPU_TASK_BOOKING_MARGIN_MB: OnceLock<u64> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChipProvingMode {
@@ -39,6 +43,16 @@ pub fn get_chip_proving_mode() -> ChipProvingMode {
             _ => ChipProvingMode::Concurrent,
         }
     })
+}
+
+#[cfg(feature = "gpu")]
+pub fn large_gpu_task_booking_margin_bytes() -> u64 {
+    *LARGE_GPU_TASK_BOOKING_MARGIN_MB.get_or_init(|| {
+        std::env::var("CENO_GPU_LARGE_TASK_BOOKING_MARGIN_MB")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(1024)
+    }) << 20
 }
 
 #[cfg(feature = "gpu")]
@@ -60,12 +74,17 @@ pub struct ChipTask<'a, PB: ProverBackend> {
     pub input: ProofInput<'static, PB>,
     /// Estimated GPU memory requirement in bytes
     pub estimated_memory_bytes: u64,
+    /// Scheduler-only booked GPU memory in bytes (may include extra concurrency margin)
+    pub booked_memory_bytes: u64,
     /// Whether this circuit has witness or fixed polynomials
     pub has_witness_or_fixed: bool,
     /// Challenges for this proof
     pub challenges: [PB::E; 2],
     /// Deferred witness extraction: trace index in pcs_data (None if num_witin == 0)
     pub witness_trace_idx: Option<usize>,
+    /// Replay witness directly from shard-resident raw GPU data when available.
+    #[cfg(feature = "gpu")]
+    pub gpu_replay_plan: Option<GpuReplayPlan<PB::E>>,
     /// Expected number of witness polynomials for this circuit
     pub num_witin: usize,
     /// CPU-side structural witness RowMajorMatrix, transported to GPU on-demand
@@ -306,6 +325,11 @@ impl ChipScheduler {
                 mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                 *tasks_inflight
             );
+            crate::scheme::gpu::log_gpu_device_state(&format!(
+                "task_done{}:{}",
+                label.replace(' ', ""),
+                msg.task_id
+            ));
             samples.push((msg.task_id, msg.forked_sample));
             match msg.result {
                 Ok(r) => {
@@ -340,7 +364,19 @@ impl ChipScheduler {
                             }
                         };
                         let memory = task.estimated_memory_bytes;
+                        let booked_memory = task.booked_memory_bytes;
                         let task_id = task.task_id;
+                        let circuit_name = task.circuit_name.clone();
+                        tracing::info!(
+                            "[scheduler] worker starting task {} ({}), estimated={:.2}MB",
+                            task_id,
+                            circuit_name,
+                            memory as f64 / (1024.0 * 1024.0)
+                        );
+                        crate::scheme::gpu::log_gpu_device_state(&format!(
+                            "task_start:{}:{}",
+                            task_id, circuit_name
+                        ));
 
                         // Catch panics so a single worker crash doesn't deadlock
                         // the scheduler (which would block forever on done_rx.recv()
@@ -367,11 +403,15 @@ impl ChipScheduler {
                             Ok((r, s)) => (r, s),
                             Err(panic_info) => {
                                 let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                                    format!("Worker panicked on task {task_id}: {s}")
+                                    format!(
+                                        "Worker panicked on task {task_id} ({circuit_name}): {s}"
+                                    )
                                 } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                                    format!("Worker panicked on task {task_id}: {s}")
+                                    format!(
+                                        "Worker panicked on task {task_id} ({circuit_name}): {s}"
+                                    )
                                 } else {
-                                    format!("Worker panicked on task {task_id}")
+                                    format!("Worker panicked on task {task_id} ({circuit_name})")
                                 };
                                 tracing::error!("{}", msg);
                                 (
@@ -385,7 +425,7 @@ impl ChipScheduler {
 
                         let _ = tx.send(CompletionMessage {
                             result,
-                            memory_reserved: memory,
+                            memory_reserved: booked_memory,
                             task_id,
                             forked_sample,
                         });
@@ -412,18 +452,24 @@ impl ChipScheduler {
                 if tasks_inflight < stream_pool_size
                     && let Some(vec_idx) = pending.iter().position(|task| {
                         mem_pool
-                            .try_book_capacity(task.estimated_memory_bytes)
+                            .try_book_capacity(task.booked_memory_bytes)
                             .is_some()
                     })
                 {
                     let task = pending.remove(vec_idx);
-                    let booked_mem = task.estimated_memory_bytes;
+                    let booked_mem = task.booked_memory_bytes;
                     tracing::info!(
-                        "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
+                        "[scheduler] Launching task_id={}, circuit={}, estimated_mem={:.2}MB, booked_mem={:.2}MB, pool_booked={:.2}MB",
+                        task.task_id,
                         task.circuit_name,
+                        task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
                         booked_mem as f64 / (1024.0 * 1024.0),
                         mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0)
                     );
+                    crate::scheme::gpu::log_gpu_device_state(&format!(
+                        "launch:{}:{}",
+                        task.task_id, task.circuit_name
+                    ));
                     tasks_inflight += 1;
                     if task_tx.send(task).is_err() {
                         mem_pool.unbook_capacity(booked_mem);
@@ -440,6 +486,14 @@ impl ChipScheduler {
 
                 // No task launched: either nothing fits (so wait) or we are deadlocked.
                 if tasks_inflight == 0 {
+                    // Not a deadlock — the non-blocking try_recv above may have
+                    // drained the final completion in the same iteration that
+                    // the outer `while` condition still held. With `pending`
+                    // empty and `tasks_inflight` now 0 we're simply done; let
+                    // the outer condition re-check and exit cleanly.
+                    if pending.is_empty() {
+                        continue;
+                    }
                     tracing::error!(
                         "Deadlock: {} remaining tasks are too big for the memory pool \
                          (pool_booked={:.2}MB):",
@@ -448,11 +502,12 @@ impl ChipScheduler {
                     );
                     for (i, task) in pending.iter().enumerate() {
                         tracing::error!(
-                            "  task[{}]: id={}, circuit={}, estimated_mem={:.2}MB",
+                            "  task[{}]: id={}, circuit={}, estimated_mem={:.2}MB, booked_mem={:.2}MB",
                             i,
                             task.task_id,
                             task.circuit_name,
                             task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                            task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
                         );
                     }
                     return Err(ZKVMError::BackendError(BackendError::CircuitError(
@@ -467,6 +522,7 @@ impl ChipScheduler {
                     mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                     tasks_inflight
                 );
+                crate::scheme::gpu::log_gpu_device_state("pool_full_wait");
 
                 // Second call site blocks instead of busy-waiting when the pool is full; this
                 // waits for the next completion to free memory before trying to launch again.
@@ -496,6 +552,8 @@ impl ChipScheduler {
             Ok(())
         });
 
+        let scope_result = scope_result;
+        mem_pool.reset_booking();
         scope_result?;
 
         // 6. Sort by task_id to restore original order

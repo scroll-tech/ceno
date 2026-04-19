@@ -30,12 +30,14 @@ pub type Word = u32;
 pub type SWord = i32;
 pub type Addr = u32;
 pub type Cycle = u64;
-pub type RegIdx = usize;
+pub type RegIdx = u8;
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[repr(C)]
 pub struct ByteAddr(pub u32);
 
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(C)]
 pub struct WordAddr(pub u32);
 
 impl From<ByteAddr> for WordAddr {

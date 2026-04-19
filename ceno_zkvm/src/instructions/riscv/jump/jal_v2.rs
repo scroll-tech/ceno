@@ -6,8 +6,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::{LkOp, LkShardramSink, emit_byte_decomposition_ops},
         riscv::{
             constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             j_insn::JInstructionConfig,
@@ -43,6 +45,8 @@ pub struct JalInstruction<E>(PhantomData<E>);
 impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
     type InstructionConfig = JalConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::JAL]
@@ -121,4 +125,21 @@ impl<E: ExtensionField> Instruction<E> for JalInstruction<E> {
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(j_insn, |sink, step, _config, _ctx| {
+        let rd_written = split_to_u8(step.rd().unwrap().value.after);
+        emit_byte_decomposition_ops(sink, &rd_written);
+
+        let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1);
+        let additional_bits =
+            (last_limb_bits..UInt8::<E>::LIMB_BITS).fold(0, |acc, x| acc + (1 << x));
+        sink.emit_lk(LkOp::Xor {
+            a: rd_written[3],
+            b: additional_bits as u8,
+        });
+    });
+
+    impl_collect_shardram!(j_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Jal);
 }
