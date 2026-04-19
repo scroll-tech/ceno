@@ -852,17 +852,8 @@ impl<
             // GPU path: defer witness and structural witness extraction to task execution
             #[cfg(feature = "gpu")]
             let (witness_mle, structural_witness, task_structural_rmm) = {
-                let _ = &structural_rmm; // suppress unused warning on structural_rmm binding
-                let keep_structural_rmm = gpu_replay_plans[this_idx].is_none();
-                (
-                    vec![],
-                    vec![],
-                    if keep_structural_rmm {
-                        Some(structural_rmm)
-                    } else {
-                        None
-                    },
-                )
+                let _ = &gpu_replay_plans[this_idx];
+                (vec![], vec![], Some(structural_rmm))
             };
 
             // CPU path: eagerly extract witness and structural witness
@@ -930,11 +921,15 @@ impl<
                 );
                 let gpu_input: &ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>> =
                     unsafe { std::mem::transmute(&input) };
+                let structural_cached_on_device = task_structural_rmm
+                    .as_ref()
+                    .is_some_and(|rmm| rmm.has_device_backing());
                 estimate_chip_proof_memory::<E, PCS>(
                     cs,
                     gpu_input,
                     &circuit_name,
                     gpu_replay_plans[this_idx].is_some(),
+                    structural_cached_on_device,
                 )
             };
             #[cfg(not(feature = "gpu"))]
@@ -1061,8 +1056,8 @@ where
                 estimate_replay_materialization_bytes_for_plan, estimate_tower_stage_bytes,
                 extract_out_evals_from_gpu_towers, extract_witness_mles_for_trace,
                 log_gpu_device_state, log_gpu_pool_usage, prove_ec_sum_quark_impl,
-                prove_main_constraints_impl,
-                prove_tower_relation_impl, transport_structural_witness_to_gpu,
+                prove_main_constraints_impl, prove_tower_relation_impl,
+                transport_structural_witness_to_gpu,
             },
         },
     };
@@ -1077,49 +1072,51 @@ where
     let replay_stage_split = gpu_replay_plan
         .as_ref()
         .is_some_and(|plan| matches!(plan.kind, GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam));
-    let structural_from_replay = structural_rmm.is_none();
+    let mut structural_rmm = structural_rmm;
 
     // Deferred witness extraction: extract from committed pcs_data just-in-time
     #[cfg(feature = "gpu")]
-    let materialize_replay_input =
-        |input: &mut ProofInput<'a, GpuBackend<E, PCS>>| -> Result<(), ZKVMError> {
-            let Some(replay_plan) = gpu_replay_plan.as_ref() else {
-                return Ok(());
-            };
-            let gpu_mem_tracker =
-                crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
-            let num_vars =
-                input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
-            let estimated_replay_bytes =
-                estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
-            let estimated_replay_mb = estimated_replay_bytes as f64 / (1024.0 * 1024.0);
-            tracing::info!(
-                "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
-                name,
-                estimated_replay_mb,
-            );
-            log_gpu_device_state(&format!("{name}:before_replay"));
-            log_gpu_pool_usage(&format!("{name}:before_replay"));
-            let [witness_rmm, structural_rmm_from_replay] = replay_plan.replay()?;
-            check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
-            input.witness = info_span!("[ceno] replay_gpu_witness_from_raw").in_scope(|| {
-                crate::scheme::gpu::extract_witness_mles_for_trace_rmm::<E>(witness_rmm)
-            });
-            if structural_from_replay {
-                input.structural_witness = info_span!("[ceno] transport_structural_witness")
-                    .in_scope(|| {
-                        transport_structural_witness_to_gpu::<E>(
-                            structural_rmm_from_replay,
-                            circuit_pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
-                            input.log2_num_instances()
-                                + circuit_pk.get_cs().rotation_vars().unwrap_or(0),
-                        )
-                    });
-            }
-            log_gpu_device_state(&format!("{name}:after_replay"));
-            log_gpu_pool_usage(&format!("{name}:after_replay"));
-            Ok(())
+    let materialize_replay_input = |input: &mut ProofInput<'a, GpuBackend<E, PCS>>,
+                                    structural_rmm: &mut Option<
+        witness::RowMajorMatrix<E::BaseField>,
+    >|
+     -> Result<(), ZKVMError> {
+        let Some(replay_plan) = gpu_replay_plan.as_ref() else {
+            return Ok(());
         };
+        let gpu_mem_tracker =
+            crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
+        let num_vars =
+            input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
+        let estimated_replay_bytes =
+            estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
+        let estimated_replay_mb = estimated_replay_bytes as f64 / (1024.0 * 1024.0);
+        tracing::info!(
+            "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
+            name,
+            estimated_replay_mb,
+        );
+        log_gpu_device_state(&format!("{name}:before_replay"));
+        log_gpu_pool_usage(&format!("{name}:before_replay"));
+        let witness_rmm = replay_plan.replay_witness()?;
+        check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
+        input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
+            .in_scope(|| crate::scheme::gpu::extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
+        if let Some(structural_rmm_cached) = structural_rmm.as_ref() {
+            input.structural_witness =
+                info_span!("[ceno] transport_structural_witness").in_scope(|| {
+                    transport_structural_witness_to_gpu::<E>(
+                        structural_rmm_cached,
+                        circuit_pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
+                        input.log2_num_instances()
+                            + circuit_pk.get_cs().rotation_vars().unwrap_or(0),
+                    )
+                });
+        }
+        log_gpu_device_state(&format!("{name}:after_replay"));
+        log_gpu_pool_usage(&format!("{name}:after_replay"));
+        Ok(())
+    };
 
     #[cfg(feature = "gpu")]
     let clear_materialized_input = |input: &mut ProofInput<'a, GpuBackend<E, PCS>>| {
@@ -1130,7 +1127,7 @@ where
     #[cfg(feature = "gpu")]
     if !replay_stage_split {
         if gpu_replay_plan.is_some() {
-            materialize_replay_input(&mut input)?;
+            materialize_replay_input(&mut input, &mut structural_rmm)?;
         } else if let Some(trace_idx) = witness_trace_idx {
             let num_vars =
                 input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
@@ -1155,7 +1152,7 @@ where
 
     // Deferred structural witness transport: CPU -> GPU just-in-time
     if !replay_stage_split {
-        if let Some(rmm) = structural_rmm {
+        if let Some(rmm) = structural_rmm.as_ref() {
             let num_structural_witin = cs.zkvm_v1_css.num_structural_witin as usize;
             input.structural_witness =
                 info_span!("[ceno] transport_structural_witness").in_scope(|| {
@@ -1169,7 +1166,7 @@ where
     }
 
     if replay_stage_split {
-        materialize_replay_input(&mut input)?;
+        materialize_replay_input(&mut input, &mut structural_rmm)?;
         let cs = circuit_pk.get_cs();
 
         let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
@@ -1303,7 +1300,7 @@ where
 
         assert_eq!(rt_tower.len(), num_var_with_rotation);
 
-        materialize_replay_input(&mut input)?;
+        materialize_replay_input(&mut input, &mut structural_rmm)?;
         log_gpu_device_state(&format!("{name}:before_main_constraints"));
         let span = entered_span!("prove_main_constraints", profiling_2 = true);
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =

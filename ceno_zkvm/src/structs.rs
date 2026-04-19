@@ -352,7 +352,8 @@ pub struct GpuReplayPlan<E: ExtensionField> {
     pub shard_ram_num_records: usize,
     pub shard_ram_num_local_writes: usize,
     config_ptr: usize,
-    replay_fn: fn(usize, &GpuReplayPlan<E>) -> Result<RMMCollections<E::BaseField>, ZKVMError>,
+    replay_witness_fn:
+        fn(usize, &GpuReplayPlan<E>) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>,
 }
 
 #[cfg(not(feature = "gpu"))]
@@ -376,7 +377,10 @@ impl<E: ExtensionField> GpuReplayPlan<E> {
         shard_ram_num_records: usize,
         shard_ram_num_local_writes: usize,
         config_ptr: usize,
-        replay_fn: fn(usize, &GpuReplayPlan<E>) -> Result<RMMCollections<E::BaseField>, ZKVMError>,
+        replay_witness_fn: fn(
+            usize,
+            &GpuReplayPlan<E>,
+        ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>,
     ) -> Self {
         Self {
             shard_id,
@@ -394,12 +398,12 @@ impl<E: ExtensionField> GpuReplayPlan<E> {
             shard_ram_num_records,
             shard_ram_num_local_writes,
             config_ptr,
-            replay_fn,
+            replay_witness_fn,
         }
     }
 
-    pub fn replay(&self) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
-        (self.replay_fn)(self.config_ptr, self)
+    pub fn replay_witness(&self) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+        (self.replay_witness_fn)(self.config_ptr, self)
     }
 }
 

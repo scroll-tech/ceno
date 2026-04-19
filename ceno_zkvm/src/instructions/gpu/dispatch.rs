@@ -1381,7 +1381,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
 fn replay_gpu_witness_from_resident_raw<E: ExtensionField, I: Instruction<E>>(
     config_ptr: usize,
     replay: &GpuReplayPlan<E>,
-) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
     let hal = get_cuda_hal()
@@ -1404,16 +1404,6 @@ fn replay_gpu_witness_from_resident_raw<E: ExtensionField, I: Instruction<E>>(
         (replay.fetch_base_pc, replay.fetch_num_slots),
     )?;
 
-    let mut raw_structural = RowMajorMatrix::<E::BaseField>::new(
-        total_instances,
-        replay.num_structural_witin.max(1),
-        I::padding_strategy(),
-    );
-    for row in raw_structural.iter_mut() {
-        *row.last_mut().unwrap() = E::BaseField::ONE;
-    }
-    raw_structural.padding_by_strategy();
-
     let mut raw_witin = gpu_witness_to_rmm::<E>(
         gpu_witness,
         total_instances,
@@ -1422,5 +1412,5 @@ fn replay_gpu_witness_from_resident_raw<E: ExtensionField, I: Instruction<E>>(
     );
     raw_witin.padding_by_strategy();
 
-    Ok([raw_witin, raw_structural])
+    Ok(raw_witin)
 }

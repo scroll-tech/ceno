@@ -316,7 +316,7 @@ pub fn build_keccak_replay_plan<E: ExtensionField>(
 fn replay_keccak_witness_from_resident_raw<E: ExtensionField>(
     config_ptr: usize,
     replay: &crate::structs::GpuReplayPlan<E>,
-) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
     let hal = get_cuda_hal()
@@ -327,32 +327,29 @@ fn replay_keccak_witness_from_resident_raw<E: ExtensionField>(
     let packed_instances = replay.keccak_instances.as_ref().ok_or_else(|| {
         ZKVMError::InvalidWitness("keccak replay missing packed instance data".into())
     })?;
-    let replayed = replay_keccak_witness_from_packed::<E>(
+    replay_keccak_witness_only_from_packed::<E>(
         config,
         replay.num_witin,
-        replay.num_structural_witin,
         packed_instances.as_ref(),
         replay.step_indices.len(),
         replay.shard_offset,
         replay.fetch_base_pc,
         replay.fetch_num_slots,
         &hal,
-    )?;
-    Ok(replayed.0)
+    )
 }
 
 #[cfg(feature = "gpu")]
-fn replay_keccak_witness_from_packed<E: ExtensionField>(
+fn replay_keccak_witness_only_from_packed<E: ExtensionField>(
     config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
     num_witin: usize,
-    num_structural_witin: usize,
     packed_instances: &[GpuKeccakInstance],
     num_instances: usize,
     shard_offset: u64,
     fetch_base_pc: u32,
     fetch_num_slots: usize,
     hal: &CudaHalBB31,
-) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
     use crate::precompiles::KECCAK_ROUNDS_CEIL_LOG2;
 
     let num_padded_instances = num_instances.next_power_of_two().max(2);
@@ -430,60 +427,7 @@ fn replay_keccak_witness_from_packed<E: ExtensionField>(
         );
         rmm
     };
-
-    let raw_structural = info_span!("structural_witness").in_scope(|| {
-        let mut raw_structural = RowMajorMatrix::<E::BaseField>::new_by_rotation(
-            num_instances,
-            rotation,
-            num_structural_witin,
-            InstancePaddingStrategy::Default,
-        );
-
-        let sel_first = config
-            .layout
-            .selector_type_layout
-            .sel_first
-            .as_ref()
-            .expect("sel_first must be Some");
-        let sel_last = config
-            .layout
-            .selector_type_layout
-            .sel_last
-            .as_ref()
-            .expect("sel_last must be Some");
-
-        let sel_first_id = sel_first.selector_expr().id();
-        let sel_last_id = sel_last.selector_expr().id();
-        let sel_all_id = config
-            .layout
-            .selector_type_layout
-            .sel_all
-            .selector_expr()
-            .id();
-
-        let sel_first_indices = sel_first.sparse_indices();
-        let sel_last_indices = sel_last.sparse_indices();
-        let sel_all_indices = config.layout.selector_type_layout.sel_all.sparse_indices();
-
-        for instance_chunk in raw_structural.iter_mut().take(num_instances) {
-            for &idx in sel_first_indices {
-                instance_chunk[idx * num_structural_witin + sel_first_id] = E::BaseField::ONE;
-            }
-            for &idx in sel_last_indices {
-                instance_chunk[idx * num_structural_witin + sel_last_id] = E::BaseField::ONE;
-            }
-            for &idx in sel_all_indices {
-                instance_chunk[idx * num_structural_witin + sel_all_id] = E::BaseField::ONE;
-            }
-        }
-        raw_structural.padding_by_strategy();
-        raw_structural
-    });
-
-    Ok((
-        [raw_witin, raw_structural],
-        LkMultiplicity::default().into_finalize_result(),
-    ))
+    Ok(raw_witin)
 }
 
 /// Keccak-specific GPU witness generation, separate from `gpu_assign_instances_inner` because:

@@ -812,7 +812,7 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
     })
 }
 
-fn normalize_traces_to_device_col_major<E: ExtensionField>(
+pub(crate) fn normalize_traces_to_device_col_major<E: ExtensionField>(
     cuda_hal: &Arc<CudaHalBB31>,
     vec_traces: &mut [witness::RowMajorMatrix<E::BaseField>],
 ) {
@@ -831,6 +831,9 @@ fn normalize_traces_to_device_col_major<E: ExtensionField>(
 
         let rows = trace.height();
         let cols = trace.width();
+        if rows == 0 || cols == 0 {
+            continue;
+        }
         let host_vals_bb31: &[BB31Base] = unsafe { std::mem::transmute(trace.values()) };
 
         let row_major_buf = cuda_hal
@@ -939,8 +942,8 @@ where
             let witness_rmm: witness::RowMajorMatrix<E::BaseField> = match source {
                 DeferredGpuTrace::Eager(rmm) => rmm,
                 DeferredGpuTrace::Replay(plan) => plan
-                    .replay()
-                    .map(|[witness_rmm, _]| {
+                    .replay_witness()
+                    .map(|witness_rmm| {
                         assert_eq!(
                             witness_rmm.height(),
                             plan.trace_height,
@@ -1214,9 +1217,9 @@ where
     let poly_len_bytes = rows * std::mem::size_of::<BB31Base>();
 
     // This helper only wraps already-materialized col-major device backing in
-    // owned subrange handles. The replay() call that produced `witness_rmm`
-    // paid the actual witness-buffer allocation cost; converting those columns
-    // into MLE handles does not allocate more VRAM here.
+    // owned subrange handles. The preceding witness replay paid the actual
+    // witness-buffer allocation cost; converting those columns into MLE
+    // handles does not allocate more VRAM here.
     check_gpu_mem_estimation(gpu_mem_tracker, 0);
 
     (0..cols)
@@ -1312,7 +1315,7 @@ where
     };
 
     for (trace_idx, replay_plan) in replayable_traces {
-        let [witness_rmm, _] = replay_plan.replay()?;
+        let witness_rmm = replay_plan.replay_witness()?;
         assert_eq!(
             witness_rmm.height(),
             replay_plan.trace_height,
@@ -1331,7 +1334,7 @@ where
 ///
 /// `num_structural_witin` and `num_vars` are used for memory estimation validation.
 pub fn transport_structural_witness_to_gpu<'a, E>(
-    structural_rmm: witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    structural_rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
     num_structural_witin: usize,
     num_vars: usize,
 ) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
@@ -1994,20 +1997,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 task.circuit_name,
                 estimated_replay_bytes as f64 / (1024.0 * 1024.0),
             );
-            let [witness_rmm, structural_rmm] =
-                replay_plan.replay().expect("GPU raw replay failed");
+            let witness_rmm = replay_plan.replay_witness().expect("GPU raw replay failed");
             check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
             task.input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
                 .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
-            task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
-                .in_scope(|| {
-                    transport_structural_witness_to_gpu::<E>(
-                        structural_rmm,
-                        task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
-                        task.input.log2_num_instances()
-                            + task.pk.get_cs().rotation_vars().unwrap_or(0),
-                    )
-                });
+            if let Some(rmm) = task.structural_rmm.as_ref() {
+                task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
+                    .in_scope(|| {
+                        transport_structural_witness_to_gpu::<E>(
+                            rmm,
+                            task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
+                            task.input.log2_num_instances()
+                                + task.pk.get_cs().rotation_vars().unwrap_or(0),
+                        )
+                    });
+            }
             return;
         }
 
@@ -2027,7 +2031,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         }
 
         // Deferred structural witness transport: CPU -> GPU just-in-time
-        if let Some(rmm) = task.structural_rmm.take() {
+        if let Some(rmm) = task.structural_rmm.as_ref() {
             let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
             task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
                 .in_scope(|| {

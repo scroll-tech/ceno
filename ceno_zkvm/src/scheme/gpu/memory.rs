@@ -92,12 +92,18 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     circuit_name: &str,
     witness_replayable: bool,
+    structural_cached_on_device: bool,
 ) -> u64 {
     let num_var_with_rotation =
         input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
 
     // Part 1: trace (base usage: witness & structural mles)
-    let trace_est = estimate_trace_bytes(composed_cs, input, witness_replayable);
+    let trace_est = estimate_trace_bytes(
+        composed_cs,
+        input,
+        witness_replayable,
+        structural_cached_on_device,
+    );
 
     // Part 2: main witness (base usage)
     let main_witness_bytes = estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
@@ -217,12 +223,12 @@ pub(crate) fn estimate_structural_mle_bytes(num_structural_witin: usize, num_var
 
 pub fn estimate_replay_materialization_bytes(
     num_witin: usize,
-    num_structural_witin: usize,
+    _num_structural_witin: usize,
     num_vars: usize,
 ) -> usize {
     let base_elem_size = std::mem::size_of::<BB31Base>();
     let mle_len = 1usize << num_vars;
-    (num_witin + num_structural_witin) * mle_len * base_elem_size
+    num_witin * mle_len * base_elem_size
 }
 
 pub fn estimate_replay_materialization_bytes_for_plan<E: ExtensionField>(
@@ -231,16 +237,6 @@ pub fn estimate_replay_materialization_bytes_for_plan<E: ExtensionField>(
 ) -> usize {
     let elem_size = std::mem::size_of::<BB31Base>();
     let witness_bytes = replay_plan.trace_height * replay_plan.num_witin * elem_size;
-    let structural_bytes = match replay_plan.kind {
-        // Standard opcode replay rebuilds structural witness on CPU and only
-        // uploads it later in `transport_structural_witness_to_gpu`, so the
-        // replay scope itself should not charge structural GPU bytes.
-        GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam => {
-            replay_plan.trace_height * replay_plan.num_structural_witin * elem_size
-        }
-        _ => 0,
-    };
-    let base_bytes = witness_bytes + structural_bytes;
     let standard_indices_temp_bytes = match replay_plan.kind {
         GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam => 0,
         _ => replay_plan.step_indices.len() * std::mem::size_of::<u32>(),
@@ -264,9 +260,9 @@ pub fn estimate_replay_materialization_bytes_for_plan<E: ExtensionField>(
             // Peak temp occurs at the first layer when cur_x/cur_y and next_x/next_y
             // coexist. Each point coordinate stores 7 BabyBear limbs.
             let ec_tree_temp_bytes = (2 * n * 7 * elem_size) + (2 * (n / 2) * 7 * elem_size);
-            base_bytes + ec_tree_temp_bytes
+            witness_bytes + ec_tree_temp_bytes
         }
-        _ => base_bytes + standard_indices_temp_bytes + keccak_instances_temp_bytes,
+        _ => witness_bytes + standard_indices_temp_bytes + keccak_instances_temp_bytes,
     }
 }
 
@@ -274,13 +270,17 @@ pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     witness_replayable: bool,
+    structural_cached_on_device: bool,
 ) -> TraceEstimate {
     let cs = &composed_cs.zkvm_v1_css;
     let num_var_with_rotation =
         input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
 
-    let structural_mle_bytes =
-        estimate_structural_mle_bytes(cs.num_structural_witin as usize, num_var_with_rotation);
+    let structural_mle_bytes = if structural_cached_on_device {
+        0
+    } else {
+        estimate_structural_mle_bytes(cs.num_structural_witin as usize, num_var_with_rotation)
+    };
     let (witness_mle_bytes, trace_temporary_bytes) = estimate_trace_extraction_bytes(
         cs.num_witin as usize,
         num_var_with_rotation,
@@ -428,7 +428,11 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
     let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes);
 
-    (build_est.total_bytes, prove_local_bytes, tower_input_live_bytes)
+    (
+        build_est.total_bytes,
+        prove_local_bytes,
+        tower_input_live_bytes,
+    )
 }
 
 /// Estimate temporary GPU memory for the tower proving stage (build + prove).
