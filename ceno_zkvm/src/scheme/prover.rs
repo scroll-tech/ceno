@@ -428,13 +428,26 @@ impl<
                     .filter_map(|plan| plan.shard_ram_records.as_ref())
                     .map(|buf| buf.len() * std::mem::size_of::<u32>())
                     .sum::<usize>();
+                let task_replay_step_indices_device_bytes = tasks
+                    .iter()
+                    .filter_map(|task| task.gpu_replay_plan.as_ref())
+                    .filter_map(|plan| plan.step_indices_device.as_ref())
+                    .map(|buf| buf.len() * std::mem::size_of::<u32>())
+                    .sum::<usize>();
                 let task_shard_ram_replay_raw_count = tasks
                     .iter()
                     .filter_map(|task| task.gpu_replay_plan.as_ref())
                     .filter(|plan| plan.shard_ram_records.is_some())
                     .count();
+                let task_replay_step_indices_device_count = tasks
+                    .iter()
+                    .filter_map(|task| task.gpu_replay_plan.as_ref())
+                    .filter(|plan| plan.step_indices_device.is_some())
+                    .count();
                 let task_shard_ram_replay_raw_mb =
                     task_shard_ram_replay_raw_bytes as f64 / (1024.0 * 1024.0);
+                let task_replay_step_indices_device_mb =
+                    task_replay_step_indices_device_bytes as f64 / (1024.0 * 1024.0);
                 tracing::info!(
                     "[gpu baseline][before_scheduler] task_structural_device={:.2}MB ({})",
                     task_structural_device_mb,
@@ -444,6 +457,11 @@ impl<
                     "[gpu baseline][before_scheduler] task_shard_ram_replay_raw={:.2}MB ({})",
                     task_shard_ram_replay_raw_mb,
                     task_shard_ram_replay_raw_count,
+                );
+                tracing::info!(
+                    "[gpu baseline][before_scheduler] task_replay_step_indices_device={:.2}MB ({})",
+                    task_replay_step_indices_device_mb,
+                    task_replay_step_indices_device_count,
                 );
                 crate::scheme::gpu::log_gpu_proof_baseline::<E, PCS>(
                     "before_scheduler",

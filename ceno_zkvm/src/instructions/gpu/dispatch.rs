@@ -9,6 +9,7 @@ use ceno_gpu::{
     Buffer, CudaHal,
     bb31::CudaHalBB31,
     common::{
+        buffer::BufferImpl,
         transpose::matrix_transpose,
         witgen::types::{GpuRamRecordSlot, GpuShardRamRecord},
     },
@@ -16,7 +17,7 @@ use ceno_gpu::{
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::FieldAlgebra;
-use std::cell::Cell;
+use std::{cell::Cell, sync::Arc};
 use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
 
@@ -183,6 +184,8 @@ pub(crate) fn build_gpu_replay_plan<E: ExtensionField, I: Instruction<E>>(
     step_indices: &[StepIndex],
     kind: GpuWitgenKind,
 ) -> GpuReplayPlan<E> {
+    use gkr_iop::gpu::get_cuda_hal;
+
     // Replay plans are intentionally split into:
     // - shared shard state: referenced by pointer / cached separately in the
     //   shard GPU session (`shard_ctx`, `shard_steps`, resident raw buffers)
@@ -192,7 +195,18 @@ pub(crate) fn build_gpu_replay_plan<E: ExtensionField, I: Instruction<E>>(
     // the same shard to reconstruct witness on demand from one resident raw
     // shard session.
     let (fetch_base_pc, fetch_num_slots) = compute_fetch_params(shard_steps, step_indices);
-    GpuReplayPlan::new(
+    let step_indices_device = if step_indices.is_empty() {
+        None
+    } else {
+        let hal = get_cuda_hal().expect("CUDA HAL must exist while building GPU replay plan");
+        let indices_u32: Vec<u32> = step_indices.iter().map(|&i| i as u32).collect();
+        Some(Arc::new(
+            hal.witgen
+                .alloc_u32_from_host(&indices_u32, None)
+                .expect("GPU replay plan step_indices upload failed"),
+        ))
+    };
+    let mut plan = GpuReplayPlan::new(
         shard_ctx.shard_id,
         kind,
         std::sync::Arc::<[StepIndex]>::from(step_indices.to_vec()),
@@ -208,7 +222,9 @@ pub(crate) fn build_gpu_replay_plan<E: ExtensionField, I: Instruction<E>>(
         0,
         config as *const I::InstructionConfig as usize,
         replay_gpu_witness_from_resident_raw::<E, I>,
-    )
+    );
+    plan.step_indices_device = step_indices_device;
+    plan
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -280,6 +296,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
                 num_witin,
                 Some(shard_steps),
                 step_indices,
+                None,
                 kind,
                 shard_ctx.current_shard_offset_cycle(),
                 fetch_params,
@@ -514,6 +531,7 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     num_witin: usize,
     shard_steps: Option<&[StepRecord]>,
     step_indices: &[StepIndex],
+    cached_step_indices: Option<&BufferImpl<'static, u32>>,
     kind: GpuWitgenKind,
     shard_offset: u64,
     fetch_params: (u32, usize),
@@ -535,8 +553,12 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
     }
 
     // Convert step_indices from usize to u32 for GPU.
-    let indices_u32: Vec<u32> = info_span!("indices_u32", n = step_indices.len())
-        .in_scope(|| step_indices.iter().map(|&i| i as u32).collect());
+    let indices_u32: Vec<u32> = if cached_step_indices.is_none() {
+        info_span!("indices_u32", n = step_indices.len())
+            .in_scope(|| step_indices.iter().map(|&i| i as u32).collect())
+    } else {
+        Vec::new()
+    };
 
     // Helper to split GpuWitgenFullResult into (witness, Some(lk_counters), ram_slots, compact_ec, compact_addr)
     macro_rules! split_full {
@@ -573,6 +595,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
@@ -607,6 +631,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
@@ -642,6 +668,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     logic_kind,
                                     fetch_base_pc,
@@ -679,6 +707,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     logic_kind,
                                     fetch_base_pc,
@@ -715,6 +745,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
@@ -750,6 +782,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
@@ -786,6 +820,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
@@ -821,6 +857,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
@@ -859,6 +897,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     shift_kind,
                                     fetch_base_pc,
@@ -898,6 +938,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     shift_kind,
                                     fetch_base_pc,
@@ -934,6 +976,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     is_signed,
                                     fetch_base_pc,
@@ -970,6 +1014,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     is_signed,
                                     fetch_base_pc,
@@ -1009,6 +1055,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     is_beq,
                                     fetch_base_pc,
@@ -1048,6 +1096,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     is_signed,
                                     fetch_base_pc,
@@ -1084,6 +1134,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     fetch_base_pc,
                                     fetch_num_slots,
@@ -1120,6 +1172,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     mem_max_bits,
                                     fetch_base_pc,
@@ -1157,6 +1211,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     mem_max_bits,
                                     fetch_base_pc,
@@ -1194,6 +1250,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     mem_max_bits,
                                     fetch_base_pc,
@@ -1235,6 +1293,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     load_width,
                                     is_signed,
@@ -1273,6 +1333,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     mul_kind,
                                     fetch_base_pc,
@@ -1309,6 +1371,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     div_kind,
                                     fetch_base_pc,
@@ -1350,6 +1414,8 @@ fn gpu_fill_witness<E: ExtensionField, I: Instruction<E>>(
                                     &col_map,
                                     gpu_records,
                                     &indices_u32,
+                                    step_indices.len(),
+                                    cached_step_indices,
                                     shard_offset,
                                     mem_max_bits,
                                     fetch_base_pc,
@@ -1384,6 +1450,14 @@ fn replay_gpu_witness_from_resident_raw<E: ExtensionField, I: Instruction<E>>(
 ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
     use gkr_iop::gpu::get_cuda_hal;
 
+    if replay.step_indices.is_empty() {
+        return Ok(RowMajorMatrix::<E::BaseField>::new(
+            0,
+            replay.num_witin,
+            I::padding_strategy(),
+        ));
+    }
+
     let hal = get_cuda_hal()
         .map_err(|e| ZKVMError::InvalidWitness(format!("Failed to get CUDA HAL: {e}").into()))?;
     let config = unsafe { &*(config_ptr as *const I::InstructionConfig) };
@@ -1399,6 +1473,7 @@ fn replay_gpu_witness_from_resident_raw<E: ExtensionField, I: Instruction<E>>(
         replay.num_witin,
         None,
         replay.step_indices.as_ref(),
+        replay.step_indices_device.as_deref(),
         replay.kind,
         replay.shard_offset,
         (replay.fetch_base_pc, replay.fetch_num_slots),

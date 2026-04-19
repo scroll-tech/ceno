@@ -332,6 +332,9 @@ pub struct GpuReplayPlan<E: ExtensionField> {
     // small shape/config metadata. Shared shard state stays resident in the
     // shard-global GPU caches and is rehydrated on worker threads on demand.
     pub step_indices: Arc<[StepIndex]>,
+    // Standard opcode replay can reuse a pre-uploaded device index buffer to
+    // avoid rebuilding and H2D-uploading step indices on every replay.
+    pub step_indices_device: Option<Arc<ceno_gpu::common::buffer::BufferImpl<'static, u32>>>,
     // Actual committed/opened witness row height after per-chip padding. This
     // is not always equal to `step_indices.len()`: rotation-heavy chips like
     // Keccak expand each logical instance into multiple witness rows.
@@ -387,6 +390,7 @@ impl<E: ExtensionField> GpuReplayPlan<E> {
             trace_idx: None,
             kind,
             step_indices,
+            step_indices_device: None,
             trace_height,
             num_witin,
             num_structural_witin,

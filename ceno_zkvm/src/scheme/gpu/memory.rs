@@ -237,10 +237,6 @@ pub fn estimate_replay_materialization_bytes_for_plan<E: ExtensionField>(
 ) -> usize {
     let elem_size = std::mem::size_of::<BB31Base>();
     let witness_bytes = replay_plan.trace_height * replay_plan.num_witin * elem_size;
-    let standard_indices_temp_bytes = match replay_plan.kind {
-        GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam => 0,
-        _ => replay_plan.step_indices.len() * std::mem::size_of::<u32>(),
-    };
     let keccak_instances_temp_bytes = match replay_plan.kind {
         GpuWitgenKind::Keccak => replay_plan
             .keccak_instances
@@ -262,7 +258,7 @@ pub fn estimate_replay_materialization_bytes_for_plan<E: ExtensionField>(
             let ec_tree_temp_bytes = (2 * n * 7 * elem_size) + (2 * (n / 2) * 7 * elem_size);
             witness_bytes + ec_tree_temp_bytes
         }
-        _ => witness_bytes + standard_indices_temp_bytes + keccak_instances_temp_bytes,
+        _ => witness_bytes + keccak_instances_temp_bytes,
     }
 }
 
