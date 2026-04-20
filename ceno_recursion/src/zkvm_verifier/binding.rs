@@ -385,6 +385,10 @@ pub struct ZKVMChipProofInput {
     pub has_gkr_proof: usize,
     pub gkr_iop_proof: GKRProofInput,
 
+    // chip-level rotation proof
+    pub has_rotation_proof: usize,
+    pub rotation_proof: SumcheckLayerProofInput,
+
     // ecc proof
     pub has_ecc_proof: usize,
     pub ecc_proof: EccQuarkProofInput,
@@ -476,6 +480,24 @@ impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
             } else {
                 GKRProofInput::default()
             },
+            has_rotation_proof: if p.rotation_proof.is_some() { 1 } else { 0 },
+            rotation_proof: if let Some(rotation) = p.rotation_proof {
+                SumcheckLayerProofInput {
+                    proof: IOPProverMessageVec::from(
+                        rotation
+                            .proof
+                            .proofs
+                            .iter()
+                            .map(|p| IOPProverMessage {
+                                evaluations: p.evaluations.clone(),
+                            })
+                            .collect::<Vec<IOPProverMessage>>(),
+                    ),
+                    evals: rotation.evals,
+                }
+            } else {
+                SumcheckLayerProofInput::default()
+            },
             has_ecc_proof: if p.ecc_proof.is_some() { 1 } else { 0 },
             ecc_proof: if p.ecc_proof.is_some() {
                 p.ecc_proof.unwrap().into()
@@ -507,6 +529,8 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub main_sumcheck_proofs: IOPProverMessageVecVariable<C>,
     pub has_gkr_iop_proof: Usize<C::N>,
     pub gkr_iop_proof: GKRProofVariable<C>,
+    pub has_rotation_proof: Usize<C::N>,
+    pub rotation_proof: SumcheckLayerProofVariable<C>,
     pub tower_proof: TowerProofInputVariable<C>,
     pub has_ecc_proof: Usize<C::N>,
     pub ecc_proof: EccQuarkProofVariable<C>,
@@ -543,6 +567,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         builder.cycle_tracker_end("read main sumcheck proofs");
         let has_gkr_iop_proof = Usize::Var(usize::read(builder));
         let gkr_iop_proof = GKRProofInput::read(builder);
+        let has_rotation_proof = Usize::Var(usize::read(builder));
+        let rotation_proof = SumcheckLayerProofInput::read(builder);
         let has_ecc_proof = Usize::Var(usize::read(builder));
         let ecc_proof = EccQuarkProofInput::read(builder);
 
@@ -565,6 +591,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             main_sumcheck_proofs,
             has_gkr_iop_proof,
             gkr_iop_proof,
+            has_rotation_proof,
+            rotation_proof,
             tower_proof,
             has_ecc_proof,
             ecc_proof,
@@ -626,6 +654,10 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(self.main_sumcheck_proofs.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_gkr_proof));
         stream.extend(self.gkr_iop_proof.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.has_rotation_proof,
+        ));
+        stream.extend(self.rotation_proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());
 
@@ -680,32 +712,12 @@ impl Hintable<InnerConfig> for SumcheckLayerProofInput {
     }
 }
 pub struct LayerProofInput {
-    pub has_rotation: usize,
-    pub rotation: SumcheckLayerProofInput,
     pub main: SumcheckLayerProofInput,
 }
 
 impl From<LayerProof<E>> for LayerProofInput {
     fn from(p: LayerProof<E>) -> Self {
         Self {
-            has_rotation: if p.rotation.is_some() { 1 } else { 0 },
-            rotation: if p.rotation.is_some() {
-                let r = p.rotation.unwrap();
-                SumcheckLayerProofInput {
-                    proof: IOPProverMessageVec::from(
-                        r.proof
-                            .proofs
-                            .iter()
-                            .map(|p| IOPProverMessage {
-                                evaluations: p.evaluations.clone(),
-                            })
-                            .collect::<Vec<IOPProverMessage>>(),
-                    ),
-                    evals: r.evals,
-                }
-            } else {
-                SumcheckLayerProofInput::default()
-            },
             main: SumcheckLayerProofInput {
                 proof: IOPProverMessageVec::from(
                     p.main
@@ -725,8 +737,6 @@ impl From<LayerProof<E>> for LayerProofInput {
 
 #[derive(DslVariable, Clone)]
 pub struct LayerProofVariable<C: Config> {
-    pub has_rotation: Usize<C::N>,
-    pub rotation: SumcheckLayerProofVariable<C>,
     pub main: SumcheckLayerProofVariable<C>,
 }
 impl VecAutoHintable for LayerProofInput {}
@@ -734,20 +744,12 @@ impl Hintable<InnerConfig> for LayerProofInput {
     type HintVariable = LayerProofVariable<InnerConfig>;
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        let has_rotation = Usize::Var(usize::read(builder));
-        let rotation = SumcheckLayerProofInput::read(builder);
         let main = SumcheckLayerProofInput::read(builder);
 
-        Self::HintVariable {
-            has_rotation,
-            rotation,
-            main,
-        }
+        Self::HintVariable { main }
     }
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_rotation));
-        stream.extend(self.rotation.write());
         stream.extend(self.main.write());
         stream
     }

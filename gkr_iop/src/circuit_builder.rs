@@ -8,8 +8,11 @@ use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
 use crate::{
-    RAMType, error::CircuitBuilderError, gkr::layer::ROTATION_OPENING_COUNT,
-    selector::SelectorType, tables::LookupTable,
+    RAMType,
+    error::CircuitBuilderError,
+    gkr::layer::{ECC_BRIDGE_OPENING_COUNT, ROTATION_OPENING_COUNT},
+    selector::SelectorType,
+    tables::LookupTable,
 };
 use p3::field::FieldAlgebra;
 
@@ -107,6 +110,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub ec_point_exprs: Vec<Expression<E>>,
     pub ec_slope_exprs: Vec<Expression<E>>,
     pub ec_final_sum: Vec<Expression<E>>,
+    pub ec_bridge_selectors: Option<[SelectorType<E>; ECC_BRIDGE_OPENING_COUNT]>,
 
     pub r_selector: Option<SelectorType<E>>,
     pub r_expressions: Vec<Expression<E>>,
@@ -179,6 +183,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             ec_final_sum: vec![],
             ec_slope_exprs: vec![],
             ec_point_exprs: vec![],
+            ec_bridge_selectors: None,
             r_selector: None,
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],

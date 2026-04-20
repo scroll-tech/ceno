@@ -1,4 +1,7 @@
-use crate::{circuit_builder::CircuitBuilder, gkr::layer::Layer};
+use crate::{
+    circuit_builder::CircuitBuilder,
+    gkr::layer::{ECC_BRIDGE_OPENING_COUNT, Layer, ROTATION_OPENING_COUNT},
+};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -18,9 +21,6 @@ pub struct Chip<E: ExtensionField> {
     /// The number of base inputs committed in the whole protocol.
     pub n_committed: usize,
 
-    /// The number of challenges generated through the whole protocols
-    /// (except the ones inside sumcheck protocols).
-    pub n_challenges: usize,
     /// All input evaluations generated at the end of layer protocols will be stored
     /// in a vector and this is the length.
     pub n_evaluations: usize,
@@ -32,26 +32,26 @@ pub struct Chip<E: ExtensionField> {
 }
 
 impl<E: ExtensionField> Chip<E> {
-    pub fn new_from_cb(cb: &CircuitBuilder<E>, n_challenges: usize) -> Chip<E> {
+    pub fn new_from_cb(cb: &CircuitBuilder<E>) -> Chip<E> {
+        let rotation_eval_count = cb.cs.rotations.len() * ROTATION_OPENING_COUNT;
+        let ecc_eval_count = if cb.cs.ec_point_exprs.is_empty() {
+            0
+        } else {
+            cb.cs.ec_slope_exprs.len() * ECC_BRIDGE_OPENING_COUNT
+        };
+        let num_non_zero_outputs = cb.cs.w_expressions.len()
+            + cb.cs.r_expressions.len()
+            + cb.cs.lk_expressions.len()
+            + cb.cs.w_table_expressions.len()
+            + cb.cs.r_table_expressions.len()
+            + cb.cs.lk_table_expressions.len() * 2
+            + rotation_eval_count
+            + ecc_eval_count;
         Self {
             n_fixed: cb.cs.num_fixed,
             n_committed: cb.cs.num_witin as usize,
-            n_challenges,
-            n_evaluations: cb.cs.w_expressions.len()
-                + cb.cs.r_expressions.len()
-                + cb.cs.lk_expressions.len()
-                + cb.cs.w_table_expressions.len()
-                + cb.cs.r_table_expressions.len()
-                + cb.cs.lk_table_expressions.len() * 2
-                + cb.cs.num_fixed
-                + cb.cs.num_witin as usize,
-            final_out_evals: (0..cb.cs.w_expressions.len()
-                + cb.cs.r_expressions.len()
-                + cb.cs.lk_expressions.len()
-                + cb.cs.w_table_expressions.len()
-                + cb.cs.r_table_expressions.len()
-                + cb.cs.lk_table_expressions.len() * 2)
-                .collect_vec(),
+            n_evaluations: num_non_zero_outputs + cb.cs.num_fixed + cb.cs.num_witin as usize,
+            final_out_evals: (0..num_non_zero_outputs).collect_vec(),
             layers: vec![],
         }
     }

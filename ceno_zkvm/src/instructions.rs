@@ -70,7 +70,7 @@ pub trait Instruction<E: ExtensionField> {
                 // zero_record
                 (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
         // register selector to legacy constrain system
@@ -79,7 +79,7 @@ pub trait Instruction<E: ExtensionField> {
         cb.cs.lk_selector = Some(selector_type.clone());
         cb.cs.zero_selector = Some(selector_type.clone());
 
-        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), out_evals);
         chip.add_layer(layer);
 
         Ok((config, chip.gkr_circuit()))
