@@ -544,6 +544,27 @@ impl<
                     .inner
                     .synchronize()
                     .expect("cuda synchronize before pcs_opening");
+                if let Some(prewarm_mb) = std::env::var("CENO_GPU_PCS_PREWARM_MB")
+                    .ok()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .filter(|&mb| mb > 0)
+                {
+                    let prewarm_bytes = (prewarm_mb as usize) * 1024 * 1024;
+                    tracing::info!(
+                        "[gpu] prewarming mem pool before pcs_opening: {}MB",
+                        prewarm_mb
+                    );
+                    let scratch = cuda_hal
+                        .inner
+                        .alloc_on_device(prewarm_bytes, false)
+                        .expect("cuda mem pool prewarm before pcs_opening");
+                    drop(scratch);
+                    cuda_hal
+                        .inner
+                        .synchronize()
+                        .expect("cuda synchronize after pcs prewarm");
+                    crate::scheme::gpu::log_gpu_device_state("after_pcs_prewarm");
+                }
                 let replay_cache = current_replay_cache_stats();
                 tracing::info!(
                     "[gpu replay cache][before_restore_pcs] shard_steps={:.2}MB shard_meta={:.2}MB shared_side_effect={:.2}MB total={:.2}MB",
