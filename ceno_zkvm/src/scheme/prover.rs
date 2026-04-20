@@ -504,6 +504,15 @@ impl<
                     .inner
                     .synchronize()
                     .expect("cuda synchronize before pcs_opening");
+                if !crate::scheme::scheduler::ChipScheduler::is_concurrent_mode() {
+                    tracing::info!(
+                        "[gpu] trimming mem pool before pcs_opening in sequential WITGEN mode"
+                    );
+                    cuda_hal
+                        .inner
+                        .trim_mem_pool()
+                        .expect("cuda trim mem pool before pcs_opening");
+                }
                 let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
                     unsafe { std::mem::transmute(&mut witness_data) };
                 crate::scheme::gpu::restore_replayable_trace_device_backing::<E, PCS>(
