@@ -825,7 +825,7 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
 pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionField>(
     config: &ShardRamConfig<E>,
     num_witin: usize,
-    num_structural_witin: usize,
+    _num_structural_witin: usize,
     device_records: &ceno_gpu::common::buffer::BufferImpl<'static, u32>,
     num_records: usize,
     num_local_writes: usize,
@@ -850,7 +850,7 @@ pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionFiel
 
     let col_map = extract_shard_ram_column_map(config, num_witin);
 
-    let (gpu_witness, _gpu_structural) = tracing::info_span!(
+    let gpu_witness = tracing::info_span!(
         "gpu_shard_ram_per_row_from_device",
         n = num_records,
         num_rows_padded,
@@ -858,13 +858,12 @@ pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionFiel
     )
     .in_scope(|| {
         hal.witgen
-            .witgen_shard_ram_per_row_from_device(
+            .witgen_shard_ram_per_row_from_device_witness_only(
                 &col_map,
                 device_records,
                 num_records,
                 num_local_writes as u32,
                 num_witin as u32,
-                num_structural_witin as u32,
                 num_rows_padded as u32,
                 None,
             )

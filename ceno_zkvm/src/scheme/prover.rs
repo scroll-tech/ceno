@@ -645,11 +645,7 @@ impl<
                         exec_gpu_task(task, transcript)
                     });
                 } else {
-                    return scheduler.execute_sequentially_on_worker(
-                        tasks,
-                        transcript,
-                        exec_gpu_task,
-                    );
+                    return scheduler.execute_sequentially(tasks, transcript, exec_gpu_task);
                 }
             }
         }
