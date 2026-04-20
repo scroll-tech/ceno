@@ -715,8 +715,17 @@ impl<
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
         // build main witness
-        let records = info_span!("[ceno] build_main_witness")
-            .in_scope(|| build_main_witness::<E, PCS, PB, PD>(cs, input, challenges));
+        let records = info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
+            build_main_witness::<E, PCS, PB, PD>(
+                cs,
+                input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
+        });
         #[cfg(feature = "gpu")]
         if task.gpu_replay_plan.as_ref().is_some_and(|plan| {
             matches!(
@@ -1233,7 +1242,12 @@ where
                 PCS,
                 GpuBackend<E, PCS>,
                 gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>,
-            >(cs, &input, challenges)
+            >(
+                cs,
+                &input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
         });
         log_gpu_device_state(&format!("{name}:after_build_main_witness"));
         log_gpu_pool_usage(&format!("{name}:after_build_main_witness"));
@@ -1384,12 +1398,20 @@ where
     // build main witness
     let records =
         info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
             build_main_witness::<
                 E,
                 PCS,
                 GpuBackend<E, PCS>,
                 gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>,
-            >(cs, &input, challenges)
+            >(
+                cs,
+                &input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
         });
 
     let span = entered_span!("prove_tower_relation", profiling_2 = true);

@@ -448,6 +448,7 @@ mod tests {
                 &[],
                 &[],
                 &challenges,
+                None,
             );
 
         let out_evals = {

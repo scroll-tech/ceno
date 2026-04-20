@@ -54,4 +54,15 @@ pub trait ProtocolWitnessGeneratorProver<PB: ProverBackend> {
         pub_io_evals: &[Either<<PB::E as ExtensionField>::BaseField, PB::E>],
         challenges: &[PB::E],
     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
+
+    fn layer_witness_filtered<'a>(
+        layer: &Layer<PB::E>,
+        layer_wits: &[Arc<PB::MultilinearPoly<'a>>],
+        pub_io_evals: &[Either<<PB::E as ExtensionField>::BaseField, PB::E>],
+        challenges: &[PB::E],
+        output_mask: Option<&[bool]>,
+    ) -> Vec<Arc<PB::MultilinearPoly<'a>>> {
+        let _ = output_mask;
+        Self::layer_witness(layer, layer_wits, pub_io_evals, challenges)
+    }
 }

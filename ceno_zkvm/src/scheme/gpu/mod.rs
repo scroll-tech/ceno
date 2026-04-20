@@ -12,7 +12,8 @@ use crate::{
             DeviceProvingKey, MainSumcheckEvals, ProofInput, RotationProverOutput, TowerProverSpec,
         },
         utils::{
-            assign_group_evals, derive_ecc_bridge_claims, extract_ecc_quark_witness_inputs,
+            GkrOutputStageMask, assign_group_evals, derive_ecc_bridge_claims,
+            extract_ecc_quark_witness_inputs, first_layer_output_group_stage_masks,
             split_rotation_evals,
         },
     },
@@ -304,12 +305,7 @@ pub fn log_gpu_device_state(label: &str) {
     );
 }
 
-use crate::{
-    scheme::{
-        constants::NUM_FANIN,
-        septic_curve::SepticPoint,
-    },
-};
+use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
 use gkr_iop::{
     gpu::{ArcMultilinearExtensionGpu, BB31Base, MultilinearExtensionGpu},
     selector::{SelectorContext, SelectorType},
@@ -565,11 +561,13 @@ pub fn prove_main_constraints_impl<
         );
     }
     let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+    let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, gkr_circuit);
     let selector_ctxs = first_layer
         .out_sel_and_eval_exprs
         .iter()
-        .map(|(selector, _)| {
-            if cs.ec_final_sum.is_empty() {
+        .zip_eq(group_stage_masks.iter())
+        .map(|((selector, _), stage_mask)| {
+            if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty() {
                 SelectorContext {
                     offset: 0,
                     num_instances,
@@ -606,6 +604,9 @@ pub fn prove_main_constraints_impl<
         else {
             panic!("rotation proof provided for non-rotation layer")
         };
+        debug_assert!(group_stage_masks[left_group_idx].contains(GkrOutputStageMask::ROTATION));
+        debug_assert!(group_stage_masks[right_group_idx].contains(GkrOutputStageMask::ROTATION));
+        debug_assert!(group_stage_masks[point_group_idx].contains(GkrOutputStageMask::ROTATION));
 
         let (left_evals, right_evals, point_evals) = split_rotation_evals(&rotation.proof.evals);
 
@@ -642,6 +643,11 @@ pub fn prove_main_constraints_impl<
         else {
             panic!("ecc proof provided for non-ecc layer")
         };
+        debug_assert!(group_stage_masks[x_group_idx].contains(GkrOutputStageMask::ECC));
+        debug_assert!(group_stage_masks[y_group_idx].contains(GkrOutputStageMask::ECC));
+        debug_assert!(group_stage_masks[slope_group_idx].contains(GkrOutputStageMask::ECC));
+        debug_assert!(group_stage_masks[x3_group_idx].contains(GkrOutputStageMask::ECC));
+        debug_assert!(group_stage_masks[y3_group_idx].contains(GkrOutputStageMask::ECC));
 
         let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
         let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation)

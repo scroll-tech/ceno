@@ -825,6 +825,7 @@ pub fn run_uint256_mul<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + '
         &[],
         &[],
         &challenges,
+        None,
     );
     exit_span!(span);
 

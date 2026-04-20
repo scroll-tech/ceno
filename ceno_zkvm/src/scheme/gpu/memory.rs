@@ -3,6 +3,7 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         hal::ProofInput,
+        utils::tower_output_count,
     },
     structs::{ComposedConstrainSystem, GpuReplayPlan},
 };
@@ -10,7 +11,6 @@ use ceno_gpu::{
     estimate_build_tower_memory, estimate_prove_tower_memory, estimate_sumcheck_memory,
 };
 use ff_ext::ExtensionField;
-use gkr_iop::evaluation::EvalExpression;
 use gkr_iop::gpu::{
     BB31Base, GpuBackend,
     gpu_prover::{
@@ -295,35 +295,7 @@ pub fn estimate_main_witness_bytes<E: ExtensionField>(
 ) -> usize {
     let elem_size = std::mem::size_of::<BB31Ext>();
     let record_len = 1usize << num_var_with_rotation;
-
-    // build_main_witness now follows the merged GKR output topology:
-    // each layer_witness call allocates one output MLE per non-zero
-    // EvalExpression::{Single, Linear} entry in out_sel_and_eval_exprs.
-    // Zero outputs are represented by default placeholders and do not allocate.
-    composed_cs
-        .gkr_circuit
-        .as_ref()
-        .map(|gkr_circuit| {
-            let output_mles = gkr_circuit
-                .layers
-                .iter()
-                .map(|layer| {
-                    layer
-                        .out_sel_and_eval_exprs
-                        .iter()
-                        .flat_map(|(_, out_evals)| out_evals.iter())
-                        .filter(|out_eval| {
-                            matches!(
-                                out_eval,
-                                EvalExpression::Single(_) | EvalExpression::Linear(_, _, _)
-                            )
-                        })
-                        .count()
-                })
-                .sum::<usize>();
-            output_mles * record_len * elem_size
-        })
-        .unwrap_or(0)
+    tower_output_count(composed_cs) * record_len * elem_size
 }
 
 pub(crate) fn estimate_main_constraints_bytes<
