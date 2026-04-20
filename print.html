@@ -8,6 +8,16 @@
 
 
         <!-- Custom HTML head -->
+        <script>
+        MathJax = {
+          tex: {
+            inlineMath: [['$', '$']],
+            displayMath: [['$$', '$$']],
+            processEscapes: true
+          }
+        };
+        </script>
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
 
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -36,10 +46,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-7d282987.js";
+            window.path_to_searchindex_js = "searchindex-3b7a2681.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-83df31e6.js"></script>
+        <script src="toc-84d6e1fa.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1214,6 +1224,752 @@ begins executing a task. This reduces peak VRAM usage.</p>
 </div>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="differences-from-risc-v"><a class="header" href="#differences-from-risc-v">Differences from RISC-V</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="technical-overview"><a class="header" href="#technical-overview">Technical Overview</a></h1>
+<p>This section covers the internal design and cryptographic protocols used in Ceno.</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="architecture-overview-1"><a class="header" href="#architecture-overview-1">Architecture Overview</a></h1>
+<h2 id="1-multi-chip-architecture"><a class="header" href="#1-multi-chip-architecture">1. Multi-chip Architecture</a></h2>
+<p>Ceno is structured as a collection of <strong>chips</strong>, each a self-contained
+GKR circuit. A chip’s per-layer constraints are <strong>same-row gates</strong>:
+every gate is a low-degree polynomial identity among witness values at
+the <em>same</em> hypercube index, checked by a per-layer zerocheck. Ceno
+has <strong>no global row-rotation</strong>; multi-step computations are expressed
+in one of two ways:</p>
+<ul>
+<li><strong>Unroll into a single row</strong> — stage every intermediate value as its
+own same-row witness. Works when the step count is small enough to
+fit as extra columns.</li>
+<li><strong><a href="#local-rotation-piop">Local rotation PIOP</a></strong> — the
+only cross-row mechanism. It links round $\mathbf{r}$ to round
+$g(\mathbf{r})$ along a $g$-orbit on $B_m$ (the “next” function
+from HyperPlonk). Used for round-based computations such as
+Keccak-f, where unrolling every round into a single row would be
+prohibitive.</li>
+</ul>
+<p>Chips do not share witnesses directly — they interact through two
+mechanisms that are both reconciled by a single global LogUp tower.</p>
+<p align="center">
+  <img src="images/multi-chip-architecture.svg" alt="Ceno multi-chip architecture" width="720" />
+</p>
+
+<p><strong>1. Shared RAM state (<code>RAMType</code>).</strong> Three logical address spaces are
+exposed to every chip:</p>
+<ul>
+<li><code>GlobalState</code> — VM-wide state such as program counter and cycle
+counter.</li>
+<li><code>Register</code> — RISC-V registers.</li>
+<li><code>Memory</code> — main memory.</li>
+</ul>
+<p>Each access is hashed to an extension-field element by random linear
+combination (RLC) with the <code>RAMType</code> tag folded into the hash, so
+entries from different regions cannot collide. Each chip’s GKR
+circuit <strong>locally accumulates</strong> these hashes into a grand product
+for reads and a grand product for writes:</p>
+<p>$$
+R = \prod_i \mathsf{rlc}(r_i), \qquad W = \prod_j \mathsf{rlc}(w_j),
+$$</p>
+<p>and outputs both as part of the chip proof.</p>
+<p><strong>2. Cross-chip lookups.</strong> A chip that advertises a ROM-style table
+(e.g. the range check chip) can be
+queried by other chips. Each chip’s GKR circuit likewise
+<strong>locally accumulates</strong> its lookup contributions — tables it
+exposes and queries it issues — into a single fractional LogUp sum
+and outputs it as part of the chip proof.</p>
+<p><strong>Reconciliation.</strong> Two parallel mechanisms combine the per-chip
+outputs:</p>
+<ul>
+<li><strong>Shared RAM state</strong> — the verifier checks that the product of every
+chip’s $R$ equals the product of every chip’s $W$. Each chip’s
+$R$ and $W$ are themselves proved correct by the
+<a href="#gkr-protocol-for-grand-product">GKR grand-product PIOP</a> run inside that
+chip’s proof.</li>
+<li><strong>Cross-chip lookups</strong> — the verifier checks that the per-chip
+LogUp fractional sums add up to zero across all chips. Each chip’s
+LogUp sum is itself proved correct by the <strong>GKR LogUp PIOP</strong> run
+inside that chip’s proof.</li>
+</ul>
+<p>Both PIOPs run <em>per-chip</em>, inside each chip’s GKR proof, to establish
+that chip’s $R$, $W$, and LogUp sum. The global reconciliation is
+just a small verifier-side check on the per-chip outputs: $\prod R = \prod W$
+across chips for RAM, and the sum of LogUp fractional sums across
+chips is zero for cross-chip lookups.</p>
+<p>The main benefit of this split is <strong>prover peak memory</strong>: chips can
+be proved one at a time (or in small batches), so peak memory is
+bounded by the largest chip’s witness rather than the sum over all
+chips. Proving every chip simultaneously would hold every witness in memory at once.</p>
+<p>One chip in the diagram — the <strong>shard RAM chip</strong> — is special: it
+participates in the within-shard $\prod R = \prod W$ balance like
+any other chip, but additionally emits a cross-shard EC accumulator
+$\Sigma_{\text{shard}}$ that is reconciled across shards rather
+than inside the shard. Its role is explained in the Segmentation
+section below.</p>
+<h2 id="2-segmentation"><a class="header" href="#2-segmentation">2. Segmentation</a></h2>
+<p>When a VM’s execution trace is too large to fit in a single shard, we
+split it along the cycle axis into multiple shards, each proved
+independently. The proof system must then check that the shards
+compose into a single consistent execution:</p>
+<p align="center">
+  <img src="images/segmentation.svg" alt="Ceno segmentation: sharded proving" width="720" />
+</p>
+
+<ul>
+<li>
+<p><strong>Control-flow continuity.</strong> Each shard exposes its initial and
+final <code>GlobalState</code> (program counter, cycle counter, …) as public
+inputs, and the verifier checks
+$\text{shard}<em>i.\text{end_pc} = \text{shard}</em>{i+1}.\text{init_pc}$
+(and likewise for other <code>GlobalState</code> fields) at every shard
+boundary.</p>
+</li>
+<li>
+<p><strong>Cross-shard memory consistency.</strong> Memory written in shard $i$
+must remain readable in any later shard $j &gt; i$. The within-shard
+RAM grand product $\prod R = \prod W$ cannot be reused across
+shards because each shard’s RLC challenge is sampled from its own
+Fiat-Shamir transcript, so per-shard products live in different
+random-hash scalings and cannot be combined.</p>
+<p>The underlying idea is a <strong>homomorphic multiset digest</strong>: a map
+$H$ from multisets of memory records into an abelian group
+$(G, +)$ that is a monoid homomorphism —
+$H(S_1 \uplus S_2) = H(S_1) + H(S_2)$ and $H(\emptyset) = 0$
+(the group identity). Homomorphism is what lets a global digest
+be assembled from per-shard digests by simple group addition,
+with no shared challenge. If $H$ is chosen so that a matched
+(write, later-read) pair digests to $0$, every matched pair
+cancels, and consistency across shards reduces to checking that
+the digest of the full cross-shard multiset equals $0$ — i.e. the
+digest of the empty multiset.</p>
+<p>The standard recipe is to pick a per-record hash
+$h : \text{records} \to G$ and define
+$H(S) := \sum_{r \in S} h(r)$; homomorphism is then automatic.
+Ceno takes $G$ to be a short-Weierstrass curve $E$ over the
+septic extension $\mathbb{F}_{q^7}$, with $h$ a deterministic
+hash-to-curve: the $x$-coordinate is a Poseidon2 hash of
+$(\text{addr}, \text{ram_type}, \text{value}, \text{shard}, \text{global_clk})$,
+and the sign of $y$ encodes read vs write (writes take
+$y \in [p/2, p)$, reads take $y \in [0, p/2)$). A write and its
+matching future read hash to the same $x$ with opposite $y$, so
+they are additive inverses on $E$ and cancel under EC addition.
+Soundness rests on collision-resistance of Poseidon2 in the
+$x$-coordinate — two unrelated records shouldn’t accidentally
+hash to $\pm$ the same point. This EC-based cross-shard
+multiset-hash design is adapted from
+<a href="https://github.com/succinctlabs/sp1">SP1</a>, which introduced it
+for cross-shard memory consistency in its zkVM.</p>
+<p>A dedicated <strong>shard RAM chip</strong> inside each shard’s proof ties
+the two layers together: for every memory read whose matching
+write lives in an earlier shard, it inserts a compensating local
+write (so the local RLC grand product still balances) and emits
+the corresponding EC point into the shard’s cross-shard
+accumulator $\Sigma_{\text{shard}}$; symmetrically for writes that
+will be read in a later shard. The
+<a href="#ec-sum-quark-piop">EC-sum Quark PIOP</a> runs <em>inside</em>
+each shard’s proof to establish that $\Sigma_{\text{shard}}$
+equals the sum of those per-record EC points. The verifier then
+just EC-adds the per-shard $\Sigma_{\text{shard}}$ values and
+checks
+$\sum_{\text{shard}} \Sigma_{\text{shard}} = \mathcal{O}$
+(the point at infinity) directly. The number of shards is at most
+in the hundreds, so this is a few hundred EC additions.</p>
+</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="prover-workflow"><a class="header" href="#prover-workflow">Prover Workflow</a></h1>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="optimizations"><a class="header" href="#optimizations">Optimizations</a></h1>
+<h2 id="distributed-sumcheck"><a class="header" href="#distributed-sumcheck">Distributed Sumcheck</a></h2>
+<p>TODO</p>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="appendix"><a class="header" href="#appendix">Appendix</a></h1>
+<p>Ceno’s GKR layers invoke several sub-PIOPs, each checking a specific
+structural constraint with its own sumcheck. The table below summarises
+the sub-PIOPs currently documented, with links to the full notes.</p>
+<div class="table-wrapper">
+<table>
+<thead>
+<tr><th>PIOP</th><th>Purpose</th><th>Sumcheck instances</th><th>Opening points per committed MLE</th></tr>
+</thead>
+<tbody>
+<tr><td><a href="#gkr-protocol-for-grand-product">GKR for Grand Product</a></td><td>Grand product $\prod_i a_i$ of $N = 2^d$ inputs</td><td>$d - 1$</td><td>Input MLE $a$ at a single point $z \in B_d$</td></tr>
+<tr><td><a href="#local-rotation-piop">Local Rotation PIOP</a></td><td>Round-to-round state transition for round-based computations (e.g. Keccak-f)</td><td>$1$</td><td>Each $f_j$ at three points $(\mathbf{s}_r, \mathbf{s}_i), (\mathbf{p}_0, \mathbf{s}_i), (\mathbf{p}_1, \mathbf{s}_i) \in B_m \times B_n$</td></tr>
+<tr><td><a href="#ec-sum-quark-piop">EC-Sum Quark PIOP</a></td><td>Sum $\sum_i P_i$ of EC points on a short-Weierstrass curve</td><td>$1$</td><td>$x, y$ at $(\mathbf{r}, 0), (\mathbf{r}, 1), (1, \mathbf{r}) \in B_{n+1}$;  $s$ at $(1, \mathbf{r})$</td></tr>
+</tbody>
+</table>
+</div>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="gkr-protocol-for-grand-product"><a href="#gkr-protocol-for-grand-product" class="header">GKR Protocol for Grand Product</a></h1>
+<h2 id="1-gkr-protocol-for-grand-product"><a class="header" href="#1-gkr-protocol-for-grand-product">1. GKR Protocol for Grand Product</a></h2>
+<p>In Ceno, grand product checks (used for offline memory checking, permutation arguments, etc.)
+require computing a product of the form $\prod_{i} a_i$. We use a <strong>complete binary tree of
+multiplication gates</strong> — called a <strong>tower tree</strong> — and verify its computation via the
+<a href="https://people.cs.georgetown.edu/jthaler/GKRNote.pdf">GKR protocol</a>, following the approach of
+<a href="#thaler13">[Thaler13, Section 5.3.1]</a>.</p>
+<h3 id="the-tree-structure"><a class="header" href="#the-tree-structure">The Tree Structure</a></h3>
+<p>A tower tree of height $d$ takes $n = 2^d$ inputs and produces a 2-tuple output. The tree
+has $d$ layers:</p>
+<ul>
+<li><strong>Layer $d$</strong> (bottom): the $n$ input values $a_0, a_1, \ldots, a_{n-1}$.</li>
+<li><strong>Layer $i$</strong> ($1 &lt; i &lt; d$): each gate $p$ multiplies its two children at layer $i+1$.</li>
+<li><strong>Layer 1</strong> (top): two gates outputting $(b_0, b_1)$ where
+$b_0 = \prod_{i=0}^{n/2-1} a_i$ and $b_1 = \prod_{i=n/2}^{n-1} a_i$.</li>
+</ul>
+<p>The wiring is natural: gate $p$ at layer $i$ has left child $(p, 0)$ and right child
+$(p, 1)$ at layer $i+1$. Equivalently, the children of gate $p$ are gates $2p$ and
+$2p+1$. Every gate computes:</p>
+<p>$$
+V_i(p) = \tilde{V}_{i+1}(p, 0) \cdot \tilde{V}_{i+1}(p, 1)
+$$</p>
+<p>The following diagram shows a height-3 tower tree with 8 inputs, outputting
+$(b_0, b_1) = (a_0 \cdots a_3,; a_4 \cdots a_7)$:</p>
+<p align="center">
+  <img src="images/tower-tree.svg" alt="Tower tree with height 3" width="720" />
+</p>
+
+<h3 id="applying-the-gkr-protocol"><a class="header" href="#applying-the-gkr-protocol">Applying the GKR Protocol</a></h3>
+<p>The GKR protocol verifies the computation layer by layer, from the top down to the inputs.
+At each layer, the verifier holds a claim about the multilinear extension $\tilde{V}_i(w)$
+for some random point $w$, and reduces it to a claim about $\tilde{V}_{i+1}(\omega)$ via
+a sumcheck invocation.</p>
+<p><strong>Claim reduction at each layer.</strong> Suppose the verifier holds a claim
+$\tilde{V}_i(w) = c$ for some random point $w$. Since every gate at layer $i$
+multiplies its two children at layer $i+1$, the multilinear extension satisfies:</p>
+<p>$$
+\tilde{V}_i(w) = \sum_{b \in \{0,1\}^{s_i}} \textrm{eq}(w, b) \cdot \tilde{V}_{i+1}(b, 0) \cdot \tilde{V}_{i+1}(b, 1)
+$$</p>
+<p>where $\tilde{V}_i$ and $\tilde{V}_{i+1}$ are the multilinear extensions of the gate values
+at layers $i$ and $i+1$ respectively, and
+$\textrm{eq}(w, b) = \prod_{k=1}^{s_i}(w_k b_k + (1 - w_k)(1 - b_k))$ is the multilinear
+extension of the equality function (equals 1 when $b = w$ on Boolean inputs).</p>
+<p>The verifier reduces this claim by running the <strong>sumcheck protocol</strong> on the right-hand side. The
+summand $\textrm{eq}(w, b) \cdot \tilde{V}_{i+1}(b, 0) \cdot \tilde{V}_{i+1}(b, 1)$
+has <strong>degree 3</strong> in each variable of $b$ (one degree from $\textrm{eq}$, one from each
+$\tilde{V}_{i+1}$ factor). Therefore, each round of the sumcheck protocol requires the prover
+to send <strong>4 field elements</strong>.</p>
+<p><strong>Full protocol flow (height-3 example):</strong></p>
+<ol>
+<li><strong>Start:</strong> The verifier has the claimed output $(b_0, b_1)$ and constructs a claim
+$\tilde{V}_1(w) = c$ at a random point $w$.</li>
+<li><strong>Layer 1 sumcheck:</strong> Run sumcheck on
+$\sum_{b} \textrm{eq}(w, b) \cdot \tilde{V}_2(b, 0) \cdot \tilde{V}_2(b, 1)$.
+This reduces the claim to evaluations of $\tilde{V}_2$, which the verifier combines into a
+single claim $\tilde{V}_2(w’) = c’$ at a new random point $w’$.</li>
+<li><strong>Layer 2 sumcheck:</strong> Run sumcheck on
+$\sum_{b} \textrm{eq}(w’, b) \cdot \tilde{V}_3(b, 0) \cdot \tilde{V}_3(b, 1)$.
+This reduces to a claim about $\tilde{V}_3$, i.e., an evaluation of the input multilinear
+polynomial $a(x)$ (with 3 variables) at a point $z$. The validity of $(b_0, b_1)$
+is thus reduced to verifying a single evaluation/opening $a(z) = v$.</li>
+</ol>
+<h3 id="tower-trees-in-ceno"><a class="header" href="#tower-trees-in-ceno">Tower trees in Ceno</a></h3>
+<p>In Ceno, tower trees are the backbone of <strong>offline memory checking</strong>: every memory read/write is verified by computing a grand product via a tower tree, and the GKR protocol proves this computation correct with a linear-time prover and a logarithmic-time verifier.</p>
+<h3 id="references"><a class="header" href="#references">References</a></h3>
+<ul>
+<li><a id="thaler13"></a> Justin Thaler. <em>Time-Optimal Interactive Proofs for Circuit Evaluation</em>. 2013.
+Section 5.3.1: “The Polynomial for a Binary Tree”.
+Available at: <a href="https://eprint.iacr.org/2013/351.pdf">https://eprint.iacr.org/2013/351.pdf</a></li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="local-rotation-piop"><a href="#local-rotation-piop" class="header">Local Rotation PIOP</a></h1>
+<h2 id="2-local-rotation-piop"><a class="header" href="#2-local-rotation-piop">2. Local Rotation PIOP</a></h2>
+<p>This note documents the <strong>local rotation PIOP</strong> implemented in Ceno, used to
+constrain two consecutive rounds of a round-based computation (e.g. the
+Keccak-f permutation underlying SHA-3) inside a single GKR layer.</p>
+<h4 id="why-this-piop-exists"><a class="header" href="#why-this-piop-exists">Why this PIOP exists</a></h4>
+<p>A round-based computation like Keccak-f passes state from round $r$ into
+round $r+1$: a proof must enforce this hand-off for every consecutive pair.
+The straightforward approach — <strong>unroll each round into its own row</strong> per
+instance — scales linearly in $T$: $6$ witness polynomials and $6$ zero
+constraints for the $T = 3$ squaring example below, $48$ and $48$ for Keccak.</p>
+<p>The local rotation PIOP avoids that blow-up. Pack all $T$ rounds into
+multilinear polynomials $f_j(\mathbf{r}, \mathbf{i})$, with $\mathbf{r}$
+indexing rounds along the $g$-orbit and $\mathbf{i}$ indexing instances.
+Then “next round” on indices becomes $\mathbf{r} \mapsto g(\mathbf{r})$, and
+each hand-off collapses to a single sumcheck-checkable constraint — one
+commitment per witness, no duplication across rounds.</p>
+<h4 id="the-local-rotation-constraint"><a class="header" href="#the-local-rotation-constraint">The local rotation constraint</a></h4>
+<p>Given round witnesses $f_1, \ldots, f_w$, write
+$f_j’(\mathbf{r}, \mathbf{i}) := f_j\bigl(g(\mathbf{r}),, \mathbf{i}\bigr)$
+for the “next-round shift” of $f_j$. The local rotation PIOP enforces a
+per-instance algebraic relation linking adjacent rounds, of the form</p>
+<p>$$
+0 = C\bigl(f_1(\mathbf{r}, \mathbf{i}), \ldots, f_w(\mathbf{r}, \mathbf{i}); f_1’(\mathbf{r}, \mathbf{i}), \ldots, f_w’(\mathbf{r}, \mathbf{i})\bigr),
+\qquad \forall \quad (\mathbf{r}, \mathbf{i}) \in B_m \times B_n \tag{1}
+$$</p>
+<p>where $C$ is a low-degree polynomial expressing the round-transition gate.</p>
+<p><strong>Example.</strong> Suppose each round takes an input, squares it, and feeds the
+square into the next round. Let $f(\mathbf{r}, \mathbf{i})$ hold the round-$\mathbf{r}$
+input and $h(\mathbf{r}, \mathbf{i})$ the squared intermediate. The
+round-transition gate is then expressed by two constraints:</p>
+<p>$$
+0 = h(\mathbf{r}, \mathbf{i}) - f(\mathbf{r}, \mathbf{i})^2, \qquad
+0 = h(\mathbf{r}, \mathbf{i}) - f\bigl(g(\mathbf{r}),\mathbf{i}\bigr). \tag{2}
+$$</p>
+<p>The first is a purely local algebraic relation at round $\mathbf{r}$. The
+second is the actual <strong>hand-off</strong>: it says $h$ at round $\mathbf{r}$ equals
+$f$ at the <em>next</em> round $g(\mathbf{r})$.</p>
+<p>Pictorially, take the smallest non-trivial case: $m = 2$ with primitive
+polynomial $p_2(X) = X^2 + X + 1$. The $g$-orbit has length $2^2 - 1 = 3$
+and cycles $(1, 0) \to (0, 1) \to (1, 1) \to (1, 0) \to \cdots$, so $T = 3$
+rounds indexed by these three hypercube points. Solid arrows are the local
+squaring constraint, dashed arrows are the transition from $h$ at round
+$\mathbf{r}$ to $f$ at round $g(\mathbf{r})$:</p>
+<p align="center">
+  <img src="images/local-rotation-squaring.svg" alt="Four rounds of squaring with hand-off" width="560" />
+</p>
+
+<h4 id="outline"><a class="header" href="#outline">Outline</a></h4>
+<p>The note is organised in three sections:</p>
+<ol>
+<li><strong>The <code>next</code> function $g: B_m \to B_m$</strong> — a bijection (permutation) with
+orbit of length $2^m - 1$ on the nonzero hypercube, borrowed from the
+HyperPlonk Lookup PIOP <a href="#hyperplonk">[HyperPlonk §3.7]</a>.</li>
+<li><strong>Algebraic simplicity of $f \circ g$</strong> — why composing a multilinear
+polynomial $f$ with $g$ does not blow up its degree, thanks to HyperPlonk’s
+linearization trick.</li>
+<li><strong>Local rotation PIOP</strong> — how the per-round constraint above is
+enforced by a single selector-gated zerocheck over $B_m \times B_n$,
+reducing to two rotation-point openings of each $f_j$.</li>
+</ol>
+<h3 id="1-the-next-function-g"><a class="header" href="#1-the-next-function-g">1. The <code>next</code> function $g$</a></h3>
+<h4 id="the-key-move-endow-b_m-with-field-structure"><a class="header" href="#the-key-move-endow-b_m-with-field-structure">The key move: endow $B_m$ with field structure</a></h4>
+<p><strong>As a bare set, the Boolean hypercube $B_m = \{0,1\}^m$ carries no algebraic
+structure</strong> — bit-tuples cannot be “added” or “multiplied”. To define a map
+$g: B_m \to B_m$ with good properties (bijective, long orbit, low-degree
+arithmetisation) we first <em>put</em> structure on $B_m$ by identifying it with the
+finite field $\mathbb{F}_{2^m}$:</p>
+<p>$$
+\underbrace{B_m}_{\text{bare set}} \cong \underbrace{\mathbb{F}_2^m}_{\mathbb{F}_2\text{-vector space}} \cong \underbrace{\mathbb{F}_2[X]/(p_m)}_{\text{polynomial ring}} \cong \underbrace{\mathbb{F}_{2^m}}_{\text{field}}.
+$$</p>
+<p>Concretely:</p>
+<ol>
+<li><strong>$B_m \leftrightarrow \mathbb{F}_2^m$</strong> (as $\mathbb{F}_2$-vector spaces):
+interpret a bit-tuple as a vector over $\mathbb{F}_2 = \{0, 1\}$, with
+bitwise XOR as addition and componentwise scalar multiplication.</li>
+<li><strong>$\mathbb{F}_2^m \leftrightarrow \mathbb{F}_2[X]/(p_m)$</strong> (as
+$\mathbb{F}_2$-vector spaces): identify
+$\mathbf{b} = (b_1, \ldots, b_m) \mapsto f_\mathbf{b}(X) := b_1 + b_2 X + \cdots + b_m X^{m-1}$.</li>
+<li><strong>$\mathbb{F}_2[X]/(p_m) \cong \mathbb{F}_{2^m}$</strong> (as fields): the
+quotient is a field iff $p_m$ is irreducible; when moreover $p_m$ is
+<em>primitive</em>, the element $X$ is a generator of the cyclic multiplicative
+group $\mathbb{F}_{2^m}^\times$.</li>
+</ol>
+<p>Once this identification is fixed, $B_m$ inherits the full field structure of
+$\mathbb{F}_{2^m}$ — in particular a multiplication — and we can do arithmetic
+on hypercube points.</p>
+<h4 id="choosing-a-primitive-polynomial"><a class="header" href="#choosing-a-primitive-polynomial">Choosing a primitive polynomial</a></h4>
+<p>Fix a <strong>primitive polynomial</strong> $p_m(X) \in \mathbb{F}_2[X]$ of degree $m$:</p>
+<p>$$
+p_m(X) = X^m + \sum_{s \in S} X^s + 1, \qquad S \subseteq [m-1].
+$$</p>
+<p>Recall $p_m$ is <em>primitive</em> iff it is irreducible and $X$ generates
+$\mathbb{F}_{2^m}^\times$ in the quotient field $\mathbb{F}_2[X]/(p_m)$.
+Primitive polynomials of every degree exist (e.g. $p_5 = X^5 + X^2 + 1$,
+$p_6 = X^6 + X + 1$). Under the identification
+$B_m \leftrightarrow \mathbb{F}_{2^m}$, the origin $0^m \in B_m$ is the field
+zero, and $B_m \setminus \{0^m\} \leftrightarrow \mathbb{F}_{2^m}^\times$.</p>
+<h4 id="defining-g-via-multiplication-by-x"><a class="header" href="#defining-g-via-multiplication-by-x">Defining $g$ via multiplication by $X$</a></h4>
+<p>Take $g: B_m \to B_m$ to be multiplication by $X$ in $\mathbb{F}_{2^m}$:</p>
+<p>$$
+g(\mathbf{b}) := \text{coeff. vector of } X \cdot f_\mathbf{b}(X) \bmod p_m.
+$$</p>
+<p>By primitivity of $p_m$, $g$ fixes $0^m$ and cycles $B_m \setminus \{0^m\}$
+with period $2^m - 1$.</p>
+<h4 id="a-very-simple-algebraic-formula"><a class="header" href="#a-very-simple-algebraic-formula">A very simple algebraic formula</a></h4>
+<p>The punchline: although we invoked field theory to define $g$, the resulting
+map has an elementary closed form. Writing
+$\mathbf{b} = (b_0, b_1, \ldots, b_{m-1})$,</p>
+<p>$$
+\boxed{g(b_0, b_1, \ldots, b_{m-1}) = (b_{m-1}, b_0’, b_1’,\ldots), \quad b_i’ = \begin{cases} b_i \oplus b_{m-1}, &amp; i \in S, \\ b_i, &amp; i \notin S. \end{cases} } \tag{3}
+$$</p>
+<p>That is: <strong>cyclically shift right by one position</strong> (so $b_{m-1}$ wraps around
+to slot $0$), then <strong>XOR $b_{m-1}$ into every slot indexed by $S$</strong>. The
+wrap-around XOR is exactly what picking up the reduction $X^m \equiv
+\sum_{s \in S} X^s + 1 \pmod{p_m}$ contributes. Each output coordinate is thus
+the XOR of <strong>at most two input bits</strong> — a structural fact we exploit in
+Section 2.</p>
+<h3 id="2-algebraic-simplicity-of-f-circ-g"><a class="header" href="#2-algebraic-simplicity-of-f-circ-g">2. Algebraic simplicity of $f \circ g$</a></h3>
+<p>Having $g$ permute the hypercube is not enough — we need $f \circ g$ to be
+representable as a low-degree polynomial for sumcheck-based PIOPs.</p>
+<h4 id="the-obstruction"><a class="header" href="#the-obstruction">The obstruction</a></h4>
+<p>Although $g$ looks $\mathbb{F}_2$-linear (cyclic shift + XOR), sumcheck does
+not run over $\mathbb{F}_2$: the prover evaluates polynomials at random points
+$\mathbf{r}$ in an extension field $\mathbb{F}$, where each $r_i$ is an
+arbitrary field element. Extended to $\mathbb{F}$, the Boolean XOR has
+multilinear extension $b \oplus b’ \mapsto b + b’ - 2 b b’$ — <strong>quadratic</strong>,
+not linear. Naively substituting $\mathbf{x} \mapsto g(\mathbf{x})$ into a
+multilinear $f$ therefore yields a polynomial of individual degree up to $2$,
+and iterating $g$ compounds the blow-up. (This is why the HyperPlonk paper
+calls $g$ a “quadratic generator”.)</p>
+<h4 id="the-linearization-trick-hyperplonk-lemma-39"><a class="header" href="#the-linearization-trick-hyperplonk-lemma-39">The linearization trick (HyperPlonk, Lemma 3.9)</a></h4>
+<p>Instead of forming $f(g(\mathbf{X}))$ symbolically, define</p>
+<p>$$
+f_{\Delta_m}(X_1, \ldots, X_m) := X_m \cdot f\bigl(\underbrace{1,, X_1’, \ldots, X_{m-1}’}_{\text{rotation point } \mathbf{p}_1}\bigr) + (1 - X_m) \cdot f\bigl(\underbrace{0,, X_1, \ldots, X_{m-1}}_{\text{rotation point } \mathbf{p}_0}\bigr), \tag{4}
+$$</p>
+<p>where $X_i’ := 1 - X_i$ if $i \in S$ and $X_i’ := X_i$ otherwise.</p>
+<p><strong>Lemma (<a href="#hyperplonk">[HyperPlonk, Lemma 3.9]</a>).</strong> For every polynomial
+$f$ of individual degree $d$,</p>
+<p>$$
+f_{\Delta_m}(\mathbf{x}) = f(g(\mathbf{x})) \qquad \forall, \mathbf{x} \in B_m,
+$$</p>
+<p>and $f_{\Delta_m}$ still has individual degree $d$. Moreover
+$f_{\Delta_m}(\mathbf{r})$ at any field point $\mathbf{r}$ is determined by
+<strong>two</strong> evaluations of $f$.</p>
+<p><strong>What this buys us.</strong> If $f$ is multilinear ($d = 1$), so is
+$f_{\Delta_m}$. The map $f \mapsto f_{\Delta_m}$ is the algebraic stand-in
+for $f \circ g$ inside a sumcheck: it preserves individual degree, and the
+verifier can turn a claim about $f_{\Delta_m}(\mathbf{r})$ into two claims
+about $f$ at the two <strong>rotation points</strong> $\mathbf{p}_0, \mathbf{p}_1$
+highlighted in (4) — used in Section 3.</p>
+<h3 id="3-local-rotation-piop"><a class="header" href="#3-local-rotation-piop">3. Local rotation PIOP</a></h3>
+<p>Fix $m$ so the number of rounds $T$ fits in one $g$-orbit
+($T \leq 2^m - 1$) and let $n$ index $2^n$ instances, so each witness is a
+multilinear polynomial $f_j: B_m \times B_n \to \mathbb{F}$. Because $g$ fixes $0^m$
+and cycles the remaining $2^m - 1$ points, the constraint must be enforced
+only on the $T$ points of $B_m$ representing real rounds. Introduce a
+precomputed <strong>rotation selector</strong> $\mathrm{sel}$ that
+vanishes off of those $T$ rounds on the $\mathbf{r}$-coordinate. The
+constraint is checked by a standard zerocheck: the verifier samples a
+random challenge $(\mathbf{z}_r, \mathbf{z}_i) \in \mathbb{F}^m \times \mathbb{F}^n$
+and runs sumcheck on</p>
+<p>$$
+0 = \sum_{(\mathbf{r}, \mathbf{i}) \in B_m \times B_n} \mathrm{sel}_{\mathbf{z}_r, \mathbf{z}_i}(\mathbf{r}, \mathbf{i}) \cdot C\bigl(f_1(\mathbf{r}, \mathbf{i}), \ldots, f_w(\mathbf{r}, \mathbf{i}), f_1’(\mathbf{r}, \mathbf{i}), \ldots, f_w’(\mathbf{r}, \mathbf{i})\bigr), \tag{5}
+$$</p>
+<p>where $\mathrm{sel}_{\mathbf{z}_r, \mathbf{z}_i}(\mathbf{r}, \mathbf{i}) := \mathrm{eq}\bigl((\mathbf{z}_r, \mathbf{z}_i), (\mathbf{r}, \mathbf{i})\bigr) \cdot \mathrm{sel}(\mathbf{r}, \mathbf{i})$
+is the challenge-parametrised selector.</p>
+<p>The sumcheck itself draws fresh random challenges $(\mathbf{s}_r, \mathbf{s}_i) \in \mathbb{F}^m \times \mathbb{F}^n$
+round by round and reduces (5) to claimed evaluations of the $f_j$ and
+$f_j’$ at this post-sumcheck point:</p>
+<p>$$
+f_j(\mathbf{s}_r, \mathbf{s}_i) \quad \text{and} \quad f_j’(\mathbf{s}_r, \mathbf{s}_i) \qquad j = 1, \ldots, w.
+$$</p>
+<p>The first batch is opened directly against the committed $f_j$. For the
+second, Section 2 delivers the key reduction: since $f_j’ = f_j \circ g$
+(with $g$ acting on the $\mathbf{r}$-coordinate only), the linearization
+lemma tells us that $f_j’(\mathbf{s}_r, \mathbf{s}_i)$ is determined by
+evaluating $f_j$ at the two <strong>rotation points</strong> $\mathbf{p}_0, \mathbf{p}_1$
+of (4) — specialised to $\mathbf{X} = \mathbf{s}_r$ — each paired with the
+same $\mathbf{s}_i$. No separate commitment to $f_j’$ is needed.</p>
+<p>In total, the PIOP needs to open each committed witness $f_j$ at exactly
+<strong>three</strong> points:</p>
+<p>$$
+\boxed{(\mathbf{s}_r, \mathbf{s}_i), \qquad (\mathbf{p}_0, \mathbf{s}_i), \qquad (\mathbf{p}_1, \mathbf{s}_i)} \tag{6}
+$$</p>
+<p>— the post-sumcheck point itself, plus the two rotation points induced by
+$\mathbf{s}_r$ via (4).</p>
+<h3 id="references-1"><a class="header" href="#references-1">References</a></h3>
+<ul>
+<li><a id="hyperplonk"></a> Chen, Bünz, Boneh, Zhang. <em>HyperPlonk: Plonk with Linear-Time Prover and High-Degree Custom Gates</em>, §3.7 (Lookup PIOP), Lemma 3.8 (permutation property), and Lemma 3.9 (linearization). 2023.
+Available at: <a href="https://eprint.iacr.org/2022/1355.pdf">https://eprint.iacr.org/2022/1355.pdf</a></li>
+<li>Lidl &amp; Niederreiter, <em>Introduction to Finite Fields and Their Applications</em>, chapters on irreducible and primitive polynomials and the cyclic structure of $\mathbb{F}_{q^n}^\times$.</li>
+</ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="ec-sum-quark-piop"><a href="#ec-sum-quark-piop" class="header">EC-Sum Quark PIOP</a></h1>
+<h2 id="3-ec-sum-quark-piop"><a class="header" href="#3-ec-sum-quark-piop">3. EC-Sum Quark PIOP</a></h2>
+<p>This note documents the <strong>EC-sum Quark PIOP</strong> implemented in Ceno, used to
+accumulate $N$ elliptic-curve points on a short-Weierstrass curve
+$y^2 = x^3 + ax + b$ into a single sum</p>
+<p>$$
+Q = P_0 + P_1 + \cdots + P_{N-1}, \qquad P_i \in E(\mathbb{F}_{q^7}), \tag{1}
+$$</p>
+<p>inside a single GKR layer. Each point’s affine coordinates live in
+the septic extension $\mathbb{F}_{q^7}$, so every extension-field
+MLE below corresponds to $7$ base-field MLEs and every algebraic
+relation expands into $7$ base-field scalar relations (one per
+$\mathbb{F}_q$-basis component). For brevity we work at the
+coordinate / extension-field level throughout.</p>
+<h4 id="why-this-piop-exists-1"><a class="header" href="#why-this-piop-exists-1">Why this PIOP exists</a></h4>
+<p>The textbook way to prove a sum of $N$ values is a <strong>binary accumulation
+tree</strong>: pair leaves into $N/2$ partial sums, pair those into $N/4$, and
+so on, with $\log_2 N$ layers. Implemented as a tower-style GKR circuit,
+the intermediate layer values are <em>derived</em> — not committed — but the
+protocol pays for one <strong>sumcheck instance per layer</strong> to reduce a claim
+at layer $k$ to a claim at layer $k+1$:</p>
+<blockquote>
+<p>Toy: $N = 4$ ($\log_2 N = 2$ layers) ⇒ $2$ sumcheck instances.</p>
+<p>Real: $N = 2^{20}$ ⇒ $20$ sumcheck instances.</p>
+</blockquote>
+<p>The Quark method (Setty–Lee <a href="#quark">[Quark]</a>) collapses the tower into a
+<strong>single</strong> MLE identity (condition (ii) below) and discharges the whole
+tree with <strong>one</strong> sumcheck over a domain of size $2N$, regardless of
+depth.</p>
+<h4 id="the-quark-encoding"><a class="header" href="#the-quark-encoding">The Quark encoding</a></h4>
+<p>Pack the entire accumulation tree — leaves <em>and</em> every intermediate
+partial sum — into one EC-point-valued multilinear extension
+$v: B_{n+1} \to E(\mathbb{F}_{q^7})$ by imposing three structural
+conditions:</p>
+<p>$$
+\begin{aligned}
+\text{(i)} \quad &amp; v(0, \mathbf{b}) = P_{\mathbf{b}}, &amp;&amp; \forall \quad \mathbf{b} \in B_n, \\
+\text{(ii)} \quad &amp; v(1, \mathbf{b}) = v(\mathbf{b}, 0) \oplus v(\mathbf{b}, 1), &amp;&amp; \forall \quad \mathbf{b} \in B_n \setminus \{(1, \ldots, 1)\}, \\
+\text{(iii)} \quad &amp; v(1, 1, \ldots, 1) \text{ is unconstrained.} &amp;&amp;
+\end{aligned}
+\tag{2}
+$$</p>
+<p>Here $\oplus$ is elliptic-curve addition and $P_{\mathbf{b}}$
+is the input point at the leaf address $\mathbf{b}$. Condition (ii) is
+<strong>self-referential</strong>: its right-hand side looks up $v$ at two addresses
+$(\mathbf{b}, 0)$ and $(\mathbf{b}, 1)$ that are themselves either leaves
+(if the leading bit of $\mathbf{b}$ is $0$) or interior nodes (if it is
+$1$). The recursion is well-founded: unrolling (ii) downward from the
+root address $(1, 1, \ldots, 1, 0)$ decomposes $Q$ into the full binary
+accumulation tree over the leaves prescribed by (i). The cell
+$v(1, 1, \ldots, 1)$ is left free because forcing condition (ii) there
+would collapse the root to the identity.</p>
+<p>The accumulated sum $Q$ sits at the <strong>root address</strong></p>
+<p>$$
+Q = v(1, 1, \ldots, 1, 0). \tag{3}
+$$</p>
+<p><strong>Example ($N = 4$).</strong> With $n = 2$, $v$ has $3$ Boolean variables
+$(c, b_1, b_2)$ and $2^{n+1} = 8$ cells. Four cells at $c = 0$ hold the
+inputs; four cells at $c = 1$ hold interior partial sums, with one cell
+unconstrained:</p>
+<p align="center">
+  <img src="images/ec-sum-quark-tree.svg" alt="Quark tree encoding for N=4" width="640" />
+</p>
+
+<h4 id="outline-1"><a class="header" href="#outline-1">Outline</a></h4>
+<p>The note is organised in four sections:</p>
+<ol>
+<li><strong>Quark MLE encoding</strong> — how condition (ii) fits an entire binary
+accumulation tree into one polynomial.</li>
+<li><strong>Affine EC addition as polynomial constraints</strong> — $\oplus$ involves a
+division, so we commit a <strong>slope hint</strong> and replace the rational
+formula with three polynomial zerocheck constraints.</li>
+<li><strong>The PIOP (power-of-two $N$)</strong> — a single selector-gated zerocheck
+over $B_n$ that enforces all three Quark conditions plus the
+root-output binding, and reduces to $7$ opening claims on the three
+committed MLEs.</li>
+<li><strong>General $N$</strong> — extend the selector family to handle the case
+where $N$ is not a power of two, by splitting interior nodes into
+<em>add</em> and <em>bypass</em> classes.</li>
+</ol>
+<h3 id="1-quark-mle-encoding"><a class="header" href="#1-quark-mle-encoding">1. Quark MLE encoding</a></h3>
+<h4 id="why-packing-the-tree-into-one-mle-is-non-trivial"><a class="header" href="#why-packing-the-tree-into-one-mle-is-non-trivial">Why packing the tree into one MLE is non-trivial</a></h4>
+<p>A naïve binary-tree GKR proof keeps each layer as a <em>separate</em>
+(implicit) polynomial and links adjacent layers via one sumcheck
+instance each — so the number of sumcheck PIOP invocations scales
+as $\log_2 N$.</p>
+<p>Quark’s observation is that a <em>single</em> polynomial $v$ over $B_{n+1}$ has
+exactly enough addresses — $2^{n+1} = 2N$ — to store $N$ leaves <strong>plus</strong>
+$N - 1$ interior nodes, with one cell to spare. The question is whether
+the inter-layer wiring can be recast as a constraint internal to $v$,
+so that one sumcheck over $v$ discharges all $\log_2 N$ layer
+reductions at once.</p>
+<h4 id="why-the-self-reference-in-ii-is-well-defined"><a class="header" href="#why-the-self-reference-in-ii-is-well-defined">Why the self-reference in (ii) is well-defined</a></h4>
+<p>Condition (ii) reads off two cells of $v$ and sets a third cell of $v$.
+On the Boolean hypercube this is not circular: at $\mathbf{b}$ with
+leading bit $0$, both right-hand-side cells are leaves (prescribed by
+(i)); at $\mathbf{b}$ with leading bit $1$, both right-hand-side cells
+are interior nodes whose addresses are strictly smaller (in the
+natural big-endian ordering) than $(1, \mathbf{b})$. A topological
+sort exists, so $v$ is determined layer-by-layer from leaves upward —
+even though the constraint itself is stated uniformly over all of
+$B_n \setminus \{(1, \ldots, 1)\}$.</p>
+<h4 id="what-quark-buys"><a class="header" href="#what-quark-buys">What Quark buys</a></h4>
+<p>After this repackaging, the entire accumulation is captured by two
+coordinate MLEs $x, y: B_{n+1} \to \mathbb{F}_{q^7}$ — one committed
+polynomial per coordinate, regardless of $N$. Section 3 adds a third
+MLE $s$ for the slope hints introduced below; in total <strong>three</strong>
+committed witness MLEs per EC-sum instance.</p>
+<h3 id="2-affine-ec-addition-as-polynomial-constraints"><a class="header" href="#2-affine-ec-addition-as-polynomial-constraints">2. Affine EC addition as polynomial constraints</a></h3>
+<h4 id="the-division-obstruction"><a class="header" href="#the-division-obstruction">The division obstruction</a></h4>
+<p>On a short-Weierstrass curve $y^2 = x^3 + ax + b$, two distinct affine
+points $P_0 = (x_0, y_0)$ and $P_1 = (x_1, y_1)$ sum to a parent
+point $P_{\mathrm{p}} = (x_{\mathrm{p}}, y_{\mathrm{p}})$ given by</p>
+<p>$$
+\lambda = \frac{y_0 - y_1}{x_0 - x_1}, \qquad
+x_{\mathrm{p}} = \lambda^2 - x_0 - x_1, \qquad
+y_{\mathrm{p}} = \lambda \cdot (x_0 - x_{\mathrm{p}}) - y_0. \tag{4}
+$$</p>
+<p>The division obstructs a direct polynomial encoding. A PIOP constraint
+$C(\cdot) = 0$ must be a polynomial in its witness arguments, so $\lambda$
+cannot be expressed in-line.</p>
+<h4 id="the-slope-hint-trick"><a class="header" href="#the-slope-hint-trick">The slope-hint trick</a></h4>
+<p>Commit an extra witness $s$ that <strong>claims</strong> to be the slope $\lambda$
+at every interior-node addition. Once $s$ is a committed polynomial, the
+rational relations in (4) rewrite as three low-degree zerocheck
+constraints per node:</p>
+<p>$$
+\begin{aligned}
+0 &amp;= s \cdot (x_0 - x_1) - (y_0 - y_1), \\
+0 &amp;= s^2 - x_0 - x_1 - x_{\mathrm{p}}, \\
+0 &amp;= s \cdot (x_0 - x_{\mathrm{p}}) - (y_0 + y_{\mathrm{p}}).
+\end{aligned}
+\tag{5}
+$$</p>
+<p>The first line pins $s$ to the slope; the second and third lines assert
+that $(x_{\mathrm{p}}, y_{\mathrm{p}})$ is the chord-and-tangent sum.
+Each of these three
+relations is degree $\leq 2$ in the witnesses and — because the
+coordinates live in $\mathbb{F}_{q^7}$ — expands into $7$ base-field
+relations, for a total of $3 \times 7 = 21$ scalar zerocheck constraints
+per interior node.</p>
+<h3 id="3-the-piop-power-of-two-n"><a class="header" href="#3-the-piop-power-of-two-n">3. The PIOP (power-of-two $N$)</a></h3>
+<p><em>In this section we assume $N = 2^n$, so every interior node sums two
+active children. Section 4 lifts the assumption.</em></p>
+<h4 id="witnesses-and-selectors"><a class="header" href="#witnesses-and-selectors">Witnesses and selectors</a></h4>
+<p>Three committed MLEs over $B_{n+1}$ per EC-sum instance:</p>
+<ul>
+<li>$x, y$ — the two coordinates of $v$, packing leaves and all partial
+sums via the Quark conditions (2).</li>
+<li>$s$ — slope hints, one value per interior node (cells with $c = 1$).</li>
+</ul>
+<p>Index interior nodes by $\mathbf{b} \in B_n$ (so the interior cell
+corresponding to $\mathbf{b}$ sits at address $(1, \mathbf{b})$ in
+$B_{n+1}$). Two precomputed <strong>selectors</strong> pick out the subsets of
+$B_n$ on which the two constraint families live:</p>
+<ul>
+<li>$\mathrm{sel}_{\mathrm{add}}(\mathbf{b})$ — one for $\mathbf{b} \in
+B_n \setminus \{(1, \ldots, 1)\}$, zero on the unconstrained
+address. Triggers the EC-add constraints (5) at every interior node.</li>
+<li>$\mathrm{sel}_{\mathrm{exp}}(\mathbf{b})$ — indicator of the root
+address $\mathbf{b} = (1, \ldots, 1, 0)$. Pins the root to the
+claimed public sum $Q$.</li>
+</ul>
+<h4 id="half-evaluations"><a class="header" href="#half-evaluations">Half-evaluations</a></h4>
+<p>Define seven <strong>half-evaluations</strong> — multilinear polynomials on $B_n$
+obtained by fixing one Boolean coordinate of $x$, $y$, or $s$:</p>
+<p>$$
+\begin{aligned}
+x_0(\mathbf{b}) &amp;:= x(\mathbf{b}, 0), &amp; x_1(\mathbf{b}) &amp;:= x(\mathbf{b}, 1), &amp; x_{\mathrm{p}}(\mathbf{b}) &amp;:= x(1, \mathbf{b}), \\
+y_0(\mathbf{b}) &amp;:= y(\mathbf{b}, 0), &amp; y_1(\mathbf{b}) &amp;:= y(\mathbf{b}, 1), &amp; y_{\mathrm{p}}(\mathbf{b}) &amp;:= y(1, \mathbf{b}), \\
+&amp; &amp; s_{\mathrm{p}}(\mathbf{b}) &amp;:= s(1, \mathbf{b}). &amp; &amp;
+\end{aligned}
+$$</p>
+<p>At interior address $\mathbf{b}$ these are exactly the data an EC-add
+reads: left and right children $(x_0, y_0), (x_1, y_1)$, parent
+$(x_{\mathrm{p}}, y_{\mathrm{p}})$, and parent slope $s_{\mathrm{p}}$.
+Collect them into $\mathbf{w}(\mathbf{b}) = (x_0, x_1, x_{\mathrm{p}},
+y_0, y_1, y_{\mathrm{p}}, s_{\mathrm{p}})(\mathbf{b})$.</p>
+<h4 id="the-zerocheck"><a class="header" href="#the-zerocheck">The zerocheck</a></h4>
+<p>Let $C_{\mathrm{add}}(\mathbf{w})$ denote a random-linear combination
+of the three constraints in (5), and let $C_{\mathrm{exp}}(\mathbf{w};
+Q)$ denote the constraint $(x_{\mathrm{p}}, y_{\mathrm{p}}) = Q$. The
+verifier samples a zerocheck challenge $\mathbf{z} \in \mathbb{F}^n$
+and runs sumcheck on</p>
+<p>$$
+0 = \sum_{\mathbf{b} \in B_n} \mathrm{eq}(\mathbf{z}, \mathbf{b}) \cdot \Bigl( \mathrm{sel}_{\mathrm{add}}(\mathbf{b}) \cdot C_{\mathrm{add}}(\mathbf{w}(\mathbf{b})) + \mathrm{sel}_{\mathrm{exp}}(\mathbf{b}) \cdot C_{\mathrm{exp}}(\mathbf{w}(\mathbf{b}); Q) \Bigr). \tag{6}
+$$</p>
+<h4 id="reduction-to-opening-claims"><a class="header" href="#reduction-to-opening-claims">Reduction to opening claims</a></h4>
+<p>The sumcheck draws fresh random challenges $\mathbf{r} \in \mathbb{F}^n$
+round by round and reduces (6) to claimed evaluations of the seven
+half-evaluations at $\mathbf{r}$. Since each half-evaluation is a
+partial evaluation of $x$, $y$, or $s$ at a hypercube-fixed coordinate,
+the PIOP opens each committed witness at the following points of
+$B_{n+1}$:</p>
+<p>$$
+\boxed{
+\begin{array}{ll}
+x, y &amp; \text{at } (\mathbf{r}, 0), (\mathbf{r}, 1), (1, \mathbf{r}) \\
+s    &amp; \text{at } (1, \mathbf{r})
+\end{array}
+}
+\tag{7}
+$$</p>
+<p>— three points each for $x$ and $y$ (the two children $(\mathbf{r}, 0),
+(\mathbf{r}, 1)$ and the parent $(1, \mathbf{r})$ of a generic addition),
+one point for $s$ (the parent, since slope hints only live on interior
+cells).</p>
+<h3 id="4-general-n"><a class="header" href="#4-general-n">4. General $N$</a></h3>
+<p>Padding $N$ up to $2^n \geq N$ introduces “padded” leaf slots with no
+real input point. The Quark tree then has interior nodes whose two
+children are not both active: the Section-3 add constraint cannot
+fire there. We fix this by <strong>refining the interior-node selectors</strong> —
+no extra committed witnesses, no change to the three committed MLEs
+$x, y, s$.</p>
+<h4 id="the-active-prefix"><a class="header" href="#the-active-prefix">The active prefix</a></h4>
+<p>Mark the leaf $v(0, \mathbf{b})$ as <strong>active</strong> iff $\mathbf{b} &lt; N$
+under the natural big-endian ordering of $B_n$, otherwise
+<strong>padded</strong>. Activeness propagates bottom-up: an interior node is
+active iff at least its left child is active. Equivalently, at each
+depth $k \geq 0$ (depth $0$ = leaves), the active cells form a prefix
+of length $\lceil N / 2^k \rceil$ in the big-endian ordering.</p>
+<h4 id="add-versus-bypass"><a class="header" href="#add-versus-bypass">Add versus bypass</a></h4>
+<p>Split interior addresses $(1, \mathbf{b})$ with $\mathbf{b} \in B_n
+\setminus \{(1, \ldots, 1)\}$ into two classes by the status of the
+right child $v(\mathbf{b}, 1)$:</p>
+<ul>
+<li><strong>Add node</strong> — right child is active (so both children are active,
+by the propagation rule). Apply the EC-add constraint family (5)
+as in Section 3.</li>
+<li><strong>Bypass node</strong> — right child is padded. The node’s value equals
+its left child, whether the left child is itself an active partial
+sum or a padded slot:
+$$
+0 = x_{\mathrm{p}}(\mathbf{b}) - x_0(\mathbf{b}), \qquad
+0 = y_{\mathrm{p}}(\mathbf{b}) - y_0(\mathbf{b}). \tag{8}
+$$
+Two constraints per coordinate component ⇒ $2 \times 7 = 14$
+scalar constraints per bypass node.</li>
+</ul>
+<p>Subsuming “both children padded” cells into the bypass class is
+benign on both sides:</p>
+<ul>
+<li><em>Completeness</em> — an honest prover fills these padded addresses
+with any values consistent with bypass (e.g. all zeros), so (8)
+holds trivially there.</li>
+<li><em>Soundness</em> — padded values never flow into $Q$. The output
+selector $\mathrm{sel}_{\mathrm{exp}}$ fires only at the root,
+which is active, and unrolling its value downward through
+add / bypass constraints stays inside the active subtree. Whatever
+the prover commits at padded addresses cannot corrupt the
+accumulated sum.</li>
+</ul>
+<p>Only the <em>active</em> bypass nodes (left child active, right padded)
+carry real arithmetic content.</p>
+<p>Introduce a second selector $\mathrm{sel}_{\mathrm{byp}}$ indicating
+bypass nodes. Together with $\mathrm{sel}_{\mathrm{add}}$ and the one
+unconstrained address $\mathbf{b} = (1, \ldots, 1)$, they partition
+$B_n$:</p>
+<p>$$
+\mathrm{sel}_{\mathrm{add}}(\mathbf{b}) + \mathrm{sel}_{\mathrm{byp}}(\mathbf{b}) + \mathbf{1}_{\{\mathbf{b} = (1, \ldots, 1)\}} = 1, \qquad \forall \mathbf{b} \in B_n. \tag{9}
+$$</p>
+<p>Both selectors depend only on $N$ and $n$; the verifier derives them
+with no extra commitments. In particular $\mathrm{sel}_{\mathrm{byp}}$
+is recoverable from $\mathrm{sel}_{\mathrm{add}}$ via (9), so the
+prover only sends $\mathrm{sel}_{\mathrm{add}}$’s claimed evaluation.</p>
+<h4 id="extended-zerocheck"><a class="header" href="#extended-zerocheck">Extended zerocheck</a></h4>
+<p>The PIOP adds the bypass term to (6):</p>
+<p>$$
+0 = \sum_{\mathbf{b} \in B_n} \mathrm{eq}(\mathbf{z}, \mathbf{b}) \cdot \Bigl( \mathrm{sel}_{\mathrm{add}} \cdot C_{\mathrm{add}} + \mathrm{sel}_{\mathrm{byp}} \cdot C_{\mathrm{byp}} + \mathrm{sel}_{\mathrm{exp}} \cdot C_{\mathrm{exp}} \Bigr)(\mathbf{b}), \tag{10}
+$$</p>
+<p>where $C_{\mathrm{byp}}$ is a random-linear combination of the two
+bypass relations (8). The opening points (7) are unchanged — $x, y$ at
+$(\mathbf{r}, 0), (\mathbf{r}, 1), (1, \mathbf{r})$ and $s$ at $(1,
+\mathbf{r})$ — since the bypass constraint reads the same
+half-evaluations as the add constraint (it just ignores the right
+child).</p>
+<p><strong>Example ($N = 3$, $n = 2$).</strong> Padding $N = 3$ up to $2^n = 4$
+leaves one padded leaf slot $v(0, 1, 1)$. The four interior
+addresses classify as:</p>
+<ul>
+<li>$v(1, 0, 0)$ — children $v(0, 0, 0) = P_0$, $v(0, 0, 1) = P_1$,
+both active ⇒ <strong>add</strong>, yielding $P_0 + P_1$.</li>
+<li>$v(1, 0, 1)$ — children $v(0, 1, 0) = P_2$, $v(0, 1, 1) =$ padded
+⇒ <strong>bypass</strong>, yielding $P_2$.</li>
+<li>$v(1, 1, 0)$ — children $v(1, 0, 0) = P_0 + P_1$, $v(1, 0, 1) =
+P_2$, both active ⇒ <strong>add</strong>, yielding $Q = P_0 + P_1 + P_2$.
+This is the root; $\mathrm{sel}_{\mathrm{exp}}$ fires here too.</li>
+<li>$v(1, 1, 1)$ — unconstrained (Quark condition (iii)).</li>
+</ul>
+<h3 id="todo"><a class="header" href="#todo">TODO</a></h3>
+<ul>
+<li><strong>Duplicate points.</strong> The slope formula (4) and the pinned-slope
+relation in (5) both assume $P_0 \ne P_1$ (so $x_0 \ne x_1$). When
+two children of an add node coincide — e.g. the same EC point appears
+twice among the inputs, or a partial sum collides with a sibling — the
+chord degenerates to the tangent and the PIOP must switch to the
+point-doubling formulas. How to fold this case into the same
+selector-gated zerocheck is left to a future revision.</li>
+</ul>
+<h3 id="references-2"><a class="header" href="#references-2">References</a></h3>
+<ul>
+<li><a id="quark"></a> Setty, Lee. <em>Quarks: Quadruple-efficient transparent
+zkSNARKs</em>. Cryptology ePrint 2020/1275. 2020. The grand-product variant
+of the tree-packing identity in (2); the EC-sum version adapts the same
+encoding to group addition.
+Available at: <a href="https://eprint.iacr.org/2020/1275.pdf">https://eprint.iacr.org/2020/1275.pdf</a></li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="integration-with-ethereum"><a class="header" href="#integration-with-ethereum">Integration with Ethereum</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>

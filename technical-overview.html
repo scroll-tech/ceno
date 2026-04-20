@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Guest Programming (ceno_rt) - Ceno Docs</title>
+        <title>Technical Overview - Ceno Docs</title>
 
 
         <!-- Custom HTML head -->
@@ -184,37 +184,18 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="guest-programming-ceno_rt"><a class="header" href="#guest-programming-ceno_rt">Guest Programming (<code>ceno_rt</code>)</a></h1>
-<p>The <code>ceno_rt</code> crate provides the runtime environment for guest programs running inside the Ceno ZKVM. It offers essential functionalities for interacting with the host and the ZKVM environment.</p>
-<h2 id="execution-environment"><a class="header" href="#execution-environment">Execution Environment</a></h2>
-<p>A guest program’s execution begins at the <code>_start</code> symbol, which is defined in <code>ceno_rt</code>. This entry point sets up the global pointer and stack, and then calls the standard Rust <code>main</code> function.</p>
-<p>After <code>main</code> returns, or to exit explicitly, the program can call <code>ceno_rt::halt(exit_code)</code>. An <code>exit_code</code> of 0 indicates success.</p>
-<h2 id="key-features-of-ceno_rt-include"><a class="header" href="#key-features-of-ceno_rt-include">Key features of <code>ceno_rt</code> include:</a></h2>
-<h3 id="memory-mapped-io-mmio"><a class="header" href="#memory-mapped-io-mmio">Memory-Mapped I/O (<code>mmio</code>)</a></h3>
-<p>The <code>ceno_rt::mmio</code> module provides a way to read data provided by the host through memory-mapped regions.</p>
-<ul>
-<li><strong>Hints</strong>: These are private inputs from the host. You can read them using <code>ceno_rt::mmio::read_slice()</code> to get a byte slice or <code>ceno_rt::mmio::read::&lt;T&gt;()</code> to deserialize a specific type.</li>
-<li><strong>Public I/O</strong>: The <code>ceno_rt::mmio::commit</code> function is used to reveal public outputs. It verifies that the output produced by the guest matches the expected output provided by the host.</li>
-</ul>
-<h3 id="standard-io-io"><a class="header" href="#standard-io-io">Standard I/O (<code>io</code>)</a></h3>
-<p>The <code>ceno_rt::io</code> module contains <code>IOWriter</code> for writing data. In debug builds, a global <code>IOWriter</code> instance is available through <code>ceno_rt::io::info_out()</code>. You can use the <code>debug_print!</code> and <code>debug_println!</code> macros for logging during development.</p>
-<h3 id="dynamic-memory-allocator"><a class="header" href="#dynamic-memory-allocator">Dynamic Memory (<code>allocator</code>)</a></h3>
-<p>For dynamic memory needs, <code>ceno_rt::allocator</code> provides a simple allocator.</p>
-<h3 id="system-calls-syscalls"><a class="header" href="#system-calls-syscalls">System Calls (<code>syscalls</code>)</a></h3>
-<p>The <code>ceno_rt::syscalls</code> module offers low-level functions to access precompiled operations for performance-critical tasks. For more details, see the “Accelerated Operations with Precompiles” chapter.</p>
-<h3 id="weakly-linked-functions"><a class="header" href="#weakly-linked-functions">Weakly Linked Functions</a></h3>
-<p><code>ceno_rt</code> defines several weakly linked functions (e.g., <code>sys_write</code>, <code>sys_alloc_words</code>, <code>sys_rand</code>) that provide default implementations for certain system-level operations. These can be overridden by the host environment.</p>
-<p>When writing a guest program, you will typically include <code>ceno_rt</code> as a dependency in your <code>Cargo.toml</code>.</p>
+                        <h1 id="technical-overview"><a class="header" href="#technical-overview">Technical Overview</a></h1>
+<p>This section covers the internal design and cryptographic protocols used in Ceno.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="advanced-topics.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="differences-from-risc-v.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="precompiles.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="architecture-overview.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -224,11 +205,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="advanced-topics.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="differences-from-risc-v.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="precompiles.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="architecture-overview.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

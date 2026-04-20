@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Raw Commands - Ceno Docs</title>
+        <title>EC-Sum Quark PIOP - Ceno Docs</title>
 
 
         <!-- Custom HTML head -->
@@ -184,33 +184,322 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="raw-commands"><a class="header" href="#raw-commands">Raw Commands</a></h1>
-<p>The <code>raw-run</code>, <code>raw-prove</code>, and <code>raw-keygen</code> commands are lower-level commands that operate on ELF files directly. These are useful for debugging and for integrating Ceno with other build systems.</p>
-<h2 id="cargo-ceno-raw-run"><a class="header" href="#cargo-ceno-raw-run"><code>cargo ceno raw-run</code></a></h2>
-<p>Executes a pre-compiled ELF file in the Ceno ZKVM.</p>
-<h3 id="usage"><a class="header" href="#usage">Usage</a></h3>
-<pre><code class="language-bash">cargo ceno raw-run &lt;ELF_PATH&gt;
-</code></pre>
-<h2 id="cargo-ceno-raw-prove"><a class="header" href="#cargo-ceno-raw-prove"><code>cargo ceno raw-prove</code></a></h2>
-<p>Generates a proof for a pre-compiled ELF file.</p>
-<h3 id="usage-1"><a class="header" href="#usage-1">Usage</a></h3>
-<pre><code class="language-bash">cargo ceno raw-prove &lt;ELF_PATH&gt;
-</code></pre>
-<h2 id="cargo-ceno-raw-keygen"><a class="header" href="#cargo-ceno-raw-keygen"><code>cargo ceno raw-keygen</code></a></h2>
-<p>Generates a proving key and a verification key for a pre-compiled ELF file.</p>
-<h3 id="usage-2"><a class="header" href="#usage-2">Usage</a></h3>
-<pre><code class="language-bash">cargo ceno raw-keygen &lt;ELF_PATH&gt;
-</code></pre>
+                        <h2 id="3-ec-sum-quark-piop"><a class="header" href="#3-ec-sum-quark-piop">3. EC-Sum Quark PIOP</a></h2>
+<p>This note documents the <strong>EC-sum Quark PIOP</strong> implemented in Ceno, used to
+accumulate $N$ elliptic-curve points on a short-Weierstrass curve
+$y^2 = x^3 + ax + b$ into a single sum</p>
+<p>$$
+Q = P_0 + P_1 + \cdots + P_{N-1}, \qquad P_i \in E(\mathbb{F}_{q^7}), \tag{1}
+$$</p>
+<p>inside a single GKR layer. Each point’s affine coordinates live in
+the septic extension $\mathbb{F}_{q^7}$, so every extension-field
+MLE below corresponds to $7$ base-field MLEs and every algebraic
+relation expands into $7$ base-field scalar relations (one per
+$\mathbb{F}_q$-basis component). For brevity we work at the
+coordinate / extension-field level throughout.</p>
+<h4 id="why-this-piop-exists"><a class="header" href="#why-this-piop-exists">Why this PIOP exists</a></h4>
+<p>The textbook way to prove a sum of $N$ values is a <strong>binary accumulation
+tree</strong>: pair leaves into $N/2$ partial sums, pair those into $N/4$, and
+so on, with $\log_2 N$ layers. Implemented as a tower-style GKR circuit,
+the intermediate layer values are <em>derived</em> — not committed — but the
+protocol pays for one <strong>sumcheck instance per layer</strong> to reduce a claim
+at layer $k$ to a claim at layer $k+1$:</p>
+<blockquote>
+<p>Toy: $N = 4$ ($\log_2 N = 2$ layers) ⇒ $2$ sumcheck instances.</p>
+<p>Real: $N = 2^{20}$ ⇒ $20$ sumcheck instances.</p>
+</blockquote>
+<p>The Quark method (Setty–Lee <a href="#quark">[Quark]</a>) collapses the tower into a
+<strong>single</strong> MLE identity (condition (ii) below) and discharges the whole
+tree with <strong>one</strong> sumcheck over a domain of size $2N$, regardless of
+depth.</p>
+<h4 id="the-quark-encoding"><a class="header" href="#the-quark-encoding">The Quark encoding</a></h4>
+<p>Pack the entire accumulation tree — leaves <em>and</em> every intermediate
+partial sum — into one EC-point-valued multilinear extension
+$v: B_{n+1} \to E(\mathbb{F}_{q^7})$ by imposing three structural
+conditions:</p>
+<p>$$
+\begin{aligned}
+\text{(i)} \quad &amp; v(0, \mathbf{b}) = P_{\mathbf{b}}, &amp;&amp; \forall \quad \mathbf{b} \in B_n, \\
+\text{(ii)} \quad &amp; v(1, \mathbf{b}) = v(\mathbf{b}, 0) \oplus v(\mathbf{b}, 1), &amp;&amp; \forall \quad \mathbf{b} \in B_n \setminus \{(1, \ldots, 1)\}, \\
+\text{(iii)} \quad &amp; v(1, 1, \ldots, 1) \text{ is unconstrained.} &amp;&amp;
+\end{aligned}
+\tag{2}
+$$</p>
+<p>Here $\oplus$ is elliptic-curve addition and $P_{\mathbf{b}}$
+is the input point at the leaf address $\mathbf{b}$. Condition (ii) is
+<strong>self-referential</strong>: its right-hand side looks up $v$ at two addresses
+$(\mathbf{b}, 0)$ and $(\mathbf{b}, 1)$ that are themselves either leaves
+(if the leading bit of $\mathbf{b}$ is $0$) or interior nodes (if it is
+$1$). The recursion is well-founded: unrolling (ii) downward from the
+root address $(1, 1, \ldots, 1, 0)$ decomposes $Q$ into the full binary
+accumulation tree over the leaves prescribed by (i). The cell
+$v(1, 1, \ldots, 1)$ is left free because forcing condition (ii) there
+would collapse the root to the identity.</p>
+<p>The accumulated sum $Q$ sits at the <strong>root address</strong></p>
+<p>$$
+Q = v(1, 1, \ldots, 1, 0). \tag{3}
+$$</p>
+<p><strong>Example ($N = 4$).</strong> With $n = 2$, $v$ has $3$ Boolean variables
+$(c, b_1, b_2)$ and $2^{n+1} = 8$ cells. Four cells at $c = 0$ hold the
+inputs; four cells at $c = 1$ hold interior partial sums, with one cell
+unconstrained:</p>
+<p align="center">
+  <img src="../images/ec-sum-quark-tree.svg" alt="Quark tree encoding for N=4" width="640" />
+</p>
+
+<h4 id="outline"><a class="header" href="#outline">Outline</a></h4>
+<p>The note is organised in four sections:</p>
+<ol>
+<li><strong>Quark MLE encoding</strong> — how condition (ii) fits an entire binary
+accumulation tree into one polynomial.</li>
+<li><strong>Affine EC addition as polynomial constraints</strong> — $\oplus$ involves a
+division, so we commit a <strong>slope hint</strong> and replace the rational
+formula with three polynomial zerocheck constraints.</li>
+<li><strong>The PIOP (power-of-two $N$)</strong> — a single selector-gated zerocheck
+over $B_n$ that enforces all three Quark conditions plus the
+root-output binding, and reduces to $7$ opening claims on the three
+committed MLEs.</li>
+<li><strong>General $N$</strong> — extend the selector family to handle the case
+where $N$ is not a power of two, by splitting interior nodes into
+<em>add</em> and <em>bypass</em> classes.</li>
+</ol>
+<h3 id="1-quark-mle-encoding"><a class="header" href="#1-quark-mle-encoding">1. Quark MLE encoding</a></h3>
+<h4 id="why-packing-the-tree-into-one-mle-is-non-trivial"><a class="header" href="#why-packing-the-tree-into-one-mle-is-non-trivial">Why packing the tree into one MLE is non-trivial</a></h4>
+<p>A naïve binary-tree GKR proof keeps each layer as a <em>separate</em>
+(implicit) polynomial and links adjacent layers via one sumcheck
+instance each — so the number of sumcheck PIOP invocations scales
+as $\log_2 N$.</p>
+<p>Quark’s observation is that a <em>single</em> polynomial $v$ over $B_{n+1}$ has
+exactly enough addresses — $2^{n+1} = 2N$ — to store $N$ leaves <strong>plus</strong>
+$N - 1$ interior nodes, with one cell to spare. The question is whether
+the inter-layer wiring can be recast as a constraint internal to $v$,
+so that one sumcheck over $v$ discharges all $\log_2 N$ layer
+reductions at once.</p>
+<h4 id="why-the-self-reference-in-ii-is-well-defined"><a class="header" href="#why-the-self-reference-in-ii-is-well-defined">Why the self-reference in (ii) is well-defined</a></h4>
+<p>Condition (ii) reads off two cells of $v$ and sets a third cell of $v$.
+On the Boolean hypercube this is not circular: at $\mathbf{b}$ with
+leading bit $0$, both right-hand-side cells are leaves (prescribed by
+(i)); at $\mathbf{b}$ with leading bit $1$, both right-hand-side cells
+are interior nodes whose addresses are strictly smaller (in the
+natural big-endian ordering) than $(1, \mathbf{b})$. A topological
+sort exists, so $v$ is determined layer-by-layer from leaves upward —
+even though the constraint itself is stated uniformly over all of
+$B_n \setminus \{(1, \ldots, 1)\}$.</p>
+<h4 id="what-quark-buys"><a class="header" href="#what-quark-buys">What Quark buys</a></h4>
+<p>After this repackaging, the entire accumulation is captured by two
+coordinate MLEs $x, y: B_{n+1} \to \mathbb{F}_{q^7}$ — one committed
+polynomial per coordinate, regardless of $N$. Section 3 adds a third
+MLE $s$ for the slope hints introduced below; in total <strong>three</strong>
+committed witness MLEs per EC-sum instance.</p>
+<h3 id="2-affine-ec-addition-as-polynomial-constraints"><a class="header" href="#2-affine-ec-addition-as-polynomial-constraints">2. Affine EC addition as polynomial constraints</a></h3>
+<h4 id="the-division-obstruction"><a class="header" href="#the-division-obstruction">The division obstruction</a></h4>
+<p>On a short-Weierstrass curve $y^2 = x^3 + ax + b$, two distinct affine
+points $P_0 = (x_0, y_0)$ and $P_1 = (x_1, y_1)$ sum to a parent
+point $P_{\mathrm{p}} = (x_{\mathrm{p}}, y_{\mathrm{p}})$ given by</p>
+<p>$$
+\lambda = \frac{y_0 - y_1}{x_0 - x_1}, \qquad
+x_{\mathrm{p}} = \lambda^2 - x_0 - x_1, \qquad
+y_{\mathrm{p}} = \lambda \cdot (x_0 - x_{\mathrm{p}}) - y_0. \tag{4}
+$$</p>
+<p>The division obstructs a direct polynomial encoding. A PIOP constraint
+$C(\cdot) = 0$ must be a polynomial in its witness arguments, so $\lambda$
+cannot be expressed in-line.</p>
+<h4 id="the-slope-hint-trick"><a class="header" href="#the-slope-hint-trick">The slope-hint trick</a></h4>
+<p>Commit an extra witness $s$ that <strong>claims</strong> to be the slope $\lambda$
+at every interior-node addition. Once $s$ is a committed polynomial, the
+rational relations in (4) rewrite as three low-degree zerocheck
+constraints per node:</p>
+<p>$$
+\begin{aligned}
+0 &amp;= s \cdot (x_0 - x_1) - (y_0 - y_1), \\
+0 &amp;= s^2 - x_0 - x_1 - x_{\mathrm{p}}, \\
+0 &amp;= s \cdot (x_0 - x_{\mathrm{p}}) - (y_0 + y_{\mathrm{p}}).
+\end{aligned}
+\tag{5}
+$$</p>
+<p>The first line pins $s$ to the slope; the second and third lines assert
+that $(x_{\mathrm{p}}, y_{\mathrm{p}})$ is the chord-and-tangent sum.
+Each of these three
+relations is degree $\leq 2$ in the witnesses and — because the
+coordinates live in $\mathbb{F}_{q^7}$ — expands into $7$ base-field
+relations, for a total of $3 \times 7 = 21$ scalar zerocheck constraints
+per interior node.</p>
+<h3 id="3-the-piop-power-of-two-n"><a class="header" href="#3-the-piop-power-of-two-n">3. The PIOP (power-of-two $N$)</a></h3>
+<p><em>In this section we assume $N = 2^n$, so every interior node sums two
+active children. Section 4 lifts the assumption.</em></p>
+<h4 id="witnesses-and-selectors"><a class="header" href="#witnesses-and-selectors">Witnesses and selectors</a></h4>
+<p>Three committed MLEs over $B_{n+1}$ per EC-sum instance:</p>
+<ul>
+<li>$x, y$ — the two coordinates of $v$, packing leaves and all partial
+sums via the Quark conditions (2).</li>
+<li>$s$ — slope hints, one value per interior node (cells with $c = 1$).</li>
+</ul>
+<p>Index interior nodes by $\mathbf{b} \in B_n$ (so the interior cell
+corresponding to $\mathbf{b}$ sits at address $(1, \mathbf{b})$ in
+$B_{n+1}$). Two precomputed <strong>selectors</strong> pick out the subsets of
+$B_n$ on which the two constraint families live:</p>
+<ul>
+<li>$\mathrm{sel}_{\mathrm{add}}(\mathbf{b})$ — one for $\mathbf{b} \in
+B_n \setminus \{(1, \ldots, 1)\}$, zero on the unconstrained
+address. Triggers the EC-add constraints (5) at every interior node.</li>
+<li>$\mathrm{sel}_{\mathrm{exp}}(\mathbf{b})$ — indicator of the root
+address $\mathbf{b} = (1, \ldots, 1, 0)$. Pins the root to the
+claimed public sum $Q$.</li>
+</ul>
+<h4 id="half-evaluations"><a class="header" href="#half-evaluations">Half-evaluations</a></h4>
+<p>Define seven <strong>half-evaluations</strong> — multilinear polynomials on $B_n$
+obtained by fixing one Boolean coordinate of $x$, $y$, or $s$:</p>
+<p>$$
+\begin{aligned}
+x_0(\mathbf{b}) &amp;:= x(\mathbf{b}, 0), &amp; x_1(\mathbf{b}) &amp;:= x(\mathbf{b}, 1), &amp; x_{\mathrm{p}}(\mathbf{b}) &amp;:= x(1, \mathbf{b}), \\
+y_0(\mathbf{b}) &amp;:= y(\mathbf{b}, 0), &amp; y_1(\mathbf{b}) &amp;:= y(\mathbf{b}, 1), &amp; y_{\mathrm{p}}(\mathbf{b}) &amp;:= y(1, \mathbf{b}), \\
+&amp; &amp; s_{\mathrm{p}}(\mathbf{b}) &amp;:= s(1, \mathbf{b}). &amp; &amp;
+\end{aligned}
+$$</p>
+<p>At interior address $\mathbf{b}$ these are exactly the data an EC-add
+reads: left and right children $(x_0, y_0), (x_1, y_1)$, parent
+$(x_{\mathrm{p}}, y_{\mathrm{p}})$, and parent slope $s_{\mathrm{p}}$.
+Collect them into $\mathbf{w}(\mathbf{b}) = (x_0, x_1, x_{\mathrm{p}},
+y_0, y_1, y_{\mathrm{p}}, s_{\mathrm{p}})(\mathbf{b})$.</p>
+<h4 id="the-zerocheck"><a class="header" href="#the-zerocheck">The zerocheck</a></h4>
+<p>Let $C_{\mathrm{add}}(\mathbf{w})$ denote a random-linear combination
+of the three constraints in (5), and let $C_{\mathrm{exp}}(\mathbf{w};
+Q)$ denote the constraint $(x_{\mathrm{p}}, y_{\mathrm{p}}) = Q$. The
+verifier samples a zerocheck challenge $\mathbf{z} \in \mathbb{F}^n$
+and runs sumcheck on</p>
+<p>$$
+0 = \sum_{\mathbf{b} \in B_n} \mathrm{eq}(\mathbf{z}, \mathbf{b}) \cdot \Bigl( \mathrm{sel}_{\mathrm{add}}(\mathbf{b}) \cdot C_{\mathrm{add}}(\mathbf{w}(\mathbf{b})) + \mathrm{sel}_{\mathrm{exp}}(\mathbf{b}) \cdot C_{\mathrm{exp}}(\mathbf{w}(\mathbf{b}); Q) \Bigr). \tag{6}
+$$</p>
+<h4 id="reduction-to-opening-claims"><a class="header" href="#reduction-to-opening-claims">Reduction to opening claims</a></h4>
+<p>The sumcheck draws fresh random challenges $\mathbf{r} \in \mathbb{F}^n$
+round by round and reduces (6) to claimed evaluations of the seven
+half-evaluations at $\mathbf{r}$. Since each half-evaluation is a
+partial evaluation of $x$, $y$, or $s$ at a hypercube-fixed coordinate,
+the PIOP opens each committed witness at the following points of
+$B_{n+1}$:</p>
+<p>$$
+\boxed{
+\begin{array}{ll}
+x, y &amp; \text{at } (\mathbf{r}, 0), (\mathbf{r}, 1), (1, \mathbf{r}) \\
+s    &amp; \text{at } (1, \mathbf{r})
+\end{array}
+}
+\tag{7}
+$$</p>
+<p>— three points each for $x$ and $y$ (the two children $(\mathbf{r}, 0),
+(\mathbf{r}, 1)$ and the parent $(1, \mathbf{r})$ of a generic addition),
+one point for $s$ (the parent, since slope hints only live on interior
+cells).</p>
+<h3 id="4-general-n"><a class="header" href="#4-general-n">4. General $N$</a></h3>
+<p>Padding $N$ up to $2^n \geq N$ introduces “padded” leaf slots with no
+real input point. The Quark tree then has interior nodes whose two
+children are not both active: the Section-3 add constraint cannot
+fire there. We fix this by <strong>refining the interior-node selectors</strong> —
+no extra committed witnesses, no change to the three committed MLEs
+$x, y, s$.</p>
+<h4 id="the-active-prefix"><a class="header" href="#the-active-prefix">The active prefix</a></h4>
+<p>Mark the leaf $v(0, \mathbf{b})$ as <strong>active</strong> iff $\mathbf{b} &lt; N$
+under the natural big-endian ordering of $B_n$, otherwise
+<strong>padded</strong>. Activeness propagates bottom-up: an interior node is
+active iff at least its left child is active. Equivalently, at each
+depth $k \geq 0$ (depth $0$ = leaves), the active cells form a prefix
+of length $\lceil N / 2^k \rceil$ in the big-endian ordering.</p>
+<h4 id="add-versus-bypass"><a class="header" href="#add-versus-bypass">Add versus bypass</a></h4>
+<p>Split interior addresses $(1, \mathbf{b})$ with $\mathbf{b} \in B_n
+\setminus \{(1, \ldots, 1)\}$ into two classes by the status of the
+right child $v(\mathbf{b}, 1)$:</p>
+<ul>
+<li><strong>Add node</strong> — right child is active (so both children are active,
+by the propagation rule). Apply the EC-add constraint family (5)
+as in Section 3.</li>
+<li><strong>Bypass node</strong> — right child is padded. The node’s value equals
+its left child, whether the left child is itself an active partial
+sum or a padded slot:
+$$
+0 = x_{\mathrm{p}}(\mathbf{b}) - x_0(\mathbf{b}), \qquad
+0 = y_{\mathrm{p}}(\mathbf{b}) - y_0(\mathbf{b}). \tag{8}
+$$
+Two constraints per coordinate component ⇒ $2 \times 7 = 14$
+scalar constraints per bypass node.</li>
+</ul>
+<p>Subsuming “both children padded” cells into the bypass class is
+benign on both sides:</p>
+<ul>
+<li><em>Completeness</em> — an honest prover fills these padded addresses
+with any values consistent with bypass (e.g. all zeros), so (8)
+holds trivially there.</li>
+<li><em>Soundness</em> — padded values never flow into $Q$. The output
+selector $\mathrm{sel}_{\mathrm{exp}}$ fires only at the root,
+which is active, and unrolling its value downward through
+add / bypass constraints stays inside the active subtree. Whatever
+the prover commits at padded addresses cannot corrupt the
+accumulated sum.</li>
+</ul>
+<p>Only the <em>active</em> bypass nodes (left child active, right padded)
+carry real arithmetic content.</p>
+<p>Introduce a second selector $\mathrm{sel}_{\mathrm{byp}}$ indicating
+bypass nodes. Together with $\mathrm{sel}_{\mathrm{add}}$ and the one
+unconstrained address $\mathbf{b} = (1, \ldots, 1)$, they partition
+$B_n$:</p>
+<p>$$
+\mathrm{sel}_{\mathrm{add}}(\mathbf{b}) + \mathrm{sel}_{\mathrm{byp}}(\mathbf{b}) + \mathbf{1}_{\{\mathbf{b} = (1, \ldots, 1)\}} = 1, \qquad \forall \mathbf{b} \in B_n. \tag{9}
+$$</p>
+<p>Both selectors depend only on $N$ and $n$; the verifier derives them
+with no extra commitments. In particular $\mathrm{sel}_{\mathrm{byp}}$
+is recoverable from $\mathrm{sel}_{\mathrm{add}}$ via (9), so the
+prover only sends $\mathrm{sel}_{\mathrm{add}}$’s claimed evaluation.</p>
+<h4 id="extended-zerocheck"><a class="header" href="#extended-zerocheck">Extended zerocheck</a></h4>
+<p>The PIOP adds the bypass term to (6):</p>
+<p>$$
+0 = \sum_{\mathbf{b} \in B_n} \mathrm{eq}(\mathbf{z}, \mathbf{b}) \cdot \Bigl( \mathrm{sel}_{\mathrm{add}} \cdot C_{\mathrm{add}} + \mathrm{sel}_{\mathrm{byp}} \cdot C_{\mathrm{byp}} + \mathrm{sel}_{\mathrm{exp}} \cdot C_{\mathrm{exp}} \Bigr)(\mathbf{b}), \tag{10}
+$$</p>
+<p>where $C_{\mathrm{byp}}$ is a random-linear combination of the two
+bypass relations (8). The opening points (7) are unchanged — $x, y$ at
+$(\mathbf{r}, 0), (\mathbf{r}, 1), (1, \mathbf{r})$ and $s$ at $(1,
+\mathbf{r})$ — since the bypass constraint reads the same
+half-evaluations as the add constraint (it just ignores the right
+child).</p>
+<p><strong>Example ($N = 3$, $n = 2$).</strong> Padding $N = 3$ up to $2^n = 4$
+leaves one padded leaf slot $v(0, 1, 1)$. The four interior
+addresses classify as:</p>
+<ul>
+<li>$v(1, 0, 0)$ — children $v(0, 0, 0) = P_0$, $v(0, 0, 1) = P_1$,
+both active ⇒ <strong>add</strong>, yielding $P_0 + P_1$.</li>
+<li>$v(1, 0, 1)$ — children $v(0, 1, 0) = P_2$, $v(0, 1, 1) =$ padded
+⇒ <strong>bypass</strong>, yielding $P_2$.</li>
+<li>$v(1, 1, 0)$ — children $v(1, 0, 0) = P_0 + P_1$, $v(1, 0, 1) =
+P_2$, both active ⇒ <strong>add</strong>, yielding $Q = P_0 + P_1 + P_2$.
+This is the root; $\mathrm{sel}_{\mathrm{exp}}$ fires here too.</li>
+<li>$v(1, 1, 1)$ — unconstrained (Quark condition (iii)).</li>
+</ul>
+<h3 id="todo"><a class="header" href="#todo">TODO</a></h3>
+<ul>
+<li><strong>Duplicate points.</strong> The slope formula (4) and the pinned-slope
+relation in (5) both assume $P_0 \ne P_1$ (so $x_0 \ne x_1$). When
+two children of an add node coincide — e.g. the same EC point appears
+twice among the inputs, or a partial sum collides with a sibling — the
+chord degenerates to the tangent and the PIOP must switch to the
+point-doubling formulas. How to fold this case into the same
+selector-gated zerocheck is left to a future revision.</li>
+</ul>
+<h3 id="references"><a class="header" href="#references">References</a></h3>
+<ul>
+<li><a id="quark"></a> Setty, Lee. <em>Quarks: Quadruple-efficient transparent
+zkSNARKs</em>. Cryptology ePrint 2020/1275. 2020. The grand-product variant
+of the tree-packing identity in (2); the EC-sum version adapts the same
+encoding to group addition.
+Available at: <a href="https://eprint.iacr.org/2020/1275.pdf">https://eprint.iacr.org/2020/1275.pdf</a></li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../ceno-cli/run.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../appendix/local-rotation-piop.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="../examples-walkthrough.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../integration-with-ethereum.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -220,11 +509,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../ceno-cli/run.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../appendix/local-rotation-piop.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="../examples-walkthrough.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../integration-with-ethereum.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

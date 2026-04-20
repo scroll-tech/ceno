@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Guest Programming (ceno_rt) - Ceno Docs</title>
+        <title>Local Rotation PIOP - Ceno Docs</title>
 
 
         <!-- Custom HTML head -->
@@ -22,33 +22,33 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon-de23e50b.svg">
-        <link rel="shortcut icon" href="favicon-8114d1fc.png">
-        <link rel="stylesheet" href="css/variables-8adf115d.css">
-        <link rel="stylesheet" href="css/general-2459343d.css">
-        <link rel="stylesheet" href="css/chrome-ae938929.css">
-        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
-        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
-        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "";
+            const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3b7a2681.js";
+            window.path_to_searchindex_js = "../searchindex-3b7a2681.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-84d6e1fa.js"></script>
+        <script src="../toc-84d6e1fa.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -115,7 +115,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -150,7 +150,7 @@
                     <h1 class="menu-title">Ceno Docs</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
 
@@ -184,37 +184,208 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="guest-programming-ceno_rt"><a class="header" href="#guest-programming-ceno_rt">Guest Programming (<code>ceno_rt</code>)</a></h1>
-<p>The <code>ceno_rt</code> crate provides the runtime environment for guest programs running inside the Ceno ZKVM. It offers essential functionalities for interacting with the host and the ZKVM environment.</p>
-<h2 id="execution-environment"><a class="header" href="#execution-environment">Execution Environment</a></h2>
-<p>A guest program’s execution begins at the <code>_start</code> symbol, which is defined in <code>ceno_rt</code>. This entry point sets up the global pointer and stack, and then calls the standard Rust <code>main</code> function.</p>
-<p>After <code>main</code> returns, or to exit explicitly, the program can call <code>ceno_rt::halt(exit_code)</code>. An <code>exit_code</code> of 0 indicates success.</p>
-<h2 id="key-features-of-ceno_rt-include"><a class="header" href="#key-features-of-ceno_rt-include">Key features of <code>ceno_rt</code> include:</a></h2>
-<h3 id="memory-mapped-io-mmio"><a class="header" href="#memory-mapped-io-mmio">Memory-Mapped I/O (<code>mmio</code>)</a></h3>
-<p>The <code>ceno_rt::mmio</code> module provides a way to read data provided by the host through memory-mapped regions.</p>
+                        <h2 id="2-local-rotation-piop"><a class="header" href="#2-local-rotation-piop">2. Local Rotation PIOP</a></h2>
+<p>This note documents the <strong>local rotation PIOP</strong> implemented in Ceno, used to
+constrain two consecutive rounds of a round-based computation (e.g. the
+Keccak-f permutation underlying SHA-3) inside a single GKR layer.</p>
+<h4 id="why-this-piop-exists"><a class="header" href="#why-this-piop-exists">Why this PIOP exists</a></h4>
+<p>A round-based computation like Keccak-f passes state from round $r$ into
+round $r+1$: a proof must enforce this hand-off for every consecutive pair.
+The straightforward approach — <strong>unroll each round into its own row</strong> per
+instance — scales linearly in $T$: $6$ witness polynomials and $6$ zero
+constraints for the $T = 3$ squaring example below, $48$ and $48$ for Keccak.</p>
+<p>The local rotation PIOP avoids that blow-up. Pack all $T$ rounds into
+multilinear polynomials $f_j(\mathbf{r}, \mathbf{i})$, with $\mathbf{r}$
+indexing rounds along the $g$-orbit and $\mathbf{i}$ indexing instances.
+Then “next round” on indices becomes $\mathbf{r} \mapsto g(\mathbf{r})$, and
+each hand-off collapses to a single sumcheck-checkable constraint — one
+commitment per witness, no duplication across rounds.</p>
+<h4 id="the-local-rotation-constraint"><a class="header" href="#the-local-rotation-constraint">The local rotation constraint</a></h4>
+<p>Given round witnesses $f_1, \ldots, f_w$, write
+$f_j’(\mathbf{r}, \mathbf{i}) := f_j\bigl(g(\mathbf{r}),, \mathbf{i}\bigr)$
+for the “next-round shift” of $f_j$. The local rotation PIOP enforces a
+per-instance algebraic relation linking adjacent rounds, of the form</p>
+<p>$$
+0 = C\bigl(f_1(\mathbf{r}, \mathbf{i}), \ldots, f_w(\mathbf{r}, \mathbf{i}); f_1’(\mathbf{r}, \mathbf{i}), \ldots, f_w’(\mathbf{r}, \mathbf{i})\bigr),
+\qquad \forall \quad (\mathbf{r}, \mathbf{i}) \in B_m \times B_n \tag{1}
+$$</p>
+<p>where $C$ is a low-degree polynomial expressing the round-transition gate.</p>
+<p><strong>Example.</strong> Suppose each round takes an input, squares it, and feeds the
+square into the next round. Let $f(\mathbf{r}, \mathbf{i})$ hold the round-$\mathbf{r}$
+input and $h(\mathbf{r}, \mathbf{i})$ the squared intermediate. The
+round-transition gate is then expressed by two constraints:</p>
+<p>$$
+0 = h(\mathbf{r}, \mathbf{i}) - f(\mathbf{r}, \mathbf{i})^2, \qquad
+0 = h(\mathbf{r}, \mathbf{i}) - f\bigl(g(\mathbf{r}),\mathbf{i}\bigr). \tag{2}
+$$</p>
+<p>The first is a purely local algebraic relation at round $\mathbf{r}$. The
+second is the actual <strong>hand-off</strong>: it says $h$ at round $\mathbf{r}$ equals
+$f$ at the <em>next</em> round $g(\mathbf{r})$.</p>
+<p>Pictorially, take the smallest non-trivial case: $m = 2$ with primitive
+polynomial $p_2(X) = X^2 + X + 1$. The $g$-orbit has length $2^2 - 1 = 3$
+and cycles $(1, 0) \to (0, 1) \to (1, 1) \to (1, 0) \to \cdots$, so $T = 3$
+rounds indexed by these three hypercube points. Solid arrows are the local
+squaring constraint, dashed arrows are the transition from $h$ at round
+$\mathbf{r}$ to $f$ at round $g(\mathbf{r})$:</p>
+<p align="center">
+  <img src="../images/local-rotation-squaring.svg" alt="Four rounds of squaring with hand-off" width="560" />
+</p>
+
+<h4 id="outline"><a class="header" href="#outline">Outline</a></h4>
+<p>The note is organised in three sections:</p>
+<ol>
+<li><strong>The <code>next</code> function $g: B_m \to B_m$</strong> — a bijection (permutation) with
+orbit of length $2^m - 1$ on the nonzero hypercube, borrowed from the
+HyperPlonk Lookup PIOP <a href="#hyperplonk">[HyperPlonk §3.7]</a>.</li>
+<li><strong>Algebraic simplicity of $f \circ g$</strong> — why composing a multilinear
+polynomial $f$ with $g$ does not blow up its degree, thanks to HyperPlonk’s
+linearization trick.</li>
+<li><strong>Local rotation PIOP</strong> — how the per-round constraint above is
+enforced by a single selector-gated zerocheck over $B_m \times B_n$,
+reducing to two rotation-point openings of each $f_j$.</li>
+</ol>
+<h3 id="1-the-next-function-g"><a class="header" href="#1-the-next-function-g">1. The <code>next</code> function $g$</a></h3>
+<h4 id="the-key-move-endow-b_m-with-field-structure"><a class="header" href="#the-key-move-endow-b_m-with-field-structure">The key move: endow $B_m$ with field structure</a></h4>
+<p><strong>As a bare set, the Boolean hypercube $B_m = \{0,1\}^m$ carries no algebraic
+structure</strong> — bit-tuples cannot be “added” or “multiplied”. To define a map
+$g: B_m \to B_m$ with good properties (bijective, long orbit, low-degree
+arithmetisation) we first <em>put</em> structure on $B_m$ by identifying it with the
+finite field $\mathbb{F}_{2^m}$:</p>
+<p>$$
+\underbrace{B_m}_{\text{bare set}} \cong \underbrace{\mathbb{F}_2^m}_{\mathbb{F}_2\text{-vector space}} \cong \underbrace{\mathbb{F}_2[X]/(p_m)}_{\text{polynomial ring}} \cong \underbrace{\mathbb{F}_{2^m}}_{\text{field}}.
+$$</p>
+<p>Concretely:</p>
+<ol>
+<li><strong>$B_m \leftrightarrow \mathbb{F}_2^m$</strong> (as $\mathbb{F}_2$-vector spaces):
+interpret a bit-tuple as a vector over $\mathbb{F}_2 = \{0, 1\}$, with
+bitwise XOR as addition and componentwise scalar multiplication.</li>
+<li><strong>$\mathbb{F}_2^m \leftrightarrow \mathbb{F}_2[X]/(p_m)$</strong> (as
+$\mathbb{F}_2$-vector spaces): identify
+$\mathbf{b} = (b_1, \ldots, b_m) \mapsto f_\mathbf{b}(X) := b_1 + b_2 X + \cdots + b_m X^{m-1}$.</li>
+<li><strong>$\mathbb{F}_2[X]/(p_m) \cong \mathbb{F}_{2^m}$</strong> (as fields): the
+quotient is a field iff $p_m$ is irreducible; when moreover $p_m$ is
+<em>primitive</em>, the element $X$ is a generator of the cyclic multiplicative
+group $\mathbb{F}_{2^m}^\times$.</li>
+</ol>
+<p>Once this identification is fixed, $B_m$ inherits the full field structure of
+$\mathbb{F}_{2^m}$ — in particular a multiplication — and we can do arithmetic
+on hypercube points.</p>
+<h4 id="choosing-a-primitive-polynomial"><a class="header" href="#choosing-a-primitive-polynomial">Choosing a primitive polynomial</a></h4>
+<p>Fix a <strong>primitive polynomial</strong> $p_m(X) \in \mathbb{F}_2[X]$ of degree $m$:</p>
+<p>$$
+p_m(X) = X^m + \sum_{s \in S} X^s + 1, \qquad S \subseteq [m-1].
+$$</p>
+<p>Recall $p_m$ is <em>primitive</em> iff it is irreducible and $X$ generates
+$\mathbb{F}_{2^m}^\times$ in the quotient field $\mathbb{F}_2[X]/(p_m)$.
+Primitive polynomials of every degree exist (e.g. $p_5 = X^5 + X^2 + 1$,
+$p_6 = X^6 + X + 1$). Under the identification
+$B_m \leftrightarrow \mathbb{F}_{2^m}$, the origin $0^m \in B_m$ is the field
+zero, and $B_m \setminus \{0^m\} \leftrightarrow \mathbb{F}_{2^m}^\times$.</p>
+<h4 id="defining-g-via-multiplication-by-x"><a class="header" href="#defining-g-via-multiplication-by-x">Defining $g$ via multiplication by $X$</a></h4>
+<p>Take $g: B_m \to B_m$ to be multiplication by $X$ in $\mathbb{F}_{2^m}$:</p>
+<p>$$
+g(\mathbf{b}) := \text{coeff. vector of } X \cdot f_\mathbf{b}(X) \bmod p_m.
+$$</p>
+<p>By primitivity of $p_m$, $g$ fixes $0^m$ and cycles $B_m \setminus \{0^m\}$
+with period $2^m - 1$.</p>
+<h4 id="a-very-simple-algebraic-formula"><a class="header" href="#a-very-simple-algebraic-formula">A very simple algebraic formula</a></h4>
+<p>The punchline: although we invoked field theory to define $g$, the resulting
+map has an elementary closed form. Writing
+$\mathbf{b} = (b_0, b_1, \ldots, b_{m-1})$,</p>
+<p>$$
+\boxed{g(b_0, b_1, \ldots, b_{m-1}) = (b_{m-1}, b_0’, b_1’,\ldots), \quad b_i’ = \begin{cases} b_i \oplus b_{m-1}, &amp; i \in S, \\ b_i, &amp; i \notin S. \end{cases} } \tag{3}
+$$</p>
+<p>That is: <strong>cyclically shift right by one position</strong> (so $b_{m-1}$ wraps around
+to slot $0$), then <strong>XOR $b_{m-1}$ into every slot indexed by $S$</strong>. The
+wrap-around XOR is exactly what picking up the reduction $X^m \equiv
+\sum_{s \in S} X^s + 1 \pmod{p_m}$ contributes. Each output coordinate is thus
+the XOR of <strong>at most two input bits</strong> — a structural fact we exploit in
+Section 2.</p>
+<h3 id="2-algebraic-simplicity-of-f-circ-g"><a class="header" href="#2-algebraic-simplicity-of-f-circ-g">2. Algebraic simplicity of $f \circ g$</a></h3>
+<p>Having $g$ permute the hypercube is not enough — we need $f \circ g$ to be
+representable as a low-degree polynomial for sumcheck-based PIOPs.</p>
+<h4 id="the-obstruction"><a class="header" href="#the-obstruction">The obstruction</a></h4>
+<p>Although $g$ looks $\mathbb{F}_2$-linear (cyclic shift + XOR), sumcheck does
+not run over $\mathbb{F}_2$: the prover evaluates polynomials at random points
+$\mathbf{r}$ in an extension field $\mathbb{F}$, where each $r_i$ is an
+arbitrary field element. Extended to $\mathbb{F}$, the Boolean XOR has
+multilinear extension $b \oplus b’ \mapsto b + b’ - 2 b b’$ — <strong>quadratic</strong>,
+not linear. Naively substituting $\mathbf{x} \mapsto g(\mathbf{x})$ into a
+multilinear $f$ therefore yields a polynomial of individual degree up to $2$,
+and iterating $g$ compounds the blow-up. (This is why the HyperPlonk paper
+calls $g$ a “quadratic generator”.)</p>
+<h4 id="the-linearization-trick-hyperplonk-lemma-39"><a class="header" href="#the-linearization-trick-hyperplonk-lemma-39">The linearization trick (HyperPlonk, Lemma 3.9)</a></h4>
+<p>Instead of forming $f(g(\mathbf{X}))$ symbolically, define</p>
+<p>$$
+f_{\Delta_m}(X_1, \ldots, X_m) := X_m \cdot f\bigl(\underbrace{1,, X_1’, \ldots, X_{m-1}’}_{\text{rotation point } \mathbf{p}_1}\bigr) + (1 - X_m) \cdot f\bigl(\underbrace{0,, X_1, \ldots, X_{m-1}}_{\text{rotation point } \mathbf{p}_0}\bigr), \tag{4}
+$$</p>
+<p>where $X_i’ := 1 - X_i$ if $i \in S$ and $X_i’ := X_i$ otherwise.</p>
+<p><strong>Lemma (<a href="#hyperplonk">[HyperPlonk, Lemma 3.9]</a>).</strong> For every polynomial
+$f$ of individual degree $d$,</p>
+<p>$$
+f_{\Delta_m}(\mathbf{x}) = f(g(\mathbf{x})) \qquad \forall, \mathbf{x} \in B_m,
+$$</p>
+<p>and $f_{\Delta_m}$ still has individual degree $d$. Moreover
+$f_{\Delta_m}(\mathbf{r})$ at any field point $\mathbf{r}$ is determined by
+<strong>two</strong> evaluations of $f$.</p>
+<p><strong>What this buys us.</strong> If $f$ is multilinear ($d = 1$), so is
+$f_{\Delta_m}$. The map $f \mapsto f_{\Delta_m}$ is the algebraic stand-in
+for $f \circ g$ inside a sumcheck: it preserves individual degree, and the
+verifier can turn a claim about $f_{\Delta_m}(\mathbf{r})$ into two claims
+about $f$ at the two <strong>rotation points</strong> $\mathbf{p}_0, \mathbf{p}_1$
+highlighted in (4) — used in Section 3.</p>
+<h3 id="3-local-rotation-piop"><a class="header" href="#3-local-rotation-piop">3. Local rotation PIOP</a></h3>
+<p>Fix $m$ so the number of rounds $T$ fits in one $g$-orbit
+($T \leq 2^m - 1$) and let $n$ index $2^n$ instances, so each witness is a
+multilinear polynomial $f_j: B_m \times B_n \to \mathbb{F}$. Because $g$ fixes $0^m$
+and cycles the remaining $2^m - 1$ points, the constraint must be enforced
+only on the $T$ points of $B_m$ representing real rounds. Introduce a
+precomputed <strong>rotation selector</strong> $\mathrm{sel}$ that
+vanishes off of those $T$ rounds on the $\mathbf{r}$-coordinate. The
+constraint is checked by a standard zerocheck: the verifier samples a
+random challenge $(\mathbf{z}_r, \mathbf{z}_i) \in \mathbb{F}^m \times \mathbb{F}^n$
+and runs sumcheck on</p>
+<p>$$
+0 = \sum_{(\mathbf{r}, \mathbf{i}) \in B_m \times B_n} \mathrm{sel}_{\mathbf{z}_r, \mathbf{z}_i}(\mathbf{r}, \mathbf{i}) \cdot C\bigl(f_1(\mathbf{r}, \mathbf{i}), \ldots, f_w(\mathbf{r}, \mathbf{i}), f_1’(\mathbf{r}, \mathbf{i}), \ldots, f_w’(\mathbf{r}, \mathbf{i})\bigr), \tag{5}
+$$</p>
+<p>where $\mathrm{sel}_{\mathbf{z}_r, \mathbf{z}_i}(\mathbf{r}, \mathbf{i}) := \mathrm{eq}\bigl((\mathbf{z}_r, \mathbf{z}_i), (\mathbf{r}, \mathbf{i})\bigr) \cdot \mathrm{sel}(\mathbf{r}, \mathbf{i})$
+is the challenge-parametrised selector.</p>
+<p>The sumcheck itself draws fresh random challenges $(\mathbf{s}_r, \mathbf{s}_i) \in \mathbb{F}^m \times \mathbb{F}^n$
+round by round and reduces (5) to claimed evaluations of the $f_j$ and
+$f_j’$ at this post-sumcheck point:</p>
+<p>$$
+f_j(\mathbf{s}_r, \mathbf{s}_i) \quad \text{and} \quad f_j’(\mathbf{s}_r, \mathbf{s}_i) \qquad j = 1, \ldots, w.
+$$</p>
+<p>The first batch is opened directly against the committed $f_j$. For the
+second, Section 2 delivers the key reduction: since $f_j’ = f_j \circ g$
+(with $g$ acting on the $\mathbf{r}$-coordinate only), the linearization
+lemma tells us that $f_j’(\mathbf{s}_r, \mathbf{s}_i)$ is determined by
+evaluating $f_j$ at the two <strong>rotation points</strong> $\mathbf{p}_0, \mathbf{p}_1$
+of (4) — specialised to $\mathbf{X} = \mathbf{s}_r$ — each paired with the
+same $\mathbf{s}_i$. No separate commitment to $f_j’$ is needed.</p>
+<p>In total, the PIOP needs to open each committed witness $f_j$ at exactly
+<strong>three</strong> points:</p>
+<p>$$
+\boxed{(\mathbf{s}_r, \mathbf{s}_i), \qquad (\mathbf{p}_0, \mathbf{s}_i), \qquad (\mathbf{p}_1, \mathbf{s}_i)} \tag{6}
+$$</p>
+<p>— the post-sumcheck point itself, plus the two rotation points induced by
+$\mathbf{s}_r$ via (4).</p>
+<h3 id="references"><a class="header" href="#references">References</a></h3>
 <ul>
-<li><strong>Hints</strong>: These are private inputs from the host. You can read them using <code>ceno_rt::mmio::read_slice()</code> to get a byte slice or <code>ceno_rt::mmio::read::&lt;T&gt;()</code> to deserialize a specific type.</li>
-<li><strong>Public I/O</strong>: The <code>ceno_rt::mmio::commit</code> function is used to reveal public outputs. It verifies that the output produced by the guest matches the expected output provided by the host.</li>
+<li><a id="hyperplonk"></a> Chen, Bünz, Boneh, Zhang. <em>HyperPlonk: Plonk with Linear-Time Prover and High-Degree Custom Gates</em>, §3.7 (Lookup PIOP), Lemma 3.8 (permutation property), and Lemma 3.9 (linearization). 2023.
+Available at: <a href="https://eprint.iacr.org/2022/1355.pdf">https://eprint.iacr.org/2022/1355.pdf</a></li>
+<li>Lidl &amp; Niederreiter, <em>Introduction to Finite Fields and Their Applications</em>, chapters on irreducible and primitive polynomials and the cyclic structure of $\mathbb{F}_{q^n}^\times$.</li>
 </ul>
-<h3 id="standard-io-io"><a class="header" href="#standard-io-io">Standard I/O (<code>io</code>)</a></h3>
-<p>The <code>ceno_rt::io</code> module contains <code>IOWriter</code> for writing data. In debug builds, a global <code>IOWriter</code> instance is available through <code>ceno_rt::io::info_out()</code>. You can use the <code>debug_print!</code> and <code>debug_println!</code> macros for logging during development.</p>
-<h3 id="dynamic-memory-allocator"><a class="header" href="#dynamic-memory-allocator">Dynamic Memory (<code>allocator</code>)</a></h3>
-<p>For dynamic memory needs, <code>ceno_rt::allocator</code> provides a simple allocator.</p>
-<h3 id="system-calls-syscalls"><a class="header" href="#system-calls-syscalls">System Calls (<code>syscalls</code>)</a></h3>
-<p>The <code>ceno_rt::syscalls</code> module offers low-level functions to access precompiled operations for performance-critical tasks. For more details, see the “Accelerated Operations with Precompiles” chapter.</p>
-<h3 id="weakly-linked-functions"><a class="header" href="#weakly-linked-functions">Weakly Linked Functions</a></h3>
-<p><code>ceno_rt</code> defines several weakly linked functions (e.g., <code>sys_write</code>, <code>sys_alloc_words</code>, <code>sys_rand</code>) that provide default implementations for certain system-level operations. These can be overridden by the host environment.</p>
-<p>When writing a guest program, you will typically include <code>ceno_rt</code> as a dependency in your <code>Cargo.toml</code>.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="advanced-topics.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../appendix/tower_tree.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="precompiles.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../appendix/ec-sum-quark.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -224,11 +395,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="advanced-topics.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../appendix/tower_tree.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="precompiles.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../appendix/ec-sum-quark.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -248,13 +419,13 @@
         </script>
 
 
-        <script src="elasticlunr-ef4e11c1.min.js"></script>
-        <script src="mark-09e88c2c.min.js"></script>
-        <script src="searcher-c2a407aa.js"></script>
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
 
-        <script src="clipboard-1626706a.min.js"></script>
-        <script src="highlight-abc7f01d.js"></script>
-        <script src="book-a0b12cfe.js"></script>
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
 

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Guest Programming (ceno_rt) - Ceno Docs</title>
+        <title>Architecture Overview - Ceno Docs</title>
 
 
         <!-- Custom HTML head -->
@@ -184,37 +184,162 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="guest-programming-ceno_rt"><a class="header" href="#guest-programming-ceno_rt">Guest Programming (<code>ceno_rt</code>)</a></h1>
-<p>The <code>ceno_rt</code> crate provides the runtime environment for guest programs running inside the Ceno ZKVM. It offers essential functionalities for interacting with the host and the ZKVM environment.</p>
-<h2 id="execution-environment"><a class="header" href="#execution-environment">Execution Environment</a></h2>
-<p>A guest program’s execution begins at the <code>_start</code> symbol, which is defined in <code>ceno_rt</code>. This entry point sets up the global pointer and stack, and then calls the standard Rust <code>main</code> function.</p>
-<p>After <code>main</code> returns, or to exit explicitly, the program can call <code>ceno_rt::halt(exit_code)</code>. An <code>exit_code</code> of 0 indicates success.</p>
-<h2 id="key-features-of-ceno_rt-include"><a class="header" href="#key-features-of-ceno_rt-include">Key features of <code>ceno_rt</code> include:</a></h2>
-<h3 id="memory-mapped-io-mmio"><a class="header" href="#memory-mapped-io-mmio">Memory-Mapped I/O (<code>mmio</code>)</a></h3>
-<p>The <code>ceno_rt::mmio</code> module provides a way to read data provided by the host through memory-mapped regions.</p>
+                        <h1 id="architecture-overview"><a class="header" href="#architecture-overview">Architecture Overview</a></h1>
+<h2 id="1-multi-chip-architecture"><a class="header" href="#1-multi-chip-architecture">1. Multi-chip Architecture</a></h2>
+<p>Ceno is structured as a collection of <strong>chips</strong>, each a self-contained
+GKR circuit. A chip’s per-layer constraints are <strong>same-row gates</strong>:
+every gate is a low-degree polynomial identity among witness values at
+the <em>same</em> hypercube index, checked by a per-layer zerocheck. Ceno
+has <strong>no global row-rotation</strong>; multi-step computations are expressed
+in one of two ways:</p>
 <ul>
-<li><strong>Hints</strong>: These are private inputs from the host. You can read them using <code>ceno_rt::mmio::read_slice()</code> to get a byte slice or <code>ceno_rt::mmio::read::&lt;T&gt;()</code> to deserialize a specific type.</li>
-<li><strong>Public I/O</strong>: The <code>ceno_rt::mmio::commit</code> function is used to reveal public outputs. It verifies that the output produced by the guest matches the expected output provided by the host.</li>
+<li><strong>Unroll into a single row</strong> — stage every intermediate value as its
+own same-row witness. Works when the step count is small enough to
+fit as extra columns.</li>
+<li><strong><a href="./appendix/local-rotation-piop.html">Local rotation PIOP</a></strong> — the
+only cross-row mechanism. It links round $\mathbf{r}$ to round
+$g(\mathbf{r})$ along a $g$-orbit on $B_m$ (the “next” function
+from HyperPlonk). Used for round-based computations such as
+Keccak-f, where unrolling every round into a single row would be
+prohibitive.</li>
 </ul>
-<h3 id="standard-io-io"><a class="header" href="#standard-io-io">Standard I/O (<code>io</code>)</a></h3>
-<p>The <code>ceno_rt::io</code> module contains <code>IOWriter</code> for writing data. In debug builds, a global <code>IOWriter</code> instance is available through <code>ceno_rt::io::info_out()</code>. You can use the <code>debug_print!</code> and <code>debug_println!</code> macros for logging during development.</p>
-<h3 id="dynamic-memory-allocator"><a class="header" href="#dynamic-memory-allocator">Dynamic Memory (<code>allocator</code>)</a></h3>
-<p>For dynamic memory needs, <code>ceno_rt::allocator</code> provides a simple allocator.</p>
-<h3 id="system-calls-syscalls"><a class="header" href="#system-calls-syscalls">System Calls (<code>syscalls</code>)</a></h3>
-<p>The <code>ceno_rt::syscalls</code> module offers low-level functions to access precompiled operations for performance-critical tasks. For more details, see the “Accelerated Operations with Precompiles” chapter.</p>
-<h3 id="weakly-linked-functions"><a class="header" href="#weakly-linked-functions">Weakly Linked Functions</a></h3>
-<p><code>ceno_rt</code> defines several weakly linked functions (e.g., <code>sys_write</code>, <code>sys_alloc_words</code>, <code>sys_rand</code>) that provide default implementations for certain system-level operations. These can be overridden by the host environment.</p>
-<p>When writing a guest program, you will typically include <code>ceno_rt</code> as a dependency in your <code>Cargo.toml</code>.</p>
+<p>Chips do not share witnesses directly — they interact through two
+mechanisms that are both reconciled by a single global LogUp tower.</p>
+<p align="center">
+  <img src="./images/multi-chip-architecture.svg" alt="Ceno multi-chip architecture" width="720" />
+</p>
+
+<p><strong>1. Shared RAM state (<code>RAMType</code>).</strong> Three logical address spaces are
+exposed to every chip:</p>
+<ul>
+<li><code>GlobalState</code> — VM-wide state such as program counter and cycle
+counter.</li>
+<li><code>Register</code> — RISC-V registers.</li>
+<li><code>Memory</code> — main memory.</li>
+</ul>
+<p>Each access is hashed to an extension-field element by random linear
+combination (RLC) with the <code>RAMType</code> tag folded into the hash, so
+entries from different regions cannot collide. Each chip’s GKR
+circuit <strong>locally accumulates</strong> these hashes into a grand product
+for reads and a grand product for writes:</p>
+<p>$$
+R = \prod_i \mathsf{rlc}(r_i), \qquad W = \prod_j \mathsf{rlc}(w_j),
+$$</p>
+<p>and outputs both as part of the chip proof.</p>
+<p><strong>2. Cross-chip lookups.</strong> A chip that advertises a ROM-style table
+(e.g. the range check chip) can be
+queried by other chips. Each chip’s GKR circuit likewise
+<strong>locally accumulates</strong> its lookup contributions — tables it
+exposes and queries it issues — into a single fractional LogUp sum
+and outputs it as part of the chip proof.</p>
+<p><strong>Reconciliation.</strong> Two parallel mechanisms combine the per-chip
+outputs:</p>
+<ul>
+<li><strong>Shared RAM state</strong> — the verifier checks that the product of every
+chip’s $R$ equals the product of every chip’s $W$. Each chip’s
+$R$ and $W$ are themselves proved correct by the
+<a href="./appendix/tower_tree.html">GKR grand-product PIOP</a> run inside that
+chip’s proof.</li>
+<li><strong>Cross-chip lookups</strong> — the verifier checks that the per-chip
+LogUp fractional sums add up to zero across all chips. Each chip’s
+LogUp sum is itself proved correct by the <strong>GKR LogUp PIOP</strong> run
+inside that chip’s proof.</li>
+</ul>
+<p>Both PIOPs run <em>per-chip</em>, inside each chip’s GKR proof, to establish
+that chip’s $R$, $W$, and LogUp sum. The global reconciliation is
+just a small verifier-side check on the per-chip outputs: $\prod R = \prod W$
+across chips for RAM, and the sum of LogUp fractional sums across
+chips is zero for cross-chip lookups.</p>
+<p>The main benefit of this split is <strong>prover peak memory</strong>: chips can
+be proved one at a time (or in small batches), so peak memory is
+bounded by the largest chip’s witness rather than the sum over all
+chips. Proving every chip simultaneously would hold every witness in memory at once.</p>
+<p>One chip in the diagram — the <strong>shard RAM chip</strong> — is special: it
+participates in the within-shard $\prod R = \prod W$ balance like
+any other chip, but additionally emits a cross-shard EC accumulator
+$\Sigma_{\text{shard}}$ that is reconciled across shards rather
+than inside the shard. Its role is explained in the Segmentation
+section below.</p>
+<h2 id="2-segmentation"><a class="header" href="#2-segmentation">2. Segmentation</a></h2>
+<p>When a VM’s execution trace is too large to fit in a single shard, we
+split it along the cycle axis into multiple shards, each proved
+independently. The proof system must then check that the shards
+compose into a single consistent execution:</p>
+<p align="center">
+  <img src="./images/segmentation.svg" alt="Ceno segmentation: sharded proving" width="720" />
+</p>
+
+<ul>
+<li>
+<p><strong>Control-flow continuity.</strong> Each shard exposes its initial and
+final <code>GlobalState</code> (program counter, cycle counter, …) as public
+inputs, and the verifier checks
+$\text{shard}<em>i.\text{end_pc} = \text{shard}</em>{i+1}.\text{init_pc}$
+(and likewise for other <code>GlobalState</code> fields) at every shard
+boundary.</p>
+</li>
+<li>
+<p><strong>Cross-shard memory consistency.</strong> Memory written in shard $i$
+must remain readable in any later shard $j &gt; i$. The within-shard
+RAM grand product $\prod R = \prod W$ cannot be reused across
+shards because each shard’s RLC challenge is sampled from its own
+Fiat-Shamir transcript, so per-shard products live in different
+random-hash scalings and cannot be combined.</p>
+<p>The underlying idea is a <strong>homomorphic multiset digest</strong>: a map
+$H$ from multisets of memory records into an abelian group
+$(G, +)$ that is a monoid homomorphism —
+$H(S_1 \uplus S_2) = H(S_1) + H(S_2)$ and $H(\emptyset) = 0$
+(the group identity). Homomorphism is what lets a global digest
+be assembled from per-shard digests by simple group addition,
+with no shared challenge. If $H$ is chosen so that a matched
+(write, later-read) pair digests to $0$, every matched pair
+cancels, and consistency across shards reduces to checking that
+the digest of the full cross-shard multiset equals $0$ — i.e. the
+digest of the empty multiset.</p>
+<p>The standard recipe is to pick a per-record hash
+$h : \text{records} \to G$ and define
+$H(S) := \sum_{r \in S} h(r)$; homomorphism is then automatic.
+Ceno takes $G$ to be a short-Weierstrass curve $E$ over the
+septic extension $\mathbb{F}_{q^7}$, with $h$ a deterministic
+hash-to-curve: the $x$-coordinate is a Poseidon2 hash of
+$(\text{addr}, \text{ram_type}, \text{value}, \text{shard}, \text{global_clk})$,
+and the sign of $y$ encodes read vs write (writes take
+$y \in [p/2, p)$, reads take $y \in [0, p/2)$). A write and its
+matching future read hash to the same $x$ with opposite $y$, so
+they are additive inverses on $E$ and cancel under EC addition.
+Soundness rests on collision-resistance of Poseidon2 in the
+$x$-coordinate — two unrelated records shouldn’t accidentally
+hash to $\pm$ the same point. This EC-based cross-shard
+multiset-hash design is adapted from
+<a href="https://github.com/succinctlabs/sp1">SP1</a>, which introduced it
+for cross-shard memory consistency in its zkVM.</p>
+<p>A dedicated <strong>shard RAM chip</strong> inside each shard’s proof ties
+the two layers together: for every memory read whose matching
+write lives in an earlier shard, it inserts a compensating local
+write (so the local RLC grand product still balances) and emits
+the corresponding EC point into the shard’s cross-shard
+accumulator $\Sigma_{\text{shard}}$; symmetrically for writes that
+will be read in a later shard. The
+<a href="./appendix/ec-sum-quark.html">EC-sum Quark PIOP</a> runs <em>inside</em>
+each shard’s proof to establish that $\Sigma_{\text{shard}}$
+equals the sum of those per-record EC points. The verifier then
+just EC-adds the per-shard $\Sigma_{\text{shard}}$ values and
+checks
+$\sum_{\text{shard}} \Sigma_{\text{shard}} = \mathcal{O}$
+(the point at infinity) directly. The number of shards is at most
+in the hundreds, so this is a few hundred EC additions.</p>
+</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="advanced-topics.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="technical-overview.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="precompiles.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="prover-workflow.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -224,11 +349,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="advanced-topics.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="technical-overview.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="precompiles.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="prover-workflow.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>

@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Guest Programming (ceno_rt) - Ceno Docs</title>
+        <title>GKR Protocol for Grand Product - Ceno Docs</title>
 
 
         <!-- Custom HTML head -->
@@ -22,33 +22,33 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon-de23e50b.svg">
-        <link rel="shortcut icon" href="favicon-8114d1fc.png">
-        <link rel="stylesheet" href="css/variables-8adf115d.css">
-        <link rel="stylesheet" href="css/general-2459343d.css">
-        <link rel="stylesheet" href="css/chrome-ae938929.css">
-        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+        <link rel="icon" href="../favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="../favicon-8114d1fc.png">
+        <link rel="stylesheet" href="../css/variables-8adf115d.css">
+        <link rel="stylesheet" href="../css/general-2459343d.css">
+        <link rel="stylesheet" href="../css/chrome-ae938929.css">
+        <link rel="stylesheet" href="../css/print-9e4910d8.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+        <link rel="stylesheet" href="../fonts/fonts-9644e21d.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
-        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
-        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+        <link rel="stylesheet" id="mdbook-highlight-css" href="../highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="../tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="../ayu-highlight-3fdfc3ac.css">
 
         <!-- Custom theme stylesheets -->
 
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "";
+            const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3b7a2681.js";
+            window.path_to_searchindex_js = "../searchindex-3b7a2681.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-84d6e1fa.js"></script>
+        <script src="../toc-84d6e1fa.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -115,7 +115,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -150,7 +150,7 @@
                     <h1 class="menu-title">Ceno Docs</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
                         </a>
 
@@ -184,37 +184,85 @@
 
                 <div id="mdbook-content" class="content">
                     <main>
-                        <h1 id="guest-programming-ceno_rt"><a class="header" href="#guest-programming-ceno_rt">Guest Programming (<code>ceno_rt</code>)</a></h1>
-<p>The <code>ceno_rt</code> crate provides the runtime environment for guest programs running inside the Ceno ZKVM. It offers essential functionalities for interacting with the host and the ZKVM environment.</p>
-<h2 id="execution-environment"><a class="header" href="#execution-environment">Execution Environment</a></h2>
-<p>A guest program’s execution begins at the <code>_start</code> symbol, which is defined in <code>ceno_rt</code>. This entry point sets up the global pointer and stack, and then calls the standard Rust <code>main</code> function.</p>
-<p>After <code>main</code> returns, or to exit explicitly, the program can call <code>ceno_rt::halt(exit_code)</code>. An <code>exit_code</code> of 0 indicates success.</p>
-<h2 id="key-features-of-ceno_rt-include"><a class="header" href="#key-features-of-ceno_rt-include">Key features of <code>ceno_rt</code> include:</a></h2>
-<h3 id="memory-mapped-io-mmio"><a class="header" href="#memory-mapped-io-mmio">Memory-Mapped I/O (<code>mmio</code>)</a></h3>
-<p>The <code>ceno_rt::mmio</code> module provides a way to read data provided by the host through memory-mapped regions.</p>
+                        <h2 id="1-gkr-protocol-for-grand-product"><a class="header" href="#1-gkr-protocol-for-grand-product">1. GKR Protocol for Grand Product</a></h2>
+<p>In Ceno, grand product checks (used for offline memory checking, permutation arguments, etc.)
+require computing a product of the form $\prod_{i} a_i$. We use a <strong>complete binary tree of
+multiplication gates</strong> — called a <strong>tower tree</strong> — and verify its computation via the
+<a href="https://people.cs.georgetown.edu/jthaler/GKRNote.pdf">GKR protocol</a>, following the approach of
+<a href="#thaler13">[Thaler13, Section 5.3.1]</a>.</p>
+<h3 id="the-tree-structure"><a class="header" href="#the-tree-structure">The Tree Structure</a></h3>
+<p>A tower tree of height $d$ takes $n = 2^d$ inputs and produces a 2-tuple output. The tree
+has $d$ layers:</p>
 <ul>
-<li><strong>Hints</strong>: These are private inputs from the host. You can read them using <code>ceno_rt::mmio::read_slice()</code> to get a byte slice or <code>ceno_rt::mmio::read::&lt;T&gt;()</code> to deserialize a specific type.</li>
-<li><strong>Public I/O</strong>: The <code>ceno_rt::mmio::commit</code> function is used to reveal public outputs. It verifies that the output produced by the guest matches the expected output provided by the host.</li>
+<li><strong>Layer $d$</strong> (bottom): the $n$ input values $a_0, a_1, \ldots, a_{n-1}$.</li>
+<li><strong>Layer $i$</strong> ($1 &lt; i &lt; d$): each gate $p$ multiplies its two children at layer $i+1$.</li>
+<li><strong>Layer 1</strong> (top): two gates outputting $(b_0, b_1)$ where
+$b_0 = \prod_{i=0}^{n/2-1} a_i$ and $b_1 = \prod_{i=n/2}^{n-1} a_i$.</li>
 </ul>
-<h3 id="standard-io-io"><a class="header" href="#standard-io-io">Standard I/O (<code>io</code>)</a></h3>
-<p>The <code>ceno_rt::io</code> module contains <code>IOWriter</code> for writing data. In debug builds, a global <code>IOWriter</code> instance is available through <code>ceno_rt::io::info_out()</code>. You can use the <code>debug_print!</code> and <code>debug_println!</code> macros for logging during development.</p>
-<h3 id="dynamic-memory-allocator"><a class="header" href="#dynamic-memory-allocator">Dynamic Memory (<code>allocator</code>)</a></h3>
-<p>For dynamic memory needs, <code>ceno_rt::allocator</code> provides a simple allocator.</p>
-<h3 id="system-calls-syscalls"><a class="header" href="#system-calls-syscalls">System Calls (<code>syscalls</code>)</a></h3>
-<p>The <code>ceno_rt::syscalls</code> module offers low-level functions to access precompiled operations for performance-critical tasks. For more details, see the “Accelerated Operations with Precompiles” chapter.</p>
-<h3 id="weakly-linked-functions"><a class="header" href="#weakly-linked-functions">Weakly Linked Functions</a></h3>
-<p><code>ceno_rt</code> defines several weakly linked functions (e.g., <code>sys_write</code>, <code>sys_alloc_words</code>, <code>sys_rand</code>) that provide default implementations for certain system-level operations. These can be overridden by the host environment.</p>
-<p>When writing a guest program, you will typically include <code>ceno_rt</code> as a dependency in your <code>Cargo.toml</code>.</p>
+<p>The wiring is natural: gate $p$ at layer $i$ has left child $(p, 0)$ and right child
+$(p, 1)$ at layer $i+1$. Equivalently, the children of gate $p$ are gates $2p$ and
+$2p+1$. Every gate computes:</p>
+<p>$$
+V_i(p) = \tilde{V}_{i+1}(p, 0) \cdot \tilde{V}_{i+1}(p, 1)
+$$</p>
+<p>The following diagram shows a height-3 tower tree with 8 inputs, outputting
+$(b_0, b_1) = (a_0 \cdots a_3,; a_4 \cdots a_7)$:</p>
+<p align="center">
+  <img src="../images/tower-tree.svg" alt="Tower tree with height 3" width="720" />
+</p>
+
+<h3 id="applying-the-gkr-protocol"><a class="header" href="#applying-the-gkr-protocol">Applying the GKR Protocol</a></h3>
+<p>The GKR protocol verifies the computation layer by layer, from the top down to the inputs.
+At each layer, the verifier holds a claim about the multilinear extension $\tilde{V}_i(w)$
+for some random point $w$, and reduces it to a claim about $\tilde{V}_{i+1}(\omega)$ via
+a sumcheck invocation.</p>
+<p><strong>Claim reduction at each layer.</strong> Suppose the verifier holds a claim
+$\tilde{V}_i(w) = c$ for some random point $w$. Since every gate at layer $i$
+multiplies its two children at layer $i+1$, the multilinear extension satisfies:</p>
+<p>$$
+\tilde{V}_i(w) = \sum_{b \in \{0,1\}^{s_i}} \textrm{eq}(w, b) \cdot \tilde{V}_{i+1}(b, 0) \cdot \tilde{V}_{i+1}(b, 1)
+$$</p>
+<p>where $\tilde{V}_i$ and $\tilde{V}_{i+1}$ are the multilinear extensions of the gate values
+at layers $i$ and $i+1$ respectively, and
+$\textrm{eq}(w, b) = \prod_{k=1}^{s_i}(w_k b_k + (1 - w_k)(1 - b_k))$ is the multilinear
+extension of the equality function (equals 1 when $b = w$ on Boolean inputs).</p>
+<p>The verifier reduces this claim by running the <strong>sumcheck protocol</strong> on the right-hand side. The
+summand $\textrm{eq}(w, b) \cdot \tilde{V}_{i+1}(b, 0) \cdot \tilde{V}_{i+1}(b, 1)$
+has <strong>degree 3</strong> in each variable of $b$ (one degree from $\textrm{eq}$, one from each
+$\tilde{V}_{i+1}$ factor). Therefore, each round of the sumcheck protocol requires the prover
+to send <strong>4 field elements</strong>.</p>
+<p><strong>Full protocol flow (height-3 example):</strong></p>
+<ol>
+<li><strong>Start:</strong> The verifier has the claimed output $(b_0, b_1)$ and constructs a claim
+$\tilde{V}_1(w) = c$ at a random point $w$.</li>
+<li><strong>Layer 1 sumcheck:</strong> Run sumcheck on
+$\sum_{b} \textrm{eq}(w, b) \cdot \tilde{V}_2(b, 0) \cdot \tilde{V}_2(b, 1)$.
+This reduces the claim to evaluations of $\tilde{V}_2$, which the verifier combines into a
+single claim $\tilde{V}_2(w’) = c’$ at a new random point $w’$.</li>
+<li><strong>Layer 2 sumcheck:</strong> Run sumcheck on
+$\sum_{b} \textrm{eq}(w’, b) \cdot \tilde{V}_3(b, 0) \cdot \tilde{V}_3(b, 1)$.
+This reduces to a claim about $\tilde{V}_3$, i.e., an evaluation of the input multilinear
+polynomial $a(x)$ (with 3 variables) at a point $z$. The validity of $(b_0, b_1)$
+is thus reduced to verifying a single evaluation/opening $a(z) = v$.</li>
+</ol>
+<h3 id="tower-trees-in-ceno"><a class="header" href="#tower-trees-in-ceno">Tower trees in Ceno</a></h3>
+<p>In Ceno, tower trees are the backbone of <strong>offline memory checking</strong>: every memory read/write is verified by computing a grand product via a tower tree, and the GKR protocol proves this computation correct with a linear-time prover and a logarithmic-time verifier.</p>
+<h3 id="references"><a class="header" href="#references">References</a></h3>
+<ul>
+<li><a id="thaler13"></a> Justin Thaler. <em>Time-Optimal Interactive Proofs for Circuit Evaluation</em>. 2013.
+Section 5.3.1: “The Polynomial for a Binary Tree”.
+Available at: <a href="https://eprint.iacr.org/2013/351.pdf">https://eprint.iacr.org/2013/351.pdf</a></li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="advanced-topics.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../appendix.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                             </a>
 
-                            <a rel="next prefetch" href="precompiles.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../appendix/local-rotation-piop.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                             </a>
 
@@ -224,11 +272,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="advanced-topics.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../appendix.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
                     </a>
 
-                    <a rel="next prefetch" href="precompiles.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../appendix/local-rotation-piop.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
                     </a>
             </nav>
@@ -248,13 +296,13 @@
         </script>
 
 
-        <script src="elasticlunr-ef4e11c1.min.js"></script>
-        <script src="mark-09e88c2c.min.js"></script>
-        <script src="searcher-c2a407aa.js"></script>
+        <script src="../elasticlunr-ef4e11c1.min.js"></script>
+        <script src="../mark-09e88c2c.min.js"></script>
+        <script src="../searcher-c2a407aa.js"></script>
 
-        <script src="clipboard-1626706a.min.js"></script>
-        <script src="highlight-abc7f01d.js"></script>
-        <script src="book-a0b12cfe.js"></script>
+        <script src="../clipboard-1626706a.min.js"></script>
+        <script src="../highlight-abc7f01d.js"></script>
+        <script src="../book-a0b12cfe.js"></script>
 
         <!-- Custom JS scripts -->
 
