@@ -1,11 +1,11 @@
 ## EC-Sum Quark PIOP
 
 This note documents the **EC-sum Quark PIOP** implemented in Ceno, used to
-accumulate $N = 2^n$ elliptic-curve points on a short-Weierstrass curve
+accumulate $N$ elliptic-curve points on a short-Weierstrass curve
 $y^2 = x^3 + ax + b$ into a single sum
 
 $$
-Q \,=\, P\_0 + P\_1 + \cdots + P\_{N-1}, \qquad P\_i = (x\_i, y\_i) \in E(\mathbb{F}\_{q^7}), \tag{1}
+Q = P\_0 + P\_1 + \cdots + P\_{N-1}, \qquad P\_i = (x\_i, y\_i) \in E(\mathbb{F}\_{q^7}), \tag{1}
 $$
 
 inside a single GKR layer. Coordinates live in the septic extension
@@ -39,14 +39,14 @@ conditions:
 
 $$
 \begin{aligned}
-\text{(i)} \quad & v(0, \mathbf{b}) = P\_{\mathrm{idx}(\mathbf{b})}, && \forall\, \mathbf{b} \in B\_n, \\\\
-\text{(ii)} \quad & v(1, \mathbf{b}) = v(\mathbf{b}, 0) \,\oplus\, v(\mathbf{b}, 1), && \forall\, \mathbf{b} \in B\_n \setminus \\{(1, \ldots, 1)\\}, \\\\
+\text{(i)} \quad & v(0, \mathbf{b}) = P\_{\mathbf{b}}, && \forall \quad \mathbf{b} \in B\_n, \\\\
+\text{(ii)} \quad & v(1, \mathbf{b}) = v(\mathbf{b}, 0) \oplus v(\mathbf{b}, 1), && \forall \quad \mathbf{b} \in B\_n \setminus \\{(1, \ldots, 1)\\}, \\\\
 \text{(iii)} \quad & v(1, 1, \ldots, 1) \text{ is unconstrained.} &&
 \end{aligned}
 \tag{2}
 $$
 
-Here $\oplus$ is elliptic-curve addition and $P\_{\mathrm{idx}(\mathbf{b})}$
+Here $\oplus$ is elliptic-curve addition and $P\_{\mathbf{b}}$
 is the input point at the leaf address $\mathbf{b}$. Condition (ii) is
 **self-referential**: its right-hand side looks up $v$ at two addresses
 $(\mathbf{b}, 0)$ and $(\mathbf{b}, 1)$ that are themselves either leaves
@@ -59,7 +59,7 @@ would collapse the root to the identity.
 The accumulated sum $Q$ sits at the **root address**
 
 $$
-Q \,=\, v(1, 1, \ldots, 1, 0). \tag{3}
+Q = v(1, 1, \ldots, 1, 0). \tag{3}
 $$
 
 **Example ($N = 4$).** With $n = 2$, $v$ has $3$ Boolean variables
@@ -151,9 +151,9 @@ constraints per node:
 
 $$
 \begin{aligned}
-0 \,&=\, s \cdot (x\_0 - x\_1) \;-\; (y\_0 - y\_1), \\\\
-0 \,&=\, s^2 \;-\; x\_0 \;-\; x\_1 \;-\; x\_3, \\\\
-0 \,&=\, s \cdot (x\_0 - x\_3) \;-\; (y\_0 + y\_3).
+0 &= s \cdot (x\_0 - x\_1) \;-\; (y\_0 - y\_1), \\\\
+0 &= s^2 \;-\; x\_0 \;-\; x\_1 \;-\; x\_3, \\\\
+0 &= s \cdot (x\_0 - x\_3) \;-\; (y\_0 + y\_3).
 \end{aligned}
 \tag{5}
 $$
@@ -201,7 +201,7 @@ samples a zerocheck challenge $\mathbf{z} \in \mathbb{F}^{n+1}$ and runs
 sumcheck on
 
 $$
-0 \,=\, \sum\_{\mathbf{u} \in B\_{n+1}} \mathrm{eq}(\mathbf{z}, \mathbf{u}) \cdot \Bigl( \mathrm{sel}\_{\mathrm{add}}(\mathbf{u}) \cdot C\_{\mathrm{add}}(\mathbf{w}(\mathbf{u})) \;+\; \mathrm{sel}\_{\mathrm{exp}}(\mathbf{u}) \cdot C\_{\mathrm{exp}}(\mathbf{w}(\mathbf{u}); Q) \Bigr). \tag{6}
+0 = \sum\_{\mathbf{u} \in B\_{n+1}} \mathrm{eq}(\mathbf{z}, \mathbf{u}) \cdot \Bigl( \mathrm{sel}\_{\mathrm{add}}(\mathbf{u}) \cdot C\_{\mathrm{add}}(\mathbf{w}(\mathbf{u})) \;+\; \mathrm{sel}\_{\mathrm{exp}}(\mathbf{u}) \cdot C\_{\mathrm{exp}}(\mathbf{w}(\mathbf{u}); Q) \Bigr). \tag{6}
 $$
 
 #### Reduction to opening claims
@@ -260,8 +260,8 @@ right child $v(\mathbf{b}, 1)$:
   its left child, whether the left child is itself a live partial
   sum or a dead slot:
   $$
-  0 \,=\, x\bigl(1, \mathbf{b}\bigr) - x\bigl(\mathbf{b}, 0\bigr), \qquad
-  0 \,=\, y\bigl(1, \mathbf{b}\bigr) - y\bigl(\mathbf{b}, 0\bigr). \tag{8}
+  0 = x\bigl(1, \mathbf{b}\bigr) - x\bigl(\mathbf{b}, 0\bigr), \qquad
+  0 = y\bigl(1, \mathbf{b}\bigr) - y\bigl(\mathbf{b}, 0\bigr). \tag{8}
   $$
   Two constraints per coordinate component ⇒ $2 \times 7 = 14$
   scalar constraints per bypass node.
@@ -279,7 +279,7 @@ layer ($u\_0 = 0$), and the one unconstrained cell $v(1, \ldots, 1)$,
 they partition $B\_{n+1}$:
 
 $$
-\mathrm{sel}\_{\mathrm{add}}(\mathbf{u}) + \mathrm{sel}\_{\mathrm{byp}}(\mathbf{u}) + \mathbf{1}\_{\\{\mathbf{u} = (1, \ldots, 1)\\}} + \mathbf{1}\_{\\{u\_0 = 0\\}} \,=\, 1, \qquad \forall\, \mathbf{u} \in B\_{n+1}. \tag{9}
+\mathrm{sel}\_{\mathrm{add}}(\mathbf{u}) + \mathrm{sel}\_{\mathrm{byp}}(\mathbf{u}) + \mathbf{1}\_{\\{\mathbf{u} = (1, \ldots, 1)\\}} + \mathbf{1}\_{\\{u\_0 = 0\\}} = 1, \qquad \forall \mathbf{u} \in B\_{n+1}. \tag{9}
 $$
 
 Both selectors depend only on $N$ and $n$; the verifier derives them
@@ -293,7 +293,7 @@ $\mathrm{sel}\_{\mathrm{add}}$'s claimed evaluation.
 The PIOP adds the bypass term to (6):
 
 $$
-0 \,=\, \sum\_{\mathbf{u} \in B\_{n+1}} \mathrm{eq}(\mathbf{z}, \mathbf{u}) \cdot \Bigl( \mathrm{sel}\_{\mathrm{add}} \cdot C\_{\mathrm{add}} \;+\; \mathrm{sel}\_{\mathrm{byp}} \cdot C\_{\mathrm{byp}} \;+\; \mathrm{sel}\_{\mathrm{exp}} \cdot C\_{\mathrm{exp}} \Bigr)(\mathbf{u}), \tag{10}
+0 = \sum\_{\mathbf{u} \in B\_{n+1}} \mathrm{eq}(\mathbf{z}, \mathbf{u}) \cdot \Bigl( \mathrm{sel}\_{\mathrm{add}} \cdot C\_{\mathrm{add}} \;+\; \mathrm{sel}\_{\mathrm{byp}} \cdot C\_{\mathrm{byp}} \;+\; \mathrm{sel}\_{\mathrm{exp}} \cdot C\_{\mathrm{exp}} \Bigr)(\mathbf{u}), \tag{10}
 $$
 
 where $C\_{\mathrm{byp}}$ is a random-linear combination of the two
