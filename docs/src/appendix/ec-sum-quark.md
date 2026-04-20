@@ -1,4 +1,4 @@
-## EC-Sum Quark PIOP
+## 3. EC-Sum Quark PIOP
 
 This note documents the **EC-sum Quark PIOP** implemented in Ceno, used to
 accumulate $N$ elliptic-curve points on a short-Weierstrass curve

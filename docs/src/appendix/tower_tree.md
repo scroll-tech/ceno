@@ -1,4 +1,4 @@
-## GKR Protocol for Tower Tree
+## 1. GKR Protocol for Grand Product
 
 In Ceno, grand product checks (used for offline memory checking, permutation arguments, etc.)
 require computing a product of the form $\prod\_{i} a\_i$. We use a **complete binary tree of

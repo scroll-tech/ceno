@@ -1,4 +1,4 @@
-## Local Rotation PIOP
+## 2. Local Rotation PIOP
 
 This note documents the **local rotation PIOP** implemented in Ceno, used to
 constrain two consecutive rounds of a round-based computation (e.g. the
