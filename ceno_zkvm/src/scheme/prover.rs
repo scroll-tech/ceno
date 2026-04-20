@@ -429,8 +429,17 @@ impl<
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
         // build main witness
-        let records = info_span!("[ceno] build_main_witness")
-            .in_scope(|| build_main_witness::<E, PCS, PB, PD>(cs, input, challenges));
+        let records = info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
+            build_main_witness::<E, PCS, PB, PD>(
+                cs,
+                input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
+        });
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
@@ -762,12 +771,20 @@ where
     // build main witness
     let records =
         info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
             build_main_witness::<
                 E,
                 PCS,
                 GpuBackend<E, PCS>,
                 gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>,
-            >(cs, &input, challenges)
+            >(
+                cs,
+                &input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
         });
 
     let span = entered_span!("prove_tower_relation", profiling_2 = true);

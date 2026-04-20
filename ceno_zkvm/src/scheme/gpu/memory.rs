@@ -2,6 +2,7 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         hal::ProofInput,
+        utils::tower_output_count,
     },
     structs::ComposedConstrainSystem,
 };
@@ -184,20 +185,9 @@ pub fn estimate_main_witness_bytes<E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
     num_var_with_rotation: usize,
 ) -> usize {
-    let cs = &composed_cs.zkvm_v1_css;
-    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
-    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
-    let num_lk_num = cs.lk_table_expressions.len();
-    let num_lk_den = if !cs.lk_table_expressions.is_empty() {
-        cs.lk_table_expressions.len()
-    } else {
-        cs.lk_expressions.len()
-    };
-    let num_records = num_reads + num_writes + num_lk_num + num_lk_den;
-
     let elem_size = std::mem::size_of::<BB31Ext>();
     let record_len = 1usize << num_var_with_rotation;
-    num_records * record_len * elem_size
+    tower_output_count(composed_cs) * record_len * elem_size
 }
 
 pub(crate) fn estimate_main_constraints_bytes<
