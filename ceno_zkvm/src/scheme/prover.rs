@@ -7,6 +7,8 @@ use gkr_iop::{
 use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 #[cfg(feature = "gpu")]
+use crate::instructions::gpu::cache::current_replay_cache_stats;
+#[cfg(feature = "gpu")]
 use crate::scheme::gpu::estimate_chip_proof_memory;
 #[cfg(feature = "gpu")]
 use crate::scheme::scheduler::get_chip_proving_mode;
@@ -475,9 +477,47 @@ impl<
             // GPU concurrent: memory-aware backfilling with standalone impl.
             // Sequential (GPU + CPU): unified path via self.create_chip_proof.
             let execute_tasks_span = entered_span!("execute_chip_tasks", profiling_1 = true);
+            #[cfg(feature = "gpu")]
+            if std::any::TypeId::of::<PB>()
+                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+            {
+                let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+                cuda_hal
+                    .inner
+                    .synchronize()
+                    .expect("cuda synchronize before run_chip_proofs");
+                let replay_cache = current_replay_cache_stats();
+                tracing::info!(
+                    "[gpu replay cache][before_run_chip_proofs] shard_steps={:.2}MB shard_meta={:.2}MB shared_side_effect={:.2}MB total={:.2}MB",
+                    replay_cache.shard_steps_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.shard_meta_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.shared_side_effect_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.total_bytes() as f64 / (1024.0 * 1024.0),
+                );
+                crate::scheme::gpu::log_gpu_device_state("before_run_chip_proofs");
+            }
             let (results, forked_samples) =
                 self.run_chip_proofs(tasks, &transcript, &witness_data)?;
             exit_span!(execute_tasks_span);
+            #[cfg(feature = "gpu")]
+            if std::any::TypeId::of::<PB>()
+                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+            {
+                let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+                cuda_hal
+                    .inner
+                    .synchronize()
+                    .expect("cuda synchronize after run_chip_proofs");
+                let replay_cache = current_replay_cache_stats();
+                tracing::info!(
+                    "[gpu replay cache][after_run_chip_proofs] shard_steps={:.2}MB shard_meta={:.2}MB shared_side_effect={:.2}MB total={:.2}MB",
+                    replay_cache.shard_steps_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.shard_meta_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.shared_side_effect_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.total_bytes() as f64 / (1024.0 * 1024.0),
+                );
+                crate::scheme::gpu::log_gpu_device_state("after_run_chip_proofs");
+            }
 
             // Phase 3: Collect results
             let collect_results_span = entered_span!("collect_chip_results", profiling_1 = true);
@@ -504,21 +544,22 @@ impl<
                     .inner
                     .synchronize()
                     .expect("cuda synchronize before pcs_opening");
-                if !crate::scheme::scheduler::ChipScheduler::is_concurrent_mode() {
-                    tracing::info!(
-                        "[gpu] trimming mem pool before pcs_opening in sequential WITGEN mode"
-                    );
-                    cuda_hal
-                        .inner
-                        .trim_mem_pool()
-                        .expect("cuda trim mem pool before pcs_opening");
-                }
+                let replay_cache = current_replay_cache_stats();
+                tracing::info!(
+                    "[gpu replay cache][before_restore_pcs] shard_steps={:.2}MB shard_meta={:.2}MB shared_side_effect={:.2}MB total={:.2}MB",
+                    replay_cache.shard_steps_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.shard_meta_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.shared_side_effect_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.total_bytes() as f64 / (1024.0 * 1024.0),
+                );
+                crate::scheme::gpu::log_gpu_device_state("before_restore_pcs");
                 let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
                     unsafe { std::mem::transmute(&mut witness_data) };
                 crate::scheme::gpu::restore_replayable_trace_device_backing::<E, PCS>(
                     gpu_witness_data,
                     &replayable_traces,
                 )?;
+                crate::scheme::gpu::log_gpu_device_state("after_restore_pcs");
             }
             let mpcs_opening_proof = info_span!("[ceno] pcs_opening").in_scope(|| {
                 #[cfg(feature = "gpu")]
