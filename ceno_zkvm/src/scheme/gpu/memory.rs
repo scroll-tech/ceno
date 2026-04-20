@@ -233,8 +233,7 @@ pub(crate) fn estimate_main_constraints_bytes<
             // (see ZerocheckLayer verifier: max_degree = self.max_expr_degree + 1)
             let main_sumcheck_degree = (layer.max_expr_degree + 1).max(1);
 
-            let total_mles =
-                layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance;
+            let total_mles = layer.n_witin + layer.n_structural_witin + layer.n_fixed;
             let main_mle_num_vars_list = vec![num_var_with_rotation; total_mles];
             let main_est = estimate_sumcheck_memory(
                 num_var_with_rotation,

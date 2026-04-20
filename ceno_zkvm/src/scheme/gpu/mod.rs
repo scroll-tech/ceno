@@ -75,13 +75,7 @@ use util::{
 
 pub struct GpuTowerProver;
 
-use crate::{
-    scheme::{
-        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
-        septic_curve::SepticPoint,
-    },
-    structs::EccQuarkProof,
-};
+use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
 use gkr_iop::{
     gpu::{ArcMultilinearExtensionGpu, BB31Base, MultilinearExtensionGpu},
     selector::{SelectorContext, SelectorType},
