@@ -1,21 +1,26 @@
 use crate::{
+    error::ZKVMError,
     scheme::{
-        constants::MIN_PAR_SIZE,
+        constants::{MIN_PAR_SIZE, SEPTIC_EXTENSION_DEGREE},
         hal::{ProofInput, ProverDevice},
     },
-    structs::ComposedConstrainSystem,
+    structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval},
 };
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     evaluation::EvalExpression,
-    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness},
+    gkr::{
+        GKRCircuit, GKRCircuitOutput, GKRCircuitWitness,
+        layer::{LayerWitness, ROTATION_OPENING_COUNT},
+    },
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use itertools::Itertools;
-use mpcs::PolynomialCommitmentScheme;
+use mpcs::{Point, PolynomialCommitmentScheme};
 pub use multilinear_extensions::wit_infer_by_expr;
 use multilinear_extensions::{
+    Expression,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
@@ -28,6 +33,187 @@ use rayon::{
 };
 use std::{iter, sync::Arc};
 use witness::next_pow2_instance_padding;
+
+pub(crate) struct EccBridgeClaims<E: ExtensionField> {
+    pub(crate) xy_point: Point<E>,
+    pub(crate) s_point: Point<E>,
+    pub(crate) x3y3_point: Point<E>,
+    pub(crate) x_evals: Vec<E>,
+    pub(crate) y_evals: Vec<E>,
+    pub(crate) s_evals: Vec<E>,
+    pub(crate) x3_evals: Vec<E>,
+    pub(crate) y3_evals: Vec<E>,
+}
+
+pub(crate) struct EccQuarkWitnessInputs<'a, PB: ProverBackend> {
+    pub(crate) xs: Vec<Arc<PB::MultilinearPoly<'a>>>,
+    pub(crate) ys: Vec<Arc<PB::MultilinearPoly<'a>>>,
+    pub(crate) slopes: Vec<Arc<PB::MultilinearPoly<'a>>>,
+}
+
+pub(crate) fn extract_ecc_quark_witness_inputs<'a, PB: ProverBackend>(
+    cs: &ComposedConstrainSystem<PB::E>,
+    input: &ProofInput<'a, PB>,
+) -> Option<EccQuarkWitnessInputs<'a, PB>> {
+    let cs = &cs.zkvm_v1_css;
+    if cs.ec_final_sum.is_empty() {
+        return None;
+    }
+
+    let ec_point_exprs = &cs.ec_point_exprs;
+    assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
+    let mut xs_ys = ec_point_exprs
+        .iter()
+        .map(|expr| match expr {
+            Expression::WitIn(id) => input.witness[*id as usize].clone(),
+            _ => unreachable!("ec point's expression must be WitIn"),
+        })
+        .collect_vec();
+    let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
+    let xs = xs_ys;
+
+    let slopes = cs
+        .ec_slope_exprs
+        .iter()
+        .map(|expr| match expr {
+            Expression::WitIn(id) => input.witness[*id as usize].clone(),
+            _ => unreachable!("slope's expression must be WitIn"),
+        })
+        .collect_vec();
+
+    Some(EccQuarkWitnessInputs { xs, ys, slopes })
+}
+
+pub(crate) fn derive_ecc_bridge_claims<E: ExtensionField>(
+    ecc_proof: &EccQuarkProof<E>,
+    sample_r: E,
+    num_var_with_rotation: usize,
+) -> Result<EccBridgeClaims<E>, ZKVMError> {
+    let degree = SEPTIC_EXTENSION_DEGREE;
+    if ecc_proof.evals.len() < 3 {
+        return Err(ZKVMError::InvalidProof(
+            "ecc proof evals shorter than selector prefix".into(),
+        ));
+    }
+    let evals = &ecc_proof.evals[3..];
+    if evals.len() != degree * 7 {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc proof eval length: expected {}, got {}",
+                degree * 7,
+                evals.len()
+            )
+            .into(),
+        ));
+    }
+
+    let s1 = &evals[0..degree];
+    let x0 = &evals[degree..2 * degree];
+    let y0 = &evals[2 * degree..3 * degree];
+    let x1 = &evals[3 * degree..4 * degree];
+    let y1 = &evals[4 * degree..5 * degree];
+    let x3 = &evals[5 * degree..6 * degree];
+    let y3 = &evals[6 * degree..7 * degree];
+
+    let one_minus_r = E::ONE - sample_r;
+    let x_evals = x0
+        .iter()
+        .zip_eq(x1.iter())
+        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
+        .collect_vec();
+    let y_evals = y0
+        .iter()
+        .zip_eq(y1.iter())
+        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
+        .collect_vec();
+    let s_evals = s1.iter().map(|v| *v * sample_r).collect_vec();
+    let x3_evals = x3.to_vec();
+    let y3_evals = y3.to_vec();
+
+    let mut xy_point = vec![sample_r];
+    xy_point.extend(ecc_proof.rt.iter().copied());
+    if xy_point.len() != num_var_with_rotation {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc xy point length: expected {}, got {}",
+                num_var_with_rotation,
+                xy_point.len()
+            )
+            .into(),
+        ));
+    }
+
+    let mut s_point = ecc_proof.rt.clone();
+    s_point.push(sample_r);
+    if s_point.len() != num_var_with_rotation {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc slope point length: expected {}, got {}",
+                num_var_with_rotation,
+                s_point.len()
+            )
+            .into(),
+        ));
+    }
+
+    let mut x3y3_point = ecc_proof.rt.clone();
+    x3y3_point.push(E::ONE);
+    if x3y3_point.len() != num_var_with_rotation {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc x3/y3 point length: expected {}, got {}",
+                num_var_with_rotation,
+                x3y3_point.len()
+            )
+            .into(),
+        ));
+    }
+
+    Ok(EccBridgeClaims {
+        xy_point,
+        s_point,
+        x3y3_point,
+        x_evals,
+        y_evals,
+        s_evals,
+        x3_evals,
+        y3_evals,
+    })
+}
+
+pub(crate) fn split_rotation_evals<E: ExtensionField>(evals: &[E]) -> (Vec<E>, Vec<E>, Vec<E>) {
+    assert_eq!(
+        evals.len() % ROTATION_OPENING_COUNT,
+        0,
+        "rotation evals length must be a multiple of {}, got {}",
+        ROTATION_OPENING_COUNT,
+        evals.len()
+    );
+    let mut left_evals = Vec::new();
+    let mut right_evals = Vec::new();
+    let mut point_evals = Vec::new();
+    for chunk in evals.chunks_exact(ROTATION_OPENING_COUNT) {
+        left_evals.push(chunk[0]);
+        right_evals.push(chunk[1]);
+        point_evals.push(chunk[2]);
+    }
+    (left_evals, right_evals, point_evals)
+}
+
+pub(crate) fn assign_group_evals<E: ExtensionField>(
+    out_evals: &mut [PointAndEval<E>],
+    eval_exprs: &[EvalExpression<E>],
+    evals: &[E],
+    point: &Point<E>,
+) {
+    assert_eq!(eval_exprs.len(), evals.len(), "group eval length mismatch");
+    for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
+        let EvalExpression::Single(index) = eval_expr else {
+            panic!("group must use EvalExpression::Single");
+        };
+        out_evals[*index] = PointAndEval::new(point.clone(), *eval);
+    }
+}
 
 /// Wrapper that asserts a shared reference is safe to send across threads.
 ///
@@ -407,7 +593,7 @@ pub fn gkr_witness<
     phase1_witness_group: &[Arc<PB::MultilinearPoly<'b>>],
     structural_witness: &[Arc<PB::MultilinearPoly<'b>>],
     fixed: &[Arc<PB::MultilinearPoly<'b>>],
-    pub_io_mles: &[Arc<PB::MultilinearPoly<'b>>],
+    _pub_io_mles: &[Arc<PB::MultilinearPoly<'b>>],
     pub_io_evals: &[Either<E::BaseField, E>],
     challenges: &[E],
 ) -> (GKRCircuitWitness<'b, PB>, GKRCircuitOutput<'b, PB>) {
@@ -436,16 +622,6 @@ pub fn gkr_witness<
             .zip_eq(fixed.iter())
             .for_each(|(index, fixed_mle)| {
                 witness_mle_flatten[*index] = Some(fixed_mle.clone());
-            });
-
-        first_layer
-            .in_eval_expr
-            .iter()
-            .skip(first_layer.n_witin + first_layer.n_fixed)
-            .take(first_layer.n_instance)
-            .zip_eq(pub_io_mles.iter())
-            .for_each(|(index, pubio_mle)| {
-                witness_mle_flatten[*index] = Some(pubio_mle.clone());
             });
 
         // XXX currently fixed poly not support in layers > 1
@@ -500,10 +676,7 @@ pub fn gkr_witness<
 
         assert_eq!(
             current_layer_wits.len(),
-            layer.n_witin
-                + layer.n_fixed
-                + layer.n_instance
-                + if i == 0 { layer.n_structural_witin } else { 0 }
+            layer.n_witin + layer.n_fixed + if i == 0 { layer.n_structural_witin } else { 0 }
         );
 
         // infer current layer output

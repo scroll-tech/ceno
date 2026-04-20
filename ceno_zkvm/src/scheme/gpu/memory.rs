@@ -16,7 +16,6 @@ use gkr_iop::gpu::{
     },
 };
 use mpcs::PolynomialCommitmentScheme;
-use std::sync::OnceLock;
 
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
@@ -219,14 +218,7 @@ pub(crate) fn estimate_main_constraints_bytes<
     let max_eqs = gkr_circuit
         .layers
         .iter()
-        .map(|layer| {
-            let rotation_extra = if layer.rotation_sumcheck_expression_monomial_terms.is_some() {
-                3
-            } else {
-                0
-            };
-            layer.out_sel_and_eval_exprs.len() + rotation_extra
-        })
+        .map(|layer| layer.out_sel_and_eval_exprs.len())
         .max()
         .unwrap_or(0);
 
