@@ -10,6 +10,7 @@ use ceno_gpu::{
     estimate_build_tower_memory, estimate_prove_tower_memory, estimate_sumcheck_memory,
 };
 use ff_ext::ExtensionField;
+use gkr_iop::evaluation::EvalExpression;
 use gkr_iop::gpu::{
     BB31Base, GpuBackend,
     gpu_prover::{
@@ -292,20 +293,37 @@ pub fn estimate_main_witness_bytes<E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
     num_var_with_rotation: usize,
 ) -> usize {
-    let cs = &composed_cs.zkvm_v1_css;
-    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
-    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
-    let num_lk_num = cs.lk_table_expressions.len();
-    let num_lk_den = if !cs.lk_table_expressions.is_empty() {
-        cs.lk_table_expressions.len()
-    } else {
-        cs.lk_expressions.len()
-    };
-    let num_records = num_reads + num_writes + num_lk_num + num_lk_den;
-
     let elem_size = std::mem::size_of::<BB31Ext>();
     let record_len = 1usize << num_var_with_rotation;
-    num_records * record_len * elem_size
+
+    // build_main_witness now follows the merged GKR output topology:
+    // each layer_witness call allocates one output MLE per non-zero
+    // EvalExpression::{Single, Linear} entry in out_sel_and_eval_exprs.
+    // Zero outputs are represented by default placeholders and do not allocate.
+    composed_cs
+        .gkr_circuit
+        .as_ref()
+        .map(|gkr_circuit| {
+            let output_mles = gkr_circuit
+                .layers
+                .iter()
+                .map(|layer| {
+                    layer
+                        .out_sel_and_eval_exprs
+                        .iter()
+                        .flat_map(|(_, out_evals)| out_evals.iter())
+                        .filter(|out_eval| {
+                            matches!(
+                                out_eval,
+                                EvalExpression::Single(_) | EvalExpression::Linear(_, _, _)
+                            )
+                        })
+                        .count()
+                })
+                .sum::<usize>();
+            output_mles * record_len * elem_size
+        })
+        .unwrap_or(0)
 }
 
 pub(crate) fn estimate_main_constraints_bytes<
