@@ -227,6 +227,78 @@ impl ChipScheduler {
         Ok((results, forked_samples))
     }
 
+    /// Execute tasks one-at-a-time on a scoped worker thread.
+    ///
+    /// This preserves sequential proving semantics while matching the worker-thread
+    /// lifecycle used by concurrent GPU scheduling more closely than running every
+    /// task directly on the main thread.
+    #[cfg(feature = "gpu")]
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn execute_sequentially_on_worker<'a, PB, T, F>(
+        &self,
+        tasks: Vec<ChipTask<'a, PB>>,
+        parent_transcript: &T,
+        execute_task: F,
+    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    where
+        PB: ProverBackend + 'static,
+        PB::E: Send + 'static,
+        T: Transcript<PB::E> + Clone + Sync,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError> + Send + Sync,
+    {
+        if tasks.is_empty() {
+            return Ok((vec![], vec![]));
+        }
+
+        for task in &tasks {
+            tracing::debug!(
+                "[scheduler] Task {} ({}): {}MB",
+                task.task_id,
+                task.circuit_name,
+                task.estimated_memory_bytes / (1024 * 1024)
+            );
+        }
+
+        let mut results = Vec::with_capacity(tasks.len());
+        let mut samples: Vec<(usize, PB::E)> = Vec::with_capacity(tasks.len());
+
+        std::thread::scope(|scope| -> Result<(), ZKVMError> {
+            for task in tasks {
+                let task_id = task.task_id;
+                let execute_ref = &execute_task;
+                let transcript_ref = parent_transcript;
+                let handle = scope.spawn(move || {
+                    let mut forked = transcript_ref.clone();
+                    forked.append_field_element(
+                        &<PB::E as ExtensionField>::BaseField::from_canonical_u64(task_id as u64),
+                    );
+                    let result = execute_ref(task, &mut forked);
+                    let sample = forked.sample_vec(1)[0];
+                    (result, sample, task_id)
+                });
+                let (result, sample, task_id) = handle.join().map_err(|panic_info| {
+                    let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                        format!("Sequential worker panicked on task {task_id}: {s}")
+                    } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                        format!("Sequential worker panicked on task {task_id}: {s}")
+                    } else {
+                        format!("Sequential worker panicked on task {task_id}")
+                    };
+                    ZKVMError::BackendError(BackendError::CircuitError(msg.into_boxed_str()))
+                })?;
+                results.push(result?);
+                samples.push((task_id, sample));
+            }
+            Ok(())
+        })?;
+
+        results.sort_by_key(|r| r.task_id);
+        samples.sort_by_key(|(id, _)| *id);
+        let forked_samples = samples.into_iter().map(|(_, s)| s).collect();
+
+        Ok((results, forked_samples))
+    }
+
     /// Execute all chip proof tasks using the greedy backfilling algorithm.
     ///
     /// Tasks are sorted by memory requirement (descending) and scheduled to
