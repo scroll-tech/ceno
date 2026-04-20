@@ -1010,6 +1010,10 @@ impl<
                         get_chip_proving_mode(),
                         crate::scheme::scheduler::ChipProvingMode::Concurrent
                     ) {
+                    // Concurrent scheduling needs extra exclusion space for the
+                    // largest replay-heavy chips. Their standalone estimate is
+                    // good enough for proving/memcheck, but booking without an
+                    // added margin can admit unsafe overlap and trigger OOMs.
                     crate::scheme::scheduler::large_gpu_task_booking_margin_bytes()
                 } else {
                     0
