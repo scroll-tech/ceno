@@ -2080,9 +2080,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         >,
     ) -> DeviceProvingKey<'static, GpuBackend<E, PCS>> {
         let pcs_data_original = if is_first_shard {
-            pk.fixed_commit_wd.clone().unwrap()
+            pk.fixed_commit_wd.as_ref().unwrap().clone()
         } else {
-            pk.fixed_no_omc_init_commit_wd.clone().unwrap()
+            pk.fixed_no_omc_init_commit_wd.as_ref().unwrap().clone()
         };
 
         // assert pcs match

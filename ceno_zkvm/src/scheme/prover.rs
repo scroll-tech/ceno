@@ -1040,7 +1040,8 @@ impl<
                 None
             };
             #[cfg(feature = "gpu")]
-            let gpu_replay_plan = gpu_replay_plans[this_idx].clone().map(|mut plan| {
+            let gpu_replay_plan = gpu_replay_plans[this_idx].as_ref().map(|plan| {
+                let mut plan = plan.clone();
                 plan.trace_idx = witness_trace_idx;
                 plan
             });

@@ -54,6 +54,13 @@ If there are no findings, state that explicitly and mention residual risks or te
 - Panic and invariant handling on potentially untrusted proof/input data (`unwrap`, `expect`, indexing, assertions).
 - Determinism and concurrency risks (parallel iteration order assumptions, shared mutable state).
 
+## Clone review heuristic
+
+- Treat `.clone()` as suspicious in hot paths or large data flows, but distinguish cheap handle clones from deep data copies.
+- Call out clones that are immediately dereferenced or destructured when a borrow would do instead, for example `option.clone().unwrap()` or `vec.clone().try_into()`.
+- Do not flag `Arc`/`Rc` clones by default when they are used to shorten a borrow and unblock later mutable access; these are often intentional and semantically cheap.
+- If a clone exists to avoid borrow-checker conflicts, mention that explicitly in the review rather than treating it as an obvious inefficiency.
+
 ## Testing guidance
 
 When proposing or reviewing behavior changes, prefer targeted tests near the affected crate/module:
@@ -75,4 +82,3 @@ When proposing or reviewing behavior changes, prefer targeted tests near the aff
 - Concise, direct, and technical.
 - Use actionable bullet points.
 - Keep summaries brief and focus on concrete findings.
-

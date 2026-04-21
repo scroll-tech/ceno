@@ -215,13 +215,9 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         b: u32,
         c: u32,
     ) {
-        let b = split_to_limb::<u32, LIMB_BITS>(b);
-        let c = split_to_limb::<u32, LIMB_BITS>(c);
-        let (_, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(
-            kind,
-            &b.clone().try_into().unwrap(),
-            &c.clone().try_into().unwrap(),
-        );
+        let b: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(b).try_into().unwrap();
+        let c: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(c).try_into().unwrap();
+        let (_, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(kind, &b, &c);
 
         let bit_shift_carry: [u32; NUM_LIMBS] = array::from_fn(|i| match kind {
             InsnKind::SLL | InsnKind::SLLI => b[i] >> (LIMB_BITS - bit_shift),
@@ -255,13 +251,9 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         b: u32,
         c: u32,
     ) {
-        let b = split_to_limb::<_, LIMB_BITS>(b);
-        let c = split_to_limb::<_, LIMB_BITS>(c);
-        let (_, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(
-            kind,
-            &b.clone().try_into().unwrap(),
-            &c.clone().try_into().unwrap(),
-        );
+        let b: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(b).try_into().unwrap();
+        let c: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(c).try_into().unwrap();
+        let (_, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(kind, &b, &c);
 
         match kind {
             InsnKind::SLL | InsnKind::SLLI => set_val!(
