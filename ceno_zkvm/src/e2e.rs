@@ -1759,8 +1759,10 @@ pub fn run_e2e_with_checkpoint<
         &init_full_mem,
     );
 
-    if target_shard_id.is_some() {
-        // skip verify as the proof are in-completed
+    let can_verify_target_shard = target_shard_id.is_none() || zkvm_proofs.len() == 1;
+    if !can_verify_target_shard {
+        // Partial multi-shard subsets still skip verification because the
+        // continuation chain between omitted shards is unavailable.
         return E2ECheckpointResult {
             proofs: Some(zkvm_proofs),
             vk: Some(vk),
@@ -1775,13 +1777,25 @@ pub fn run_e2e_with_checkpoint<
             proofs: Some(zkvm_proofs.clone()),
             vk: Some(vk),
             next_step: Some(Box::new(move || {
-                run_e2e_verify(&verifier, zkvm_proofs, exit_code, max_steps)
+                run_e2e_verify(
+                    &verifier,
+                    zkvm_proofs,
+                    exit_code,
+                    max_steps,
+                    target_shard_id,
+                )
             })),
         };
     }
 
     let start = std::time::Instant::now();
-    run_e2e_verify(&verifier, zkvm_proofs.clone(), exit_code, max_steps);
+    run_e2e_verify(
+        &verifier,
+        zkvm_proofs.clone(),
+        exit_code,
+        max_steps,
+        target_shard_id,
+    );
     tracing::debug!("verified in {:?}", start.elapsed());
 
     E2ECheckpointResult {
@@ -2023,15 +2037,29 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     zkvm_proofs: Vec<ZKVMProof<E, PCS>>,
     exit_code: Option<u32>,
     max_steps: usize,
+    target_shard_id: Option<usize>,
 ) {
     let transcripts = (0..zkvm_proofs.len())
         .map(|_| Transcript::new(b"riscv"))
         .collect_vec();
-    assert!(
+    let expect_halt = zkvm_proofs
+        .last()
+        .map(|proof| proof.has_halt(&verifier.vk))
+        .unwrap_or(exit_code.is_some());
+    let verified = if target_shard_id.is_some() && zkvm_proofs.len() == 1 {
         verifier
-            .verify_proofs_halt(zkvm_proofs, transcripts, exit_code.is_some())
-            .expect("verify proof return with error"),
-    );
+            .verify_shard_proof_halt(
+                zkvm_proofs.into_iter().next().unwrap(),
+                transcripts.into_iter().next().unwrap(),
+                expect_halt,
+            )
+            .expect("verify proof return with error")
+    } else {
+        verifier
+            .verify_proofs_halt(zkvm_proofs, transcripts, expect_halt)
+            .expect("verify proof return with error")
+    };
+    assert!(verified);
     match exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),
@@ -2099,11 +2127,19 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
     {
         Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
     }
-    let transcripts = (0..zkvm_proofs.len())
-        .map(|_| Transcript::new(b"riscv"))
-        .collect_vec();
     let has_halt = zkvm_proofs.last().unwrap().has_halt(&verifier.vk);
-    verifier.verify_proofs_halt(zkvm_proofs, transcripts, has_halt)?;
+    if zkvm_proofs.len() == 1 {
+        verifier.verify_shard_proof_halt(
+            zkvm_proofs.into_iter().next().unwrap(),
+            Transcript::new(b"riscv"),
+            has_halt,
+        )?;
+    } else {
+        let transcripts = (0..zkvm_proofs.len())
+            .map(|_| Transcript::new(b"riscv"))
+            .collect_vec();
+        verifier.verify_proofs_halt(zkvm_proofs, transcripts, has_halt)?;
+    }
     // print verification statistics such as hash count
     #[cfg(debug_assertions)]
     {

@@ -121,6 +121,35 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         self.verify_proofs_halt(vec![vm_proof], vec![transcript], expect_halt)
     }
 
+    /// Verify a single shard proof as a standalone segment.
+    ///
+    /// Unlike `verify_proof_halt`, this checks proof validity and halt/segment
+    /// invariants for one shard only and intentionally skips cross-shard
+    /// continuation checks such as init_pc/heap chaining.
+    pub fn verify_shard_proof_halt(
+        &self,
+        vm_proof: ZKVMProof<E, PCS>,
+        transcript: impl ForkableTranscript<E>,
+        expect_halt: bool,
+    ) -> Result<bool, ZKVMError> {
+        let has_halt = vm_proof.has_halt(&self.vk);
+        if has_halt != expect_halt {
+            return Err(ZKVMError::VerifyError(
+                format!("shard proof ecall/halt mismatch: expected {expect_halt} != {has_halt}",)
+                    .into(),
+            ));
+        }
+
+        assert_eq!(
+            vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX),
+            E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
+        );
+
+        let shard_id = vm_proof.public_values.shard_id as usize;
+        self.verify_proof_validity(shard_id, vm_proof, transcript)?;
+        Ok(true)
+    }
+
     /// Verify a trace from start to optional halt.
     pub fn verify_proofs_halt(
         &self,
@@ -237,8 +266,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             }
         }
 
-        // check shard id
-        assert_eq!(vm_proof.public_values.shard_id, shard_id as u32);
+        if vm_proof.public_values.shard_id != shard_id as u32 {
+            return Err(ZKVMError::VerifyError(
+                format!(
+                    "proof shard_id mismatch: expected {} != {}",
+                    shard_id, vm_proof.public_values.shard_id
+                )
+                .into(),
+            ));
+        }
 
         // write fixed commitment to transcript
         // TODO check soundness if there is no fixed_commit but got fixed proof?

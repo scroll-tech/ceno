@@ -350,7 +350,8 @@ fn run_inner<
     let vk_bytes = bincode::serialize(&vk).unwrap();
     fs::write(&vk_file, vk_bytes).unwrap();
 
-    if checkpoint > Checkpoint::PrepVerify && target_shard_id.is_none() {
+    if checkpoint > Checkpoint::PrepVerify && (target_shard_id.is_none() || zkvm_proofs.len() == 1)
+    {
         let verifier = ZKVMVerifier::new(vk);
         verify(zkvm_proofs.clone(), &verifier).expect("Verification failed");
         soundness_test(zkvm_proofs.first().cloned().unwrap(), &verifier);
