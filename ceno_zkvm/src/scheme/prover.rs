@@ -1236,9 +1236,10 @@ where
 
     if replay_stage_split {
         materialize_replay_input(&mut input, &mut structural_rmm)?;
-        let cs = circuit_pk.get_cs();
-
         let records = info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
             build_main_witness::<
                 E,
                 PCS,
@@ -1397,7 +1398,6 @@ where
         ));
     }
 
-    // build main witness
     let records =
         info_span!("[ceno] build_main_witness").in_scope(|| {
             // ECC and rotation have dedicated witness/eval flows. For tower proving we only

@@ -85,7 +85,6 @@ use util::{
 };
 
 pub struct GpuTowerProver;
-
 #[derive(Clone)]
 pub enum DeferredGpuTrace<E: ExtensionField> {
     Eager(witness::RowMajorMatrix<E::BaseField>),
@@ -304,7 +303,6 @@ pub fn log_gpu_device_state(label: &str) {
         mb(max_bytes as usize),
     );
 }
-
 use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
 use gkr_iop::{
     gpu::{ArcMultilinearExtensionGpu, BB31Base, MultilinearExtensionGpu},
