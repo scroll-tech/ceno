@@ -274,7 +274,7 @@ pub fn estimate_replay_materialization_bytes_for_plan<E: ExtensionField>(
 ) -> usize {
     let elem_size = std::mem::size_of::<BB31Base>();
     let witness_bytes = replay_plan.trace_height * replay_plan.num_witin * elem_size;
-    let keccak_instances_temp_bytes = match replay_plan.kind {
+    let replay_temp_bytes = match replay_plan.kind {
         GpuWitgenKind::Keccak => replay_plan
             .keccak_instances
             .as_ref()
@@ -283,20 +283,17 @@ pub fn estimate_replay_materialization_bytes_for_plan<E: ExtensionField>(
                     * std::mem::size_of::<ceno_gpu::common::witgen::types::GpuKeccakInstance>()
             })
             .unwrap_or(0),
-        _ => 0,
-    };
-
-    match replay_plan.kind {
         GpuWitgenKind::ShardRam => {
             let n = replay_plan.shard_ram_num_records.next_power_of_two();
             // ShardRam replay constructs an EC tree on GPU from the device records.
             // Peak temp occurs at the first layer when cur_x/cur_y and next_x/next_y
             // coexist. Each point coordinate stores 7 BabyBear limbs.
-            let ec_tree_temp_bytes = (2 * n * 7 * elem_size) + (2 * (n / 2) * 7 * elem_size);
-            witness_bytes + ec_tree_temp_bytes
+            (2 * n * 7 * elem_size) + (2 * (n / 2) * 7 * elem_size)
         }
-        _ => witness_bytes + keccak_instances_temp_bytes,
-    }
+        _ => 0,
+    };
+
+    witness_bytes + replay_temp_bytes
 }
 
 pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
