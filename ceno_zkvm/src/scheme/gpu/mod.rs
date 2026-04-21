@@ -1446,6 +1446,43 @@ pub fn clear_replayable_trace_device_backing<E, PCS>(
     );
 }
 
+pub fn install_replayable_trace_materializer<E, PCS>(
+    pcs_data: &mut <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
+) where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    let pcs_data_basefold: &mut BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(pcs_data) };
+
+    let replay_trace_map: BTreeMap<usize, crate::structs::GpuReplayPlan<E>> =
+        replayable_traces.iter().cloned().collect();
+    pcs_data_basefold.deferred_rmm_loader = Some(Arc::new(move |trace_idx| {
+        let replay_plan = replay_trace_map.get(&trace_idx).ok_or_else(|| {
+            ceno_gpu::HalError::InvalidInput(format!(
+                "missing replay plan for witness trace {trace_idx}"
+            ))
+        })?;
+        replay_plan
+            .replay_witness()
+            .map(|witness_rmm| {
+                assert_eq!(
+                    witness_rmm.height(),
+                    replay_plan.trace_height,
+                    "replayed trace height changed between plan build and PCS opening",
+                );
+                unsafe { std::mem::transmute(witness_rmm) }
+            })
+            .map_err(|e| ceno_gpu::HalError::InvalidInput(format!("{e:?}")))
+    }));
+}
+
 pub fn restore_replayable_trace_device_backing<E, PCS>(
     pcs_data: &mut <GpuBackend<E, PCS> as ProverBackend>::PcsData,
     replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],

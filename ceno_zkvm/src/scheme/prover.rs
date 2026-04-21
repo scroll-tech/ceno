@@ -538,6 +538,12 @@ impl<
                 && std::any::TypeId::of::<PB>()
                     == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
             {
+                let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                    unsafe { std::mem::transmute(&mut witness_data) };
+                crate::scheme::gpu::install_replayable_trace_materializer::<E, PCS>(
+                    gpu_witness_data,
+                    &replayable_traces,
+                );
                 let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
                 cuda_hal
                     .inner
@@ -552,13 +558,9 @@ impl<
                     replay_cache.total_bytes() as f64 / (1024.0 * 1024.0),
                 );
                 crate::scheme::gpu::log_gpu_device_state("before_restore_pcs");
-                let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
-                    unsafe { std::mem::transmute(&mut witness_data) };
-                crate::scheme::gpu::restore_replayable_trace_device_backing::<E, PCS>(
-                    gpu_witness_data,
-                    &replayable_traces,
-                )?;
-                crate::scheme::gpu::log_gpu_device_state("after_restore_pcs");
+                tracing::info!(
+                    "[gpu replay cache][before_restore_pcs] using on-demand witness replay during pcs_opening"
+                );
             }
             let mpcs_opening_proof = info_span!("[ceno] pcs_opening").in_scope(|| {
                 #[cfg(feature = "gpu")]
