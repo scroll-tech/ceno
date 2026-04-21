@@ -139,6 +139,19 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     let replay_materialization_bytes = replay_plan
         .map(|plan| estimate_replay_materialization_bytes_for_plan(plan, num_var_with_rotation))
         .unwrap_or(trace_est.trace_resident_bytes + trace_est.trace_temporary_bytes);
+    let replay_prepare_overlap_bytes = if witness_replayable
+        && !replay_stage_split
+        && matches!(get_chip_proving_mode(), ChipProvingMode::Concurrent)
+    {
+        // Concurrent replayable tasks build their witness/device backing on a
+        // worker pool stream immediately before proof stages. In practice this
+        // replay allocation behaves like additional exclusion space: frees are
+        // stream-ordered and the scheduler's admission decision happens before
+        // those buffers are fully reclaimed across overlapping workers.
+        replay_materialization_bytes
+    } else {
+        0
+    };
     let (resident_bytes, stage_peak_usage_bytes, total_usage_bytes) = if replay_stage_split {
         // Replayable large-memory chips are materialized twice:
         // - once for build_main_witness + build_tower_witness
@@ -174,6 +187,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         let tower_prove_stage_bytes = main_witness_bytes + tower_prove_peak_bytes;
         let stage_peak = trace_est
             .trace_temporary_bytes
+            .max(replay_prepare_overlap_bytes)
             .max(tower_build_stage_bytes)
             .max(tower_prove_stage_bytes)
             .max(ecc_quark_temporary_bytes)
@@ -223,9 +237,10 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         );
         // Stage-scoped memory beyond the always-live extracted trace.
         tracing::info!(
-            "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_main={:.2}MB, ecc_quark={:.2}MB, prove_main={:.2}MB",
+            "[mem estimate][{}] temporary: extract_trace={:.2}MB, replay_prepare={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_main={:.2}MB, ecc_quark={:.2}MB, prove_main={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_temporary_bytes),
+            to_mb(replay_prepare_overlap_bytes),
             to_mb(tower_build_stage_bytes),
             to_mb(tower_prove_stage_bytes),
             to_mb(ecc_quark_temporary_bytes),
