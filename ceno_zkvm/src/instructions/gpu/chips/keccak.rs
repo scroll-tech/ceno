@@ -209,7 +209,6 @@ pub fn pack_keccak_instances(
 /// Unlike `try_gpu_assign_instances`, keccak has a rotation-aware matrix layout
 /// (each logical instance spans 32 physical rows) and requires building
 /// structural witness on CPU with selector indices from the cyclic group.
-#[cfg(feature = "gpu")]
 pub fn gpu_assign_keccak_instances<E: ExtensionField>(
     config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
     shard_ctx: &mut ShardContext,
@@ -281,7 +280,6 @@ pub fn gpu_assign_keccak_instances<E: ExtensionField>(
     })
 }
 
-#[cfg(feature = "gpu")]
 pub fn build_keccak_replay_plan<E: ExtensionField>(
     config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
     shard_ctx: &ShardContext,
@@ -312,7 +310,6 @@ pub fn build_keccak_replay_plan<E: ExtensionField>(
     )
 }
 
-#[cfg(feature = "gpu")]
 fn replay_keccak_witness_from_resident_raw<E: ExtensionField>(
     config_ptr: usize,
     replay: &crate::structs::GpuReplayPlan<E>,
@@ -339,7 +336,6 @@ fn replay_keccak_witness_from_resident_raw<E: ExtensionField>(
     )
 }
 
-#[cfg(feature = "gpu")]
 fn replay_keccak_witness_only_from_packed<E: ExtensionField>(
     config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
     num_witin: usize,
@@ -437,7 +433,6 @@ fn replay_keccak_witness_only_from_packed<E: ExtensionField>(
 ///
 /// The LK/shardram collection logic (Steps 6-7) is identical to the standard path;
 /// it is duplicated here rather than shared.
-#[cfg(feature = "gpu")]
 fn gpu_assign_keccak_inner<E: ExtensionField>(
     config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
     shard_ctx: &mut ShardContext,
@@ -735,7 +730,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(feature = "gpu")]
     fn test_gpu_witgen_keccak_correctness() {
         use crate::e2e::ShardContext;
 

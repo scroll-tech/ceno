@@ -50,7 +50,6 @@ mod tests {
     );
 
     #[test]
-    #[cfg(feature = "gpu")]
     fn test_gpu_witgen_jal_correctness() {
         use crate::{
             e2e::ShardContext, instructions::gpu::utils::test_helpers::assert_witness_colmajor_eq,

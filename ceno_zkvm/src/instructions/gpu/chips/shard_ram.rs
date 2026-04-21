@@ -12,7 +12,6 @@ use crate::{
     tables::{MemFinalRecord, ShardRamCircuit, ShardRamConfig, ShardRamRecord},
 };
 
-#[cfg(feature = "gpu")]
 pub fn build_shard_ram_replay_plan<E: ExtensionField>(
     shard_id: usize,
     config: &ShardRamConfig<E>,
@@ -41,7 +40,6 @@ pub fn build_shard_ram_replay_plan<E: ExtensionField>(
     )
 }
 
-#[cfg(feature = "gpu")]
 fn replay_shard_ram_witness_from_device<E: ExtensionField>(
     config_ptr: usize,
     replay: &crate::structs::GpuReplayPlan<E>,

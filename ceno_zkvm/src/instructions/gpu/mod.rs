@@ -1,5 +1,6 @@
 #[cfg(feature = "gpu")]
 pub mod cache;
+#[cfg(feature = "gpu")]
 pub mod chips;
 #[cfg(feature = "gpu")]
 pub mod config;

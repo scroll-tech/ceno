@@ -62,7 +62,6 @@ mod tests {
     );
 
     #[test]
-    #[cfg(feature = "gpu")]
     fn test_gpu_witgen_logic_r_correctness() {
         use crate::{
             e2e::ShardContext,
