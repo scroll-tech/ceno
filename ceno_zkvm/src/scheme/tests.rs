@@ -255,6 +255,7 @@ fn test_rw_lk_expression_combination() {
             pk: prover.pk.circuit_pks.get(&name).unwrap(),
             input,
             estimated_memory_bytes: 0,
+            booked_memory_bytes: 0,
             has_witness_or_fixed: true,
             challenges: prover_challenges,
             witness_trace_idx: None,

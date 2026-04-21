@@ -489,7 +489,10 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             structural_instances
         };
         let num_instances = [num_instances, 0];
+        #[cfg(feature = "gpu")]
         let mut input = ChipInput::new(OC::name(), witness, num_instances);
+        #[cfg(not(feature = "gpu"))]
+        let input = ChipInput::new(OC::name(), witness, num_instances);
         #[cfg(feature = "gpu")]
         if cs.zkvm_v1_css.num_witin > 0
             && crate::instructions::gpu::config::is_gpu_witgen_enabled()

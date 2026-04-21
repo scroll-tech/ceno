@@ -926,6 +926,7 @@ mod tests {
             pk: &pk,
             input: proof_input,
             estimated_memory_bytes: 0,
+            booked_memory_bytes: 0,
             has_witness_or_fixed: true,
             challenges,
             witness_trace_idx: None,

@@ -1,4 +1,3 @@
-use ceno_gpu::Buffer;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
@@ -16,11 +15,15 @@ use crate::scheme::{
     hal::MainSumcheckEvals,
     scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
 };
+#[cfg(feature = "gpu")]
+use ceno_gpu::Buffer;
 use either::Either;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::Instance;
-use p3::{field::FieldAlgebra, matrix::Matrix};
+use p3::field::FieldAlgebra;
+#[cfg(feature = "gpu")]
+use p3::matrix::Matrix;
 use std::iter::Iterator;
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -221,6 +224,7 @@ impl<
             for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
                 let crate::structs::ChipInput {
                     witness_rmms,
+                    #[cfg(feature = "gpu")]
                     gpu_replay_plan,
                     ..
                 } = chip_input;
@@ -295,29 +299,38 @@ impl<
                 && std::any::TypeId::of::<PB>()
                     == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>();
             #[cfg(not(feature = "gpu"))]
-            let use_deferred_gpu_commit = false;
+            let _use_deferred_gpu_commit = false;
 
             // commit to witness traces in batch
+            #[cfg_attr(not(feature = "gpu"), allow(unused_mut))]
             let (witness_mles, mut witness_data, witin_commit): (
                 Vec<PB::MultilinearPoly<'_>>,
                 PB::PcsData,
                 PCS::Commitment,
-            ) = if use_deferred_gpu_commit {
-                info_span!("[ceno] commit_traces").in_scope(|| {
-                    let gpu_device: &gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>> =
-                        unsafe { std::mem::transmute(&self.device) };
-                    let (gpu_witness_mles, gpu_witness_data, witin_commit) =
-                        crate::scheme::gpu::commit_traces_deferred_cache_none::<E, PCS>(
-                            gpu_device,
-                            deferred_gpu_traces,
-                        );
-                    let witness_mles = unsafe { std::mem::transmute(gpu_witness_mles) };
-                    let witness_data = unsafe { std::mem::transmute_copy(&gpu_witness_data) };
-                    std::mem::forget(gpu_witness_data);
-                    (witness_mles, witness_data, witin_commit)
-                })
-            } else {
-                info_span!("[ceno] commit_traces").in_scope(|| self.device.commit_traces(wits_rmms))
+            ) = {
+                #[cfg(feature = "gpu")]
+                if use_deferred_gpu_commit {
+                    info_span!("[ceno] commit_traces").in_scope(|| {
+                        let gpu_device: &gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>> =
+                            unsafe { std::mem::transmute(&self.device) };
+                        let (gpu_witness_mles, gpu_witness_data, witin_commit) =
+                            crate::scheme::gpu::commit_traces_deferred_cache_none::<E, PCS>(
+                                gpu_device,
+                                deferred_gpu_traces,
+                            );
+                        let witness_mles = unsafe { std::mem::transmute(gpu_witness_mles) };
+                        let witness_data = unsafe { std::mem::transmute_copy(&gpu_witness_data) };
+                        std::mem::forget(gpu_witness_data);
+                        (witness_mles, witness_data, witin_commit)
+                    })
+                } else {
+                    info_span!("[ceno] commit_traces")
+                        .in_scope(|| self.device.commit_traces(wits_rmms))
+                }
+                #[cfg(not(feature = "gpu"))]
+                {
+                    info_span!("[ceno] commit_traces").in_scope(|| self.device.commit_traces(wits_rmms))
+                }
             };
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
