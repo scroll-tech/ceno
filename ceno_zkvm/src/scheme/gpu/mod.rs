@@ -1127,7 +1127,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
-        Vec<MultilinearExtensionGpu<'a, E>>,
+        Vec<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
         <GpuBackend<E, PCS> as ProverBackend>::PcsData,
         PCS::Commitment,
     ) {
@@ -2141,7 +2141,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
     fn transport_mles<'a>(
         &self,
         mles: &[MultilinearExtension<'a, E>],
-    ) -> Vec<ArcMultilinearExtensionGpu<'a, E>> {
+    ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let cuda_hal = get_cuda_hal().unwrap();
         mles.iter()
             .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
