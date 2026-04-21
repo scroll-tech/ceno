@@ -1479,13 +1479,15 @@ fn replay_gpu_witness_from_resident_raw<E: ExtensionField, I: Instruction<E>>(
         (replay.fetch_base_pc, replay.fetch_num_slots),
     )?;
 
-    let mut raw_witin = gpu_witness_to_rmm::<E>(
+    let raw_witin = gpu_witness_to_rmm::<E>(
         gpu_witness,
         total_instances,
         replay.num_witin,
         I::padding_strategy(),
     );
-    raw_witin.padding_by_strategy();
 
+    // Keep replayed witness immutable after attaching the col-major device backing.
+    // Mutating/padding a RowMajorMatrix clears device metadata, but replay consumers
+    // read directly from the attached GPU buffer rather than the host placeholder.
     Ok(raw_witin)
 }
