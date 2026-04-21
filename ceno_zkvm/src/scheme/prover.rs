@@ -772,6 +772,7 @@ impl<
             ));
         }
         exit_span!(span);
+        drop(records);
 
         assert_eq!(
             rt_tower.len(), // num var length should equal to max_num_instance
@@ -1424,6 +1425,7 @@ where
             )
         });
     exit_span!(span);
+    drop(records);
 
     assert_eq!(rt_tower.len(), num_var_with_rotation,);
 

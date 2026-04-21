@@ -166,14 +166,19 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             stage_peak + ESTIMATION_SAFETY_MARGIN_BYTES,
         )
     } else {
-        // Peak is max across all stages (extraction, tower, ecc, main).
-        // Each stage's temporary memory is on top of the resident usage (records + deferred_resident).
+        // In the non-replay path, extracted trace MLEs stay resident across the
+        // full chip proof, but the tower-facing main witness records only need
+        // to stay live through tower proving. They are dropped before the
+        // ECC/rotation/main-constraint stages.
+        let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
+        let tower_prove_stage_bytes = main_witness_bytes + tower_prove_peak_bytes;
         let stage_peak = trace_est
             .trace_temporary_bytes
-            .max(tower_temporary_bytes)
+            .max(tower_build_stage_bytes)
+            .max(tower_prove_stage_bytes)
             .max(ecc_quark_temporary_bytes)
             .max(main_constraints_temporary_bytes);
-        let resident = trace_est.trace_resident_bytes + main_witness_bytes;
+        let resident = trace_est.trace_resident_bytes;
         (
             resident,
             stage_peak,
@@ -208,21 +213,22 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             to_mb(ESTIMATION_SAFETY_MARGIN_BYTES),
         );
     } else {
+        let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
+        let tower_prove_stage_bytes = main_witness_bytes + tower_prove_peak_bytes;
         // Resident memory (always occupied during chip proof)
         tracing::info!(
-            "[mem estimate][{}] resident: trace={:.2}MB, main_witness={:.2}MB",
+            "[mem estimate][{}] resident: trace={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_resident_bytes),
-            to_mb(main_witness_bytes),
         );
-        // Temporary memory per stage (only one active at a time, peak = max)
+        // Stage-scoped memory beyond the always-live extracted trace.
         tracing::info!(
-            "[mem estimate][{}] temporary: extract_trace={:.2}MB, ecc_quark={:.2}MB, build_tower={:.2}MB, prove_tower={:.2}MB, prove_main={:.2}MB",
+            "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_main={:.2}MB, ecc_quark={:.2}MB, prove_main={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_temporary_bytes),
+            to_mb(tower_build_stage_bytes),
+            to_mb(tower_prove_stage_bytes),
             to_mb(ecc_quark_temporary_bytes),
-            to_mb(tower_build_bytes),
-            to_mb(tower_prove_peak_bytes),
             to_mb(main_constraints_temporary_bytes),
         );
         // Total peak = resident + max(stage temporaries)
