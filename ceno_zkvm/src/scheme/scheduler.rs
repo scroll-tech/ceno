@@ -428,6 +428,13 @@ impl ChipScheduler {
                             }
                         };
 
+                        #[cfg(feature = "gpu")]
+                        if let Some(stream) = gkr_iop::gpu::get_thread_stream() {
+                            stream
+                                .synchronize()
+                                .expect("worker stream synchronize before completion failed");
+                        }
+
                         let _ = tx.send(CompletionMessage {
                             result,
                             memory_reserved: booked_memory,
