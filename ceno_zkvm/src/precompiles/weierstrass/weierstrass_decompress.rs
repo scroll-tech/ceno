@@ -659,6 +659,7 @@ pub fn run_weierstrass_decompress<
         &[],
         &[],
         &challenges,
+        None,
     );
     exit_span!(span);
 

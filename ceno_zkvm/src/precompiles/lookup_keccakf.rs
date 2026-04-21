@@ -1128,6 +1128,7 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         &[],
         &[],
         &challenges,
+        None,
     );
     exit_span!(span);
 

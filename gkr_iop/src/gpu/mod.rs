@@ -406,6 +406,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         pub_io_evals: &[Either<E::BaseField, E>],
         challenges: &[E],
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        Self::layer_witness_filtered(layer, layer_wits, pub_io_evals, challenges, None)
+    }
+
+    fn layer_witness_filtered<'a>(
+        layer: &Layer<E>,
+        layer_wits: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
+        pub_io_evals: &[Either<E::BaseField, E>],
+        challenges: &[E],
+        output_mask: Option<&[bool]>,
+    ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let stream = get_thread_stream();
         let span = entered_span!("preprocess", profiling_2 = true);
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
@@ -417,21 +427,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
             .collect();
+        if let Some(mask) = output_mask {
+            assert_eq!(
+                mask.len(),
+                out_evals.len(),
+                "output_mask len {} != out_evals len {} for layer {}",
+                mask.len(),
+                out_evals.len(),
+                layer.name
+            );
+        }
 
         // pre-process and flatten indices into friendly GPU format
-        let (num_non_zero_expr, term_coefficients, mle_indices_per_term, mle_size_info) = layer
+        let (selected_indices, term_coefficients, mle_indices_per_term, mle_size_info) = layer
             .exprs_with_selector_out_eval_monomial_form
             .iter()
-            .zip_eq(out_evals.iter())
-            .filter(|(_, (_, out_eval))| {
+            .zip_eq(out_evals.iter().enumerate())
+            .filter(|(_, (idx, (_, out_eval)))| {
+                let should_materialize = output_mask.is_none_or(|mask| mask[*idx]);
                 match out_eval {
-                    // only take linear/single to process
-                    EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => true,
+                    EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
+                        should_materialize
+                    }
                     EvalExpression::Partition(..) => unimplemented!("Partition"),
                     EvalExpression::Zero => false,
                 }
             })
-            .map(|(expr, _)| {
+            .map(|(expr, (idx, _))| {
                 let (coeffs, indices, size_info) = extract_mle_relationships_from_monomial_terms(
                     expr,
                     &layer_wits.iter().map(|mle| mle.as_ref()).collect_vec(),
@@ -439,35 +461,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     challenges,
                 );
                 let coeffs_gl64: Vec<BB31Ext> = unsafe { std::mem::transmute(coeffs) };
-                (coeffs_gl64, indices, size_info)
+                (idx, coeffs_gl64, indices, size_info)
             })
             .fold(
-                (0, Vec::new(), Vec::new(), Vec::new()),
-                |(mut num_non_zero_expr, mut coeff_acc, mut indices_acc, mut size_acc),
-                 (coeffs, indices, size_info)| {
-                    num_non_zero_expr += 1;
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+                |(mut selected, mut coeff_acc, mut indices_acc, mut size_acc),
+                 (idx, coeffs, indices, size_info)| {
+                    selected.push(idx);
                     coeff_acc.push(coeffs);
                     indices_acc.push(indices);
                     size_acc.push(size_info);
-                    (num_non_zero_expr, coeff_acc, indices_acc, size_acc)
+                    (selected, coeff_acc, indices_acc, size_acc)
                 },
             );
+        let num_non_zero_expr = selected_indices.len();
 
-        assert!(
+        let num_vars = if num_non_zero_expr == 0 {
+            0
+        } else {
+            assert!(
+                mle_size_info
+                    .iter()
+                    .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| {
+                        assert_eq!(a, b);
+                        *a > 0 && *b > 0
+                    }))
+                    .all_equal()
+            );
             mle_size_info
                 .iter()
-                .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| {
-                    assert_eq!(a, b);
-                    *a > 0 && *b > 0
-                }))
-                .all_equal()
-        );
-        let num_vars = mle_size_info
-            .iter()
-            .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| *a > 0 && *b > 0))
-            .take(1)
-            .collect_vec()[0]
-            .0;
+                .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| *a > 0 && *b > 0))
+                .take(1)
+                .collect_vec()[0]
+                .0
+        };
         exit_span!(span);
 
         let span = entered_span!("witness_infer", profiling_2 = true);
@@ -503,15 +530,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // recover it back and interleaving with default gpu
         let mut next_iter = next_witness_buf.into_iter();
+        let mut selected_iter = selected_indices.into_iter().peekable();
 
         out_evals
             .into_iter()
-            .map(|(_, out_eval)| {
-                if matches!(
+            .enumerate()
+            .map(|(idx, (_, out_eval))| {
+                let should_materialize = matches!(
                     out_eval,
                     EvalExpression::Linear(..) | EvalExpression::Single(_)
-                ) {
-                    // take next element from next_witness_buf
+                ) && selected_iter
+                    .peek()
+                    .is_some_and(|selected_idx| *selected_idx == idx);
+                if should_materialize {
+                    selected_iter.next();
                     MultilinearExtensionGpu::from_ceno_gpu_ext(GpuPolynomialExt::new(
                         next_iter
                             .next()

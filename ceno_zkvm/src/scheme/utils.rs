@@ -34,6 +34,133 @@ use rayon::{
 use std::{iter, sync::Arc};
 use witness::next_pow2_instance_padding;
 
+/// Prover-only routing metadata for first-layer GKR output groups.
+///
+/// This is group-level metadata describing which downstream proving submodule
+/// consumes outputs from a selector group. A group may route to more than one
+/// submodule, e.g. `TOWER | ZERO`, when the flat tower-output prefix cuts
+/// through the middle of the group.
+///
+/// This metadata is not part of the proof format and is not used by the
+/// verifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) struct GkrOutputStageMask(u8);
+
+impl GkrOutputStageMask {
+    pub(crate) const TOWER: Self = Self(1 << 0);
+    pub(crate) const ECC: Self = Self(1 << 1);
+    pub(crate) const ROTATION: Self = Self(1 << 2);
+    pub(crate) const ZERO: Self = Self(1 << 3);
+
+    pub(crate) const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub(crate) const fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WitnessBuildStage {
+    Tower,
+}
+
+pub(crate) fn tower_output_count<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+) -> usize {
+    let cs = &composed_cs.zkvm_v1_css;
+    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+    let num_lk_num = cs.lk_table_expressions.len();
+    let num_lk_den = if !cs.lk_table_expressions.is_empty() {
+        cs.lk_table_expressions.len()
+    } else {
+        cs.lk_expressions.len()
+    };
+    num_reads + num_writes + num_lk_num + num_lk_den
+}
+
+fn build_output_materialization_mask<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    circuit: &GKRCircuit<E>,
+    stage: WitnessBuildStage,
+) -> Vec<bool> {
+    let first_layer = circuit.layers.first().expect("empty gkr circuit layer");
+    let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, circuit);
+    let total_outputs = first_layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .map(|(_, outputs)| outputs.len())
+        .sum::<usize>();
+    let mut mask = vec![false; total_outputs];
+    match stage {
+        WitnessBuildStage::Tower => {
+            // Materialization is exact at flattened-entry granularity even though routing metadata
+            // is tracked at group granularity. This is what lets mixed `TOWER | ZERO` groups avoid
+            // allocating the non-tower suffix during tower prove.
+            let mut remaining = tower_output_count(composed_cs);
+            let mut offset = 0usize;
+            for ((_, outputs), stage_mask) in first_layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .zip(group_stage_masks.iter())
+            {
+                let len = outputs.len();
+                if stage_mask.contains(GkrOutputStageMask::TOWER) && remaining > 0 {
+                    let take_len = len.min(remaining);
+                    mask[offset..offset + take_len].fill(true);
+                    remaining -= take_len;
+                }
+                offset += len;
+            }
+            debug_assert_eq!(remaining, 0, "failed to cover all tower outputs");
+        }
+    }
+    mask
+}
+
+pub(crate) fn first_layer_output_group_stage_masks<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    circuit: &GKRCircuit<E>,
+) -> Vec<GkrOutputStageMask> {
+    let first_layer = circuit.layers.first().expect("empty gkr circuit layer");
+    let mut group_masks = vec![GkrOutputStageMask::ZERO; first_layer.out_sel_and_eval_exprs.len()];
+
+    if let Some(rotation_groups) = first_layer.rotation_selector_group_indices() {
+        for group_idx in rotation_groups {
+            group_masks[group_idx] = GkrOutputStageMask::ROTATION;
+        }
+    }
+    if let Some(ecc_groups) = first_layer.ecc_bridge_group_indices() {
+        for group_idx in ecc_groups {
+            group_masks[group_idx] = GkrOutputStageMask::ECC;
+        }
+    }
+
+    let tower_outputs = tower_output_count(composed_cs);
+    let mut seen_tower_outputs = 0usize;
+    for (group_mask, (_, outputs)) in group_masks
+        .iter_mut()
+        .zip(first_layer.out_sel_and_eval_exprs.iter())
+    {
+        if seen_tower_outputs >= tower_outputs {
+            break;
+        }
+        *group_mask = group_mask.union(GkrOutputStageMask::TOWER);
+        seen_tower_outputs += outputs.len();
+    }
+    assert!(
+        seen_tower_outputs >= tower_outputs,
+        "failed to cover all tower outputs: layer={}, seen_tower_outputs={}, tower_outputs={}",
+        first_layer.name,
+        seen_tower_outputs,
+        tower_outputs,
+    );
+
+    group_masks
+}
+
 pub(crate) struct EccBridgeClaims<E: ExtensionField> {
     pub(crate) xy_point: Point<E>,
     pub(crate) s_point: Point<E>,
@@ -511,6 +638,7 @@ pub fn build_main_witness<
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'a, PB>,
     challenges: &[E; 2],
+    stage: WitnessBuildStage,
 ) -> Vec<Arc<PB::MultilinearPoly<'a>>> {
     let ComposedConstrainSystem {
         zkvm_v1_css: cs,
@@ -561,6 +689,7 @@ pub fn build_main_witness<
     #[cfg(feature = "gpu")]
     let gpu_mem_tracker = crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "build_main_witness");
 
+    let output_mask = build_output_materialization_mask(composed_cs, gkr_circuit, stage);
     let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
         gkr_circuit,
         &input.witness,
@@ -569,6 +698,7 @@ pub fn build_main_witness<
         &[],
         &input.pi,
         challenges,
+        Some(output_mask.as_slice()),
     );
 
     // GPU memory check: validate estimation against actual usage
@@ -582,6 +712,7 @@ pub fn build_main_witness<
     gkr_circuit_out.0.0
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn gkr_witness<
     'b,
     E: ExtensionField,
@@ -596,6 +727,7 @@ pub fn gkr_witness<
     _pub_io_mles: &[Arc<PB::MultilinearPoly<'b>>],
     pub_io_evals: &[Either<E::BaseField, E>],
     challenges: &[E],
+    output_mask: Option<&[bool]>,
 ) -> (GKRCircuitWitness<'b, PB>, GKRCircuitOutput<'b, PB>) {
     // layer order from output to input
     let mut layer_wits = Vec::<LayerWitness<PB>>::with_capacity(circuit.layers.len() + 1);
@@ -680,12 +812,16 @@ pub fn gkr_witness<
         );
 
         // infer current layer output
+        let layer_output_mask = (i + 1 == circuit.layers.len())
+            .then_some(output_mask)
+            .flatten();
         let current_layer_output: Vec<Arc<PB::MultilinearPoly<'b>>> =
-            <PD as ProtocolWitnessGeneratorProver<PB>>::layer_witness(
+            <PD as ProtocolWitnessGeneratorProver<PB>>::layer_witness_filtered(
                 layer,
                 &current_layer_wits,
                 pub_io_evals,
                 challenges,
+                layer_output_mask,
             );
         layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 
