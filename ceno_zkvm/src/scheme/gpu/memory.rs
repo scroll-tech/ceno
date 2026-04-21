@@ -91,11 +91,20 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     circuit_name: &str,
-    witness_replayable: bool,
+    replay_plan: Option<&GpuReplayPlan<E>>,
     structural_cached_on_device: bool,
 ) -> u64 {
     let num_var_with_rotation =
         input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
+    let witness_replayable = replay_plan.is_some();
+    let structural_resident_bytes = if structural_cached_on_device {
+        0
+    } else {
+        estimate_structural_mle_bytes(
+            composed_cs.zkvm_v1_css.num_structural_witin as usize,
+            num_var_with_rotation,
+        )
+    };
 
     // Part 1: trace (base usage: witness & structural mles)
     let trace_est = estimate_trace_bytes(
@@ -127,6 +136,9 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
 
     let replay_stage_split =
         witness_replayable && matches!(circuit_name, "Ecall_Keccak" | "ShardRamCircuit");
+    let replay_materialization_bytes = replay_plan
+        .map(|plan| estimate_replay_materialization_bytes_for_plan(plan, num_var_with_rotation))
+        .unwrap_or(trace_est.trace_resident_bytes + trace_est.trace_temporary_bytes);
     let (resident_bytes, stage_peak_usage_bytes, total_usage_bytes) = if replay_stage_split {
         // Replayable large-memory chips are materialized twice:
         // - once for build_main_witness + build_tower_witness
@@ -142,7 +154,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         let tower_prove_stage_bytes = tower_prove_peak_bytes;
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
         let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
-        let replay_stage_bytes = trace_est.trace_resident_bytes + trace_est.trace_temporary_bytes;
+        let replay_stage_bytes = structural_resident_bytes + replay_materialization_bytes;
         let stage_peak = tower_build_stage_bytes
             .max(tower_prove_stage_bytes)
             .max(ecc_stage_bytes)
@@ -170,39 +182,58 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     };
 
     let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
-    // Resident memory (always occupied during chip proof)
-    tracing::info!(
-        "[mem estimate][{}] resident: trace={:.2}MB, main_witness={:.2}MB",
-        circuit_name,
-        to_mb(if replay_stage_split {
-            0
-        } else {
-            trace_est.trace_resident_bytes
-        }),
-        to_mb(if replay_stage_split {
-            0
-        } else {
-            main_witness_bytes
-        }),
-    );
-    // Temporary memory per stage (only one active at a time, peak = max)
-    tracing::info!(
-        "[mem estimate][{}] temporary: extract_trace={:.2}MB, ecc_quark={:.2}MB, build_tower={:.2}MB, prove_tower={:.2}MB, prove_main={:.2}MB",
-        circuit_name,
-        to_mb(trace_est.trace_temporary_bytes),
-        to_mb(ecc_quark_temporary_bytes),
-        to_mb(tower_build_bytes),
-        to_mb(tower_prove_peak_bytes),
-        to_mb(main_constraints_temporary_bytes),
-    );
-    // Total peak = resident + max(stage temporaries)
-    tracing::info!(
-        "[mem estimate][{}] total_usage={:.2}MB (resident={:.2}MB + temporary={:.2}MB)",
-        circuit_name,
-        to_mb(total_usage_bytes),
-        to_mb(resident_bytes),
-        to_mb(stage_peak_usage_bytes),
-    );
+    if replay_stage_split {
+        let tower_build_stage_bytes =
+            trace_est.trace_resident_bytes + main_witness_bytes + tower_build_bytes;
+        let tower_prove_stage_bytes = tower_prove_peak_bytes;
+        let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
+        let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
+        let replay_stage_bytes = structural_resident_bytes + replay_materialization_bytes;
+        tracing::info!(
+            "[mem estimate][{}] replay_split: trace={:.2}MB, main_witness={:.2}MB, replay={:.2}MB, tower_build_stage={:.2}MB, prove_tower_stage={:.2}MB, ecc_stage={:.2}MB, prove_main_stage={:.2}MB",
+            circuit_name,
+            to_mb(trace_est.trace_resident_bytes),
+            to_mb(main_witness_bytes),
+            to_mb(replay_stage_bytes),
+            to_mb(tower_build_stage_bytes),
+            to_mb(tower_prove_stage_bytes),
+            to_mb(ecc_stage_bytes),
+            to_mb(main_stage_bytes),
+        );
+        tracing::info!(
+            "[mem estimate][{}] total_usage={:.2}MB (replay_split_peak={:.2}MB + safety={:.2}MB)",
+            circuit_name,
+            to_mb(total_usage_bytes),
+            to_mb(stage_peak_usage_bytes),
+            to_mb(ESTIMATION_SAFETY_MARGIN_BYTES),
+        );
+    } else {
+        // Resident memory (always occupied during chip proof)
+        tracing::info!(
+            "[mem estimate][{}] resident: trace={:.2}MB, main_witness={:.2}MB",
+            circuit_name,
+            to_mb(trace_est.trace_resident_bytes),
+            to_mb(main_witness_bytes),
+        );
+        // Temporary memory per stage (only one active at a time, peak = max)
+        tracing::info!(
+            "[mem estimate][{}] temporary: extract_trace={:.2}MB, ecc_quark={:.2}MB, build_tower={:.2}MB, prove_tower={:.2}MB, prove_main={:.2}MB",
+            circuit_name,
+            to_mb(trace_est.trace_temporary_bytes),
+            to_mb(ecc_quark_temporary_bytes),
+            to_mb(tower_build_bytes),
+            to_mb(tower_prove_peak_bytes),
+            to_mb(main_constraints_temporary_bytes),
+        );
+        // Total peak = resident + max(stage temporaries)
+        tracing::info!(
+            "[mem estimate][{}] total_usage={:.2}MB (resident={:.2}MB + temporary={:.2}MB)",
+            circuit_name,
+            to_mb(total_usage_bytes),
+            to_mb(resident_bytes),
+            to_mb(stage_peak_usage_bytes),
+        );
+    }
 
     total_usage_bytes as u64
 }

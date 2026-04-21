@@ -991,7 +991,7 @@ impl<
                     cs,
                     gpu_input,
                     &circuit_name,
-                    gpu_replay_plans[this_idx].is_some(),
+                    gpu_replay_plans[this_idx].as_ref(),
                     structural_cached_on_device,
                 )
             };
@@ -1000,7 +1000,8 @@ impl<
 
             #[cfg(feature = "gpu")]
             let booked_memory = {
-                let margin = if matches!(circuit_name.as_str(), "Ecall_Keccak" | "ShardRamCircuit")
+                let margin = if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                    && matches!(circuit_name.as_str(), "Ecall_Keccak" | "ShardRamCircuit")
                     && matches!(
                         get_chip_proving_mode(),
                         crate::scheme::scheduler::ChipProvingMode::Concurrent

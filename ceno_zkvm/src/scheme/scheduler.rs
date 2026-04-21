@@ -11,6 +11,8 @@
 //! maximizes GPU utilization through backfilling with smaller tasks.
 
 #[cfg(feature = "gpu")]
+use crate::instructions::gpu::config::is_gpu_witgen_enabled;
+#[cfg(feature = "gpu")]
 use crate::structs::GpuReplayPlan;
 use crate::{
     error::ZKVMError,
@@ -264,11 +266,22 @@ impl ChipScheduler {
         let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
         let stream_pool_size = cuda_hal.inner().stream_pool_size();
 
-        // must call `init_booking_baseline` before concurrent execution
         let mem_pool = cuda_hal.inner().mem_pool();
-        mem_pool
-            .init_booking_baseline()
-            .expect("Failed to init booking baseline");
+        if is_gpu_witgen_enabled() {
+            // GPU-witgen mode retains more task-relevant device state in the pool
+            // before scheduling begins, so concurrent admission must start from
+            // the current pool baseline.
+            mem_pool
+                .init_booking_baseline()
+                .expect("Failed to init booking baseline");
+            tracing::info!(
+                "[scheduler] initialized booking baseline from current pool usage (GPU witgen enabled)"
+            );
+        } else {
+            // Match the pre-baseline behavior used by local master for the
+            // CPU-witgen / deferred-extraction pipeline.
+            tracing::info!("[scheduler] skipping booking baseline init (GPU witgen disabled)");
+        }
 
         // For single task, just execute directly (no threading overhead)
         if tasks.len() == 1 {
