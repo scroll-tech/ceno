@@ -2,6 +2,7 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         hal::ProofInput,
+        utils::tower_output_count,
     },
     structs::ComposedConstrainSystem,
 };
@@ -16,7 +17,6 @@ use gkr_iop::gpu::{
     },
 };
 use mpcs::PolynomialCommitmentScheme;
-use std::sync::OnceLock;
 
 use crate::scheme::scheduler::{ChipProvingMode, get_chip_proving_mode};
 
@@ -185,20 +185,9 @@ pub fn estimate_main_witness_bytes<E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
     num_var_with_rotation: usize,
 ) -> usize {
-    let cs = &composed_cs.zkvm_v1_css;
-    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
-    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
-    let num_lk_num = cs.lk_table_expressions.len();
-    let num_lk_den = if !cs.lk_table_expressions.is_empty() {
-        cs.lk_table_expressions.len()
-    } else {
-        cs.lk_expressions.len()
-    };
-    let num_records = num_reads + num_writes + num_lk_num + num_lk_den;
-
     let elem_size = std::mem::size_of::<BB31Ext>();
     let record_len = 1usize << num_var_with_rotation;
-    num_records * record_len * elem_size
+    tower_output_count(composed_cs) * record_len * elem_size
 }
 
 pub(crate) fn estimate_main_constraints_bytes<
@@ -219,14 +208,7 @@ pub(crate) fn estimate_main_constraints_bytes<
     let max_eqs = gkr_circuit
         .layers
         .iter()
-        .map(|layer| {
-            let rotation_extra = if layer.rotation_sumcheck_expression_monomial_terms.is_some() {
-                3
-            } else {
-                0
-            };
-            layer.out_sel_and_eval_exprs.len() + rotation_extra
-        })
+        .map(|layer| layer.out_sel_and_eval_exprs.len())
         .max()
         .unwrap_or(0);
 
@@ -241,8 +223,7 @@ pub(crate) fn estimate_main_constraints_bytes<
             // (see ZerocheckLayer verifier: max_degree = self.max_expr_degree + 1)
             let main_sumcheck_degree = (layer.max_expr_degree + 1).max(1);
 
-            let total_mles =
-                layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance;
+            let total_mles = layer.n_witin + layer.n_structural_witin + layer.n_fixed;
             let main_mle_num_vars_list = vec![num_var_with_rotation; total_mles];
             let main_est = estimate_sumcheck_memory(
                 num_var_with_rotation,

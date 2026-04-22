@@ -17,6 +17,7 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
+        utils::{assign_group_evals, derive_ecc_bridge_claims},
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
@@ -568,19 +569,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert_eq!(num_vars, log2_num_instances);
         });
 
-        // verify ecc proof if exists
-        let shard_ec_sum: Option<SepticPoint<E::BaseField>> = if composed_cs.has_ecc_ops() {
-            tracing::debug!("verifying ecc proof...");
-            assert!(proof.ecc_proof.is_some());
-            let ecc_proof = proof.ecc_proof.as_ref().unwrap();
-            assert!(!ecc_proof.sum.is_infinity);
-
-            EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
-            tracing::debug!("ecc proof verified.");
-            Some(ecc_proof.sum.clone())
-        } else {
-            None
-        };
+        let mut shard_ec_sum: Option<SepticPoint<E::BaseField>> = None;
 
         // verify and reduce product tower sumcheck
         let tower_proofs = &proof.tower_proof;
@@ -596,7 +585,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             transcript.append_field_element_ext(eval);
         }
 
-        let (_, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
+        let (rt_tower, record_evals, logup_p_evals, logup_q_evals) = TowerVerify::verify(
             proof
                 .r_out_evals
                 .iter()
@@ -625,6 +614,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 })?;
         }
 
+        if composed_cs.has_ecc_ops() {
+            tracing::debug!("verifying ecc proof...");
+            let ecc_proof = proof
+                .ecc_proof
+                .as_ref()
+                .ok_or_else(|| ZKVMError::InvalidProof("missing ecc proof".into()))?;
+            if ecc_proof.sum.is_infinity {
+                return Err(ZKVMError::InvalidProof(
+                    "invalid ecc proof: infinity shard sum".into(),
+                ));
+            }
+
+            EccVerifier::verify_ecc_proof(ecc_proof, transcript)?;
+            tracing::debug!("ecc proof verified.");
+            shard_ec_sum = Some(ecc_proof.sum.clone());
+        }
+
         debug_assert!(
             chain!(&record_evals, &logup_p_evals, &logup_q_evals)
                 .map(|e| &e.point)
@@ -637,7 +643,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         debug_assert_eq!(logup_p_evals.len(), lk_counts_per_instance);
         debug_assert_eq!(logup_q_evals.len(), lk_counts_per_instance);
 
-        let evals = record_evals
+        let base_evals = record_evals
             .iter()
             // append p_evals if there got lk table expressions
             .chain(if cs.lk_table_expressions.is_empty() {
@@ -650,43 +656,133 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .collect_vec();
 
         let gkr_circuit = gkr_circuit.as_ref().unwrap();
-        let selector_ctxs = if cs.ec_final_sum.is_empty() {
-            assert_eq!(proof.num_instances[1], 0);
-            // it's not shard chip
-            vec![
-                SelectorContext::new(0, num_instances, num_var_with_rotation);
-                gkr_circuit
-                    .layers
-                    .first()
-                    .map(|layer| layer.out_sel_and_eval_exprs.len())
-                    .unwrap_or(0)
-            ]
-        } else {
-            // it's shard chip
-            tracing::debug!(
-                "num_reads: {}, num_writes: {}, total: {}",
-                proof.num_instances[0],
-                proof.num_instances[1],
-                proof.num_instances[0] + proof.num_instances[1],
+        let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+        let selector_ctxs = first_layer
+            .out_sel_and_eval_exprs
+            .iter()
+            .map(|(selector, _)| {
+                if cs.ec_final_sum.is_empty() {
+                    SelectorContext::new(0, num_instances, num_var_with_rotation)
+                } else if cs.r_selector.as_ref() == Some(selector) {
+                    SelectorContext::new(0, proof.num_instances[0], num_var_with_rotation)
+                } else if cs.w_selector.as_ref() == Some(selector) {
+                    SelectorContext::new(
+                        proof.num_instances[0],
+                        proof.num_instances[1],
+                        num_var_with_rotation,
+                    )
+                } else {
+                    SelectorContext::new(0, num_instances, num_var_with_rotation)
+                }
+            })
+            .collect_vec();
+
+        let mut out_evals = vec![PointAndEval::default(); gkr_circuit.n_evaluations];
+        for (idx, point_and_eval) in base_evals.into_iter().enumerate() {
+            out_evals[idx] = point_and_eval;
+        }
+
+        if !first_layer.rotation_exprs.1.is_empty() {
+            let rotation_proof = proof
+                .rotation_proof
+                .as_ref()
+                .ok_or_else(|| ZKVMError::InvalidProof("missing rotation proof".into()))?
+                .clone();
+
+            let rotation_claims = gkr_iop::gkr::layer::zerocheck_layer::verify_rotation(
+                num_var_with_rotation,
+                first_layer.rotation_exprs.1.len(),
+                first_layer
+                    .rotation_sumcheck_expression
+                    .as_ref()
+                    .expect("missing rotation sumcheck expression"),
+                rotation_proof,
+                first_layer.rotation_cyclic_subgroup_size,
+                first_layer.rotation_cyclic_group_log2,
+                &rt_tower,
+                challenges,
+                transcript,
+            )?;
+
+            let Some([left_group_idx, right_group_idx, point_group_idx]) =
+                first_layer.rotation_selector_group_indices()
+            else {
+                return Err(ZKVMError::InvalidProof(
+                    "rotation claims expected but selectors are missing".into(),
+                ));
+            };
+
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
+                &rotation_claims.left_evals,
+                &rotation_claims.rotation_points.left,
             );
-            vec![
-                SelectorContext {
-                    offset: 0,
-                    num_instances: proof.num_instances[0],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: proof.num_instances[0],
-                    num_instances: proof.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                },
-                SelectorContext {
-                    offset: 0,
-                    num_instances: proof.num_instances[0] + proof.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                },
-            ]
-        };
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
+                &rotation_claims.right_evals,
+                &rotation_claims.rotation_points.right,
+            );
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
+                &rotation_claims.target_evals,
+                &rotation_claims.rotation_points.origin,
+            );
+        }
+
+        if let Some(ecc_proof) = proof.ecc_proof.as_ref() {
+            let Some(
+                [
+                    x_group_idx,
+                    y_group_idx,
+                    slope_group_idx,
+                    x3_group_idx,
+                    y3_group_idx,
+                ],
+            ) = first_layer.ecc_bridge_group_indices()
+            else {
+                return Err(ZKVMError::InvalidProof(
+                    "ecc bridge claims expected but selectors are missing".into(),
+                ));
+            };
+
+            let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
+            let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation)?;
+
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[x_group_idx].1,
+                &claims.x_evals,
+                &claims.xy_point,
+            );
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[y_group_idx].1,
+                &claims.y_evals,
+                &claims.xy_point,
+            );
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[slope_group_idx].1,
+                &claims.s_evals,
+                &claims.s_point,
+            );
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[x3_group_idx].1,
+                &claims.x3_evals,
+                &claims.x3y3_point,
+            );
+            assign_group_evals(
+                &mut out_evals,
+                &first_layer.out_sel_and_eval_exprs[y3_group_idx].1,
+                &claims.y3_evals,
+                &claims.x3y3_point,
+            );
+        }
+
         let pi = cs
             .instance
             .iter()
@@ -696,7 +792,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,
             proof.gkr_iop_proof.clone().unwrap(),
-            &evals,
+            &out_evals,
             &pi,
             challenges,
             transcript,

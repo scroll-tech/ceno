@@ -8,14 +8,13 @@ use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 #[cfg(feature = "gpu")]
 use crate::scheme::gpu::estimate_chip_proof_memory;
 use crate::scheme::{
-    constants::SEPTIC_EXTENSION_DEGREE,
     hal::MainSumcheckEvals,
     scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
 };
 use either::Either;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{Expression, Instance};
+use multilinear_extensions::Instance;
 use p3::field::FieldAlgebra;
 use std::iter::Iterator;
 use sumcheck::{
@@ -429,42 +428,18 @@ impl<
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
-        // run ecc quark prover
-        let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
-            let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
-            let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
-            assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
-            let mut xs_ys = ec_point_exprs
-                .iter()
-                .map(|expr| match expr {
-                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                    _ => unreachable!("ec point's expression must be WitIn"),
-                })
-                .collect_vec();
-            let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
-            let xs = xs_ys;
-            let slopes = cs
-                .zkvm_v1_css
-                .ec_slope_exprs
-                .iter()
-                .map(|expr| match expr {
-                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                    _ => unreachable!("slope's expression must be WitIn"),
-                })
-                .collect_vec();
-            let ecc_proof = Some(info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
-                self.device
-                    .prove_ec_sum_quark(input.num_instances(), xs, ys, slopes, transcript)
-            })?);
-            exit_span!(span);
-            ecc_proof
-        } else {
-            None
-        };
-
         // build main witness
-        let records = info_span!("[ceno] build_main_witness")
-            .in_scope(|| build_main_witness::<E, PCS, PB, PD>(cs, input, challenges));
+        let records = info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
+            build_main_witness::<E, PCS, PB, PD>(
+                cs,
+                input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
+        });
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
@@ -481,13 +456,32 @@ impl<
             num_var_with_rotation,
         );
 
+        let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
+        let ecc_proof = info_span!("[ceno] prove_ec_sum_quark")
+            .in_scope(|| self.device.prove_ec_sum_quark(cs, input, transcript))?;
+        exit_span!(span);
+
+        let span = entered_span!("prove_rotation", profiling_2 = true);
+        let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
+            self.device
+                .prove_rotation(cs, input, &rt_tower, challenges, transcript)
+        })?;
+        exit_span!(span);
+
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
         let span = entered_span!("prove_main_constraints", profiling_2 = true);
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
             info_span!("[ceno] prove_main_constraints").in_scope(|| {
-                self.device
-                    .prove_main_constraints(rt_tower, input, cs, challenges, transcript)
+                self.device.prove_main_constraints(
+                    rt_tower,
+                    rotation.clone(),
+                    ecc_proof.as_ref(),
+                    input,
+                    cs,
+                    challenges,
+                    transcript,
+                )
             })?;
         let MainSumcheckEvals {
             wits_in_evals,
@@ -502,6 +496,7 @@ impl<
                 lk_out_evals,
                 main_sumcheck_proofs,
                 gkr_iop_proof,
+                rotation_proof: rotation.map(|r| r.proof),
                 tower_proof,
                 ecc_proof,
                 num_instances: input.num_instances,
@@ -736,7 +731,7 @@ where
 {
     use crate::scheme::gpu::{
         extract_witness_mles_for_trace, prove_ec_sum_quark_impl, prove_main_constraints_impl,
-        prove_tower_relation_impl, transport_structural_witness_to_gpu,
+        prove_rotation_impl, prove_tower_relation_impl, transport_structural_witness_to_gpu,
     };
     use gkr_iop::gpu::{GpuBackend, get_cuda_hal};
 
@@ -773,47 +768,23 @@ where
             });
     }
 
-    // run ecc quark prover using _impl function
-    let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
-        let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
-        let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
-        assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
-        let mut xs_ys = ec_point_exprs
-            .iter()
-            .map(|expr| match expr {
-                Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                _ => unreachable!("ec point's expression must be WitIn"),
-            })
-            .collect_vec();
-        let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
-        let xs = xs_ys;
-        let slopes = cs
-            .zkvm_v1_css
-            .ec_slope_exprs
-            .iter()
-            .map(|expr| match expr {
-                Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                _ => unreachable!("slope's expression must be WitIn"),
-            })
-            .collect_vec();
-        let ecc_proof = Some(info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
-            prove_ec_sum_quark_impl::<E, PCS>(input.num_instances(), xs, ys, slopes, transcript)
-        })?);
-        exit_span!(span);
-        ecc_proof
-    } else {
-        None
-    };
-
     // build main witness
     let records =
         info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
             build_main_witness::<
                 E,
                 PCS,
                 GpuBackend<E, PCS>,
                 gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>,
-            >(cs, &input, challenges)
+            >(
+                cs,
+                &input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
         });
 
     let span = entered_span!("prove_tower_relation", profiling_2 = true);
@@ -828,11 +799,30 @@ where
 
     assert_eq!(rt_tower.len(), num_var_with_rotation,);
 
+    let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
+    let ecc_proof = info_span!("[ceno] prove_ec_sum_quark")
+        .in_scope(|| prove_ec_sum_quark_impl::<E, PCS>(cs, &input, transcript))?;
+    exit_span!(span);
+
+    let span = entered_span!("prove_rotation", profiling_2 = true);
+    let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
+        prove_rotation_impl::<E, PCS>(cs, &input, &rt_tower, challenges, transcript)
+    })?;
+    exit_span!(span);
+
     // prove main constraints using _impl function
     let span = entered_span!("prove_main_constraints", profiling_2 = true);
     let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
         info_span!("[ceno] prove_main_constraints").in_scope(|| {
-            prove_main_constraints_impl::<E, PCS>(rt_tower, &input, cs, challenges, transcript)
+            prove_main_constraints_impl::<E, PCS>(
+                rt_tower,
+                rotation.clone(),
+                ecc_proof.as_ref(),
+                &input,
+                cs,
+                challenges,
+                transcript,
+            )
         })?;
     let MainSumcheckEvals {
         wits_in_evals,
@@ -847,6 +837,7 @@ where
             lk_out_evals,
             main_sumcheck_proofs,
             gkr_iop_proof,
+            rotation_proof: rotation.map(|r| r.proof),
             tower_proof,
             ecc_proof,
             num_instances: input.num_instances,

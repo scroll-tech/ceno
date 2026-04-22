@@ -679,6 +679,7 @@ pub fn run_weierstrass_add<
         &[],
         &[],
         &challenges,
+        None,
     );
     exit_span!(span);
 
