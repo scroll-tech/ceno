@@ -69,7 +69,7 @@ fn keccak_prove(c: &mut Criterion) {
     let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
     assert!(
         verifier
-            .verify_full_trace_proof_halt(proof, transcript, true)
+            .verify_full_trace_proofs_halt(vec![proof], vec![transcript], true)
             .expect("verify proof return with error"),
     );
     println!();

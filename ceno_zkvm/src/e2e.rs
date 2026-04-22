@@ -2146,18 +2146,10 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
         Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
     }
     let has_halt = zkvm_proofs.last().unwrap().has_halt(&verifier.vk);
-    if zkvm_proofs.len() == 1 {
-        verifier.verify_full_trace_proof_halt(
-            zkvm_proofs.into_iter().next().unwrap(),
-            Transcript::new(b"riscv"),
-            has_halt,
-        )?;
-    } else {
-        let transcripts = (0..zkvm_proofs.len())
-            .map(|_| Transcript::new(b"riscv"))
-            .collect_vec();
-        verifier.verify_full_trace_proofs_halt(zkvm_proofs, transcripts, has_halt)?;
-    }
+    let transcripts = (0..zkvm_proofs.len())
+        .map(|_| Transcript::new(b"riscv"))
+        .collect_vec();
+    verifier.verify_full_trace_proofs_halt(zkvm_proofs, transcripts, has_halt)?;
     // print verification statistics such as hash count
     #[cfg(debug_assertions)]
     {

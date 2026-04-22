@@ -103,7 +103,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
     ) -> Result<bool, ZKVMError> {
-        self.verify_full_trace_proof_halt(vm_proof, transcript, true)
+        self.verify_full_trace_proofs_halt(vec![vm_proof], vec![transcript], true)
     }
 
     /// Verify a full zkVM trace composed of one or more proofs and ending in halt.
@@ -114,19 +114,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         transcripts: Vec<impl ForkableTranscript<E>>,
     ) -> Result<bool, ZKVMError> {
         self.verify_full_trace_proofs_halt(vm_proofs, transcripts, true)
-    }
-
-    /// Verify a full zkVM trace from program entry to optional halt.
-    ///
-    /// This enforces first-shard entry semantics and, for multi-shard traces,
-    /// cross-shard continuation semantics.
-    pub fn verify_full_trace_proof_halt(
-        &self,
-        vm_proof: ZKVMProof<E, PCS>,
-        transcript: impl ForkableTranscript<E>,
-        expect_halt: bool,
-    ) -> Result<bool, ZKVMError> {
-        self.verify_full_trace_proofs_halt(vec![vm_proof], vec![transcript], expect_halt)
     }
 
     /// Verify a single shard proof as a standalone segment.
