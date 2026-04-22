@@ -20,12 +20,10 @@ purpose is to make these meaningful.
    is of an execution of *this specific program image* starting from
    *its declared entry point*, not of some arbitrary subtrace the
    prover chose to begin at a convenient PC.
-2. **Halt: when the caller expects termination, the terminal shard
-   invokes the halt ecall.** Intermediate shards must not halt, and
-   the terminal shard's halt-ecall presence is checked against the
-   caller's expectation (a full run reaching halt vs. a prefix run
-   stopped at a step budget). This prevents a prover from either
-   hiding a halt or manufacturing one.
+2. **Halt: the terminal shard invokes the halt ecall.** Intermediate
+   shards must not halt, and the terminal shard must, so the proof
+   covers a complete execution ending exactly where the guest invokes
+   halt. A prover cannot hide a halt or manufacture one.
 
 ### What is not a verifier-level guarantee
 
@@ -37,15 +35,6 @@ exit-code semantics, and a non-zero value may be a legitimate
 application signal (for example, distinguishing error classes). A
 caller that wants "exited successfully" must compare
 `exit_code == 0` itself, outside the verifier.
-
-**Prefix proofs are a dev and benchmarking affordance, not a
-production verification surface.** On a non-halting shard the
-public-value fields other than PC are not adversary-hardened the way
-the halt path is; verifier-level checks on them are format sanity
-rather than soundness statements. Before prefix proofs are exposed to
-any external consumer (recursion, aggregation, a third-party
-verifier), those fields must first be brought up to the halt-path
-standard.
 
 ## Sections
 
