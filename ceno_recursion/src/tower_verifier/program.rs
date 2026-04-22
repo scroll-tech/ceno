@@ -15,6 +15,26 @@ use openvm_native_recursion::{
 use openvm_stark_backend::p3_field::FieldAlgebra;
 const NATIVE_SUMCHECK_CTX_LEN: usize = 10;
 
+fn observe_tower_spec_evals<C: Config>(
+    builder: &mut Builder<C>,
+    challenger: &mut DuplexChallengerVariable<C>,
+    spec_evals: &Array<C, Ext<C::F, C::EF>>,
+    num_specs: Var<C::N>,
+    spec_stride: Var<C::N>,
+    per_round_eval_len: Var<C::N>,
+    round_var: RVar<C::N>,
+) {
+    builder.range(0, num_specs).for_each(|idx, builder| {
+        let offset: Var<C::N> = builder.eval(idx[0] * spec_stride + round_var * per_round_eval_len);
+        let end: Var<C::N> = builder.eval(offset + per_round_eval_len);
+        let slice = spec_evals.slice(builder, offset, end);
+        unsafe {
+            let felts = exts_to_felts(builder, &slice);
+            challenger_multi_observe(builder, challenger, &felts);
+        }
+    });
+}
+
 pub fn iop_verifier_state_verify<C: Config>(
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
@@ -289,42 +309,31 @@ pub fn verify_tower_proof<C: Config>(
         builder.assert_ext_eq(expected_evaluation, sub_e);
         builder.cycle_tracker_end("check expected evaluation");
 
-        // Bind prover-supplied prod/logup evals into transcript (Fiat-Shamir soundness).
-        // After sumcheck_layer_eval with writeback=1, the local arrays contain the hint data.
-        let prod_stride: Var<C::N> = builder.eval(
-            proof.prod_specs_eval.inner_length * proof.prod_specs_eval.inner_inner_length,
+        // After `sumcheck_layer_eval` with writeback enabled, the local arrays hold the
+        // prover-provided per-round prod/logup evaluations that must be transcript-bound before
+        // sampling `r_merge`.
+        let prod_spec_stride = builder
+            .eval(proof.prod_specs_eval.inner_length * proof.prod_specs_eval.inner_inner_length);
+        observe_tower_spec_evals(
+            builder,
+            challenger,
+            &prod_specs_eval,
+            num_prod_spec.get_var(),
+            prod_spec_stride,
+            proof.prod_specs_eval.inner_inner_length,
+            round_var,
         );
-        builder
-            .range(0, num_prod_spec.get_var())
-            .for_each(|idx, builder| {
-                let offset: Var<C::N> = builder.eval(
-                    idx[0] * prod_stride + round_var * proof.prod_specs_eval.inner_inner_length,
-                );
-                let end: Var<C::N> =
-                    builder.eval(offset + proof.prod_specs_eval.inner_inner_length);
-                let slice = prod_specs_eval.slice(builder, offset, end);
-                unsafe {
-                    let felts = exts_to_felts(builder, &slice);
-                    challenger_multi_observe(builder, challenger, &felts);
-                }
-            });
-        let logup_stride: Var<C::N> = builder.eval(
-            proof.logup_specs_eval.inner_length * proof.logup_specs_eval.inner_inner_length,
+        let logup_spec_stride = builder
+            .eval(proof.logup_specs_eval.inner_length * proof.logup_specs_eval.inner_inner_length);
+        observe_tower_spec_evals(
+            builder,
+            challenger,
+            &logup_specs_eval,
+            num_logup_spec.get_var(),
+            logup_spec_stride,
+            proof.logup_specs_eval.inner_inner_length,
+            round_var,
         );
-        builder
-            .range(0, num_logup_spec.get_var())
-            .for_each(|idx, builder| {
-                let offset: Var<C::N> = builder.eval(
-                    idx[0] * logup_stride + round_var * proof.logup_specs_eval.inner_inner_length,
-                );
-                let end: Var<C::N> =
-                    builder.eval(offset + proof.logup_specs_eval.inner_inner_length);
-                let slice = logup_specs_eval.slice(builder, offset, end);
-                unsafe {
-                    let felts = exts_to_felts(builder, &slice);
-                    challenger_multi_observe(builder, challenger, &felts);
-                }
-            });
 
         builder.cycle_tracker_start("derive next layer's expected sum");
         // derive single eval

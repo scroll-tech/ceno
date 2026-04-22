@@ -35,6 +35,15 @@ pub struct SumcheckLayerProof<E: ExtensionField> {
     pub evals: Vec<E>,
 }
 
+/// Final multilinear evaluations are explicit prover messages, not transcript-derived values.
+/// Absorb them before any later Fiat-Shamir challenge is sampled.
+pub(crate) fn bind_prover_evals<E: ExtensionField>(
+    transcript: &mut impl Transcript<E>,
+    evals: &[E],
+) {
+    transcript.append_field_element_exts(evals);
+}
+
 pub trait SumcheckLayer<E: ExtensionField> {
     #[allow(clippy::too_many_arguments)]
     fn prove<PB: ProverBackend<E = E>, PD: ProverDevice<PB>>(
@@ -106,8 +115,7 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
             transcript,
         );
 
-        // Bind the prover-supplied evaluations into the transcript (Fiat-Shamir soundness).
-        transcript.append_field_element_exts(&evals);
+        bind_prover_evals(transcript, &evals);
 
         // Check the final evaluations.
         let got_claim =
