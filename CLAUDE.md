@@ -80,38 +80,19 @@ code paths, also run `cargo make tests` end-to-end.
 ## Verifier semantic contract
 
 What a valid Ceno proof attests to depends on the **verifier mode**,
-which is committed at verifier construction and *not* derived from
-the proof (so a prover cannot influence which statement is verified).
-The mode lives on the verifier instance and drives the halt /
-continuity checks inside the single unified verification entry
-point. Three modes exist:
+committed at verifier construction and not derived from the proof:
 
-- **FullRun** — full trace from `vk.entry_pc` to program halt.
-  Intermediate shards must not halt; the last shard must halt. This
-  is the production mode and the default of the verifier
-  constructor. The recursive verifier in `ceno_recursion/` always
-  runs an inner verifier in this mode.
-- **PrefixRun** — full trace from `vk.entry_pc` that stopped at a
-  step budget. Intermediate shards must not halt; the last shard's
-  halt status is not checked. Dev / benchmarking only.
-- **DebugSegment** — single-shard standalone verification
-  (`--shard-id=N`). Accepts one shard at any position in the run;
-  skips entry-PC and cross-shard chain checks; reads the shard id
-  from the proof's public values. Dev only.
+- **FullRun** — trace from `vk.entry_pc` to halt. Production default.
+- **PrefixRun** — trace from `vk.entry_pc` that stopped at a step
+  budget; last-shard halt not checked. Dev/bench only.
+- **DebugSegment** — one shard at any position; skips entry-PC and
+  chain checks. Dev only.
 
-`FullRun` is the production-safe default; only `PrefixRun` /
-`DebugSegment` callers opt in via `new_with_mode`. The program-level
-statement any mode attests to always includes "execution starts at
-`vk.entry_pc`" (FullRun / PrefixRun only — DebugSegment has no entry
-constraint). A change that weakens any mode's statement — removing
-the entry-PC check, letting intermediate shards halt, making the
-mode prover-derived, etc. — is a blocker by default. See
-`docs/src/technical-overview.md` for the long form.
-
-Non-halt-mode proofs are a dev/bench affordance, not a production
-surface — don't wire them into anything external without first
-hardening the non-halting-shard public values to the halt-path
-standard.
+Only `PrefixRun` / `DebugSegment` callers opt in via `new_with_mode`;
+non-`FullRun` proofs must not be exposed to external consumers.
+Weakening any mode's statement (dropping the entry-PC check, letting
+intermediate shards halt, making the mode prover-derived, etc.) is a
+blocker by default.
 
 ## What to prioritize when editing
 
