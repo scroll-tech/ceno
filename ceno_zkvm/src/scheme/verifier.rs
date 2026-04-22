@@ -92,41 +92,50 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         self.vk
     }
 
-    /// Verify a trace from start to halt.
+    /// Verify a full zkVM trace from program entry to halt.
+    ///
+    /// This is the production verifier API. It treats a single proof as a
+    /// complete trace starting from `vk.entry_pc`, not as an arbitrary shard
+    /// segment.
     #[tracing::instrument(skip_all, name = "verify_proof")]
     pub fn verify_proof(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
     ) -> Result<bool, ZKVMError> {
-        self.verify_proof_halt(vm_proof, transcript, true)
+        self.verify_full_trace_proof_halt(vm_proof, transcript, true)
     }
 
+    /// Verify a full zkVM trace composed of one or more proofs and ending in halt.
     #[tracing::instrument(skip_all, name = "verify_proofs")]
     pub fn verify_proofs(
         &self,
         vm_proofs: Vec<ZKVMProof<E, PCS>>,
         transcripts: Vec<impl ForkableTranscript<E>>,
     ) -> Result<bool, ZKVMError> {
-        self.verify_proofs_halt(vm_proofs, transcripts, true)
+        self.verify_full_trace_proofs_halt(vm_proofs, transcripts, true)
     }
 
-    /// Verify a trace from start to optional halt.
-    pub fn verify_proof_halt(
+    /// Verify a full zkVM trace from program entry to optional halt.
+    ///
+    /// This enforces first-shard entry semantics and, for multi-shard traces,
+    /// cross-shard continuation semantics.
+    pub fn verify_full_trace_proof_halt(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
         expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
-        self.verify_proofs_halt(vec![vm_proof], vec![transcript], expect_halt)
+        self.verify_full_trace_proofs_halt(vec![vm_proof], vec![transcript], expect_halt)
     }
 
     /// Verify a single shard proof as a standalone segment.
     ///
-    /// Unlike `verify_proof_halt`, this checks proof validity and halt/segment
-    /// invariants for one shard only and intentionally skips cross-shard
-    /// continuation checks such as init_pc/heap chaining.
-    pub fn verify_shard_proof_halt(
+    /// This is a debug-oriented API. It checks proof validity and halt/segment
+    /// invariants for one shard only and intentionally skips full-trace entry
+    /// and cross-shard continuation checks such as `INIT_PC == vk.entry_pc` and
+    /// init_pc/heap chaining.
+    pub fn verify_single_shard_segment_halt(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
@@ -150,8 +159,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         Ok(true)
     }
 
-    /// Verify a trace from start to optional halt.
-    pub fn verify_proofs_halt(
+    /// Verify a full zkVM trace composed of one or more proofs from entry to
+    /// optional halt.
+    pub fn verify_full_trace_proofs_halt(
         &self,
         vm_proofs: Vec<ZKVMProof<E, PCS>>,
         transcripts: Vec<impl ForkableTranscript<E>>,

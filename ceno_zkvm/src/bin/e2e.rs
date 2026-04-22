@@ -5,7 +5,8 @@ use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
         Checkpoint, FieldType, MultiProver, PcsKind, Preset, public_io_words_to_digest_words,
-        run_e2e_with_checkpoint, setup_platform, setup_platform_debug, verify,
+        run_e2e_full_trace_verify, run_e2e_single_shard_debug_verify, run_e2e_with_checkpoint,
+        setup_platform, setup_platform_debug,
     },
     scheme::{
         ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
@@ -350,10 +351,18 @@ fn run_inner<
     let vk_bytes = bincode::serialize(&vk).unwrap();
     fs::write(&vk_file, vk_bytes).unwrap();
 
-    if checkpoint > Checkpoint::PrepVerify && (target_shard_id.is_none() || zkvm_proofs.len() == 1)
-    {
+    if checkpoint > Checkpoint::PrepVerify {
         let verifier = ZKVMVerifier::new(vk);
-        verify(zkvm_proofs.clone(), &verifier).expect("Verification failed");
+        if target_shard_id.is_some() {
+            run_e2e_single_shard_debug_verify(
+                &verifier,
+                zkvm_proofs.first().cloned().expect("missing shard proof"),
+                None,
+                max_steps,
+            );
+        } else {
+            run_e2e_full_trace_verify(&verifier, zkvm_proofs.clone(), None, max_steps);
+        }
         soundness_test(zkvm_proofs.first().cloned().unwrap(), &verifier);
     }
 }
