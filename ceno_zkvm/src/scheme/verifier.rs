@@ -12,7 +12,8 @@ use super::{PublicValues, ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
     instructions::riscv::constants::{
-        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX,
+        END_PC_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, HINT_LENGTH_IDX, HINT_START_ADDR_IDX,
+        INIT_CYCLE_IDX, INIT_PC_IDX,
     },
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
@@ -46,11 +47,87 @@ use sumcheck::{
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
-pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
-    pub vk: ZKVMVerifyingKey<E, PCS>,
+pub use crate::structs::RV32imMemStateConfig;
+
+pub struct ZKVMVerifier<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M = RV32imMemStateConfig,
+> where
+    M: Clone + Default + serde::Serialize + serde::de::DeserializeOwned,
+{
+    pub vk: ZKVMVerifyingKey<E, PCS, M>,
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M> ZKVMVerifier<E, PCS, M>
+where
+    M: Clone + Default + serde::Serialize + serde::de::DeserializeOwned,
+{
+    pub fn new(vk: ZKVMVerifyingKey<E, PCS, M>) -> Self {
+        ZKVMVerifier { vk }
+    }
+
+    pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS, M> {
+        self.vk
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
+    ZKVMVerifier<E, PCS, RV32imMemStateConfig>
+{
+    fn validate_mem_state(
+        mem_state: &RV32imMemStateConfig,
+        prev_heap_addr_end: Option<u32>,
+        prev_hint_addr_end: Option<u32>,
+        vm_proof: &ZKVMProof<E, PCS>,
+    ) -> Result<(u32, u32), ZKVMError> {
+        let heap_addr_start = vm_proof
+            .public_values
+            .query_by_index::<E>(HEAP_START_ADDR_IDX)
+            .to_canonical_u64() as u32;
+        let heap_len = vm_proof
+            .public_values
+            .query_by_index::<E>(HEAP_LENGTH_IDX)
+            .to_canonical_u64() as u32;
+        let next_heap_addr_end = heap_addr_start + heap_len * WORD_SIZE as u32;
+        if !mem_state.heap.contains(&heap_addr_start)
+            || !mem_state.heap.contains(&next_heap_addr_end)
+        {
+            return Err(ZKVMError::VerifyError(
+                "heap continuation out of range".into(),
+            ));
+        }
+        if let Some(prev_heap_addr_end) = prev_heap_addr_end
+            && heap_addr_start != prev_heap_addr_end
+        {
+            return Err(ZKVMError::VerifyError("heap continuation mismatch".into()));
+        }
+
+        let hint_addr_start = vm_proof
+            .public_values
+            .query_by_index::<E>(HINT_START_ADDR_IDX)
+            .to_canonical_u64() as u32;
+        let hint_len = vm_proof
+            .public_values
+            .query_by_index::<E>(HINT_LENGTH_IDX)
+            .to_canonical_u64() as u32;
+        let next_hint_addr_end = hint_addr_start + hint_len * WORD_SIZE as u32;
+        if !mem_state.hints.contains(&hint_addr_start)
+            || !mem_state.hints.contains(&next_hint_addr_end)
+        {
+            return Err(ZKVMError::VerifyError(
+                "hint continuation out of range".into(),
+            ));
+        }
+        if let Some(prev_hint_addr_end) = prev_hint_addr_end
+            && hint_addr_start != prev_hint_addr_end
+        {
+            return Err(ZKVMError::VerifyError("hint continuation mismatch".into()));
+        }
+
+        Ok((next_heap_addr_end, next_hint_addr_end))
+    }
+
     #[allow(clippy::type_complexity)]
     fn split_input_opening_evals(
         circuit_vk: &VerifyingKey<E>,
@@ -82,14 +159,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let wits_in_evals = evals[..wit_len].to_vec();
         let fixed_in_evals = evals[wit_len..(wit_len + fixed_len)].to_vec();
         Ok((wits_in_evals, fixed_in_evals))
-    }
-
-    pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
-        ZKVMVerifier { vk }
-    }
-
-    pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS> {
-        self.vk
     }
 
     /// Verify a full zkVM trace from program entry to halt.
@@ -156,13 +225,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     ) -> Result<bool, ZKVMError> {
         assert!(!vm_proofs.is_empty());
         let num_proofs = vm_proofs.len();
-        let (_end_pc, _end_heap_addr, shard_ec_sum) = vm_proofs
+        let (_end_pc, _end_heap_addr, _end_hint_addr, shard_ec_sum) = vm_proofs
             .into_iter()
             .zip_eq(transcripts)
             // optionally halt on last chunk
             .zip_eq(iter::repeat_n(false, num_proofs - 1).chain(iter::once(expect_halt)))
             .enumerate()
-            .try_fold((None, None, SepticPoint::<E::BaseField>::default()), |(prev_pc, prev_heap_addr_end, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
+            .try_fold((None, None, None, SepticPoint::<E::BaseField>::default()), |(prev_pc, prev_heap_addr_end, prev_hint_addr_end, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
                 // require ecall/halt proof to exist, depend on whether we expect a halt.
                 let has_halt = vm_proof.has_halt(&self.vk);
                 if has_halt != expect_halt {
@@ -194,29 +263,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 }
                 let end_pc = vm_proof.public_values.query_by_index::<E>(END_PC_IDX);
 
-                // check memory continuation consistency
-                let heap_addr_start_u32 = vm_proof
-                    .public_values
-                    .query_by_index::<E>(HEAP_START_ADDR_IDX)
-                    .to_canonical_u64() as u32;
-                let heap_len = vm_proof
-                    .public_values
-                    .query_by_index::<E>(HEAP_LENGTH_IDX)
-                    .to_canonical_u64() as u32;
-                if let Some(prev_heap_addr_end) = prev_heap_addr_end {
-                    assert_eq!(heap_addr_start_u32, prev_heap_addr_end);
-                    // TODO check heap addr in prime field within range
-                } else {
-                    // TODO first chunk, check initial heap addr
-                };
-                // TODO check heap_len == heap chip num_instances
-                let next_heap_addr_end: u32 = heap_addr_start_u32 + heap_len * WORD_SIZE as u32;
+                let (next_heap_addr_end, next_hint_addr_end) = Self::validate_mem_state(
+                    &self.vk.mem_state_verifier,
+                    prev_heap_addr_end,
+                    prev_hint_addr_end,
+                    &vm_proof,
+                )?;
 
                 // add to shard ec sum
                 let shard_ec = self.verify_proof_validity(shard_id, vm_proof, transcript)?;
                 shard_ec_sum = shard_ec_sum + shard_ec;
 
-                Ok((Some(end_pc), Some(next_heap_addr_end), shard_ec_sum))
+                Ok((
+                    Some(end_pc),
+                    Some(next_heap_addr_end),
+                    Some(next_hint_addr_end),
+                    shard_ec_sum,
+                ))
             })?;
         // TODO check _end_heap_addr within heap range from vk
         // check shard ec_sum is_infinity
@@ -336,6 +399,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .into(),
                 ));
             }
+            if circuit_vk.get_cs().with_omc_init_dyn() && proofs.len() > 1 {
+                return Err(ZKVMError::InvalidProof(
+                    format!("{shard_id}th shard got > 1 dynamic table init").into(),
+                ));
+            }
             num_proofs += proofs.len();
         }
 
@@ -351,6 +419,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             assert!(num_instance > 0);
             let circuit_name = &self.vk.circuit_index_to_name[index];
             let circuit_vk = &self.vk.circuit_vks[circuit_name];
+
+            if circuit_name == "HeapTable" {
+                let heap_len = vm_proof
+                    .public_values
+                    .query_by_index::<E>(HEAP_LENGTH_IDX)
+                    .to_canonical_u64() as usize;
+                if num_instance != heap_len {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("heap shard length mismatch: proof {num_instance} != public value {heap_len}").into(),
+                    ));
+                }
+            }
+            if circuit_name == "HintsTable" {
+                let hint_len = vm_proof
+                    .public_values
+                    .query_by_index::<E>(HINT_LENGTH_IDX)
+                    .to_canonical_u64() as usize;
+                if num_instance != hint_len {
+                    return Err(ZKVMError::InvalidProof(
+                        format!("hint shard length mismatch: proof {num_instance} != public value {hint_len}").into(),
+                    ));
+                }
+            }
 
             if proof.r_out_evals.len() != circuit_vk.get_cs().num_reads()
                 || proof.w_out_evals.len() != circuit_vk.get_cs().num_writes()

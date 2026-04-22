@@ -13,7 +13,10 @@ use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
 
-use ceno_zkvm::{e2e::MultiProver, scheme::verifier::ZKVMVerifier};
+use ceno_zkvm::{
+    e2e::MultiProver,
+    scheme::verifier::{RV32imMemStateConfig, ZKVMVerifier},
+};
 use mpcs::BasefoldDefault;
 use transcript::BasicTranscript;
 
@@ -69,7 +72,7 @@ fn fibonacci_prove(c: &mut Criterion) {
 
         println!("e2e proof {}", proof);
         let transcript = BasicTranscript::new(b"riscv");
-        let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
+        let verifier = ZKVMVerifier::<E, Pcs, RV32imMemStateConfig>::new(vk);
         assert!(
             verifier
                 .verify_full_trace_proofs_halt(vec![proof], vec![transcript], false)
