@@ -294,10 +294,19 @@ impl<
             };
 
             #[cfg(feature = "gpu")]
+            let using_gpu_backend = std::any::TypeId::of::<PB>()
+                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>();
+            #[cfg(feature = "gpu")]
+            let needs_replay_restore = crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                && using_gpu_backend;
+            #[cfg(not(feature = "gpu"))]
+            let _needs_replay_restore = false;
+
+            #[cfg(feature = "gpu")]
             let use_deferred_gpu_commit = crate::instructions::gpu::config::is_gpu_witgen_enabled()
                 && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
-                && std::any::TypeId::of::<PB>()
-                    == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>();
+                && using_gpu_backend;
             #[cfg(not(feature = "gpu"))]
             let _use_deferred_gpu_commit = false;
 
@@ -363,33 +372,29 @@ impl<
                 &circuit_trace_indices,
             );
             #[cfg(feature = "gpu")]
-            let replayable_traces: Vec<(usize, crate::structs::GpuReplayPlan<E>)> = tasks
-                .iter()
-                .filter_map(|task| {
-                    task.gpu_replay_plan
-                        .as_ref()
-                        .and_then(|plan| plan.trace_idx.map(|trace_idx| (trace_idx, plan.clone())))
-                })
-                .collect();
+            let replayable_traces: Vec<(usize, crate::structs::GpuReplayPlan<E>)> =
+                if needs_replay_restore {
+                    tasks.iter()
+                        .filter_map(|task| {
+                            task.gpu_replay_plan.as_ref().and_then(|plan| {
+                                plan.trace_idx.map(|trace_idx| (trace_idx, plan.clone()))
+                            })
+                        })
+                        .collect()
+                } else {
+                    vec![]
+                };
             #[cfg(feature = "gpu")]
-            if crate::instructions::gpu::config::is_gpu_witgen_enabled()
-                && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
-            {
-                if std::any::TypeId::of::<PB>()
-                    == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
-                {
-                    let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
-                        unsafe { std::mem::transmute(&mut witness_data) };
-                    crate::scheme::gpu::clear_replayable_trace_device_backing::<E, PCS>(
-                        gpu_witness_data,
-                        &replayable_traces,
-                    );
-                }
+            if needs_replay_restore {
+                let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                    unsafe { std::mem::transmute(&mut witness_data) };
+                crate::scheme::gpu::clear_replayable_trace_device_backing::<E, PCS>(
+                    gpu_witness_data,
+                    &replayable_traces,
+                );
             }
             #[cfg(feature = "gpu")]
-            if std::any::TypeId::of::<PB>()
-                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
-            {
+            if using_gpu_backend {
                 if let Some(active_dpk) = self.get_device_proving_key(shard_ctx) {
                     let active_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
                         unsafe { std::mem::transmute(active_dpk.pcs_data.as_ref()) };
@@ -490,14 +495,7 @@ impl<
             // Sequential (GPU + CPU): unified path via self.create_chip_proof.
             let execute_tasks_span = entered_span!("execute_chip_tasks", profiling_1 = true);
             #[cfg(feature = "gpu")]
-            if std::any::TypeId::of::<PB>()
-                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
-            {
-                let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
-                cuda_hal
-                    .inner
-                    .synchronize()
-                    .expect("cuda synchronize before run_chip_proofs");
+            if needs_replay_restore {
                 let replay_cache = current_replay_cache_stats();
                 tracing::info!(
                     "[gpu replay cache][before_run_chip_proofs] shard_steps={:.2}MB shard_meta={:.2}MB shared_side_effect={:.2}MB total={:.2}MB",
@@ -512,14 +510,7 @@ impl<
                 self.run_chip_proofs(tasks, &transcript, &witness_data)?;
             exit_span!(execute_tasks_span);
             #[cfg(feature = "gpu")]
-            if std::any::TypeId::of::<PB>()
-                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
-            {
-                let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
-                cuda_hal
-                    .inner
-                    .synchronize()
-                    .expect("cuda synchronize after run_chip_proofs");
+            if needs_replay_restore {
                 let replay_cache = current_replay_cache_stats();
                 tracing::info!(
                     "[gpu replay cache][after_run_chip_proofs] shard_steps={:.2}MB shard_meta={:.2}MB shared_side_effect={:.2}MB total={:.2}MB",
@@ -546,16 +537,7 @@ impl<
             // generate static info from prover key for expected num variable
             let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
             #[cfg(feature = "gpu")]
-            if crate::instructions::gpu::config::is_gpu_witgen_enabled()
-                && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
-                && std::any::TypeId::of::<PB>()
-                    == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
-            {
-                let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
-                cuda_hal
-                    .inner
-                    .synchronize()
-                    .expect("cuda synchronize before pcs_opening");
+            if needs_replay_restore {
                 let replay_cache = current_replay_cache_stats();
                 tracing::info!(
                     "[gpu replay cache][before_restore_pcs] shard_steps={:.2}MB shard_meta={:.2}MB shared_side_effect={:.2}MB total={:.2}MB",
