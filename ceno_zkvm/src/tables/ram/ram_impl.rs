@@ -1,5 +1,4 @@
 use ceno_emul::Addr;
-use either::Either;
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
@@ -7,10 +6,7 @@ use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelExtend, ParallelIterator,
 };
-use std::{
-    marker::PhantomData,
-    ops::{Neg, Range},
-};
+use std::{marker::PhantomData, ops::Range};
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 use super::{
@@ -18,7 +14,6 @@ use super::{
     ram_circuit::{DynVolatileRamTable, MemFinalRecord, NonVolatileTable},
 };
 use crate::{
-    chip_handler::general::PublicValuesQuery,
     circuit_builder::{CircuitBuilder, SetTableSpec},
     e2e::ShardContext,
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK},
@@ -28,7 +23,6 @@ use crate::{
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
-use p3::field::FieldAlgebra;
 
 pub trait NonVolatileTableConfigTrait<NVRAM>: Sized + Send + Sync {
     type Config: Sized + Send + Sync;
@@ -157,96 +151,6 @@ impl<NVRAM: NonVolatileTable + Send + Sync + Clone> NonVolatileTableConfigTrait<
         let mut value = Vec::with_capacity(NVRAM::len(&config.params));
         value.par_extend(
             (0..NVRAM::len(&config.params))
-                .into_par_iter()
-                .map(|_| F::ONE),
-        );
-        let structural_witness =
-            RowMajorMatrix::<F>::new_by_values(value, 1, InstancePaddingStrategy::Default);
-        Ok([RowMajorMatrix::empty(), structural_witness])
-    }
-}
-
-/// define public io
-/// init value set by instance
-#[derive(Clone, Debug)]
-pub struct PubIOTableInitConfig<NVRAM: NonVolatileTable + Send + Sync + Clone> {
-    addr: Fixed,
-    phantom: PhantomData<NVRAM>,
-    params: ProgramParams,
-}
-
-impl<NVRAM: NonVolatileTable + Send + Sync + Clone> PubIOTableInitConfig<NVRAM> {
-    pub fn construct_circuit<E: ExtensionField>(
-        cb: &mut CircuitBuilder<E>,
-        params: &ProgramParams,
-    ) -> Result<Self, CircuitBuilderError> {
-        assert!(!NVRAM::WRITABLE);
-        let init_v = cb.query_public_io()?;
-        let addr = cb.create_fixed(|| "addr");
-
-        let init_table = [
-            vec![(NVRAM::RAM_TYPE as usize).into()],
-            vec![Expression::Fixed(addr)],
-            init_v.iter().map(|v| v.expr_as_instance()).collect_vec(),
-            vec![Expression::ZERO], // Initial cycle.
-        ]
-        .concat();
-
-        cb.w_table_record(
-            || "init_table",
-            NVRAM::RAM_TYPE,
-            SetTableSpec {
-                len: Some(NVRAM::len(params)),
-                structural_witins: vec![],
-            },
-            init_table,
-        )?;
-
-        Ok(Self {
-            addr,
-            phantom: PhantomData,
-            params: params.clone(),
-        })
-    }
-
-    /// assign to fixed address
-    pub fn gen_init_state<F: SmallField>(
-        &self,
-        num_fixed: usize,
-        io_addrs: &[Addr],
-    ) -> RowMajorMatrix<F> {
-        assert!(NVRAM::len(&self.params).is_power_of_two());
-
-        let mut init_table = RowMajorMatrix::<F>::new(
-            NVRAM::len(&self.params),
-            num_fixed,
-            InstancePaddingStrategy::Default,
-        );
-        assert_eq!(init_table.num_padding_instances(), 0);
-
-        init_table
-            .par_rows_mut()
-            .zip_eq(io_addrs)
-            .for_each(|(row, addr)| {
-                set_fixed_val!(row, self.addr, (*addr as u64).into_f());
-            });
-        init_table
-    }
-
-    /// TODO consider taking RowMajorMatrix as argument to save allocations.
-    pub fn assign_instances<F: SmallField>(
-        &self,
-        _num_witin: usize,
-        num_structural_witin: usize,
-        final_mem: &[MemFinalRecord],
-    ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
-        if final_mem.is_empty() {
-            return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
-        }
-        assert!(num_structural_witin == 0 || num_structural_witin == 1);
-        let mut value = Vec::with_capacity(NVRAM::len(&self.params));
-        value.par_extend(
-            (0..NVRAM::len(&self.params))
                 .into_par_iter()
                 .map(|_| F::ONE),
         );
@@ -480,17 +384,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
-        if let Some(instance) = DVRAM::dynamic_length_instance() {
+        if DVRAM::dynamic_length_instance().is_some() {
             cb.set_omc_init_dyn();
-            cb.require_zero(
-                || "dynamic_length + (num_instance * -1)",
-                instance.expr()
-                    + Expression::Product(
-                        Box::new(cb.query_num_instance()?.expr()),
-                        Box::new(Expression::Constant(Either::Left(E::BaseField::ONE.neg()))),
-                    ),
-            )?;
-        } else {
+        } else if !DVRAM::DYNAMIC_OFFSET {
             cb.set_omc_init_only();
         }
 
@@ -542,7 +438,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
         assert_eq!(num_structural_witin, 2);
-        if DVRAM::dynamic_length_instance().is_some() {
+        if DVRAM::dynamic_length_instance().is_some() || DVRAM::DYNAMIC_OFFSET {
             Self::assign_instances_dynamic(config, num_witin, num_structural_witin, data)
         } else {
             Self::assign_instances(config, num_witin, num_structural_witin, data)

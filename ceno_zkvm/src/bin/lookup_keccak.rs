@@ -1,5 +1,5 @@
 use ceno_zkvm::precompiles::{run_lookup_keccakf, setup_lookup_keccak_gkr_circuit};
-use clap::{Parser, command};
+use clap::Parser;
 use ff_ext::GoldilocksExt2;
 use itertools::Itertools;
 use mpcs::BasefoldDefault;

@@ -16,9 +16,9 @@ use crate::{
     witness::{LkMultiplicity, set_val},
 };
 use ceno_emul::{
-    CENO_PLATFORM,
+    CENO_PLATFORM, InsnKind,
     InsnKind::{ADD, ECALL},
-    Platform, Program, StepRecord, VMState, encode_rv32,
+    Platform, Program, StepIndex, StepRecord, VMState, encode_rv32,
 };
 use ff_ext::{ExtensionField, FieldInto, FromUniformBytes, GoldilocksExt2};
 use gkr_iop::cpu::default_backend_config;
@@ -34,10 +34,10 @@ use ff_ext::{Instrumented, PoseidonField};
 
 use super::{
     PublicValues,
-    constants::MAX_NUM_VARIABLES,
+    constants::{MAX_NUM_VARIABLES, SEPTIC_EXTENSION_DEGREE},
     prover::ZKVMProver,
     utils::infer_tower_product_witness,
-    verifier::{RV32imMemStateConfig, TowerVerify, ZKVMVerifier},
+    verifier::{TowerVerify, ZKVMVerifier},
 };
 use crate::{
     e2e::ShardContext, scheme::constants::NUM_FANIN, structs::PointAndEval,
@@ -52,6 +52,39 @@ use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use transcript::{BasicTranscript, Transcript};
 
+#[test]
+fn test_public_values_iter_field_matches_query_order() {
+    type E = GoldilocksExt2;
+
+    let public_values = PublicValues::new(
+        0xABCD_1234,
+        0x0800_0000,
+        123,
+        0x0800_1000,
+        456,
+        7,
+        0x3000_0000,
+        64,
+        0x2800_0000,
+        32,
+        [0, 1, 2, 3, 4, 5, 6, 7],
+        std::array::from_fn(|i| (i as u32) + 10),
+    );
+
+    let from_iter = public_values
+        .iter_field::<<E as ExtensionField>::BaseField>()
+        .collect_vec();
+    let from_query = (0..PublicValues::flattened_len())
+        .map(|i| public_values.query_by_index::<E>(i))
+        .collect_vec();
+
+    assert_eq!(
+        PublicValues::flattened_len(),
+        11 + SEPTIC_EXTENSION_DEGREE * 2 + 16
+    );
+    assert_eq!(from_iter, from_query);
+}
+
 struct TestConfig {
     pub(crate) reg_id: WitIn,
 }
@@ -62,6 +95,11 @@ struct TestCircuit<E: ExtensionField, const RW: usize, const L: usize> {
 
 impl<E: ExtensionField, const L: usize, const RW: usize> Instruction<E> for TestCircuit<E, RW, L> {
     type InstructionConfig = TestConfig;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::INVALID]
+    }
 
     fn name() -> String {
         "TEST".into()
@@ -136,17 +174,20 @@ fn test_rw_lk_expression_combination() {
                 zkvm_fixed_traces,
             )
             .unwrap();
-        let vk = pk.get_vk_slow::<RV32imMemStateConfig>();
+        let vk = pk.get_vk_slow();
 
         // generate mock witness
         let num_instances = 1 << 8;
         let mut zkvm_witness = ZKVMWitnesses::default();
+        let steps = vec![StepRecord::default(); num_instances];
+        let step_indices: Vec<StepIndex> = (0..steps.len()).collect();
         zkvm_witness
             .assign_opcode_circuit::<TestCircuit<E, RW, L>>(
                 &zkvm_cs,
                 &mut shard_ctx,
                 &config,
-                vec![&StepRecord::default(); num_instances],
+                &steps,
+                &step_indices,
             )
             .unwrap();
 
@@ -187,7 +228,7 @@ fn test_rw_lk_expression_combination() {
                     .iter()
                     .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
                     .collect_vec(),
-                structural_in = structural_wits_in
+                structural_wits_in
                     .iter()
                     .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
                     .collect_vec(),
@@ -203,19 +244,25 @@ fn test_rw_lk_expression_combination() {
             fixed: vec![],
             witness: wits_in,
             structural_witness: structural_in,
-            public_values: vec![],
-            pub_io_evals: vec![],
-            num_instances: vec![num_instances],
+            pi: vec![],
+            num_instances: [num_instances, 0],
             has_ecc_ops: false,
         };
+        let task = crate::scheme::scheduler::ChipTask {
+            task_id: 0,
+            circuit_name: name.clone(),
+            circuit_idx: 0,
+            pk: prover.pk.circuit_pks.get(&name).unwrap(),
+            input,
+            estimated_memory_bytes: 0,
+            has_witness_or_fixed: true,
+            challenges: prover_challenges,
+            witness_trace_idx: None,
+            num_witin: 0,
+            structural_rmm: None,
+        };
         let (proof, _, _) = prover
-            .create_chip_proof(
-                name.as_str(),
-                prover.pk.circuit_pks.get(&name).unwrap(),
-                input,
-                &mut transcript,
-                &prover_challenges,
-            )
+            .create_chip_proof(&task, &mut transcript)
             .expect("create_proof failed");
 
         // verify proof
@@ -233,13 +280,12 @@ fn test_rw_lk_expression_combination() {
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
         }
-        verifier
+        let _ = verifier
             .verify_chip_proof(
                 name.as_str(),
                 verifier.vk.circuit_vks.get(&name).unwrap(),
                 &proof,
-                &[],
-                &[],
+                &PublicValues::default(),
                 &mut v_transcript,
                 NUM_FANIN,
                 &PointAndEval::default(),
@@ -317,19 +363,17 @@ fn test_single_add_instance_e2e() {
         .clone()
         .key_gen::<Pcs>(pp, vp, program.entry, zkvm_fixed_traces)
         .expect("keygen failed");
-    let vk = pk.get_vk_slow::<RV32imMemStateConfig>();
+    let vk = pk.get_vk_slow();
 
     // single instance
     let mut vm = VMState::new(CENO_PLATFORM.clone(), program.clone().into());
-    let all_records = vm
-        .iter_until_halt()
-        .collect::<Result<Vec<StepRecord>, _>>()
-        .expect("vm exec failed")
-        .into_iter()
-        .collect::<Vec<_>>();
+    vm.iter_until_halt()
+        .collect::<Result<Vec<_>, _>>()
+        .expect("vm exec failed");
+    let all_records = vm.tracer().recorded_steps().to_vec();
     let mut add_records = vec![];
     let mut halt_records = vec![];
-    all_records.iter().for_each(|record| {
+    all_records.into_iter().for_each(|record| {
         let kind = record.insn().kind;
         match kind {
             ADD => add_records.push(record),
@@ -352,12 +396,15 @@ fn test_single_add_instance_e2e() {
     let verifier = ZKVMVerifier::new(vk);
     let mut zkvm_witness = ZKVMWitnesses::default();
     // assign opcode circuits
+    let add_indices: Vec<StepIndex> = (0..add_records.len()).collect();
+    let halt_indices: Vec<StepIndex> = (0..halt_records.len()).collect();
     zkvm_witness
         .assign_opcode_circuit::<AddInstruction<E>>(
             &zkvm_cs,
             &mut shard_ctx,
             &add_config,
-            add_records,
+            &add_records,
+            &add_indices,
         )
         .unwrap();
     zkvm_witness
@@ -365,7 +412,8 @@ fn test_single_add_instance_e2e() {
             &zkvm_cs,
             &mut shard_ctx,
             &halt_config,
-            halt_records,
+            &halt_records,
+            &halt_indices,
         )
         .unwrap();
     zkvm_witness.finalize_lk_multiplicities();
@@ -380,7 +428,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0; 8], [0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(&shard_ctx, zkvm_witness, pi, transcript)

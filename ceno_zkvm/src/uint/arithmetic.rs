@@ -798,7 +798,7 @@ mod tests {
 
         #[test]
         fn test_add_mul2() {
-            let witness_values: Vec<ArcMultilinearExtension<E>> = vec![
+            let witness_values: Vec<ArcMultilinearExtension<E>> = [
                 // alloc a = 1 + 1 * 2^16
                 vec![1, 1, 0, 0],
                 // alloc b = 2 + 1 * 2^16

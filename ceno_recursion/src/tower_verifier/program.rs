@@ -1,91 +1,19 @@
 use super::binding::{PointAndEvalVariable, PointVariable};
 use crate::{
-    arithmetics::{
-        UniPolyExtrapolator, challenger_multi_observe, eq_eval, evaluate_at_point_degree_1, extend,
-        exts_to_felts, reverse,
-    },
+    arithmetics::{UniPolyExtrapolator, challenger_multi_observe, eq_eval, extend, exts_to_felts},
     tower_verifier::binding::IOPProverMessageVecVariable,
-    transcript::transcript_observe_label,
+    transcript::{
+        transcript_label_as_array, transcript_observe_label, transcript_observe_label_felts,
+    },
     zkvm_verifier::binding::TowerProofInputVariable,
 };
 use openvm_native_compiler::prelude::*;
-use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::challenger::{
-    CanObserveVariable, FeltChallenger, duplex::DuplexChallengerVariable,
+use openvm_native_recursion::{
+    challenger::{FeltChallenger, duplex::DuplexChallengerVariable},
+    vars::HintSlice,
 };
 use openvm_stark_backend::p3_field::FieldAlgebra;
-const NATIVE_SUMCHECK_CTX_LEN: usize = 9;
-
-pub(crate) fn interpolate_uni_poly<C: Config>(
-    builder: &mut Builder<C>,
-    p_i: &Array<C, Ext<C::F, C::EF>>,
-    eval_at: Ext<C::F, C::EF>,
-) -> Ext<C::F, C::EF> {
-    let len = p_i.len();
-    let evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(len.clone());
-    let prod: Ext<C::F, C::EF> = builder.eval(eval_at);
-
-    builder.set(&evals, 0, eval_at);
-
-    // `prod = \prod_{j} (eval_at - j)`
-    let e: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    builder.range(1, len.clone()).for_each(|i_vec, builder| {
-        let i = i_vec[0];
-        let tmp: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-        builder.assign(&tmp, eval_at - e);
-        builder.set(&evals, i, tmp);
-        builder.assign(&prod, prod * tmp);
-        builder.assign(&e, e + one);
-    });
-
-    let denom_up: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    let i: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    builder.assign(&i, i + one);
-    builder.range(2, len.clone()).for_each(|_i_vec, builder| {
-        builder.assign(&denom_up, denom_up * i);
-        builder.assign(&i, i + one);
-    });
-    let denom_down: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-
-    let idx_vec_len: RVar<C::N> = builder.eval_expr(len.clone() - RVar::from(1));
-    let idx_vec: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(idx_vec_len);
-    let idx_val: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
-    builder.range(0, idx_vec.len()).for_each(|i_vec, builder| {
-        builder.set(&idx_vec, i_vec[0], idx_val);
-        builder.assign(&idx_val, idx_val + one);
-    });
-    let idx_rev = reverse(builder, &idx_vec);
-    let res = builder.constant(C::EF::ZERO);
-
-    let len_f = idx_val;
-    let neg_one: Ext<C::F, C::EF> = builder.constant(C::EF::NEG_ONE);
-    let evals_rev = reverse(builder, &evals);
-    let p_i_rev = reverse(builder, p_i);
-
-    let mut idx_pos: RVar<C::N> = builder.eval_expr(len.clone() - RVar::from(1));
-    iter_zip!(builder, idx_rev, evals_rev, p_i_rev).for_each(|ptr_vec, builder| {
-        let idx = builder.iter_ptr_get(&idx_rev, ptr_vec[0]);
-        let eval = builder.iter_ptr_get(&evals_rev, ptr_vec[1]);
-        let up_eval_inv: Ext<C::F, C::EF> = builder.eval(denom_up * eval);
-        builder.assign(&up_eval_inv, up_eval_inv.inverse());
-        let p = builder.iter_ptr_get(&p_i_rev, ptr_vec[2]);
-
-        builder.assign(&res, res + p * prod * denom_down * up_eval_inv);
-        builder.assign(&denom_up, denom_up * (len_f - idx) * neg_one);
-        builder.assign(&denom_down, denom_down * idx);
-
-        idx_pos = builder.eval_expr(idx_pos - RVar::from(1));
-    });
-
-    let p_i_0 = builder.get(p_i, 0);
-    let eval_0 = builder.get(&evals, 0);
-    let up_eval_inv: Ext<C::F, C::EF> = builder.eval(denom_up * eval_0);
-    builder.assign(&up_eval_inv, up_eval_inv.inverse());
-    builder.assign(&res, res + p_i_0 * prod * denom_down * up_eval_inv);
-
-    res
-}
+const NATIVE_SUMCHECK_CTX_LEN: usize = 10;
 
 pub fn iop_verifier_state_verify<C: Config>(
     builder: &mut Builder<C>,
@@ -93,54 +21,84 @@ pub fn iop_verifier_state_verify<C: Config>(
     out_claim: &Ext<C::F, C::EF>,
     prover_messages: &IOPProverMessageVecVariable<C>,
     max_num_variables: Felt<C::F>,
-    max_degree: Felt<C::F>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    max_degree: usize,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) -> (
     Array<C, Ext<<C as Config>::F, <C as Config>::EF>>,
     Ext<<C as Config>::F, <C as Config>::EF>,
 ) {
-    // TODO: either store it in a global cache or pass them as parameters
-    let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-    let zero_f: Felt<C::F> = builder.constant(C::F::ZERO);
-
+    let max_degree_felt: Felt<C::F> = builder.constant(C::F::from_canonical_usize(max_degree));
     let max_num_variables_usize: Usize<C::N> =
         Usize::from(builder.cast_felt_to_var(max_num_variables));
-    challenger.observe(builder, max_num_variables);
-    challenger.observe(builder, zero_f);
-    challenger.observe(builder, max_degree);
-    challenger.observe(builder, zero_f);
+    let pre_verified_integrity_data: Array<C, Felt<C::F>> = builder.dyn_array(4);
+    // Prover and verifier currently agree on how `usize` values are serialized.
+    // On a 64-bit platform, a `usize` spans 64 bits, so it is represented
+    // as two ordered `u32` Felts.
+    //
+    // `max_num_variables` occupies the first Felt,
+    // with the second Felt padded with 0. The same layout applies to `max_degree`.
+    //
+    // TODO fix to single u32
+    builder.set_value(&pre_verified_integrity_data, 0, max_num_variables);
+    builder.set_value(&pre_verified_integrity_data, 2, max_degree_felt);
+    challenger_multi_observe(builder, challenger, &pre_verified_integrity_data);
 
     builder.assert_var_eq(max_num_variables_usize.get_var(), prover_messages.len());
 
     let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(max_num_variables_usize.clone());
-    let expected: Ext<C::F, C::EF> = builder.eval(*out_claim + zero);
+    let expected: Ext<C::F, C::EF> = builder.eval(*out_claim);
+    let internal_round_label = transcript_label_as_array(builder, b"Internal round");
 
     builder.cycle_tracker_start("IOPVerifierState::verify_round_and_update_state");
+    let curr_offset: Var<C::N> = builder.eval(C::N::ZERO);
     builder
         .range(0, max_num_variables_usize.clone())
         .for_each(|i_vec, builder| {
             let i = i_vec[0];
 
-            // TODO: this takes 7 cycles, can we optimize it?
-            let prover_msg = prover_messages.get(builder, i.variable());
+            let next_offset: Var<C::N> =
+                builder.eval(curr_offset + prover_messages.prover_message_size);
+            let prover_msg = prover_messages
+                .evaluations
+                .slice(builder, curr_offset, next_offset);
+            builder.assign(&curr_offset, next_offset);
 
             unsafe {
                 let prover_msg_felts = exts_to_felts(builder, &prover_msg);
                 challenger_multi_observe(builder, challenger, &prover_msg_felts);
             }
 
-            transcript_observe_label(builder, challenger, b"Internal round");
+            transcript_observe_label_felts(builder, challenger, &internal_round_label);
             let challenge = challenger.sample_ext(builder);
 
             let e1 = builder.get(&prover_msg, 0);
-            let e2 = builder.get(&prover_msg, 1);
-            let target: Ext<<C as Config>::F, <C as Config>::EF> = builder.eval(e1 + e2);
+            let e0 = builder.eval(expected - e1);
+            let p_r = match max_degree {
+                1 => unipoly_extrapolator.extrapolate_uni_poly_deg_1(builder, e0, e1, challenge),
+                2 => {
+                    let p1 = e1;
+                    let p2 = builder.get(&prover_msg, 1);
+                    unipoly_extrapolator.extrapolate_uni_poly_deg_2(builder, e0, p1, p2, challenge)
+                }
+                3 => {
+                    let p1 = e1;
+                    let p2 = builder.get(&prover_msg, 1);
+                    let p3 = builder.get(&prover_msg, 2);
+                    unipoly_extrapolator
+                        .extrapolate_uni_poly_deg_3(builder, e0, p1, p2, p3, challenge)
+                }
+                4 => {
+                    let p1 = e1;
+                    let p2 = builder.get(&prover_msg, 1);
+                    let p3 = builder.get(&prover_msg, 2);
+                    let p4 = builder.get(&prover_msg, 3);
+                    unipoly_extrapolator
+                        .extrapolate_uni_poly_deg_4(builder, e0, p1, p2, p3, p4, challenge)
+                }
+                _ => panic!("unsupported max_degree {max_degree}"),
+            };
 
-            builder.assert_ext_eq(expected, target);
-
-            let p_r = unipoly_extrapolator.extrapolate_uni_poly(builder, &prover_msg, challenge);
-
-            builder.assign(&expected, p_r + zero);
+            builder.assign(&expected, p_r);
             builder.set_value(&challenges, i, challenge);
         });
     builder.cycle_tracker_end("IOPVerifierState::verify_round_and_update_state");
@@ -151,40 +109,31 @@ pub fn iop_verifier_state_verify<C: Config>(
 pub fn verify_tower_proof<C: Config>(
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
-    prod_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    logup_out_evals: &Array<C, Array<C, Ext<C::F, C::EF>>>,
+    num_prod_spec: Usize<C::N>,
+    num_logup_spec: Usize<C::N>,
+    prod_out_evals: &HintSlice<C>,
+    logup_out_evals: &HintSlice<C>,
     num_variables: Array<C, Usize<C::N>>,
-    num_fanin: Usize<C::N>,
+    _num_fanin: Usize<C::N>,
 
     // TowerProofVariable
     max_num_variables: Usize<C::N>,
 
     proof: &TowerProofInputVariable<C>,
-    unipoly_extrapolator: &mut UniPolyExtrapolator<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) -> (
     PointVariable<C>,
     Array<C, PointAndEvalVariable<C>>,
     Array<C, PointAndEvalVariable<C>>,
     Array<C, PointAndEvalVariable<C>>,
+    Array<C, Ext<C::F, C::EF>>,
+    Array<C, Ext<C::F, C::EF>>,
 ) {
-    let num_prod_spec = prod_out_evals.len();
-    let num_logup_spec = logup_out_evals.len();
-
     let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
 
     builder.assert_usize_eq(proof.prod_specs_eval.len(), num_prod_spec.clone());
-    iter_zip!(builder, prod_out_evals).for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let evals = builder.iter_ptr_get(&prod_out_evals, ptr);
-        builder.assert_usize_eq(evals.len(), num_fanin.clone());
-    });
     builder.assert_usize_eq(proof.logup_specs_eval.len(), num_logup_spec.clone());
-    iter_zip!(builder, logup_out_evals).for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let evals = builder.iter_ptr_get(logup_out_evals, ptr);
-        builder.assert_usize_eq(evals.len(), RVar::from(4));
-    });
     builder.assert_usize_eq(
         num_variables.len(),
         num_prod_spec.clone() + num_logup_spec.clone(),
@@ -203,8 +152,6 @@ pub fn verify_tower_proof<C: Config>(
     transcript_observe_label(builder, challenger, b"combine subset evals");
     let alpha = challenger.sample_ext(builder);
 
-    let alpha_acc: Ext<C::F, C::EF> = builder.eval(zero + one);
-
     // initial_claim = \sum_j alpha^j * out_j[rt]
     // out_j[rt] := (record_{j}[rt])
     // out_j[rt] := (logup_p{j}[rt])
@@ -221,91 +168,50 @@ pub fn verify_tower_proof<C: Config>(
             builder.set_value(&initial_rt, idx, c);
         });
 
+    let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
+    builder.set(&input_ctx, 0, Usize::from(0));
+    builder.set(&input_ctx, 1, num_prod_spec.clone());
+    builder.set(&input_ctx, 2, num_logup_spec.clone());
+    builder.set(&input_ctx, 3, Usize::from(1));
+    builder.set(&input_ctx, 4, Usize::from(2));
+    builder.set(&input_ctx, 5, Usize::from(1));
+    builder.set(&input_ctx, 6, Usize::from(4));
+    builder.set(&input_ctx, 7, Usize::from(0));
+    builder.set(&input_ctx, 8, Usize::from(999));
+    builder.set(&input_ctx, 9, Usize::from(1));
+
+    let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(3);
+    builder.set(&challenges, 0, alpha);
+    let r = builder.get(&initial_rt, 0);
+    let c1: Ext<C::F, C::EF> = builder.eval(one - r);
+    builder.set(&challenges, 1, c1);
+    builder.set(&challenges, 2, r);
+
+    let sumcheck_out_len: Usize<C::N> = builder
+        .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
+    let next_layer_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(sumcheck_out_len);
+
+    let prod_out_evals_vals: Array<C, Ext<C::F, C::EF>> =
+        builder.dyn_array(prod_out_evals.length.clone());
+    let logup_out_evals_vals: Array<C, Ext<C::F, C::EF>> =
+        builder.dyn_array(logup_out_evals.length.clone());
+    builder.sumcheck_layer_eval(
+        &input_ctx,
+        &challenges,
+        &prod_out_evals_vals,
+        &logup_out_evals_vals,
+        prod_out_evals.id.get_var(),
+        logup_out_evals.id.get_var(),
+        &next_layer_evals,
+    );
+    let initial_claim = builder.get(&next_layer_evals, 0);
+
     let prod_spec_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_prod_spec.clone());
-
-    iter_zip!(builder, prod_out_evals, prod_spec_point_n_eval).for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let evals = builder.iter_ptr_get(&prod_out_evals, ptr);
-        let e = evaluate_at_point_degree_1(builder, &evals, &initial_rt);
-        let p_ptr = ptr_vec[1];
-        builder.iter_ptr_set(
-            &prod_spec_point_n_eval,
-            p_ptr,
-            PointAndEvalVariable {
-                point: PointVariable {
-                    fs: initial_rt.clone(),
-                },
-                eval: e,
-            },
-        );
-    });
-
     let logup_spec_p_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_logup_spec.clone());
     let logup_spec_q_point_n_eval: Array<C, PointAndEvalVariable<C>> =
         builder.dyn_array(num_logup_spec.clone());
-
-    iter_zip!(
-        builder,
-        logup_out_evals,
-        logup_spec_p_point_n_eval,
-        logup_spec_q_point_n_eval
-    )
-    .for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let evals = builder.iter_ptr_get(&prod_out_evals, ptr);
-
-        let p_slice = evals.slice(builder, 0, 2);
-        let q_slice = evals.slice(builder, 2, 4);
-
-        let e1 = evaluate_at_point_degree_1(builder, &p_slice, &initial_rt);
-        let e2 = evaluate_at_point_degree_1(builder, &q_slice, &initial_rt);
-
-        let p_ptr = ptr_vec[1];
-        let q_ptr = ptr_vec[2];
-
-        builder.iter_ptr_set(
-            &logup_spec_p_point_n_eval,
-            p_ptr,
-            PointAndEvalVariable {
-                point: PointVariable {
-                    fs: initial_rt.clone(),
-                },
-                eval: e1,
-            },
-        );
-        builder.iter_ptr_set(
-            &logup_spec_q_point_n_eval,
-            q_ptr,
-            PointAndEvalVariable {
-                point: PointVariable {
-                    fs: initial_rt.clone(),
-                },
-                eval: e2,
-            },
-        );
-    });
-
-    let initial_claim: Ext<C::F, C::EF> = builder.eval(zero + zero);
-
-    iter_zip!(builder, prod_spec_point_n_eval).for_each(|ptr_vec, builder| {
-        let ptr = ptr_vec[0];
-        let prod_eval = builder.iter_ptr_get(&prod_spec_point_n_eval, ptr);
-        builder.assign(&initial_claim, initial_claim + prod_eval.eval * alpha_acc);
-        builder.assign(&alpha_acc, alpha_acc * alpha);
-    });
-
-    builder
-        .range(0, num_logup_spec.clone())
-        .for_each(|i_vec, builder| {
-            let p = builder.get(&logup_spec_p_point_n_eval, i_vec[0]);
-            builder.assign(&initial_claim, initial_claim + p.eval * alpha_acc);
-            builder.assign(&alpha_acc, alpha_acc * alpha);
-            let q = builder.get(&logup_spec_q_point_n_eval, i_vec[0]);
-            builder.assign(&initial_claim, initial_claim + q.eval * alpha_acc);
-            builder.assign(&alpha_acc, alpha_acc * alpha);
-        });
     builder.cycle_tracker_end("initial sum");
 
     let curr_pt = initial_rt.clone();
@@ -317,11 +223,24 @@ pub fn verify_tower_proof<C: Config>(
         point: PointVariable { fs: initial_rt },
         eval: initial_claim,
     };
+    builder.set(&input_ctx, 1, proof.prod_specs_eval.length);
+    builder.set(&input_ctx, 2, proof.logup_specs_eval.length);
+    builder.set(
+        &input_ctx,
+        3,
+        Usize::from(proof.prod_specs_eval.inner_length),
+    );
+    builder.set(
+        &input_ctx,
+        5,
+        Usize::from(proof.logup_specs_eval.inner_length),
+    );
 
-    let next_layer_evals_output_len: Usize<C::N> = builder
-        .eval(Usize::from(1) + num_prod_spec.clone() + Usize::from(2) * num_logup_spec.clone());
-    let next_layer_evals: Array<C, Ext<C::F, C::EF>> =
-        builder.dyn_array(next_layer_evals_output_len);
+    let prod_specs_eval: Array<C, Ext<C::F, C::EF>> =
+        builder.dyn_array(proof.prod_specs_eval.data.length.clone());
+    let logup_specs_eval: Array<C, Ext<C::F, C::EF>> =
+        builder.dyn_array(proof.logup_specs_eval.data.length.clone());
+    builder.set(&input_ctx, 9, Usize::from(0));
 
     builder.range(0, op_range).for_each(|i_vec, builder| {
         let round_var = i_vec[0];
@@ -332,8 +251,6 @@ pub fn verify_tower_proof<C: Config>(
         let max_num_variables: Felt<C::F> = builder.constant(C::F::ONE);
         builder.assign(&max_num_variables, max_num_variables + round);
 
-        let max_degree = builder.constant(C::F::from_canonical_usize(3));
-
         builder.cycle_tracker_start("sumcheck verify");
         let (sub_rt, sub_e) = iop_verifier_state_verify(
             builder,
@@ -341,7 +258,7 @@ pub fn verify_tower_proof<C: Config>(
             out_claim,
             &prover_messages,
             max_num_variables,
-            max_degree,
+            3,
             unipoly_extrapolator,
         );
         builder.cycle_tracker_end("sumcheck verify");
@@ -349,30 +266,7 @@ pub fn verify_tower_proof<C: Config>(
         builder.cycle_tracker_start("check expected evaluation");
         let eq_e = eq_eval(builder, out_rt, &sub_rt, one, zero);
 
-        let input_ctx: Array<C, Usize<C::N>> = builder.dyn_array(NATIVE_SUMCHECK_CTX_LEN);
         builder.set(&input_ctx, 0, round_var);
-        builder.set(&input_ctx, 1, num_prod_spec.clone());
-        builder.set(&input_ctx, 2, num_logup_spec.clone());
-        builder.set(
-            &input_ctx,
-            3,
-            Usize::from(proof.prod_specs_eval.inner_length),
-        );
-        builder.set(
-            &input_ctx,
-            4,
-            Usize::from(proof.prod_specs_eval.inner_inner_length),
-        );
-        builder.set(
-            &input_ctx,
-            5,
-            Usize::from(proof.logup_specs_eval.inner_length),
-        );
-        builder.set(
-            &input_ctx,
-            6,
-            Usize::from(proof.logup_specs_eval.inner_inner_length),
-        );
         builder.set(&input_ctx, 7, Usize::from(1));
         let n_v = builder.get(&num_variables, 0);
         builder.set(&input_ctx, 8, n_v);
@@ -383,8 +277,10 @@ pub fn verify_tower_proof<C: Config>(
         builder.sumcheck_layer_eval(
             &input_ctx,
             &challenges,
-            &proof.prod_specs_eval.data,
-            &proof.logup_specs_eval.data,
+            &prod_specs_eval,
+            &logup_specs_eval,
+            proof.prod_specs_eval.data.id.get_var(),
+            proof.logup_specs_eval.data.id.get_var(),
             &next_layer_evals,
         );
         let expected_evaluation = builder.get(&next_layer_evals, 0);
@@ -422,78 +318,14 @@ pub fn verify_tower_proof<C: Config>(
         builder.sumcheck_layer_eval(
             &input_ctx,
             &challenges,
-            &proof.prod_specs_eval.data,
-            &proof.logup_specs_eval.data,
+            &prod_specs_eval,
+            &logup_specs_eval,
+            proof.prod_specs_eval.data.id.get_var(),
+            proof.logup_specs_eval.data.id.get_var(),
             &next_layer_evals,
         );
 
-        let next_round = builder.eval_expr(round_var + RVar::from(1));
-        builder
-            .range(0, num_prod_spec.clone())
-            .for_each(|i_vec, builder| {
-                let spec_index = i_vec[0];
-                let skip = builder.get(&should_skip, spec_index);
-                let max_round = builder.get(&num_variables, spec_index);
-                let round_limit: RVar<C::N> = builder.eval_expr(max_round - RVar::from(1));
-
-                // now skip is 0 if and only if current round_var is smaller than round_limit.
-                builder.if_eq(skip, var_zero).then(|builder| {
-                    builder.if_eq(next_round, round_limit).then(|builder| {
-                        let evals_idx: Usize<C::N> = builder.eval(spec_index + Usize::from(1));
-                        let evals = builder.get(&next_layer_evals, evals_idx);
-
-                        let point_and_eval: PointAndEvalVariable<C> =
-                            builder.eval(PointAndEvalVariable {
-                                point: PointVariable {
-                                    fs: rt_prime.clone(),
-                                },
-                                eval: evals,
-                            });
-                        builder.set_value(&prod_spec_point_n_eval, spec_index, point_and_eval);
-                    });
-                });
-            });
-
-        let num_variables_len = num_variables.len();
-        let logup_num_variables_slice =
-            num_variables.slice(builder, num_prod_spec.clone(), num_variables_len.clone());
-
-        builder
-            .range(0, num_logup_spec.clone())
-            .for_each(|i_vec, builder| {
-                let spec_index = i_vec[0];
-                let max_round = builder.get(&logup_num_variables_slice, spec_index);
-                let round_limit: RVar<C::N> = builder.eval_expr(max_round - RVar::from(1));
-                let idx: Var<C::N> = builder.eval(spec_index.variable() + num_prod_spec.get_var());
-                let skip = builder.get(&should_skip, idx);
-
-                // now skip is 0 if and only if current round_var is smaller than round_limit.
-                builder.if_eq(skip, var_zero).then(|builder| {
-                    builder.if_eq(next_round, round_limit).then(|builder| {
-                        let p_idx: Usize<C::N> = builder.eval(idx + Usize::from(1));
-                        let q_idx: Usize<C::N> =
-                            builder.eval(idx + Usize::from(1) + num_logup_spec.clone());
-                        let p_eval = builder.get(&next_layer_evals, p_idx);
-                        let q_eval = builder.get(&next_layer_evals, q_idx);
-
-                        let p_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                            point: PointVariable {
-                                fs: rt_prime.clone(),
-                            },
-                            eval: p_eval,
-                        });
-                        let q_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                            point: PointVariable {
-                                fs: rt_prime.clone(),
-                            },
-                            eval: q_eval,
-                        });
-                        builder.set_value(&logup_spec_p_point_n_eval, spec_index, p_eval);
-                        builder.set_value(&logup_spec_q_point_n_eval, spec_index, q_eval);
-                    });
-                });
-            });
-
+        // extract next layer's expected sum
         let output_eval = builder.get(&next_layer_evals, 0);
         builder.assign(&curr_pt, rt_prime.clone());
         builder.assign(&curr_eval, output_eval);
@@ -512,11 +344,58 @@ pub fn verify_tower_proof<C: Config>(
         );
     });
 
+    // update prod_spec and logup_spec evaluations at next_rt
+    let product_evals = {
+        let start: Var<C::N> = builder.eval(Usize::from(1));
+        let end: Var<C::N> = builder.eval(start + num_prod_spec.clone());
+        next_layer_evals.slice(builder, start, end)
+    };
+    let logup_evals = {
+        let start: Var<C::N> = builder.eval(Usize::from(1) + num_prod_spec.clone());
+        let end: Var<C::N> = builder.eval(start + Usize::from(2) * num_logup_spec.clone());
+        next_layer_evals.slice(builder, start, end)
+    };
+
+    builder
+        .range(0, num_prod_spec.clone())
+        .for_each(|i_vec, builder| {
+            let i = i_vec[0];
+            let eval = builder.get(&product_evals, i);
+
+            let point_and_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: next_rt.point.clone(),
+                eval,
+            });
+            builder.set_value(&prod_spec_point_n_eval, i, point_and_eval);
+        });
+    builder
+        .range(0, num_logup_spec.clone())
+        .for_each(|i_vec, builder| {
+            let i = i_vec[0];
+            let p_idx = i;
+            let q_idx: Var<C::N> = builder.eval(num_logup_spec.clone() + i);
+            let p_eval = builder.get(&logup_evals, p_idx);
+            let q_eval = builder.get(&logup_evals, q_idx);
+
+            let p_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: next_rt.point.clone(),
+                eval: p_eval,
+            });
+            let q_eval: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+                point: next_rt.point.clone(),
+                eval: q_eval,
+            });
+            builder.set_value(&logup_spec_p_point_n_eval, i, p_eval);
+            builder.set_value(&logup_spec_q_point_n_eval, i, q_eval);
+        });
+
     (
         next_rt.point,
         prod_spec_point_n_eval,
         logup_spec_p_point_n_eval,
         logup_spec_q_point_n_eval,
+        prod_out_evals_vals,
+        logup_out_evals_vals,
     )
 }
 

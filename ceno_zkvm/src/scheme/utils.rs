@@ -1,21 +1,26 @@
 use crate::{
+    error::ZKVMError,
     scheme::{
-        constants::MIN_PAR_SIZE,
+        constants::{MIN_PAR_SIZE, SEPTIC_EXTENSION_DEGREE},
         hal::{ProofInput, ProverDevice},
     },
-    structs::ComposedConstrainSystem,
+    structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval},
 };
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     evaluation::EvalExpression,
-    gkr::{GKRCircuit, GKRCircuitOutput, GKRCircuitWitness, layer::LayerWitness},
+    gkr::{
+        GKRCircuit, GKRCircuitOutput, GKRCircuitWitness,
+        layer::{LayerWitness, ROTATION_OPENING_COUNT},
+    },
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use itertools::Itertools;
-use mpcs::PolynomialCommitmentScheme;
+use mpcs::{Point, PolynomialCommitmentScheme};
 pub use multilinear_extensions::wit_infer_by_expr;
 use multilinear_extensions::{
+    Expression,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
 };
@@ -28,6 +33,331 @@ use rayon::{
 };
 use std::{iter, sync::Arc};
 use witness::next_pow2_instance_padding;
+
+/// Prover-only routing metadata for first-layer GKR output groups.
+///
+/// This is group-level metadata describing which downstream proving submodule
+/// consumes outputs from a selector group. A group may route to more than one
+/// submodule, e.g. `TOWER | ZERO`, when the flat tower-output prefix cuts
+/// through the middle of the group.
+///
+/// This metadata is not part of the proof format and is not used by the
+/// verifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) struct GkrOutputStageMask(u8);
+
+impl GkrOutputStageMask {
+    pub(crate) const TOWER: Self = Self(1 << 0);
+    pub(crate) const ECC: Self = Self(1 << 1);
+    pub(crate) const ROTATION: Self = Self(1 << 2);
+    pub(crate) const ZERO: Self = Self(1 << 3);
+
+    pub(crate) const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub(crate) const fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WitnessBuildStage {
+    Tower,
+}
+
+pub(crate) fn tower_output_count<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+) -> usize {
+    let cs = &composed_cs.zkvm_v1_css;
+    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+    let num_lk_num = cs.lk_table_expressions.len();
+    let num_lk_den = if !cs.lk_table_expressions.is_empty() {
+        cs.lk_table_expressions.len()
+    } else {
+        cs.lk_expressions.len()
+    };
+    num_reads + num_writes + num_lk_num + num_lk_den
+}
+
+fn build_output_materialization_mask<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    circuit: &GKRCircuit<E>,
+    stage: WitnessBuildStage,
+) -> Vec<bool> {
+    let first_layer = circuit.layers.first().expect("empty gkr circuit layer");
+    let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, circuit);
+    let total_outputs = first_layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .map(|(_, outputs)| outputs.len())
+        .sum::<usize>();
+    let mut mask = vec![false; total_outputs];
+    match stage {
+        WitnessBuildStage::Tower => {
+            // Materialization is exact at flattened-entry granularity even though routing metadata
+            // is tracked at group granularity. This is what lets mixed `TOWER | ZERO` groups avoid
+            // allocating the non-tower suffix during tower prove.
+            let mut remaining = tower_output_count(composed_cs);
+            let mut offset = 0usize;
+            for ((_, outputs), stage_mask) in first_layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .zip(group_stage_masks.iter())
+            {
+                let len = outputs.len();
+                if stage_mask.contains(GkrOutputStageMask::TOWER) && remaining > 0 {
+                    let take_len = len.min(remaining);
+                    mask[offset..offset + take_len].fill(true);
+                    remaining -= take_len;
+                }
+                offset += len;
+            }
+            debug_assert_eq!(remaining, 0, "failed to cover all tower outputs");
+        }
+    }
+    mask
+}
+
+pub(crate) fn first_layer_output_group_stage_masks<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    circuit: &GKRCircuit<E>,
+) -> Vec<GkrOutputStageMask> {
+    let first_layer = circuit.layers.first().expect("empty gkr circuit layer");
+    let mut group_masks = vec![GkrOutputStageMask::ZERO; first_layer.out_sel_and_eval_exprs.len()];
+
+    if let Some(rotation_groups) = first_layer.rotation_selector_group_indices() {
+        for group_idx in rotation_groups {
+            group_masks[group_idx] = GkrOutputStageMask::ROTATION;
+        }
+    }
+    if let Some(ecc_groups) = first_layer.ecc_bridge_group_indices() {
+        for group_idx in ecc_groups {
+            group_masks[group_idx] = GkrOutputStageMask::ECC;
+        }
+    }
+
+    let tower_outputs = tower_output_count(composed_cs);
+    let mut seen_tower_outputs = 0usize;
+    for (group_mask, (_, outputs)) in group_masks
+        .iter_mut()
+        .zip(first_layer.out_sel_and_eval_exprs.iter())
+    {
+        if seen_tower_outputs >= tower_outputs {
+            break;
+        }
+        *group_mask = group_mask.union(GkrOutputStageMask::TOWER);
+        seen_tower_outputs += outputs.len();
+    }
+    assert!(
+        seen_tower_outputs >= tower_outputs,
+        "failed to cover all tower outputs: layer={}, seen_tower_outputs={}, tower_outputs={}",
+        first_layer.name,
+        seen_tower_outputs,
+        tower_outputs,
+    );
+
+    group_masks
+}
+
+pub(crate) struct EccBridgeClaims<E: ExtensionField> {
+    pub(crate) xy_point: Point<E>,
+    pub(crate) s_point: Point<E>,
+    pub(crate) x3y3_point: Point<E>,
+    pub(crate) x_evals: Vec<E>,
+    pub(crate) y_evals: Vec<E>,
+    pub(crate) s_evals: Vec<E>,
+    pub(crate) x3_evals: Vec<E>,
+    pub(crate) y3_evals: Vec<E>,
+}
+
+pub(crate) struct EccQuarkWitnessInputs<'a, PB: ProverBackend> {
+    pub(crate) xs: Vec<Arc<PB::MultilinearPoly<'a>>>,
+    pub(crate) ys: Vec<Arc<PB::MultilinearPoly<'a>>>,
+    pub(crate) slopes: Vec<Arc<PB::MultilinearPoly<'a>>>,
+}
+
+pub(crate) fn extract_ecc_quark_witness_inputs<'a, PB: ProverBackend>(
+    cs: &ComposedConstrainSystem<PB::E>,
+    input: &ProofInput<'a, PB>,
+) -> Option<EccQuarkWitnessInputs<'a, PB>> {
+    let cs = &cs.zkvm_v1_css;
+    if cs.ec_final_sum.is_empty() {
+        return None;
+    }
+
+    let ec_point_exprs = &cs.ec_point_exprs;
+    assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
+    let mut xs_ys = ec_point_exprs
+        .iter()
+        .map(|expr| match expr {
+            Expression::WitIn(id) => input.witness[*id as usize].clone(),
+            _ => unreachable!("ec point's expression must be WitIn"),
+        })
+        .collect_vec();
+    let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
+    let xs = xs_ys;
+
+    let slopes = cs
+        .ec_slope_exprs
+        .iter()
+        .map(|expr| match expr {
+            Expression::WitIn(id) => input.witness[*id as usize].clone(),
+            _ => unreachable!("slope's expression must be WitIn"),
+        })
+        .collect_vec();
+
+    Some(EccQuarkWitnessInputs { xs, ys, slopes })
+}
+
+pub(crate) fn derive_ecc_bridge_claims<E: ExtensionField>(
+    ecc_proof: &EccQuarkProof<E>,
+    sample_r: E,
+    num_var_with_rotation: usize,
+) -> Result<EccBridgeClaims<E>, ZKVMError> {
+    let degree = SEPTIC_EXTENSION_DEGREE;
+    if ecc_proof.evals.len() < 3 {
+        return Err(ZKVMError::InvalidProof(
+            "ecc proof evals shorter than selector prefix".into(),
+        ));
+    }
+    let evals = &ecc_proof.evals[3..];
+    if evals.len() != degree * 7 {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc proof eval length: expected {}, got {}",
+                degree * 7,
+                evals.len()
+            )
+            .into(),
+        ));
+    }
+
+    let s1 = &evals[0..degree];
+    let x0 = &evals[degree..2 * degree];
+    let y0 = &evals[2 * degree..3 * degree];
+    let x1 = &evals[3 * degree..4 * degree];
+    let y1 = &evals[4 * degree..5 * degree];
+    let x3 = &evals[5 * degree..6 * degree];
+    let y3 = &evals[6 * degree..7 * degree];
+
+    let one_minus_r = E::ONE - sample_r;
+    let x_evals = x0
+        .iter()
+        .zip_eq(x1.iter())
+        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
+        .collect_vec();
+    let y_evals = y0
+        .iter()
+        .zip_eq(y1.iter())
+        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
+        .collect_vec();
+    let s_evals = s1.iter().map(|v| *v * sample_r).collect_vec();
+    let x3_evals = x3.to_vec();
+    let y3_evals = y3.to_vec();
+
+    let mut xy_point = vec![sample_r];
+    xy_point.extend(ecc_proof.rt.iter().copied());
+    if xy_point.len() != num_var_with_rotation {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc xy point length: expected {}, got {}",
+                num_var_with_rotation,
+                xy_point.len()
+            )
+            .into(),
+        ));
+    }
+
+    let mut s_point = ecc_proof.rt.clone();
+    s_point.push(sample_r);
+    if s_point.len() != num_var_with_rotation {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc slope point length: expected {}, got {}",
+                num_var_with_rotation,
+                s_point.len()
+            )
+            .into(),
+        ));
+    }
+
+    let mut x3y3_point = ecc_proof.rt.clone();
+    x3y3_point.push(E::ONE);
+    if x3y3_point.len() != num_var_with_rotation {
+        return Err(ZKVMError::InvalidProof(
+            format!(
+                "invalid ecc x3/y3 point length: expected {}, got {}",
+                num_var_with_rotation,
+                x3y3_point.len()
+            )
+            .into(),
+        ));
+    }
+
+    Ok(EccBridgeClaims {
+        xy_point,
+        s_point,
+        x3y3_point,
+        x_evals,
+        y_evals,
+        s_evals,
+        x3_evals,
+        y3_evals,
+    })
+}
+
+pub(crate) fn split_rotation_evals<E: ExtensionField>(evals: &[E]) -> (Vec<E>, Vec<E>, Vec<E>) {
+    assert_eq!(
+        evals.len() % ROTATION_OPENING_COUNT,
+        0,
+        "rotation evals length must be a multiple of {}, got {}",
+        ROTATION_OPENING_COUNT,
+        evals.len()
+    );
+    let mut left_evals = Vec::new();
+    let mut right_evals = Vec::new();
+    let mut point_evals = Vec::new();
+    for chunk in evals.chunks_exact(ROTATION_OPENING_COUNT) {
+        left_evals.push(chunk[0]);
+        right_evals.push(chunk[1]);
+        point_evals.push(chunk[2]);
+    }
+    (left_evals, right_evals, point_evals)
+}
+
+pub(crate) fn assign_group_evals<E: ExtensionField>(
+    out_evals: &mut [PointAndEval<E>],
+    eval_exprs: &[EvalExpression<E>],
+    evals: &[E],
+    point: &Point<E>,
+) {
+    assert_eq!(eval_exprs.len(), evals.len(), "group eval length mismatch");
+    for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
+        let EvalExpression::Single(index) = eval_expr else {
+            panic!("group must use EvalExpression::Single");
+        };
+        out_evals[*index] = PointAndEval::new(point.clone(), *eval);
+    }
+}
+
+/// Wrapper that asserts a shared reference is safe to send across threads.
+///
+/// # Safety
+/// The caller must guarantee that the referenced data is only **read** (never
+/// mutated) while the `SyncRef` is alive. This is typically the case when the
+/// reference points to data that is immutable for the duration of a
+/// `std::thread::scope` block.
+#[cfg(feature = "gpu")]
+pub(crate) struct SyncRef<'a, T>(pub(crate) &'a T);
+
+// SAFETY: T is only accessed via a shared reference which is read-only.
+// The T: Sync bound ensures &T is safe to share across threads (required for &T: Send).
+#[cfg(feature = "gpu")]
+unsafe impl<T: Sync> Send for SyncRef<'_, T> {}
+#[cfg(feature = "gpu")]
+unsafe impl<T: Sync> Sync for SyncRef<'_, T> {}
 
 /// interleaving multiple mles into mles, and num_limbs indicate number of final limbs vector
 /// e.g input [[1,2],[3,4],[5,6],[7,8]], num_limbs=2,log2_per_instance_size=3
@@ -308,6 +638,7 @@ pub fn build_main_witness<
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'a, PB>,
     challenges: &[E; 2],
+    stage: WitnessBuildStage,
 ) -> Vec<Arc<PB::MultilinearPoly<'a>>> {
     let ComposedConstrainSystem {
         zkvm_v1_css: cs,
@@ -342,12 +673,6 @@ pub fn build_main_witness<
         "assert circuit"
     );
 
-    let pub_io_mles = cs
-        .instance_openings
-        .iter()
-        .map(|instance| input.public_values[instance.0].clone())
-        .collect_vec();
-
     // check all witness size are power of 2
     assert!(
         input
@@ -355,22 +680,39 @@ pub fn build_main_witness<
             .iter()
             .chain(&input.structural_witness)
             .chain(&input.fixed)
-            .chain(&pub_io_mles)
             .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
     );
 
+    // GPU memory estimation
+    #[cfg(feature = "gpu")]
+    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+    #[cfg(feature = "gpu")]
+    let gpu_mem_tracker = crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "build_main_witness");
+
+    let output_mask = build_output_materialization_mask(composed_cs, gkr_circuit, stage);
     let (_, gkr_circuit_out) = gkr_witness::<E, PCS, PB, PD>(
         gkr_circuit,
         &input.witness,
         &input.structural_witness,
         &input.fixed,
-        &pub_io_mles,
-        &input.pub_io_evals,
+        &[],
+        &input.pi,
         challenges,
+        Some(output_mask.as_slice()),
     );
+
+    // GPU memory check: validate estimation against actual usage
+    #[cfg(feature = "gpu")]
+    {
+        let estimated_bytes =
+            crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
+        crate::scheme::gpu::check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
+    }
+
     gkr_circuit_out.0.0
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn gkr_witness<
     'b,
     E: ExtensionField,
@@ -382,9 +724,10 @@ pub fn gkr_witness<
     phase1_witness_group: &[Arc<PB::MultilinearPoly<'b>>],
     structural_witness: &[Arc<PB::MultilinearPoly<'b>>],
     fixed: &[Arc<PB::MultilinearPoly<'b>>],
-    pub_io_mles: &[Arc<PB::MultilinearPoly<'b>>],
+    _pub_io_mles: &[Arc<PB::MultilinearPoly<'b>>],
     pub_io_evals: &[Either<E::BaseField, E>],
     challenges: &[E],
+    output_mask: Option<&[bool]>,
 ) -> (GKRCircuitWitness<'b, PB>, GKRCircuitOutput<'b, PB>) {
     // layer order from output to input
     let mut layer_wits = Vec::<LayerWitness<PB>>::with_capacity(circuit.layers.len() + 1);
@@ -411,16 +754,6 @@ pub fn gkr_witness<
             .zip_eq(fixed.iter())
             .for_each(|(index, fixed_mle)| {
                 witness_mle_flatten[*index] = Some(fixed_mle.clone());
-            });
-
-        first_layer
-            .in_eval_expr
-            .iter()
-            .skip(first_layer.n_witin + first_layer.n_fixed)
-            .take(first_layer.n_instance)
-            .zip_eq(pub_io_mles.iter())
-            .for_each(|(index, pubio_mle)| {
-                witness_mle_flatten[*index] = Some(pubio_mle.clone());
             });
 
         // XXX currently fixed poly not support in layers > 1
@@ -475,19 +808,20 @@ pub fn gkr_witness<
 
         assert_eq!(
             current_layer_wits.len(),
-            layer.n_witin
-                + layer.n_fixed
-                + layer.n_instance
-                + if i == 0 { layer.n_structural_witin } else { 0 }
+            layer.n_witin + layer.n_fixed + if i == 0 { layer.n_structural_witin } else { 0 }
         );
 
         // infer current layer output
+        let layer_output_mask = (i + 1 == circuit.layers.len())
+            .then_some(output_mask)
+            .flatten();
         let current_layer_output: Vec<Arc<PB::MultilinearPoly<'b>>> =
-            <PD as ProtocolWitnessGeneratorProver<PB>>::layer_witness(
+            <PD as ProtocolWitnessGeneratorProver<PB>>::layer_witness_filtered(
                 layer,
                 &current_layer_wits,
                 pub_io_evals,
                 challenges,
+                layer_output_mask,
             );
         layer_wits.push(LayerWitness::new(current_layer_wits, vec![]));
 

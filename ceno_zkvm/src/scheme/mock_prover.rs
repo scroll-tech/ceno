@@ -3,8 +3,6 @@ use crate::{
     ROMType,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     e2e::ShardContext,
-    instructions::riscv::constants::NUM_INSTANCE_IDX,
-    state::{GlobalState, StateCircuit},
     structs::{
         ComposedConstrainSystem, ProgramParams, RAMType, ZKVMConstraintSystem, ZKVMFixedTraces,
         ZKVMWitnesses,
@@ -27,9 +25,9 @@ use gkr_iop::{
 use itertools::{Itertools, chain, enumerate, izip};
 use multilinear_extensions::{
     Expression, WitnessId, fmt,
-    mle::{ArcMultilinearExtension, IntoMLEs, MultilinearExtension},
+    mle::{ArcMultilinearExtension, MultilinearExtension},
     util::ceil_log2,
-    utils::{eval_by_expr, eval_by_expr_with_fixed, eval_by_expr_with_instance},
+    utils::{eval_by_expr, eval_by_expr_with_fixed},
 };
 use p3::field::{Field, FieldAlgebra};
 use rand::thread_rng;
@@ -41,7 +39,6 @@ use std::{
     hash::Hash,
     io::{BufReader, ErrorKind},
     marker::PhantomData,
-    ops::Index,
     sync::OnceLock,
 };
 use strum::IntoEnumIterator;
@@ -625,7 +622,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     left,
                     cs.num_witin,
                     cs.num_fixed as WitnessId,
-                    cs.instance_openings.len(),
+                    0,
                     fixed,
                     wits_in,
                     structural_witin,
@@ -640,7 +637,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     &right,
                     cs.num_witin,
                     cs.num_fixed as WitnessId,
-                    cs.instance_openings.len(),
+                    0,
                     fixed,
                     wits_in,
                     structural_witin,
@@ -672,7 +669,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     expr,
                     cs.num_witin,
                     cs.num_fixed as WitnessId,
-                    cs.instance_openings.len(),
+                    0,
                     fixed,
                     wits_in,
                     structural_witin,
@@ -718,7 +715,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                 expr,
                 cs.num_witin,
                 cs.num_fixed as WitnessId,
-                cs.instance_openings.len(),
+                0,
                 fixed,
                 wits_in,
                 structural_witin,
@@ -764,7 +761,7 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                             arg_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             wits_in,
                             structural_witin,
@@ -784,29 +781,27 @@ impl<'a, E: ExtensionField + Hash> MockProver<E> {
                     .collect();
 
                 // Count lookups infered from ConstraintSystem from all instances into lkm_from_cs.
-                for i in 0..selected_count {
+                for (arg0, arg1) in args_eval[0]
+                    .iter()
+                    .zip(args_eval[1].iter())
+                    .take(selected_count)
+                {
                     match rom_type {
                         ROMType::Dynamic => {
-                            lkm_from_cs.assert_dynamic_range(args_eval[0][i], args_eval[1][i]);
+                            lkm_from_cs.assert_dynamic_range(*arg0, *arg1);
                         }
                         ROMType::DoubleU8 => {
-                            lkm_from_cs.assert_double_u8(args_eval[0][i], args_eval[1][i]);
+                            lkm_from_cs.assert_double_u8(*arg0, *arg1);
                         }
-                        ROMType::And => {
-                            lkm_from_cs.lookup_and_byte(args_eval[0][i], args_eval[1][i])
-                        }
-                        ROMType::Or => lkm_from_cs.lookup_or_byte(args_eval[0][i], args_eval[1][i]),
-                        ROMType::Xor => {
-                            lkm_from_cs.lookup_xor_byte(args_eval[0][i], args_eval[1][i])
-                        }
-                        ROMType::Ltu => {
-                            lkm_from_cs.lookup_ltu_byte(args_eval[0][i], args_eval[1][i])
-                        }
+                        ROMType::And => lkm_from_cs.lookup_and_byte(*arg0, *arg1),
+                        ROMType::Or => lkm_from_cs.lookup_or_byte(*arg0, *arg1),
+                        ROMType::Xor => lkm_from_cs.lookup_xor_byte(*arg0, *arg1),
+                        ROMType::Ltu => lkm_from_cs.lookup_ltu_byte(*arg0, *arg1),
                         ROMType::Pow => {
-                            assert_eq!(args_eval[0][i], 2);
-                            lkm_from_cs.lookup_pow2(args_eval[1][i])
+                            assert_eq!(*arg0, 2);
+                            lkm_from_cs.lookup_pow2(*arg1)
                         }
-                        ROMType::Instruction => lkm_from_cs.fetch(args_eval[0][i] as u32),
+                        ROMType::Instruction => lkm_from_cs.fetch(*arg0 as u32),
                     };
                 }
             }
@@ -967,17 +962,16 @@ Hints:
     ) where
         E: LkMultiplicityKey,
     {
-        let mut pub_io_evals = pi
-            .to_vec::<E>()
-            .into_iter()
-            .map(|v| Either::Right(E::from(*v.index(0))))
-            .collect_vec();
-        let pi_mles: Vec<ArcMultilinearExtension<E>> = pi
-            .to_vec::<E>()
-            .into_mles()
-            .into_iter()
-            .map(|v| v.into())
-            .collect_vec();
+        let get_circuit_pi_inputs = |circuit_cs: &ConstraintSystem<E>| {
+            let circuit_pub_io_evals = circuit_cs
+                .instance
+                .iter()
+                .map(|instance| Either::Right(E::from(pi.query_by_index::<E>(instance.0))))
+                .collect_vec();
+            let circuit_pi_mles = vec![];
+            (circuit_pub_io_evals, circuit_pi_mles)
+        };
+
         let mut rng = thread_rng();
         let challenges = [0u8; 2].map(|_| E::random(&mut rng));
 
@@ -1003,11 +997,7 @@ Hints:
             let ComposedConstrainSystem {
                 zkvm_v1_css: cs, ..
             } = &composed_cs;
-            let pi_mles = cs
-                .instance_openings
-                .iter()
-                .map(|instance| pi_mles[instance.0].clone())
-                .collect_vec();
+            let (circuit_pub_io_evals, circuit_pi_mles) = get_circuit_pi_inputs(cs);
 
             // skip init table on non-first shard
             if composed_cs.with_omc_init_only() && !shard_ctx.is_first_shard() {
@@ -1031,9 +1021,6 @@ Hints:
 
             let chip_input = chip_input.unwrap();
             let num_rows = chip_input.num_instances();
-            // set pub_io_evals per chip
-            pub_io_evals[NUM_INSTANCE_IDX] =
-                Either::Right(E::from_canonical_usize(chip_input.num_instances()));
 
             let [witness, structural_witness] = &chip_input.witness_rmms;
             let mut witness = witness
@@ -1067,8 +1054,8 @@ Hints:
                     &fixed,
                     &witness,
                     &structural_witness,
-                    &pi_mles,
-                    &pub_io_evals,
+                    &circuit_pi_mles,
+                    &circuit_pub_io_evals,
                     num_rows,
                     challenges,
                     lkm_from_assignments,
@@ -1095,12 +1082,12 @@ Hints:
                         &expr.values,
                         cs.num_witin,
                         cs.num_fixed as WitnessId,
-                        cs.instance_openings.len(),
+                        0,
                         &fixed,
                         &witness,
                         &structural_witness,
-                        &pi_mles,
-                        &pub_io_evals,
+                        &circuit_pi_mles,
+                        &circuit_pub_io_evals,
                         &challenges,
                     )
                     .get_ext_field_vec()
@@ -1110,12 +1097,12 @@ Hints:
                         &expr.multiplicity,
                         cs.num_witin,
                         cs.num_fixed as WitnessId,
-                        cs.instance_openings.len(),
+                        0,
                         &fixed,
                         &witness,
                         &structural_witness,
-                        &pi_mles,
-                        &pub_io_evals,
+                        &circuit_pi_mles,
+                        &circuit_pub_io_evals,
                         &challenges,
                     )
                     .get_ext_field_vec()
@@ -1168,11 +1155,7 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
-                    let pi_mles = cs
-                        .instance_openings
-                        .iter()
-                        .map(|instance| pi_mles[instance.0].clone())
-                        .collect_vec();
+                    let (circuit_pub_io_evals, circuit_pi_mles) = get_circuit_pi_inputs(cs);
 
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
@@ -1206,12 +1189,12 @@ Hints:
                             ram_type_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             witness,
                             structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
+                            &circuit_pi_mles,
+                            &circuit_pub_io_evals,
                             &challenges,
                         );
                         let ram_type_vec = ram_type_mle.get_ext_field_vec();
@@ -1219,12 +1202,12 @@ Hints:
                             w_rlc_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             witness,
                             structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
+                            &circuit_pi_mles,
+                            &circuit_pub_io_evals,
                             &challenges,
                         );
                         let w_selector_vec = w_selector.get_base_field_vec();
@@ -1274,11 +1257,7 @@ Hints:
                     let fixed = fixed_mles.get(circuit_name).unwrap();
                     let witness = wit_mles.get(circuit_name).unwrap();
                     let structural_witness = structural_wit_mles.get(circuit_name).unwrap();
-                    let pi_mles = cs
-                        .instance_openings
-                        .iter()
-                        .map(|instance| pi_mles[instance.0].clone())
-                        .collect_vec();
+                    let (circuit_pub_io_evals, circuit_pi_mles) = get_circuit_pi_inputs(cs);
                     let num_rows = num_instances.get(circuit_name).unwrap();
                     if *num_rows == 0 {
                         continue;
@@ -1310,12 +1289,12 @@ Hints:
                             ram_type_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             witness,
                             structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
+                            &circuit_pi_mles,
+                            &circuit_pub_io_evals,
                             &challenges,
                         );
                         let ram_type_vec = ram_type_mle.get_ext_field_vec();
@@ -1323,12 +1302,12 @@ Hints:
                             r_rlc_expr,
                             cs.num_witin,
                             cs.num_fixed as WitnessId,
-                            cs.instance_openings.len(),
+                            0,
                             fixed,
                             witness,
                             structural_witness,
-                            &pi_mles,
-                            &pub_io_evals,
+                            &circuit_pi_mles,
+                            &circuit_pub_io_evals,
                             &challenges,
                         );
                         let r_selector_vec = r_selector.get_base_field_vec();
@@ -1351,12 +1330,12 @@ Hints:
                                         expr,
                                         cs.num_witin,
                                         cs.num_fixed as WitnessId,
-                                        cs.instance_openings.len(),
+                                        0,
                                         fixed,
                                         witness,
                                         structural_witness,
-                                        &pi_mles,
-                                        &pub_io_evals,
+                                        &circuit_pi_mles,
+                                        &circuit_pub_io_evals,
                                         &challenges,
                                     );
                                     filter_mle_by_selector_mle(v, r_selector.clone())
@@ -1483,43 +1462,8 @@ Hints:
             };
         }
         // part1 global state
-        let mut cs = ConstraintSystem::new(|| "riscv");
-        let mut cb = CircuitBuilder::new(&mut cs);
-        let gs_init = GlobalState::initial_global_state(&mut cb).unwrap();
-        let gs_final = GlobalState::finalize_global_state(&mut cb).unwrap();
-
-        let (mut gs_rs, rs_grp_by_anno, mut gs_ws, ws_grp_by_anno, gs) =
+        let (gs_rs, rs_grp_by_anno, gs_ws, ws_grp_by_anno, gs) =
             derive_ram_rws!(RAMType::GlobalState);
-        gs_rs.insert(
-            eval_by_expr_with_instance(
-                &[],
-                &[],
-                &[],
-                &pub_io_evals
-                    .iter()
-                    .map(|v| v.right().unwrap())
-                    .collect_vec(),
-                &challenges,
-                &gs_final,
-            )
-            .right()
-            .unwrap(),
-        );
-        gs_ws.insert(
-            eval_by_expr_with_instance(
-                &[],
-                &[],
-                &[],
-                &pub_io_evals
-                    .iter()
-                    .map(|v| v.right().unwrap())
-                    .collect_vec(),
-                &challenges,
-                &gs_init,
-            )
-            .right()
-            .unwrap(),
-        );
 
         // gs stores { (pc, timestamp) }
         find_rw_mismatch!(

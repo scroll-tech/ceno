@@ -6,7 +6,7 @@ use crate::{
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    gkr::GKRProof,
+    gkr::{GKRProof, layer::sumcheck_layer::SumcheckLayerProof},
     hal::{ProtocolWitnessGeneratorProver, ProverBackend},
 };
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -24,6 +24,8 @@ pub trait ProverDevice<PB>:
     + DeviceTransporter<PB>
     + ProtocolWitnessGeneratorProver<PB>
     + EccQuarkProver<PB>
+    + RotationProver<PB>
+    + ChipInputPreparer<PB>
 // + FixedMLEPadder<PB>
 where
     PB: ProverBackend,
@@ -31,14 +33,24 @@ where
     fn get_pb(&self) -> &PB;
 }
 
+/// Prepare a chip task's input for proving.
+/// CPU: no-op (input already fully populated during task building).
+/// GPU: deferred witness extraction + structural witness transport.
+pub trait ChipInputPreparer<PB: ProverBackend> {
+    fn prepare_chip_input(
+        &self,
+        task: &mut crate::scheme::scheduler::ChipTask<'_, PB>,
+        pcs_data: &PB::PcsData,
+    );
+}
+
 // TODO: remove the lifetime bound
 pub struct ProofInput<'a, PB: ProverBackend> {
     pub witness: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub structural_witness: Vec<Arc<PB::MultilinearPoly<'a>>>,
     pub fixed: Vec<Arc<PB::MultilinearPoly<'a>>>,
-    pub public_values: Vec<Arc<PB::MultilinearPoly<'a>>>,
-    pub pub_io_evals: Vec<Either<<PB::E as ExtensionField>::BaseField, PB::E>>,
-    pub num_instances: Vec<usize>,
+    pub pi: Vec<Either<<PB::E as ExtensionField>::BaseField, PB::E>>,
+    pub num_instances: [usize; 2],
     pub has_ecc_ops: bool,
 }
 
@@ -96,12 +108,10 @@ pub trait TraceCommitter<PB: ProverBackend> {
 pub trait EccQuarkProver<PB: ProverBackend> {
     fn prove_ec_sum_quark<'a>(
         &self,
-        num_instances: usize,
-        xs: Vec<Arc<PB::MultilinearPoly<'a>>>,
-        ys: Vec<Arc<PB::MultilinearPoly<'a>>>,
-        invs: Vec<Arc<PB::MultilinearPoly<'a>>>,
+        cs: &ComposedConstrainSystem<PB::E>,
+        input: &ProofInput<'a, PB>,
         transcript: &mut impl Transcript<PB::E>,
-    ) -> Result<EccQuarkProof<PB::E>, ZKVMError>;
+    ) -> Result<Option<EccQuarkProof<PB::E>>, ZKVMError>;
 }
 
 pub trait TowerProver<PB: ProverBackend> {
@@ -144,16 +154,40 @@ pub struct MainSumcheckEvals<E: ExtensionField> {
     pub fixed_in_evals: Vec<E>,
 }
 
+#[derive(Clone)]
+pub struct RotationProverOutput<E: ExtensionField> {
+    pub proof: SumcheckLayerProof<E>,
+    pub left_point: Point<E>,
+    pub right_point: Point<E>,
+    pub point: Point<E>,
+}
+
+pub trait RotationProver<PB: ProverBackend> {
+    fn prove_rotation<'a>(
+        &self,
+        cs: &ComposedConstrainSystem<PB::E>,
+        input: &ProofInput<'a, PB>,
+        rt_tower: &Point<PB::E>,
+        challenges: &[PB::E; 2],
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> Result<Option<RotationProverOutput<PB::E>>, ZKVMError> {
+        let _ = (cs, input, rt_tower, challenges, transcript);
+        Ok(None)
+    }
+}
+
 pub trait MainSumcheckProver<PB: ProverBackend> {
     // this prover aims to achieve two goals:
     // 1. the validity of last layer in the tower tree is reduced to
     //    the validity of read/write/logup records through sumchecks;
     // 2. multiple multiplication relations between witness multilinear polynomials
     //    achieved via zerochecks.
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     fn prove_main_constraints<'a, 'b>(
         &self,
         rt_tower: Vec<PB::E>,
+        rotation: Option<RotationProverOutput<PB::E>>,
+        ecc_proof: Option<&EccQuarkProof<PB::E>>,
         input: &'b ProofInput<'a, PB>,
         cs: &ComposedConstrainSystem<PB::E>,
         challenges: &[PB::E; 2],

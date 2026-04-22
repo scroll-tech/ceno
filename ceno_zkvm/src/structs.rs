@@ -3,22 +3,23 @@ use crate::{
     e2e::{E2EProgramCtx, ShardContext},
     error::ZKVMError,
     instructions::Instruction,
-    scheme::{septic_curve::SepticPoint, verifier::MemStatePubValuesVerifier},
-    state::StateCircuit,
+    scheme::septic_curve::SepticPoint,
     tables::{
         ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
         TableCircuit,
     },
 };
-use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepRecord, WordAddr};
+use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepIndex, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{
-    circuit_builder::ShardOMCInitType, gkr::GKRCircuit, tables::LookupTable,
+    circuit_builder::ShardOMCInitType,
+    gkr::GKRCircuit,
+    tables::LookupTable,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{Expression, Instance};
+use multilinear_extensions::Instance;
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSlice,
@@ -34,6 +35,33 @@ use sumcheck::structs::{IOPProof, IOPProverMessage};
 use tracing::Level;
 use witness::RowMajorMatrix;
 
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct RV32imMemStateConfig {
+    pub heap: Range<u32>,
+    pub hints: Range<u32>,
+}
+
+impl RV32imMemStateConfig {
+    pub fn from_platform(platform: &Platform) -> Self {
+        Self {
+            heap: platform.heap.start..platform.heap.end,
+            hints: platform.hints.start..platform.hints.end,
+        }
+    }
+}
+
+impl From<Platform> for RV32imMemStateConfig {
+    fn from(platform: Platform) -> Self {
+        Self::from_platform(&platform)
+    }
+}
+
+impl From<&Platform> for RV32imMemStateConfig {
+    fn from(platform: &Platform) -> Self {
+        Self::from_platform(platform)
+    }
+}
+
 /// Proof that the sum of N (not necessarily a power of two) EC points
 /// is equal to `sum` in one layer instead of multiple layers in a
 /// GKR layered circuit approach that we used for offline memory checking.
@@ -48,7 +76,7 @@ pub struct EccQuarkProof<E: ExtensionField> {
     pub zerocheck_proof: IOPProof<E>,
     /// Number of EC points being summed
     pub num_instances: usize,
-    pub evals: Vec<E>, // x[rt,0], x[rt,1], y[rt,0], y[rt,1], x[0,rt], y[0,rt], s[0,rt]
+    pub evals: Vec<E>, /* [sel_add, sel_bypass, sel_export] ++ [s[1,rt], x[rt,0], y[rt,0], x[rt,1], y[rt,1], x[1,rt], y[1,rt]] */
     pub rt: Point<E>,
     pub sum: SepticPoint<E::BaseField>,
 }
@@ -158,8 +186,8 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
         self.zkvm_v1_css.w_expressions.len() + self.zkvm_v1_css.w_table_expressions.len()
     }
 
-    pub fn instance_openings(&self) -> &[Instance] {
-        &self.zkvm_v1_css.instance_openings
+    pub fn instance(&self) -> &[Instance] {
+        &self.zkvm_v1_css.instance
     }
     pub fn has_ecc_ops(&self) -> bool {
         !self.zkvm_v1_css.ec_final_sum.is_empty()
@@ -202,8 +230,6 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
 #[derive(Clone)]
 pub struct ZKVMConstraintSystem<E: ExtensionField> {
     pub(crate) circuit_css: BTreeMap<String, ComposedConstrainSystem<E>>,
-    pub(crate) initial_global_state_expr: Expression<E>,
-    pub(crate) finalize_global_state_expr: Expression<E>,
     // pub keccak_gkr_iop: Option<KeccakGKRIOP<E>>,
     pub params: ProgramParams,
 }
@@ -212,8 +238,6 @@ impl<E: ExtensionField> Default for ZKVMConstraintSystem<E> {
     fn default() -> Self {
         ZKVMConstraintSystem {
             circuit_css: BTreeMap::new(),
-            initial_global_state_expr: Expression::ZERO,
-            finalize_global_state_expr: Expression::ZERO,
             params: ProgramParams::default(),
             // keccak_gkr_iop: None,
         }
@@ -264,15 +288,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
         };
         assert!(self.circuit_css.insert(TC::name(), cs).is_none());
         config
-    }
-
-    pub fn register_global_state<SC: StateCircuit<E>>(&mut self) {
-        let mut cs = ConstraintSystem::new(|| "riscv_state");
-        let mut circuit_builder = CircuitBuilder::<E>::new(&mut cs);
-        self.initial_global_state_expr =
-            SC::initial_global_state(&mut circuit_builder).expect("global_state_in failed");
-        self.finalize_global_state_expr =
-            SC::finalize_global_state(&mut circuit_builder).expect("global_state_out failed");
     }
 
     pub fn get_css(&self) -> &BTreeMap<String, ComposedConstrainSystem<E>> {
@@ -332,15 +347,14 @@ impl<E: ExtensionField> ZKVMFixedTraces<E> {
 pub struct ChipInput<E: ExtensionField> {
     pub name: String,
     pub witness_rmms: RMMCollections<E::BaseField>,
-    // in shard ram chip, num_instances length would be > 1
-    pub num_instances: Vec<usize>,
+    pub num_instances: [usize; 2],
 }
 
 impl<E: ExtensionField> ChipInput<E> {
     pub fn new(
         name: String,
         witness_rmms: RMMCollections<E::BaseField>,
-        num_instances: Vec<usize>,
+        num_instances: [usize; 2],
     ) -> Self {
         Self {
             name,
@@ -375,7 +389,8 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
         config: &OC::InstructionConfig,
-        records: Vec<&StepRecord>,
+        shard_steps: &[StepRecord],
+        indices: &[StepIndex],
     ) -> Result<(), ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
 
@@ -385,18 +400,26 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             shard_ctx,
             cs.zkvm_v1_css.num_witin as usize,
             cs.zkvm_v1_css.num_structural_witin as usize,
-            records,
+            shard_steps,
+            indices,
         )?;
-        let num_instances = vec![witness[0].num_instances()];
-        let input = ChipInput::new(
-            OC::name(),
-            witness,
-            if num_instances[0] > 0 {
-                num_instances
-            } else {
-                vec![]
-            },
-        );
+        let witness_instances = witness[0].num_instances();
+        let structural_instances = witness[1].num_instances();
+        if witness_instances > 0 && structural_instances > 0 {
+            assert_eq!(
+                witness_instances,
+                structural_instances,
+                "{}: mismatched num_instances between witness and structural RMMs",
+                OC::name()
+            );
+        }
+        let num_instances = if witness_instances > 0 {
+            witness_instances
+        } else {
+            structural_instances
+        };
+        let num_instances = [num_instances, 0];
+        let input = ChipInput::new(OC::name(), witness, num_instances);
         assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
         assert!(
             self.lk_mlts
@@ -449,16 +472,18 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             self.combined_lk_mlt.as_ref().unwrap(),
             input,
         )?;
-        let num_instances = std::cmp::max(witness[0].num_instances(), witness[1].num_instances());
-        let input = ChipInput::new(
-            TC::name(),
-            witness,
-            if num_instances > 0 {
-                vec![num_instances]
-            } else {
-                vec![]
-            },
-        );
+        let witness_instances = witness[0].num_instances();
+        let structural_instances = witness[1].num_instances();
+        if witness_instances > 0 && structural_instances > 0 {
+            assert_eq!(
+                witness_instances,
+                structural_instances,
+                "{}: mismatched num_instances between witness and structural RMMs",
+                TC::name()
+            );
+        }
+        let num_instances = std::cmp::max(witness_instances, structural_instances);
+        let input = ChipInput::new(TC::name(), witness, [num_instances, 0]);
         assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
 
         Ok(())
@@ -618,7 +643,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 Ok(ChipInput::new(
                     ShardRamCircuit::<E>::name(),
                     witness,
-                    vec![num_reads, num_writes],
+                    [num_reads, num_writes],
                 ))
             })
             .collect::<Result<Vec<_>, ZKVMError>>()?;
@@ -632,13 +657,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         Ok(())
     }
 
-    pub fn get_witnesses_name_instance(&self) -> Vec<(String, Vec<usize>)> {
+    pub fn get_witnesses_name_instance(&self) -> Vec<(String, [usize; 2])> {
         self.witnesses
             .iter()
             .flat_map(|(_, chip_inputs)| {
                 chip_inputs
                     .iter()
-                    .map(|chip_input| (chip_input.name.clone(), chip_input.num_instances.clone()))
+                    .map(|chip_input| (chip_input.name.clone(), chip_input.num_instances))
             })
             .collect_vec()
     }
@@ -726,10 +751,6 @@ pub struct ZKVMProvingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
 
     pub circuit_index_fixed_num_instances: BTreeMap<usize, usize>,
-
-    // expression for global state in/out
-    pub initial_global_state_expr: Expression<E>,
-    pub finalize_global_state_expr: Expression<E>,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
@@ -740,8 +761,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
             program_ctx: None,
             entry_pc: 0,
             circuit_pks: BTreeMap::new(),
-            initial_global_state_expr: Expression::ZERO,
-            finalize_global_state_expr: Expression::ZERO,
             circuit_index_fixed_num_instances: BTreeMap::new(),
             circuit_name_to_index: BTreeMap::new(),
             fixed_commit_wd: None,
@@ -794,9 +813,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
-    pub fn get_vk_slow<M>(&self) -> ZKVMVerifyingKey<E, PCS, M>
+    pub fn get_vk_slow(&self) -> ZKVMVerifyingKey<E, PCS> {
+        self.get_vk_slow_with_mem_state::<RV32imMemStateConfig>()
+    }
+
+    pub fn get_vk_slow_with_mem_state<M>(&self) -> ZKVMVerifyingKey<E, PCS, M>
     where
-        M: MemStatePubValuesVerifier<E, PCS> + From<Platform>,
+        M: Clone + Default + From<Platform> + Serialize + DeserializeOwned,
     {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
@@ -808,9 +831,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .collect(),
             fixed_commit: self.fixed_commit.clone(),
             fixed_no_omc_init_commit: self.fixed_no_omc_init_commit.clone(),
-            // expression for global state in/out
-            initial_global_state_expr: self.initial_global_state_expr.clone(),
-            finalize_global_state_expr: self.finalize_global_state_expr.clone(),
             circuit_index_to_name: self
                 .circuit_pks
                 .keys()
@@ -838,9 +858,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 pub struct ZKVMVerifyingKey<
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
-    M: MemStatePubValuesVerifier<E, PCS>,
-> where
+    M = RV32imMemStateConfig,
+>
+where
     PCS::VerifierParam: Sized,
+    M: Clone + Default + Serialize + DeserializeOwned,
 {
     pub vp: PCS::VerifierParam,
     // entry program counter
@@ -849,9 +871,6 @@ pub struct ZKVMVerifyingKey<
     pub circuit_vks: BTreeMap<String, VerifyingKey<E>>,
     pub fixed_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
-    // expression for global state in/out
-    pub initial_global_state_expr: Expression<E>,
-    pub finalize_global_state_expr: Expression<E>,
     // circuit index -> circuit name
     // mainly used for debugging
     pub circuit_index_to_name: BTreeMap<usize, String>,

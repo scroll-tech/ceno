@@ -14,15 +14,13 @@ use p3::{
 use serde::Deserialize;
 
 use super::{basefold::*, extension_mmcs::*, mmcs::*, rs::*, utils::*};
-use crate::{
-    arithmetics::eq_eval_with_index,
-    tower_verifier::{binding::*, program::interpolate_uni_poly},
-};
+use crate::{arithmetics::eq_eval_with_index, tower_verifier::binding::*};
 
 pub type F = BabyBear;
 pub type E = BabyBearExt4;
 pub type InnerConfig = AsmConfig<F, E>;
 
+use crate::arithmetics::UniPolyExtrapolator;
 use p3::fri::{
     BatchOpening as InnerBatchOpening, CommitPhaseProofStep as InnerCommitPhaseProofStep,
 };
@@ -308,12 +306,6 @@ pub struct QueryPhaseVerifierInputVariable<C: Config> {
 }
 
 #[derive(DslVariable, Clone)]
-pub struct PackedCodeword<C: Config> {
-    pub low: Ext<C::F, C::EF>,
-    pub high: Ext<C::F, C::EF>,
-}
-
-#[derive(DslVariable, Clone)]
 pub struct RoundContextVariable<C: Config> {
     pub(crate) opened_values_buffer: Array<C, Array<C, Felt<C::F>>>,
     pub(crate) log2_heights: Array<C, Var<C::N>>,
@@ -324,6 +316,7 @@ pub struct RoundContextVariable<C: Config> {
 pub(crate) fn batch_verifier_query_phase<C: Config>(
     builder: &mut Builder<C>,
     input: QueryPhaseVerifierInputVariable<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
 ) {
     let inv_2 = builder.constant(C::F::from_canonical_u32(0x3c000001));
     let two_adic_generators_inverses: Array<C, Felt<C::F>> = builder.dyn_array(28);
@@ -388,11 +381,8 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
 
     let initial_cur_num_var: Var<C::N> = builder.eval(input.max_num_var.clone());
     let initial_log2_height: Var<C::N> =
-        builder.eval(initial_cur_num_var + Usize::from(get_rate_log() - 1));
-    builder.assert_eq::<Var<C::N>>(
-        input.proof.commits.len() + Usize::from(1),
-        input.fold_challenges.len(),
-    );
+        builder.eval(initial_cur_num_var + Usize::from(get_rate_log()));
+    builder.assert_eq::<Var<C::N>>(input.proof.commits.len(), input.fold_challenges.len());
 
     let rounds_context: Array<C, RoundContextVariable<C>> = builder.dyn_array(input.rounds.len());
     let batch_coeffs_offset: Var<C::N> = builder.constant(C::N::ZERO);
@@ -419,12 +409,11 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
         .for_each(|ptr_vec, builder| {
             let opening = builder.iter_ptr_get(&round.openings, ptr_vec[2]);
             let log2_height: Var<C::N> =
-                builder.eval(opening.num_var + Usize::from(get_rate_log() - 1));
+                builder.eval(opening.num_var + Usize::from(get_rate_log()));
             builder.iter_ptr_set(&log2_heights, ptr_vec[1], log2_height);
             let width = opening.point_and_evals.evals.len();
 
-            let opened_value_len: Var<C::N> = builder.eval(width.clone() * two);
-            let opened_value_buffer = builder.dyn_array(opened_value_len);
+            let opened_value_buffer = builder.dyn_array(width.clone());
             builder.iter_ptr_set(
                 &opened_values_buffer,
                 ptr_vec[0],
@@ -480,17 +469,13 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                     let bit = builder.get(&idx_bits, i_vec[0]);
                     builder.assert_eq::<Var<_>>(bit, Usize::from(0));
                 });
-            let idx_bits = idx_bits.slice(builder, 1, log2_max_codeword_size);
+            let idx_bits = idx_bits.slice(builder, 0, log2_max_codeword_size);
 
-            let reduced_codeword_by_height: Array<C, PackedCodeword<C>> =
-                builder.dyn_array(log2_max_codeword_size);
+            let ro_len: Var<C::N> = builder.eval(log2_max_codeword_size + Usize::from(1));
+            let reduced_codeword_by_height: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(ro_len);
             // initialize reduced_codeword_by_height with zeroes
             iter_zip!(builder, reduced_codeword_by_height).for_each(|ptr_vec, builder| {
-                let zero_codeword = PackedCodeword {
-                    low: zero,
-                    high: zero,
-                };
-                builder.set_value(&reduced_codeword_by_height, ptr_vec[0], zero_codeword);
+                builder.set_value(&reduced_codeword_by_height, ptr_vec[0], zero);
             });
             let query = builder.iter_ptr_get(&input.proof.query_opening_proof, ptr_vec[1]);
 
@@ -523,39 +508,23 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                             builder.iter_ptr_get(&round_context.minus_alpha_offsets, ptr_vec[1]);
                         let opening = builder.iter_ptr_get(&round.openings, ptr_vec[4]);
                         let width = opening.point_and_evals.evals.len();
-                        let low_values = opened_values_buffer.slice(builder, 0, width.clone());
-                        let high_values = opened_values_buffer.slice(
-                            builder,
-                            width.clone(),
-                            opened_values_buffer.len(),
-                        );
 
                         let all_zeros_slice = all_zeros.slice(builder, 0, width.clone());
-                        let low = builder.fri_single_reduced_opening_eval(
+                        let eval = builder.fri_single_reduced_opening_eval(
                             alpha,
                             opened_values.id.get_var(),
                             zero_flag,
-                            &low_values,
+                            &opened_values_buffer,
                             &all_zeros_slice,
                         );
-                        let high = builder.fri_single_reduced_opening_eval(
-                            alpha,
-                            opened_values.id.get_var(),
-                            zero_flag,
-                            &high_values,
-                            &all_zeros_slice,
-                        );
-                        builder.assign(&low, low * minus_alpha_offset);
-                        builder.assign(&high, high * minus_alpha_offset);
+                        builder.assign(&eval, eval * minus_alpha_offset);
 
-                        let codeword: PackedCodeword<C> = PackedCodeword { low, high };
-                        let codeword_acc = builder.get(&reduced_codeword_by_height, log2_height);
+                        let eval_acc = builder.get(&reduced_codeword_by_height, log2_height);
 
-                        // reduced_openings[log2_height] += codeword
-                        builder.assign(&codeword_acc.low, codeword_acc.low + codeword.low);
-                        builder.assign(&codeword_acc.high, codeword_acc.high + codeword.high);
+                        // reduced_openings[log2_height] += eval
+                        builder.assign(&eval_acc, eval_acc + eval);
 
-                        builder.set_value(&reduced_codeword_by_height, log2_height, codeword_acc);
+                        builder.set_value(&reduced_codeword_by_height, log2_height, eval_acc);
 
                         // reorder opened values according to the permutation
                         let mat_j =
@@ -583,31 +552,24 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
             builder.cycle_tracker_end("Batching and first FRI round");
             let opening_ext = query.commit_phase_openings;
 
-            // fold 1st codeword
-            let cur_num_var: Var<C::N> = builder.eval(initial_cur_num_var);
             let log2_height: Var<C::N> = builder.eval(initial_log2_height);
 
-            let r = builder.get(&input.fold_challenges, 0);
-            let codeword = builder.get(&reduced_codeword_by_height, log2_height);
-            let coeff = verifier_folding_coeffs_level(
-                builder,
-                &two_adic_generators_inverses,
-                log2_height,
-                &idx_bits,
-                inv_2,
-            );
-            let folded = codeword_fold_with_challenge::<C>(
-                builder,
-                codeword.low,
-                codeword.high,
-                r,
-                coeff,
-                inv_2,
-            );
+            let coeff = {
+                let leaf_idx_bits = idx_bits.slice(builder, 1, idx_bits.len());
+                verifier_folding_coeffs_level(
+                    builder,
+                    &two_adic_generators_inverses,
+                    log2_height,
+                    &leaf_idx_bits,
+                    inv_2,
+                )
+            };
+            let folded = builder.constant(C::EF::ZERO);
 
             // check commit phases
             let commits = &input.proof.commits;
             builder.assert_eq::<Var<C::N>>(commits.len(), opening_ext.len());
+
             builder.cycle_tracker_start("FRI rounds");
             let i: Var<C::N> = builder.constant(C::N::ZERO);
             iter_zip!(builder, commits, opening_ext).for_each(|ptr_vec, builder| {
@@ -618,12 +580,43 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 let sibling_value = commit_phase_step.sibling_value;
                 let proof = commit_phase_step.opening_proof;
 
-                builder.assign(&cur_num_var, cur_num_var - Usize::from(1));
-                builder.assign(&log2_height, log2_height - Usize::from(1));
-
                 let folded_idx = builder.get(&idx_bits, i);
                 let new_involved_packed_codeword =
                     builder.get(&reduced_codeword_by_height, log2_height);
+                builder.assign(&folded, folded + new_involved_packed_codeword);
+
+                // leaf
+                let leafs = builder.dyn_array(2);
+                let sibling_idx = builder.eval_expr(RVar::from(1) - folded_idx);
+                builder.set_value(&leafs, folded_idx, folded);
+                builder.set_value(&leafs, sibling_idx, sibling_value);
+
+                // idx >>= 1
+                let idx_pair = idx_bits.slice(builder, i_plus_one, idx_bits.len());
+
+                // mmcs_ext.verify_batch
+                let dimensions = builder.dyn_array(1);
+                let opened_values = builder.dyn_array(1);
+                let log2_height_minus_one = builder.eval(log2_height - Usize::from(1));
+                builder.set_value(&opened_values, 0, leafs.clone());
+                builder.set_value(&dimensions, 0, log2_height_minus_one);
+                let ext_mmcs_verifier_input = ExtMmcsVerifierInputVariable {
+                    commit: commit.clone(),
+                    dimensions,
+                    index_bits: idx_pair.clone(),
+                    opened_values,
+                    proof,
+                };
+                ext_mmcs_verify_batch::<C>(builder, ext_mmcs_verifier_input);
+
+                let r = builder.get(&input.fold_challenges, i);
+                let left = builder.get(&leafs, 0);
+                let right = builder.get(&leafs, 1);
+                let new_folded =
+                    codeword_fold_with_challenge(builder, left, right, r, coeff, inv_2);
+                builder.assign(&folded, new_folded);
+                builder.assign(&i, i_plus_one);
+                builder.assign(&log2_height, log2_height_minus_one);
 
                 // Note that previous coeff is
                 //   1/2 * generator_of_order(2^{level + 2})^{-prev_index}
@@ -637,7 +630,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 // So prev ^ 2 = 1/4 * omega^{-2^(MAX - (level + 2)) * 2 * (index+2^level*prev_bit)}
                 //             = 1/4 * omega^{-2^(MAX - (level + 1)) * (index+2^level*prev_bit)}
                 //             = 1/4 * omega^{-2^(MAX - (level + 1)) * index - 2^(MAX - (level + 1)) * 2^level*prev_bit}
-                //             = 1/2 * curr * omeag^{- 2^(MAX - 1) * prev_bit}
+                //             = 1/2 * curr * omega^{- 2^(MAX - 1) * prev_bit}
                 //             = 1/2 * curr * generator_of_order(2)^{-prev_bit}
                 // Note that generator_of_order(2) is exactly -1, so
                 // prev ^ 2 = 1/2 * curr * (-1)^{-prev_bit}
@@ -647,47 +640,12 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 // Because `folded_idx` is just the `prev_bit`, so we reuse the following `if_eq` and multiply -1
                 // in the branch where `folded_idx` is != 0.
                 builder.assign(&coeff, coeff * coeff * two_felt);
-
-                builder.if_eq(folded_idx, Usize::from(0)).then_or_else(
-                    |builder| {
-                        builder.assign(&folded, folded + new_involved_packed_codeword.low);
-                    },
-                    |builder| {
-                        builder.assign(&folded, folded + new_involved_packed_codeword.high);
+                let next_folded_idx = builder.get(&idx_bits, i_plus_one);
+                builder
+                    .if_ne(next_folded_idx, Usize::from(0))
+                    .then(|builder| {
                         builder.assign(&coeff, -coeff);
-                    },
-                );
-
-                // leafs
-                let leafs = builder.dyn_array(2);
-                let sibling_idx = builder.eval_expr(RVar::from(1) - folded_idx);
-                builder.set_value(&leafs, folded_idx, folded);
-                builder.set_value(&leafs, sibling_idx, sibling_value);
-
-                // idx >>= 1
-                let idx_pair = idx_bits.slice(builder, i_plus_one, idx_bits.len());
-
-                // mmcs_ext.verify_batch
-                let dimensions = builder.dyn_array(1);
-                let opened_values = builder.dyn_array(1);
-                builder.set_value(&opened_values, 0, leafs.clone());
-                builder.set_value(&dimensions, 0, log2_height);
-                let ext_mmcs_verifier_input = ExtMmcsVerifierInputVariable {
-                    commit: commit.clone(),
-                    dimensions,
-                    index_bits: idx_pair.clone(),
-                    opened_values,
-                    proof,
-                };
-                ext_mmcs_verify_batch::<C>(builder, ext_mmcs_verifier_input);
-
-                let r = builder.get(&input.fold_challenges, i_plus_one);
-                let left = builder.get(&leafs, 0);
-                let right = builder.get(&leafs, 1);
-                let new_folded =
-                    codeword_fold_with_challenge(builder, left, right, r, coeff, inv_2);
-                builder.assign(&folded, new_folded);
-                builder.assign(&i, i_plus_one);
+                    });
             });
             builder.cycle_tracker_end("FRI rounds");
             // assert that final_value[i] = folded
@@ -708,7 +666,7 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
     );
     // 1. check initial claim match with first round sumcheck value
     let batch_coeffs_offset: Var<C::N> = builder.constant(C::N::ZERO);
-    let expected_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    let expected_claim: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     iter_zip!(builder, input.rounds).for_each(|ptr_vec, builder| {
         let round = builder.iter_ptr_get(&input.rounds, ptr_vec[0]);
         iter_zip!(builder, round.openings).for_each(|ptr_vec, builder| {
@@ -721,45 +679,27 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
                 let eval = builder.iter_ptr_get(&opening.point_and_evals.evals, ptr_vec[0]);
                 let coeff = builder.get(&input.batch_coeffs, batch_coeffs_offset);
                 let val: Ext<C::F, C::EF> = builder.eval(eval * coeff * scalar);
-                builder.assign(&expected_sum, expected_sum + val);
+                builder.assign(&expected_claim, expected_claim + val);
                 builder.assign(&batch_coeffs_offset, batch_coeffs_offset + Usize::from(1));
             });
         });
     });
-    let sum: Ext<C::F, C::EF> = {
-        let sumcheck_evals = builder.get(&input.proof.sumcheck_proof, 0).evaluations;
-        let eval0 = builder.get(&sumcheck_evals, 0);
-        let eval1 = builder.get(&sumcheck_evals, 1);
-        builder.eval(eval0 + eval1)
-    };
-    builder.assert_eq::<Ext<C::F, C::EF>>(expected_sum, sum);
-
-    // 2. check every round of sumcheck match with prev claims
-    let fold_len_minus_one: Var<C::N> = builder.eval(input.fold_challenges.len() - Usize::from(1));
+    // check every round of sumcheck match with prev claims
     builder
-        .range(0, fold_len_minus_one)
+        .range(0, input.fold_challenges.len())
         .for_each(|i_vec, builder| {
             let i = i_vec[0];
             let evals = builder.get(&input.proof.sumcheck_proof, i).evaluations;
+            let eval1 = builder.get(&evals, 0);
+            let eval0 = builder.eval(expected_claim - eval1);
             let challenge = builder.get(&input.fold_challenges, i);
-            let left = interpolate_uni_poly(builder, &evals, challenge);
-            let i_plus_one = builder.eval_expr(i + Usize::from(1));
-            let next_evals = builder
-                .get(&input.proof.sumcheck_proof, i_plus_one)
-                .evaluations;
-            let eval0 = builder.get(&next_evals, 0);
-            let eval1 = builder.get(&next_evals, 1);
-            let right: Ext<C::F, C::EF> = builder.eval(eval0 + eval1);
-            builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
+            let next_claim =
+                unipoly_extrapolator.extrapolate_uni_poly(builder, eval0, &evals, challenge);
+            builder.assign(&expected_claim, next_claim);
         });
 
-    // 3. check final evaluation are correct
-    let final_evals = builder
-        .get(&input.proof.sumcheck_proof, fold_len_minus_one)
-        .evaluations;
-    let final_challenge = builder.get(&input.fold_challenges, fold_len_minus_one);
-    let left = interpolate_uni_poly(builder, &final_evals, final_challenge);
-    let right: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    // check final evaluation are correct
+    let eval_claims: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
     let one: Var<C::N> = builder.constant(C::N::ONE);
     let j: Var<C::N> = builder.constant(C::N::ZERO);
     // \sum_i eq(p, [r,i]) * f(r,i)
@@ -793,13 +733,13 @@ pub(crate) fn batch_verifier_query_phase<C: Config>(
             builder.assert_eq::<Var<C::N>>(final_message.len(), one);
             let final_message = builder.get(&final_message, 0);
             let dot_prod: Ext<C::F, C::EF> = builder.eval(final_message * coeff);
-            builder.assign(&right, right + dot_prod);
+            builder.assign(&eval_claims, eval_claims + dot_prod);
 
             builder.assign(&j, j + Usize::from(1));
         });
     });
     builder.assert_eq::<Var<C::N>>(j, input.proof.final_message.len());
-    builder.assert_eq::<Ext<C::F, C::EF>>(left, right);
+    builder.assert_eq::<Ext<C::F, C::EF>>(expected_claim, eval_claims);
 }
 
 #[cfg(test)]
@@ -810,13 +750,22 @@ pub mod tests {
         BasefoldDefault, BasefoldRSParams, BasefoldSpec, PCSFriParam, PolynomialCommitmentScheme,
         pcs_batch_commit, pcs_trim, util::hash::write_digest_to_transcript,
     };
-    use openvm_circuit::arch::{SystemConfig, VmExecutor, instructions::program::Program};
+    use openvm_circuit::{
+        arch::{SystemConfig, VmExecutor, instructions::program::Program},
+        utils::{TestStarkEngine, air_test_impl},
+    };
     use openvm_instructions::exe::VmExe;
-    use openvm_native_circuit::{Native, NativeConfig};
+    use openvm_native_circuit::{Native, NativeBuilder, NativeConfig};
     use openvm_native_compiler::asm::AsmBuilder;
     use openvm_native_recursion::hints::Hintable;
     use openvm_stark_backend::p3_challenger::GrindingChallenger;
-    use openvm_stark_sdk::p3_baby_bear::BabyBear;
+    use openvm_stark_sdk::{
+        config::{
+            baby_bear_poseidon2::BabyBearPoseidon2Engine,
+            fri_params::standard_fri_params_with_100_bits_conjectured_security,
+        },
+        p3_baby_bear::BabyBear,
+    };
     use rand::thread_rng;
     use transcript::{BasicTranscript, Transcript};
 
@@ -824,23 +773,25 @@ pub mod tests {
     type E = BabyBearExt4;
     type Pcs = BasefoldDefault<E>;
 
+    use super::{QueryPhaseVerifierInput, batch_verifier_query_phase};
     use crate::{
+        arithmetics::UniPolyExtrapolator,
         basefold_verifier::{
             basefold::{Round, RoundOpening},
+            mmcs::MmcsCommitment,
             query_phase::PointAndEvals,
         },
         tower_verifier::binding::Point,
     };
-
-    use super::{QueryPhaseVerifierInput, batch_verifier_query_phase};
 
     pub fn build_batch_verifier_query_phase(
         input: QueryPhaseVerifierInput,
     ) -> (Program<BabyBear>, Vec<Vec<BabyBear>>) {
         // build test program
         let mut builder = AsmBuilder::<F, E>::default();
+        let unipoly_extrapolator = UniPolyExtrapolator::new(&mut builder);
         let query_phase_input = QueryPhaseVerifierInput::read(&mut builder);
-        batch_verifier_query_phase(&mut builder, query_phase_input);
+        batch_verifier_query_phase(&mut builder, query_phase_input, &unipoly_extrapolator);
         builder.halt();
         let program = builder.compile_isa();
 
@@ -929,9 +880,7 @@ pub mod tests {
                     .sample_and_append_challenge(b"commit round")
                     .elements,
             );
-            if i < num_rounds - 1 {
-                write_digest_to_transcript(&commits[i], &mut transcript);
-            }
+            write_digest_to_transcript(&commits[i], &mut transcript);
         }
         transcript.append_field_element_exts_iter(opening_proof.final_message.iter().flatten());
 
@@ -979,12 +928,17 @@ pub mod tests {
             .with_max_segment_len((1 << 25) - 100);
         let config = NativeConfig::new(system_config, Native);
 
-        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config).unwrap();
         let exe = VmExe::new(program);
+        let executor = VmExecutor::<BabyBear, NativeConfig>::new(config.clone()).unwrap();
         let interpreter = executor.instance(&exe).unwrap();
         interpreter
-            .execute(witness, None)
+            .execute(witness.clone(), None)
             .expect("constructed test should pass");
+
+        let fri_params = standard_fri_params_with_100_bits_conjectured_security(1);
+        let vb = NativeBuilder::default();
+        air_test_impl::<BabyBearPoseidon2Engine, _>(fri_params, vb, config, exe, witness, 1, true)
+            .unwrap();
     }
 
     #[test]

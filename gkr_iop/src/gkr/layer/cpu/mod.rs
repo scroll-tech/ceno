@@ -16,10 +16,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression,
-    mle::{MultilinearExtension, Point},
-    monomial::Term,
-    virtual_poly::build_eq_x_r_vec,
+    Expression, mle::Point, monomial::Term, virtual_poly::build_eq_x_r_vec,
     virtual_polys::VirtualPolynomialsBuilder,
 };
 use rayon::{
@@ -37,11 +34,11 @@ use transcript::Transcript;
 
 use crate::{
     gkr::layer::{
-        ROTATION_OPENING_COUNT,
         hal::LinearLayerProver,
         sumcheck_layer::{LayerProof, SumcheckLayerProof},
     },
     hal::ProverBackend,
+    selector::SelectorType,
 };
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<CpuBackend<E, PCS>>
@@ -65,7 +62,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<Cp
                 proof: IOPProof { proofs: vec![] },
                 evals,
             },
-            rotation: None,
         }
     }
 }
@@ -97,7 +93,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
                 proof,
                 evals: prover_state.get_mle_flatten_final_evaluations(),
             },
-            rotation: None,
         }
     }
 }
@@ -134,115 +129,86 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             selector_ctxs.len()
         );
 
-        let (_, raw_rotation_exprs) = &layer.rotation_exprs;
-        let (rotation_proof, rotation_left, rotation_right, rotation_point) =
-            if let Some(rotation_sumcheck_expression) =
-                layer.rotation_sumcheck_expression_monomial_terms.as_ref()
-            {
-                // 1st sumcheck: process rotation_exprs
-                let rt = out_points.first().unwrap();
-                let (
-                    proof,
-                    RotationPoints {
-                        left,
-                        right,
-                        origin,
-                    },
-                ) = prove_rotation(
-                    num_threads,
-                    max_num_variables,
-                    layer.rotation_cyclic_subgroup_size,
-                    layer.rotation_cyclic_group_log2,
-                    &wit,
-                    raw_rotation_exprs,
-                    rotation_sumcheck_expression.clone(),
-                    rt,
-                    challenges,
-                    transcript,
-                );
-                (Some(proof), Some(left), Some(right), Some(origin))
-            } else {
-                (None, None, None, None)
-            };
-
-        // 2th sumcheck: batch rotation with other constrains
+        // Main sumcheck batches smaller selector-group sumchecks.
+        // Per group g (from `out_sel_and_eval_exprs`):
+        //   p_g(x) = sel_g(x) * Σ_j (α_{2+offset(g,j)} * expr_{g,j}(x)),
+        //   S_g = Σ_{x in {0,1}^n} p_g(x).
+        // For zerocheck constraints (from each chip), S_g is expected to be 0.
+        // The batched polynomial is p(x) = Σ_g p_g(x), so Σ_x p(x) = Σ_g S_g = 0.
         let span = entered_span!("build_out_points_eq", profiling_4 = true);
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
-            get_challenge_pows(
-                layer.exprs.len() + raw_rotation_exprs.len() * ROTATION_OPENING_COUNT,
-                transcript,
-            )
+            get_challenge_pows(layer.exprs.len(), transcript)
         )
         .collect_vec();
 
-        // zero check eq || rotation eq
-        let mut eqs = layer
+        // Build selector eq MLEs in parallel, then merge deterministically by structural wit id.
+        let selector_eq_pairs = layer
             .out_sel_and_eval_exprs
             .par_iter()
             .zip(out_points.par_iter())
             .zip(selector_ctxs.par_iter())
             .filter_map(|(((sel_type, _), point), selector_ctx)| {
-                sel_type.compute(point, selector_ctx)
+                let eq = sel_type.compute(point, selector_ctx)?;
+                let selector_expr = match sel_type {
+                    SelectorType::Whole(expr)
+                    | SelectorType::Prefix(expr)
+                    | SelectorType::OrderedSparse {
+                        expression: expr, ..
+                    }
+                    | SelectorType::QuarkBinaryTreeLessThan(expr) => expr,
+                    SelectorType::None => return None,
+                };
+                let Expression::StructuralWitIn(wit_id, _) = selector_expr else {
+                    panic!("selector expression must be StructuralWitIn");
+                };
+                let wit_id = *wit_id as usize;
+                assert!(
+                    wit_id < layer.n_structural_witin,
+                    "selector wit id out of range"
+                );
+                Some((wit_id, eq))
             })
-            // for rotation left point
-            .chain(rotation_left.par_iter().map(|rotation_left| {
-                MultilinearExtension::from_evaluations_ext_vec(
-                    rotation_left.len(),
-                    build_eq_x_r_vec(rotation_left),
-                )
-            }))
-            // for rotation right point
-            .chain(rotation_right.par_iter().map(|rotation_right| {
-                MultilinearExtension::from_evaluations_ext_vec(
-                    rotation_right.len(),
-                    build_eq_x_r_vec(rotation_right),
-                )
-            }))
-            // for rotation point
-            .chain(rotation_point.par_iter().map(|rotation_point| {
-                MultilinearExtension::from_evaluations_ext_vec(
-                    rotation_point.len(),
-                    build_eq_x_r_vec(rotation_point),
-                )
-            }))
             .collect::<Vec<_>>();
+
+        let mut selector_eq_by_wit_id = vec![None; layer.n_structural_witin];
+        for (wit_id, eq) in selector_eq_pairs {
+            if selector_eq_by_wit_id[wit_id].is_none() {
+                selector_eq_by_wit_id[wit_id] = Some(eq);
+            }
+        }
         exit_span!(span);
 
-        // `wit` := witin ++ fixed ++ pubio
-        // we concat eq in between `wit` := witin ++ eqs ++ fixed
-        let all_witins = wit
-            .iter()
-            .take(layer.n_witin + layer.n_fixed + layer.n_instance)
-            .map(|mle| Either::Left(mle.as_ref()))
-            .chain(
-                // some non-selector structural witin
-                wit.iter()
-                    .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
-                    .take(
-                        layer.n_structural_witin
-                            - layer.out_sel_and_eval_exprs.len()
-                            - layer
-                                .rotation_exprs
-                                .0
-                                .as_ref()
-                                .map(|_| ROTATION_OPENING_COUNT)
-                                .unwrap_or(0),
-                    )
-                    .map(|mle| Either::Left(mle.as_ref())),
-            )
-            .chain(eqs.iter_mut().map(Either::Right))
-            .collect_vec();
+        // `wit` := witin ++ fixed ++ structural
+        // selector structural witins are replaced by computed eq MLEs in-place by witness id.
+        let base_wit_count = layer.n_witin + layer.n_fixed;
+        let mut all_witins =
+            Vec::with_capacity(layer.n_witin + layer.n_structural_witin + layer.n_fixed);
+        all_witins.extend(
+            wit.iter()
+                .take(base_wit_count)
+                .map(|mle| Either::Left(mle.as_ref())),
+        );
+        for (selector_eq, mle) in selector_eq_by_wit_id.iter_mut().zip(
+            wit.iter()
+                .skip(base_wit_count)
+                .take(layer.n_structural_witin),
+        ) {
+            if let Some(eq) = selector_eq.as_mut() {
+                all_witins.push(Either::Right(eq));
+            } else {
+                all_witins.push(Either::Left(mle.as_ref()));
+            }
+        }
 
         assert_eq!(
             all_witins.len(),
-            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
-            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {} + layer.n_instance {}",
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {}",
             all_witins.len(),
             layer.n_witin,
             layer.n_structural_witin,
             layer.n_fixed,
-            layer.n_instance,
         );
 
         let builder =
@@ -266,7 +232,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         (
             LayerProof {
                 main: SumcheckLayerProof { proof, evals },
-                rotation: rotation_proof,
             },
             prover_state.collect_raw_challenges(),
         )
@@ -281,7 +246,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 ///     rotated_rotation_expr[i].0(rx) == (1 - rx_4) * rotation_expr[i].1(0, rx_0, rx_1, ..., rx_3, rx_5, ...)
 ///                                     + rx_4 * rotation_expr[i].1(1, rx_0, 1 - rx_1, ..., rx_3, rx_5, ...)
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn prove_rotation<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     num_threads: usize,
     max_num_variables: usize,
     rotation_cyclic_subgroup_size: usize,

@@ -2,7 +2,7 @@ use ceno_emul::InsnKind;
 
 mod rv32im;
 pub use rv32im::{
-    DummyExtraConfig, Rv32imConfig,
+    DummyExtraConfig, InstructionDispatchBuilder, InstructionDispatchCtx, Rv32imConfig,
     mmu::{MemPadder, MmuConfig},
 };
 
@@ -30,7 +30,7 @@ pub mod insn_base;
 mod j_insn;
 mod r_insn;
 
-mod ecall_insn;
+pub(crate) mod ecall_insn;
 
 #[cfg(feature = "u16limb_circuit")]
 mod auipc;

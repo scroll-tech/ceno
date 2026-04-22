@@ -39,9 +39,10 @@ use derive::AlignedBorrow;
 use ff_ext::{ExtensionField, SmallField};
 use generic_array::{GenericArray, sequence::GenericSequence};
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     cpu::{CpuBackend, CpuProver},
+    default_out_eval_groups,
     error::{BackendError, CircuitBuilderError},
     gkr::{GKRCircuit, GKRProof, GKRProverOutput, layer::Layer, mock::MockProver},
     selector::{SelectorContext, SelectorType},
@@ -110,7 +111,6 @@ pub struct Uint256MulLayout<E: ExtensionField> {
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
-    pub n_challenges: usize,
 }
 
 impl<E: ExtensionField> Uint256MulLayout<E> {
@@ -130,10 +130,9 @@ impl<E: ExtensionField> Uint256MulLayout<E> {
         let eq = cb.create_placeholder_structural_witin(|| "uint256_mul_structural_witin");
         let sel = SelectorType::Prefix(eq.expr());
         let selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: sel.clone(),
-            sel_mem_write: sel.clone(),
-            sel_lookup: sel.clone(),
-            sel_zero: sel.clone(),
+            sel_first: None,
+            sel_last: None,
+            sel_all: sel.clone(),
         };
 
         // Default expression, will be updated in build_layer_logic
@@ -154,7 +153,6 @@ impl<E: ExtensionField> Uint256MulLayout<E> {
             output32_exprs,
             n_fixed: 0,
             n_committed: 0,
-            n_challenges: 0,
             n_structural_witin: 0,
         }
     }
@@ -282,36 +280,22 @@ impl<E: ExtensionField> ProtocolBuilder<E> for Uint256MulLayout<E> {
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
+    fn finalize(&mut self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
-        self.n_challenges = 0;
 
         // register selector to legacy constrain system
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
 
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-        (
-            [
-                // r_record
-                (0..r_len).collect_vec(),
-                // w_record
-                (r_len..r_len + w_len).collect_vec(),
-                // lk_record
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                // zero_record
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, self.n_challenges),
-        )
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb);
+        let layer = Layer::from_circuit_builder(cb, name, out_evals);
+        chip.add_layer(layer);
+        chip
     }
 
     fn n_committed(&self) -> usize {
@@ -319,10 +303,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for Uint256MulLayout<E> {
     }
 
     fn n_fixed(&self) -> usize {
-        todo!()
-    }
-
-    fn n_challenges(&self) -> usize {
         todo!()
     }
 
@@ -417,7 +397,6 @@ pub struct Uint256InvLayout<E: ExtensionField, Spec: Uint256InvSpec> {
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
-    pub n_challenges: usize,
     phantom: PhantomData<Spec::P>,
 }
 
@@ -433,10 +412,9 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Uint256InvLayout<E, Spec> {
         let eq = cb.create_placeholder_structural_witin(|| "uint256_mul_structural_witin");
         let sel = SelectorType::Prefix(eq.expr());
         let selector_type_layout = SelectorTypeLayout {
-            sel_mem_read: sel.clone(),
-            sel_mem_write: sel.clone(),
-            sel_lookup: sel.clone(),
-            sel_zero: sel.clone(),
+            sel_first: None,
+            sel_last: None,
+            sel_all: sel.clone(),
         };
 
         // Default expression, will be updated in build_layer_logic
@@ -452,7 +430,6 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Uint256InvLayout<E, Spec> {
             output32_exprs,
             n_fixed: 0,
             n_committed: 0,
-            n_challenges: 0,
             n_structural_witin: 0,
             phantom: Default::default(),
         }
@@ -534,36 +511,22 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> ProtocolBuilder<E> for Uint256InvL
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
+    fn finalize(&mut self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
         self.n_structural_witin = cb.cs.num_structural_witin as usize;
-        self.n_challenges = 0;
 
         // register selector to legacy constrain system
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
 
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-        (
-            [
-                // r_record
-                (0..r_len).collect_vec(),
-                // w_record
-                (r_len..r_len + w_len).collect_vec(),
-                // lk_record
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                // zero_record
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, self.n_challenges),
-        )
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb);
+        let layer = Layer::from_circuit_builder(cb, name, out_evals);
+        chip.add_layer(layer);
+        chip
     }
 
     fn n_committed(&self) -> usize {
@@ -571,10 +534,6 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> ProtocolBuilder<E> for Uint256InvL
     }
 
     fn n_fixed(&self) -> usize {
-        todo!()
-    }
-
-    fn n_challenges(&self) -> usize {
         todo!()
     }
 
@@ -707,15 +666,7 @@ pub fn setup_uint256mul_gkr_circuit<E: ExtensionField>()
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let (out_evals, mut chip) = layout.finalize(&mut cb);
-
-    let layer = Layer::from_circuit_builder(
-        &cb,
-        "weierstrass_add".to_string(),
-        layout.n_challenges,
-        out_evals,
-    );
-    chip.add_layer(layer);
+    let chip = layout.finalize("weierstrass_add".to_string(), &mut cb);
 
     Ok((
         TestUint256MulLayout {
@@ -874,6 +825,7 @@ pub fn run_uint256_mul<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + '
         &[],
         &[],
         &challenges,
+        None,
     );
     exit_span!(span);
 
@@ -945,7 +897,6 @@ pub fn run_uint256_mul<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + '
                     log2_num_instance,
                     gkr_proof.clone(),
                     &out_evals,
-                    &[],
                     &[],
                     &challenges,
                     &mut verifier_transcript,

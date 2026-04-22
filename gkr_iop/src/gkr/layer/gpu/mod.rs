@@ -1,5 +1,4 @@
 use crate::{
-    cpu::{CpuBackend, CpuProver},
     gkr::{
         booleanhypercube::BooleanHypercube,
         layer::{
@@ -14,16 +13,11 @@ use either::Either;
 use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
-use multilinear_extensions::{
-    Expression,
-    mle::{MultilinearExtension, Point},
-    monomial::Term,
-};
+use multilinear_extensions::{Expression, mle::Point, monomial::Term};
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
 };
-use std::sync::Arc;
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::IOPProof,
@@ -33,40 +27,29 @@ use transcript::{BasicTranscript, Transcript};
 
 use crate::{
     gkr::layer::{
-        ROTATION_OPENING_COUNT,
         hal::LinearLayerProver,
         sumcheck_layer::{LayerProof, SumcheckLayerProof},
     },
     hal::ProverBackend,
 };
+use ceno_gpu::common::sumcheck::CommonTermPlan;
 
 use crate::gpu::{MultilinearExtensionGpu, gpu_prover::*};
 
 pub mod utils;
-use crate::selector::SelectorContext;
+use crate::selector::{SelectorContext, SelectorType};
 use utils::*;
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> LinearLayerProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
     fn prove(
-        layer: &Layer<E>,
-        wit: LayerWitness<GpuBackend<E, PCS>>,
-        out_point: &multilinear_extensions::mle::Point<E>,
-        transcript: &mut impl transcript::Transcript<E>,
+        _layer: &Layer<E>,
+        _wit: LayerWitness<GpuBackend<E, PCS>>,
+        _out_point: &multilinear_extensions::mle::Point<E>,
+        _transcript: &mut impl transcript::Transcript<E>,
     ) -> crate::gkr::layer::sumcheck_layer::LayerProof<E> {
-        let span = entered_span!("LinearLayerProver", profiling_2 = true);
-        let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit
-            .0
-            .into_iter()
-            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
-            .collect();
-        let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
-        let res = <CpuProver<CpuBackend<E, PCS>> as LinearLayerProver<CpuBackend<E, PCS>>>::prove(
-            layer, cpu_wit, out_point, transcript,
-        );
-        exit_span!(span);
-        res
+        panic!("LinearLayerProver is not implemented for GPU");
     }
 }
 
@@ -74,30 +57,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> SumcheckLayerProver<
     for GpuProver<GpuBackend<E, PCS>>
 {
     fn prove(
-        layer: &Layer<E>,
-        num_threads: usize,
-        max_num_variables: usize,
-        wit: LayerWitness<'_, GpuBackend<E, PCS>>,
-        challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
-        transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
+        _layer: &Layer<E>,
+        _num_threads: usize,
+        _max_num_variables: usize,
+        _wit: LayerWitness<'_, GpuBackend<E, PCS>>,
+        _challenges: &[<GpuBackend<E, PCS> as ProverBackend>::E],
+        _transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
     ) -> LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E> {
-        let span = entered_span!("SumcheckLayerProver", profiling_2 = true);
-        let cpu_wits: Vec<Arc<MultilinearExtension<'_, E>>> = wit
-            .0
-            .into_iter()
-            .map(|gpu_mle| Arc::new(gpu_mle.inner_to_mle()))
-            .collect();
-        let cpu_wit = LayerWitness::<CpuBackend<E, PCS>>(cpu_wits);
-        let res = <CpuProver<CpuBackend<E, PCS>> as SumcheckLayerProver<CpuBackend<E, PCS>>>::prove(
-            layer,
-            num_threads,
-            max_num_variables,
-            cpu_wit,
-            challenges,
-            transcript,
-        );
-        exit_span!(span);
-        res
+        panic!("SumcheckLayerProver is not implemented for GPU");
     }
 }
 
@@ -118,8 +85,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
         LayerProof<<GpuBackend<E, PCS> as ProverBackend>::E>,
         Point<<GpuBackend<E, PCS> as ProverBackend>::E>,
     ) {
+        let stream = crate::gpu::get_thread_stream();
         let span = entered_span!("ZerocheckLayerProver", profiling_2 = true);
-        let num_threads = 1; // VP builder for GPU: do not use _num_threads
+        let _num_threads = 1; // VP builder for GPU: do not use host thread parallelism
 
         assert_eq!(challenges.len(), 2);
         assert_eq!(
@@ -130,128 +98,155 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
             out_points.len(),
         );
 
-        let (_, raw_rotation_exprs) = &layer.rotation_exprs;
-        let (rotation_proof, rotation_left, rotation_right, rotation_point) =
-            if let Some(rotation_sumcheck_expression) =
-                layer.rotation_sumcheck_expression_monomial_terms.as_ref()
-            {
-                // 1st sumcheck: process rotation_exprs
-                let rt = out_points.first().unwrap();
-                let (
-                    proof,
-                    RotationPoints {
-                        left,
-                        right,
-                        origin,
-                    },
-                ) = prove_rotation_gpu(
-                    num_threads,
-                    max_num_variables,
-                    layer.rotation_cyclic_subgroup_size,
-                    layer.rotation_cyclic_group_log2,
-                    &wit,
-                    raw_rotation_exprs,
-                    rotation_sumcheck_expression.clone(),
-                    rt,
-                    challenges,
-                    transcript,
-                );
-                (Some(proof), Some(left), Some(right), Some(origin))
-            } else {
-                (None, None, None, None)
-            };
-
-        // 2th sumcheck: batch rotation with other constrains
+        // Main sumcheck batches smaller selector-group sumchecks.
+        // Per group g (from `out_sel_and_eval_exprs`):
+        //   p_g(x) = sel_g(x) * Σ_j (α_{2+offset(g,j)} * expr_{g,j}(x)),
+        //   S_g = Σ_{x in {0,1}^n} p_g(x).
+        // For zerocheck constraints (from each chip), S_g is expected to be 0.
+        // The batched polynomial is p(x) = Σ_g p_g(x), so Σ_x p(x) = Σ_g S_g = 0.
         let main_sumcheck_challenges = chain!(
             challenges.iter().copied(),
-            get_challenge_pows(
-                layer.exprs.len() + raw_rotation_exprs.len() * ROTATION_OPENING_COUNT,
-                transcript,
-            )
+            get_challenge_pows(layer.exprs.len(), transcript)
         )
         .collect_vec();
 
         let span_eq = entered_span!("build eqs", profiling_2 = true);
         let cuda_hal = get_cuda_hal().unwrap();
-        let eqs_gpu = layer
+        let selector_eq_pairs = layer
             .out_sel_and_eval_exprs
             .iter()
             .zip(out_points.iter())
             .zip(selector_ctxs.iter())
-            .map(|(((sel_type, _), point), selector_ctx)| {
-                build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type)
+            .filter_map(|(((sel_type, _), point), selector_ctx)| {
+                let eq = build_eq_x_r_with_sel_gpu(&cuda_hal, point, selector_ctx, sel_type);
+                let selector_expr = match sel_type {
+                    SelectorType::Whole(expr)
+                    | SelectorType::Prefix(expr)
+                    | SelectorType::OrderedSparse {
+                        expression: expr, ..
+                    }
+                    | SelectorType::QuarkBinaryTreeLessThan(expr) => expr,
+                    SelectorType::None => return None,
+                };
+                let Expression::StructuralWitIn(wit_id, _) = selector_expr else {
+                    panic!("selector expression must be StructuralWitIn");
+                };
+                let wit_id = *wit_id as usize;
+                assert!(
+                    wit_id < layer.n_structural_witin,
+                    "selector wit id out of range"
+                );
+                Some((wit_id, eq))
             })
-            // for rotation left point
-            .chain(
-                rotation_left
-                    .iter()
-                    .map(|rotation_left| build_eq_x_r_gpu(&cuda_hal, rotation_left)),
-            )
-            // for rotation right point
-            .chain(
-                rotation_right
-                    .iter()
-                    .map(|rotation_right| build_eq_x_r_gpu(&cuda_hal, rotation_right)),
-            )
-            // for rotation point
-            .chain(
-                rotation_point
-                    .iter()
-                    .map(|rotation_point| build_eq_x_r_gpu(&cuda_hal, rotation_point)),
-            )
             .collect::<Vec<_>>();
-        // `wit` := witin ++ fixed ++ pubio
+
+        let mut selector_eq_by_wit_id: Vec<Option<MultilinearExtensionGpu<'static, E>>> =
+            vec![None; layer.n_structural_witin];
+        for (wit_id, eq) in selector_eq_pairs {
+            if selector_eq_by_wit_id[wit_id].is_none() {
+                selector_eq_by_wit_id[wit_id] = Some(eq);
+            }
+        }
+
+        // `wit` := witin ++ fixed ++ structural
+        // selector structural witins are replaced by computed eq MLEs in-place by witness id.
+        let base_wit_count = layer.n_witin + layer.n_fixed;
         let all_witins_gpu = wit
             .iter()
-            .take(layer.n_witin + layer.n_fixed + layer.n_instance)
+            .take(base_wit_count)
             .map(|mle| mle.as_ref())
             .chain(
-                // some non-selector structural witin
-                wit.iter()
-                    .skip(layer.n_witin + layer.n_fixed + layer.n_instance)
-                    .take(
-                        layer.n_structural_witin
-                            - layer.out_sel_and_eval_exprs.len()
-                            - layer
-                                .rotation_exprs
-                                .0
-                                .as_ref()
-                                .map(|_| ROTATION_OPENING_COUNT)
-                                .unwrap_or(0),
+                selector_eq_by_wit_id
+                    .iter_mut()
+                    .zip(
+                        wit.iter()
+                            .skip(base_wit_count)
+                            .take(layer.n_structural_witin),
                     )
-                    .map(|mle| mle.as_ref()),
+                    .map(|(selector_eq, mle)| {
+                        if let Some(eq) = selector_eq.as_mut() {
+                            eq
+                        } else {
+                            mle.as_ref()
+                        }
+                    }),
             )
-            .chain(eqs_gpu.iter())
             .collect_vec();
         assert_eq!(
             all_witins_gpu.len(),
-            layer.n_witin + layer.n_structural_witin + layer.n_fixed + layer.n_instance,
-            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {} + layer.n_instance {}",
+            layer.n_witin + layer.n_structural_witin + layer.n_fixed,
+            "all_witins.len() {} != layer.n_witin {} + layer.n_structural_witin {} + layer.n_fixed {}",
             all_witins_gpu.len(),
             layer.n_witin,
             layer.n_structural_witin,
             layer.n_fixed,
-            layer.n_instance,
         );
         exit_span!(span_eq);
 
+        let plan = layer.main_sumcheck_expression_common_factored.as_ref();
+        let residual_terms = layer
+            .main_sumcheck_expression_monomial_terms_excluded_shared
+            .as_ref();
         // Calculate max_num_var and max_degree from the extracted relationships
+        let monomial_terms = match (plan, residual_terms) {
+            (Some(_), Some(residual)) => residual.clone(),
+            (Some(_), None) => panic!("common factoring plan present without residual monomials"),
+            (None, Some(terms)) => terms.clone(),
+            (None, None) => layer
+                .main_sumcheck_expression_monomial_terms
+                .clone()
+                .expect("main sumcheck monomial terms must exist"),
+        };
         let (term_coefficients, mle_indices_per_term, mle_size_info) =
             extract_mle_relationships_from_monomial_terms(
-                &layer
-                    .main_sumcheck_expression_monomial_terms
-                    .clone()
-                    .unwrap(),
+                &monomial_terms,
                 &all_witins_gpu,
                 &pub_io_evals.iter().map(|v| Either::Right(*v)).collect_vec(),
                 &main_sumcheck_challenges,
             );
+        if let Some(plan) = plan {
+            for group in &plan.groups {
+                for &term_idx in &group.term_indices {
+                    debug_assert!(
+                        term_idx < mle_indices_per_term.len(),
+                        "factored term {} missing residual monomial (len={})",
+                        term_idx,
+                        mle_indices_per_term.len()
+                    );
+                }
+            }
+        }
+        let common_term_plan_host: Option<CommonTermPlan> =
+            plan.map(|plan| encode_common_term_plan(plan, all_witins_gpu.len()));
         let max_num_var = max_num_variables;
-        let max_degree = mle_indices_per_term
-            .iter()
-            .map(|indices| indices.len())
-            .max()
-            .unwrap_or(0);
+        let max_degree = if let Some(plan) = plan {
+            plan.groups
+                .iter()
+                .flat_map(|group| {
+                    group.term_indices.iter().map(|term_idx| {
+                        let shared_len = group.shared_len;
+                        let residual_len = mle_indices_per_term
+                            .get(*term_idx)
+                            .map(|v| v.len())
+                            .unwrap_or(0);
+                        shared_len + residual_len
+                    })
+                })
+                .max()
+                .unwrap_or_else(|| {
+                    mle_indices_per_term
+                        .iter()
+                        .map(|indices| indices.len())
+                        .max()
+                        .unwrap_or(0)
+                })
+        } else {
+            mle_indices_per_term
+                .iter()
+                .map(|indices| indices.len())
+                .max()
+                .unwrap_or(0)
+        };
 
         // Convert types for GPU function Call
         let basic_tr: &mut BasicTranscript<BB31Ext> =
@@ -269,11 +264,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                 &mle_indices_per_term,
                 max_num_var,
                 max_degree,
+                common_term_plan_host.as_ref(),
                 basic_tr,
+                stream.as_ref(),
             )
             .unwrap();
-        let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
-        let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
+        let evals_gpu = evals_gpu.into_iter().flatten().collect();
+        let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect();
 
         // convert back to E: ExtensionField
         let proof_gpu_e =
@@ -289,7 +286,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
                     proof: proof_gpu_e,
                     evals: evals_gpu_e,
                 },
-                rotation: rotation_proof,
             },
             row_challenges_e,
         )
@@ -305,7 +301,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZerocheckLayerProver
 ///                                     + rx_4 * rotation_expr[i].1(1, rx_0, 1 - rx_1, ..., rx_3, rx_5, ...)
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all, name = "prove_rotation_gpu", level = "info")]
-pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+pub fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     _num_threads: usize,
     max_num_variables: usize,
     rotation_cyclic_subgroup_size: usize,
@@ -317,6 +313,7 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     global_challenges: &[E],
     transcript: &mut impl Transcript<E>,
 ) -> (SumcheckLayerProof<E>, RotationPoints<E>) {
+    let stream = crate::gpu::get_thread_stream();
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
     let cuda_hal = get_cuda_hal().unwrap();
 
@@ -389,11 +386,13 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
             &mle_indices_per_term,
             max_num_var,
             max_degree,
+            None,
             basic_tr,
+            stream.as_ref(),
         )
         .unwrap();
-    let evals_gpu = evals_gpu.into_iter().flatten().collect_vec();
-    let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect_vec();
+    let evals_gpu = evals_gpu.into_iter().flatten().collect();
+    let row_challenges = challenges_gpu.iter().map(|c| c.elements).collect();
 
     let proof_gpu_e = unsafe { std::mem::transmute::<IOPProof<BB31Ext>, IOPProof<E>>(proof_gpu) };
     let mut evals_gpu_e = unsafe { std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(evals_gpu) };
@@ -405,10 +404,17 @@ pub(crate) fn prove_rotation_gpu<E: ExtensionField, PCS: PolynomialCommitmentSch
     let span = entered_span!("rotation derived left/right eval", profiling_3 = true);
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);
     let (left_point, right_point) = bh.get_rotation_points(&row_challenges_e);
+    // Capture parent thread's CUDA stream so Rayon workers can reuse it.
+    // TODO: GPU batch evaluation and its batch version
+    let parent_stream = crate::gpu::get_thread_stream();
     let evals = evals_gpu_e
         .par_chunks_exact(2)
         .zip_eq(raw_rotation_exprs.par_iter())
         .flat_map(|(evals, (rotated_expr, _))| {
+            // Propagate parent thread's CUDA stream to Rayon worker
+            let _guard = parent_stream
+                .as_ref()
+                .map(|s| crate::gpu::bind_thread_stream(s.clone()));
             let [rotated_eval, target_eval] = evals else {
                 unreachable!()
             };

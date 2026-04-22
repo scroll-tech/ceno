@@ -139,6 +139,11 @@ pub struct MulhConfig<E: ExtensionField> {
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBase<E, I> {
     type InstructionConfig = MulhConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

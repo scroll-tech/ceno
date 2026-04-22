@@ -36,12 +36,12 @@ fn impl_opcode_beq(take_branch: bool, a: u32, b: u32) {
 
     let insn_code = encode_rv32(InsnKind::BEQ, 2, 3, 0, 8);
     let pc_offset = if take_branch { 8 } else { PC_STEP_SIZE };
-    let (raw_witin, lkm) = BeqInstruction::assign_instances(
+    let (raw_witin, lkm) = BeqInstruction::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_b_instruction(
+        &[StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
             insn_code,
@@ -78,12 +78,12 @@ fn impl_opcode_bne(take_branch: bool, a: u32, b: u32) {
 
     let insn_code = encode_rv32(InsnKind::BNE, 2, 3, 0, 8);
     let pc_offset = if take_branch { 8 } else { PC_STEP_SIZE };
-    let (raw_witin, lkm) = BneInstruction::assign_instances(
+    let (raw_witin, lkm) = BneInstruction::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_b_instruction(
+        &[StepRecord::new_b_instruction(
             3,
             Change::new(MOCK_PC_START, MOCK_PC_START + pc_offset),
             insn_code,
@@ -122,12 +122,12 @@ fn impl_bltu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     };
 
     let insn_code = encode_rv32(InsnKind::BLTU, 2, 3, 0, -8);
-    let (raw_witin, lkm) = BltuInstruction::assign_instances(
+    let (raw_witin, lkm) = BltuInstruction::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_b_instruction(
+        &[StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -167,12 +167,12 @@ fn impl_bgeu_circuit(taken: bool, a: u32, b: u32) -> Result<(), ZKVMError> {
     };
 
     let insn_code = encode_rv32(InsnKind::BGEU, 2, 3, 0, -8);
-    let (raw_witin, lkm) = BgeuInstruction::assign_instances(
+    let (raw_witin, lkm) = BgeuInstruction::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_b_instruction(
+        &[StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -219,12 +219,12 @@ fn impl_blt_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
     };
 
     let insn_code = encode_rv32(InsnKind::BLT, 2, 3, 0, -8);
-    let (raw_witin, lkm) = BltInstruction::assign_instances(
+    let (raw_witin, lkm) = BltInstruction::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_b_instruction(
+        &[StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,
@@ -271,12 +271,12 @@ fn impl_bge_circuit<E: ExtensionField>(taken: bool, a: i32, b: i32) -> Result<()
     };
 
     let insn_code = encode_rv32(InsnKind::BGE, 2, 3, 0, -8);
-    let (raw_witin, lkm) = BgeInstruction::assign_instances(
+    let (raw_witin, lkm) = BgeInstruction::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         circuit_builder.cs.num_witin as usize,
         circuit_builder.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_b_instruction(
+        &[StepRecord::new_b_instruction(
             12,
             Change::new(MOCK_PC_START, pc_after),
             insn_code,

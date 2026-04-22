@@ -1,14 +1,13 @@
 use std::marker::PhantomData;
 
 use ceno_emul::{
-    BN254_FP_ADD, BN254_FP_MUL, ByteAddr, Change, InsnKind, Platform, StepRecord, WORD_SIZE,
-    WriteOp,
+    BN254_FP_ADD, BN254_FP_MUL, ByteAddr, Change, InsnKind, Platform, StepIndex, StepRecord,
+    WORD_SIZE, WriteOp,
 };
 use ff_ext::ExtensionField;
 use generic_array::typenum::Unsigned;
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -77,6 +76,11 @@ impl<E: ExtensionField, P: FpOpField + FpAddSpec + NumWords> Instruction<E>
     for FpAddInstruction<E, P>
 {
     type InstructionConfig = EcallFpOpConfig<E, P>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "Ecall_FpAdd".to_string()
@@ -120,7 +124,8 @@ impl<E: ExtensionField, P: FpOpField + FpAddSpec + NumWords> Instruction<E>
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
+        step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         assign_fp_op_instances::<E, P>(
             config,
@@ -128,6 +133,7 @@ impl<E: ExtensionField, P: FpOpField + FpAddSpec + NumWords> Instruction<E>
             num_witin,
             num_structural_witin,
             steps,
+            step_indices,
             P::SYSCALL_CODE,
             FieldOperation::Add,
         )
@@ -140,6 +146,11 @@ impl<E: ExtensionField, P: FpOpField + FpMulSpec + NumWords> Instruction<E>
     for FpMulInstruction<E, P>
 {
     type InstructionConfig = EcallFpOpConfig<E, P>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "Ecall_FpMul".to_string()
@@ -183,7 +194,8 @@ impl<E: ExtensionField, P: FpOpField + FpMulSpec + NumWords> Instruction<E>
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
+        step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         assign_fp_op_instances::<E, P>(
             config,
@@ -191,6 +203,7 @@ impl<E: ExtensionField, P: FpOpField + FpMulSpec + NumWords> Instruction<E>
             num_witin,
             num_structural_witin,
             steps,
+            step_indices,
             P::SYSCALL_CODE,
             FieldOperation::Mul,
         )
@@ -277,10 +290,7 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
             .collect::<Result<Vec<WriteMEM>, _>>()?,
     );
 
-    let (out_evals, mut chip) = layout.finalize(cb);
-    let layer =
-        Layer::from_circuit_builder(cb, layer_name.to_string(), layout.n_challenges, out_evals);
-    chip.add_layer(layer);
+    let chip = layout.finalize(layer_name.to_string(), cb);
 
     Ok((
         EcallFpOpConfig {
@@ -295,17 +305,19 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn assign_fp_op_instances<E: ExtensionField, P: FpOpField + NumWords>(
     config: &EcallFpOpConfig<E, P>,
     shard_ctx: &mut ShardContext,
     num_witin: usize,
     num_structural_witin: usize,
-    steps: Vec<&StepRecord>,
+    steps: &[StepRecord],
+    step_indices: &[StepIndex],
     syscall_code: u32,
     op: FieldOperation,
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     let mut lk_multiplicity = LkMultiplicity::default();
-    if steps.is_empty() {
+    if step_indices.is_empty() {
         return Ok((
             [
                 RowMajorMatrix::new(0, num_witin, InstancePaddingStrategy::Default),
@@ -316,15 +328,15 @@ fn assign_fp_op_instances<E: ExtensionField, P: FpOpField + NumWords>(
     }
 
     let nthreads = max_usable_threads();
-    let num_instance_per_batch = steps.len().div_ceil(nthreads).max(1);
+    let num_instance_per_batch = step_indices.len().div_ceil(nthreads).max(1);
 
     let mut raw_witin = RowMajorMatrix::<E::BaseField>::new(
-        steps.len(),
+        step_indices.len(),
         num_witin,
         InstancePaddingStrategy::Default,
     );
     let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new(
-        steps.len(),
+        step_indices.len(),
         num_structural_witin,
         InstancePaddingStrategy::Default,
     );
@@ -333,14 +345,15 @@ fn assign_fp_op_instances<E: ExtensionField, P: FpOpField + NumWords>(
     let shard_ctx_vec = shard_ctx.get_forked();
 
     raw_witin_iter
-        .zip_eq(steps.par_chunks(num_instance_per_batch))
+        .zip_eq(step_indices.par_chunks(num_instance_per_batch))
         .zip(shard_ctx_vec)
-        .flat_map(|((instances, steps), mut shard_ctx)| {
+        .flat_map(|((instances, indices), mut shard_ctx)| {
             let mut lk_multiplicity = lk_multiplicity.clone();
             instances
                 .chunks_mut(num_witin)
-                .zip_eq(steps)
-                .map(|(instance, step)| {
+                .zip_eq(indices.iter().copied())
+                .map(|(instance, idx)| {
+                    let step = &steps[idx];
                     let ops = &step.syscall().expect("syscall step");
                     config
                         .vm_state
@@ -397,9 +410,10 @@ fn assign_fp_op_instances<E: ExtensionField, P: FpOpField + NumWords>(
         .collect::<Result<(), ZKVMError>>()?;
 
     let words = <P as NumWords>::WordsFieldElement::USIZE;
-    let instances: Vec<FpOpInstance<P>> = steps
+    let instances: Vec<FpOpInstance<P>> = step_indices
         .par_iter()
-        .map(|step| {
+        .map(|&idx| {
+            let step = &steps[idx];
             let values: Vec<u32> = step
                 .syscall()
                 .unwrap()

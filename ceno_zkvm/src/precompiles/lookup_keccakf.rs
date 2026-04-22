@@ -1,17 +1,17 @@
 use ceno_emul::{ByteAddr, Cycle, MemOp, StepRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
-    circuit_builder::{
-        CircuitBuilder, ConstraintSystem, RotationParams, expansion_expr, rotation_split,
-    },
+    circuit_builder::{CircuitBuilder, ConstraintSystem, expansion_expr, rotation_split},
     cpu::{CpuBackend, CpuProver},
+    default_out_eval_groups,
     error::{BackendError, CircuitBuilderError},
+    evaluation::EvalExpression,
     gkr::{
         GKRCircuit, GKRProof, GKRProverOutput,
         booleanhypercube::{BooleanHypercube, CYCLIC_POW2_5},
-        layer::Layer,
+        layer::{Layer, cpu::prove_rotation, zerocheck_layer::verify_rotation},
         mock::MockProver,
     },
     selector::{SelectorContext, SelectorType},
@@ -159,7 +159,6 @@ pub struct KeccakLayout<E: ExtensionField> {
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
-    pub n_challenges: usize,
 }
 
 const ROTATION_WITNESS_LEN: usize = 196;
@@ -192,8 +191,8 @@ impl<E: ExtensionField> KeccakLayout<E> {
             wits,
             // fixed,
             [
-                sel_mem_read,
-                sel_mem_write,
+                sel_first,
+                sel_last,
                 eq_zero,
                 eq_rotation_left,
                 eq_rotation_right,
@@ -231,20 +230,19 @@ impl<E: ExtensionField> KeccakLayout<E> {
                 eq_rotation,
             },
             selector_type_layout: SelectorTypeLayout {
-                sel_mem_read: SelectorType::OrderedSparse32 {
+                sel_first: Some(SelectorType::OrderedSparse {
+                    num_vars: 5,
                     indices: vec![CYCLIC_POW2_5[0] as usize],
-                    expression: sel_mem_read.expr(),
-                },
-                sel_mem_write: SelectorType::OrderedSparse32 {
+                    expression: sel_first.expr(),
+                }),
+                sel_last: Some(SelectorType::OrderedSparse {
+                    num_vars: 5,
                     indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
-                    expression: sel_mem_write.expr(),
-                },
-                sel_lookup: SelectorType::OrderedSparse32 {
+                    expression: sel_last.expr(),
+                }),
+                sel_all: SelectorType::OrderedSparse {
+                    num_vars: 5,
                     indices: checked_indices.clone(),
-                    expression: eq_zero.expr(),
-                },
-                sel_zero: SelectorType::OrderedSparse32 {
-                    indices: checked_indices,
                     expression: eq_zero.expr(),
                 },
             },
@@ -253,7 +251,6 @@ impl<E: ExtensionField> KeccakLayout<E> {
             n_fixed: 0,
             n_committed: 0,
             n_structural_witin: STRUCTURAL_WITIN,
-            n_challenges: 0,
         }
     }
 }
@@ -389,6 +386,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // iterator over split witnesses
         let mut rotation_witness = rotation_witness.iter();
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..5 {
             #[allow(clippy::needless_range_loop)]
             for j in 0..5 {
@@ -505,48 +503,32 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         // rotation constrain: rotation(keccak_input8).next() == keccak_output8
         izip!(keccak_input8, keccak_output8)
             .for_each(|(input, output)| system.rotate_and_assert_eq(input.expr(), output.expr()));
-        system.set_rotation_params(RotationParams {
-            rotation_eqs: Some([
-                layout.layer_exprs.eq_rotation_left.expr(),
-                layout.layer_exprs.eq_rotation_right.expr(),
-                layout.layer_exprs.eq_rotation.expr(),
-            ]),
-            rotation_cyclic_group_log2: ROUNDS_CEIL_LOG2,
-            rotation_cyclic_subgroup_size: ROUNDS - 1,
-        });
+        system.set_rotation_params(
+            layout.layer_exprs.eq_rotation_left.expr(),
+            layout.layer_exprs.eq_rotation_right.expr(),
+            layout.layer_exprs.eq_rotation.expr(),
+            ROUNDS_CEIL_LOG2,
+            ROUNDS - 1,
+        );
 
         Ok(layout)
     }
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
+    fn finalize(&mut self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E> {
         self.n_fixed = cb.cs.num_fixed;
         self.n_committed = cb.cs.num_witin as usize;
-        self.n_challenges = 0;
 
         // register selector to legacy constrain system
-        cb.cs.r_selector = Some(self.selector_type_layout.sel_mem_read.clone());
-        cb.cs.w_selector = Some(self.selector_type_layout.sel_mem_write.clone());
-        cb.cs.lk_selector = Some(self.selector_type_layout.sel_lookup.clone());
-        cb.cs.zero_selector = Some(self.selector_type_layout.sel_zero.clone());
+        cb.cs.r_selector = Some(self.selector_type_layout.sel_first.clone().unwrap());
+        cb.cs.w_selector = Some(self.selector_type_layout.sel_last.clone().unwrap());
+        cb.cs.lk_selector = Some(self.selector_type_layout.sel_all.clone());
+        cb.cs.zero_selector = Some(self.selector_type_layout.sel_all.clone());
 
-        let w_len = cb.cs.w_expressions.len();
-        let r_len = cb.cs.r_expressions.len();
-        let lk_len = cb.cs.lk_expressions.len();
-        let zero_len =
-            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
-        (
-            [
-                // r_record
-                (0..r_len).collect_vec(),
-                // w_record
-                (r_len..r_len + w_len).collect_vec(),
-                // lk_record
-                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
-                // zero_record
-                (0..zero_len).collect_vec(),
-            ],
-            Chip::new_from_cb(cb, self.n_challenges),
-        )
+        let out_evals = default_out_eval_groups(cb);
+        let mut chip = Chip::new_from_cb(cb);
+        let layer = Layer::from_circuit_builder(cb, name, out_evals);
+        chip.add_layer(layer);
+        chip
     }
 
     fn n_committed(&self) -> usize {
@@ -555,10 +537,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
     fn n_fixed(&self) -> usize {
         unimplemented!("retrieve from constrain system")
-    }
-
-    fn n_challenges(&self) -> usize {
-        0
     }
 
     fn n_evaluations(&self) -> usize {
@@ -687,30 +665,25 @@ where
                 let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
                 let mut cyclic_group = bh.into_iter();
 
-                let (mut sel_mem_read_iter, sel_mem_read_structural_witin) = (
-                    self.selector_type_layout
-                        .sel_mem_read
-                        .sparse32_indices()
-                        .iter(),
-                    self.selector_type_layout.sel_mem_read.selector_expr().id(),
+                let Some(sel_first) = self.selector_type_layout.sel_first.as_ref() else {
+                    panic!("sel_first must be Some");
+                };
+                let (mut sel_first_iter, sel_first_structural_witin) = (
+                    sel_first.sparse_indices().iter(),
+                    sel_first.selector_expr().id(),
                 );
-                let (mut sel_mem_write_iter, sel_mem_write_structural_witin) = (
-                    self.selector_type_layout
-                        .sel_mem_write
-                        .sparse32_indices()
-                        .iter(),
-                    self.selector_type_layout.sel_mem_write.selector_expr().id(),
+
+                let Some(sel_last) = self.selector_type_layout.sel_last.as_ref() else {
+                    panic!("sel_last must be Some");
+                };
+                let (mut sel_last_iter, sel_last_structural_witin) = (
+                    sel_last.sparse_indices().iter(),
+                    sel_last.selector_expr().id(),
                 );
-                let (mut sel_lookup_iter, sel_lookup_structural_witin) = (
-                    self.selector_type_layout
-                        .sel_lookup
-                        .sparse32_indices()
-                        .iter(),
-                    self.selector_type_layout.sel_lookup.selector_expr().id(),
-                );
-                let (mut sel_zero_iter, sel_zero_structural_witin) = (
-                    self.selector_type_layout.sel_zero.sparse32_indices().iter(),
-                    self.selector_type_layout.sel_zero.selector_expr().id(),
+
+                let (mut sel_all_iter, sel_all_structural_witin) = (
+                    self.selector_type_layout.sel_all.sparse_indices().iter(),
+                    self.selector_type_layout.sel_all.selector_expr().id(),
                 );
 
                 #[allow(clippy::needless_range_loop)]
@@ -720,24 +693,19 @@ where
                         &mut wits[round_index as usize * self.n_committed..][..self.n_committed];
 
                     // set selector
-                    if let Some(index) = sel_mem_read_iter.next() {
+                    if let Some(index) = sel_first_iter.next() {
                         structural_wits
-                            [index * self.n_structural_witin + sel_mem_read_structural_witin] =
+                            [index * self.n_structural_witin + sel_first_structural_witin] =
                             E::BaseField::ONE;
                     }
-                    if let Some(index) = sel_mem_write_iter.next() {
+                    if let Some(index) = sel_last_iter.next() {
                         structural_wits
-                            [index * self.n_structural_witin + sel_mem_write_structural_witin] =
+                            [index * self.n_structural_witin + sel_last_structural_witin] =
                             E::BaseField::ONE;
                     }
-                    if let Some(index) = sel_lookup_iter.next() {
+                    if let Some(index) = sel_all_iter.next() {
                         structural_wits
-                            [index * self.n_structural_witin + sel_lookup_structural_witin] =
-                            E::BaseField::ONE;
-                    }
-                    if let Some(index) = sel_zero_iter.next() {
-                        structural_wits
-                            [index * self.n_structural_witin + sel_zero_structural_witin] =
+                            [index * self.n_structural_witin + sel_all_structural_witin] =
                             E::BaseField::ONE;
                     }
 
@@ -995,15 +963,7 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
         })
         .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-    let (out_evals, mut chip) = layout.finalize(&mut cb);
-
-    let layer = Layer::from_circuit_builder(
-        &cb,
-        "lookup_keccak".to_string(),
-        layout.n_challenges,
-        out_evals,
-    );
-    chip.add_layer(layer);
+    let chip = layout.finalize("lookup_keccak".to_string(), &mut cb);
 
     Ok((
         TestKeccakLayout {
@@ -1168,18 +1128,42 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         &[],
         &[],
         &challenges,
+        None,
     );
     exit_span!(span);
 
     let span = entered_span!("out_eval", profiling_2 = true);
-    let out_evals = {
-        let mut point = Vec::with_capacity(log2_num_instance_rounds);
-        point.extend(
-            prover_transcript
-                .sample_vec(log2_num_instance_rounds)
-                .to_vec(),
-        );
+    let mut point = Vec::with_capacity(log2_num_instance_rounds);
+    point.extend(
+        prover_transcript
+            .sample_vec(log2_num_instance_rounds)
+            .to_vec(),
+    );
 
+    let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+    assert!(
+        !first_layer.rotation_exprs.1.is_empty(),
+        "lookup_keccakf unittest expects rotation-enabled circuit"
+    );
+    let rotation_terms = first_layer
+        .rotation_sumcheck_expression_monomial_terms
+        .as_ref()
+        .expect("missing rotation sumcheck terms")
+        .clone();
+    let (rotation_proof, rotation_points) = prove_rotation::<E, PCS>(
+        num_threads,
+        log2_num_instance_rounds,
+        first_layer.rotation_cyclic_subgroup_size,
+        first_layer.rotation_cyclic_group_log2,
+        &gkr_witness.layers[0],
+        &first_layer.rotation_exprs.1,
+        rotation_terms,
+        &point,
+        &challenges,
+        &mut prover_transcript,
+    );
+
+    let mut out_evals = {
         if test_outputs {
             // Confront outputs with tiny_keccak::keccakf call
             let mut instance_outputs = vec![vec![]; num_instances];
@@ -1230,6 +1214,60 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             })
             .collect::<Vec<_>>()
     };
+
+    let Some([left_group_idx, right_group_idx, point_group_idx]) =
+        first_layer.rotation_selector_group_indices()
+    else {
+        panic!("rotation selectors missing");
+    };
+
+    let mut left_evals = Vec::new();
+    let mut right_evals = Vec::new();
+    let mut point_evals = Vec::new();
+    for chunk in rotation_proof.evals.chunks_exact(3) {
+        left_evals.push(chunk[0]);
+        right_evals.push(chunk[1]);
+        point_evals.push(chunk[2]);
+    }
+
+    let assign_group = |out_evals: &mut [PointAndEval<E>],
+                        eval_exprs: &[EvalExpression<E>],
+                        evals: &[E],
+                        point: &[E]| {
+        assert_eq!(
+            eval_exprs.len(),
+            evals.len(),
+            "rotation eval length mismatch"
+        );
+        for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
+            let EvalExpression::Single(index) = eval_expr else {
+                panic!("rotation groups must use EvalExpression::Single");
+            };
+            out_evals[*index] = PointAndEval {
+                point: point.to_vec(),
+                eval: *eval,
+            };
+        }
+    };
+
+    assign_group(
+        &mut out_evals,
+        &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
+        &left_evals,
+        &rotation_points.left,
+    );
+    assign_group(
+        &mut out_evals,
+        &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
+        &right_evals,
+        &rotation_points.right,
+    );
+    assign_group(
+        &mut out_evals,
+        &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
+        &point_evals,
+        &rotation_points.origin,
+    );
     exit_span!(span);
 
     if cfg!(debug_assertions) {
@@ -1240,7 +1278,15 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     }
 
     let span = entered_span!("create_proof", profiling_2 = true);
-    let selector_ctxs = vec![SelectorContext::new(0, num_instances, log2_num_instance_rounds); 3];
+    let first_layer_selector_groups = gkr_circuit
+        .layers
+        .first()
+        .map(|layer| layer.out_sel_and_eval_exprs.len())
+        .unwrap_or(0);
+    let selector_ctxs = vec![
+        SelectorContext::new(0, num_instances, log2_num_instance_rounds);
+        first_layer_selector_groups
+    ];
     let GKRProverOutput { gkr_proof, .. } = gkr_circuit
         .prove::<CpuBackend<E, PCS>, CpuProver<_>>(
             num_threads,
@@ -1271,12 +1317,27 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
                     .to_vec(),
             );
 
+            verify_rotation(
+                log2_num_instance_rounds,
+                first_layer.rotation_exprs.1.len(),
+                first_layer
+                    .rotation_sumcheck_expression
+                    .as_ref()
+                    .expect("missing rotation sumcheck expression"),
+                rotation_proof.clone(),
+                first_layer.rotation_cyclic_subgroup_size,
+                first_layer.rotation_cyclic_group_log2,
+                &point,
+                &challenges,
+                &mut verifier_transcript,
+            )
+            .expect("rotation verify failed");
+
             gkr_circuit
                 .verify(
                     log2_num_instance_rounds,
                     gkr_proof.clone(),
                     &out_evals,
-                    &[],
                     &[],
                     &challenges,
                     &mut verifier_transcript,

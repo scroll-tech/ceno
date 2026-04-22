@@ -48,9 +48,6 @@ impl<E: ExtensionField> ZKVMConstraintSystem<E> {
 
         vm_pk.commit_fixed(fixed_traces, fixed_traces_no_omc_init)?;
 
-        vm_pk.initial_global_state_expr = self.initial_global_state_expr;
-        vm_pk.finalize_global_state_expr = self.finalize_global_state_expr;
-
         vm_pk.set_program_entry_pc(entry_pc);
 
         Ok(vm_pk)

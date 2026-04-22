@@ -5,7 +5,7 @@ use std::array;
 use ceno_syscall::syscall_sha256_extend;
 
 fn main() {
-    let mut words: [u32; 64] = array::from_fn(|i| i as u32);
+    let mut words = Box::new(array::from_fn(|i| i as u32));
 
     let expected = [
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 34013193, 67559435, 1711661200,
@@ -18,6 +18,8 @@ fn main() {
         634956631,
     ];
 
-    syscall_sha256_extend(&mut words);
-    assert_eq!(words, expected);
+    for i in 16..64 {
+        syscall_sha256_extend(&mut words[i]);
+    }
+    assert_eq!(*words, expected);
 }

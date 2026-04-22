@@ -2,7 +2,7 @@ use std::iter::repeat_n;
 
 use rayon::iter::IndexedParallelIterator;
 
-use crate::{gkr::booleanhypercube::CYCLIC_POW2_5, utils::eq_eval_less_or_equal_than};
+use crate::utils::eq_eval_less_or_equal_than;
 use ff_ext::ExtensionField;
 use multilinear_extensions::{
     Expression, WitnessId,
@@ -48,8 +48,10 @@ pub enum SelectorType<E: ExtensionField> {
     /// Select part of the instances, other parts padded with a field element.
     Prefix(Expression<E>),
     /// selector activates on the specified `indices`, which are assumed to be in ascending order.
-    /// each index corresponds to a position within a fixed-size chunk (e.g., size 32),
-    OrderedSparse32 {
+    /// selector activates on the specified `indices`, which are assumed to be in ascending order.
+    /// each index corresponds to a position within a fixed-size chunk (e.g., size 64),
+    OrderedSparse {
+        num_vars: usize,
         indices: Vec<usize>,
         expression: Expression<E>,
     },
@@ -90,19 +92,20 @@ impl<E: ExtensionField> SelectorType<E> {
                         .into_mle(),
                 )
             }
-            SelectorType::OrderedSparse32 {
+            SelectorType::OrderedSparse {
+                num_vars,
                 indices,
                 expression: _,
             } => {
-                assert_eq!(ceil_log2(ctx.num_instances) + 5, ctx.num_vars);
+                assert_eq!(ceil_log2(ctx.num_instances) + num_vars, ctx.num_vars);
                 Some(
-                    (0..(1 << (ctx.num_vars - 5)))
+                    (0..(1 << (ctx.num_vars - num_vars)))
                         .into_par_iter()
                         .flat_map(|chunk_index| {
                             if chunk_index >= ctx.num_instances {
-                                vec![E::ZERO; 32]
+                                vec![E::ZERO; 1 << num_vars]
                             } else {
-                                let mut chunk = vec![E::ZERO; 32];
+                                let mut chunk = vec![E::ZERO; 1 << num_vars];
                                 let mut indices_iter = indices.iter().copied();
                                 let mut next_keep = indices_iter.next();
 
@@ -125,7 +128,6 @@ impl<E: ExtensionField> SelectorType<E> {
         }
     }
 
-    /// Compute true and false mle eq(1; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (eq() - sel(y; b[5..]))
     pub fn compute(
         &self,
         out_point: &Point<E>,
@@ -152,15 +154,17 @@ impl<E: ExtensionField> SelectorType<E> {
                 sel.splice(end..sel.len(), repeat_n(E::ZERO, sel.len() - end));
                 Some(sel.into_mle())
             }
-            // compute true and false mle eq(1; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (eq() - sel(y; b[5..]))
-            SelectorType::OrderedSparse32 { indices, .. } => {
+            // compute true and false mle eq(1; b[..num_vars]) * sel(y; b[num_vars..]), and eq(1; b[..num_vars]) * (eq() - sel(y; b[num_vars..]))
+            SelectorType::OrderedSparse {
+                indices, num_vars, ..
+            } => {
                 assert_eq!(
                     out_point.len(),
-                    next_pow2_instance_padding(ctx.num_instances).ilog2() as usize + 5
+                    next_pow2_instance_padding(ctx.num_instances).ilog2() as usize + num_vars
                 );
 
                 let mut sel = build_eq_x_r_vec(out_point);
-                sel.par_chunks_exact_mut(CYCLIC_POW2_5.len())
+                sel.par_chunks_exact_mut(1 << num_vars)
                     .enumerate()
                     .for_each(|(chunk_index, chunk)| {
                         if chunk_index >= ctx.num_instances {
@@ -281,21 +285,22 @@ impl<E: ExtensionField> SelectorType<E> {
                     (expression, sel)
                 }
             }
-            // evaluate true and false mle eq(CYCLIC_POW2_5[round]; b[..5]) * sel(y; b[5..]), and eq(1; b[..5]) * (1 - sel(y; b[5..]))
-            SelectorType::OrderedSparse32 {
+            // evaluate true mle \sum_{round} (eq(CYCLIC_POW2[round]; b[..num_vars])) * sel(y; b[num_vars..])
+            SelectorType::OrderedSparse {
+                num_vars,
                 indices,
                 expression,
             } => {
-                let out_subgroup_eq = build_eq_x_r_vec(&out_point[..5]);
-                let in_subgroup_eq = build_eq_x_r_vec(&in_point[..5]);
+                let out_subgroup_eq = build_eq_x_r_vec(&out_point[..*num_vars]);
+                let in_subgroup_eq = build_eq_x_r_vec(&in_point[..*num_vars]);
                 let mut eval = E::ZERO;
                 for index in indices {
                     eval += out_subgroup_eq[*index] * in_subgroup_eq[*index];
                 }
                 let sel = eq_eval_less_or_equal_than(
                     ctx.num_instances - 1,
-                    &out_point[5..],
-                    &in_point[5..],
+                    &out_point[*num_vars..],
+                    &in_point[*num_vars..],
                 );
                 (expression, eval * sel)
             }
@@ -358,16 +363,16 @@ impl<E: ExtensionField> SelectorType<E> {
     }
 
     /// return ordered indices of OrderedSparse32
-    pub fn sparse32_indices(&self) -> &[usize] {
+    pub fn sparse_indices(&self) -> &[usize] {
         match self {
-            Self::OrderedSparse32 { indices, .. } => indices,
+            Self::OrderedSparse { indices, .. } => indices,
             _ => panic!("invalid calling on non sparse type"),
         }
     }
 
     pub fn selector_expr(&self) -> &Expression<E> {
         match self {
-            Self::OrderedSparse32 { expression, .. }
+            Self::OrderedSparse { expression, .. }
             | Self::Whole(expression)
             | Self::Prefix(expression) => expression,
             e => unimplemented!("no selector expression in {:?}", e),

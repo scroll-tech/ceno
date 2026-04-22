@@ -1,6 +1,4 @@
-use super::ram_impl::{
-    LocalFinalRAMTableConfig, NonVolatileTableConfigTrait, PubIOTableInitConfig,
-};
+use super::ram_impl::{LocalFinalRAMTableConfig, NonVolatileTableConfigTrait};
 use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
@@ -123,58 +121,6 @@ impl<
     }
 }
 
-/// PubIORamCircuit initializes and finalizes memory
-/// - at fixed addresses,
-/// - with content from the public input of proofs.
-///
-/// This circuit does not and cannot decide whether the memory is mutable or not.
-/// It supports LOAD where the program reads the public input,
-/// or STORE where the memory content must equal the public input after execution.
-pub struct PubIORamInitCircuit<E, R>(PhantomData<(E, R)>);
-
-impl<E: ExtensionField, NVRAM: NonVolatileTable + Send + Sync + Clone> TableCircuit<E>
-    for PubIORamInitCircuit<E, NVRAM>
-{
-    type TableConfig = PubIOTableInitConfig<NVRAM>;
-    type FixedInput = [Addr];
-    type WitnessInput<'a> = [MemFinalRecord];
-
-    fn name() -> String {
-        format!("RAM_{:?}_{}", NVRAM::RAM_TYPE, NVRAM::name())
-    }
-
-    fn construct_circuit(
-        cb: &mut CircuitBuilder<E>,
-        params: &ProgramParams,
-    ) -> Result<Self::TableConfig, ZKVMError> {
-        cb.set_omc_init_only();
-        Ok(cb.namespace(
-            || Self::name(),
-            |cb| Self::TableConfig::construct_circuit(cb, params),
-        )?)
-    }
-
-    fn generate_fixed_traces(
-        config: &Self::TableConfig,
-        num_fixed: usize,
-        io_addrs: &[Addr],
-    ) -> RowMajorMatrix<E::BaseField> {
-        // assume returned table is well-formed including padding
-        config.gen_init_state(num_fixed, io_addrs)
-    }
-
-    fn assign_instances(
-        config: &Self::TableConfig,
-        num_witin: usize,
-        num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
-        final_mem: &[MemFinalRecord],
-    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
-        // assume returned table is well-formed including padding
-        Ok(config.assign_instances(num_witin, num_structural_witin, final_mem)?)
-    }
-}
-
 /// - **Dynamic**: The address space is bounded within a specific range,
 ///   though the range itself may be dynamically determined per proof.
 /// - **Volatile**: The initial values are set to `0`
@@ -183,6 +129,7 @@ pub trait DynVolatileRamTable {
     const V_LIMBS: usize;
     const ZERO_INIT: bool;
     const DESCENDING: bool;
+    const DYNAMIC_OFFSET: bool = false;
 
     fn addr_expr<E: ExtensionField>(
         cb: &mut CircuitBuilder<E>,
@@ -359,13 +306,13 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
                 // zero_record
                 vec![],
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(selector_type.clone());
 
-        let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Self::name(), out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))

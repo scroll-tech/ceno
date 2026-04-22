@@ -11,7 +11,7 @@ use crate::{
     utils::{imm_sign_extend, imm_sign_extend_circuit},
     witness::LkMultiplicity,
 };
-use ceno_emul::StepRecord;
+use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{ToExpr, WitIn};
 use p3::field::FieldAlgebra;
@@ -32,6 +32,11 @@ pub struct InstructionConfig<E: ExtensionField> {
 
 impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     type InstructionConfig = InstructionConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ADDI]
+    }
 
     fn name() -> String {
         format!("{:?}", Self::INST_KIND)

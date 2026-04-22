@@ -138,12 +138,12 @@ mod test {
 
         // values assignment
         let insn_code = encode_rv32(I::INST_KIND, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulhInstructionBase::<E, I>::assign_instances(
+        let (raw_witin, lkm) = MulhInstructionBase::<E, I>::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![&StepRecord::new_r_instruction(
+            &[StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
                 insn_code,
@@ -217,12 +217,12 @@ mod test {
 
         // values assignment
         let insn_code = encode_rv32(InsnKind::MULH, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulhInstruction::assign_instances(
+        let (raw_witin, lkm) = MulhInstruction::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![&StepRecord::new_r_instruction(
+            &[StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
                 insn_code,
@@ -301,12 +301,12 @@ mod test {
 
         // values assignment
         let insn_code = encode_rv32(InsnKind::MULHSU, 2, 3, 4, 0);
-        let (raw_witin, lkm) = MulhsuInstruction::assign_instances(
+        let (raw_witin, lkm) = MulhsuInstruction::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![&StepRecord::new_r_instruction(
+            &[StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
                 insn_code,

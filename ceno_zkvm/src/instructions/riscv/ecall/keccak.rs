@@ -1,12 +1,13 @@
 use std::marker::PhantomData;
 
 use ceno_emul::{
-    ByteAddr, Change, Cycle, InsnKind, KECCAK_PERMUTE, Platform, StepRecord, WORD_SIZE, WriteOp,
+    ByteAddr, Change, Cycle, InsnKind, KECCAK_PERMUTE, Platform, StepIndex, StepRecord, WORD_SIZE,
+    WriteOp,
 };
 use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube, layer::Layer},
+    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube},
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -54,6 +55,11 @@ pub struct KeccakInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
     type InstructionConfig = EcallKeccakConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::ECALL]
+    }
 
     fn name() -> String {
         "Ecall_Keccak".to_string()
@@ -126,10 +132,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(cb, Self::name(), layout.n_challenges, out_evals);
-        chip.add_layer(layer);
+        let chip = layout.finalize(Self::name(), cb);
 
         let circuit = chip.gkr_circuit();
 
@@ -169,10 +172,11 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         shard_ctx: &mut ShardContext,
         num_witin: usize,
         num_structural_witin: usize,
-        steps: Vec<&StepRecord>,
+        steps: &[StepRecord],
+        step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
         let mut lk_multiplicity = LkMultiplicity::default();
-        if steps.is_empty() {
+        if step_indices.is_empty() {
             return Ok((
                 [
                     RowMajorMatrix::new(0, num_witin, InstancePaddingStrategy::Default),
@@ -182,17 +186,18 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             ));
         }
         let nthreads = max_usable_threads();
-        let num_instance_per_batch = steps.len().div_ceil(nthreads).max(1);
+        let num_instance_per_batch = step_indices.len().div_ceil(nthreads).max(1);
+        let rotation = KECCAK_ROUNDS.next_power_of_two().ilog2() as usize;
 
         let mut raw_witin = RowMajorMatrix::<E::BaseField>::new_by_rotation(
-            steps.len(),
-            KECCAK_ROUNDS.next_power_of_two().ilog2() as usize,
+            step_indices.len(),
+            rotation,
             num_witin,
             InstancePaddingStrategy::Default,
         );
         let mut raw_structural_witin = RowMajorMatrix::<E::BaseField>::new_by_rotation(
-            steps.len(),
-            KECCAK_ROUNDS.next_power_of_two().ilog2() as usize,
+            step_indices.len(),
+            rotation,
             num_structural_witin,
             InstancePaddingStrategy::Default,
         );
@@ -203,15 +208,16 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
         // 1st pass: assign witness outside of gkr-iop scope
         raw_witin_iter
-            .zip_eq(steps.par_chunks(num_instance_per_batch))
+            .zip_eq(step_indices.par_chunks(num_instance_per_batch))
             .zip(shard_ctx_vec)
-            .flat_map(|((instances, steps), mut shard_ctx)| {
+            .flat_map(|((instances, indices), mut shard_ctx)| {
                 let mut lk_multiplicity = lk_multiplicity.clone();
 
                 instances
                     .chunks_mut(num_witin * KECCAK_ROUNDS.next_power_of_two())
-                    .zip_eq(steps)
-                    .map(|(instance_with_rotation, step)| {
+                    .zip_eq(indices.iter().copied())
+                    .map(|(instance_with_rotation, idx)| {
+                        let step = &steps[idx];
                         let ops = &step.syscall().expect("syscall step");
 
                         let bh = BooleanHypercube::new(KECCAK_ROUNDS_CEIL_LOG2);
@@ -271,9 +277,10 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .collect::<Result<(), ZKVMError>>()?;
 
         // second pass
-        let instances: Vec<KeccakInstance> = steps
+        let instances: Vec<KeccakInstance> = step_indices
             .iter()
-            .map(|step| -> KeccakInstance {
+            .map(|&idx| -> KeccakInstance {
+                let step = &steps[idx];
                 let (instance, prev_ts): (Vec<u32>, Vec<Cycle>) = step
                     .syscall()
                     .unwrap()

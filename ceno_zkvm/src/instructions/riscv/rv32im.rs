@@ -9,7 +9,7 @@ use crate::instructions::riscv::lui::LuiInstruction;
 #[cfg(not(feature = "u16limb_circuit"))]
 use crate::tables::PowTableCircuit;
 use crate::{
-    e2e::{ShardContext, StepCellExtractor},
+    e2e::ShardContext,
     error::ZKVMError,
     instructions::{
         Instruction,
@@ -21,9 +21,10 @@ use crate::{
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
                 Fp2AddInstruction, Fp2MulInstruction, FpAddInstruction, FpMulInstruction,
-                KeccakInstruction, Secp256k1InvInstruction, Secp256r1InvInstruction,
-                Uint256MulInstruction, WeierstrassAddAssignInstruction,
-                WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
+                KeccakInstruction, PubIoCommitInstruction, Secp256k1InvInstruction,
+                Secp256r1InvInstruction, ShaExtendInstruction, Uint256MulInstruction,
+                WeierstrassAddAssignInstruction, WeierstrassDecompressInstruction,
+                WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
@@ -35,6 +36,7 @@ use crate::{
         },
     },
     scheme::constants::DYNAMIC_RANGE_MAX_BITS,
+    state::GlobalState,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, DoubleU8TableCircuit, DynamicRangeTableCircuit, LtuTableCircuit,
@@ -45,14 +47,14 @@ use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
     Bn254FpMulSpec,
     InsnKind::{self, *},
-    KeccakSpec, LogPcCycleSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec,
-    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec, Secp256r1DoubleSpec,
-    Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepRecord, SyscallSpec, Uint256MulSpec,
+    KeccakSpec, LogPcCycleSpec, Platform, PubIoCommitSpec, STATE_CONTINUATION, Secp256k1AddSpec,
+    Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec,
+    Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepCellExtractor, StepIndex,
+    StepRecord, SyscallSpec, Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
-use ecall::EcallDummy;
 use ff_ext::ExtensionField;
-use itertools::{Itertools, izip};
+use itertools::Itertools;
 use mulh::{MulInstruction, MulhInstruction, MulhsuInstruction};
 use shift::SraInstruction;
 use slt::{SltInstruction, SltuInstruction};
@@ -64,14 +66,16 @@ use sp1_curves::weierstrass::{
     secp256r1::Secp256r1,
 };
 use std::{
+    any::{TypeId, type_name},
     cmp::Reverse,
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
 };
 use strum::{EnumCount, IntoEnumIterator};
 
 pub mod mmu;
 
 const ECALL_HALT: u32 = Platform::ecall_halt();
+const ECALL_PUB_IO_COMMIT: u32 = PubIoCommitSpec::CODE;
 
 pub struct Rv32imConfig<E: ExtensionField> {
     // ALU Opcodes.
@@ -133,7 +137,10 @@ pub struct Rv32imConfig<E: ExtensionField> {
 
     // Ecall Opcodes
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub pubio_commit_config: <PubIoCommitInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub state_continuation_config: <GlobalState<E> as Instruction<E>>::InstructionConfig,
     pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub sha_extend_config: <ShaExtendInstruction<E> as Instruction<E>>::InstructionConfig,
     pub bn254_add_config:
         <WeierstrassAddAssignInstruction<E, SwCurve<Bn254>> as Instruction<E>>::InstructionConfig,
     pub bn254_double_config:
@@ -179,15 +186,78 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub ecall_cells_map: HashMap<String, u64>,
 }
 
+#[derive(Clone)]
+pub struct InstructionDispatchBuilder {
+    record_buffer_count: usize,
+    insn_to_record_buffer: Vec<Option<usize>>,
+    type_to_record_buffer: HashMap<TypeId, usize>,
+}
+
+impl InstructionDispatchBuilder {
+    fn new() -> Self {
+        Self {
+            record_buffer_count: 0,
+            insn_to_record_buffer: vec![None; InsnKind::COUNT],
+            type_to_record_buffer: HashMap::new(),
+        }
+    }
+
+    fn register_instruction_kinds<E: ExtensionField, I: Instruction<E> + 'static>(
+        &mut self,
+        kinds: &[InsnKind],
+    ) {
+        assert!(
+            kinds.iter().all(|kind| *kind != InsnKind::ECALL),
+            "ecall dispatch via function code"
+        );
+        let record_buffer_index = self.record_buffer_count;
+        self.record_buffer_count += 1;
+        for &kind in kinds {
+            if let Some(existing) = self.insn_to_record_buffer[kind as usize] {
+                panic!(
+                    "Instruction kind {:?} registered multiple times: existing buffer {}, new buffer {} (instruction type: {})",
+                    kind,
+                    existing,
+                    record_buffer_index,
+                    type_name::<I>()
+                );
+            }
+            self.insn_to_record_buffer[kind as usize] = Some(record_buffer_index);
+        }
+        assert!(
+            self.type_to_record_buffer
+                .insert(TypeId::of::<I>(), record_buffer_index)
+                .is_none(),
+            "Instruction circuit {} registered more than once",
+            type_name::<I>()
+        );
+    }
+
+    pub fn to_dispatch_ctx(&self) -> InstructionDispatchCtx {
+        InstructionDispatchCtx::new(
+            self.record_buffer_count,
+            self.insn_to_record_buffer.clone(),
+            self.type_to_record_buffer.clone(),
+        )
+    }
+}
+
 const KECCAK_CELL_BLOWUP_FACTOR: u64 = 2;
 
 impl<E: ExtensionField> Rv32imConfig<E> {
-    pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
+    pub fn construct_circuits(
+        cs: &mut ZKVMConstraintSystem<E>,
+    ) -> (Self, InstructionDispatchBuilder) {
         let mut inst_cells_map = vec![0; InsnKind::COUNT];
         let mut ecall_cells_map = HashMap::new();
 
+        let mut inst_dispatch_builder = InstructionDispatchBuilder::new();
+
         macro_rules! register_opcode_circuit {
             ($insn_kind:ident, $instruction:ty, $inst_cells_map:ident) => {{
+                inst_dispatch_builder.register_instruction_kinds::<E, $instruction>(
+                    <$instruction as Instruction<E>>::inst_kinds(),
+                );
                 let config = cs.register_opcode_circuit::<$instruction>();
 
                 // update estimated cell
@@ -290,6 +360,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             }};
         }
         let halt_config = register_ecall_circuit!(HaltInstruction<E>, ecall_cells_map);
+        let pubio_commit_config =
+            register_ecall_circuit!(PubIoCommitInstruction<E>, ecall_cells_map);
+        let state_continuation_config = register_ecall_circuit!(GlobalState<E>, ecall_cells_map);
 
         // Keccak precompile is a known hotspot for peak memory.
         // Its heavy read/write/LK activity inflates tower-witness usage, causing
@@ -316,6 +389,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .is_none()
         );
         let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
+        let sha_extend_config = register_ecall_circuit!(ShaExtendInstruction<E>, ecall_cells_map);
         let bn254_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
         let bn254_fp_add_config =
             register_ecall_circuit!(FpAddInstruction<E, Bn254BaseField>, ecall_cells_map);
@@ -347,7 +421,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         #[cfg(not(feature = "u16limb_circuit"))]
         let pow_config = cs.register_table_circuit::<PowTableCircuit<E>>();
 
-        Self {
+        let config = Self {
             // alu opcodes
             add_config,
             sub_config,
@@ -402,7 +476,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             lb_config,
             // ecall opcodes
             halt_config,
+            pubio_commit_config,
+            state_continuation_config,
             keccak_config,
+            sha_extend_config,
             bn254_add_config,
             bn254_double_config,
             bn254_fp_add_config,
@@ -428,7 +505,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             pow_config,
             inst_cells_map,
             ecall_cells_map,
-        }
+        };
+
+        (config, inst_dispatch_builder)
     }
 
     pub fn generate_fixed_traces(
@@ -493,7 +572,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // system
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config);
+        fixed.register_opcode_circuit::<PubIoCommitInstruction<E>>(cs, &self.pubio_commit_config);
+        fixed.register_opcode_circuit::<GlobalState<E>>(cs, &self.state_continuation_config);
         fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs, &self.keccak_config);
+        fixed.register_opcode_circuit::<ShaExtendInstruction<E>>(cs, &self.sha_extend_config);
         fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
             cs,
             &self.bn254_add_config,
@@ -559,317 +641,228 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &());
     }
 
-    pub fn assign_opcode_circuit<'a>(
+    pub fn assign_opcode_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
+        instrunction_dispatch_ctx: &mut InstructionDispatchCtx,
+        shard_steps: &[StepRecord],
         witness: &mut ZKVMWitnesses<E>,
-        steps: &'a [StepRecord],
-    ) -> Result<GroupedSteps<'a>, ZKVMError> {
-        let mut all_records: BTreeMap<InsnKind, Vec<&StepRecord>> = InsnKind::iter()
-            .map(|insn_kind| (insn_kind, Vec::new()))
-            .collect();
-        let mut halt_records = Vec::new();
-        let mut keccak_records = Vec::new();
-        let mut bn254_add_records = Vec::new();
-        let mut bn254_double_records = Vec::new();
-        let mut bn254_fp_add_records = Vec::new();
-        let mut bn254_fp_mul_records = Vec::new();
-        let mut bn254_fp2_add_records = Vec::new();
-        let mut bn254_fp2_mul_records = Vec::new();
-        let mut secp256k1_add_records = Vec::new();
-        let mut secp256k1_double_records = Vec::new();
-        let mut secp256k1_decompress_records = Vec::new();
-        let mut uint256_mul_records = Vec::new();
-        let mut secp256k1_scalar_invert_records = Vec::new();
-        let mut secp256r1_add_records = Vec::new();
-        let mut secp256r1_double_records = Vec::new();
-        let mut secp256r1_scalar_invert_records = Vec::new();
-        steps.iter().for_each(|record| {
-            let insn_kind = record.insn.kind;
-            match insn_kind {
-                // ecall / halt
-                InsnKind::ECALL if record.rs1().unwrap().value == Platform::ecall_halt() => {
-                    halt_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == KeccakSpec::CODE => {
-                    keccak_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254AddSpec::CODE => {
-                    bn254_add_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254DoubleSpec::CODE => {
-                    bn254_double_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254FpAddSpec::CODE => {
-                    bn254_fp_add_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254FpMulSpec::CODE => {
-                    bn254_fp_mul_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254Fp2AddSpec::CODE => {
-                    bn254_fp2_add_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Bn254Fp2MulSpec::CODE => {
-                    bn254_fp2_mul_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1AddSpec::CODE => {
-                    secp256k1_add_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DoubleSpec::CODE => {
-                    secp256k1_double_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256r1AddSpec::CODE => {
-                    secp256r1_add_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256r1DoubleSpec::CODE => {
-                    secp256r1_double_records.push(record);
-                }
-                InsnKind::ECALL
-                    if record.rs1().unwrap().value == Secp256k1ScalarInvertSpec::CODE =>
-                {
-                    secp256k1_scalar_invert_records.push(record);
-                }
-                InsnKind::ECALL
-                    if record.rs1().unwrap().value == Secp256r1ScalarInvertSpec::CODE =>
-                {
-                    secp256r1_scalar_invert_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Secp256k1DecompressSpec::CODE => {
-                    secp256k1_decompress_records.push(record);
-                }
-                InsnKind::ECALL if record.rs1().unwrap().value == Uint256MulSpec::CODE => {
-                    uint256_mul_records.push(record);
-                }
-                // other type of ecalls are handled by dummy ecall instruction
-                _ => {
-                    // it's safe to unwrap as all_records are initialized with Vec::new()
-                    all_records.get_mut(&insn_kind).unwrap().push(record);
-                }
-            }
-        });
+    ) -> Result<(), ZKVMError> {
+        instrunction_dispatch_ctx.trace_opcode_stats();
 
-        for (insn_kind, (_, records)) in
-            izip!(InsnKind::iter(), &all_records).sorted_by_key(|(_, (_, a))| Reverse(a.len()))
-        {
-            tracing::debug!("tracer generated {:?} {} records", insn_kind, records.len());
+        macro_rules! log_ecall {
+            ($desc:literal, $code:expr) => {
+                tracing::debug!(
+                    "tracer generated {} {} records",
+                    $desc,
+                    instrunction_dispatch_ctx.count_ecall_code($code)
+                );
+            };
         }
-        tracing::debug!("tracer generated HALT {} records", halt_records.len());
-        tracing::debug!("tracer generated KECCAK {} records", keccak_records.len());
-        tracing::debug!(
-            "tracer generated bn254_add_records {} records",
-            bn254_add_records.len()
+
+        log_ecall!("HALT", ECALL_HALT);
+        log_ecall!("PUB_IO_COMMIT", ECALL_PUB_IO_COMMIT);
+        log_ecall!("STATE_CONTINUATION", STATE_CONTINUATION);
+        log_ecall!("KECCAK", KeccakSpec::CODE);
+        log_ecall!("bn254_add_records", Bn254AddSpec::CODE);
+        log_ecall!("bn254_double_records", Bn254DoubleSpec::CODE);
+        log_ecall!("bn254_fp_add_records", Bn254FpAddSpec::CODE);
+        log_ecall!("bn254_fp_mul_records", Bn254FpMulSpec::CODE);
+        log_ecall!("bn254_fp2_add_records", Bn254Fp2AddSpec::CODE);
+        log_ecall!("bn254_fp2_mul_records", Bn254Fp2MulSpec::CODE);
+        log_ecall!("secp256k1_add_records", Secp256k1AddSpec::CODE);
+        log_ecall!("secp256k1_double_records", Secp256k1DoubleSpec::CODE);
+        log_ecall!(
+            "secp256k1_scalar_invert_records",
+            Secp256k1ScalarInvertSpec::CODE
         );
-        tracing::debug!(
-            "tracer generated bn254_double_records {} records",
-            bn254_double_records.len()
+        log_ecall!(
+            "secp256k1_decompress_records",
+            Secp256k1DecompressSpec::CODE
         );
-        tracing::debug!(
-            "tracer generated bn254_fp_add_records {} records",
-            bn254_fp_add_records.len()
+        log_ecall!("secp256r1_add_records", Secp256r1AddSpec::CODE);
+        log_ecall!("secp256r1_double_records", Secp256r1DoubleSpec::CODE);
+        log_ecall!(
+            "secp256r1_scalar_invert_records",
+            Secp256r1ScalarInvertSpec::CODE
         );
-        tracing::debug!(
-            "tracer generated bn254_fp_mul_records {} records",
-            bn254_fp_mul_records.len()
-        );
-        tracing::debug!(
-            "tracer generated bn254_fp2_add_records {} records",
-            bn254_fp2_add_records.len()
-        );
-        tracing::debug!(
-            "tracer generated bn254_fp2_mul_records {} records",
-            bn254_fp2_mul_records.len()
-        );
-        tracing::debug!(
-            "tracer generated secp256k1_add_records {} records",
-            secp256k1_add_records.len()
-        );
-        tracing::debug!(
-            "tracer generated secp256k1_double_records {} records",
-            secp256k1_double_records.len()
-        );
-        tracing::debug!(
-            "tracer generated secp256k1_scalar_invert_records {} records",
-            secp256k1_scalar_invert_records.len()
-        );
-        tracing::debug!(
-            "tracer generated secp256k1_decompress_records {} records",
-            secp256k1_decompress_records.len()
-        );
-        tracing::debug!(
-            "tracer generated uint256_mul_records {} records",
-            uint256_mul_records.len()
-        );
+        log_ecall!("uint256_mul_records", Uint256MulSpec::CODE);
+        log_ecall!("sha_extend_records", Sha256ExtendSpec::CODE);
 
         macro_rules! assign_opcode {
-            ($insn_kind:ident,$instruction:ty,$config:ident) => {
+            ($instruction:ty, $config:ident) => {{
+                let records = instrunction_dispatch_ctx
+                    .records_for_kinds::<E, $instruction>()
+                    .unwrap_or(&[]);
                 witness.assign_opcode_circuit::<$instruction>(
                     cs,
                     shard_ctx,
                     &self.$config,
-                    all_records.remove(&($insn_kind)).unwrap(),
+                    shard_steps,
+                    records,
                 )?;
-            };
+            }};
         }
+
+        macro_rules! assign_ecall {
+            ($instruction:ty, $config:ident, $code:expr) => {{
+                let records = instrunction_dispatch_ctx
+                    .records_for_ecall_code($code)
+                    .unwrap_or(&[]);
+                witness.assign_opcode_circuit::<$instruction>(
+                    cs,
+                    shard_ctx,
+                    &self.$config,
+                    shard_steps,
+                    records,
+                )?;
+            }};
+        }
+
         // alu
-        assign_opcode!(ADD, AddInstruction<E>, add_config);
-        assign_opcode!(SUB, SubInstruction<E>, sub_config);
-        assign_opcode!(AND, AndInstruction<E>, and_config);
-        assign_opcode!(OR, OrInstruction<E>, or_config);
-        assign_opcode!(XOR, XorInstruction<E>, xor_config);
-        assign_opcode!(SLL, SllInstruction<E>, sll_config);
-        assign_opcode!(SRL, SrlInstruction<E>, srl_config);
-        assign_opcode!(SRA, SraInstruction<E>, sra_config);
-        assign_opcode!(SLT, SltInstruction<E>, slt_config);
-        assign_opcode!(SLTU, SltuInstruction<E>, sltu_config);
-        assign_opcode!(MUL, MulInstruction<E>, mul_config);
-        assign_opcode!(MULH, MulhInstruction<E>, mulh_config);
-        assign_opcode!(MULHSU, MulhsuInstruction<E>, mulhsu_config);
-        assign_opcode!(MULHU, MulhuInstruction<E>, mulhu_config);
-        assign_opcode!(DIVU, DivuInstruction<E>, divu_config);
-        assign_opcode!(REMU, RemuInstruction<E>, remu_config);
-        assign_opcode!(DIV, DivInstruction<E>, div_config);
-        assign_opcode!(REM, RemInstruction<E>, rem_config);
+        assign_opcode!(AddInstruction<E>, add_config);
+        assign_opcode!(SubInstruction<E>, sub_config);
+        assign_opcode!(AndInstruction<E>, and_config);
+        assign_opcode!(OrInstruction<E>, or_config);
+        assign_opcode!(XorInstruction<E>, xor_config);
+        assign_opcode!(SllInstruction<E>, sll_config);
+        assign_opcode!(SrlInstruction<E>, srl_config);
+        assign_opcode!(SraInstruction<E>, sra_config);
+        assign_opcode!(SltInstruction<E>, slt_config);
+        assign_opcode!(SltuInstruction<E>, sltu_config);
+        assign_opcode!(MulInstruction<E>, mul_config);
+        assign_opcode!(MulhInstruction<E>, mulh_config);
+        assign_opcode!(MulhsuInstruction<E>, mulhsu_config);
+        assign_opcode!(MulhuInstruction<E>, mulhu_config);
+        assign_opcode!(DivuInstruction<E>, divu_config);
+        assign_opcode!(RemuInstruction<E>, remu_config);
+        assign_opcode!(DivInstruction<E>, div_config);
+        assign_opcode!(RemInstruction<E>, rem_config);
         // alu with imm
-        assign_opcode!(ADDI, AddiInstruction<E>, addi_config);
-        assign_opcode!(ANDI, AndiInstruction<E>, andi_config);
-        assign_opcode!(ORI, OriInstruction<E>, ori_config);
-        assign_opcode!(XORI, XoriInstruction<E>, xori_config);
-        assign_opcode!(SLLI, SlliInstruction<E>, slli_config);
-        assign_opcode!(SRLI, SrliInstruction<E>, srli_config);
-        assign_opcode!(SRAI, SraiInstruction<E>, srai_config);
-        assign_opcode!(SLTI, SltiInstruction<E>, slti_config);
-        assign_opcode!(SLTIU, SltiuInstruction<E>, sltiu_config);
+        assign_opcode!(AddiInstruction<E>, addi_config);
+        assign_opcode!(AndiInstruction<E>, andi_config);
+        assign_opcode!(OriInstruction<E>, ori_config);
+        assign_opcode!(XoriInstruction<E>, xori_config);
+        assign_opcode!(SlliInstruction<E>, slli_config);
+        assign_opcode!(SrliInstruction<E>, srli_config);
+        assign_opcode!(SraiInstruction<E>, srai_config);
+        assign_opcode!(SltiInstruction<E>, slti_config);
+        assign_opcode!(SltiuInstruction<E>, sltiu_config);
         #[cfg(feature = "u16limb_circuit")]
-        assign_opcode!(LUI, LuiInstruction<E>, lui_config);
+        assign_opcode!(LuiInstruction<E>, lui_config);
         #[cfg(feature = "u16limb_circuit")]
-        assign_opcode!(AUIPC, AuipcInstruction<E>, auipc_config);
+        assign_opcode!(AuipcInstruction<E>, auipc_config);
         // branching
-        assign_opcode!(BEQ, BeqInstruction<E>, beq_config);
-        assign_opcode!(BNE, BneInstruction<E>, bne_config);
-        assign_opcode!(BLT, BltInstruction<E>, blt_config);
-        assign_opcode!(BLTU, BltuInstruction<E>, bltu_config);
-        assign_opcode!(BGE, BgeInstruction<E>, bge_config);
-        assign_opcode!(BGEU, BgeuInstruction<E>, bgeu_config);
+        assign_opcode!(BeqInstruction<E>, beq_config);
+        assign_opcode!(BneInstruction<E>, bne_config);
+        assign_opcode!(BltInstruction<E>, blt_config);
+        assign_opcode!(BltuInstruction<E>, bltu_config);
+        assign_opcode!(BgeInstruction<E>, bge_config);
+        assign_opcode!(BgeuInstruction<E>, bgeu_config);
         // jump
-        assign_opcode!(JAL, JalInstruction<E>, jal_config);
-        assign_opcode!(JALR, JalrInstruction<E>, jalr_config);
+        assign_opcode!(JalInstruction<E>, jal_config);
+        assign_opcode!(JalrInstruction<E>, jalr_config);
         // memory
-        assign_opcode!(LW, LwInstruction<E>, lw_config);
-        assign_opcode!(LB, LbInstruction<E>, lb_config);
-        assign_opcode!(LBU, LbuInstruction<E>, lbu_config);
-        assign_opcode!(LH, LhInstruction<E>, lh_config);
-        assign_opcode!(LHU, LhuInstruction<E>, lhu_config);
-        assign_opcode!(SW, SwInstruction<E>, sw_config);
-        assign_opcode!(SH, ShInstruction<E>, sh_config);
-        assign_opcode!(SB, SbInstruction<E>, sb_config);
+        assign_opcode!(LwInstruction<E>, lw_config);
+        assign_opcode!(LbInstruction<E>, lb_config);
+        assign_opcode!(LbuInstruction<E>, lbu_config);
+        assign_opcode!(LhInstruction<E>, lh_config);
+        assign_opcode!(LhuInstruction<E>, lhu_config);
+        assign_opcode!(SwInstruction<E>, sw_config);
+        assign_opcode!(ShInstruction<E>, sh_config);
+        assign_opcode!(SbInstruction<E>, sb_config);
 
         // ecall / halt
-        witness.assign_opcode_circuit::<HaltInstruction<E>>(
-            cs,
-            shard_ctx,
-            &self.halt_config,
-            halt_records,
-        )?;
-        witness.assign_opcode_circuit::<KeccakInstruction<E>>(
-            cs,
-            shard_ctx,
-            &self.keccak_config,
-            keccak_records,
-        )?;
-        witness.assign_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
-            cs,
-            shard_ctx,
-            &self.bn254_add_config,
-            bn254_add_records,
-        )?;
-        witness.assign_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>>(
-            cs,
-            shard_ctx,
-            &self.bn254_double_config,
-            bn254_double_records,
-        )?;
-        witness.assign_opcode_circuit::<FpAddInstruction<E, Bn254BaseField>>(
-            cs,
-            shard_ctx,
-            &self.bn254_fp_add_config,
-            bn254_fp_add_records,
-        )?;
-        witness.assign_opcode_circuit::<FpMulInstruction<E, Bn254BaseField>>(
-            cs,
-            shard_ctx,
-            &self.bn254_fp_mul_config,
-            bn254_fp_mul_records,
-        )?;
-        witness.assign_opcode_circuit::<Fp2AddInstruction<E, Bn254BaseField>>(
-            cs,
-            shard_ctx,
-            &self.bn254_fp2_add_config,
-            bn254_fp2_add_records,
-        )?;
-        witness.assign_opcode_circuit::<Fp2MulInstruction<E, Bn254BaseField>>(
-            cs,
-            shard_ctx,
-            &self.bn254_fp2_mul_config,
-            bn254_fp2_mul_records,
-        )?;
-        witness.assign_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>>(
-            cs,
-            shard_ctx,
-            &self.secp256k1_add_config,
-            secp256k1_add_records,
-        )?;
-        witness
-            .assign_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>>(
-                cs,
-                shard_ctx,
-                &self.secp256k1_double_config,
-                secp256k1_double_records,
-            )?;
-        witness.assign_opcode_circuit::<Secp256k1InvInstruction<E>>(
-            cs,
-            shard_ctx,
-            &self.secp256k1_scalar_invert,
-            secp256k1_scalar_invert_records,
-        )?;
-        witness.assign_opcode_circuit::<WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>>(
-            cs,
-            shard_ctx,
-            &self.secp256k1_decompress_config,
-            secp256k1_decompress_records,
-        )?;
-        witness.assign_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Secp256r1>>>(
-            cs,
-            shard_ctx,
-            &self.secp256r1_add_config,
-            secp256r1_add_records,
-        )?;
-        witness
-            .assign_opcode_circuit::<WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256r1>>>(
-                cs,
-                shard_ctx,
-                &self.secp256r1_double_config,
-                secp256r1_double_records,
-            )?;
-        witness.assign_opcode_circuit::<Secp256r1InvInstruction<E>>(
-            cs,
-            shard_ctx,
-            &self.secp256r1_scalar_invert,
-            secp256r1_scalar_invert_records,
-        )?;
-        witness.assign_opcode_circuit::<Uint256MulInstruction<E>>(
-            cs,
-            shard_ctx,
-            &self.uint256_mul_config,
-            uint256_mul_records,
-        )?;
-
-        assert_eq!(
-            all_records.keys().cloned().collect::<BTreeSet<_>>(),
-            // these are opcodes that haven't been implemented
-            [INVALID, ECALL].into_iter().collect::<BTreeSet<_>>(),
+        assign_ecall!(HaltInstruction<E>, halt_config, ECALL_HALT);
+        assign_ecall!(
+            PubIoCommitInstruction<E>,
+            pubio_commit_config,
+            ECALL_PUB_IO_COMMIT
         );
-        Ok(GroupedSteps(all_records))
+        assign_ecall!(
+            GlobalState<E>,
+            state_continuation_config,
+            STATE_CONTINUATION
+        );
+        assign_ecall!(KeccakInstruction<E>, keccak_config, KeccakSpec::CODE);
+        assign_ecall!(
+            WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>,
+            bn254_add_config,
+            Bn254AddSpec::CODE
+        );
+        assign_ecall!(
+            WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>,
+            bn254_double_config,
+            Bn254DoubleSpec::CODE
+        );
+        assign_ecall!(
+            FpAddInstruction<E, Bn254BaseField>,
+            bn254_fp_add_config,
+            Bn254FpAddSpec::CODE
+        );
+        assign_ecall!(
+            FpMulInstruction<E, Bn254BaseField>,
+            bn254_fp_mul_config,
+            Bn254FpMulSpec::CODE
+        );
+        assign_ecall!(
+            Fp2AddInstruction<E, Bn254BaseField>,
+            bn254_fp2_add_config,
+            Bn254Fp2AddSpec::CODE
+        );
+        assign_ecall!(
+            Fp2MulInstruction<E, Bn254BaseField>,
+            bn254_fp2_mul_config,
+            Bn254Fp2MulSpec::CODE
+        );
+        assign_ecall!(
+            WeierstrassAddAssignInstruction<E, SwCurve<Secp256k1>>,
+            secp256k1_add_config,
+            Secp256k1AddSpec::CODE
+        );
+        assign_ecall!(
+            WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256k1>>,
+            secp256k1_double_config,
+            Secp256k1DoubleSpec::CODE
+        );
+        assign_ecall!(
+            Secp256k1InvInstruction<E>,
+            secp256k1_scalar_invert,
+            Secp256k1ScalarInvertSpec::CODE
+        );
+        assign_ecall!(
+            WeierstrassDecompressInstruction<E, SwCurve<Secp256k1>>,
+            secp256k1_decompress_config,
+            Secp256k1DecompressSpec::CODE
+        );
+        assign_ecall!(
+            WeierstrassAddAssignInstruction<E, SwCurve<Secp256r1>>,
+            secp256r1_add_config,
+            Secp256r1AddSpec::CODE
+        );
+        assign_ecall!(
+            WeierstrassDoubleAssignInstruction<E, SwCurve<Secp256r1>>,
+            secp256r1_double_config,
+            Secp256r1DoubleSpec::CODE
+        );
+        assign_ecall!(
+            Secp256r1InvInstruction<E>,
+            secp256r1_scalar_invert,
+            Secp256r1ScalarInvertSpec::CODE
+        );
+        assign_ecall!(
+            Uint256MulInstruction<E>,
+            uint256_mul_config,
+            Uint256MulSpec::CODE
+        );
+        assign_ecall!(
+            ShaExtendInstruction<E>,
+            sha_extend_config,
+            Sha256ExtendSpec::CODE
+        );
+
+        Ok(())
     }
 
     pub fn assign_table_circuit(
@@ -898,30 +891,129 @@ impl<E: ExtensionField> Rv32imConfig<E> {
     }
 }
 
-/// Opaque type to pass unimplemented instructions from Rv32imConfig to DummyExtraConfig.
-pub struct GroupedSteps<'a>(BTreeMap<InsnKind, Vec<&'a StepRecord>>);
+pub struct InstructionDispatchCtx {
+    insn_to_record_buffer: Vec<Option<usize>>,
+    type_to_record_buffer: HashMap<TypeId, usize>,
+    insn_kinds: Vec<InsnKind>,
+    circuit_record_buffers: Vec<Vec<StepIndex>>,
+    fallback_record_buffers: Vec<Vec<StepIndex>>,
+    ecall_record_buffers: BTreeMap<u32, Vec<StepIndex>>,
+}
 
+impl InstructionDispatchCtx {
+    fn new(
+        record_buffer_count: usize,
+        insn_to_record_buffer: Vec<Option<usize>>,
+        type_to_record_buffer: HashMap<TypeId, usize>,
+    ) -> Self {
+        Self {
+            insn_to_record_buffer,
+            type_to_record_buffer,
+            insn_kinds: InsnKind::iter().collect(),
+            circuit_record_buffers: (0..record_buffer_count).map(|_| Vec::new()).collect(),
+            fallback_record_buffers: (0..InsnKind::COUNT).map(|_| Vec::new()).collect(),
+            ecall_record_buffers: BTreeMap::new(),
+        }
+    }
+
+    pub fn begin_shard(&mut self) {
+        self.reset_record_buffers();
+    }
+
+    #[inline(always)]
+    pub fn ingest_step(&mut self, step_idx: StepIndex, step: &StepRecord) {
+        let kind = step.insn.kind;
+        if kind == InsnKind::ECALL {
+            let code = step
+                .rs1()
+                .expect("ecall requires rs1 to determine syscall code")
+                .value;
+            self.ecall_record_buffers
+                .entry(code)
+                .or_default()
+                .push(step_idx);
+        } else if let Some(record_buffer_idx) = self.insn_to_record_buffer[kind as usize] {
+            self.circuit_record_buffers[record_buffer_idx].push(step_idx);
+        } else {
+            self.fallback_record_buffers[kind as usize].push(step_idx);
+        }
+    }
+
+    fn reset_record_buffers(&mut self) {
+        for record_buffer in &mut self.circuit_record_buffers {
+            record_buffer.clear();
+        }
+        for record_buffer in &mut self.fallback_record_buffers {
+            record_buffer.clear();
+        }
+        for record_buffer in self.ecall_record_buffers.values_mut() {
+            record_buffer.clear();
+        }
+    }
+
+    fn trace_opcode_stats(&self) {
+        let mut counts = self
+            .insn_kinds
+            .iter()
+            .map(|kind| (*kind, self.count_kind(*kind)))
+            .collect_vec();
+        counts.sort_by_key(|(_, count)| Reverse(*count));
+        for (kind, count) in counts {
+            tracing::debug!("tracer generated {:?} {} records", kind, count);
+        }
+    }
+
+    fn count_kind(&self, kind: InsnKind) -> usize {
+        if kind == InsnKind::ECALL {
+            return self
+                .ecall_record_buffers
+                .values()
+                .map(|record_buffer| record_buffer.len())
+                .sum();
+        }
+        if let Some(idx) = self.insn_to_record_buffer[kind as usize] {
+            self.circuit_record_buffers[idx].len()
+        } else {
+            self.fallback_record_buffers[kind as usize].len()
+        }
+    }
+
+    fn count_ecall_code(&self, code: u32) -> usize {
+        self.ecall_record_buffers
+            .get(&code)
+            .map(|record_buffer| record_buffer.len())
+            .unwrap_or_default()
+    }
+
+    fn records_for_kinds<E: ExtensionField, I: Instruction<E> + 'static>(
+        &self,
+    ) -> Option<&[StepIndex]> {
+        let record_buffer_id = self
+            .type_to_record_buffer
+            .get(&TypeId::of::<I>())
+            .expect("un-registered instruction circuit");
+        self.circuit_record_buffers
+            .get(*record_buffer_id)
+            .map(|records| records.as_slice())
+    }
+
+    fn records_for_ecall_code(&self, code: u32) -> Option<&[StepIndex]> {
+        self.ecall_record_buffers
+            .get(&code)
+            .map(|records| records.as_slice())
+    }
+}
 /// Fake version of what is missing in Rv32imConfig, for some tests.
 pub struct DummyExtraConfig<E: ExtensionField> {
-    ecall_config: <EcallDummy<E> as Instruction<E>>::InstructionConfig,
-
-    sha256_extend_config:
-        <LargeEcallDummy<E, Sha256ExtendSpec> as Instruction<E>>::InstructionConfig,
-
     phantom_log_pc_cycle: <LargeEcallDummy<E, LogPcCycleSpec> as Instruction<E>>::InstructionConfig,
 }
 
 impl<E: ExtensionField> DummyExtraConfig<E> {
     pub fn construct_circuits(cs: &mut ZKVMConstraintSystem<E>) -> Self {
-        let ecall_config = cs.register_opcode_circuit::<EcallDummy<E>>();
-        let sha256_extend_config =
-            cs.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>();
         let phantom_log_pc_cycle =
             cs.register_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>();
 
         Self {
-            ecall_config,
-            sha256_extend_config,
             phantom_log_pc_cycle,
         }
     }
@@ -931,11 +1023,6 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         fixed: &mut ZKVMFixedTraces<E>,
     ) {
-        fixed.register_opcode_circuit::<EcallDummy<E>>(cs, &self.ecall_config);
-        fixed.register_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
-            cs,
-            &self.sha256_extend_config,
-        );
         fixed.register_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
             cs,
             &self.phantom_log_pc_cycle,
@@ -946,73 +1033,46 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         &self,
         cs: &ZKVMConstraintSystem<E>,
         shard_ctx: &mut ShardContext,
+        instrunction_dispatch_ctx: &InstructionDispatchCtx,
+        shard_steps: &[StepRecord],
         witness: &mut ZKVMWitnesses<E>,
-        steps: GroupedSteps,
     ) -> Result<(), ZKVMError> {
-        let mut steps = steps.0;
-
-        let mut sha256_extend_steps = Vec::new();
-        let mut bn254_fp_add_steps = Vec::new();
-        let mut bn254_fp_mul_steps = Vec::new();
-        let mut bn254_fp2_add_steps = Vec::new();
-        let mut bn254_fp2_mul_steps = Vec::new();
-        let mut phantom_log_pc_cycle_spec = Vec::new();
-        let mut other_steps = Vec::new();
-
-        if let Some(ecall_steps) = steps.remove(&ECALL) {
-            for step in ecall_steps {
-                match step.rs1().unwrap().value {
-                    Sha256ExtendSpec::CODE => sha256_extend_steps.push(step),
-                    Bn254FpAddSpec::CODE => bn254_fp_add_steps.push(step),
-                    Bn254FpMulSpec::CODE => bn254_fp_mul_steps.push(step),
-                    Bn254Fp2AddSpec::CODE => bn254_fp2_add_steps.push(step),
-                    Bn254Fp2MulSpec::CODE => bn254_fp2_mul_steps.push(step),
-                    LogPcCycleSpec::CODE => phantom_log_pc_cycle_spec.push(step),
-                    _ => other_steps.push(step),
-                }
-            }
-        }
-
-        witness.assign_opcode_circuit::<LargeEcallDummy<E, Sha256ExtendSpec>>(
-            cs,
-            shard_ctx,
-            &self.sha256_extend_config,
-            sha256_extend_steps,
-        )?;
+        let phantom_log_pc_cycle_records = instrunction_dispatch_ctx
+            .records_for_ecall_code(LogPcCycleSpec::CODE)
+            .unwrap_or(&[]);
         witness.assign_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
             cs,
             shard_ctx,
             &self.phantom_log_pc_cycle,
-            phantom_log_pc_cycle_spec,
+            shard_steps,
+            phantom_log_pc_cycle_records,
         )?;
-        witness.assign_opcode_circuit::<EcallDummy<E>>(
-            cs,
-            shard_ctx,
-            &self.ecall_config,
-            other_steps,
-        )?;
-
-        let _ = steps.remove(&INVALID);
-        let keys: Vec<&InsnKind> = steps.keys().collect::<Vec<_>>();
-        assert!(steps.is_empty(), "unimplemented opcodes: {:?}", keys);
         Ok(())
     }
 }
 
-impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
+impl<E: ExtensionField> Rv32imConfig<E> {
     #[inline(always)]
-    fn extract_cells(&self, record: &StepRecord) -> u64 {
-        let insn_kind = record.insn.kind;
-        if !matches!(insn_kind, InsnKind::ECALL) {
-            // quick match for opcode and return
-            return self.inst_cells_map[insn_kind as usize];
+    pub fn cells_for(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64 {
+        if !matches!(kind, InsnKind::ECALL) {
+            return self.inst_cells_map[kind as usize];
         }
+
         // deal with ecall logic
-        match record.rs1().unwrap().value {
+        let code = rs1_value.unwrap_or_default();
+        match code {
             // ecall / halt
             ECALL_HALT => *self
                 .ecall_cells_map
                 .get(&HaltInstruction::<E>::name())
+                .expect("unable to find name"),
+            ECALL_PUB_IO_COMMIT => *self
+                .ecall_cells_map
+                .get(&PubIoCommitInstruction::<E>::name())
+                .expect("unable to find name"),
+            STATE_CONTINUATION => *self
+                .ecall_cells_map
+                .get(&GlobalState::<E>::name())
                 .expect("unable to find name"),
             KeccakSpec::CODE => *self
                 .ecall_cells_map
@@ -1074,11 +1134,27 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
                 .ecall_cells_map
                 .get(&Uint256MulInstruction::<E>::name())
                 .expect("unable to find name"),
+            Sha256ExtendSpec::CODE => *self
+                .ecall_cells_map
+                .get(&ShaExtendInstruction::<E>::name())
+                .expect("unable to find name"),
             // phantom
             LogPcCycleSpec::CODE => 0,
-            ceno_emul::SHA_EXTEND => 0,
-            // other type of ecalls are handled by dummy ecall instruction
-            _ => unreachable!("unknow match record {:?}", record),
+            _ => panic!("unknown ecall code {code:#x}"),
         }
+    }
+}
+
+impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
+    #[inline(always)]
+    fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64 {
+        self.cells_for(kind, rs1_value)
+    }
+}
+
+impl<E: ExtensionField> StepCellExtractor for Rv32imConfig<E> {
+    #[inline(always)]
+    fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64 {
+        self.cells_for(kind, rs1_value)
     }
 }

@@ -4,8 +4,8 @@ use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
-    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::{create_backend, create_prover, verifier::RV32imMemStateConfig},
+    e2e::{Checkpoint, KECCAK_EMPTY_WORDS, Preset, run_e2e_with_checkpoint, setup_platform},
+    scheme::{create_backend, create_prover},
 };
 mod alloc;
 use ceno_zkvm::e2e::MultiProver;
@@ -31,10 +31,9 @@ type E = BabyBearExt4;
 fn setup() -> (Program, Platform) {
     let stack_size = 32768;
     let heap_size = 2097152;
-    let pub_io_size = 16;
 
     let program = Program::load_elf(ceno_examples::quadratic_sorting, u32::MAX).unwrap();
-    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size, pub_io_size);
+    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size);
     (program, platform)
 }
 
@@ -42,6 +41,7 @@ fn quadratic_sorting_1(c: &mut Criterion) {
     let (program, platform) = setup();
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let public_io_digest = KECCAK_EMPTY_WORDS;
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
 
     for n in [100, 500] {
@@ -60,13 +60,13 @@ fn quadratic_sorting_1(c: &mut Criterion) {
                 b.iter_custom(|iters| {
                     let mut time = Duration::new(0, 0);
                     for _ in 0..iters {
-                        let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RV32imMemStateConfig>(
+                        let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
                             create_prover(backend.clone()),
                             program.clone(),
                             platform.clone(),
                             MultiProver::default(),
                             &hints,
-                            &[],
+                            public_io_digest,
                             max_steps,
                             Checkpoint::PrepE2EProving,
                             None,

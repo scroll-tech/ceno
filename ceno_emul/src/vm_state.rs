@@ -6,7 +6,7 @@ use crate::{
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
-    tracer::{Change, FullTracer, NextCycleAccess, Tracer},
+    tracer::{Change, FullTracer, Tracer},
 };
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
@@ -46,14 +46,17 @@ impl<T: Tracer> VMState<T> {
     /// 32 architectural registers + 1 register RD_NULL for dark writes to x0.
     pub const REG_COUNT: usize = VM_REG_COUNT;
 
-    pub fn new_with_tracer(platform: Platform, program: Arc<Program>) -> Self {
-        Self::new_with_tracer_and_next_accesses(platform, program, None)
+    pub fn new_with_tracer(platform: Platform, program: Arc<Program>) -> Self
+    where
+        T::Config: Default,
+    {
+        Self::new_with_tracer_config(platform, program, T::Config::default())
     }
 
-    pub fn new_with_tracer_and_next_accesses(
+    pub fn new_with_tracer_config(
         platform: Platform,
         program: Arc<Program>,
-        next_accesses: Option<Arc<NextCycleAccess>>,
+        config: T::Config,
     ) -> Self {
         let pc = program.entry;
 
@@ -63,11 +66,18 @@ impl<T: Tracer> VMState<T> {
             program: program.clone(),
             memory: DenseAddrSpace::new(
                 ByteAddr::from(platform.rom.start).waddr(),
-                ByteAddr::from(platform.stack.end).waddr(),
+                ByteAddr::from(
+                    platform
+                        .stack
+                        .end
+                        .max(platform.heap.end)
+                        .max(platform.hints.end),
+                )
+                .waddr(),
             ),
             registers: [0; VM_REG_COUNT],
             halt_state: None,
-            tracer: T::with_next_accesses(&platform, next_accesses),
+            tracer: T::new(&platform, config),
         };
 
         for (&addr, &value) in &program.image {
@@ -77,7 +87,10 @@ impl<T: Tracer> VMState<T> {
         vm
     }
 
-    pub fn new_from_elf_with_tracer(platform: Platform, elf: &[u8]) -> Result<Self> {
+    pub fn new_from_elf_with_tracer(platform: Platform, elf: &[u8]) -> Result<Self>
+    where
+        T::Config: Default,
+    {
         let program = Arc::new(Program::load_elf(elf, u32::MAX)?);
         let platform = Platform {
             prog_data: Arc::new(program.image.keys().copied().collect()),
@@ -96,6 +109,10 @@ impl<T: Tracer> VMState<T> {
 
     pub fn tracer(&self) -> &T {
         &self.tracer
+    }
+
+    pub fn tracer_mut(&mut self) -> &mut T {
+        &mut self.tracer
     }
 
     pub fn take_tracer(self) -> T {

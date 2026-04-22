@@ -41,12 +41,12 @@ fn verify_test_opcode_jal<E: ExtensionField>(pc_offset: i32) {
 
     let new_pc: ByteAddr = ByteAddr(MOCK_PC_START.0.wrapping_add_signed(pc_offset));
     let insn_code = encode_rv32(InsnKind::JAL, 0, 0, 4, pc_offset);
-    let (raw_witin, lkm) = JalInstruction::<E>::assign_instances(
+    let (raw_witin, lkm) = JalInstruction::<E>::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_j_instruction(
+        &[StepRecord::new_j_instruction(
             4,
             Change::new(MOCK_PC_START, new_pc),
             insn_code,
@@ -117,12 +117,12 @@ fn verify_test_opcode_jalr<E: ExtensionField>(rs1_read: Word, imm: i32) {
     )
     .unwrap();
 
-    let (raw_witin, lkm) = JalrInstruction::<E>::assign_instances(
+    let (raw_witin, lkm) = JalrInstruction::<E>::assign_instances_from_steps(
         &config,
         &mut ShardContext::default(),
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
-        vec![&StepRecord::new_i_instruction(
+        &[StepRecord::new_i_instruction(
             4,
             Change::new(MOCK_PC_START, new_pc),
             insn_code,

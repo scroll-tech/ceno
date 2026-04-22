@@ -31,6 +31,11 @@ pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
 
 impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     type InstructionConfig = LogicConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[I::INST_KIND]
+    }
 
     fn name() -> String {
         format!("{:?}", I::INST_KIND)

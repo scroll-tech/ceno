@@ -13,7 +13,6 @@ use std::{collections::BTreeSet, fmt::Display, ops::Range, sync::Arc};
 pub struct Platform {
     pub rom: Range<Addr>,
     pub prog_data: Arc<BTreeSet<Addr>>,
-    pub public_io: Range<Addr>,
 
     pub stack: Range<Addr>,
     pub heap: Range<Addr>,
@@ -34,7 +33,7 @@ impl Display for Platform {
         write!(
             f,
             "Platform {{ rom: {:#x}..{:#x}, prog_data: {:#x}..{:#x}, stack: {:#x}..{:#x}, heap: {:#x}..{:#x}, \
-            public_io: {:#x}..{:#x}, hints: {:#x}..{:#x}, unsafe_ecall_nop: {} }}",
+            hints: {:#x}..{:#x}, unsafe_ecall_nop: {} }}",
             self.rom.start,
             self.rom.end,
             prog_data
@@ -49,8 +48,6 @@ impl Display for Platform {
             self.stack.end,
             self.heap.start,
             self.heap.end,
-            self.public_io.start,
-            self.public_io.end,
             self.hints.start,
             self.hints.end,
             self.unsafe_ecall_nop
@@ -61,15 +58,10 @@ impl Display for Platform {
 /// aligned with [`memory.x`]
 // ┌───────────────────────────── 0x4000_0000 (stack top)
 // │
-// │   STACK (≈128 MB, grows downward)
-// │   0x3800_0000 .. 0x4000_0000
+// │   STACK (256 MB window, grows downward)
+// │   0x3000_0000 .. 0x4000_0000
 // │
-// ├───────────────────────────── 0x3800_0000 (stack base / pubio end)
-// │
-// │   PUBLIC I/O (128 MB)
-// │   0x3000_0000 .. 0x3800_0000
-// │
-// ├───────────────────────────── 0x3000_0000 (pubio base / hints end)
+// ├───────────────────────────── 0x3000_0000 (stack base / hints end)
 // │
 // │   HINTS (128 MB)
 // │   0x2800_0000 .. 0x3000_0000
@@ -83,9 +75,10 @@ impl Display for Platform {
 // │   HEAP (128 MB, grows upward)
 // │   0x1800_0000 .. 0x2000_0000
 // │
-// ├───────────────────────────── 0x1800_0000 (_sheap, align 0x800_0000)
-// │   RAM (128 MB)
-// │   0x1000_0000 .. 0x1800_0000
+// ├───────────────────────────── 0x1800_0000 (heap midpoint)
+// │
+// │   RAM / DATA / BSS / HEAP
+// │   0x1000_0000 .. 0x2000_0000
 // │
 // ├───────────────────────────── 0x1000_0000 (ram base / rom end)
 // │
@@ -94,15 +87,10 @@ impl Display for Platform {
 // │
 // └───────────────────────────── 0x0800_0000 (rom base)
 pub static CENO_PLATFORM: Lazy<Platform> = Lazy::new(|| Platform {
-    rom: 0x0800_0000..0x1000_0000,       // 128 MB
-    public_io: 0x3000_0000..0x3800_0000, // 128 MB
-    stack: 0x3800_0000..0x4000_4000, // stack grows downward 128MB, 0x4000 reserved for debug io.
-    // we make hints start from 0x2800_0000 thus reserve a 128MB gap (0x2000_0000..0x2800_0000)
-    // between the RAM payload and the hint data for debug io
+    rom: 0x0800_0000..0x1000_0000,   // 128 MB
+    stack: 0x3000_0000..0x4000_4000, // stack grows downward, 0x4000 reserved for debug io.
     hints: 0x2800_0000..0x3000_0000, // 128 MB
-    // heap grows upward, reserved 128 MB for it
-    // the beginning of heap address got bss/sbss data
-    // and the real heap start from 0x1800_0000
+    // heap grows upward in the low RAM window; .data/.bss live at its beginning.
     heap: 0x1000_0000..0x2000_0000,
     unsafe_ecall_nop: false,
     prog_data: Arc::new(BTreeSet::new()),
@@ -122,10 +110,6 @@ impl Platform {
 
     pub fn is_ram(&self, addr: Addr) -> bool {
         self.stack.contains(&addr) || self.heap.contains(&addr) || self.is_prog_data(addr)
-    }
-
-    pub fn is_pub_io(&self, addr: Addr) -> bool {
-        self.public_io.contains(&addr)
     }
 
     pub fn is_hints(&self, addr: Addr) -> bool {
@@ -156,7 +140,7 @@ impl Platform {
     }
 
     pub fn can_write(&self, addr: Addr) -> bool {
-        self.is_ram(addr) || self.is_pub_io(addr) || self.is_hints(addr)
+        self.is_ram(addr) || self.is_hints(addr)
     }
 
     // Environment calls.
@@ -188,13 +172,7 @@ impl Platform {
 
     /// Validate the platform configuration, range shall not overlap.
     pub fn validate(&self) -> bool {
-        let mut ranges = [
-            &self.rom,
-            &self.stack,
-            &self.heap,
-            &self.public_io,
-            &self.hints,
-        ];
+        let mut ranges = [&self.rom, &self.stack, &self.heap, &self.hints];
         ranges.sort_by_key(|r| r.start);
         for i in 0..ranges.len() - 1 {
             if ranges[i].end > ranges[i + 1].start {

@@ -2,8 +2,8 @@ use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
-    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
-    scheme::{create_backend, create_prover, verifier::RV32imMemStateConfig},
+    e2e::{Checkpoint, KECCAK_EMPTY_WORDS, Preset, run_e2e_with_checkpoint, setup_platform},
+    scheme::{create_backend, create_prover},
 };
 use std::{fs, path::PathBuf, time::Duration};
 mod alloc;
@@ -32,10 +32,9 @@ fn setup() -> (Program, Platform) {
     file_path.push("examples/fibonacci.elf");
     let stack_size = 32768;
     let heap_size = 2097152;
-    let pub_io_size = 16;
     let elf_bytes = fs::read(&file_path).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
-    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size, pub_io_size);
+    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size);
     (program, platform)
 }
 
@@ -43,6 +42,7 @@ fn fibonacci_witness(c: &mut Criterion) {
     let (program, platform) = setup();
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let public_io_digest = KECCAK_EMPTY_WORDS;
 
     let max_steps = usize::MAX;
     let mut group = c.benchmark_group(format!("fib_wit_max_steps_{}", max_steps));
@@ -62,13 +62,13 @@ fn fibonacci_witness(c: &mut Criterion) {
             b.iter_custom(|iters| {
                 let mut time = Duration::new(0, 0);
                 for _ in 0..iters {
-                    let result = run_e2e_with_checkpoint::<E, Pcs, _, _, RV32imMemStateConfig>(
+                    let result = run_e2e_with_checkpoint::<E, Pcs, _, _>(
                         create_prover(backend.clone()),
                         program.clone(),
                         platform.clone(),
                         MultiProver::default(),
                         &Vec::from(&hints),
-                        &[],
+                        public_io_digest,
                         max_steps,
                         Checkpoint::PrepWitnessGen,
                         None,

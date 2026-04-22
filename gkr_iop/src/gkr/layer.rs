@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use itertools::{Itertools, chain, izip};
 use linear_layer::{LayerClaims, LinearLayer};
 use multilinear_extensions::{
-    Expression, Instance, StructuralWitIn, ToExpr,
+    Expression, StructuralWitIn, ToExpr,
     mle::{Point, PointAndEval},
     monomial::Term,
 };
@@ -41,11 +41,24 @@ pub type RotateExprs<E> = (
 // rotation contribute
 // left + right + target, overall 3
 pub const ROTATION_OPENING_COUNT: usize = 3;
+pub const ECC_BRIDGE_OPENING_COUNT: usize = 5;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum LayerType {
     Zerocheck,
     Linear,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct CommonFactoredTermPlan {
+    pub groups: Vec<CommonTermGroup>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct CommonTermGroup {
+    pub witness_indices: Vec<usize>,
+    pub term_indices: Vec<usize>,
+    pub shared_len: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -59,14 +72,9 @@ pub struct Layer<E: ExtensionField> {
     pub n_witin: usize,
     pub n_structural_witin: usize,
     pub n_fixed: usize,
-    pub n_instance: usize,
     pub max_expr_degree: usize,
     /// keep all structural witin which could be evaluated succinctly without PCS
     pub structural_witins: Vec<StructuralWitIn>,
-    /// instance openings
-    pub instance_openings: Vec<Instance>,
-    /// num challenges dedicated to this layer.
-    pub n_challenges: usize,
     /// Expressions to prove in this layer. For zerocheck and linear layers,
     /// each expression corresponds to an output. While in sumcheck, there
     /// is only 1 expression, which corresponds to the sum of all outputs.
@@ -92,6 +100,7 @@ pub struct Layer<E: ExtensionField> {
     // there got 3 different eq for (left, right, target) during rotation argument
     // refer https://hackmd.io/HAAj1JTQQiKfu0SIwOJDRw?view#Rotation
     pub rotation_exprs: RotateExprs<E>,
+    pub ecc_bridge_group_indices: Option<[usize; ECC_BRIDGE_OPENING_COUNT]>,
     pub rotation_cyclic_group_log2: usize,
     pub rotation_cyclic_subgroup_size: usize,
 
@@ -101,7 +110,10 @@ pub struct Layer<E: ExtensionField> {
     // static expression, only valid for zerocheck & sumcheck layer
     // store in 2 forms: expression & monomial
     pub main_sumcheck_expression_monomial_terms: Option<Vec<Term<Expression<E>, Expression<E>>>>,
+    pub main_sumcheck_expression_monomial_terms_excluded_shared:
+        Option<Vec<Term<Expression<E>, Expression<E>>>>,
     pub main_sumcheck_expression: Option<Expression<E>>,
+    pub main_sumcheck_expression_common_factored: Option<CommonFactoredTermPlan>,
 
     // rotation sumcheck expression, only optionally valid for zerocheck
     // store in 2 forms: expression & monomial
@@ -129,10 +141,8 @@ impl<E: ExtensionField> Layer<E> {
         n_witin: usize,
         n_structural_witin: usize,
         n_fixed: usize,
-        n_instance: usize,
         // exprs concat zero/non-zero expression.
         exprs: Vec<Expression<E>>,
-        n_challenges: usize,
         in_eval_expr: Vec<usize>,
         // first tuple value is eq
         out_sel_and_eval_exprs: Vec<ExprEvalType<E>>,
@@ -143,7 +153,6 @@ impl<E: ExtensionField> Layer<E> {
         ),
         expr_names: Vec<String>,
         structural_witins: Vec<StructuralWitIn>,
-        instance_openings: Vec<Instance>,
     ) -> Self {
         assert_eq!(expr_names.len(), exprs.len(), "there are expr without name");
         let max_expr_degree = exprs
@@ -160,21 +169,21 @@ impl<E: ExtensionField> Layer<E> {
                     n_witin,
                     n_structural_witin,
                     n_fixed,
-                    n_instance,
                     max_expr_degree,
                     structural_witins,
-                    instance_openings,
-                    n_challenges,
                     exprs,
                     exprs_with_selector_out_eval_monomial_form: vec![],
                     in_eval_expr,
                     out_sel_and_eval_exprs,
                     rotation_exprs: (rotation_eq, rotation_exprs),
+                    ecc_bridge_group_indices: None,
                     rotation_cyclic_group_log2,
                     rotation_cyclic_subgroup_size,
                     expr_names,
                     main_sumcheck_expression_monomial_terms: None,
+                    main_sumcheck_expression_monomial_terms_excluded_shared: None,
                     main_sumcheck_expression: None,
+                    main_sumcheck_expression_common_factored: None,
                     rotation_sumcheck_expression_monomial_terms: None,
                     rotation_sumcheck_expression: None,
                 };
@@ -193,11 +202,10 @@ impl<E: ExtensionField> Layer<E> {
         wit: LayerWitness<PB>,
         claims: &mut [PointAndEval<E>],
         pub_io_evals: &[E],
-        challenges: &mut Vec<E>,
+        challenges: &[E],
         transcript: &mut T,
         selector_ctxs: &[SelectorContext],
     ) -> (LayerProof<E>, Point<E>) {
-        self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
         let (sumcheck_layer_proof, point) = match self.ty {
@@ -241,12 +249,10 @@ impl<E: ExtensionField> Layer<E> {
         proof: LayerProof<E>,
         claims: &mut [PointAndEval<E>],
         pub_io_evals: &[E],
-        raw_pi: &[Vec<E::BaseField>],
-        challenges: &mut Vec<E>,
+        challenges: &[E],
         transcript: &mut Trans,
         selector_ctxs: &[SelectorContext],
     ) -> Result<Point<E>, BackendError> {
-        self.update_challenges(challenges, transcript);
         let mut eval_and_dedup_points = self.extract_claim_and_point(claims, challenges);
 
         let LayerClaims { in_point, evals } = match self.ty {
@@ -256,7 +262,6 @@ impl<E: ExtensionField> Layer<E> {
                 proof,
                 eval_and_dedup_points,
                 pub_io_evals,
-                raw_pi,
                 challenges,
                 transcript,
                 selector_ctxs,
@@ -307,17 +312,6 @@ impl<E: ExtensionField> Layer<E> {
             .collect_vec()
     }
 
-    // generate layer challenge by order, starting from index 2
-    // as challenge id 0, 1 are occupied
-    fn update_challenges(&self, challenges: &mut Vec<E>, transcript: &mut impl Transcript<E>) {
-        if challenges.len() <= self.n_challenges + 2 {
-            challenges.resize(self.n_challenges + 2, E::default());
-        };
-        challenges[2..].copy_from_slice(
-            &transcript.sample_and_append_challenge_pows(self.n_challenges, b"layer challenge"),
-        );
-    }
-
     fn update_claims(&self, claims: &mut [PointAndEval<E>], evals: &[E], point: &Point<E>) {
         for (value, pos) in izip!(chain![evals], chain![&self.in_eval_expr]) {
             claims[*pos] = PointAndEval {
@@ -330,7 +324,6 @@ impl<E: ExtensionField> Layer<E> {
     pub fn from_circuit_builder(
         cb: &CircuitBuilder<E>,
         layer_name: String,
-        n_challenges: usize,
         out_evals: OutEvalGroups,
     ) -> Layer<E> {
         let w_len = cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len();
@@ -344,19 +337,71 @@ impl<E: ExtensionField> Layer<E> {
         assert_eq!(w_record_evals.len(), w_len);
         assert_eq!(lookup_evals.len(), lk_len);
         assert_eq!(zero_evals.len(), zero_len);
+        // Construction of output-evaluation groups used by the main zerocheck:
+        // - Read group (`r_selector`):      sel_r(x) * (r_i(x) - 1) = (claim^r_i - 1)
+        // - Write group (`w_selector`):     sel_w(x) * (w_i(x) - 1) = (claim^w_i - 1)
+        // - Lookup group (`lk_selector`):   sel_lk(x) * f_i(x) = claim^lk_i
+        //   where f_i is normalized to absorb lookup padding alpha:
+        //     non-negated: f_i = lookup_i - alpha, claim^lk_i = claim_i - alpha
+        //     negated:     f_i = lookup_i + alpha, claim^lk_i = alpha - claim_i
+        // - Rotation groups (3 groups): left/right/target claims, each one eq-selected.
+        // - ECC bridge groups (5 groups): x/y/slope/x3/y3 claims, each one selector-separated.
+        // - Zero group (`zero_selector`):  sel_0(x) * z_i(x) = 0  (encoded via EvalExpression::Zero).
+        //
+        // The final batched main-sumcheck polynomial is formed as:
+        //   p(x) = Σ_g sel_g(x) * (Σ_i α^{offset(g,i)} * (expr_{g,i}(x) - eval_{g,i})).
+        // `offset(g,i)` is the global challenge-power index of the i-th expression in group g,
+        // i.e. the contiguous position after flattening all groups in `expr_evals` order.
+        // Here, `expr_evals` below constructs (g -> {(expr_{g,i}, eval_{g,i})_i}) for all groups.
 
+        let rotation_expr_len = cb.cs.rotations.len() * ROTATION_OPENING_COUNT;
+        let ecc_bridge_expr_len = if cb.cs.ec_point_exprs.is_empty() {
+            0
+        } else {
+            cb.cs.ec_slope_exprs.len() * ECC_BRIDGE_OPENING_COUNT
+        };
+        let mut next_non_zero_eval_idx = r_record_evals
+            .iter()
+            .chain(w_record_evals.iter())
+            .chain(lookup_evals.iter())
+            .copied()
+            .max()
+            .map_or(0, |max_idx| max_idx + 1);
         let non_zero_expr_len = cb.cs.w_expressions.len()
             + cb.cs.w_table_expressions.len()
             + cb.cs.r_expressions.len()
             + cb.cs.r_table_expressions.len()
             + cb.cs.lk_expressions.len()
-            + cb.cs.lk_table_expressions.len() * 2;
+            + cb.cs.lk_table_expressions.len() * 2
+            + rotation_expr_len
+            + ecc_bridge_expr_len;
         let zero_expr_len =
             cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
-        let mut expr_evals = Vec::with_capacity(4);
+        let selector_group_capacity = [
+            cb.cs.r_selector.as_ref(),
+            cb.cs.w_selector.as_ref(),
+            cb.cs.lk_selector.as_ref(),
+            cb.cs.zero_selector.as_ref(),
+        ]
+        .iter()
+        .filter(|selector| selector.is_some())
+        .count()
+            + if cb.cs.rotations.is_empty() {
+                0
+            } else {
+                ROTATION_OPENING_COUNT
+            }
+            + if cb.cs.ec_point_exprs.is_empty() {
+                0
+            } else {
+                ECC_BRIDGE_OPENING_COUNT
+            };
+        let mut expr_evals = Vec::with_capacity(selector_group_capacity);
         let mut expr_names = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
         let mut expressions = Vec::with_capacity(non_zero_expr_len + zero_expr_len);
+        let mut ecc_bridge_group_indices: Option<[usize; ECC_BRIDGE_OPENING_COUNT]> = None;
+        let mut ecc_bridge_eval_bases: Option<[usize; ECC_BRIDGE_OPENING_COUNT]> = None;
 
         if let Some(r_selector) = cb.cs.r_selector.as_ref() {
             // process r_record
@@ -417,12 +462,23 @@ impl<E: ExtensionField> Layer<E> {
         if let Some(lk_selector) = cb.cs.lk_selector.as_ref() {
             // process lookup records
             let evals = Self::dedup_last_selector_evals(lk_selector, &mut expr_evals);
-            for (idx, ((lookup, name), lookup_eval)) in (cb
+            for (idx, (((is_negate, lookup), name), lookup_eval)) in (cb
                 .cs
                 .lk_expressions
                 .iter()
-                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.multiplicity))
-                .chain(cb.cs.lk_table_expressions.iter().map(|t| &t.values)))
+                .map(|expr| (false, expr))
+                .chain(
+                    cb.cs
+                        .lk_table_expressions
+                        .iter()
+                        .map(|t| (true, &t.multiplicity)),
+                )
+                .chain(
+                    cb.cs
+                        .lk_table_expressions
+                        .iter()
+                        .map(|t| (false, &t.values)),
+                ))
             .zip_eq(if cb.cs.lk_table_expressions.is_empty() {
                 Either::Left(cb.cs.lk_expressions_namespace_map.iter())
             } else {
@@ -437,14 +493,174 @@ impl<E: ExtensionField> Layer<E> {
             .zip_eq(&lookup_evals)
             .enumerate()
             {
-                expressions.push(lookup - cb.cs.chip_record_alpha.clone());
-                evals.push(EvalExpression::<E>::Linear(
-                    // evaluation = claim * one - alpha (padding)
-                    *lookup_eval,
-                    E::BaseField::ONE.expr().into(),
-                    cb.cs.chip_record_alpha.clone().neg().into(),
-                ));
+                // Encode lookup constraints in the canonical form: `sel * expression = evaluation`.
+                //
+                // Non-negated lookup:
+                //   claim = sel * lookup + (1 - sel) * padding
+                //   => claim - padding = sel * (lookup - padding)
+                //   so we use `expression = lookup - padding` and `evaluation = claim - padding`.
+                //
+                // Negated lookup (`-lookup` used by multiplicity path):
+                //   claim - padding = sel * (-lookup - padding)
+                //   => padding - claim = sel * (lookup + padding)
+                //   so we use `expression = lookup + padding` and `evaluation = padding - claim`.
+                if is_negate {
+                    expressions.push(lookup + cb.cs.chip_record_alpha.clone());
+                    evals.push(EvalExpression::<E>::Linear(
+                        // evaluation = alpha (padding) - claim * one
+                        *lookup_eval,
+                        E::BaseField::ONE.neg().expr().into(),
+                        cb.cs.chip_record_alpha.clone().into(),
+                    ));
+                } else {
+                    expressions.push(lookup - cb.cs.chip_record_alpha.clone());
+                    evals.push(EvalExpression::<E>::Linear(
+                        // evaluation = claim * one - alpha (padding)
+                        *lookup_eval,
+                        E::BaseField::ONE.expr().into(),
+                        cb.cs.chip_record_alpha.clone().neg().into(),
+                    ));
+                };
+
                 expr_names.push(format!("{}/{idx}", name));
+            }
+        }
+
+        if !cb.cs.rotations.is_empty() {
+            let Some(RotationParams {
+                rotation_eqs: Some([rotation_left_eq, rotation_right_eq, rotation_eq]),
+                ..
+            }) = cb.cs.rotation_params.as_ref()
+            else {
+                panic!("rotation params not set");
+            };
+
+            // Rotation claims occupy 3 * num_rotations dedicated out-eval entries:
+            // [left_0..left_n][right_0..right_n][target_0..target_n].
+            let num_rotations = cb.cs.rotations.len();
+            let rotation_left_eval_base = next_non_zero_eval_idx;
+            let rotation_right_eval_base = rotation_left_eval_base + num_rotations;
+            let rotation_eval_base = rotation_right_eval_base + num_rotations;
+            next_non_zero_eval_idx = rotation_eval_base + num_rotations;
+
+            // Rotation selector groups must be fresh groups (no dedup with preceding
+            // r/w/lookup groups) so chip-level rotation claim assignment is unambiguous.
+            let left_group_idx = expr_evals.len();
+            expr_evals.push((SelectorType::Whole(rotation_left_eq.clone()), vec![]));
+            let right_group_idx = expr_evals.len();
+            expr_evals.push((SelectorType::Whole(rotation_right_eq.clone()), vec![]));
+            let target_group_idx = expr_evals.len();
+            expr_evals.push((SelectorType::Whole(rotation_eq.clone()), vec![]));
+
+            // Expression order must match flattened out-eval group order:
+            // [left...][right...][target...].
+            for (idx, (rotate_expr, _)) in cb.cs.rotations.iter().enumerate() {
+                expressions.push(rotate_expr.clone());
+                expr_evals[left_group_idx]
+                    .1
+                    .push(EvalExpression::Single(rotation_left_eval_base + idx));
+                expr_names.push(format!("rotation/left/{idx}"));
+            }
+
+            for (idx, (rotate_expr, _)) in cb.cs.rotations.iter().enumerate() {
+                expressions.push(rotate_expr.clone());
+                expr_evals[right_group_idx]
+                    .1
+                    .push(EvalExpression::Single(rotation_right_eval_base + idx));
+                expr_names.push(format!("rotation/right/{idx}"));
+            }
+
+            for (idx, (_, target_expr)) in cb.cs.rotations.iter().enumerate() {
+                expressions.push(target_expr.clone());
+                expr_evals[target_group_idx]
+                    .1
+                    .push(EvalExpression::Single(rotation_eval_base + idx));
+                expr_names.push(format!("rotation/point/{idx}"));
+            }
+        }
+
+        if !cb.cs.ec_point_exprs.is_empty() {
+            let septic_degree = cb.cs.ec_slope_exprs.len();
+            assert_eq!(cb.cs.ec_point_exprs.len(), septic_degree * 2);
+
+            // ECC bridge selector groups must be explicitly supplied and independent.
+            // Do not fall back to (or reuse) preceding r/w/lk/zero selectors.
+            let [ecc_sel_x, ecc_sel_y, ecc_sel_s, ecc_sel_x3, ecc_sel_y3] =
+                cb.cs.ec_bridge_selectors.clone().expect(
+                    "ecc bridge selectors must be provided when ec_point_exprs is non-empty",
+                );
+
+            let x_eval_base = next_non_zero_eval_idx;
+            let y_eval_base = x_eval_base + septic_degree;
+            let s_eval_base = y_eval_base + septic_degree;
+            let x3_eval_base = s_eval_base + septic_degree;
+            let y3_eval_base = x3_eval_base + septic_degree;
+            next_non_zero_eval_idx = y3_eval_base + septic_degree;
+            ecc_bridge_eval_bases = Some([
+                x_eval_base,
+                y_eval_base,
+                s_eval_base,
+                x3_eval_base,
+                y3_eval_base,
+            ]);
+
+            let x_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_x.clone(), vec![]));
+            let y_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_y.clone(), vec![]));
+            let s_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_s.clone(), vec![]));
+            let x3_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_x3, vec![]));
+            let y3_group_idx = expr_evals.len();
+            expr_evals.push((ecc_sel_y3, vec![]));
+            ecc_bridge_group_indices = Some([
+                x_group_idx,
+                y_group_idx,
+                s_group_idx,
+                x3_group_idx,
+                y3_group_idx,
+            ]);
+
+            for (idx, x_expr) in cb.cs.ec_point_exprs[..septic_degree].iter().enumerate() {
+                expressions.push(x_expr.clone());
+                expr_evals[x_group_idx]
+                    .1
+                    .push(EvalExpression::Single(x_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/x/{idx}"));
+            }
+
+            for (idx, y_expr) in cb.cs.ec_point_exprs[septic_degree..].iter().enumerate() {
+                expressions.push(y_expr.clone());
+                expr_evals[y_group_idx]
+                    .1
+                    .push(EvalExpression::Single(y_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/y/{idx}"));
+            }
+
+            for (idx, slope_expr) in cb.cs.ec_slope_exprs.iter().enumerate() {
+                expressions.push(slope_expr.clone());
+                expr_evals[s_group_idx]
+                    .1
+                    .push(EvalExpression::Single(s_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/slope/{idx}"));
+            }
+
+            // x3/y3 reuse x/y expressions but are opened at rt||1 instead of [r]||rt.
+            for (idx, x_expr) in cb.cs.ec_point_exprs[..septic_degree].iter().enumerate() {
+                expressions.push(x_expr.clone());
+                expr_evals[x3_group_idx]
+                    .1
+                    .push(EvalExpression::Single(x3_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/x3/{idx}"));
+            }
+
+            for (idx, y_expr) in cb.cs.ec_point_exprs[septic_degree..].iter().enumerate() {
+                expressions.push(y_expr.clone());
+                expr_evals[y3_group_idx]
+                    .1
+                    .push(EvalExpression::Single(y3_eval_base + idx));
+                expr_names.push(format!("ecc_bridge/y3/{idx}"));
             }
         }
 
@@ -477,26 +693,63 @@ impl<E: ExtensionField> Layer<E> {
             ..
         } = &cb.cs;
 
-        let in_eval_expr = (non_zero_expr_len..)
-            .take(cb.cs.num_witin as usize + cb.cs.num_fixed + cb.cs.instance_openings.len())
+        // Drop selector groups that ended up without eval expressions.
+        expr_evals.retain(|(_, evals)| !evals.is_empty());
+
+        if let Some([x_base, y_base, s_base, x3_base, y3_base]) = ecc_bridge_eval_bases {
+            let find_group_by_base = |base: usize| {
+                expr_evals
+                    .iter()
+                    .enumerate()
+                    .find_map(|(idx, (_, evals))| match evals.first() {
+                        Some(EvalExpression::Single(pos)) if *pos == base => Some(idx),
+                        _ => None,
+                    })
+            };
+            let x_idx = find_group_by_base(x_base)
+                .expect("missing x ecc bridge selector group after retain");
+            let y_idx = find_group_by_base(y_base)
+                .expect("missing y ecc bridge selector group after retain");
+            let s_idx = find_group_by_base(s_base)
+                .expect("missing slope ecc bridge selector group after retain");
+            let x3_idx = find_group_by_base(x3_base)
+                .expect("missing x3 ecc bridge selector group after retain");
+            let y3_idx = find_group_by_base(y3_base)
+                .expect("missing y3 ecc bridge selector group after retain");
+            ecc_bridge_group_indices = Some([x_idx, y_idx, s_idx, x3_idx, y3_idx]);
+        }
+
+        let out_eval_count = expr_evals
+            .iter()
+            .map(|(_, evals)| evals.len())
+            .sum::<usize>();
+        assert_eq!(
+            expressions.len(),
+            out_eval_count,
+            "expression/out-eval ordering mismatch: exprs={}, out_evals={}",
+            expressions.len(),
+            out_eval_count,
+        );
+
+        let in_eval_expr = (next_non_zero_eval_idx..)
+            .take(cb.cs.num_witin as usize + cb.cs.num_fixed)
             .collect_vec();
         if rotations.is_empty() {
-            Layer::new(
+            let mut layer = Layer::new(
                 layer_name,
                 LayerType::Zerocheck,
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
-                cb.cs.instance_openings.len(),
                 expressions,
-                n_challenges,
                 in_eval_expr,
                 expr_evals,
                 ((None, vec![]), 0, 0),
                 expr_names,
                 cb.cs.structural_witins.clone(),
-                cb.cs.instance_openings.clone(),
-            )
+            );
+            layer.ecc_bridge_group_indices = ecc_bridge_group_indices;
+            layer
         } else {
             let Some(RotationParams {
                 rotation_eqs,
@@ -506,15 +759,13 @@ impl<E: ExtensionField> Layer<E> {
             else {
                 panic!("rotation params not set");
             };
-            Layer::new(
+            let mut layer = Layer::new(
                 layer_name,
                 LayerType::Zerocheck,
                 cb.cs.num_witin as usize,
                 cb.cs.num_structural_witin as usize,
                 cb.cs.num_fixed,
-                cb.cs.instance_openings.len(),
                 expressions,
-                n_challenges,
                 in_eval_expr,
                 expr_evals,
                 (
@@ -524,8 +775,9 @@ impl<E: ExtensionField> Layer<E> {
                 ),
                 expr_names,
                 cb.cs.structural_witins.clone(),
-                cb.cs.instance_openings.clone(),
-            )
+            );
+            layer.ecc_bridge_group_indices = ecc_bridge_group_indices;
+            layer
         }
     }
 
@@ -548,6 +800,37 @@ impl<E: ExtensionField> Layer<E> {
         }
 
         &mut expr_evals.last_mut().unwrap().1
+    }
+
+    pub fn rotation_selector_group_indices(&self) -> Option<[usize; ROTATION_OPENING_COUNT]> {
+        let [left_eq, right_eq, point_eq] = self.rotation_exprs.0.as_ref()?;
+
+        let find_group = |selector_expr: &Expression<E>| {
+            self.out_sel_and_eval_exprs
+                .iter()
+                .enumerate()
+                .find_map(|(idx, (sel_type, _))| {
+                    let expr = match sel_type {
+                        SelectorType::Whole(expr)
+                        | SelectorType::Prefix(expr)
+                        | SelectorType::OrderedSparse {
+                            expression: expr, ..
+                        }
+                        | SelectorType::QuarkBinaryTreeLessThan(expr) => expr,
+                        SelectorType::None => return None,
+                    };
+                    (expr == selector_expr).then_some(idx)
+                })
+        };
+
+        let left_idx = find_group(left_eq)?;
+        let right_idx = find_group(right_eq)?;
+        let point_idx = find_group(point_eq)?;
+        Some([left_idx, right_idx, point_idx])
+    }
+
+    pub fn ecc_bridge_group_indices(&self) -> Option<[usize; ECC_BRIDGE_OPENING_COUNT]> {
+        self.ecc_bridge_group_indices
     }
 }
 

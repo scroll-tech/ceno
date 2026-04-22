@@ -18,7 +18,7 @@ use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 use gkr_iop::{
-    OutEvalGroups, ProtocolBuilder, ProtocolWitnessGenerator,
+    ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
     circuit_builder::{CircuitBuilder, ConstraintSystem},
     cpu::{CpuBackend, CpuProver},
@@ -368,7 +368,8 @@ fn output32_layer<E: ExtensionField>(
     let mut keccak_output32_iter = out_evals.iter().map(|x| EvalExpression::Single(*x));
 
     // process keccak output
-    let sel_type = SelectorType::OrderedSparse32 {
+    let sel_type = SelectorType::OrderedSparse {
+        num_vars: 5,
         indices: vec![CYCLIC_POW2_5[ROUNDS - 1] as usize],
         expression: layer.sel.expr(),
     };
@@ -391,7 +392,7 @@ fn output32_layer<E: ExtensionField>(
         }
     }
 
-    system.into_layer("Round 23: final".to_string(), in_evals.to_vec(), 0)
+    system.into_layer("Round 23: final".to_string(), in_evals.to_vec())
 }
 
 fn iota_layer<E: ExtensionField>(
@@ -423,7 +424,6 @@ fn iota_layer<E: ExtensionField>(
     system.into_layer(
         format!("Round {round_id}: Iota:: compute output"),
         iota_in_evals.to_vec(),
-        0,
     )
 }
 
@@ -475,7 +475,6 @@ fn rho_pi_and_chi_layer<E: ExtensionField>(
     system.into_layer(
         format!("Round {round_id}: Chi:: apply rho, pi and chi"),
         in_evals.to_vec(),
-        0,
     )
 }
 
@@ -504,7 +503,6 @@ fn theta_third_layer<E: ExtensionField>(
     system.into_layer(
         format!("Round {round_id}: Theta::compute output"),
         in_evals.to_vec(),
-        0,
     )
 }
 
@@ -533,7 +531,6 @@ fn theta_second_layer<E: ExtensionField>(
     system.into_layer(
         format!("Round {round_id}: Theta::compute D[x][z]"),
         in_evals.to_vec(),
-        0,
     )
 }
 
@@ -578,7 +575,6 @@ fn theta_first_layer<E: ExtensionField>(
     system.into_layer(
         format!("Round {round_id}: Theta::compute C[x][z]"),
         in_evals.to_vec(),
-        0,
     )
 }
 
@@ -623,7 +619,8 @@ fn keccak_first_layer<E: ExtensionField>(
 
     // process keccak output
     let mut out_eval_iter = input32_out_evals.iter().map(|x| EvalExpression::Single(*x));
-    let sel_type = SelectorType::OrderedSparse32 {
+    let sel_type = SelectorType::OrderedSparse {
+        num_vars: 5,
         indices: vec![CYCLIC_POW2_5[0] as usize],
         expression: layer.sel_keccak_out.expr(),
     };
@@ -649,7 +646,6 @@ fn keccak_first_layer<E: ExtensionField>(
     system.into_layer(
         "Round 0: Theta::compute C[x][z], build 32-bit input".to_string(),
         in_evals.to_vec(),
-        0,
     )
 }
 
@@ -662,7 +658,6 @@ impl<E: ExtensionField> KeccakLayout<E> {
         let mut chip = Chip {
             n_fixed: 0,
             n_committed: STATE_SIZE,
-            n_challenges: 0,
             n_evaluations: KECCAK_ALL_IN_EVAL_SIZE + KECCAK_OUT_EVAL_SIZE,
             layers: vec![],
             final_out_evals: unsafe {
@@ -781,7 +776,7 @@ impl<E: ExtensionField> KeccakLayout<E> {
 impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     type Params = KeccakParams;
 
-    fn finalize(&mut self, _cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>) {
+    fn finalize(&mut self, _name: String, _cb: &mut CircuitBuilder<E>) -> Chip<E> {
         unimplemented!()
     }
 
@@ -797,10 +792,6 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
     }
 
     fn n_fixed(&self) -> usize {
-        0
-    }
-
-    fn n_challenges(&self) -> usize {
         0
     }
 
@@ -919,6 +910,7 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
         &[],
         &[],
         &[],
+        None,
     );
     exit_span!(span);
 
@@ -999,7 +991,6 @@ pub fn run_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'stat
                     log2_num_instances,
                     gkr_proof,
                     &out_evals,
-                    &[],
                     &[],
                     &[],
                     &mut verifier_transcript,

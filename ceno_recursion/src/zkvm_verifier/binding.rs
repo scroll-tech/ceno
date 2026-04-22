@@ -1,9 +1,12 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{
     arithmetics::{ceil_log2, next_pow2_instance_padding},
-    basefold_verifier::basefold::{
-        BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
+    basefold_verifier::{
+        basefold::{
+            BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
+        },
+        utils::read_hint_slice,
     },
     tower_verifier::binding::{
         IOPProverMessage, IOPProverMessageVec, IOPProverMessageVecVariable, PointVariable,
@@ -12,7 +15,7 @@ use crate::{
 };
 use ceno_zkvm::{
     scheme::{ZKVMChipProof, ZKVMProof},
-    structs::{EccQuarkProof, TowerProofs},
+    structs::{EccQuarkProof, TowerProofs, ZKVMVerifyingKey},
 };
 use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::LayerProof};
 use itertools::Itertools;
@@ -24,10 +27,14 @@ use openvm_native_compiler::{
     prelude::*,
 };
 use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::hints::{Hintable, VecAutoHintable};
+use openvm_native_recursion::{
+    hints::{Hintable, VecAutoHintable},
+    vars::HintSlice,
+};
 use openvm_stark_backend::p3_field::{FieldAlgebra, extension::BinomialExtensionField};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldExtensionAlgebra;
+use std::cmp::max;
 use sumcheck::structs::IOPProof;
 
 pub type F = BabyBear;
@@ -65,9 +72,7 @@ pub fn decompose_prefixed_layer_bits(n: usize) -> (Vec<usize>, Vec<Vec<F>>) {
 #[derive(DslVariable, Clone)]
 pub struct ZKVMProofInputVariable<C: Config> {
     pub shard_id: Usize<C::N>,
-    pub raw_pi: Array<C, Array<C, Felt<C::F>>>,
-    pub raw_pi_num_variables: Array<C, Var<C::N>>,
-    pub pi_evals: Array<C, Ext<C::F, C::EF>>,
+    pub pi: Array<C, Felt<C::F>>,
     pub chip_proofs: Array<C, Array<C, ZKVMChipProofInputVariable<C>>>,
     pub max_num_var: Var<C::N>,
     pub max_width: Var<C::N>,
@@ -89,37 +94,69 @@ pub struct TowerProofInputVariable<C: Config> {
 
 pub(crate) struct ZKVMProofInput {
     pub shard_id: usize,
-    pub raw_pi: Vec<Vec<F>>,
-    // Evaluation of raw_pi.
-    pub pi_evals: Vec<E>,
+    pub pi: Vec<F>,
     pub chip_proofs: BTreeMap<usize, ZKVMChipProofs>,
     pub witin_commit: BasefoldCommitment,
     pub opening_proof: BasefoldProof,
 }
 
-impl From<(usize, ZKVMProof<E, RecPcs>)> for ZKVMProofInput {
-    fn from(d: (usize, ZKVMProof<E, RecPcs>)) -> Self {
+impl ZKVMProofInput {
+    pub fn from_proof(
+        shard_id: usize,
+        zkvm_proof: ZKVMProof<E, RecPcs>,
+        vk: &ZKVMVerifyingKey<E, RecPcs>,
+    ) -> Self {
+        let pi = zkvm_proof.public_values.iter_field::<F>().collect_vec();
+
+        let mut chip_witin_num_vars: HashMap<usize, (usize, usize)> = HashMap::new(); // (chip_id, (num_witin, num_fixed))
+        let mut chip_indices = zkvm_proof
+            .chip_proofs
+            .keys()
+            .copied()
+            .collect::<Vec<usize>>();
+        chip_indices.push(0);
+
+        let mut chip_idx: usize = 0;
+        let mut chip_id: usize = chip_indices[chip_idx];
+        for (i, (_, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+            if chip_id == i {
+                let composed_cs = chip_vk.get_cs();
+                chip_witin_num_vars.insert(
+                    chip_id,
+                    (
+                        composed_cs.zkvm_v1_css.num_witin as usize,
+                        composed_cs.zkvm_v1_css.num_fixed,
+                    ),
+                );
+                chip_idx += 1;
+                chip_id = chip_indices[chip_idx];
+            }
+        }
+
         ZKVMProofInput {
-            shard_id: d.0,
-            raw_pi: d.1.raw_pi,
-            pi_evals: d.1.pi_evals,
-            chip_proofs: d
-                .1
+            shard_id,
+            pi,
+            chip_proofs: zkvm_proof
                 .chip_proofs
                 .into_iter()
                 .map(|(chip_idx, proofs)| {
+                    let (num_witin, num_fixed) = *chip_witin_num_vars
+                        .get(&chip_idx)
+                        .expect("num_witin data should exist");
                     (
                         chip_idx,
                         proofs
                             .into_iter()
-                            .map(|proof| ZKVMChipProofInput::from((chip_idx, proof)))
+                            .map(|proof| {
+                                ZKVMChipProofInput::from((chip_idx, proof, num_witin, num_fixed))
+                            })
                             .collect::<Vec<ZKVMChipProofInput>>()
                             .into(),
                     )
                 })
                 .collect::<BTreeMap<usize, ZKVMChipProofs>>(),
-            witin_commit: d.1.witin_commit.into(),
-            opening_proof: d.1.opening_proof.into(),
+            witin_commit: zkvm_proof.witin_commit.into(),
+            opening_proof: zkvm_proof.opening_proof.into(),
         }
     }
 }
@@ -129,23 +166,23 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let shard_id = Usize::Var(usize::read(builder));
-        let raw_pi = Vec::<Vec<F>>::read(builder);
-        let raw_pi_num_variables = Vec::<usize>::read(builder);
-        let pi_evals = Vec::<E>::read(builder);
+        let pi = Vec::<F>::read(builder);
+        builder.cycle_tracker_start("read chip proofs");
         let chip_proofs = Vec::<ZKVMChipProofs>::read(builder);
+        builder.cycle_tracker_end("read chip proofs");
         let max_num_var = usize::read(builder);
         let max_width = usize::read(builder);
         let witin_commit = BasefoldCommitment::read(builder);
         let witin_perm: Array<AsmConfig<F, BinomialExtensionField<F, 4>>, Var<F>> =
             Vec::<usize>::read(builder);
         let fixed_perm = Vec::<usize>::read(builder);
+        builder.cycle_tracker_start("read pcs proof");
         let pcs_proof = BasefoldProof::read(builder);
+        builder.cycle_tracker_end("read pcs proof");
 
         ZKVMProofInputVariable {
             shard_id,
-            raw_pi,
-            raw_pi_num_variables,
-            pi_evals,
+            pi,
             chip_proofs,
             max_num_var,
             max_width,
@@ -158,38 +195,39 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
 
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        let raw_pi_num_variables: Vec<usize> = self
-            .raw_pi
-            .iter()
-            .map(|v| ceil_log2(v.len().next_power_of_two()))
-            .collect();
         let witin_num_vars = self
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .map(|proof| proof.num_instances.iter().sum())
+            .filter(|proof| proof.num_witin > 0)
+            .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .map(|proof| proof.wits_in_evals.len().max(1))
+            .map(|proof| proof.num_witin.max(1))
             .collect::<Vec<_>>();
         let fixed_num_vars = self
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .filter(|proof| !proof.fixed_in_evals.is_empty())
-            .map(|proof| proof.num_instances.iter().sum())
+            .filter(|proof| proof.num_fixed > 0)
+            .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
             .iter()
             .flat_map(|(_, proofs)| proofs.iter())
-            .filter(|proof| !proof.fixed_in_evals.is_empty())
-            .map(|proof| proof.fixed_in_evals.len())
+            .filter(|proof| proof.num_fixed > 0)
+            .map(|proof| proof.num_fixed)
             .collect::<Vec<_>>();
-        let max_num_var = witin_num_vars.iter().copied().max().unwrap_or(0);
+        let max_num_var = witin_num_vars
+            .iter()
+            .chain(fixed_num_vars.iter())
+            .copied()
+            .max()
+            .unwrap_or(0);
         let max_width = witin_max_widths
             .iter()
             .chain(fixed_max_widths.iter())
@@ -214,9 +252,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let fixed_perm = get_perm(fixed_num_vars);
 
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.shard_id));
-        stream.extend(self.raw_pi.write());
-        stream.extend(raw_pi_num_variables.write());
-        stream.extend(self.pi_evals.write());
+        stream.extend(self.pi.write());
         stream.extend(vec![vec![F::from_canonical_usize(self.chip_proofs.len())]]);
         for proofs in self.chip_proofs.values() {
             stream.extend(proofs.write());
@@ -275,18 +311,24 @@ impl Hintable<InnerConfig> for TowerProofInput {
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let num_proofs = Usize::Var(usize::read(builder));
+        builder.cycle_tracker_start("read sumcheck proofs in tower reduction");
         let proofs = builder.dyn_array(num_proofs.clone());
         iter_zip!(builder, proofs).for_each(|idx_vec, builder| {
             let ptr = idx_vec[0];
             let proof = IOPProverMessageVec::read(builder);
             builder.iter_ptr_set(&proofs, ptr, proof);
         });
+        builder.cycle_tracker_end("read sumcheck proofs in tower reduction");
 
         let num_prod_specs = Usize::Var(usize::read(builder));
+        builder.cycle_tracker_start("read prod specs eval");
         let prod_specs_eval = ThreeDimensionalVector::read(builder);
+        builder.cycle_tracker_end("read prod specs eval");
 
+        builder.cycle_tracker_start("read logup specs eval");
         let num_logup_specs = Usize::Var(usize::read(builder));
         let logup_specs_eval = ThreeDimensionalVector::read(builder);
+        builder.cycle_tracker_end("read logup specs eval");
 
         TowerProofInputVariable {
             num_proofs,
@@ -319,14 +361,19 @@ impl Hintable<InnerConfig> for TowerProofInput {
 
 pub struct ZKVMChipProofInput {
     pub idx: usize,
+    /// number of variables in the chip's multilinear polynomials
+    pub num_vars: usize,
+
+    pub num_witin: usize,
+    pub num_fixed: usize,
 
     // product constraints
     pub r_out_evals_len: usize,
     pub w_out_evals_len: usize,
     pub lk_out_evals_len: usize,
-    pub r_out_evals: Vec<Vec<E>>,
-    pub w_out_evals: Vec<Vec<E>>,
-    pub lk_out_evals: Vec<Vec<E>>,
+    pub r_out_evals: Vec<E>,
+    pub w_out_evals: Vec<E>,
+    pub lk_out_evals: Vec<E>,
 
     pub tower_proof: TowerProofInput,
 
@@ -338,14 +385,15 @@ pub struct ZKVMChipProofInput {
     pub has_gkr_proof: usize,
     pub gkr_iop_proof: GKRProofInput,
 
+    // chip-level rotation proof
+    pub has_rotation_proof: usize,
+    pub rotation_proof: SumcheckLayerProofInput,
+
     // ecc proof
     pub has_ecc_proof: usize,
     pub ecc_proof: EccQuarkProofInput,
 
-    pub num_instances: Vec<usize>,
-
-    pub wits_in_evals: Vec<E>,
-    pub fixed_in_evals: Vec<E>,
+    pub num_instances: [usize; 2],
 }
 
 impl VecAutoHintable for ZKVMChipProofInput {}
@@ -379,19 +427,36 @@ impl Hintable<InnerConfig> for ZKVMChipProofs {
     }
 }
 
-impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
-    fn from(d: (usize, ZKVMChipProof<E>)) -> Self {
+impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
+    fn from(d: (usize, ZKVMChipProof<E>, usize, usize)) -> Self {
         let idx = d.0;
         let p = d.1;
 
+        let num_vars = if p.gkr_iop_proof.is_some() {
+            let vars = p
+                .gkr_iop_proof
+                .as_ref()
+                .unwrap()
+                .0
+                .iter()
+                .map(|l| l.main.proof.proofs.len())
+                .collect::<Vec<usize>>();
+            vars[0]
+        } else {
+            0
+        };
+
         Self {
             idx,
+            num_vars,
+            num_witin: d.2,
+            num_fixed: d.3,
             r_out_evals_len: p.r_out_evals.len(),
             w_out_evals_len: p.w_out_evals.len(),
             lk_out_evals_len: p.lk_out_evals.len(),
-            r_out_evals: p.r_out_evals,
-            w_out_evals: p.w_out_evals,
-            lk_out_evals: p.lk_out_evals,
+            r_out_evals: p.r_out_evals.into_iter().flatten().collect(),
+            w_out_evals: p.w_out_evals.into_iter().flatten().collect(),
+            lk_out_evals: p.lk_out_evals.into_iter().flatten().collect(),
             tower_proof: p.tower_proof.into(),
             has_main_sumcheck_proofs: if p.main_sumcheck_proofs.is_some() {
                 1
@@ -415,6 +480,24 @@ impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
             } else {
                 GKRProofInput::default()
             },
+            has_rotation_proof: if p.rotation_proof.is_some() { 1 } else { 0 },
+            rotation_proof: if let Some(rotation) = p.rotation_proof {
+                SumcheckLayerProofInput {
+                    proof: IOPProverMessageVec::from(
+                        rotation
+                            .proof
+                            .proofs
+                            .iter()
+                            .map(|p| IOPProverMessage {
+                                evaluations: p.evaluations.clone(),
+                            })
+                            .collect::<Vec<IOPProverMessage>>(),
+                    ),
+                    evals: rotation.evals,
+                }
+            } else {
+                SumcheckLayerProofInput::default()
+            },
             has_ecc_proof: if p.ecc_proof.is_some() { 1 } else { 0 },
             ecc_proof: if p.ecc_proof.is_some() {
                 p.ecc_proof.unwrap().into()
@@ -422,8 +505,6 @@ impl From<(usize, ZKVMChipProof<E>)> for ZKVMChipProofInput {
                 EccQuarkProofInput::dummy()
             },
             num_instances: p.num_instances,
-            wits_in_evals: p.wits_in_evals,
-            fixed_in_evals: p.fixed_in_evals,
         }
     }
 }
@@ -434,7 +515,6 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub idx_felt: Felt<C::F>,
 
     pub sum_num_instances: Usize<C::N>,
-    pub sum_num_instances_felt: Felt<C::F>,
     pub sum_num_instances_minus_one_bit_decomposition: Array<C, Felt<C::F>>,
     pub log2_num_instances: Usize<C::N>,
 
@@ -442,23 +522,21 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub w_out_evals_len: Usize<C::N>,
     pub lk_out_evals_len: Usize<C::N>,
 
-    pub r_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    pub w_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    pub lk_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
+    pub rw_out_evals: HintSlice<C>,
+    pub lk_out_evals: HintSlice<C>,
 
     pub has_main_sumcheck_proofs: Usize<C::N>,
     pub main_sumcheck_proofs: IOPProverMessageVecVariable<C>,
     pub has_gkr_iop_proof: Usize<C::N>,
     pub gkr_iop_proof: GKRProofVariable<C>,
+    pub has_rotation_proof: Usize<C::N>,
+    pub rotation_proof: SumcheckLayerProofVariable<C>,
     pub tower_proof: TowerProofInputVariable<C>,
     pub has_ecc_proof: Usize<C::N>,
     pub ecc_proof: EccQuarkProofVariable<C>,
     pub num_instances: Array<C, Var<C::N>>,
     pub n_inst_0_bit_decomps: Array<C, Felt<C::F>>,
     pub n_inst_1_bit_decomps: Array<C, Felt<C::F>>,
-
-    pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
-    pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
 }
 impl Hintable<InnerConfig> for ZKVMChipProofInput {
     type HintVariable = ZKVMChipProofInputVariable<InnerConfig>;
@@ -467,112 +545,60 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let idx = Usize::Var(usize::read(builder));
         let idx_felt = F::read(builder);
 
-        let num_instances = Vec::<usize>::read(builder);
-
-        // derive sum_num_instances from instances vector
-        let sum_num_instances = Usize::from(Var::uninit(builder));
-        builder.assign(&sum_num_instances, F::ZERO);
-        iter_zip!(builder, num_instances).for_each(|ptr_vec, builder| {
-            let num_instance = builder.iter_ptr_get(&num_instances, ptr_vec[0]);
-            builder.assign(&sum_num_instances, sum_num_instances.clone() + num_instance);
-        });
-        builder.assert_nonzero(&sum_num_instances);
-        let sum_num_instances_felt = builder.unsafe_cast_var_to_felt(sum_num_instances.get_var());
-
-        let sum_num_instances_minus_one_bit_decomposition = {
-            let bit_decompose_hints = Vec::<F>::read(builder);
-            let const_zero: Felt<_> = builder.constant(F::ZERO);
-            let const_one: Felt<_> = builder.constant(F::ONE);
-            let const_two: Var<_> = builder.constant(F::TWO);
-            let sum = Var::uninit(builder);
-            builder.assign(&sum, F::ZERO);
-            let pow2_factor = Var::uninit(builder);
-            builder.assign(&pow2_factor, F::ONE);
-            // traverse from lsb
-            iter_zip!(builder, bit_decompose_hints).for_each(|ptr_vec, builder| {
-                let bit = builder.iter_ptr_get(&bit_decompose_hints, ptr_vec[0]);
-                // assert bit
-                builder.assert_eq::<Felt<_>>(bit * (const_one - bit), const_zero);
-                let bit_var = builder.cast_felt_to_var(bit);
-                builder.assign(&sum, sum + bit_var * pow2_factor);
-                builder.assign(&pow2_factor, pow2_factor * const_two);
-            });
-            let sum_felt = builder.unsafe_cast_var_to_felt(sum);
-            // assert bit decompose result match sum_num_instances_felt
-            let sum_instance_minus_one: Felt<_> = builder.eval(sum_num_instances_felt - const_one);
-            builder.assert_eq::<Felt<_>>(sum_felt, sum_instance_minus_one);
-            bit_decompose_hints
-        };
-
-        let log2_num_instances = {
-            let derived_log2 = Usize::from(Var::uninit(builder));
-            // min log2_num_instances 1
-            builder.assign(&derived_log2, F::ONE);
-            let const_one_bit: Var<_> = builder.constant(F::ONE);
-            let bit_index = Usize::from(Var::uninit(builder));
-            builder.assign(&bit_index, F::ZERO);
-            iter_zip!(builder, sum_num_instances_minus_one_bit_decomposition).for_each(
-                |ptr_vec, builder| {
-                    let bit = builder
-                        .iter_ptr_get(&sum_num_instances_minus_one_bit_decomposition, ptr_vec[0]);
-                    let bit_var = builder.cast_felt_to_var(bit);
-                    // Bits encode (sum_num_instances - 1). Highest set bit index + 1 == ceil(log2(sum)).
-                    builder.if_eq(bit_var, const_one_bit).then(|builder| {
-                        builder.assign(&derived_log2, bit_index.clone() + const_one_bit);
-                    });
-                    builder.assign(&bit_index, bit_index.clone() + const_one_bit);
-                },
-            );
-            derived_log2
-        };
+        let sum_num_instances = Usize::Var(usize::read(builder));
+        let sum_num_instances_minus_one_bit_decomposition = Vec::<F>::read(builder);
+        let log2_num_instances = Usize::Var(usize::read(builder));
 
         let r_out_evals_len = Usize::Var(usize::read(builder));
         let w_out_evals_len = Usize::Var(usize::read(builder));
         let lk_out_evals_len = Usize::Var(usize::read(builder));
 
-        let r_out_evals = Vec::<Vec<E>>::read(builder);
-        let w_out_evals = Vec::<Vec<E>>::read(builder);
-        let lk_out_evals = Vec::<Vec<E>>::read(builder);
+        builder.cycle_tracker_start("read omc out evals");
+        let rw_out_evals = read_hint_slice(builder);
+        let lk_out_evals = read_hint_slice(builder);
+        builder.cycle_tracker_end("read omc out evals");
 
+        builder.cycle_tracker_start("read tower proofs");
         let tower_proof = TowerProofInput::read(builder);
+        builder.cycle_tracker_end("read tower proofs");
         let has_main_sumcheck_proofs = Usize::Var(usize::read(builder));
+        builder.cycle_tracker_start("read main sumcheck proofs");
         let main_sumcheck_proofs = IOPProverMessageVec::read(builder);
+        builder.cycle_tracker_end("read main sumcheck proofs");
         let has_gkr_iop_proof = Usize::Var(usize::read(builder));
         let gkr_iop_proof = GKRProofInput::read(builder);
+        let has_rotation_proof = Usize::Var(usize::read(builder));
+        let rotation_proof = SumcheckLayerProofInput::read(builder);
         let has_ecc_proof = Usize::Var(usize::read(builder));
         let ecc_proof = EccQuarkProofInput::read(builder);
 
+        let num_instances = Vec::<usize>::read(builder);
         let n_inst_0_bit_decomps = Vec::<F>::read(builder);
         let n_inst_1_bit_decomps = Vec::<F>::read(builder);
-
-        let fixed_in_evals = Vec::<E>::read(builder);
-        let wits_in_evals = Vec::<E>::read(builder);
 
         ZKVMChipProofInputVariable {
             idx,
             idx_felt,
             sum_num_instances,
-            sum_num_instances_felt,
             sum_num_instances_minus_one_bit_decomposition,
             log2_num_instances,
             r_out_evals_len,
             w_out_evals_len,
             lk_out_evals_len,
-            r_out_evals,
-            w_out_evals,
+            rw_out_evals,
             lk_out_evals,
             has_main_sumcheck_proofs,
             main_sumcheck_proofs,
             has_gkr_iop_proof,
             gkr_iop_proof,
+            has_rotation_proof,
+            rotation_proof,
             tower_proof,
             has_ecc_proof,
             ecc_proof,
             num_instances,
             n_inst_0_bit_decomps,
             n_inst_1_bit_decomps,
-            fixed_in_evals,
-            wits_in_evals,
         }
     }
 
@@ -583,24 +609,42 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let idx_u32: F = F::from_canonical_u32(self.idx as u32);
         stream.extend(idx_u32.write());
 
-        let num_instances = self.num_instances.iter().sum();
-        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
-            &self.num_instances,
-        ));
+        let sum_num_instances = self.num_instances.iter().sum();
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&sum_num_instances));
 
-        let sum_num_instance_bit_decomp = decompose_minus_one_bits(num_instances);
+        let sum_num_instance_bit_decomp = decompose_minus_one_bits(sum_num_instances);
         stream.extend(sum_num_instance_bit_decomp.write());
 
-        let r_out_evals_len = self.r_out_evals.len();
-        let w_out_evals_len = self.w_out_evals.len();
-        let lk_out_evals_len = self.lk_out_evals.len();
+        let next_pow2_instance = next_pow2_instance_padding(sum_num_instances);
+        let log2_num_instances = ceil_log2(next_pow2_instance);
+        stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
+
+        let r_out_evals_len = self.r_out_evals_len;
+        let w_out_evals_len = self.w_out_evals_len;
+        let lk_out_evals_len = self.lk_out_evals_len;
+        tracing::debug!(
+            "circuit {} r_len: {}, w: {}, lk: {}, n_prods: {}, n_logups: {}, n_layers: {}, n_prod_evals: {}, n_logup_evals: {}",
+            self.idx,
+            r_out_evals_len,
+            w_out_evals_len,
+            lk_out_evals_len,
+            self.tower_proof.num_prod_specs,
+            self.tower_proof.num_logup_specs,
+            self.tower_proof.proofs.len(),
+            self.tower_proof.prod_specs_eval.inner_inner_length
+                * self.tower_proof.prod_specs_eval.inner_length
+                * self.tower_proof.prod_specs_eval.outer_length,
+            self.tower_proof.logup_specs_eval.inner_inner_length
+                * self.tower_proof.logup_specs_eval.inner_length
+                * self.tower_proof.logup_specs_eval.outer_length,
+        );
 
         stream.extend(<usize as Hintable<InnerConfig>>::write(&r_out_evals_len));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&w_out_evals_len));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&lk_out_evals_len));
 
-        stream.extend(self.r_out_evals.write());
-        stream.extend(self.w_out_evals.write());
+        let rw_out_evals = [self.r_out_evals.clone(), self.w_out_evals.clone()].concat();
+        stream.extend(rw_out_evals.write());
         stream.extend(self.lk_out_evals.write());
 
         stream.extend(self.tower_proof.write());
@@ -610,24 +654,23 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(self.main_sumcheck_proofs.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_gkr_proof));
         stream.extend(self.gkr_iop_proof.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.has_rotation_proof,
+        ));
+        stream.extend(self.rotation_proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());
+
+        stream.extend(self.num_instances.to_vec().write());
 
         let n_inst_0 = self.num_instances[0];
         let n_inst_0_bit_decomps = decompose_minus_one_bits(n_inst_0);
 
-        let n_inst_1 = if self.num_instances.len() > 1 {
-            self.num_instances[1]
-        } else {
-            1usize
-        };
+        let n_inst_1 = max(self.num_instances[1], 1);
         let n_inst_1_bit_decomps = decompose_minus_one_bits(n_inst_1);
 
         stream.extend(n_inst_0_bit_decomps.write());
         stream.extend(n_inst_1_bit_decomps.write());
-
-        stream.extend(self.fixed_in_evals.write());
-        stream.extend(self.wits_in_evals.write());
 
         stream
     }
@@ -669,32 +712,12 @@ impl Hintable<InnerConfig> for SumcheckLayerProofInput {
     }
 }
 pub struct LayerProofInput {
-    pub has_rotation: usize,
-    pub rotation: SumcheckLayerProofInput,
     pub main: SumcheckLayerProofInput,
 }
 
 impl From<LayerProof<E>> for LayerProofInput {
     fn from(p: LayerProof<E>) -> Self {
         Self {
-            has_rotation: if p.rotation.is_some() { 1 } else { 0 },
-            rotation: if p.rotation.is_some() {
-                let r = p.rotation.unwrap();
-                SumcheckLayerProofInput {
-                    proof: IOPProverMessageVec::from(
-                        r.proof
-                            .proofs
-                            .iter()
-                            .map(|p| IOPProverMessage {
-                                evaluations: p.evaluations.clone(),
-                            })
-                            .collect::<Vec<IOPProverMessage>>(),
-                    ),
-                    evals: r.evals,
-                }
-            } else {
-                SumcheckLayerProofInput::default()
-            },
             main: SumcheckLayerProofInput {
                 proof: IOPProverMessageVec::from(
                     p.main
@@ -714,8 +737,6 @@ impl From<LayerProof<E>> for LayerProofInput {
 
 #[derive(DslVariable, Clone)]
 pub struct LayerProofVariable<C: Config> {
-    pub has_rotation: Usize<C::N>,
-    pub rotation: SumcheckLayerProofVariable<C>,
     pub main: SumcheckLayerProofVariable<C>,
 }
 impl VecAutoHintable for LayerProofInput {}
@@ -723,20 +744,12 @@ impl Hintable<InnerConfig> for LayerProofInput {
     type HintVariable = LayerProofVariable<InnerConfig>;
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        let has_rotation = Usize::Var(usize::read(builder));
-        let rotation = SumcheckLayerProofInput::read(builder);
         let main = SumcheckLayerProofInput::read(builder);
 
-        Self::HintVariable {
-            has_rotation,
-            rotation,
-            main,
-        }
+        Self::HintVariable { main }
     }
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_rotation));
-        stream.extend(self.rotation.write());
         stream.extend(self.main.write());
         stream
     }

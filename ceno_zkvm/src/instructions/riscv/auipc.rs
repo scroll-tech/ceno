@@ -37,6 +37,11 @@ pub struct AuipcInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     type InstructionConfig = AuipcConfig<E>;
+    type InsnType = InsnKind;
+
+    fn inst_kinds() -> &'static [Self::InsnType] {
+        &[InsnKind::AUIPC]
+    }
 
     fn name() -> String {
         format!("{:?}", InsnKind::AUIPC)
@@ -240,12 +245,12 @@ mod tests {
             .unwrap();
 
         let insn_code = encode_rv32(InsnKind::AUIPC, 0, 0, 4, imm);
-        let (raw_witin, lkm) = AuipcInstruction::<E>::assign_instances(
+        let (raw_witin, lkm) = AuipcInstruction::<E>::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![&StepRecord::new_i_instruction(
+            &[StepRecord::new_i_instruction(
                 3,
                 Change::new(MOCK_PC_START, MOCK_PC_START + PC_STEP_SIZE),
                 insn_code,

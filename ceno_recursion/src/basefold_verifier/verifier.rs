@@ -4,6 +4,7 @@ use crate::{
 };
 
 use super::{basefold::*, rs::*, utils::*};
+use crate::arithmetics::UniPolyExtrapolator;
 use ff_ext::BabyBearExt4;
 use openvm_native_compiler::{asm::AsmConfig, ir::FromConstant, prelude::*};
 use openvm_native_compiler_derive::iter_zip;
@@ -24,6 +25,7 @@ pub fn batch_verify<C: Config>(
     max_width: Var<C::N>,
     rounds: Array<C, RoundVariable<C>>,
     proof: BasefoldProofVariable<C>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
     challenger: &mut DuplexChallengerVariable<C>,
 ) {
     builder.cycle_tracker_start("prior query phase");
@@ -87,7 +89,6 @@ pub fn batch_verify<C: Config>(
             // num_var is always smaller than 32.
             builder.range_check_var(diff, 5);
             builder.assign(&diff_product_num_var, diff_product_num_var * diff);
-
             let diff: Var<C::N> = builder.eval(max_width - opening.point_and_evals.evals.len());
             // width is always smaller than 2^14.
             builder.range_check_var(diff, 14);
@@ -114,12 +115,9 @@ pub fn batch_verify<C: Config>(
         transcript_observe_label(builder, challenger, b"commit round");
         let challenge = challenger.sample_ext(builder);
         builder.set(&fold_challenges, index_vec[0], challenge);
-        builder
-            .if_ne(index_vec[0], num_rounds - Usize::from(1))
-            .then(|builder| {
-                let commit = builder.get(&proof.commits, index_vec[0]);
-                challenger.observe_digest(builder, commit.value.into());
-            });
+
+        let commit = builder.get(&proof.commits, index_vec[0]);
+        challenger.observe_digest(builder, commit.value.into());
     });
 
     iter_zip!(builder, proof.final_message).for_each(|ptr_vec_sumcheck_message, builder| {
@@ -157,7 +155,7 @@ pub fn batch_verify<C: Config>(
     };
     builder.cycle_tracker_end("prior query phase");
     builder.cycle_tracker_start("query phase");
-    batch_verifier_query_phase(builder, input);
+    batch_verifier_query_phase(builder, input, unipoly_extrapolator);
     builder.cycle_tracker_end("query phase");
 }
 
@@ -189,6 +187,7 @@ pub mod tests {
 
     use super::{BasefoldProof, BasefoldProofVariable, InnerConfig, RoundVariable, batch_verify};
     use crate::{
+        arithmetics::UniPolyExtrapolator,
         basefold_verifier::{
             basefold::{BasefoldCommitment, Round, RoundOpening},
             query_phase::{BatchOpening, CommitPhaseProofStep, PointAndEvals, QueryOpeningProof},
@@ -248,12 +247,14 @@ pub mod tests {
         let mut challenger = DuplexChallengerVariable::new(&mut builder);
         let verifier_input = VerifierInput::read(&mut builder);
         builder.cycle_tracker_end("Prepare data");
+        let unipoly_extrapolator = UniPolyExtrapolator::new(&mut builder);
         batch_verify(
             &mut builder,
             verifier_input.max_num_var,
             verifier_input.max_width,
             verifier_input.rounds,
             verifier_input.proof,
+            &unipoly_extrapolator,
             &mut challenger,
         );
         builder.halt();

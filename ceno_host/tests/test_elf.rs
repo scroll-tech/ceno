@@ -3,8 +3,8 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 use anyhow::Result;
 use ceno_emul::{
     BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, EmuContext, InsnKind,
-    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, SHA_EXTEND_WORDS,
-    StepRecord, UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, StepRecord,
+    UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
     host_utils::{read_all_messages, read_all_messages_as_words},
 };
 use ceno_host::CenoStdin;
@@ -123,7 +123,6 @@ fn test_hints() -> Result<()> {
             .write(&"This is my hint string.".to_string())?
             .write(&1997_u32)?
             .write(&1999_u32)?,
-        None,
     ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
@@ -140,7 +139,6 @@ fn test_bubble_sorting() -> Result<()> {
         ceno_examples::quadratic_sorting,
         // Provide some random numbers to sort.
         CenoStdin::default().write(&(0..1_000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
-        None,
     ));
     for msg in &all_messages {
         print!("{msg}");
@@ -155,7 +153,6 @@ fn test_sorting() -> Result<()> {
         ceno_examples::sorting,
         // Provide some random numbers to sort.
         CenoStdin::default().write(&(0..1000).map(|_| rng.next_u32()).collect::<Vec<_>>())?,
-        None,
     ));
     for (i, msg) in enumerate(&all_messages) {
         println!("{i}: {msg}");
@@ -178,7 +175,6 @@ fn test_median() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::median,
         &hints,
-        None,
     ));
     assert!(!all_messages.is_empty());
     for (i, msg) in enumerate(&all_messages) {
@@ -200,7 +196,6 @@ fn test_hashing_fail() {
         CENO_PLATFORM.clone(),
         ceno_examples::hashing,
         CenoStdin::default().write(&nums).unwrap(),
-        None,
     );
 }
 
@@ -221,7 +216,6 @@ fn test_hashing() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::hashing,
         CenoStdin::default().write(&uniques)?,
-        None,
     ));
     assert!(!all_messages.is_empty());
     for (i, msg) in enumerate(&all_messages) {
@@ -466,19 +460,6 @@ fn test_secp256k1_ecrecover() -> Result<()> {
 #[test]
 fn test_sha256_extend() -> Result<()> {
     let program_elf = ceno_examples::sha_extend_syscall;
-    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
-
-    let steps = run(&mut state)?;
-    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
-    assert_eq!(syscalls.len(), 1);
-
-    let witness = syscalls[0];
-    assert_eq!(witness.reg_ops.len(), 1);
-    assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
-
-    let state_ptr = witness.reg_ops[0].value.after;
-    assert_eq!(state_ptr, witness.reg_ops[0].value.before);
-    let state_ptr: WordAddr = state_ptr.into();
 
     let expected = [
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 34013193, 67559435, 1711661200,
@@ -491,14 +472,35 @@ fn test_sha256_extend() -> Result<()> {
         634956631,
     ];
 
-    assert_eq!(witness.mem_ops.len(), SHA_EXTEND_WORDS);
+    let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let steps = run(&mut state)?;
+    let syscalls = steps.iter().filter_map(|step| step.syscall()).collect_vec();
+    assert_eq!(syscalls.len(), 48);
 
-    for (i, write_op) in witness.mem_ops.iter().enumerate() {
-        assert_eq!(write_op.addr, state_ptr + i);
-        assert_eq!(write_op.value.after, expected[i]);
-        if i < 16 {
-            // sanity check: first 16 entries remain unchanged
-            assert_eq!(write_op.value.before, write_op.value.after);
+    for round in 0..48 {
+        let witness = &syscalls[round];
+
+        assert_eq!(witness.reg_ops.len(), 1);
+        assert_eq!(witness.reg_ops[0].register_index(), Platform::reg_arg0());
+
+        assert_eq!(
+            witness.reg_ops[0].value.before,
+            witness.reg_ops[0].value.after
+        );
+        let state_ptr = witness.reg_ops[0].value.before;
+        let state_ptr: WordAddr = state_ptr.into();
+
+        assert_eq!(witness.mem_ops.len(), 5);
+
+        let offsets = [2, 7, 15, 16, 0];
+        for (i, write_op) in witness.mem_ops.iter().enumerate() {
+            let mem_addr: u32 = state_ptr.0 - offsets[i] as u32;
+            assert_eq!(write_op.addr.0, mem_addr);
+            if i < 4 {
+                assert_eq!(write_op.value.before, write_op.value.after);
+            } else {
+                assert_eq!(write_op.value.after, expected[round + 16 - offsets[i]]);
+            }
         }
     }
 
@@ -507,7 +509,7 @@ fn test_sha256_extend() -> Result<()> {
 
 #[test]
 fn test_sha256_full() -> Result<()> {
-    let public_io: &[u32; 8] = &[
+    let _public_io: &[u32; 8] = &[
         30689455, 3643278932, 1489987339, 1626711444, 3610619649, 1925764735, 581441152, 321290698,
     ];
     let hints: &Vec<u32> = &vec![0u32; 10];
@@ -515,7 +517,6 @@ fn test_sha256_full() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::sha256,
         CenoStdin::default().write(hints)?,
-        Some(CenoStdin::default().write(public_io)?),
     ));
     assert_eq!(all_messages.len(), 0);
 
@@ -709,7 +710,6 @@ fn test_fibonacci() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::fibonacci,
         CenoStdin::default().write(&10_u32)?,
-        Some(CenoStdin::default().write(&4191_u32)?),
     );
     Ok(())
 }
@@ -721,7 +721,6 @@ fn test_keccak_no_syscall() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::keccak_no_syscall,
         CenoStdin::default().write(&pre_image)?,
-        None,
     ));
 
     let pre_image: Vec<u8> = pre_image.iter().flat_map(|x| x.to_le_bytes()).collect();
@@ -748,14 +747,12 @@ fn test_keccak_guest() -> Result<()> {
         CENO_PLATFORM.clone(),
         ceno_examples::keccak_lib,
         &CenoStdin::default(),
-        None,
     );
 
     let _ = ceno_host::run(
         CENO_PLATFORM.clone(),
         ceno_examples::keccak_native,
         &CenoStdin::default(),
-        None,
     );
     Ok(())
 }
@@ -798,7 +795,8 @@ fn messages_to_strings(messages: &[Vec<u8>]) -> Vec<String> {
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
-    let steps = state.iter_until_halt().collect::<Result<Vec<_>>>()?;
+    state.iter_until_halt().collect::<Result<Vec<_>>>()?;
+    let steps = state.tracer().recorded_steps().to_vec();
     eprintln!("Emulator ran for {} steps.", steps.len());
     Ok(steps)
 }

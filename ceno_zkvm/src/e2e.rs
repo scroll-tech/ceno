@@ -1,6 +1,8 @@
 use crate::{
     error::ZKVMError,
-    instructions::riscv::{DummyExtraConfig, MemPadder, MmuConfig, Rv32imConfig},
+    instructions::riscv::{
+        DummyExtraConfig, InstructionDispatchBuilder, MemPadder, MmuConfig, Rv32imConfig,
+    },
     scheme::{
         PublicValues, ZKVMProof,
         constants::SEPTIC_EXTENSION_DEGREE,
@@ -8,9 +10,8 @@ use crate::{
         mock_prover::{LkMultiplicityKey, MockProver},
         prover::ZKVMProver,
         septic_curve::SepticPoint,
-        verifier::{MemStatePubValuesVerifier, ZKVMVerifier},
+        verifier::ZKVMVerifier,
     },
-    state::GlobalState,
     structs::{
         ProgramParams, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMProvingKey, ZKVMVerifyingKey,
         ZKVMWitnesses,
@@ -21,9 +22,10 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, IterAddresses, NextCycleAccess,
-    Platform, PreflightTracer, Program, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word,
-    WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, IterAddresses,
+    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, StepCellExtractor,
+    StepIndex, StepRecord, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
+    host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -31,9 +33,9 @@ use ff_ext::{ExtensionField, SmallField};
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 use gkr_iop::{RAMType, hal::ProverBackend};
+use itertools::Itertools;
 #[cfg(debug_assertions)]
-use itertools::MinMaxResult;
-use itertools::{Itertools, chain};
+use itertools::{MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
 use rustc_hash::FxHashSet;
@@ -46,6 +48,7 @@ use std::{
     ops::Range,
     sync::Arc,
 };
+use tiny_keccak::{Hasher, Keccak};
 use tracing::info_span;
 use transcript::BasicTranscript as Transcript;
 use witness::next_pow2_instance_padding;
@@ -54,9 +57,33 @@ use witness::next_pow2_instance_padding;
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
 pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
-// define a relative small number to make first shard handle much less instruction
-pub const DEFAULT_MAX_CELL_FIRST_SHARD: u64 = 1 << 20;
+/// Keccak-256 digest of the empty string (""), in big-endian byte form.
+pub const KECCAK_EMPTY: [u8; 32] = [
+    0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7, 0x03, 0xc0,
+    0xe5, 0x00, 0xb6, 0x53, 0xca, 0x82, 0x27, 0x3b, 0x7b, 0xfa, 0xd8, 0x04, 0x5d, 0x85, 0xa4, 0x70,
+];
+/// Same empty-string Keccak digest, reinterpreted as 8 little-endian `u32` words.
+pub const KECCAK_EMPTY_WORDS: [u32; 8] = [
+    0x0146d2c5, 0x3c23f786, 0xb27d7e92, 0xc003c7dc, 0x53b600e5, 0x3b2782ca, 0x04d8fa7b, 0x70a4855d,
+];
 
+pub fn public_io_words_to_digest_words(words: &[u32]) -> [u32; 8] {
+    if words.is_empty() {
+        return KECCAK_EMPTY_WORDS;
+    }
+
+    let mut keccak = Keccak::v256();
+    for word in words {
+        keccak.update(&word.to_le_bytes());
+    }
+    let mut digest = [0u8; 32];
+    keccak.finalize(&mut digest);
+
+    // Reinterpret Keccak digest bytes as 8 little-endian u32 words.
+    unsafe { core::mem::transmute::<[u8; 32], [u32; 8]>(digest) }
+}
+
+// define a relative small number to make first shard handle much less instruction
 /// The polynomial commitment scheme kind
 #[derive(
     Default,
@@ -117,7 +144,9 @@ pub struct EmulationResult<'a> {
     pub final_mem_state: FinalMemState,
     pub pi: PublicValues,
     pub shard_ctx_builder: ShardContextBuilder,
+    pub shard_cycle_boundaries: Arc<Vec<Cycle>>,
     pub executed_steps: usize,
+    pub max_step_shard: usize,
     pub phantom: PhantomData<&'a ()>,
     // pub shard_ctxs: Vec<ShardContext<'a>>,
 }
@@ -371,19 +400,17 @@ impl<'a> ShardContext<'a> {
     /// then `find_future_next_access(0xabc, 4)` returns `8`.
     #[inline(always)]
     pub fn find_future_next_access(&self, cycle: Cycle, addr: WordAddr) -> Option<Cycle> {
-        self.addr_future_accesses
-            .get(cycle as usize)
-            .and_then(|res| {
-                if res.len() == 1 {
-                    Some(res[0].1)
-                } else if res.len() > 1 {
-                    res.iter()
-                        .find(|(m_addr, _)| *m_addr == addr)
-                        .map(|(_, cycle)| *cycle)
-                } else {
-                    None
-                }
-            })
+        self.addr_future_accesses.get(&cycle).and_then(|res| {
+            if res.len() == 1 && res[0].0 == addr {
+                Some(res[0].1)
+            } else if res.len() > 1 {
+                res.iter()
+                    .find(|(m_addr, _)| *m_addr == addr)
+                    .map(|(_, cycle)| *cycle)
+            } else {
+                None
+            }
+        })
     }
 
     #[inline(always)]
@@ -571,24 +598,44 @@ impl<'a> ShardContext<'a> {
     }
 }
 
-pub trait StepCellExtractor {
-    fn extract_cells(&self, step: &StepRecord) -> u64;
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ShardStepSummary {
+    pub step_count: usize,
+    pub first_cycle: Cycle,
+    pub last_cycle: Cycle,
+    pub first_pc_before: Addr,
+    pub last_pc_after: Addr,
+    pub first_heap_before: Addr,
+    pub last_heap_after: Addr,
+    pub first_hint_before: Addr,
+    pub last_hint_after: Addr,
+}
+
+impl ShardStepSummary {
+    fn update(&mut self, step: &StepRecord) {
+        if self.step_count == 0 {
+            self.first_cycle = step.cycle();
+            self.first_pc_before = step.pc().before.0;
+            self.first_heap_before = step.heap_maxtouch_addr.before.0;
+            self.first_hint_before = step.hint_maxtouch_addr.before.0;
+        }
+        self.step_count += 1;
+        self.last_cycle = step.cycle();
+        self.last_pc_after = step.pc().after.0;
+        self.last_heap_after = step.heap_maxtouch_addr.after.0;
+        self.last_hint_after = step.hint_maxtouch_addr.after.0;
+    }
 }
 
 pub struct ShardContextBuilder {
     pub cur_shard_id: usize,
     addr_future_accesses: Arc<NextCycleAccess>,
-    cur_cells: u64,
-    cur_acc_cycle: Cycle,
-    max_cell_per_shard: u64,
-    max_cycle_per_shard: Cycle,
-    target_cell_first_shard: u64,
     prev_shard_cycle_range: Vec<Cycle>,
     prev_shard_heap_range: Vec<Addr>,
     prev_shard_hint_range: Vec<Addr>,
-    // holds the first step for the next shard once the current shard hits its limit
-    pending_step: Option<StepRecord>,
     platform: Platform,
+    shard_cycle_boundaries: Arc<Vec<Cycle>>,
+    max_cycle: Cycle,
 }
 
 impl Default for ShardContextBuilder {
@@ -596,148 +643,121 @@ impl Default for ShardContextBuilder {
         ShardContextBuilder {
             cur_shard_id: 0,
             addr_future_accesses: Arc::new(Default::default()),
-            cur_cells: 0,
-            cur_acc_cycle: 0,
-            max_cell_per_shard: 0,
-            max_cycle_per_shard: 0,
-            target_cell_first_shard: 0,
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
             prev_shard_hint_range: vec![],
-            pending_step: None,
             platform: CENO_PLATFORM.clone(),
+            shard_cycle_boundaries: Arc::new(vec![FullTracer::SUBCYCLES_PER_INSN]),
+            max_cycle: 0,
         }
     }
 }
 
 impl ShardContextBuilder {
-    /// set max_cell_per_shard == u64::MAX if target for single shard
-    pub fn new(
+    pub fn from_plan(
         multi_prover: &MultiProver,
         platform: Platform,
+        shard_cycle_boundaries: Arc<Vec<Cycle>>,
+        max_cycle: Cycle,
         addr_future_accesses: NextCycleAccess,
     ) -> Self {
         assert_eq!(multi_prover.max_provers, 1);
         assert_eq!(multi_prover.prover_id, 0);
         ShardContextBuilder {
             cur_shard_id: 0,
-            cur_cells: 0,
-            cur_acc_cycle: 0,
-            max_cell_per_shard: multi_prover.max_cell_per_shard,
-            max_cycle_per_shard: multi_prover.max_cycle_per_shard,
-            target_cell_first_shard: {
-                if multi_prover.max_cell_per_shard == u64::MAX {
-                    u64::MAX
-                } else {
-                    multi_prover.max_cell_per_shard
-                }
-            },
             addr_future_accesses: Arc::new(addr_future_accesses),
             prev_shard_cycle_range: vec![0],
             prev_shard_heap_range: vec![0],
             prev_shard_hint_range: vec![0],
-            pending_step: None,
             platform,
+            shard_cycle_boundaries,
+            max_cycle,
         }
     }
 
-    pub fn position_next_shard<'a>(
+    pub fn shard_cycle_boundaries(&self) -> Arc<Vec<Cycle>> {
+        self.shard_cycle_boundaries.clone()
+    }
+
+    pub fn total_shards(&self) -> usize {
+        self.shard_cycle_boundaries.len().saturating_sub(1)
+    }
+
+    pub fn position_next_shard<'a, S>(
         &mut self,
-        steps_iter: &mut impl Iterator<Item = StepRecord>,
-        step_cell_extractor: impl StepCellExtractor,
-        steps: &mut Vec<StepRecord>,
-    ) -> Option<ShardContext<'a>> {
-        steps.clear();
-        let target_cost_current_shard = if self.cur_shard_id == 0 {
-            self.target_cell_first_shard
-        } else {
-            self.max_cell_per_shard
-        };
-        loop {
-            let step = if let Some(step) = self.pending_step.take() {
-                step
-            } else {
-                match steps_iter.next() {
-                    Some(step) => step,
-                    None => break,
-                }
-            };
-            let next_cells = self.cur_cells + step_cell_extractor.extract_cells(&step);
-            let next_cycle = self.cur_acc_cycle + FullTracer::SUBCYCLES_PER_INSN;
-            if next_cells >= target_cost_current_shard || next_cycle >= self.max_cycle_per_shard {
-                assert!(
-                    !steps.is_empty(),
-                    "empty record match when splitting shards"
-                );
-                self.pending_step = Some(step);
+        steps_iter: &mut S,
+        mut on_step: impl FnMut(StepIndex, &StepRecord),
+    ) -> Option<(ShardContext<'a>, ShardStepSummary)>
+    where
+        S: StepSource,
+    {
+        if self.cur_shard_id >= self.total_shards() {
+            return None;
+        }
+        steps_iter.start_new_shard();
+        let expected_end_cycle = self
+            .shard_cycle_boundaries
+            .get(self.cur_shard_id + 1)
+            .copied()
+            .expect("missing shard boundary for shard");
+        let mut summary = ShardStepSummary::default();
+        while let Some(step_idx) = steps_iter.next() {
+            let record = steps_iter.step_record(step_idx);
+            summary.update(record);
+            on_step(step_idx, record);
+            if summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN == expected_end_cycle {
                 break;
             }
-            self.cur_cells = next_cells;
-            self.cur_acc_cycle = next_cycle;
-            steps.push(step);
         }
 
-        if steps.is_empty() {
+        if summary.step_count == 0 {
             return None;
         }
 
+        assert_eq!(
+            summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN,
+            expected_end_cycle,
+            "shard {} did not end on expected boundary",
+            self.cur_shard_id
+        );
+
         if self.cur_shard_id > 0 {
             assert_eq!(
-                steps.first().map(|step| step.cycle()).unwrap_or_default(),
+                summary.first_cycle,
                 self.prev_shard_cycle_range
                     .last()
                     .copied()
                     .unwrap_or(FullTracer::SUBCYCLES_PER_INSN)
             );
             assert_eq!(
-                steps
-                    .first()
-                    .map(|step| step.heap_maxtouch_addr.before)
-                    .unwrap_or_default(),
+                summary.first_heap_before,
                 self.prev_shard_heap_range
                     .last()
                     .copied()
                     .unwrap_or(self.platform.heap.start)
-                    .into()
             );
             assert_eq!(
-                steps
-                    .first()
-                    .map(|step| step.hint_maxtouch_addr.before)
-                    .unwrap_or_default(),
+                summary.first_hint_before,
                 self.prev_shard_hint_range
                     .last()
                     .copied()
                     .unwrap_or(self.platform.hints.start)
-                    .into()
             );
         }
 
         let shard_ctx = ShardContext {
             shard_id: self.cur_shard_id,
-            cur_shard_cycle_range: steps.first().map(|step| step.cycle() as usize).unwrap()
-                ..(steps.last().unwrap().cycle() + FullTracer::SUBCYCLES_PER_INSN) as usize,
+            num_shards: self.total_shards(),
+            max_cycle: self.max_cycle,
+            cur_shard_cycle_range: summary.first_cycle as usize
+                ..(summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN) as usize,
             addr_future_accesses: self.addr_future_accesses.clone(),
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
             prev_shard_heap_range: self.prev_shard_heap_range.clone(),
             prev_shard_hint_range: self.prev_shard_hint_range.clone(),
             platform: self.platform.clone(),
-            shard_heap_addr_range: steps
-                .first()
-                .map(|step| step.heap_maxtouch_addr.before.0)
-                .unwrap_or_default()
-                ..steps
-                    .last()
-                    .map(|step| step.heap_maxtouch_addr.after.0)
-                    .unwrap_or_default(),
-            shard_hint_addr_range: steps
-                .first()
-                .map(|step| step.hint_maxtouch_addr.before.0)
-                .unwrap_or_default()
-                ..steps
-                    .last()
-                    .map(|step| step.hint_maxtouch_addr.after.0)
-                    .unwrap_or_default(),
+            shard_heap_addr_range: summary.first_heap_before..summary.last_heap_after,
+            shard_hint_addr_range: summary.first_hint_before..summary.last_hint_after,
             ..Default::default()
         };
         self.prev_shard_cycle_range
@@ -746,19 +766,23 @@ impl ShardContextBuilder {
             .push(shard_ctx.shard_heap_addr_range.end);
         self.prev_shard_hint_range
             .push(shard_ctx.shard_hint_addr_range.end);
-        self.cur_cells = 0;
-        self.cur_acc_cycle = 0;
         self.cur_shard_id += 1;
 
-        Some(shard_ctx)
+        Some((shard_ctx, summary))
     }
+}
+
+pub trait StepSource: Iterator<Item = StepIndex> {
+    fn start_new_shard(&mut self);
+    fn shard_steps(&self) -> &[StepRecord];
+    fn step_record(&self, idx: StepIndex) -> &StepRecord;
 }
 
 /// Lazily replays `StepRecord`s by re-running the VM up to the number of steps
 /// recorded during the preflight execution. This keeps shard generation memory
 /// usage bounded without storing the entire trace.
 struct StepReplay {
-    vm: VMState,
+    vm: VMState<FullTracer>,
     remaining_steps: usize,
 }
 
@@ -768,9 +792,11 @@ impl StepReplay {
         program: Arc<Program>,
         init_mem_state: &InitMemState,
         remaining_steps: usize,
+        max_step_shard: usize,
     ) -> Self {
-        let mut vm = VMState::new(platform, program);
-        for record in chain!(init_mem_state.hints.iter(), init_mem_state.io.iter()) {
+        let mut vm =
+            VMState::new_with_tracer_config(platform, program, FullTracerConfig { max_step_shard });
+        for record in init_mem_state.hints.iter() {
             vm.init_memory(record.addr.into(), record.value);
         }
         StepReplay {
@@ -778,10 +804,18 @@ impl StepReplay {
             remaining_steps,
         }
     }
+
+    fn reset_current_shard(&mut self) {
+        self.vm.tracer_mut().reset_step_buffer();
+    }
+
+    fn current_shard_steps(&self) -> &[StepRecord] {
+        self.vm.tracer().recorded_steps()
+    }
 }
 
 impl Iterator for StepReplay {
-    type Item = StepRecord;
+    type Item = StepIndex;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.remaining_steps == 0 {
@@ -801,36 +835,73 @@ impl Iterator for StepReplay {
     }
 }
 
+impl StepSource for StepReplay {
+    fn start_new_shard(&mut self) {
+        self.reset_current_shard();
+    }
+
+    fn shard_steps(&self) -> &[StepRecord] {
+        self.current_shard_steps()
+    }
+
+    #[inline(always)]
+    fn step_record(&self, idx: StepIndex) -> &StepRecord {
+        self.vm.tracer().step_record(idx)
+    }
+}
+
 pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
     init_mem_state: &InitMemState,
+    public_io_digest: [u32; 8],
     platform: &Platform,
     multi_prover: &MultiProver,
+    step_cell_extractor: Arc<dyn StepCellExtractor>,
 ) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
-        io: io_init,
+        io: _,
         reg: reg_init,
         hints: hints_init,
         stack: _,
         heap: _,
     } = init_mem_state;
 
-    let mut vm: VMState<PreflightTracer> = VMState::new_with_tracer(platform.clone(), program);
+    let tracer_config = PreflightTracerConfig::new(
+        true,
+        multi_prover.max_cell_per_shard,
+        multi_prover.max_cycle_per_shard,
+    )
+    .with_step_cell_extractor(step_cell_extractor);
+    let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
+        .in_scope(move || {
+            VMState::new_with_tracer_config(platform.clone(), program.clone(), tracer_config)
+        });
 
-    for record in chain!(hints_init, io_init) {
-        vm.init_memory(record.addr.into(), record.value);
-    }
-
-    let exit_code = info_span!("[ceno] emulator.preflight-execute").in_scope(|| {
-        vm.iter_until_halt()
-            .take(max_steps)
-            .try_for_each(|step| step.map(|_| ()))
-            .unwrap_or_else(|err| panic!("emulator trapped before halt: {err}"));
-        vm.halted_state().map(|halt_state| halt_state.exit_code)
+    info_span!("[ceno] emulator.init_mem").in_scope(|| {
+        for record in hints_init {
+            vm.init_memory(record.addr.into(), record.value);
+        }
     });
 
+    let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
+        let mut steps = 0usize;
+        loop {
+            if steps >= max_steps {
+                break;
+            }
+            match vm.next_step_record() {
+                Ok(Some(_)) => {
+                    steps += 1;
+                }
+                Ok(None) => break,
+                Err(err) => panic!("emulator trapped before halt: {err}"),
+            }
+        }
+        vm.halted_state().map(|halt_state| halt_state.exit_code)
+    });
+    let max_cycle = vm.tracer().cycle();
     if platform.is_debug {
         let all_messages = read_all_messages(&vm)
             .iter()
@@ -893,17 +964,8 @@ pub fn emulate_program<'a>(
         })
         .collect_vec();
 
-    // Find the final public IO cycles.
-    let io_final = io_init
-        .iter()
-        .map(|rec| MemFinalRecord {
-            ram_type: RAMType::Memory,
-            addr: rec.addr,
-            value: rec.value,
-            init_value: rec.value,
-            cycle: final_access.cycle(rec.addr.into()),
-        })
-        .collect_vec();
+    // Legacy public-io memory init is removed.
+    let io_final: Vec<MemFinalRecord> = vec![];
 
     // Find the final hints IO cycles.
     let hints_final = hints_init
@@ -976,8 +1038,8 @@ pub fn emulate_program<'a>(
         heap_final.len() as u32,
         platform.hints.start,
         hints_final.len() as u32,
-        io_init.iter().map(|rec| rec.value).collect_vec(),
-        vec![0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
+        public_io_digest,
+        [0; SEPTIC_EXTENSION_DEGREE * 2], // point_at_infinity
     );
 
     #[cfg(debug_assertions)]
@@ -994,17 +1056,31 @@ pub fn emulate_program<'a>(
         );
     }
 
-    let shard_ctx_builder = ShardContextBuilder::new(
+    let tracer = vm.take_tracer();
+    let (plan_builder, next_accesses) = tracer.into_shard_plan();
+    let max_step_shard = plan_builder.max_step_shard();
+    let shard_cycle_boundaries = Arc::new(plan_builder.into_cycle_boundaries());
+    let shard_ctx_builder = ShardContextBuilder::from_plan(
         multi_prover,
         platform.clone(),
-        vm.take_tracer().into_next_accesses(),
+        shard_cycle_boundaries.clone(),
+        max_cycle,
+        next_accesses,
+    );
+    tracing::info!(
+        "num_shards: {}, max_cycle {}, shard_cycle_boundaries {:?}",
+        shard_ctx_builder.total_shards(),
+        max_cycle,
+        shard_cycle_boundaries.as_ref()
     );
 
     EmulationResult {
         pi,
         exit_code,
         shard_ctx_builder,
+        shard_cycle_boundaries: shard_cycle_boundaries.clone(),
         executed_steps: insts,
+        max_step_shard,
         final_mem_state: FinalMemState {
             reg: reg_final,
             io: io_final,
@@ -1027,9 +1103,8 @@ pub fn setup_platform(
     program: &Program,
     stack_size: u32,
     heap_size: u32,
-    pub_io_size: u32,
 ) -> Platform {
-    setup_platform_inner(preset, program, stack_size, heap_size, pub_io_size, false)
+    setup_platform_inner(preset, program, stack_size, heap_size, false)
 }
 
 pub fn setup_platform_debug(
@@ -1037,9 +1112,8 @@ pub fn setup_platform_debug(
     program: &Program,
     stack_size: u32,
     heap_size: u32,
-    pub_io_size: u32,
 ) -> Platform {
-    setup_platform_inner(preset, program, stack_size, heap_size, pub_io_size, true)
+    setup_platform_inner(preset, program, stack_size, heap_size, true)
 }
 
 fn setup_platform_inner(
@@ -1047,7 +1121,6 @@ fn setup_platform_inner(
     program: &Program,
     stack_size: u32,
     heap_size: u32,
-    pub_io_size: u32,
     is_debug: bool,
 ) -> Platform {
     let preset = match preset {
@@ -1081,17 +1154,12 @@ fn setup_platform_inner(
         heap.start..heap_end as u32
     };
 
-    assert!(
-        pub_io_size.is_power_of_two(),
-        "pub io size {pub_io_size} must be a power of two"
-    );
     let platform = Platform {
         rom: program.base_address
             ..program.base_address + (program.instructions.len() * WORD_SIZE) as u32,
         prog_data,
         stack,
         heap,
-        public_io: preset.public_io.start..preset.public_io.start + pub_io_size,
         ..preset
     };
     assert!(
@@ -1123,7 +1191,8 @@ pub fn init_static_addrs(program: &Program) -> Vec<MemInitRecord> {
 
 pub struct ConstraintSystemConfig<E: ExtensionField> {
     pub zkvm_cs: ZKVMConstraintSystem<E>,
-    pub config: Rv32imConfig<E>,
+    pub config: Arc<Rv32imConfig<E>>,
+    pub inst_dispatch_builder: InstructionDispatchBuilder,
     pub mmu_config: MmuConfig<E>,
     pub dummy_config: DummyExtraConfig<E>,
     pub prog_config: ProgramTableConfig,
@@ -1134,14 +1203,14 @@ pub fn construct_configs<E: ExtensionField>(
 ) -> ConstraintSystemConfig<E> {
     let mut zkvm_cs = ZKVMConstraintSystem::new_with_platform(program_params);
 
-    let config = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
+    let (config, inst_dispatch_builder) = Rv32imConfig::<E>::construct_circuits(&mut zkvm_cs);
     let mmu_config = MmuConfig::<E>::construct_circuits(&mut zkvm_cs);
     let dummy_config = DummyExtraConfig::<E>::construct_circuits(&mut zkvm_cs);
     let prog_config = zkvm_cs.register_table_circuit::<ProgramTableCircuit<E>>();
-    zkvm_cs.register_global_state::<GlobalState>();
     ConstraintSystemConfig {
         zkvm_cs,
-        config,
+        config: Arc::new(config),
+        inst_dispatch_builder,
         mmu_config,
         dummy_config,
         prog_config,
@@ -1152,7 +1221,6 @@ pub fn generate_fixed_traces<E: ExtensionField>(
     system_config: &ConstraintSystemConfig<E>,
     reg_init: &[MemInitRecord],
     static_mem_init: &[MemInitRecord],
-    io_addrs: &[Addr],
     program: &Program,
 ) -> ZKVMFixedTraces<E> {
     let mut zkvm_fixed_traces = ZKVMFixedTraces::default();
@@ -1171,7 +1239,6 @@ pub fn generate_fixed_traces<E: ExtensionField>(
         &mut zkvm_fixed_traces,
         reg_init,
         static_mem_init,
-        io_addrs,
     );
     system_config
         .dummy_config
@@ -1195,36 +1262,41 @@ pub fn generate_witness<'a, E: ExtensionField>(
         "execution trace must contain at least one step"
     );
 
+    let mut instrunction_dispatch_ctx = system_config.inst_dispatch_builder.to_dispatch_ctx();
     let pi_template = emul_result.pi.clone();
     let mut step_iter = StepReplay::new(
         platform.clone(),
         program.clone(),
         init_mem_state,
         emul_result.executed_steps,
+        emul_result.max_step_shard,
     );
-    let mut shard_steps = Vec::new();
-
     std::iter::from_fn(move || {
         info_span!(
             "[ceno] app_prove.generate_witness",
             shard_id = shard_ctx_builder.cur_shard_id
         )
         .in_scope(|| {
-            let mut shard_ctx = match shard_ctx_builder.position_next_shard(
-                &mut step_iter,
-                &system_config.config,
-                &mut shard_steps,
-            ) {
-                Some(ctx) => ctx,
-                None => return None,
-            };
+            let time = std::time::Instant::now();
+            instrunction_dispatch_ctx.begin_shard();
+            let (mut shard_ctx, shard_summary) =
+                match shard_ctx_builder.position_next_shard(
+                    &mut step_iter,
+                    |idx, record| instrunction_dispatch_ctx.ingest_step(idx, record),
+                ) {
+                    Some(result) => result,
+                    None => return None,
+                };
+            tracing::debug!("position_next_shard finish in {:?}", time.elapsed());
+            let shard_steps = step_iter.shard_steps();
 
             let mut zkvm_witness = ZKVMWitnesses::default();
             let mut pi = pi_template.clone();
             tracing::debug!(
-                "{}th shard collect {} steps, heap_addr_range {:x} - {:x}, hint_addr_range {:x} - {:x}",
+                "{}th shard collect {} steps, cycles range {:?}, heap_addr_range {:x} - {:x}, hint_addr_range {:x} - {:x}",
                 shard_ctx.shard_id,
-                shard_steps.len(),
+                shard_summary.step_count,
+                shard_ctx.cur_shard_cycle_range,
                 shard_ctx.shard_heap_addr_range.start,
                 shard_ctx.shard_heap_addr_range.end,
                 shard_ctx.shard_hint_addr_range.start,
@@ -1232,15 +1304,14 @@ pub fn generate_witness<'a, E: ExtensionField>(
             );
 
             let current_shard_offset_cycle = shard_ctx.current_shard_offset_cycle();
-            let last_step = shard_steps.last().expect("shard must contain steps");
-            let current_shard_end_cycle =
-                last_step.cycle() + FullTracer::SUBCYCLES_PER_INSN - current_shard_offset_cycle;
+            let current_shard_end_cycle = shard_summary.last_cycle + FullTracer::SUBCYCLES_PER_INSN
+                - current_shard_offset_cycle;
             let current_shard_init_pc = if shard_ctx.is_first_shard() {
                 program.entry
             } else {
-                shard_steps.first().unwrap().pc().before.0
+                shard_summary.first_pc_before
             };
-            let current_shard_end_pc = last_step.pc().after.0;
+            let current_shard_end_pc = shard_summary.last_pc_after;
 
             pi.init_pc = current_shard_init_pc;
             pi.init_cycle = FullTracer::SUBCYCLES_PER_INSN;
@@ -1267,13 +1338,14 @@ pub fn generate_witness<'a, E: ExtensionField>(
             }
 
             let time = std::time::Instant::now();
-            let dummy_records = system_config
+            system_config
                 .config
                 .assign_opcode_circuit(
                     &system_config.zkvm_cs,
                     &mut shard_ctx,
+                    &mut instrunction_dispatch_ctx,
+                    shard_steps,
                     &mut zkvm_witness,
-                    &shard_steps,
                 )
                 .unwrap();
             tracing::debug!("assign_opcode_circuit finish in {:?}", time.elapsed());
@@ -1283,8 +1355,9 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 .assign_opcode_circuit(
                     &system_config.zkvm_cs,
                     &mut shard_ctx,
+                    &instrunction_dispatch_ctx,
+                    shard_steps,
                     &mut zkvm_witness,
-                    dummy_records,
                 )
                 .unwrap();
             tracing::debug!("assign_dummy_config finish in {:?}", time.elapsed());
@@ -1340,7 +1413,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &pi,
                         &emul_result.final_mem_state.reg,
                         &emul_result.final_mem_state.mem,
-                        &emul_result.final_mem_state.io,
                         &emul_result.final_mem_state.stack,
                     )
                     .unwrap();
@@ -1352,7 +1424,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &system_config.zkvm_cs,
                         &mut zkvm_witness,
                         &pi,
-                        &[],
                         &[],
                         &[],
                         &[],
@@ -1375,7 +1446,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 "assign_dynamic_init_table_circuit finish in {:?}",
                 time.elapsed()
             );
-
             let time = std::time::Instant::now();
             system_config
                 .mmu_config
@@ -1386,7 +1456,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     &pi,
                     &emul_result.final_mem_state.reg,
                     &emul_result.final_mem_state.mem,
-                    &emul_result.final_mem_state.io,
                     &emul_result.final_mem_state.hints,
                     &emul_result.final_mem_state.stack,
                     &emul_result.final_mem_state.heap,
@@ -1447,10 +1516,7 @@ pub enum Checkpoint {
 
 // Currently handles state required by the sanity check in `bin/e2e.rs`
 // Future cases would require this to be an enum
-pub type IntermediateState<E, PCS, M> = (
-    Option<ZKVMProof<E, PCS>>,
-    Option<ZKVMVerifyingKey<E, PCS, M>>,
-);
+pub type IntermediateState<E, PCS> = (Option<ZKVMProof<E, PCS>>, Option<ZKVMVerifyingKey<E, PCS>>);
 
 /// Context construct from a program and given platform
 pub struct E2EProgramCtx<E: ExtensionField> {
@@ -1461,27 +1527,20 @@ pub struct E2EProgramCtx<E: ExtensionField> {
     pub pubio_len: usize,
     pub system_config: ConstraintSystemConfig<E>,
     pub reg_init: Vec<MemInitRecord>,
-    pub io_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
 }
 
 /// end-to-end pipeline result, stopping at a certain checkpoint
-pub struct E2ECheckpointResult<
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E>,
-    M: MemStatePubValuesVerifier<E, PCS>,
-> {
+pub struct E2ECheckpointResult<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     /// The proof generated by the pipeline, if any
     pub proofs: Option<Vec<ZKVMProof<E, PCS>>>,
     /// The verifying key generated by the pipeline, if any
-    pub vk: Option<ZKVMVerifyingKey<E, PCS, M>>,
+    pub vk: Option<ZKVMVerifyingKey<E, PCS>>,
     /// The next step to run after the checkpoint
     next_step: Option<Box<dyn FnOnce()>>,
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M: MemStatePubValuesVerifier<E, PCS>>
-    E2ECheckpointResult<E, PCS, M>
-{
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> E2ECheckpointResult<E, PCS> {
     pub fn next_step(self) {
         if let Some(next_step) = self.next_step {
             next_step();
@@ -1496,7 +1555,7 @@ pub fn setup_program<E: ExtensionField>(
     multi_prover: MultiProver,
 ) -> E2EProgramCtx<E> {
     let static_addrs = init_static_addrs(&program);
-    let pubio_len = platform.public_io.iter_addresses().len();
+    let pubio_len = 0;
     let program_params = ProgramParams {
         platform: platform.clone(),
         program_size: next_pow2_instance_padding(program.instructions.len()),
@@ -1505,16 +1564,9 @@ pub fn setup_program<E: ExtensionField>(
     };
     let system_config = construct_configs::<E>(program_params);
     let reg_init = system_config.mmu_config.initial_registers();
-    let io_init = MemPadder::new_mem_records_uninit(platform.public_io.clone(), pubio_len);
-
     // Generate fixed traces
-    let zkvm_fixed_traces = generate_fixed_traces(
-        &system_config,
-        &reg_init,
-        &static_addrs,
-        &io_init.iter().map(|rec| rec.addr).collect_vec(),
-        &program,
-    );
+    let zkvm_fixed_traces =
+        generate_fixed_traces(&system_config, &reg_init, &static_addrs, &program);
 
     E2EProgramCtx {
         program: Arc::new(program),
@@ -1524,20 +1576,16 @@ pub fn setup_program<E: ExtensionField>(
         pubio_len,
         system_config,
         reg_init,
-        io_init,
         zkvm_fixed_traces,
     }
 }
 
 impl<E: ExtensionField> E2EProgramCtx<E> {
-    pub fn keygen<
-        PCS: PolynomialCommitmentScheme<E> + 'static,
-        M: MemStatePubValuesVerifier<E, PCS> + From<Platform>,
-    >(
+    pub fn keygen<PCS: PolynomialCommitmentScheme<E> + 'static>(
         self,
         max_num_variables: usize,
         security_level: SecurityLevel,
-    ) -> (ZKVMProvingKey<E, PCS>, ZKVMVerifyingKey<E, PCS, M>) {
+    ) -> (ZKVMProvingKey<E, PCS>, ZKVMVerifyingKey<E, PCS>) {
         let pcs_param =
             PCS::setup(1 << max_num_variables, security_level).expect("Basefold PCS setup");
         let (pp, vp) = PCS::trim(pcs_param, 1 << max_num_variables).expect("Basefold trim");
@@ -1560,11 +1608,10 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
     pub fn keygen_with_pb<
         PCS: PolynomialCommitmentScheme<E> + 'static,
         PB: ProverBackend<E = E, Pcs = PCS> + 'static,
-        M: MemStatePubValuesVerifier<E, PCS> + From<Platform>,
     >(
         self,
         pb: &PB,
-    ) -> (ZKVMProvingKey<E, PCS>, ZKVMVerifyingKey<E, PCS, M>) {
+    ) -> (ZKVMProvingKey<E, PCS>, ZKVMVerifyingKey<E, PCS>) {
         let mut pk = self
             .system_config
             .zkvm_cs
@@ -1582,9 +1629,7 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
     }
 
     /// Setup init mem state
-    pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> InitMemState {
-        let mut io_init = self.io_init.clone();
-        MemPadder::init_mem_records(&mut io_init, public_io);
+    pub fn setup_init_mem(&self, hints: &[u32]) -> InitMemState {
         let hint_init = MemPadder::new_mem_records(
             self.platform.hints.clone(),
             hints.len().next_power_of_two(),
@@ -1594,7 +1639,7 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
         InitMemState {
             mem: self.static_addrs.clone(),
             reg: self.reg_init.clone(),
-            io: io_init,
+            io: vec![],
             hints: hint_init,
             // stack/heap both init value 0 and range is dynamic
             stack: vec![],
@@ -1620,19 +1665,18 @@ pub fn run_e2e_with_checkpoint<
     PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
     PB: ProverBackend<E = E, Pcs = PCS> + 'static,
     PD: ProverDevice<PB> + 'static,
-    M: MemStatePubValuesVerifier<E, PCS> + From<Platform> + 'static,
 >(
     device: PD,
     program: Program,
     platform: Platform,
     multi_prover: MultiProver,
     hints: &[u32],
-    public_io: &[u32],
+    public_io_digest: [u32; 8],
     max_steps: usize,
     checkpoint: Checkpoint,
     // for debug purpose
     target_shard_id: Option<usize>,
-) -> E2ECheckpointResult<E, PCS, M> {
+) -> E2ECheckpointResult<E, PCS> {
     let start = std::time::Instant::now();
     let ctx = setup_program::<E>(program, platform, multi_prover);
     tracing::debug!("setup_program done in {:?}", start.elapsed());
@@ -1646,7 +1690,7 @@ pub fn run_e2e_with_checkpoint<
     let prover = ZKVMProver::new(pk.into(), device);
 
     let start = std::time::Instant::now();
-    let init_full_mem = prover.setup_init_mem(hints, public_io);
+    let init_full_mem = prover.setup_init_mem(hints);
     tracing::debug!("setup_init_mem done in {:?}", start.elapsed());
 
     // Generate witness
@@ -1659,6 +1703,7 @@ pub fn run_e2e_with_checkpoint<
                 _ = run_e2e_proof::<E, _, _, _>(
                     &prover,
                     &init_full_mem,
+                    public_io_digest,
                     max_steps,
                     is_mock_proving,
                     target_shard_id,
@@ -1669,12 +1714,17 @@ pub fn run_e2e_with_checkpoint<
 
     // Emulate program
     let start = std::time::Instant::now();
+    let raw_step_cell_extractor =
+        Arc::clone(&prover.pk.program_ctx.as_ref().unwrap().system_config.config);
+    let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
     let emul_result = emulate_program(
         prover.pk.program_ctx.as_ref().unwrap().program.clone(),
         max_steps,
         &init_full_mem,
+        public_io_digest,
         &prover.pk.program_ctx.as_ref().unwrap().platform,
         &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
+        step_cell_extractor,
     );
     tracing::debug!("emulate done in {:?}", start.elapsed());
 
@@ -1752,6 +1802,7 @@ pub fn run_e2e_proof<
 >(
     prover: &ZKVMProver<E, PCS, PB, PD>,
     init_full_mem: &InitMemState,
+    public_io_digest: [u32; 8],
     max_steps: usize,
     is_mock_proving: bool,
     // for debug purpose
@@ -1759,12 +1810,16 @@ pub fn run_e2e_proof<
 ) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     // Emulate program
+    let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+    let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
     let emul_result = emulate_program(
         ctx.program.clone(),
         max_steps,
         init_full_mem,
+        public_io_digest,
         &ctx.platform,
         &ctx.multi_prover,
+        step_cell_extractor,
     );
     create_proofs_streaming(
         emul_result,
@@ -1854,7 +1909,7 @@ fn create_proofs_streaming<
                 {
                     let mut proofs = Vec::new();
                     let mut proof_err = None;
-                    let mut rx = rx;
+                    let rx = rx;
                     while let Ok((zkvm_witness, shard_ctx, pi)) = rx.recv() {
                         if is_mock_proving {
                             MockProver::assert_satisfied_full(
@@ -1963,12 +2018,8 @@ fn create_proofs_streaming<
     proofs
 }
 
-pub fn run_e2e_verify<
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E>,
-    M: MemStatePubValuesVerifier<E, PCS>,
->(
-    verifier: &ZKVMVerifier<E, PCS, M>,
+pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    verifier: &ZKVMVerifier<E, PCS>,
     zkvm_proofs: Vec<ZKVMProof<E, PCS>>,
     exit_code: Option<u32>,
     max_steps: usize,
@@ -1976,16 +2027,11 @@ pub fn run_e2e_verify<
     let transcripts = (0..zkvm_proofs.len())
         .map(|_| Transcript::new(b"riscv"))
         .collect_vec();
-    let mem_state_proofs = zkvm_proofs.clone();
     assert!(
         verifier
             .verify_proofs_halt(zkvm_proofs, transcripts, exit_code.is_some())
             .expect("verify proof return with error"),
     );
-    verifier
-        .vk
-        .mem_state_verifier
-        .verify_proofs(mem_state_proofs);
     match exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),
@@ -2045,13 +2091,9 @@ fn format_segment(platform: &Platform, addr: u32) -> String {
     )
 }
 
-pub fn verify<
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E> + serde::Serialize,
-    M: MemStatePubValuesVerifier<E, PCS>,
->(
+pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Serialize>(
     zkvm_proofs: Vec<ZKVMProof<E, PCS>>,
-    verifier: &ZKVMVerifier<E, PCS, M>,
+    verifier: &ZKVMVerifier<E, PCS>,
 ) -> Result<(), ZKVMError> {
     #[cfg(debug_assertions)]
     {
@@ -2076,17 +2118,11 @@ pub fn verify<
 
 #[cfg(test)]
 mod tests {
-    use crate::e2e::{MultiProver, ShardContextBuilder, StepCellExtractor};
-    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepRecord};
+    use crate::e2e::{MultiProver, ShardContextBuilder};
+    use ceno_emul::{CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepIndex, StepRecord};
     use itertools::Itertools;
-
-    struct UniformStepExtractor;
-
-    impl StepCellExtractor for &UniformStepExtractor {
-        fn extract_cells(&self, _step: &StepRecord) -> u64 {
-            1
-        }
-    }
+    use std::sync::Arc;
+    use tiny_keccak::{Hasher, Keccak};
 
     #[test]
     fn test_single_prover_shard_ctx() {
@@ -2114,23 +2150,85 @@ mod tests {
         executed_instruction: usize,
         expected_shard: usize,
     ) {
-        let mut shard_ctx_builder = ShardContextBuilder::new(
+        let steps = (0..executed_instruction)
+            .map(|i| {
+                StepRecord::new_ecall_any(FullTracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
+            })
+            .collect_vec();
+        let max_cycle = steps
+            .last()
+            .map(|step| step.cycle() + FullTracer::SUBCYCLES_PER_INSN)
+            .unwrap_or(FullTracer::SUBCYCLES_PER_INSN);
+        let shard_cycle_boundaries = {
+            let mut boundaries = vec![FullTracer::SUBCYCLES_PER_INSN];
+            let mut cur_cycle_in_shard = 0;
+            for step in &steps {
+                let next_cycle = cur_cycle_in_shard + FullTracer::SUBCYCLES_PER_INSN;
+                if max_cycle_per_shard < Cycle::MAX && next_cycle >= max_cycle_per_shard {
+                    boundaries.push(step.cycle());
+                    cur_cycle_in_shard = FullTracer::SUBCYCLES_PER_INSN;
+                } else {
+                    cur_cycle_in_shard = next_cycle;
+                }
+            }
+            boundaries.push(max_cycle);
+            Arc::new(boundaries)
+        };
+        let mut shard_ctx_builder = ShardContextBuilder::from_plan(
             &MultiProver::new(0, 1, u64::MAX, max_cycle_per_shard),
             CENO_PLATFORM.clone(),
+            shard_cycle_boundaries,
+            max_cycle,
             NextCycleAccess::default(),
         );
+        struct TestReplay {
+            steps: Vec<StepRecord>,
+            cursor: usize,
+            shard_start: usize,
+        }
 
-        let mut steps_iter = (0..executed_instruction).map(|i| {
-            StepRecord::new_ecall_any(FullTracer::SUBCYCLES_PER_INSN * (i + 1) as u64, 0.into())
-        });
-        let mut steps = Vec::new();
+        impl TestReplay {
+            fn new(steps: Vec<StepRecord>) -> Self {
+                Self {
+                    steps,
+                    cursor: 0,
+                    shard_start: 0,
+                }
+            }
+        }
 
+        impl Iterator for TestReplay {
+            type Item = StepIndex;
+
+            fn next(&mut self) -> Option<Self::Item> {
+                if self.cursor >= self.steps.len() {
+                    return None;
+                }
+                let local_idx = self.cursor - self.shard_start;
+                self.cursor += 1;
+                Some(local_idx)
+            }
+        }
+
+        impl super::StepSource for TestReplay {
+            fn start_new_shard(&mut self) {
+                self.shard_start = self.cursor;
+            }
+
+            fn shard_steps(&self) -> &[StepRecord] {
+                &self.steps[self.shard_start..self.cursor]
+            }
+
+            fn step_record(&self, idx: StepIndex) -> &StepRecord {
+                &self.steps[self.shard_start + idx]
+            }
+        }
+
+        let mut steps_iter = TestReplay::new(steps);
         let shard_ctx = std::iter::from_fn(|| {
-            shard_ctx_builder.position_next_shard(
-                &mut steps_iter,
-                &UniformStepExtractor {},
-                &mut steps,
-            )
+            shard_ctx_builder
+                .position_next_shard(&mut steps_iter, |_, _| {})
+                .map(|(ctx, _)| ctx)
         })
         .collect_vec();
 
@@ -2153,5 +2251,32 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn public_io_digest_matches_guest_commit_hashing() {
+        let words = vec![4191u32];
+        let digest_words = super::public_io_words_to_digest_words(&words);
+
+        let mut keccak = Keccak::v256();
+        for word in &words {
+            keccak.update(&word.to_le_bytes());
+        }
+        let mut digest = [0u8; 32];
+        keccak.finalize(&mut digest);
+        let expected = core::array::from_fn(|i| {
+            u32::from_le_bytes([
+                digest[i * 4],
+                digest[i * 4 + 1],
+                digest[i * 4 + 2],
+                digest[i * 4 + 3],
+            ])
+        });
+
+        assert_eq!(digest_words, expected);
+        assert_eq!(
+            super::public_io_words_to_digest_words(&[]),
+            super::KECCAK_EMPTY_WORDS
+        );
     }
 }

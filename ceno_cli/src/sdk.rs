@@ -7,11 +7,8 @@ use ceno_recursion::{
 use ceno_zkvm::{
     e2e::{MultiProver, run_e2e_proof, setup_program},
     scheme::{
-        ZKVMProof, create_backend, create_prover,
-        hal::ProverDevice,
-        mock_prover::LkMultiplicityKey,
-        prover::ZKVMProver,
-        verifier::{RV32imMemStateConfig, ZKVMVerifier},
+        ZKVMProof, create_backend, create_prover, hal::ProverDevice,
+        mock_prover::LkMultiplicityKey, prover::ZKVMProver, verifier::ZKVMVerifier,
     },
     structs::{ZKVMProvingKey, ZKVMVerifyingKey},
 };
@@ -54,7 +51,7 @@ pub struct Sdk<
 
     // base(app) layer
     pub zkvm_pk: Option<Arc<ZKVMProvingKey<E, PCS>>>,
-    pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS, RV32imMemStateConfig>>,
+    pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS>>,
     pub zkvm_prover: Option<ZKVMProver<E, PCS, PB, PD>>,
 
     // aggregation
@@ -107,7 +104,7 @@ where
     }
 
     // allow us to read the app vk from file and then set it
-    pub fn set_app_vk(&mut self, vk: ZKVMVerifyingKey<E, PCS, RV32imMemStateConfig>) {
+    pub fn set_app_vk(&mut self, vk: ZKVMVerifyingKey<E, PCS>) {
         self.zkvm_vk = Some(vk);
     }
 
@@ -151,13 +148,20 @@ where
     pub fn generate_base_proof(
         &self,
         hints: CenoStdin,
-        pub_io: CenoStdin,
+        public_io_digest: [u32; 8],
         max_steps: usize,
         shard_id: Option<usize>,
     ) -> Vec<ZKVMProof<E, PCS>> {
         if let Some(zkvm_prover) = self.zkvm_prover.as_ref() {
-            let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(&hints), &Vec::from(&pub_io));
-            run_e2e_proof::<E, PCS, PB, PD>(zkvm_prover, &init_full_mem, max_steps, false, shard_id)
+            let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(&hints));
+            run_e2e_proof::<E, PCS, PB, PD>(
+                zkvm_prover,
+                &init_full_mem,
+                public_io_digest,
+                max_steps,
+                false,
+                shard_id,
+            )
         } else {
             panic!("ZKVMProver is not initialized")
         }
@@ -167,7 +171,7 @@ where
         self.zkvm_pk.clone().expect("zkvm pk is not set")
     }
 
-    pub fn get_app_vk(&self) -> ZKVMVerifyingKey<E, PCS, RV32imMemStateConfig> {
+    pub fn get_app_vk(&self) -> ZKVMVerifyingKey<E, PCS> {
         self.zkvm_vk.clone().expect("zkvm vk is not set")
     }
 
@@ -179,7 +183,7 @@ where
         self.agg_pk.as_ref().expect("agg pk is not set").get_vk()
     }
 
-    pub fn create_zkvm_verifier(&self) -> ZKVMVerifier<E, PCS, RV32imMemStateConfig> {
+    pub fn create_zkvm_verifier(&self) -> ZKVMVerifier<E, PCS> {
         let Some(app_vk) = self.zkvm_vk.clone() else {
             panic!("empty zkvm vk");
         };
@@ -214,8 +218,12 @@ where
                 agg_pk.internal_committed_exe.exe.clone(),
             )
             .expect("internal prover");
-
-            CenoAggregationProver::new(leaf_prover, internal_prover, agg_pk.clone())
+            assert!(
+                self.zkvm_vk.is_some(),
+                "Aggregation must provide existing base layer vk."
+            );
+            let base_vk = self.zkvm_vk.as_ref().unwrap().clone();
+            CenoAggregationProver::new(base_vk, leaf_prover, internal_prover, agg_pk.clone())
         } else {
             let agg_prover = CenoAggregationProver::from_base_vk(self.zkvm_vk.clone().unwrap());
             self.agg_pk = Some(agg_prover.pk.clone());

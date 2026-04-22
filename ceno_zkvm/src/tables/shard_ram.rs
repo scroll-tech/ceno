@@ -418,6 +418,11 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         let selector_r = cb.create_placeholder_structural_witin(|| "selector_r");
         let selector_w = cb.create_placeholder_structural_witin(|| "selector_w");
         let selector_zero = cb.create_placeholder_structural_witin(|| "selector_zero");
+        let selector_ecc_x = cb.create_placeholder_structural_witin(|| "selector_ecc_x");
+        let selector_ecc_y = cb.create_placeholder_structural_witin(|| "selector_ecc_y");
+        let selector_ecc_s = cb.create_placeholder_structural_witin(|| "selector_ecc_s");
+        let selector_ecc_x3 = cb.create_placeholder_structural_witin(|| "selector_ecc_x3");
+        let selector_ecc_y3 = cb.create_placeholder_structural_witin(|| "selector_ecc_y3");
 
         let config = Self::construct_circuit(cb, param)?;
 
@@ -439,6 +444,13 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         cb.cs.w_selector = Some(selector_w);
         cb.cs.zero_selector = Some(selector_zero.clone());
         cb.cs.lk_selector = Some(selector_zero);
+        cb.cs.ec_bridge_selectors = Some([
+            SelectorType::Whole(selector_ecc_x.expr()),
+            SelectorType::Whole(selector_ecc_y.expr()),
+            SelectorType::Whole(selector_ecc_s.expr()),
+            SelectorType::Whole(selector_ecc_x3.expr()),
+            SelectorType::Whole(selector_ecc_y3.expr()),
+        ]);
 
         // all shared the same selector
         let (out_evals, mut chip) = (
@@ -452,10 +464,10 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
                 // zero_record
                 (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
-        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))
@@ -487,10 +499,20 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
 
-        assert_eq!(num_structural_witin, 3);
+        // ShardRam expects exactly these structural selectors:
+        // r, w, zero, ecc_x, ecc_y, ecc_s, ecc_x3, ecc_y3.
+        assert_eq!(
+            num_structural_witin, 8,
+            "ShardRam requires exactly 8 structural selectors (r,w,zero,ecc_x,ecc_y,ecc_s,ecc_x3,ecc_y3)"
+        );
         let selector_r_witin = WitIn { id: 0 };
         let selector_w_witin = WitIn { id: 1 };
         let selector_zero_witin = WitIn { id: 2 };
+        let selector_ecc_x_witin = WitIn { id: 3 };
+        let selector_ecc_y_witin = WitIn { id: 4 };
+        let selector_ecc_s_witin = WitIn { id: 5 };
+        let selector_ecc_x3_witin = WitIn { id: 6 };
+        let selector_ecc_y3_witin = WitIn { id: 7 };
 
         let nthreads = max_usable_threads();
 
@@ -539,6 +561,17 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
             );
             RowMajorMatrix::new(value, num_structural_witin)
         };
+        // ECC bridge selectors are `Whole`, so keep them active on all rows.
+        raw_structual_witin
+            .values
+            .par_chunks_mut(num_structural_witin)
+            .for_each(|row| {
+                set_val!(row, selector_ecc_x_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_y_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_s_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_x3_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_y3_witin, E::BaseField::ONE);
+            });
         let raw_witin_iter = raw_witin.values[0..steps.len() * num_witin]
             .par_chunks_mut(num_instance_per_batch * num_witin);
         let raw_structual_witin_iter = raw_structual_witin.values
@@ -651,7 +684,7 @@ mod tests {
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
     use p3::babybear::BabyBear;
     use rand::thread_rng;
-    use std::{ops::Index, sync::Arc};
+    use std::sync::Arc;
     use tracing_forest::{ForestLayer, util::LevelFilter};
     use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
     use transcript::BasicTranscript;
@@ -659,16 +692,17 @@ mod tests {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         scheme::{
-            PublicValues, create_backend, create_prover,
-            hal::ProofInput,
-            prover::ZKVMProver,
-            septic_curve::SepticPoint,
-            verifier::{RV32imMemStateConfig, ZKVMVerifier},
+            PublicValues, constants::SEPTIC_EXTENSION_DEGREE, create_backend, create_prover,
+            hal::ProofInput, prover::ZKVMProver, septic_curve::SepticPoint, verifier::ZKVMVerifier,
         },
         structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
         tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
     };
-    use multilinear_extensions::mle::IntoMLE;
+    #[cfg(feature = "gpu")]
+    use gkr_iop::{
+        gpu::{MultilinearExtensionGpu, get_cuda_hal},
+        hal::MultilinearPolynomial,
+    };
     use p3::field::PrimeField32;
 
     type E = BabyBearExt4;
@@ -752,25 +786,17 @@ mod tests {
             .map(|record| record.ec_point.point.clone())
             .sum();
 
-        let public_value = PublicValues::new(
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            vec![0], // dummy
-            global_ec_sum
-                .x
-                .iter()
-                .chain(global_ec_sum.y.iter())
-                .map(|fe| fe.as_canonical_u32())
-                .collect_vec(),
-        );
+        let mut shard_rw_sum = [0u32; SEPTIC_EXTENSION_DEGREE * 2];
+        for (i, fe) in global_ec_sum
+            .x
+            .iter()
+            .chain(global_ec_sum.y.iter())
+            .enumerate()
+        {
+            shard_rw_sum[i] = fe.as_canonical_u32();
+        }
+
+        let public_value = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0; 8], shard_rw_sum);
 
         // assign witness
         let witness = ShardRamCircuit::assign_instances(
@@ -801,54 +827,77 @@ mod tests {
         let pd = create_prover(backend);
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
-        let zkvm_vk = zkvm_pk.get_vk_slow::<RV32imMemStateConfig>();
+        let zkvm_vk = zkvm_pk.get_vk_slow();
         let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 
-        let public_input_mles = public_value
-            .to_vec::<E>()
-            .into_iter()
-            .map(|v| Arc::new(v.into_mle()))
+        let pub_io_evals = pk
+            .get_cs()
+            .zkvm_v1_css
+            .instance
+            .iter()
+            .map(|instance| Either::Right(E::from(public_value.query_by_index::<E>(instance.0))))
             .collect_vec();
-        let pub_io_evals = public_value
-            .to_vec::<E>()
-            .into_iter()
-            .map(|v| Either::Right(E::from(*v.index(0))))
-            .collect_vec();
+
+        #[cfg(not(feature = "gpu"))]
+        let (witness_mles, structural_mles) = {
+            (
+                witness[0].to_mles().into_iter().map(Arc::new).collect(),
+                witness[1].to_mles().into_iter().map(Arc::new).collect(),
+            )
+        };
+        #[cfg(feature = "gpu")]
+        let (witness_mles, structural_mles) = {
+            let cuda_hal = get_cuda_hal().unwrap();
+            let witness_cpu: Vec<_> = witness[0].to_mles();
+            let structural_cpu: Vec<_> = witness[1].to_mles();
+            (
+                witness_cpu
+                    .iter()
+                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                    .collect_vec(),
+                structural_cpu
+                    .iter()
+                    .map(|v| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, v)))
+                    .collect_vec(),
+            )
+        };
+
         let proof_input = ProofInput {
-            witness: witness[0].to_mles().into_iter().map(Arc::new).collect(),
-            structural_witness: witness[1].to_mles().into_iter().map(Arc::new).collect(),
+            witness: witness_mles,
+            structural_witness: structural_mles,
             fixed: vec![],
-            public_values: public_input_mles.clone(),
-            pub_io_evals,
-            num_instances: vec![n_global_writes as usize, n_global_reads as usize],
+            pi: pub_io_evals,
+            num_instances: [n_global_writes as usize, n_global_reads as usize],
             has_ecc_ops: true,
         };
         let mut rng = thread_rng();
         let challenges = [E::random(&mut rng), E::random(&mut rng)];
+        let task = crate::scheme::scheduler::ChipTask {
+            task_id: 0,
+            circuit_name: ShardRamCircuit::<E>::name(),
+            circuit_idx: 0,
+            pk: &pk,
+            input: proof_input,
+            estimated_memory_bytes: 0,
+            has_witness_or_fixed: true,
+            challenges,
+            witness_trace_idx: None,
+            num_witin: 0,
+            structural_rmm: None,
+        };
         let (proof, _, point) = zkvm_prover
-            .create_chip_proof(
-                ShardRamCircuit::<E>::name().as_str(),
-                &pk,
-                proof_input,
-                &mut transcript,
-                &challenges,
-            )
+            .create_chip_proof(&task, &mut transcript)
             .unwrap();
 
         let mut transcript = BasicTranscript::new(b"global chip test");
         let verifier = ZKVMVerifier::new(zkvm_vk);
-        let pi_evals = public_input_mles
-            .iter()
-            .map(|mle| mle.evaluate(&point[..mle.num_vars()]))
-            .collect_vec();
-        let (vrf_point, _) = verifier
+        let (vrf_point, _, _, _) = verifier
             .verify_chip_proof(
                 "global",
                 &pk.vk,
                 &proof,
-                &pi_evals,
-                &public_value.to_vec::<E>(),
+                &public_value,
                 &mut transcript,
                 2,
                 &PointAndEval::default(),

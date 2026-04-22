@@ -13,7 +13,7 @@ use std::{
 mod allocator;
 
 mod mmio;
-pub use mmio::{commit, read, read_owned, read_slice};
+pub use mmio::{CommitCtx, commit, commit_digest, read, read_owned, read_slice};
 
 mod io;
 #[cfg(debug_assertions)]

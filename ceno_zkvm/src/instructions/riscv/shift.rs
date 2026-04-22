@@ -172,12 +172,12 @@ mod tests {
             )
             .unwrap();
 
-        let (raw_witin, lkm) = ShiftLogicalInstruction::<E, I>::assign_instances(
+        let (raw_witin, lkm) = ShiftLogicalInstruction::<E, I>::assign_instances_from_steps(
             &config,
             &mut ShardContext::default(),
             cb.cs.num_witin as usize,
             cb.cs.num_structural_witin as usize,
-            vec![&StepRecord::new_r_instruction(
+            &[StepRecord::new_r_instruction(
                 3,
                 MOCK_PC_START,
                 insn_code,

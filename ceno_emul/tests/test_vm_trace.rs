@@ -60,7 +60,8 @@ fn test_empty_program() -> Result<()> {
 }
 
 fn run(state: &mut VMState) -> Result<Vec<StepRecord>> {
-    state.iter_until_halt().collect()
+    state.iter_until_halt().collect::<Result<Vec<_>>>()?;
+    Ok(state.tracer().recorded_steps().to_vec())
 }
 
 /// Example in RISC-V bytecode and assembly.

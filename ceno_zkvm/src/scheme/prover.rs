@@ -3,21 +3,18 @@ use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
 };
-use std::{
-    collections::{BTreeMap, HashMap},
-    marker::PhantomData,
-    sync::Arc,
-};
+use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
-use crate::scheme::{constants::SEPTIC_EXTENSION_DEGREE, hal::MainSumcheckEvals};
+#[cfg(feature = "gpu")]
+use crate::scheme::gpu::estimate_chip_proof_memory;
+use crate::scheme::{
+    hal::MainSumcheckEvals,
+    scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
+};
 use either::Either;
-use gkr_iop::hal::MultilinearPolynomial;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{
-    Expression, Instance,
-    mle::{IntoMLE, MultilinearExtension},
-};
+use multilinear_extensions::Instance;
 use p3::field::FieldAlgebra;
 use std::iter::Iterator;
 use sumcheck::{
@@ -25,21 +22,22 @@ use sumcheck::{
     structs::IOPProverMessage,
 };
 use tracing::info_span;
-use transcript::Transcript;
+use transcript::{ForkableTranscript, Transcript};
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
+#[cfg(feature = "gpu")]
+use crate::structs::ProvingKey;
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::riscv::constants::NUM_INSTANCE_IDX,
     scheme::{
         hal::{DeviceProvingKey, ProofInput},
         utils::build_main_witness,
     },
-    structs::{ProvingKey, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
+    structs::{TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
-type CreateTableProof<E> = (ZKVMChipProof<E>, HashMap<usize, E>, Point<E>);
+type CreateTableProof<E> = (ZKVMChipProof<E>, MainSumcheckEvals<E>, Point<E>);
 
 pub type ZkVMCpuProver<E, PCS> =
     ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
@@ -108,6 +106,13 @@ impl<
             self.device_non_first_shard_pk.as_ref()
         }
     }
+
+    pub fn setup_init_mem(&self, hints: &[u32]) -> crate::e2e::InitMemState {
+        let Some(ctx) = self.pk.program_ctx.as_ref() else {
+            panic!("empty program ctx")
+        };
+        ctx.setup_init_mem(hints)
+    }
 }
 
 impl<
@@ -129,37 +134,37 @@ impl<
         shard_ctx: &ShardContext,
         witnesses: ZKVMWitnesses<E>,
         pi: PublicValues,
-        mut transcript: impl Transcript<E> + 'static,
+        mut transcript: impl ForkableTranscript<E> + 'static,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
+        // Pre-extract fixed_mles before entering the tracing scope to avoid lifetime issues with std::thread::scope
+        let fixed_mles_preload = self
+            .get_device_proving_key(shard_ctx)
+            .map(|dpk| dpk.fixed_mles.clone())
+            .unwrap_or_default();
+
         info_span!(
             "[ceno] create_proof_of_shard",
             shard_id = shard_ctx.shard_id
         )
         .in_scope(|| {
-            let raw_pi = pi.to_vec::<E>();
-            let mut pi_evals = ZKVMProof::<E, PCS>::pi_evals(&raw_pi);
-            let mut chip_proofs = BTreeMap::new();
-
             let span = entered_span!("commit_to_pi", profiling_1 = true);
-            // including raw public input to transcript
-            for v in raw_pi.iter().flatten() {
-                transcript.append_field_element(v);
+            // Include transcript-visible public values in canonical circuit order.
+            // The order must match verifier and recursion verifier exactly.
+            for (_, circuit_pk) in self.pk.circuit_pks.iter() {
+                for instance_value in circuit_pk.get_cs().zkvm_v1_css.instance.iter() {
+                    transcript.append_field_element(&pi.query_by_index::<E>(instance_value.0));
+                }
             }
-            exit_span!(span);
 
-            let pi: Vec<MultilinearExtension<E>> =
-                raw_pi.iter().map(|p| p.to_vec().into_mle()).collect();
+            exit_span!(span);
 
             // commit to fixed commitment
             let span = entered_span!("commit_to_fixed_commit", profiling_1 = true);
-            if let Some(fixed_commit) = &self.pk.fixed_commit
-                && shard_ctx.is_first_shard()
-            {
+            if let Some(fixed_commit) = self.pk.fixed_commit.as_ref() {
                 PCS::write_commitment(fixed_commit, &mut transcript)
                     .map_err(ZKVMError::PCSError)?;
-            } else if let Some(fixed_commit) = &self.pk.fixed_no_omc_init_commit
-                && !shard_ctx.is_first_shard()
-            {
+            }
+            if let Some(fixed_commit) = self.pk.fixed_no_omc_init_commit.as_ref() {
                 PCS::write_commitment(fixed_commit, &mut transcript)
                     .map_err(ZKVMError::PCSError)?;
             }
@@ -179,10 +184,10 @@ impl<
                 // num_instance from witness might include rotation
                 let num_instances = chip_inputs
                     .iter()
-                    .flat_map(|chip_input| &chip_input.num_instances)
+                    .flat_map(|chip_input| chip_input.num_instances)
                     .collect_vec();
 
-                if num_instances.is_empty() {
+                if num_instances.iter().sum::<usize>() == 0 {
                     continue;
                 }
 
@@ -191,7 +196,7 @@ impl<
                 transcript.append_field_element(&E::BaseField::from_canonical_usize(*circuit_idx));
                 for num_instance in num_instances {
                     transcript
-                        .append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
+                        .append_field_element(&E::BaseField::from_canonical_usize(num_instance));
                 }
             }
 
@@ -222,19 +227,32 @@ impl<
                     / (1024.0 * 1024.0)
             );
 
+            // Build trace index map: maps circuit enum index -> trace index in pcs_data.
+            // BTreeMap iterates in key order, so trace indices match insertion order.
+            // GPU uses this for deferred witness extraction; CPU ignores it.
+            let circuit_trace_indices: Vec<Option<usize>> = {
+                let mut next_trace = 0usize;
+                (0..name_and_instances.len())
+                    .map(|i| {
+                        if wits_rmms.contains_key(&i) {
+                            let idx = next_trace;
+                            next_trace += 1;
+                            Some(idx)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
+
             // commit to witness traces in batch
-            let (mut witness_mles, witness_data, witin_commit) = info_span!("[ceno] commit_traces")
+            let (witness_mles, witness_data, witin_commit) = info_span!("[ceno] commit_traces")
                 .in_scope(|| self.device.commit_traces(wits_rmms));
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
 
-            // transfer pk to device
-            let transfer_pk_span = entered_span!("transfer pk to device", profiling_1 = true);
-            let mut fixed_mles = self
-                .get_device_proving_key(shard_ctx)
-                .map(|dpk| dpk.fixed_mles.clone())
-                .unwrap_or_default();
-            exit_span!(transfer_pk_span);
+            // Use pre-loaded fixed_mles (extracted before in_scope to avoid lifetime issues)
+            let fixed_mles = fixed_mles_preload;
 
             // squeeze two challenges from transcript
             let challenges = [
@@ -243,122 +261,41 @@ impl<
             ];
             tracing::debug!("global challenges in prover: {:?}", challenges);
 
-            let public_input_span = entered_span!("public_input", profiling_1 = true);
-            let public_input = self.device.transport_mles(&pi);
-            exit_span!(public_input_span);
-
             let main_proofs_span = entered_span!("main_proofs", profiling_1 = true);
 
-            let mut points = Vec::new();
-            let mut evaluations = Vec::new();
-            let mut witness_iter = self
-                .device
-                .extract_witness_mles(&mut witness_mles, &witness_data);
-            for ((circuit_name, num_instances), structural_rmm) in name_and_instances
-                .into_iter()
-                .zip_eq(structural_rmms.into_iter())
-            {
-                let circuit_idx = self
-                    .pk
-                    .circuit_name_to_index
-                    .get(&circuit_name)
-                    .cloned()
-                    .expect("invalid circuit {} not exist in ceno zkvm");
-                let pk = self.pk.circuit_pks.get(&circuit_name).unwrap();
-                let cs = pk.get_cs();
-                if !shard_ctx.is_first_shard() && cs.with_omc_init_only() {
-                    assert!(num_instances.is_empty());
-                    // skip drain respective fixed because we use different set of fixed commitment
-                    continue;
-                }
-                if num_instances.is_empty() {
-                    // we need to drain respective fixed when num_instances is 0
-                    if cs.num_fixed() > 0 {
-                        let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
-                    }
-                    continue;
-                }
-                transcript
-                    .append_field_element(&E::BaseField::from_canonical_u64(circuit_idx as u64));
+            // Phase 1: Build all ChipTasks
+            let build_tasks_span = entered_span!("build_chip_tasks", profiling_1 = true);
+            let tasks = self.build_chip_tasks(
+                shard_ctx,
+                name_and_instances,
+                structural_rmms,
+                witness_mles,
+                &witness_data,
+                fixed_mles,
+                challenges,
+                &pi,
+                &circuit_trace_indices,
+            );
+            exit_span!(build_tasks_span);
 
-                // TODO: add an enum for circuit type either in constraint_system or vk
-                let witness_mle = info_span!("[ceno] extract_witness_mles").in_scope(|| {
-                    if cs.num_witin() > 0 {
-                        let mles = witness_iter.by_ref().take(cs.num_witin()).collect_vec();
-                        assert_eq!(
-                            mles.len(),
-                            cs.num_witin(),
-                            "insufficient witness mles for circuit {}",
-                            circuit_name
-                        );
-                        mles
-                    } else {
-                        vec![]
-                    }
-                });
+            // Phase 2: Execute chip proof tasks
+            // GPU concurrent: memory-aware backfilling with standalone impl.
+            // Sequential (GPU + CPU): unified path via self.create_chip_proof.
+            let execute_tasks_span = entered_span!("execute_chip_tasks", profiling_1 = true);
+            let (results, forked_samples) =
+                self.run_chip_proofs(tasks, &transcript, &witness_data)?;
+            exit_span!(execute_tasks_span);
 
-                let structural_witness = info_span!("[ceno] transport_structural_witness")
-                    .in_scope(|| {
-                        let structural_mles = structural_rmm.to_mles();
-                        self.device.transport_mles(&structural_mles)
-                    });
-
-                let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
-                let input = ProofInput {
-                    witness: witness_mle,
-                    fixed,
-                    structural_witness,
-                    public_values: public_input.clone(),
-                    pub_io_evals: {
-                        let mut pi_evals: Vec<_> =
-                            pi_evals.iter().map(|p| Either::Right(*p)).collect();
-                        // set num_instances
-                        pi_evals[NUM_INSTANCE_IDX] =
-                            Either::Right(E::from_canonical_usize(num_instances.iter().sum()));
-                        pi_evals
-                    },
-                    num_instances: num_instances.clone(),
-                    has_ecc_ops: cs.has_ecc_ops(),
-                };
-
-                let (opcode_proof, pi_in_evals, input_opening_point) =
-                    info_span!("[ceno] create_chip_proof", name = circuit_name.as_str()).in_scope(
-                        || {
-                            self.create_chip_proof(
-                                circuit_name.as_str(),
-                                pk,
-                                input,
-                                &mut transcript,
-                                &challenges,
-                            )
-                        },
-                    )?;
-                tracing::trace!(
-                    "generated proof for opcode {} with num_instances={:?}",
-                    circuit_name,
-                    num_instances
-                );
-
-                if cs.num_witin() > 0 || cs.num_fixed() > 0 {
-                    points.push(input_opening_point);
-                    evaluations.push(vec![
-                        opcode_proof.wits_in_evals.clone(),
-                        opcode_proof.fixed_in_evals.clone(),
-                    ]);
-                } else {
-                    assert!(opcode_proof.wits_in_evals.is_empty());
-                    assert!(opcode_proof.fixed_in_evals.is_empty());
-                }
-                chip_proofs
-                    .entry(circuit_idx)
-                    .or_insert(vec![])
-                    .push(opcode_proof);
-                for (idx, eval) in pi_in_evals {
-                    pi_evals[idx] = eval;
-                }
-            }
-            drop(witness_iter);
+            // Phase 3: Collect results
+            let collect_results_span = entered_span!("collect_chip_results", profiling_1 = true);
+            let (chip_proofs, points, evaluations) = Self::collect_chip_results(results);
+            exit_span!(collect_results_span);
             exit_span!(main_proofs_span);
+
+            // merge forked transcript samples into main transcript
+            for sample in forked_samples {
+                transcript.append_field_element_ext(&sample);
+            }
 
             // batch opening pcs
             // generate static info from prover key for expected num variable
@@ -375,15 +312,100 @@ impl<
             });
             exit_span!(pcs_opening);
 
-            let vm_proof = ZKVMProof::new(
-                raw_pi,
-                pi_evals,
-                chip_proofs,
-                witin_commit,
-                mpcs_opening_proof,
-            );
+            let vm_proof = ZKVMProof::new(pi, chip_proofs, witin_commit, mpcs_opening_proof);
 
             Ok(vm_proof)
+        })
+    }
+
+    /// Phase 2: Execute all chip proof tasks via scheduler.
+    ///
+    /// Sequential mode (GPU + CPU): uses `self.create_chip_proof` via trait dispatch.
+    /// Concurrent mode (GPU only): uses standalone `create_chip_proof_gpu_impl`.
+    ///
+    /// Handles transcript forking and sampling internally via the scheduler.
+    fn run_chip_proofs<'data, T: Transcript<E> + Clone>(
+        &self,
+        tasks: Vec<ChipTask<'data, PB>>,
+        transcript: &T,
+        witness_data: &PB::PcsData,
+    ) -> Result<(Vec<ChipTaskResult<E>>, Vec<E>), ZKVMError> {
+        let scheduler = ChipScheduler::new();
+
+        #[cfg(feature = "gpu")]
+        {
+            if ChipScheduler::is_concurrent_mode() {
+                // GPU concurrent: standalone function path (no &self needed for Send+Sync)
+                // Verify at runtime that PB is indeed GpuBackend<E, PCS> before transmuting.
+                assert_eq!(
+                    std::any::TypeId::of::<PB>(),
+                    std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>(),
+                    "Concurrent GPU path requires PB = GpuBackend<E, PCS>"
+                );
+                // SAFETY: TypeId check above guarantees PB = GpuBackend<E, PCS>, so PcsData types match.
+                let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData =
+                    unsafe { std::mem::transmute(witness_data) };
+
+                // SAFETY: pcs_data is only read (via get_trace) during concurrent execution.
+                use crate::scheme::utils::SyncRef;
+                let gpu_wd = SyncRef(gpu_witness_data);
+
+                return scheduler.execute(tasks, transcript, |task, transcript| {
+                    // Append circuit_idx to per-task forked transcript (matching verifier)
+                    transcript.append_field_element(&E::BaseField::from_canonical_u64(
+                        task.circuit_idx as u64,
+                    ));
+
+                    // SAFETY: TypeId check above (before closure) guarantees PB = GpuBackend<E, PCS>.
+                    let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
+                        unsafe { std::mem::transmute(task.input) };
+
+                    let (proof, opening_evals, input_opening_point) =
+                        create_chip_proof_gpu_impl::<E, PCS>(
+                            task.circuit_name.as_str(),
+                            task.pk,
+                            gpu_input,
+                            transcript,
+                            &task.challenges,
+                            gpu_wd.0,
+                            task.witness_trace_idx,
+                            task.num_witin,
+                            task.structural_rmm,
+                        )?;
+
+                    Ok(ChipTaskResult {
+                        task_id: task.task_id,
+                        circuit_idx: task.circuit_idx,
+                        proof,
+                        opening_evals,
+                        input_opening_point,
+                        has_witness_or_fixed: task.has_witness_or_fixed,
+                    })
+                });
+            }
+        }
+
+        // Sequential path (GPU + CPU unified):
+        // Uses execute_sequentially directly to avoid Send+Sync requirement on the closure.
+        scheduler.execute_sequentially(tasks, transcript, |mut task, transcript| {
+            // Append circuit_idx to per-task forked transcript (matching verifier)
+            transcript
+                .append_field_element(&E::BaseField::from_canonical_u64(task.circuit_idx as u64));
+
+            // Prepare: deferred extraction for GPU, no-op for CPU
+            self.device.prepare_chip_input(&mut task, witness_data);
+
+            let (proof, opening_evals, input_opening_point) =
+                self.create_chip_proof(&task, transcript)?;
+
+            Ok(ChipTaskResult {
+                task_id: task.task_id,
+                circuit_idx: task.circuit_idx,
+                proof,
+                opening_evals,
+                input_opening_point,
+                has_witness_or_fixed: task.has_witness_or_fixed,
+            })
         })
     }
 
@@ -391,56 +413,33 @@ impl<
     ///
     /// for each read/write/logup expression, we pack all records of that type
     /// into a single tower tree, and then feed these trees into tower prover.
-    #[tracing::instrument(skip_all, name = "create_chip_proof", fields(table_name=name, profiling_2
+    #[tracing::instrument(skip_all, name = "create_chip_proof", fields(table_name=%task.circuit_name, profiling_2
     ), level = "trace")]
-    pub fn create_chip_proof<'a>(
+    pub fn create_chip_proof(
         &self,
-        name: &str,
-        circuit_pk: &ProvingKey<E>,
-        input: ProofInput<'a, PB>,
+        task: &ChipTask<'_, PB>,
         transcript: &mut impl Transcript<E>,
-        challenges: &[E; 2],
     ) -> Result<CreateTableProof<E>, ZKVMError> {
+        let circuit_pk = task.pk;
+        let input = &task.input;
+        let challenges = &task.challenges;
+
         let cs = circuit_pk.get_cs();
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
 
-        // run ecc quark prover
-        let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
-            let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
-            let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
-            assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
-            let mut xs_ys = ec_point_exprs
-                .iter()
-                .map(|expr| match expr {
-                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                    _ => unreachable!("ec point's expression must be WitIn"),
-                })
-                .collect_vec();
-            let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
-            let xs = xs_ys;
-            let slopes = cs
-                .zkvm_v1_css
-                .ec_slope_exprs
-                .iter()
-                .map(|expr| match expr {
-                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                    _ => unreachable!("slope's expression must be WitIn"),
-                })
-                .collect_vec();
-            let ecc_proof = Some(info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
-                self.device
-                    .prove_ec_sum_quark(input.num_instances(), xs, ys, slopes, transcript)
-            })?);
-            exit_span!(span);
-            ecc_proof
-        } else {
-            None
-        };
-
         // build main witness
-        let records = info_span!("[ceno] build_main_witness")
-            .in_scope(|| build_main_witness::<E, PCS, PB, PD>(cs, &input, challenges));
+        let records = info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
+            build_main_witness::<E, PCS, PB, PD>(
+                cs,
+                input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
+        });
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
@@ -448,7 +447,7 @@ impl<
         let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
             info_span!("[ceno] prove_tower_relation").in_scope(|| {
                 self.device
-                    .prove_tower_relation(cs, &input, &records, challenges, transcript)
+                    .prove_tower_relation(cs, input, &records, challenges, transcript)
             });
         exit_span!(span);
 
@@ -457,42 +456,38 @@ impl<
             num_var_with_rotation,
         );
 
-        // TODO: batch reduction into main sumcheck
-        // x[rt,0] = \sum_b eq([rt,0], b) * x[b]
-        // x[rt,1] = \sum_b eq([rt,1], b) * x[b]
-        // x[1,rt] = \sum_b eq([1,rt], b) * x[b]
-        // y[rt,0] = \sum_b eq([rt,0], b) * y[b]
-        // y[rt,1] = \sum_b eq([rt,1], b) * y[b]
-        // y[1,rt] = \sum_b eq([1,rt], b) * y[b]
-        // s[0,rt] = \sum_b eq([0,rt], b) * s[b]
+        let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
+        let ecc_proof = info_span!("[ceno] prove_ec_sum_quark")
+            .in_scope(|| self.device.prove_ec_sum_quark(cs, input, transcript))?;
+        exit_span!(span);
+
+        let span = entered_span!("prove_rotation", profiling_2 = true);
+        let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
+            self.device
+                .prove_rotation(cs, input, &rt_tower, challenges, transcript)
+        })?;
+        exit_span!(span);
 
         // 1. prove the main constraints among witness polynomials
         // 2. prove the relation between last layer in the tower and read/write/logup records
         let span = entered_span!("prove_main_constraints", profiling_2 = true);
         let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
             info_span!("[ceno] prove_main_constraints").in_scope(|| {
-                self.device
-                    .prove_main_constraints(rt_tower, &input, cs, challenges, transcript)
+                self.device.prove_main_constraints(
+                    rt_tower,
+                    rotation.clone(),
+                    ecc_proof.as_ref(),
+                    input,
+                    cs,
+                    challenges,
+                    transcript,
+                )
             })?;
         let MainSumcheckEvals {
             wits_in_evals,
             fixed_in_evals,
         } = evals;
         exit_span!(span);
-
-        // evaluate pi if there is instance query
-        let mut pi_in_evals: HashMap<usize, E> = HashMap::new();
-        if !cs.instance_openings().is_empty() {
-            let span = entered_span!("pi::evals", profiling_2 = true);
-            for &Instance(idx) in cs.instance_openings() {
-                let poly = &input.public_values[idx];
-                pi_in_evals.insert(
-                    idx,
-                    poly.eval(input_opening_point[..poly.num_vars()].to_vec()),
-                );
-            }
-            exit_span!(span);
-        }
 
         Ok((
             ZKVMChipProof {
@@ -501,23 +496,358 @@ impl<
                 lk_out_evals,
                 main_sumcheck_proofs,
                 gkr_iop_proof,
+                rotation_proof: rotation.map(|r| r.proof),
                 tower_proof,
                 ecc_proof,
-                fixed_in_evals,
-                wits_in_evals,
                 num_instances: input.num_instances,
             },
-            pi_in_evals,
+            MainSumcheckEvals {
+                wits_in_evals,
+                fixed_in_evals,
+            },
             input_opening_point,
         ))
     }
 
-    pub fn setup_init_mem(&self, hints: &[u32], public_io: &[u32]) -> crate::e2e::InitMemState {
-        let Some(ctx) = self.pk.program_ctx.as_ref() else {
-            panic!("empty program ctx")
-        };
-        ctx.setup_init_mem(hints, public_io)
+    /// Phase 1: Build ChipTasks from witness data.
+    /// All #[cfg] for eager vs deferred extraction are contained here.
+    #[allow(clippy::too_many_arguments)]
+    fn build_chip_tasks<'data>(
+        &self,
+        shard_ctx: &ShardContext,
+        name_and_instances: Vec<(String, [usize; 2])>,
+        structural_rmms: Vec<witness::RowMajorMatrix<E::BaseField>>,
+        #[allow(unused_mut)] mut witness_mles: Vec<PB::MultilinearPoly<'data>>,
+        witness_data: &PB::PcsData,
+        mut fixed_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
+        challenges: [E; 2],
+        pi: &PublicValues,
+        circuit_trace_indices: &[Option<usize>],
+    ) -> Vec<ChipTask<'_, PB>> {
+        // CPU path: eagerly extract witness MLEs from pcs_data
+        #[cfg(not(feature = "gpu"))]
+        let mut witness_iter = self
+            .device
+            .extract_witness_mles(&mut witness_mles, witness_data);
+
+        #[cfg(feature = "gpu")]
+        let _ = (&witness_mles, witness_data); // suppress unused warnings on GPU path
+
+        let mut tasks: Vec<ChipTask<'_, PB>> = Vec::new();
+        let mut task_id = 0usize;
+
+        for (circuit_enum_idx, ((circuit_name, num_instances), structural_rmm)) in
+            name_and_instances
+                .into_iter()
+                .zip_eq(structural_rmms.into_iter())
+                .enumerate()
+        {
+            let this_idx = circuit_enum_idx;
+
+            let circuit_idx = self
+                .pk
+                .circuit_name_to_index
+                .get(&circuit_name)
+                .cloned()
+                .expect("invalid circuit {} not exist in ceno zkvm");
+            let pk = self.pk.circuit_pks.get(&circuit_name).unwrap();
+            let cs = pk.get_cs();
+            if !shard_ctx.is_first_shard() && cs.with_omc_init_only() {
+                assert_eq!(num_instances, [0, 0]);
+                // skip drain respective fixed because we use different set of fixed commitment
+                continue;
+            }
+            if num_instances.iter().sum::<usize>() == 0 {
+                // we need to drain respective fixed when num_instances is 0
+                if cs.num_fixed() > 0 {
+                    let _ = fixed_mles.drain(..cs.num_fixed()).collect_vec();
+                }
+                continue;
+            }
+
+            // GPU path: defer witness and structural witness extraction to task execution
+            #[cfg(feature = "gpu")]
+            let (witness_mle, structural_witness, task_structural_rmm) = {
+                let _ = &structural_rmm; // suppress unused warning on structural_rmm binding
+                (vec![], vec![], Some(structural_rmm))
+            };
+
+            // CPU path: eagerly extract witness and structural witness
+            #[cfg(not(feature = "gpu"))]
+            let (witness_mle, structural_witness, task_structural_rmm) = {
+                let witness_mle = info_span!("[ceno] extract_witness_mles").in_scope(|| {
+                    if cs.num_witin() > 0 {
+                        let mles = witness_iter.by_ref().take(cs.num_witin()).collect_vec();
+                        assert_eq!(
+                            mles.len(),
+                            cs.num_witin(),
+                            "insufficient witness mles for circuit {}",
+                            circuit_name
+                        );
+                        mles
+                    } else {
+                        vec![]
+                    }
+                });
+                let structural_witness = info_span!("[ceno] transport_structural_witness")
+                    .in_scope(|| {
+                        let structural_mles = structural_rmm.to_mles();
+                        self.device.transport_mles(&structural_mles)
+                    });
+                (witness_mle, structural_witness, None)
+            };
+
+            let fixed = fixed_mles.drain(..cs.num_fixed()).collect_vec();
+
+            let circuit_pi = cs
+                .zkvm_v1_css
+                .instance
+                .iter()
+                .map(|Instance(idx)| Either::Left(pi.query_by_index::<E>(*idx)))
+                .collect_vec();
+
+            let input_temp: ProofInput<'_, PB> = ProofInput {
+                witness: witness_mle,
+                fixed,
+                structural_witness,
+                pi: circuit_pi,
+                num_instances,
+                has_ecc_ops: cs.has_ecc_ops(),
+            };
+            // SAFETY: All Arcs in ProofInput contain 'static data:
+            // - GPU path: `witness` and `structural_witness` are empty vecs (deferred extraction),
+            //   `fixed` originates from `DeviceProvingKey<'static, PB>`.
+            // - CPU path: `witness_mle` may borrow non-'static data, but the CPU path always
+            //   uses sequential execution (never enters the concurrent scheduler), so the data
+            //   remains valid for the lifetime of `build_chip_tasks`'s caller.
+            // The inferred lifetime is shorter than 'static only because the compiler cannot
+            // prove the Arc contents are 'static across both cfg paths.
+            let input = unsafe {
+                std::mem::transmute::<ProofInput<'_, PB>, ProofInput<'static, PB>>(input_temp)
+            };
+
+            // Estimate memory for this task
+            #[cfg(feature = "gpu")]
+            let estimated_memory = {
+                // SAFETY: TypeId check in run_chip_proofs guarantees PB = GpuBackend<E, PCS>.
+                debug_assert_eq!(
+                    std::any::TypeId::of::<PB>(),
+                    std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>(),
+                    "GPU memory estimation requires PB = GpuBackend<E, PCS>"
+                );
+                let gpu_input: &ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>> =
+                    unsafe { std::mem::transmute(&input) };
+                estimate_chip_proof_memory::<E, PCS>(cs, gpu_input, &circuit_name)
+            };
+            #[cfg(not(feature = "gpu"))]
+            let estimated_memory = 0u64; // CPU path doesn't need memory tracking
+
+            // Look up trace index for deferred extraction (GPU uses this; CPU ignores it)
+            let witness_trace_idx = if cs.num_witin() > 0 {
+                circuit_trace_indices[this_idx]
+            } else {
+                None
+            };
+
+            tasks.push(ChipTask {
+                task_id,
+                circuit_name: circuit_name.clone(),
+                circuit_idx,
+                pk,
+                input,
+                estimated_memory_bytes: estimated_memory,
+                has_witness_or_fixed: cs.num_witin() > 0 || cs.num_fixed() > 0,
+                challenges,
+                witness_trace_idx,
+                num_witin: cs.num_witin(),
+                structural_rmm: task_structural_rmm,
+            });
+            task_id += 1;
+        }
+        #[cfg(not(feature = "gpu"))]
+        drop(witness_iter);
+
+        tasks
     }
+
+    /// Phase 3: Collect chip proof results into proof components.
+    #[allow(clippy::type_complexity)]
+    fn collect_chip_results(
+        results: Vec<ChipTaskResult<E>>,
+    ) -> (
+        BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+        Vec<Point<E>>,
+        Vec<Vec<Vec<E>>>,
+    ) {
+        let mut chip_proofs = BTreeMap::new();
+        let mut points = Vec::new();
+        let mut evaluations = Vec::new();
+
+        for result in results {
+            tracing::trace!(
+                "generated proof for circuit {} with circuit_idx={}",
+                result.circuit_idx,
+                result.task_id
+            );
+
+            if result.has_witness_or_fixed {
+                points.push(result.input_opening_point);
+                evaluations.push(vec![
+                    result.opening_evals.wits_in_evals,
+                    result.opening_evals.fixed_in_evals,
+                ]);
+            }
+            chip_proofs
+                .entry(result.circuit_idx)
+                .or_insert(vec![])
+                .push(result.proof);
+        }
+
+        (chip_proofs, points, evaluations)
+    }
+}
+
+/// GPU-specific standalone function for create_chip_proof that doesn't require &self.
+/// Uses the _impl functions directly, avoiding Send/Sync requirements on ZKVMProver.
+/// This enables parallel execution in the scheduler without capturing &self.
+#[cfg(feature = "gpu")]
+#[allow(clippy::too_many_arguments)]
+#[tracing::instrument(skip_all, name = "create_chip_proof_gpu_impl", fields(table_name=name, profiling_2), level = "trace")]
+pub fn create_chip_proof_gpu_impl<'a, E, PCS>(
+    name: &str,
+    circuit_pk: &ProvingKey<E>,
+    mut input: ProofInput<'a, gkr_iop::gpu::GpuBackend<E, PCS>>,
+    transcript: &mut impl Transcript<E>,
+    challenges: &[E; 2],
+    // Deferred extraction params:
+    pcs_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
+    witness_trace_idx: Option<usize>,
+    num_witin: usize,
+    structural_rmm: Option<witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
+) -> Result<CreateTableProof<E>, ZKVMError>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+{
+    use crate::scheme::gpu::{
+        extract_witness_mles_for_trace, prove_ec_sum_quark_impl, prove_main_constraints_impl,
+        prove_rotation_impl, prove_tower_relation_impl, transport_structural_witness_to_gpu,
+    };
+    use gkr_iop::gpu::{GpuBackend, get_cuda_hal};
+
+    let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
+    let _stream = cuda_hal
+        .inner
+        .get_pool_stream()
+        .expect("should acquire stream");
+    let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(_stream.clone());
+
+    // Deferred witness extraction: extract from committed pcs_data just-in-time
+    if let Some(trace_idx) = witness_trace_idx {
+        let num_vars =
+            input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
+        input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
+            extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin, num_vars)
+        });
+    }
+
+    let cs = circuit_pk.get_cs();
+    let log2_num_instances = input.log2_num_instances();
+    let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
+
+    // Deferred structural witness transport: CPU -> GPU just-in-time
+    if let Some(rmm) = structural_rmm {
+        let num_structural_witin = cs.zkvm_v1_css.num_structural_witin as usize;
+        input.structural_witness =
+            info_span!("[ceno] transport_structural_witness").in_scope(|| {
+                transport_structural_witness_to_gpu::<E>(
+                    rmm,
+                    num_structural_witin,
+                    num_var_with_rotation,
+                )
+            });
+    }
+
+    // build main witness
+    let records =
+        info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
+            build_main_witness::<
+                E,
+                PCS,
+                GpuBackend<E, PCS>,
+                gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>,
+            >(
+                cs,
+                &input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
+        });
+
+    let span = entered_span!("prove_tower_relation", profiling_2 = true);
+    // prove the product and logup sum relation between layers in tower using _impl function
+    let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
+        info_span!("[ceno] prove_tower_relation").in_scope(|| {
+            prove_tower_relation_impl::<E, PCS>(
+                cs, &input, &records, challenges, transcript, &cuda_hal,
+            )
+        });
+    exit_span!(span);
+
+    assert_eq!(rt_tower.len(), num_var_with_rotation,);
+
+    let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
+    let ecc_proof = info_span!("[ceno] prove_ec_sum_quark")
+        .in_scope(|| prove_ec_sum_quark_impl::<E, PCS>(cs, &input, transcript))?;
+    exit_span!(span);
+
+    let span = entered_span!("prove_rotation", profiling_2 = true);
+    let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
+        prove_rotation_impl::<E, PCS>(cs, &input, &rt_tower, challenges, transcript)
+    })?;
+    exit_span!(span);
+
+    // prove main constraints using _impl function
+    let span = entered_span!("prove_main_constraints", profiling_2 = true);
+    let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
+        info_span!("[ceno] prove_main_constraints").in_scope(|| {
+            prove_main_constraints_impl::<E, PCS>(
+                rt_tower,
+                rotation.clone(),
+                ecc_proof.as_ref(),
+                &input,
+                cs,
+                challenges,
+                transcript,
+            )
+        })?;
+    let MainSumcheckEvals {
+        wits_in_evals,
+        fixed_in_evals,
+    } = evals;
+    exit_span!(span);
+
+    Ok((
+        ZKVMChipProof {
+            r_out_evals,
+            w_out_evals,
+            lk_out_evals,
+            main_sumcheck_proofs,
+            gkr_iop_proof,
+            rotation_proof: rotation.map(|r| r.proof),
+            tower_proof,
+            ecc_proof,
+            num_instances: input.num_instances,
+        },
+        MainSumcheckEvals {
+            wits_in_evals,
+            fixed_in_evals,
+        },
+        input_opening_point,
+    ))
 }
 
 /// TowerProofs

@@ -6,10 +6,8 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_zkvm::{
     e2e::*,
     scheme::{
-        constants::MAX_NUM_VARIABLES,
-        create_backend, create_prover,
-        mock_prover::LkMultiplicityKey,
-        verifier::{RV32imMemStateConfig, ZKVMVerifier},
+        constants::MAX_NUM_VARIABLES, create_backend, create_prover,
+        mock_prover::LkMultiplicityKey, verifier::ZKVMVerifier,
     },
 };
 use clap::Args;
@@ -57,10 +55,6 @@ pub struct CenoOptions {
     /// Public constrained input.
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
-
-    /// pub io size in byte
-    #[arg(long, default_value = "1k", value_parser = parse_size)]
-    public_io_size: u32,
 
     /// The preset configuration to use.
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
@@ -171,25 +165,9 @@ impl CenoOptions {
         self.heap_size.next_multiple_of(WORD_SIZE as u32)
     }
 
-    /// Read the public io into ceno stdin
-    pub fn read_public_io(&self) -> anyhow::Result<Vec<u32>> {
-        if let Some(public_io) = &self.public_io {
-            // if vector contains only one element, write it as a raw `u32`
-            // otherwise, write the entire vector
-            // in both cases, convert the resulting `CenoStdin` into a `Vec<u32>`
-            if public_io.len() == 1 {
-                CenoStdin::default()
-                    .write(&public_io[0])
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            } else {
-                CenoStdin::default()
-                    .write(public_io)
-                    .map(|stdin| Into::<Vec<u32>>::into(&*stdin))
-            }
-            .context("failed to get public_io".to_string())
-        } else {
-            Ok(vec![])
-        }
+    /// Read raw public-io words; digesting happens later in the zkVM pipeline.
+    pub fn read_public_io(&self) -> Vec<u32> {
+        self.public_io.clone().unwrap_or_default()
     }
 
     /// Read the hints
@@ -356,7 +334,7 @@ fn run_elf_inner<
     compilation_options: &CompilationOptions,
     elf_path: P,
     checkpoint: Checkpoint,
-) -> anyhow::Result<E2ECheckpointResult<E, PCS, RV32imMemStateConfig>> {
+) -> anyhow::Result<E2ECheckpointResult<E, PCS>> {
     let elf_path = elf_path.as_ref();
     let elf_bytes =
         std::fs::read(elf_path).context(format!("failed to read {}", elf_path.display()))?;
@@ -369,16 +347,9 @@ fn run_elf_inner<
         options.max_cycle_per_shard,
     );
 
-    let public_io = options
-        .read_public_io()
-        .context("failed to read public io")?;
-    let public_io_size = options.public_io_size;
-    assert!(
-        public_io.len() <= public_io_size as usize / WORD_SIZE,
-        "require pub io length {} < max public_io_size {}",
-        public_io.len(),
-        public_io_size as usize / WORD_SIZE
-    );
+    let public_io = options.read_public_io();
+    let public_io_digest = public_io_words_to_digest_words(&public_io);
+    tracing::debug!("public io digest words: {:?}", public_io_digest);
 
     let platform = if compilation_options.release {
         setup_platform(
@@ -386,7 +357,6 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            public_io_size,
         )
     } else {
         setup_platform_debug(
@@ -394,7 +364,6 @@ fn run_elf_inner<
             &program,
             options.stack_size(),
             options.heap_size(),
-            public_io_size,
         )
     };
     tracing::info!("Running on platform {:?} {}", options.platform, platform);
@@ -412,19 +381,17 @@ fn run_elf_inner<
     );
 
     let backend = create_backend(options.max_num_variables, options.security_level);
-    Ok(
-        run_e2e_with_checkpoint::<E, PCS, _, _, RV32imMemStateConfig>(
-            create_prover(backend.clone()),
-            program,
-            platform,
-            multi_prover,
-            &hints,
-            &public_io,
-            options.max_steps,
-            checkpoint,
-            options.shard_id.map(|v| v as usize),
-        ),
-    )
+    Ok(run_e2e_with_checkpoint::<E, PCS, _, _>(
+        create_prover(backend.clone()),
+        program,
+        platform,
+        multi_prover,
+        &hints,
+        public_io_digest,
+        options.max_steps,
+        checkpoint,
+        options.shard_id.map(|v| v as usize),
+    ))
 }
 
 fn keygen_inner<
