@@ -340,15 +340,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // check num proofs
         let mut num_proofs = 0;
         for (index, proofs) in &vm_proof.chip_proofs {
-            let circuit_name =
-                self.vk.circuit_index_to_name.get(index).ok_or_else(|| {
-                    ZKVMError::VKNotFound(
-                        format!(
-                            "{shard_id}th shard circuit index {index} missing from vk index map"
-                        )
+            let circuit_name = self.vk.circuit_index_to_name.get(index).ok_or_else(|| {
+                ZKVMError::VKNotFound(
+                    format!("{shard_id}th shard circuit index {index} missing from vk index map")
                         .into(),
-                    )
-                })?;
+                )
+            })?;
             let circuit_vk = self.vk.circuit_vks.get(circuit_name).ok_or_else(|| {
                 ZKVMError::VKNotFound(
                     format!("{shard_id}th shard circuit name {circuit_name} missing from vk")
@@ -384,15 +381,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     format!("{shard_id}th shard chip {index} has zero instances").into(),
                 ));
             }
-            let circuit_name =
-                self.vk.circuit_index_to_name.get(index).ok_or_else(|| {
-                    ZKVMError::VKNotFound(
-                        format!(
-                            "{shard_id}th shard circuit index {index} missing from vk index map"
-                        )
+            let circuit_name = self.vk.circuit_index_to_name.get(index).ok_or_else(|| {
+                ZKVMError::VKNotFound(
+                    format!("{shard_id}th shard circuit index {index} missing from vk index map")
                         .into(),
-                    )
-                })?;
+                )
+            })?;
             let circuit_vk = self.vk.circuit_vks.get(circuit_name).ok_or_else(|| {
                 ZKVMError::VKNotFound(
                     format!("{shard_id}th shard circuit name {circuit_name} missing from vk")
@@ -748,8 +742,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .ok_or_else(|| ZKVMError::InvalidProof("missing rotation proof".into()))?
                 .clone();
 
-            let rotation_sumcheck_expression =
-                first_layer.rotation_sumcheck_expression.as_ref().ok_or_else(|| {
+            let rotation_sumcheck_expression = first_layer
+                .rotation_sumcheck_expression
+                .as_ref()
+                .ok_or_else(|| {
                     ZKVMError::InvalidProof(
                         format!("{_name} missing rotation sumcheck expression").into(),
                     )
@@ -984,9 +980,10 @@ impl TowerVerify {
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
             .sum::<E>();
 
-        let max_num_variables = num_variables.iter().max().ok_or_else(|| {
-            ZKVMError::InvalidProof("tower verify: empty num_variables".into())
-        })?;
+        let max_num_variables = num_variables
+            .iter()
+            .max()
+            .ok_or_else(|| ZKVMError::InvalidProof("tower verify: empty num_variables".into()))?;
         let required_rounds = max_num_variables.saturating_sub(1);
         if tower_proofs.proofs.len() < required_rounds {
             return Err(ZKVMError::InvalidProof(
