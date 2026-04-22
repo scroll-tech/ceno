@@ -122,7 +122,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
     /// invariants for one shard only and intentionally skips full-trace entry
     /// and cross-shard continuation checks such as `INIT_PC == vk.entry_pc` and
     /// init_pc/heap chaining.
-    pub fn verify_single_shard_segment_halt(
+    pub(crate) fn verify_single_shard_segment_halt(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
