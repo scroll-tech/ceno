@@ -2,6 +2,7 @@ use crate::zkvm_verifier::{
     binding::{E, F, ZKVMProofInput, ZKVMProofInputVariable},
     verifier::verify_zkvm_proof,
 };
+use ceno_emul::WORD_SIZE;
 use ceno_zkvm::{
     instructions::riscv::constants::{
         END_PC_IDX, EXIT_CODE_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, HINT_LENGTH_IDX,
@@ -10,7 +11,6 @@ use ceno_zkvm::{
     scheme::ZKVMProof,
     structs::ZKVMVerifyingKey,
 };
-use ceno_emul::WORD_SIZE;
 use ff_ext::BabyBearExt4;
 use mpcs::{Basefold, BasefoldRSParams};
 use openvm_circuit::{

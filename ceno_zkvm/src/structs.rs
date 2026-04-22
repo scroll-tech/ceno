@@ -12,9 +12,7 @@ use crate::{
 use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepIndex, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{
-    circuit_builder::ShardOMCInitType,
-    gkr::GKRCircuit,
-    tables::LookupTable,
+    circuit_builder::ShardOMCInitType, gkr::GKRCircuit, tables::LookupTable,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::Itertools;
@@ -859,8 +857,7 @@ pub struct ZKVMVerifyingKey<
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
     M = RV32imMemStateConfig,
->
-where
+> where
     PCS::VerifierParam: Sized,
     M: Clone + Default + Serialize + DeserializeOwned,
 {

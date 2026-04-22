@@ -5,10 +5,9 @@ use multilinear_extensions::{Expression, Instance, StructuralWitIn, StructuralWi
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit};
 
 use crate::{
-    instructions::riscv::constants::UINT_LIMBS,
+    instructions::riscv::constants::{HEAP_LENGTH_IDX, HINT_LENGTH_IDX, UINT_LIMBS},
     structs::{ProgramParams, RAMType},
 };
-use crate::instructions::riscv::constants::{HEAP_LENGTH_IDX, HINT_LENGTH_IDX};
 
 mod ram_circuit;
 mod ram_impl;

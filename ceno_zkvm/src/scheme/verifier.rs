@@ -53,8 +53,7 @@ pub struct ZKVMVerifier<
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
     M = RV32imMemStateConfig,
->
-where
+> where
     M: Clone + Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     pub vk: ZKVMVerifyingKey<E, PCS, M>,
@@ -73,7 +72,9 @@ where
     }
 }
 
-impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS, RV32imMemStateConfig> {
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
+    ZKVMVerifier<E, PCS, RV32imMemStateConfig>
+{
     fn validate_mem_state(
         mem_state: &RV32imMemStateConfig,
         prev_heap_addr_end: Option<u32>,
@@ -89,9 +90,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS,
             .query_by_index::<E>(HEAP_LENGTH_IDX)
             .to_canonical_u64() as u32;
         let next_heap_addr_end = heap_addr_start + heap_len * WORD_SIZE as u32;
-        if !mem_state.heap.contains(&heap_addr_start) || !mem_state.heap.contains(&next_heap_addr_end)
+        if !mem_state.heap.contains(&heap_addr_start)
+            || !mem_state.heap.contains(&next_heap_addr_end)
         {
-            return Err(ZKVMError::VerifyError("heap continuation out of range".into()));
+            return Err(ZKVMError::VerifyError(
+                "heap continuation out of range".into(),
+            ));
         }
         if let Some(prev_heap_addr_end) = prev_heap_addr_end
             && heap_addr_start != prev_heap_addr_end
@@ -111,7 +115,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS,
         if !mem_state.hints.contains(&hint_addr_start)
             || !mem_state.hints.contains(&next_hint_addr_end)
         {
-            return Err(ZKVMError::VerifyError("hint continuation out of range".into()));
+            return Err(ZKVMError::VerifyError(
+                "hint continuation out of range".into(),
+            ));
         }
         if let Some(prev_hint_addr_end) = prev_hint_addr_end
             && hint_addr_start != prev_hint_addr_end
@@ -155,37 +161,63 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS,
         Ok((wits_in_evals, fixed_in_evals))
     }
 
-    /// Verify a trace from start to halt.
+    /// Verify a full zkVM trace from program entry to halt.
+    ///
+    /// This is the production verifier API. It treats a single proof as a
+    /// complete trace starting from `vk.entry_pc`, not as an arbitrary shard
+    /// segment.
     #[tracing::instrument(skip_all, name = "verify_proof")]
     pub fn verify_proof(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
     ) -> Result<bool, ZKVMError> {
-        self.verify_proof_halt(vm_proof, transcript, true)
+        self.verify_full_trace_proofs_halt(vec![vm_proof], vec![transcript], true)
     }
 
+    /// Verify a full zkVM trace composed of one or more proofs and ending in halt.
     #[tracing::instrument(skip_all, name = "verify_proofs")]
     pub fn verify_proofs(
         &self,
         vm_proofs: Vec<ZKVMProof<E, PCS>>,
         transcripts: Vec<impl ForkableTranscript<E>>,
     ) -> Result<bool, ZKVMError> {
-        self.verify_proofs_halt(vm_proofs, transcripts, true)
+        self.verify_full_trace_proofs_halt(vm_proofs, transcripts, true)
     }
 
-    /// Verify a trace from start to optional halt.
-    pub fn verify_proof_halt(
+    /// Verify a single shard proof as a standalone segment.
+    ///
+    /// This is a debug-oriented API. It checks proof validity and halt/segment
+    /// invariants for one shard only and intentionally skips full-trace entry
+    /// and cross-shard continuation checks such as `INIT_PC == vk.entry_pc` and
+    /// init_pc/heap chaining.
+    pub(crate) fn verify_single_shard_segment_halt(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
         expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
-        self.verify_proofs_halt(vec![vm_proof], vec![transcript], expect_halt)
+        let has_halt = vm_proof.has_halt(&self.vk);
+        if has_halt != expect_halt {
+            return Err(ZKVMError::VerifyError(
+                format!("shard proof ecall/halt mismatch: expected {expect_halt} != {has_halt}",)
+                    .into(),
+            ));
+        }
+
+        assert_eq!(
+            vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX),
+            E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
+        );
+
+        let shard_id = vm_proof.public_values.shard_id as usize;
+        self.verify_proof_validity(shard_id, vm_proof, transcript)?;
+        Ok(true)
     }
 
-    /// Verify a trace from start to optional halt.
-    pub fn verify_proofs_halt(
+    /// Verify a full zkVM trace composed of one or more proofs from entry to
+    /// optional halt.
+    pub fn verify_full_trace_proofs_halt(
         &self,
         vm_proofs: Vec<ZKVMProof<E, PCS>>,
         transcripts: Vec<impl ForkableTranscript<E>>,
@@ -294,8 +326,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS,
             }
         }
 
-        // check shard id
-        assert_eq!(vm_proof.public_values.shard_id, shard_id as u32);
+        if vm_proof.public_values.shard_id != shard_id as u32 {
+            return Err(ZKVMError::VerifyError(
+                format!(
+                    "proof shard_id mismatch: expected {} != {}",
+                    shard_id, vm_proof.public_values.shard_id
+                )
+                .into(),
+            ));
+        }
 
         // write fixed commitment to transcript
         // TODO check soundness if there is no fixed_commit but got fixed proof?

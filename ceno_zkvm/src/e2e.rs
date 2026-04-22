@@ -1759,13 +1759,12 @@ pub fn run_e2e_with_checkpoint<
         &init_full_mem,
     );
 
-    if target_shard_id.is_some() {
-        // skip verify as the proof are in-completed
-        return E2ECheckpointResult {
-            proofs: Some(zkvm_proofs),
-            vk: Some(vk),
-            next_step: None,
-        };
+    if let Some(target_shard_id) = target_shard_id {
+        assert_eq!(
+            zkvm_proofs.len(),
+            1,
+            "debug --shard-id={target_shard_id} must produce exactly one proof",
+        );
     }
 
     let verifier = ZKVMVerifier::new(vk.clone());
@@ -1774,14 +1773,32 @@ pub fn run_e2e_with_checkpoint<
         return E2ECheckpointResult {
             proofs: Some(zkvm_proofs.clone()),
             vk: Some(vk),
-            next_step: Some(Box::new(move || {
-                run_e2e_verify(&verifier, zkvm_proofs, exit_code, max_steps)
+            next_step: Some(Box::new(move || match target_shard_id {
+                Some(_) => run_e2e_single_shard_debug_verify(
+                    &verifier,
+                    zkvm_proofs.into_iter().next().expect("missing shard proof"),
+                    exit_code,
+                    max_steps,
+                ),
+                None => run_e2e_full_trace_verify(&verifier, zkvm_proofs, exit_code, max_steps),
             })),
         };
     }
 
     let start = std::time::Instant::now();
-    run_e2e_verify(&verifier, zkvm_proofs.clone(), exit_code, max_steps);
+    match target_shard_id {
+        Some(_) => run_e2e_single_shard_debug_verify(
+            &verifier,
+            zkvm_proofs
+                .clone()
+                .into_iter()
+                .next()
+                .expect("missing shard proof"),
+            exit_code,
+            max_steps,
+        ),
+        None => run_e2e_full_trace_verify(&verifier, zkvm_proofs.clone(), exit_code, max_steps),
+    }
     tracing::debug!("verified in {:?}", start.elapsed());
 
     E2ECheckpointResult {
@@ -2018,7 +2035,11 @@ fn create_proofs_streaming<
     proofs
 }
 
-pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+/// Verify the full produced trace in the normal e2e flow.
+///
+/// This is the production-style verification path used when e2e is not scoped
+/// to a debug `--shard-id` run.
+pub fn run_e2e_full_trace_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     verifier: &ZKVMVerifier<E, PCS>,
     zkvm_proofs: Vec<ZKVMProof<E, PCS>>,
     exit_code: Option<u32>,
@@ -2027,15 +2048,44 @@ pub fn run_e2e_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     let transcripts = (0..zkvm_proofs.len())
         .map(|_| Transcript::new(b"riscv"))
         .collect_vec();
-    assert!(
-        verifier
-            .verify_proofs_halt(zkvm_proofs, transcripts, exit_code.is_some())
-            .expect("verify proof return with error"),
-    );
+    let expect_halt = zkvm_proofs
+        .last()
+        .map(|proof| proof.has_halt(&verifier.vk))
+        .unwrap_or(exit_code.is_some());
+    let verified = verifier
+        .verify_full_trace_proofs_halt(zkvm_proofs, transcripts, expect_halt)
+        .expect("verify proof return with error");
+    assert!(verified);
     match exit_code {
         Some(0) => tracing::info!("exit code 0. Success."),
         Some(code) => tracing::error!("exit code {}. Failure.", code),
         None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
+    }
+}
+
+/// Verify a single produced shard as a standalone debug segment.
+///
+/// This path is only for explicit e2e `--shard-id` runs where exactly one proof
+/// is produced. It intentionally does not claim full-trace verification.
+pub fn run_e2e_single_shard_debug_verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    verifier: &ZKVMVerifier<E, PCS>,
+    zkvm_proof: ZKVMProof<E, PCS>,
+    exit_code: Option<u32>,
+    max_steps: usize,
+) {
+    let expect_halt = zkvm_proof.has_halt(&verifier.vk);
+    let verified = verifier
+        .verify_single_shard_segment_halt(zkvm_proof, Transcript::new(b"riscv"), expect_halt)
+        .expect("verify proof return with error");
+    assert!(verified);
+    if expect_halt {
+        match exit_code {
+            Some(0) => tracing::info!("exit code 0. Success."),
+            Some(code) => tracing::error!("exit code {}. Failure.", code),
+            None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
+        }
+    } else {
+        tracing::info!("single shard segment verified without full-trace continuation checks");
     }
 }
 
@@ -2099,11 +2149,11 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
     {
         Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
     }
+    let has_halt = zkvm_proofs.last().unwrap().has_halt(&verifier.vk);
     let transcripts = (0..zkvm_proofs.len())
         .map(|_| Transcript::new(b"riscv"))
         .collect_vec();
-    let has_halt = zkvm_proofs.last().unwrap().has_halt(&verifier.vk);
-    verifier.verify_proofs_halt(zkvm_proofs, transcripts, has_halt)?;
+    verifier.verify_full_trace_proofs_halt(zkvm_proofs, transcripts, has_halt)?;
     // print verification statistics such as hash count
     #[cfg(debug_assertions)]
     {
