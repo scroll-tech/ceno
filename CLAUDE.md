@@ -77,6 +77,24 @@ Before declaring a change done: at minimum run `cargo make clippy` and
 the tests for the crate you touched. For anything in prover/verifier
 code paths, also run `cargo make tests` end-to-end.
 
+## Verifier semantic contract
+
+A valid Ceno proof attests to exactly two program-level facts:
+**execution starts at the verifying key's entry PC**, and
+**execution exits with code zero**. Everything else in the verifier
+(transcript, sumcheck, PCS, tower/GKR, shard EC sum) is plumbing that
+makes those two statements meaningful. The caller-supplied "expect
+halt" flag picks the terminal mode (full run vs. prefix run); the
+exit-code-zero invariant holds in both, and the halt-ecall presence
+must match what the caller declared. A change that relaxes either
+statement is a blocker. See `docs/src/technical-overview.md` for the
+long form.
+
+Prefix proofs (expect-halt = false) are a dev/bench affordance, not
+a production surface — don't wire them into anything external without
+first bringing the non-halting-shard public values up to the halt-path
+standard.
+
 ## What to prioritize when editing
 
 Verifier code — including the recursive verifier in `ceno_recursion/`

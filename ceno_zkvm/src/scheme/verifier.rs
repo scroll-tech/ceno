@@ -128,7 +128,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         transcripts: Vec<impl ForkableTranscript<E>>,
         expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
-        assert!(!vm_proofs.is_empty());
+        if vm_proofs.is_empty() {
+            return Err(ZKVMError::VerifyError("empty proof batch".into()));
+        }
         let num_proofs = vm_proofs.len();
         let (_end_pc, _end_heap_addr, shard_ec_sum) = vm_proofs
             .into_iter()
@@ -147,24 +149,48 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             .into(),
                     ));
                 }
+                // Semantic exit invariant: every shard must carry exit_code == 0.
+                // On a halting shard the halt ecall chip binds public_values.exit_code
+                // to the a0 register argument via the `instance` mechanism, so this
+                // check asserts "program exited successfully". On a non-halting shard
+                // no chip references EXIT_CODE_IDX, so enforcing 0 at the verifier is
+                // what prevents a prover from stuffing arbitrary bytes into the field.
+                if vm_proof.public_values.exit_code != 0 {
+                    return Err(ZKVMError::VerifyError(
+                        format!(
+                            "{shard_id}th shard exit_code must be 0, got {}",
+                            vm_proof.public_values.exit_code
+                        )
+                        .into(),
+                    ));
+                }
                 // each shard set init cycle = Tracer::SUBCYCLES_PER_INSN
                 // to satisfy initial reads for all prev_cycle = 0 < init_cycle
-                assert_eq!(
-                    vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX),
-                    E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
-                );
+                let init_cycle = vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX);
+                let expected_init_cycle =
+                    E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN);
+                if init_cycle != expected_init_cycle {
+                    return Err(ZKVMError::VerifyError(
+                        format!(
+                            "{shard_id}th shard init_cycle mismatch: expected {expected_init_cycle:?} != {init_cycle:?}"
+                        )
+                        .into(),
+                    ));
+                }
                 // check init_pc match prev end_pc
-                if let Some(prev_pc) = prev_pc {
-                    assert_eq!(
-                       vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX),
-                        prev_pc
-                    );
+                let init_pc = vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX);
+                let expected_init_pc = if let Some(prev_pc) = prev_pc {
+                    prev_pc
                 } else {
-                    // first chunk, check program entry
-                    assert_eq!(
-                        vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX),
-                        E::BaseField::from_canonical_u32(self.vk.entry_pc)
-                    );
+                    E::BaseField::from_canonical_u32(self.vk.entry_pc)
+                };
+                if init_pc != expected_init_pc {
+                    return Err(ZKVMError::VerifyError(
+                        format!(
+                            "{shard_id}th shard init_pc mismatch: expected {expected_init_pc:?} != {init_pc:?}"
+                        )
+                        .into(),
+                    ));
                 }
                 let end_pc = vm_proof.public_values.query_by_index::<E>(END_PC_IDX);
 
@@ -178,11 +204,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                     .query_by_index::<E>(HEAP_LENGTH_IDX)
                     .to_canonical_u64() as u32;
                 if let Some(prev_heap_addr_end) = prev_heap_addr_end {
-                    assert_eq!(heap_addr_start_u32, prev_heap_addr_end);
+                    if heap_addr_start_u32 != prev_heap_addr_end {
+                        return Err(ZKVMError::VerifyError(
+                            format!(
+                                "{shard_id}th shard heap_start_addr mismatch: expected {prev_heap_addr_end} != {heap_addr_start_u32}"
+                            )
+                            .into(),
+                        ));
+                    }
                     // TODO check heap addr in prime field within range
                 } else {
                     // TODO first chunk, check initial heap addr
-                };
+                }
                 // TODO check heap_len == heap chip num_instances
                 let next_heap_addr_end: u32 = heap_addr_start_u32 + heap_len * WORD_SIZE as u32;
 
@@ -238,7 +271,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         }
 
         // check shard id
-        assert_eq!(vm_proof.public_values.shard_id, shard_id as u32);
+        if vm_proof.public_values.shard_id != shard_id as u32 {
+            return Err(ZKVMError::VerifyError(
+                format!(
+                    "{shard_id}th shard public shard_id mismatch: expected {shard_id} != {}",
+                    vm_proof.public_values.shard_id
+                )
+                .into(),
+            ));
+        }
 
         // write fixed commitment to transcript
         // TODO check soundness if there is no fixed_commit but got fixed proof?
@@ -289,8 +330,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         // check num proofs
         let mut num_proofs = 0;
         for (index, proofs) in &vm_proof.chip_proofs {
-            let circuit_name = &self.vk.circuit_index_to_name[index];
-            let circuit_vk = &self.vk.circuit_vks[circuit_name];
+            let circuit_name =
+                self.vk.circuit_index_to_name.get(index).ok_or_else(|| {
+                    ZKVMError::VKNotFound(
+                        format!(
+                            "{shard_id}th shard circuit index {index} missing from vk index map"
+                        )
+                        .into(),
+                    )
+                })?;
+            let circuit_vk = self.vk.circuit_vks.get(circuit_name).ok_or_else(|| {
+                ZKVMError::VKNotFound(
+                    format!("{shard_id}th shard circuit name {circuit_name} missing from vk")
+                        .into(),
+                )
+            })?;
             if shard_id > 0 && circuit_vk.get_cs().with_omc_init_only() {
                 return Err(ZKVMError::InvalidProof(
                     format!("{shard_id}th shard non-first shard got omc dynamic table init",)
@@ -315,9 +369,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .zip_eq(forked_transcripts.iter_mut())
         {
             let num_instance: usize = proof.num_instances.iter().sum();
-            assert!(num_instance > 0);
-            let circuit_name = &self.vk.circuit_index_to_name[index];
-            let circuit_vk = &self.vk.circuit_vks[circuit_name];
+            if num_instance == 0 {
+                return Err(ZKVMError::InvalidProof(
+                    format!("{shard_id}th shard chip {index} has zero instances").into(),
+                ));
+            }
+            let circuit_name =
+                self.vk.circuit_index_to_name.get(index).ok_or_else(|| {
+                    ZKVMError::VKNotFound(
+                        format!(
+                            "{shard_id}th shard circuit index {index} missing from vk index map"
+                        )
+                        .into(),
+                    )
+                })?;
+            let circuit_vk = self.vk.circuit_vks.get(circuit_name).ok_or_else(|| {
+                ZKVMError::VKNotFound(
+                    format!("{shard_id}th shard circuit name {circuit_name} missing from vk")
+                        .into(),
+                )
+            })?;
 
             if proof.r_out_evals.len() != circuit_vk.get_cs().num_reads()
                 || proof.w_out_evals.len() != circuit_vk.get_cs().num_writes()
@@ -348,10 +419,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .lk_out_evals
                 .iter()
                 .map(|evals| {
-                    let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
-                    p1 * q1.inverse() + p2 * q2.inverse()
+                    let &[p1, p2, q1, q2] = evals.as_slice() else {
+                        return Err(ZKVMError::InvalidProof(
+                            format!(
+                                "{shard_id}th shard lk_out_evals row length {} != 4",
+                                evals.len()
+                            )
+                            .into(),
+                        ));
+                    };
+                    Ok(p1 * q1.inverse() + p2 * q2.inverse())
                 })
-                .sum::<E>();
+                .sum::<Result<E, ZKVMError>>()?;
 
             transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
 
@@ -496,46 +575,44 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
 
         // constrain log2_num_instances within max length
-        cs.r_table_expressions
-            .iter()
-            .chain(&cs.w_table_expressions)
-            .for_each(|set_table_expr| {
-                // iterate through structural witins and collect max round.
-                let num_vars = set_table_expr
-                    .table_spec
-                    .len
-                    .map(ceil_log2)
-                    .unwrap_or_else(|| {
-                        set_table_expr
-                            .table_spec
-                            .structural_witins
-                            .iter()
-                            .map(|StructuralWitIn { witin_type, .. }| {
-                                let hint_num_vars = log2_num_instances;
-                                assert!((1 << hint_num_vars) <= witin_type.max_len());
-                                hint_num_vars
-                            })
-                            .max()
-                            .unwrap_or(log2_num_instances)
-                    });
-                assert_eq!(num_vars, log2_num_instances);
-            });
-        cs.lk_table_expressions.iter().for_each(|l| {
-            // iterate through structural witins and collect max round.
-            let num_vars = l.table_spec.len.map(ceil_log2).unwrap_or_else(|| {
-                l.table_spec
-                    .structural_witins
-                    .iter()
-                    .map(|StructuralWitIn { witin_type, .. }| {
-                        let hint_num_vars = log2_num_instances;
-                        assert!((1 << hint_num_vars) <= witin_type.max_len());
-                        hint_num_vars
-                    })
-                    .max()
-                    .unwrap_or(log2_num_instances)
-            });
-            assert_eq!(num_vars, log2_num_instances);
-        });
+        let check_table_spec_vars = |table_spec: &crate::circuit_builder::SetTableSpec,
+                                     kind: &str|
+         -> Result<(), ZKVMError> {
+            let num_vars = if let Some(len) = table_spec.len {
+                ceil_log2(len)
+            } else {
+                let mut max_vars = log2_num_instances;
+                for StructuralWitIn { witin_type, .. } in &table_spec.structural_witins {
+                    let hint_num_vars = log2_num_instances;
+                    if (1 << hint_num_vars) > witin_type.max_len() {
+                        return Err(ZKVMError::InvalidProof(
+                            format!(
+                                "{_name} {kind} structural witin exceeds max_len: 2^{hint_num_vars} > {}",
+                                witin_type.max_len()
+                            )
+                            .into(),
+                        ));
+                    }
+                    max_vars = max_vars.max(hint_num_vars);
+                }
+                max_vars
+            };
+            if num_vars != log2_num_instances {
+                return Err(ZKVMError::InvalidProof(
+                    format!(
+                        "{_name} {kind} table num_vars mismatch: {num_vars} != {log2_num_instances}"
+                    )
+                    .into(),
+                ));
+            }
+            Ok(())
+        };
+        for set_table_expr in cs.r_table_expressions.iter().chain(&cs.w_table_expressions) {
+            check_table_spec_vars(&set_table_expr.table_spec, "r/w")?;
+        }
+        for l in &cs.lk_table_expressions {
+            check_table_spec_vars(&l.table_spec, "lk")?;
+        }
 
         let mut shard_ec_sum: Option<SepticPoint<E::BaseField>> = None;
 
@@ -623,8 +700,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .cloned()
             .collect_vec();
 
-        let gkr_circuit = gkr_circuit.as_ref().unwrap();
-        let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+        let gkr_circuit = gkr_circuit.as_ref().ok_or_else(|| {
+            ZKVMError::InvalidProof(format!("{_name} missing gkr circuit in vk").into())
+        })?;
+        let first_layer = gkr_circuit.layers.first().ok_or_else(|| {
+            ZKVMError::InvalidProof(format!("{_name} empty gkr circuit layers").into())
+        })?;
         let selector_ctxs = first_layer
             .out_sel_and_eval_exprs
             .iter()
@@ -657,13 +738,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                 .ok_or_else(|| ZKVMError::InvalidProof("missing rotation proof".into()))?
                 .clone();
 
+            let rotation_sumcheck_expression =
+                first_layer.rotation_sumcheck_expression.as_ref().ok_or_else(|| {
+                    ZKVMError::InvalidProof(
+                        format!("{_name} missing rotation sumcheck expression").into(),
+                    )
+                })?;
             let rotation_claims = gkr_iop::gkr::layer::zerocheck_layer::verify_rotation(
                 num_var_with_rotation,
                 first_layer.rotation_exprs.1.len(),
-                first_layer
-                    .rotation_sumcheck_expression
-                    .as_ref()
-                    .expect("missing rotation sumcheck expression"),
+                rotation_sumcheck_expression,
                 rotation_proof,
                 first_layer.rotation_cyclic_subgroup_size,
                 first_layer.rotation_cyclic_group_log2,
@@ -757,9 +841,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             .map(|instance| E::from(public_values.query_by_index::<E>(instance.0)))
             .collect_vec();
         let (wits_in_evals, fixed_in_evals) = Self::split_input_opening_evals(circuit_vk, proof)?;
+        let gkr_iop_proof = proof.gkr_iop_proof.clone().ok_or_else(|| {
+            ZKVMError::InvalidProof(format!("{_name} missing gkr iop proof").into())
+        })?;
         let (_, rt) = gkr_circuit.verify(
             num_var_with_rotation,
-            proof.gkr_iop_proof.clone().unwrap(),
+            gkr_iop_proof,
             &out_evals,
             &pi,
             challenges,
@@ -793,19 +880,52 @@ impl TowerVerify {
     ) -> TowerVerifyResult<E> {
         // XXX to sumcheck batched product argument with logup, we limit num_product_fanin to 2
         // TODO mayber give a better naming?
-        assert_eq!(num_fanin, 2);
+        if num_fanin != 2 {
+            return Err(ZKVMError::VerifyError(
+                format!("tower verify: num_fanin must be 2, got {num_fanin}").into(),
+            ));
+        }
         let num_prod_spec = prod_out_evals.len();
         let num_logup_spec = logup_out_evals.len();
 
         let log2_num_fanin = ceil_log2(num_fanin);
-        // sanity check
-        assert_eq!(num_prod_spec, tower_proofs.prod_spec_size());
-        assert!(prod_out_evals.iter().all(|evals| evals.len() == num_fanin));
-        assert_eq!(num_logup_spec, tower_proofs.logup_spec_size());
-        assert!(logup_out_evals.iter().all(|evals| {
-            evals.len() == 4 // [p1, p2, q1, q2]
-        }));
-        assert_eq!(num_variables.len(), num_prod_spec + num_logup_spec);
+        if num_prod_spec != tower_proofs.prod_spec_size() {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "tower verify: prod spec size mismatch: {num_prod_spec} != {}",
+                    tower_proofs.prod_spec_size()
+                )
+                .into(),
+            ));
+        }
+        if !prod_out_evals.iter().all(|evals| evals.len() == num_fanin) {
+            return Err(ZKVMError::InvalidProof(
+                format!("tower verify: prod_out_evals row length != {num_fanin}").into(),
+            ));
+        }
+        if num_logup_spec != tower_proofs.logup_spec_size() {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "tower verify: logup spec size mismatch: {num_logup_spec} != {}",
+                    tower_proofs.logup_spec_size()
+                )
+                .into(),
+            ));
+        }
+        if !logup_out_evals.iter().all(|evals| evals.len() == 4) {
+            return Err(ZKVMError::InvalidProof(
+                "tower verify: logup_out_evals row length != 4".into(),
+            ));
+        }
+        if num_variables.len() != num_prod_spec + num_logup_spec {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "tower verify: num_variables length {} != num_prod_spec {num_prod_spec} + num_logup_spec {num_logup_spec}",
+                    num_variables.len()
+                )
+                .into(),
+            ));
+        }
 
         let alpha_pows = get_challenge_pows(
             num_prod_spec + num_logup_spec * 2, /* logup occupy 2 sumcheck: numerator and denominator */
@@ -854,7 +974,73 @@ impl TowerVerify {
             .map(|(point_n_eval, alpha)| point_n_eval.eval * *alpha)
             .sum::<E>();
 
-        let max_num_variables = num_variables.iter().max().unwrap();
+        let max_num_variables = num_variables.iter().max().ok_or_else(|| {
+            ZKVMError::InvalidProof("tower verify: empty num_variables".into())
+        })?;
+        let required_rounds = max_num_variables.saturating_sub(1);
+        if tower_proofs.proofs.len() < required_rounds {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "tower verify: sumcheck proofs length {} < required {required_rounds}",
+                    tower_proofs.proofs.len()
+                )
+                .into(),
+            ));
+        }
+        for (spec_index, &max_round) in num_variables.iter().enumerate().take(num_prod_spec) {
+            let needed = max_round.saturating_sub(1);
+            if tower_proofs.prod_specs_eval[spec_index].len() < needed {
+                return Err(ZKVMError::InvalidProof(
+                    format!(
+                        "tower verify: prod spec {spec_index} eval rounds {} < required {needed}",
+                        tower_proofs.prod_specs_eval[spec_index].len()
+                    )
+                    .into(),
+                ));
+            }
+            for (round, row) in tower_proofs.prod_specs_eval[spec_index]
+                .iter()
+                .enumerate()
+                .take(needed)
+            {
+                if row.len() != num_fanin {
+                    return Err(ZKVMError::InvalidProof(
+                        format!(
+                            "tower verify: prod spec {spec_index} round {round} row length {} != {num_fanin}",
+                            row.len()
+                        )
+                        .into(),
+                    ));
+                }
+            }
+        }
+        for (spec_index, &max_round) in num_variables[num_prod_spec..].iter().enumerate() {
+            let needed = max_round.saturating_sub(1);
+            if tower_proofs.logup_specs_eval[spec_index].len() < needed {
+                return Err(ZKVMError::InvalidProof(
+                    format!(
+                        "tower verify: logup spec {spec_index} eval rounds {} < required {needed}",
+                        tower_proofs.logup_specs_eval[spec_index].len()
+                    )
+                    .into(),
+                ));
+            }
+            for (round, row) in tower_proofs.logup_specs_eval[spec_index]
+                .iter()
+                .enumerate()
+                .take(needed)
+            {
+                if row.len() != 4 {
+                    return Err(ZKVMError::InvalidProof(
+                        format!(
+                            "tower verify: logup spec {spec_index} round {round} row length {} != 4",
+                            row.len()
+                        )
+                        .into(),
+                    ));
+                }
+            }
+        }
 
         let (next_rt, _) = (0..(max_num_variables - 1)).try_fold(
             (
@@ -1040,6 +1226,16 @@ impl EccVerifier {
             transcript,
         );
 
+        let required_evals_len = 3 + 7 * SEPTIC_EXTENSION_DEGREE;
+        if proof.evals.len() < required_evals_len {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "ecc proof evals length {} < required {required_evals_len}",
+                    proof.evals.len()
+                )
+                .into(),
+            ));
+        }
         let evals = &proof.evals[3..]; // skip sel_add, sel_bypass, sel_export
         let s0: SepticExtension<E> = evals[0..][..SEPTIC_EXTENSION_DEGREE].into();
         let x0: SepticExtension<E> =
@@ -1099,7 +1295,9 @@ impl EccVerifier {
                 num_vars,
             },
         ) else {
-            unreachable!()
+            return Err(ZKVMError::InvalidProof(
+                "ecc proof: sel_add selector evaluation returned None".into(),
+            ));
         };
 
         if proof.evals[0] != expected_sel_add {
