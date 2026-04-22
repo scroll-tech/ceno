@@ -15,7 +15,10 @@ use ceno_gpu::common::buffer::BufferImpl;
 #[cfg(feature = "gpu")]
 use ceno_gpu::common::witgen::types::GpuKeccakInstance;
 use ff_ext::{ExtensionField, PoseidonField};
-use gkr_iop::{gkr::GKRCircuit, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
+use gkr_iop::{
+    circuit_builder::ShardOMCInitType, gkr::GKRCircuit, tables::LookupTable,
+    utils::lk_multiplicity::Multiplicity,
+};
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::Instance;
@@ -33,6 +36,33 @@ use std::{
 use sumcheck::structs::{IOPProof, IOPProverMessage};
 use tracing::Level;
 use witness::RowMajorMatrix;
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+pub struct RV32imMemStateConfig {
+    pub heap: Range<u32>,
+    pub hints: Range<u32>,
+}
+
+impl RV32imMemStateConfig {
+    pub fn from_platform(platform: &Platform) -> Self {
+        Self {
+            heap: platform.heap.start..platform.heap.end,
+            hints: platform.hints.start..platform.hints.end,
+        }
+    }
+}
+
+impl From<Platform> for RV32imMemStateConfig {
+    fn from(platform: Platform) -> Self {
+        Self::from_platform(&platform)
+    }
+}
+
+impl From<&Platform> for RV32imMemStateConfig {
+    fn from(platform: &Platform) -> Self {
+        Self::from_platform(platform)
+    }
+}
 
 /// Proof that the sum of N (not necessarily a power of two) EC points
 /// is equal to `sum` in one layer instead of multiple layers in a
@@ -191,7 +221,11 @@ impl<E: ExtensionField> ComposedConstrainSystem<E> {
     }
 
     pub fn with_omc_init_only(&self) -> bool {
-        self.zkvm_v1_css.with_omc_init_only
+        matches!(self.zkvm_v1_css.omc_init_type, ShardOMCInitType::InitOnce)
+    }
+
+    pub fn with_omc_init_dyn(&self) -> bool {
+        matches!(self.zkvm_v1_css.omc_init_type, ShardOMCInitType::InitDyn)
     }
 }
 
@@ -973,6 +1007,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PCS> {
     pub fn get_vk_slow(&self) -> ZKVMVerifyingKey<E, PCS> {
+        self.get_vk_slow_with_mem_state::<RV32imMemStateConfig>()
+    }
+
+    pub fn get_vk_slow_with_mem_state<M>(&self) -> ZKVMVerifyingKey<E, PCS, M>
+    where
+        M: Clone + Default + From<Platform> + Serialize + DeserializeOwned,
+    {
         ZKVMVerifyingKey {
             vp: self.vp.clone(),
             entry_pc: self.entry_pc,
@@ -989,6 +1030,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
                 .enumerate()
                 .map(|(index, name)| (index, name.clone()))
                 .collect(),
+            mem_state_verifier: self
+                .program_ctx
+                .as_ref()
+                .map(|ctx| M::from(ctx.platform.clone()))
+                .unwrap_or_default(),
         }
     }
 
@@ -999,12 +1045,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProvingKey<E, PC
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "E::BaseField: Serialize",
-    deserialize = "E::BaseField: DeserializeOwned",
+    serialize = "E::BaseField: Serialize, M: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned, M: DeserializeOwned",
 ))]
-pub struct ZKVMVerifyingKey<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
-where
+pub struct ZKVMVerifyingKey<
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M = RV32imMemStateConfig,
+> where
     PCS::VerifierParam: Sized,
+    M: Clone + Default + Serialize + DeserializeOwned,
 {
     pub vp: PCS::VerifierParam,
     // entry program counter
@@ -1016,4 +1066,5 @@ where
     // circuit index -> circuit name
     // mainly used for debugging
     pub circuit_index_to_name: BTreeMap<usize, String>,
+    pub mem_state_verifier: M,
 }
