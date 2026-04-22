@@ -51,7 +51,7 @@ If there are no findings, state that explicitly and mention residual risks or te
 - Arithmetic and layout correctness (field operations, multilinear indexing, padding/boundary math, off-by-one risks).
 - Performance regressions in proving/verifying hot paths (unnecessary clones, extra allocations, accidental quadratic behavior, synchronization overhead).
 - Architecture integrity across crates (API layering, unnecessary coupling, abstraction leaks).
-- Panic and invariant handling on potentially untrusted proof/input data (`unwrap`, `expect`, indexing, assertions).
+- Panic and invariant handling on potentially untrusted proof/input data (`unwrap`, `expect`, indexing, assertions) — treat panics on proof-derived data in verifier code paths as liveness / DoS findings, not style.
 - Determinism and concurrency risks (parallel iteration order assumptions, shared mutable state).
 
 ## Clone review heuristic
@@ -60,6 +60,10 @@ If there are no findings, state that explicitly and mention residual risks or te
 - Call out clones that are immediately dereferenced or destructured when a borrow would do instead, for example `option.clone().unwrap()` or `vec.clone().try_into()`.
 - Do not flag `Arc`/`Rc` clones by default when they are used to shorten a borrow and unblock later mutable access; these are often intentional and semantically cheap.
 - If a clone exists to avoid borrow-checker conflicts, mention that explicitly in the review rather than treating it as an obvious inefficiency.
+
+## Review checklist
+
+Work through `./.github/pr-review-checklist.md` for any PR touching prover/verifier or proof-system code. That file is the canonical, category-by-category checklist (transcript / Fiat–Shamir, sumcheck layer plumbing, PCS openings, determinism, verifier robustness, feature-gate parity, scope) and is shared with `CLAUDE.md` and human reviewers.
 
 ## Testing guidance
 
