@@ -79,21 +79,15 @@ code paths, also run `cargo make tests` end-to-end.
 
 ## Verifier semantic contract
 
-A valid Ceno proof attests to exactly two program-level facts:
-**execution starts at the verifying key's entry PC**, and
-**execution exits with code zero**. Everything else in the verifier
-(transcript, sumcheck, PCS, tower/GKR, shard EC sum) is plumbing that
-makes those two statements meaningful. The caller-supplied "expect
-halt" flag picks the terminal mode (full run vs. prefix run); the
-exit-code-zero invariant holds in both, and the halt-ecall presence
-must match what the caller declared. A change that relaxes either
-statement is a blocker. See `docs/src/technical-overview.md` for the
-long form.
-
-Prefix proofs (expect-halt = false) are a dev/bench affordance, not
-a production surface — don't wire them into anything external without
-first bringing the non-halting-shard public values up to the halt-path
-standard.
+A valid Ceno proof attests that **execution starts at the verifying
+key's entry PC** and (when the caller expects a halt) **the terminal
+shard invokes the halt ecall**. Exit code is *not* required to be
+zero — `public_values.exit_code` is bound to register `a0` at the
+halt site but the guest defines its own exit-code semantics; callers
+that want success check `exit_code == 0` themselves. Relaxing the
+entry-PC or halt-presence statement is a blocker. Prefix proofs
+(`expect-halt = false`) are a dev/bench affordance, not a production
+surface. See `docs/src/technical-overview.md` for the long form.
 
 ## What to prioritize when editing
 

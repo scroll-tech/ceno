@@ -7,11 +7,11 @@ verification actually binds the proof to.
 
 ## What the verifier guarantees
 
-A successful Ceno verification attests to exactly two program-level
+A successful Ceno verification attests to the following program-level
 statements. Everything else in the verifier — transcript flow,
 sumcheck, PCS openings, tower and GKR reductions, per-shard EC
 accumulators, cross-shard memory consistency — is machinery whose
-purpose is to make these two statements meaningful.
+purpose is to make these meaningful.
 
 1. **Start: execution begins at the program entry point declared in
    the verifying key.** The first shard's initial program counter is
@@ -20,21 +20,23 @@ purpose is to make these two statements meaningful.
    is of an execution of *this specific program image* starting from
    *its declared entry point*, not of some arbitrary subtrace the
    prover chose to begin at a convenient PC.
-2. **Exit: the program exits successfully with code zero.** Every
-   shard carries an exit-code public value, required by the verifier
-   to be zero. On a halting shard, the halt-ecall chip binds this
-   field to the value the guest passed in the first argument register
-   via the public-value "instance" mechanism, so the check asserts
-   *"the guest called the halt ecall with argument zero"* — i.e. the
-   program exited successfully in the RISC-V convention.
+2. **Halt: when the caller expects termination, the terminal shard
+   invokes the halt ecall.** Intermediate shards must not halt, and
+   the terminal shard's halt-ecall presence is checked against the
+   caller's expectation (a full run reaching halt vs. a prefix run
+   stopped at a step budget). This prevents a prover from either
+   hiding a halt or manufacturing one.
 
-Two terminal modes are legitimate, selected by a caller-supplied
-"expect halt" flag: a full run reaching halt, or a prefix run stopped
-at a step budget. The verifier checks, on each shard, that the
-proof's halt-ecall presence matches the declared mode — only the
-terminal shard may carry a halt, and only when the caller expects
-one — which prevents a prover from either hiding a halt or
-manufacturing one. The exit-code-zero invariant holds in both modes.
+### What is not a verifier-level guarantee
+
+The verifier does *not* require a specific exit code. The halt-ecall
+chip binds `public_values.exit_code` to the value the guest passed
+in register `a0` at the halt site, so the field is a faithful readout
+of what the guest passed — but the guest program defines its own
+exit-code semantics, and a non-zero value may be a legitimate
+application signal (for example, distinguishing error classes). A
+caller that wants "exited successfully" must compare
+`exit_code == 0` itself, outside the verifier.
 
 **Prefix proofs are a dev and benchmarking affordance, not a
 production verification surface.** On a non-halting shard the
