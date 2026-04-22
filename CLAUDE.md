@@ -79,20 +79,38 @@ code paths, also run `cargo make tests` end-to-end.
 
 ## Verifier semantic contract
 
-A valid Ceno proof attests to exactly two program-level facts:
-**execution starts at the verifying key's entry PC**, and
-**execution exits with code zero**. Everything else in the verifier
-(transcript, sumcheck, PCS, tower/GKR, shard EC sum) is plumbing that
-makes those two statements meaningful. The caller-supplied "expect
-halt" flag picks the terminal mode (full run vs. prefix run); the
-exit-code-zero invariant holds in both, and the halt-ecall presence
-must match what the caller declared. A change that relaxes either
-statement is a blocker. See `docs/src/technical-overview.md` for the
-long form.
+What a valid Ceno proof attests to depends on the **verifier mode**,
+which is committed at verifier construction and *not* derived from
+the proof (so a prover cannot influence which statement is verified).
+The mode lives on the verifier instance and drives the halt /
+continuity checks inside the single unified verification entry
+point. Three modes exist:
 
-Prefix proofs (expect-halt = false) are a dev/bench affordance, not
-a production surface — don't wire them into anything external without
-first bringing the non-halting-shard public values up to the halt-path
+- **FullRun** — full trace from `vk.entry_pc` to program halt.
+  Intermediate shards must not halt; the last shard must halt. This
+  is the production mode and the default of the verifier
+  constructor. The recursive verifier in `ceno_recursion/` always
+  runs an inner verifier in this mode.
+- **PrefixRun** — full trace from `vk.entry_pc` that stopped at a
+  step budget. Intermediate shards must not halt; the last shard's
+  halt status is not checked. Dev / benchmarking only.
+- **DebugSegment** — single-shard standalone verification
+  (`--shard-id=N`). Accepts one shard at any position in the run;
+  skips entry-PC and cross-shard chain checks; reads the shard id
+  from the proof's public values. Dev only.
+
+`FullRun` is the production-safe default; only `PrefixRun` /
+`DebugSegment` callers opt in via `new_with_mode`. The program-level
+statement any mode attests to always includes "execution starts at
+`vk.entry_pc`" (FullRun / PrefixRun only — DebugSegment has no entry
+constraint). A change that weakens any mode's statement — removing
+the entry-PC check, letting intermediate shards halt, making the
+mode prover-derived, etc. — is a blocker by default. See
+`docs/src/technical-overview.md` for the long form.
+
+Non-halt-mode proofs are a dev/bench affordance, not a production
+surface — don't wire them into anything external without first
+hardening the non-halting-shard public values to the halt-path
 standard.
 
 ## What to prioritize when editing

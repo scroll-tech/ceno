@@ -7,40 +7,63 @@ verification actually binds the proof to.
 
 ## What the verifier guarantees
 
-A successful Ceno verification attests to exactly two program-level
-statements. Everything else in the verifier — transcript flow,
-sumcheck, PCS openings, tower and GKR reductions, per-shard EC
-accumulators, cross-shard memory consistency — is machinery whose
-purpose is to make these two statements meaningful.
+What a successful Ceno verification attests to depends on the
+**verifier mode**, which is committed at verifier construction — it
+lives on the verifier instance and is *not* a per-call argument or
+derived from the proof, so a prover cannot influence which statement
+is being verified. Three modes exist:
 
-1. **Start: execution begins at the program entry point declared in
-   the verifying key.** The first shard's initial program counter is
-   bound to the verifying key's entry PC; every subsequent shard's
-   initial PC is chained to the previous shard's final PC. The proof
-   is of an execution of *this specific program image* starting from
-   *its declared entry point*, not of some arbitrary subtrace the
-   prover chose to begin at a convenient PC.
-2. **Exit: the program exits successfully with code zero.** Every
-   shard carries an exit-code public value, required by the verifier
-   to be zero. On a halting shard, the halt-ecall chip binds this
-   field to the value the guest passed in the first argument register
-   via the public-value "instance" mechanism, so the check asserts
-   *"the guest called the halt ecall with argument zero"* — i.e. the
-   program exited successfully in the RISC-V convention.
+### FullRun
 
-Two terminal modes are legitimate, selected by a caller-supplied
-"expect halt" flag: a full run reaching halt, or a prefix run stopped
-at a step budget. The verifier checks, on each shard, that the
-proof's halt-ecall presence matches the declared mode — only the
-terminal shard may carry a halt, and only when the caller expects
-one — which prevents a prover from either hiding a halt or
-manufacturing one. The exit-code-zero invariant holds in both modes.
+The production mode. The proof attests that:
 
-**Prefix proofs are a dev and benchmarking affordance, not a
-production verification surface.** On a non-halting shard the
-public-value fields other than PC are not adversary-hardened the way
-the halt path is; verifier-level checks on them are format sanity
-rather than soundness statements. Before prefix proofs are exposed to
+- Execution starts at the program entry point declared in the
+  verifying key. The first shard's initial program counter is bound
+  to the verifying key's entry PC; every subsequent shard's initial
+  PC is chained to the previous shard's final PC.
+- No intermediate shard contains a halt ecall, and the last shard
+  does. In other words, the trace ends exactly where the guest
+  invokes halt.
+
+Equivalently, the proof is of an execution of *this specific program
+image* from *its declared entry point* to halt, not of some arbitrary
+subtrace the prover chose to begin or end at a convenient point.
+
+`FullRun` is the default mode of the verifier constructor, and the
+recursive verifier in `ceno_recursion/` always runs an inner verifier
+in this mode — there is no exposed mode parameter at the recursion
+boundary.
+
+### PrefixRun
+
+A dev and benchmarking mode. Same start and intermediate-shard
+guarantees as `FullRun` (execution starts at `vk.entry_pc`; no
+intermediate shard halts), but the last-shard halt-existence check
+is skipped. Used when the emulator is run for a fixed step budget
+that stops before the program halts.
+
+### DebugSegment
+
+A single-shard developer mode for `--shard-id=N` workflows. Accepts
+exactly one proof at an arbitrary position in the run, reads the
+shard id from the proof's public values, and skips both the entry-PC
+check and all cross-shard continuity checks. No claim is made about
+entry, continuation, or termination; only that the single shard's
+cryptographic proof is valid at its stated shard id.
+
+### What is not a verifier-level guarantee
+
+No mode makes a soundness-level claim about the exit code. The
+halt-ecall chip binds `public_values.exit_code` to the value the
+guest passed to the halt ecall, so on a `FullRun` proof the exit
+code is a meaningful public value that a consumer can read — but
+it is not required to be zero by the verifier. A caller that cares
+about "exited successfully" must check `exit_code == 0` itself.
+
+Similarly, `PrefixRun` and `DebugSegment` proofs are dev/benchmarking
+affordances, not production verification surfaces. On a non-halting
+shard the public-value fields other than PC are not adversary-
+hardened the way the halt path is. Before either mode is exposed to
 any external consumer (recursion, aggregation, a third-party
 verifier), those fields must first be brought up to the halt-path
 standard.

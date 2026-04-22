@@ -46,8 +46,31 @@ use sumcheck::{
 use transcript::{ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
+/// How a verifier interprets the proof(s) it receives.
+///
+/// The mode is committed at verifier construction and drives the
+/// halt / continuity checks inside `verify_proofs`. It is *not* a
+/// per-call argument and is *not* derived from the proof, so a
+/// malicious prover cannot influence which statement is verified.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VerifierMode {
+    /// Full trace from `vk.entry_pc` to program halt. Intermediate
+    /// shards must not halt; the last shard must halt.
+    FullRun,
+    /// Full trace from `vk.entry_pc` that stopped at a step budget.
+    /// Intermediate shards must not halt; the last shard's halt
+    /// status is not checked.
+    PrefixRun,
+    /// Single-shard debug verification. Accepts one shard at any
+    /// position in the run (`--shard-id=N`); skips the entry-PC
+    /// check, reads shard id from `public_values.shard_id`, and
+    /// does no cross-shard chaining.
+    DebugSegment,
+}
+
 pub struct ZKVMVerifier<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub vk: ZKVMVerifyingKey<E, PCS>,
+    pub mode: VerifierMode,
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS> {
@@ -84,99 +107,121 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
         Ok((wits_in_evals, fixed_in_evals))
     }
 
+    /// Construct a verifier in the production-safe `FullRun` mode.
     pub fn new(vk: ZKVMVerifyingKey<E, PCS>) -> Self {
-        ZKVMVerifier { vk }
+        Self::new_with_mode(vk, VerifierMode::FullRun)
+    }
+
+    /// Construct a verifier with an explicit mode.
+    pub fn new_with_mode(vk: ZKVMVerifyingKey<E, PCS>, mode: VerifierMode) -> Self {
+        ZKVMVerifier { vk, mode }
     }
 
     pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS> {
         self.vk
     }
 
-    /// Verify a full zkVM trace from program entry to halt.
-    ///
-    /// This is the production verifier API. It treats a single proof as a
-    /// complete trace starting from `vk.entry_pc`, not as an arbitrary shard
-    /// segment.
+    /// Verify a single-proof trace. Thin convenience wrapper over `verify_proofs`.
     #[tracing::instrument(skip_all, name = "verify_proof")]
     pub fn verify_proof(
         &self,
         vm_proof: ZKVMProof<E, PCS>,
         transcript: impl ForkableTranscript<E>,
     ) -> Result<bool, ZKVMError> {
-        self.verify_full_trace_proofs_halt(vec![vm_proof], vec![transcript], true)
+        self.verify_proofs(vec![vm_proof], vec![transcript])
     }
 
-    /// Verify a full zkVM trace composed of one or more proofs and ending in halt.
+    /// Verify one or more zkVM proofs. The meaning of the proof set is
+    /// determined by `self.mode`:
+    ///
+    /// - `FullRun`: treats `vm_proofs` as a full trace from `vk.entry_pc`
+    ///   that ends in halt. Intermediate shards must not halt; the last
+    ///   shard must halt.
+    /// - `PrefixRun`: same as `FullRun` for entry and intermediate shards,
+    ///   but the last shard's halt status is not checked.
+    /// - `DebugSegment`: accepts exactly one proof at an arbitrary position
+    ///   in the run; skips entry-PC and cross-shard chain checks and reads
+    ///   the shard id from the proof's public values.
     #[tracing::instrument(skip_all, name = "verify_proofs")]
     pub fn verify_proofs(
         &self,
         vm_proofs: Vec<ZKVMProof<E, PCS>>,
         transcripts: Vec<impl ForkableTranscript<E>>,
     ) -> Result<bool, ZKVMError> {
-        self.verify_full_trace_proofs_halt(vm_proofs, transcripts, true)
+        match self.mode {
+            VerifierMode::DebugSegment => self.verify_debug_segment(vm_proofs, transcripts),
+            VerifierMode::FullRun | VerifierMode::PrefixRun => {
+                self.verify_full_trace(vm_proofs, transcripts)
+            }
+        }
     }
 
-    /// Verify a single shard proof as a standalone segment.
-    ///
-    /// This is a debug-oriented API. It checks proof validity and halt/segment
-    /// invariants for one shard only and intentionally skips full-trace entry
-    /// and cross-shard continuation checks such as `INIT_PC == vk.entry_pc` and
-    /// init_pc/heap chaining.
-    pub(crate) fn verify_single_shard_segment_halt(
+    fn verify_debug_segment(
         &self,
-        vm_proof: ZKVMProof<E, PCS>,
-        transcript: impl ForkableTranscript<E>,
-        expect_halt: bool,
+        mut vm_proofs: Vec<ZKVMProof<E, PCS>>,
+        mut transcripts: Vec<impl ForkableTranscript<E>>,
     ) -> Result<bool, ZKVMError> {
-        let has_halt = vm_proof.has_halt(&self.vk);
-        if has_halt != expect_halt {
+        if vm_proofs.len() != 1 || transcripts.len() != 1 {
             return Err(ZKVMError::VerifyError(
-                format!("shard proof ecall/halt mismatch: expected {expect_halt} != {has_halt}",)
-                    .into(),
+                format!(
+                    "DebugSegment mode requires exactly one proof/transcript, got {} / {}",
+                    vm_proofs.len(),
+                    transcripts.len()
+                )
+                .into(),
             ));
         }
-
-        assert_eq!(
-            vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX),
-            E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
-        );
+        let vm_proof = vm_proofs.pop().expect("len checked");
+        let transcript = transcripts.pop().expect("len checked");
 
         let shard_id = vm_proof.public_values.shard_id as usize;
         self.verify_proof_validity(shard_id, vm_proof, transcript)?;
         Ok(true)
     }
 
-    /// Verify a full zkVM trace composed of one or more proofs from entry to
-    /// optional halt.
-    pub fn verify_full_trace_proofs_halt(
+    fn verify_full_trace(
         &self,
         vm_proofs: Vec<ZKVMProof<E, PCS>>,
         transcripts: Vec<impl ForkableTranscript<E>>,
-        expect_halt: bool,
     ) -> Result<bool, ZKVMError> {
         if vm_proofs.is_empty() {
             return Err(ZKVMError::VerifyError("empty proof batch".into()));
         }
         let num_proofs = vm_proofs.len();
+        // Per-shard expected halt status. Intermediate shards must not halt.
+        // Last shard: FullRun => must halt; PrefixRun => no halt-existence check.
+        let last_shard_expect_halt: Option<bool> = match self.mode {
+            VerifierMode::FullRun => Some(true),
+            VerifierMode::PrefixRun => None,
+            VerifierMode::DebugSegment => unreachable!("dispatched above"),
+        };
+        let expected_halts = iter::repeat_n(Some(false), num_proofs - 1)
+            .chain(iter::once(last_shard_expect_halt));
         let (_end_pc, _end_heap_addr, shard_ec_sum) = vm_proofs
             .into_iter()
             .zip_eq(transcripts)
-            // optionally halt on last chunk
-            .zip_eq(iter::repeat_n(false, num_proofs - 1).chain(iter::once(expect_halt)))
+            .zip_eq(expected_halts)
             .enumerate()
             .try_fold((None, None, SepticPoint::<E::BaseField>::default()), |(prev_pc, prev_heap_addr_end, mut shard_ec_sum), (shard_id, ((vm_proof, transcript), expect_halt))| {
-                // require ecall/halt proof to exist, depend on whether we expect a halt.
-                let has_halt = vm_proof.has_halt(&self.vk);
-                if has_halt != expect_halt {
-                    return Err(ZKVMError::VerifyError(
-                        format!(
-                            "{shard_id}th proof ecall/halt mismatch: expected {expect_halt} != {has_halt}",
-                        )
-                            .into(),
-                    ));
+                // halt-existence check: only enforced when caller-declared mode
+                // pins it down for this shard (i.e. always for intermediate
+                // shards; for the last shard only in FullRun).
+                if let Some(expect_halt) = expect_halt {
+                    let has_halt = vm_proof.has_halt(&self.vk);
+                    if has_halt != expect_halt {
+                        return Err(ZKVMError::VerifyError(
+                            format!(
+                                "{shard_id}th proof ecall/halt mismatch: expected {expect_halt} != {has_halt}",
+                            )
+                                .into(),
+                        ));
+                    }
                 }
-                // each shard set init cycle = Tracer::SUBCYCLES_PER_INSN
-                // to satisfy initial reads for all prev_cycle = 0 < init_cycle
+                // Each shard resets its local cycle counter to
+                // Tracer::SUBCYCLES_PER_INSN; cycles do NOT chain across shards.
+                // Cross-shard record disambiguation is carried by `shard_id`
+                // inside the memory-record hash (EC-sum Quark), not by a global
+                // cycle counter, so the uniform reset is the protocol choice.
                 let init_cycle = vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX);
                 let expected_init_cycle =
                     E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN);
@@ -188,7 +233,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                         .into(),
                     ));
                 }
-                // check init_pc match prev end_pc
+                // check init_pc match prev end_pc (or vk.entry_pc on first shard)
                 let init_pc = vm_proof.public_values.query_by_index::<E>(INIT_PC_IDX);
                 let expected_init_pc = if let Some(prev_pc) = prev_pc {
                     prev_pc
