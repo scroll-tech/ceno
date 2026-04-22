@@ -7,7 +7,7 @@ verification actually binds the proof to.
 
 ## What the verifier guarantees
 
-A successful Ceno verification attests to two program-level facts:
+A successful Ceno verification attests to three program-level facts:
 
 - Execution starts at the program entry point declared in the
   verifying key. The first shard's initial program counter is bound
@@ -15,21 +15,15 @@ A successful Ceno verification attests to two program-level facts:
   PC is chained to the previous shard's final PC.
 - No intermediate shard contains a halt ecall, and the last shard
   does. The trace ends exactly where the guest invokes halt.
+- The halt ecall was invoked with argument zero. The halt-ecall chip
+  binds `public_values.exit_code` to the value the guest passed in
+  register `a0`, and the verifier requires that value to be zero.
 
 Equivalently, the proof is of an execution of *this specific program
-image* from *its declared entry point* to halt, not of some arbitrary
-subtrace the prover chose to begin or end at a convenient point. The
-recursive verifier in `ceno_recursion/` makes the same claim about
-every inner proof.
-
-### What is not a verifier-level guarantee
-
-The verifier does *not* make a soundness-level claim about the exit
-code. The halt-ecall chip binds `public_values.exit_code` to the
-value the guest passed to the halt ecall, so the exit code is a
-meaningful public value that a consumer can read — but it is not
-required to be zero by the verifier. A caller that cares about
-"exited successfully" must check `exit_code == 0` itself.
+image* from *its declared entry point*, successfully halting with
+exit code zero — not of some arbitrary subtrace the prover chose to
+begin or end at a convenient point. The recursive verifier in
+`ceno_recursion/` makes the same claim about every inner proof.
 
 ## Sections
 

@@ -195,6 +195,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
             VerifierMode::PrefixRun => None,
             VerifierMode::DebugSegment => unreachable!("dispatched above"),
         };
+        // FullRun additionally requires the terminal shard's exit code to be
+        // zero. On the halting shard, the halt-ecall chip binds
+        // public_values.exit_code to register a0 via the instance mechanism,
+        // so this asserts "the guest invoked halt with argument 0" — program
+        // exited successfully in the RISC-V convention. Not enforced in
+        // PrefixRun (which is a dev/bench mode with no termination claim).
+        let require_exit_code_zero = matches!(self.mode, VerifierMode::FullRun);
         let expected_halts = iter::repeat_n(Some(false), num_proofs - 1)
             .chain(iter::once(last_shard_expect_halt));
         let (_end_pc, _end_heap_addr, shard_ec_sum) = vm_proofs
@@ -215,6 +222,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMVerifier<E, PCS>
                             )
                                 .into(),
                         ));
+                    }
+                    // On the halting shard in FullRun, require exit_code == 0.
+                    // The halt-ecall chip binds public_values.exit_code to a0.
+                    if require_exit_code_zero && expect_halt {
+                        let exit_code = vm_proof.public_values.exit_code;
+                        if exit_code != 0 {
+                            return Err(ZKVMError::VerifyError(
+                                format!(
+                                    "{shard_id}th shard exit_code must be 0 in FullRun, got {exit_code}"
+                                )
+                                .into(),
+                            ));
+                        }
                     }
                 }
                 // Each shard resets its local cycle counter to

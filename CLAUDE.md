@@ -82,11 +82,12 @@ code paths, also run `cargo make tests` end-to-end.
 What a valid Ceno proof attests to depends on the **verifier mode**,
 committed at verifier construction and not derived from the proof:
 
-- **FullRun** — trace from `vk.entry_pc` to halt. Production default.
+- **FullRun** — trace from `vk.entry_pc` to halt with `exit_code == 0`.
+  Production default.
 - **PrefixRun** — trace from `vk.entry_pc` that stopped at a step
-  budget; last-shard halt not checked. Dev/bench only.
-- **DebugSegment** — one shard at any position; skips entry-PC and
-  chain checks. Dev only.
+  budget; last-shard halt and exit code not checked. Dev/bench only.
+- **DebugSegment** — one shard at any position; skips entry-PC, chain,
+  halt, and exit-code checks. Dev only.
 
 Only `PrefixRun` / `DebugSegment` callers opt in via `new_with_mode`;
 non-`FullRun` proofs must not be exposed to external consumers.
