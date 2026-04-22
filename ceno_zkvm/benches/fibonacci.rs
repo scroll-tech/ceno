@@ -72,7 +72,7 @@ fn fibonacci_prove(c: &mut Criterion) {
         let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
         assert!(
             verifier
-                .verify_proof_halt(proof, transcript, false)
+                .verify_full_trace_proofs_halt(vec![proof], vec![transcript], false)
                 .expect("verify proof return with error"),
         );
         println!();
