@@ -384,7 +384,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
-        if !DVRAM::DYNAMIC_OFFSET {
+        if DVRAM::dynamic_length_instance().is_some() {
+            cb.set_omc_init_dyn();
+        } else if !DVRAM::DYNAMIC_OFFSET {
             cb.set_omc_init_only();
         }
 
@@ -436,7 +438,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
         assert_eq!(num_structural_witin, 2);
-        if DVRAM::DYNAMIC_OFFSET {
+        if DVRAM::dynamic_length_instance().is_some() || DVRAM::DYNAMIC_OFFSET {
             Self::assign_instances_dynamic(config, num_witin, num_structural_witin, data)
         } else {
             Self::assign_instances(config, num_witin, num_structural_witin, data)

@@ -16,7 +16,7 @@ use gkr_iop::{
     selector::SelectorType,
 };
 use itertools::Itertools;
-use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
+use multilinear_extensions::{Expression, Instance, StructuralWitIn, StructuralWitInType, ToExpr};
 use std::{collections::HashMap, marker::PhantomData, ops::Range};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
@@ -179,6 +179,10 @@ pub trait DynVolatileRamTable {
 
     fn dynamic_addr(_params: &ProgramParams, _entry_index: usize, _pv: &PublicValues) -> Addr {
         unimplemented!()
+    }
+
+    fn dynamic_length_instance() -> Option<Instance> {
+        None
     }
 }
 

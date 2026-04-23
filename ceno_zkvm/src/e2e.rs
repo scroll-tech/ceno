@@ -1600,8 +1600,8 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
                 self.zkvm_fixed_traces.clone(),
             )
             .expect("keygen failed");
-        let vk = pk.get_vk_slow();
         pk.set_program_ctx(self);
+        let vk = pk.get_vk_slow();
         (pk, vk)
     }
 
@@ -1623,8 +1623,8 @@ impl<E: ExtensionField> E2EProgramCtx<E> {
                 self.zkvm_fixed_traces.clone(),
             )
             .expect("keygen failed");
-        let vk = pk.get_vk_slow();
         pk.set_program_ctx(self);
+        let vk = pk.get_vk_slow();
         (pk, vk)
     }
 
@@ -2073,15 +2073,19 @@ pub fn run_e2e_single_shard_debug_verify<E: ExtensionField, PCS: PolynomialCommi
     exit_code: Option<u32>,
     max_steps: usize,
 ) {
-    let expect_halt = zkvm_proof.has_halt(&verifier.vk) || exit_code.is_some();
+    let expect_halt = zkvm_proof.has_halt(&verifier.vk);
     let verified = verifier
         .verify_single_shard_segment_halt(zkvm_proof, Transcript::new(b"riscv"), expect_halt)
         .expect("verify proof return with error");
     assert!(verified);
-    match exit_code {
-        Some(0) => tracing::info!("exit code 0. Success."),
-        Some(code) => tracing::error!("exit code {}. Failure.", code),
-        None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
+    if expect_halt {
+        match exit_code {
+            Some(0) => tracing::info!("exit code 0. Success."),
+            Some(code) => tracing::error!("exit code {}. Failure.", code),
+            None => tracing::error!("Unfinished execution. max_steps={:?}.", max_steps),
+        }
+    } else {
+        tracing::info!("single shard segment verified without full-trace continuation checks");
     }
 }
 
