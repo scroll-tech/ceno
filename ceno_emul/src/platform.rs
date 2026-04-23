@@ -119,7 +119,7 @@ impl Platform {
     /// Virtual address of a register.
     pub const fn register_vma(index: RegIdx) -> Addr {
         // Register VMAs are aligned, cannot be confused with indices, and readable in hex.
-        (index << 8) as Addr
+        (index as Addr) << 8
     }
 
     /// Register index from a virtual address (unchecked).
@@ -199,7 +199,7 @@ mod tests {
         // Registers do not overlap with ROM or RAM.
         for reg in [
             Platform::register_vma(0),
-            Platform::register_vma(VMState::<PreflightTracer>::REG_COUNT - 1),
+            Platform::register_vma((VMState::<PreflightTracer>::REG_COUNT - 1) as RegIdx),
         ] {
             assert!(!p.is_rom(reg));
             assert!(!p.is_ram(reg));

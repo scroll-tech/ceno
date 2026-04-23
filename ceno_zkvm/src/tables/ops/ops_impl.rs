@@ -4,7 +4,7 @@ use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::Itertools;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_fixed_val, set_val};
 
 use crate::{
@@ -70,7 +70,7 @@ impl OpTableConfig {
         &self,
         num_witin: usize,
         num_structural_witin: usize,
-        multiplicity: &HashMap<u64, usize>,
+        multiplicity: &FxHashMap<u64, usize>,
         length: usize,
     ) -> Result<RMMCollections<F>, CircuitBuilderError> {
         assert_eq!(num_structural_witin, 1);

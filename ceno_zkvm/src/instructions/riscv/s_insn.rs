@@ -3,7 +3,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut, WriteMEM},
+    instructions::{
+        gpu::utils::{LkOp, LkShardramSink},
+        riscv::insn_base::{ReadRS1, ReadRS2, StateInOut, WriteMEM},
+    },
     tables::InsnRecord,
     witness::LkMultiplicity,
 };
@@ -16,10 +19,10 @@ use multilinear_extensions::{Expression, ToExpr};
 /// - Registers reads.
 /// - Memory write
 pub struct SInstructionConfig<E: ExtensionField> {
-    vm_state: StateInOut<E>,
-    rs1: ReadRS1<E>,
-    rs2: ReadRS2<E>,
-    mem_write: WriteMEM,
+    pub(crate) vm_state: StateInOut<E>,
+    pub(crate) rs1: ReadRS1<E>,
+    pub(crate) rs2: ReadRS2<E>,
+    pub(crate) mem_write: WriteMEM,
 }
 
 impl<E: ExtensionField> SInstructionConfig<E> {
@@ -90,5 +93,32 @@ impl<E: ExtensionField> SInstructionConfig<E> {
         lk_multiplicity.fetch(step.pc().before.0);
 
         Ok(())
+    }
+
+    pub fn emit_shardram(
+        &self,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) {
+        lk_multiplicity.fetch(step.pc().before.0);
+        self.rs1.emit_shardram(shard_ctx, step);
+        self.rs2.emit_shardram(shard_ctx, step);
+        self.mem_write.emit_shardram(shard_ctx, step);
+    }
+
+    #[allow(dead_code)]
+    pub fn emit_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        sink.emit_lk(LkOp::Fetch {
+            pc: step.pc().before.0,
+        });
+        self.rs1.emit_lk_and_shardram(sink, shard_ctx, step);
+        self.rs2.emit_lk_and_shardram(sink, shard_ctx, step);
+        self.mem_write.emit_lk_and_shardram(sink, shard_ctx, step);
     }
 }

@@ -14,7 +14,12 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::{Instruction, riscv::constants::LIMB_BITS},
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
+    instructions::{
+        Instruction,
+        gpu::utils::{LkOp, LkShardramSink, emit_u16_limbs},
+        riscv::constants::LIMB_BITS,
+    },
     structs::ProgramParams,
     uint::Value,
     witness::{LkMultiplicity, set_val},
@@ -30,18 +35,18 @@ pub struct DivRemConfig<E: ExtensionField> {
     pub(crate) remainder: UInt<E>,
     pub(crate) r_insn: RInstructionConfig<E>,
 
-    dividend_sign: WitIn,
-    divisor_sign: WitIn,
-    quotient_sign: WitIn,
-    remainder_zero: WitIn,
-    divisor_zero: WitIn,
-    divisor_sum_inv: WitIn,
-    remainder_sum_inv: WitIn,
-    remainder_inv: [WitIn; UINT_LIMBS],
-    sign_xor: WitIn,
-    remainder_prime: UInt<E>, // r'
-    lt_marker: [WitIn; UINT_LIMBS],
-    lt_diff: WitIn,
+    pub(crate) dividend_sign: WitIn,
+    pub(crate) divisor_sign: WitIn,
+    pub(crate) quotient_sign: WitIn,
+    pub(crate) remainder_zero: WitIn,
+    pub(crate) divisor_zero: WitIn,
+    pub(crate) divisor_sum_inv: WitIn,
+    pub(crate) remainder_sum_inv: WitIn,
+    pub(crate) remainder_inv: [WitIn; UINT_LIMBS],
+    pub(crate) sign_xor: WitIn,
+    pub(crate) remainder_prime: UInt<E>, // r'
+    pub(crate) lt_marker: [WitIn; UINT_LIMBS],
+    pub(crate) lt_diff: WitIn,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -49,6 +54,8 @@ pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = DivRemConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -376,6 +383,14 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         })
     }
 
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::DIV => Some(dispatch::GpuWitgenKind::Div(0u32)),
+        InsnKind::DIVU => Some(dispatch::GpuWitgenKind::Div(1u32)),
+        InsnKind::REM => Some(dispatch::GpuWitgenKind::Div(2u32)),
+        InsnKind::REMU => Some(dispatch::GpuWitgenKind::Div(3u32)),
+        _ => None,
+    });
+
     fn assign_instance(
         config: &Self::InstructionConfig,
         shard_ctx: &mut ShardContext,
@@ -522,6 +537,87 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
+        let dividend = step.rs1().unwrap().value;
+        let divisor = step.rs2().unwrap().value;
+        let dividend_value = Value::new_unchecked(dividend);
+        let divisor_value = Value::new_unchecked(divisor);
+        let dividend_limbs = dividend_value.as_u16_limbs();
+        let divisor_limbs = divisor_value.as_u16_limbs();
+
+        let signed = matches!(I::INST_KIND, InsnKind::DIV | InsnKind::REM);
+        let (quotient, remainder, dividend_sign, divisor_sign, quotient_sign, case) =
+            run_divrem(signed, &u32_to_limbs(&dividend), &u32_to_limbs(&divisor));
+
+        emit_u16_limbs(sink, limbs_to_u32(&quotient));
+        emit_u16_limbs(sink, limbs_to_u32(&remainder));
+
+        let carries = run_mul_carries(
+            signed,
+            &u32_to_limbs(&divisor),
+            &quotient,
+            &remainder,
+            quotient_sign,
+        );
+        for i in 0..UINT_LIMBS {
+            sink.emit_lk(LkOp::DynamicRange {
+                value: carries[i] as u64,
+                bits: (LIMB_BITS + 2) as u32,
+            });
+            sink.emit_lk(LkOp::DynamicRange {
+                value: carries[i + UINT_LIMBS] as u64,
+                bits: (LIMB_BITS + 2) as u32,
+            });
+        }
+
+        let sign_xor = dividend_sign ^ divisor_sign;
+        let remainder_prime = if sign_xor {
+            negate(&remainder)
+        } else {
+            remainder
+        };
+        let remainder_zero =
+            remainder.iter().all(|&v| v == 0) && case != DivRemCoreSpecialCase::ZeroDivisor;
+
+        if signed {
+            let dividend_sign_mask = if dividend_sign {
+                1 << (LIMB_BITS - 1)
+            } else {
+                0
+            };
+            let divisor_sign_mask = if divisor_sign {
+                1 << (LIMB_BITS - 1)
+            } else {
+                0
+            };
+            sink.emit_lk(LkOp::DynamicRange {
+                value: ((dividend_limbs[UINT_LIMBS - 1] as u64 - dividend_sign_mask) << 1),
+                bits: 16,
+            });
+            sink.emit_lk(LkOp::DynamicRange {
+                value: ((divisor_limbs[UINT_LIMBS - 1] as u64 - divisor_sign_mask) << 1),
+                bits: 16,
+            });
+        }
+
+        if case == DivRemCoreSpecialCase::None && !remainder_zero {
+            let idx = run_sltu_diff_idx(&u32_to_limbs(&divisor), &remainder_prime, divisor_sign);
+            let val = if divisor_sign {
+                remainder_prime[idx] - divisor_limbs[idx] as u32
+            } else {
+                divisor_limbs[idx] as u32 - remainder_prime[idx]
+            };
+            sink.emit_lk(LkOp::DynamicRange {
+                value: val as u64 - 1,
+                bits: 16,
+            });
+        } else {
+            sink.emit_lk(LkOp::DynamicRange { value: 0, bits: 16 });
+        }
+    });
+
+    impl_collect_shardram!(r_insn);
 }
 
 #[derive(Debug, Eq, PartialEq)]

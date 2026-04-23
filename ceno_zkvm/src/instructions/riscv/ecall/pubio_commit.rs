@@ -115,7 +115,10 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
         let syscall_code = PubIoCommitSpec::CODE;
-        let ops = step.syscall().expect("syscall step");
+        let ops = step
+            .syscall(shard_ctx.syscall_witnesses.as_ref())
+            .expect("syscall step")
+            .clone();
         assert_eq!(ops.reg_ops.len(), 1, "PUB_IO_COMMIT expects 1 reg op");
         assert_eq!(
             ops.mem_ops.len(),

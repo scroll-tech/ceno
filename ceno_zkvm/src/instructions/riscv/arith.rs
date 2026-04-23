@@ -2,8 +2,14 @@ use std::marker::PhantomData;
 
 use super::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig};
 use crate::{
-    circuit_builder::CircuitBuilder, e2e::ShardContext, error::ZKVMError,
-    instructions::Instruction, structs::ProgramParams, uint::Value, witness::LkMultiplicity,
+    circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
+    error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
+    instructions::{Instruction, gpu::utils::emit_u16_limbs},
+    structs::ProgramParams,
+    uint::Value,
+    witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::ExtensionField;
@@ -11,11 +17,11 @@ use ff_ext::ExtensionField;
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 #[derive(Debug)]
 pub struct ArithConfig<E: ExtensionField> {
-    r_insn: RInstructionConfig<E>,
+    pub r_insn: RInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    rd_written: UInt<E>,
+    pub rs1_read: UInt<E>,
+    pub rs2_read: UInt<E>,
+    pub rd_written: UInt<E>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
@@ -35,6 +41,8 @@ pub type SubInstruction<E> = ArithInstruction<E, SubOp>;
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = ArithConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = matches!(I::INST_KIND, InsnKind::ADD | InsnKind::SUB);
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -132,6 +140,27 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
+        match I::INST_KIND {
+            InsnKind::ADD => {
+                emit_u16_limbs(sink, step.rd().unwrap().value.after);
+            }
+            InsnKind::SUB => {
+                emit_u16_limbs(sink, step.rd().unwrap().value.after);
+                emit_u16_limbs(sink, step.rs1().unwrap().value);
+            }
+            _ => unreachable!("Unsupported instruction kind"),
+        }
+    });
+
+    impl_collect_shardram!(r_insn);
+
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::ADD => Some(dispatch::GpuWitgenKind::Add),
+        InsnKind::SUB => Some(dispatch::GpuWitgenKind::Sub),
+        _ => None,
+    });
 }
 
 #[cfg(test)]

@@ -245,7 +245,10 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Create GPU version from CPU version of MultilinearExtension
-    pub fn from_ceno(cuda_hal: &CudaHalBB31, mle: &MultilinearExtension<'a, E>) -> Self {
+    pub fn from_ceno(
+        cuda_hal: &CudaHalBB31,
+        mle: &MultilinearExtension<'a, E>,
+    ) -> MultilinearExtensionGpu<'static, E> {
         let stream = get_thread_stream();
         // check type of mle
         match mle.evaluations {
@@ -259,7 +262,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                     stream.as_ref(),
                 )
                 .unwrap();
-                Self {
+                MultilinearExtensionGpu {
                     mle: GpuFieldType::Base(mle_gpu),
                     _phantom: PhantomData,
                 }
@@ -274,7 +277,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                     stream.as_ref(),
                 )
                 .unwrap();
-                Self {
+                MultilinearExtensionGpu {
                     mle: GpuFieldType::Ext(mle_gpu),
                     _phantom: PhantomData,
                 }
@@ -357,7 +360,7 @@ pub type ArcMultilinearExtensionGpu<'a, E> = Arc<MultilinearExtensionGpu<'a, E>>
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
     type E = E;
     type Pcs = PCS;
-    type MultilinearPoly<'a> = MultilinearExtensionGpu<'a, E>;
+    type MultilinearPoly<'a> = MultilinearExtensionGpu<'static, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
     type PcsData = BasefoldCommitmentWithWitnessGpu<

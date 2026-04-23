@@ -17,7 +17,8 @@ use gkr_iop::{
 };
 use itertools::Itertools;
 use multilinear_extensions::{Expression, Instance, StructuralWitIn, StructuralWitInType, ToExpr};
-use std::{collections::HashMap, marker::PhantomData, ops::Range};
+use rustc_hash::FxHashMap;
+use std::{marker::PhantomData, ops::Range};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 #[derive(Clone, Debug)]
@@ -108,7 +109,7 @@ impl<
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
+        _multiplicity: &[FxHashMap<u64, usize>],
         final_v: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
@@ -244,7 +245,7 @@ impl<
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
+        _multiplicity: &[FxHashMap<u64, usize>],
         data: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
@@ -330,7 +331,7 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
+        _multiplicity: &[FxHashMap<u64, usize>],
         (shard_ctx, final_mem): &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding

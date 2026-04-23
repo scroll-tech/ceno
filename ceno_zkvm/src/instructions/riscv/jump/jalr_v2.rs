@@ -7,8 +7,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_const_range_op,
         riscv::{
             constants::{PC_BITS, UINT_LIMBS, UInt},
             i_insn::IInstructionConfig,
@@ -43,6 +45,8 @@ pub struct JalrInstruction<E>(PhantomData<E>);
 impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
     type InstructionConfig = JalrConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::JALR]
@@ -188,4 +192,19 @@ impl<E: ExtensionField> Instruction<E> for JalrInstruction<E> {
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, config, _ctx| {
+        let rd_value = Value::new_unchecked(step.rd().unwrap().value.after);
+        let rd_limb = rd_value.as_u16_limbs();
+        emit_const_range_op(sink, rd_limb[0] as u64, 16);
+        emit_const_range_op(sink, rd_limb[1] as u64, PC_BITS - 16);
+
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
+        let jump_pc = step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32);
+        config.jump_pc_addr.emit_lk_and_shardram(sink, jump_pc);
+    });
+
+    impl_collect_shardram!(i_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Jalr);
 }
