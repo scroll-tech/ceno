@@ -1,8 +1,8 @@
 use ff_ext::SmallField;
 use itertools::izip;
+use rustc_hash::FxHashMap;
 use std::{
     cell::RefCell,
-    collections::HashMap,
     fmt::Debug,
     hash::Hash,
     mem::{self},
@@ -16,7 +16,7 @@ use crate::tables::{
     ops::{AndTable, LtuTable, OrTable, PowTable, XorTable},
 };
 
-pub type MultiplicityRaw<K> = [HashMap<K, usize>; mem::variant_count::<LookupTable>()];
+pub type MultiplicityRaw<K> = [FxHashMap<K, usize>; mem::variant_count::<LookupTable>()];
 
 #[derive(Clone, Default, Debug)]
 pub struct Multiplicity<K>(pub MultiplicityRaw<K>);

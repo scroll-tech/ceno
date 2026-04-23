@@ -3,8 +3,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_u16_limbs,
         riscv::{RIVInstruction, constants::UInt, i_insn::IInstructionConfig},
     },
     structs::ProgramParams,
@@ -21,18 +23,20 @@ use witness::set_val;
 pub struct AddiInstruction<E>(PhantomData<E>);
 
 pub struct InstructionConfig<E: ExtensionField> {
-    i_insn: IInstructionConfig<E>,
+    pub(crate) i_insn: IInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    imm: WitIn,
+    pub(crate) rs1_read: UInt<E>,
+    pub(crate) imm: WitIn,
     // 0 positive, 1 negative
-    imm_sign: WitIn,
-    rd_written: UInt<E>,
+    pub(crate) imm_sign: WitIn,
+    pub(crate) rd_written: UInt<E>,
 }
 
 impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
     type InstructionConfig = InstructionConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::ADDI]
@@ -104,4 +108,12 @@ impl<E: ExtensionField> Instruction<E> for AddiInstruction<E> {
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, _config, _ctx| {
+        emit_u16_limbs(sink, step.rd().unwrap().value.after);
+    });
+
+    impl_collect_shardram!(i_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Addi);
 }

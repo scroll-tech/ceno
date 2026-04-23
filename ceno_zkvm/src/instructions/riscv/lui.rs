@@ -6,8 +6,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_const_range_op,
         riscv::{
             constants::{UINT_BYTE_LIMBS, UInt8},
             i_insn::IInstructionConfig,
@@ -35,6 +37,8 @@ pub struct LuiInstruction<E>(PhantomData<E>);
 impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
     type InstructionConfig = LuiConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::LUI]
@@ -103,7 +107,7 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
             .i_insn
             .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
-        let rd_written = split_to_u8(step.rd().unwrap().value.after);
+        let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
         for (val, witin) in izip!(rd_written.iter().skip(1), config.rd_written) {
             lk_multiplicity.assert_ux::<8>(*val as u64);
             set_val!(instance, witin, E::BaseField::from_canonical_u8(*val));
@@ -113,6 +117,17 @@ impl<E: ExtensionField> Instruction<E> for LuiInstruction<E> {
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, _config, _ctx| {
+        let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
+        for val in rd_written.iter().skip(1) {
+            emit_const_range_op(sink, *val as u64, 8);
+        }
+    });
+
+    impl_collect_shardram!(i_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Lui);
 }
 
 #[cfg(test)]

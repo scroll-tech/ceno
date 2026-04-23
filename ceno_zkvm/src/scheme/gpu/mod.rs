@@ -4,6 +4,7 @@ use super::hal::{
 };
 use crate::{
     error::ZKVMError,
+    instructions::gpu::cache::current_replay_cache_stats,
     scheme::{
         constants::SEPTIC_EXTENSION_DEGREE,
         cpu::TowerRelationOutput,
@@ -18,7 +19,11 @@ use crate::{
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
-use ceno_gpu::bb31::{CudaHalBB31, GpuPolynomial};
+use ceno_gpu::{
+    Buffer, CudaHal,
+    bb31::{CudaHalBB31, GpuPolynomial},
+    get_cuda_mem_info,
+};
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
@@ -37,6 +42,7 @@ use multilinear_extensions::{
     util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
+use p3::matrix::Matrix;
 use rayon::iter::{
     IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
     IntoParallelRefMutIterator, ParallelIterator,
@@ -54,28 +60,249 @@ use sumcheck::{
 use transcript::{BasicTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
+use ceno_gpu::common::transpose::matrix_transpose;
 use tracing::info_span;
+use witness::DeviceMatrixLayout;
 
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::gpu_prover::*;
 
 mod memory;
 mod util;
-pub use memory::{
+pub(crate) use memory::{
     check_gpu_mem_estimation, estimate_chip_proof_memory, estimate_main_witness_bytes,
-    init_gpu_mem_tracker,
+    estimate_replay_materialization_bytes_for_plan, estimate_tower_bytes,
+    estimate_tower_stage_bytes, init_gpu_mem_tracker,
 };
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
-    estimate_structural_mle_bytes, estimate_tower_bytes, estimate_trace_extraction_bytes,
+    estimate_structural_mle_bytes, estimate_trace_extraction_bytes,
 };
+pub(crate) use util::expect_basic_transcript;
 use util::{
-    WitnessRegistry, batch_mles_take_half, expect_basic_transcript, hal_to_backend_error,
-    mle_filter_even_odd_batch, mle_host_to_gpu, read_septic_value_from_gpu, symbolic_from_mle,
+    WitnessRegistry, batch_mles_take_half, hal_to_backend_error, mle_filter_even_odd_batch,
+    mle_host_to_gpu, read_septic_value_from_gpu, symbolic_from_mle,
 };
 
 pub struct GpuTowerProver;
+#[derive(Clone)]
+pub enum DeferredGpuTrace<E: ExtensionField> {
+    Eager(witness::RowMajorMatrix<E::BaseField>),
+    Replay(crate::structs::GpuReplayPlan<E>),
+}
 
+#[derive(Debug, Default, Clone, Copy)]
+struct PcsResidentStats {
+    digest_tree_bytes: usize,
+    codeword_leaves_bytes: usize,
+    trace_gpu_bytes: usize,
+    rmms_device_bytes: usize,
+    rmms_device_count: usize,
+    total_rmms: usize,
+}
+
+fn pcs_resident_stats(
+    pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    >,
+) -> PcsResidentStats {
+    let digest_tree_bytes =
+        pcs_data_basefold.codeword.digest_buf.len() * std::mem::size_of::<BB31Base>();
+    let codeword_leaves_bytes = pcs_data_basefold
+        .codeword
+        .leaves
+        .as_ref()
+        .map(|leaves| {
+            leaves
+                .iter()
+                .map(|leaf| leaf.values().len() * std::mem::size_of::<BB31Base>())
+                .sum::<usize>()
+        })
+        .unwrap_or(0);
+    let trace_gpu_bytes = pcs_data_basefold
+        .trace
+        .as_ref()
+        .map(|traces| {
+            traces
+                .iter()
+                .flatten()
+                .map(|poly| poly.evaluations().len() * std::mem::size_of::<BB31Base>())
+                .sum::<usize>()
+        })
+        .unwrap_or(0);
+    let (rmms_device_bytes, rmms_device_count, total_rmms) = pcs_data_basefold
+        .rmms
+        .as_ref()
+        .map(|rmms| {
+            (
+                rmms.iter()
+                    .filter(|rmm| rmm.has_device_backing())
+                    .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<BB31Base>())
+                    .sum::<usize>(),
+                rmms.iter().filter(|rmm| rmm.has_device_backing()).count(),
+                rmms.len(),
+            )
+        })
+        .unwrap_or((0, 0, 0));
+    PcsResidentStats {
+        digest_tree_bytes,
+        codeword_leaves_bytes,
+        trace_gpu_bytes,
+        rmms_device_bytes,
+        rmms_device_count,
+        total_rmms,
+    }
+}
+
+pub fn log_gpu_pcs_baseline<E, PCS>(
+    label: &str,
+    pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
+) where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU PCS baseline logging only supports BabyBear base field",
+    );
+    let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(pcs_data) };
+    let pcs = pcs_resident_stats(pcs_data_basefold);
+    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+    tracing::info!(
+        "[gpu pcs baseline][{label}] digest_tree={:.2}MB leaves={:.2}MB trace_gpu={:.2}MB rmms_device={:.2}MB ({}/{})",
+        mb(pcs.digest_tree_bytes),
+        mb(pcs.codeword_leaves_bytes),
+        mb(pcs.trace_gpu_bytes),
+        mb(pcs.rmms_device_bytes),
+        pcs.rmms_device_count,
+        pcs.total_rmms,
+    );
+}
+
+pub fn log_gpu_proof_baseline<E, PCS>(
+    label: &str,
+    witness_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    fixed_mles: &[Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>],
+) where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU baseline logging only supports BabyBear base field",
+    );
+    let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu baseline logging");
+    let pool = cuda_hal.inner.mem_pool();
+    let used_bytes = pool.get_used_size().unwrap_or(0);
+    let reserved_bytes = pool.get_reserved_size().unwrap_or(0);
+    let (cuda_free_bytes, cuda_total_bytes) = get_cuda_mem_info().unwrap_or((0usize, 0usize));
+    let cuda_used_bytes = cuda_total_bytes.saturating_sub(cuda_free_bytes);
+
+    let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(witness_data) };
+
+    let pcs = pcs_resident_stats(pcs_data_basefold);
+    let fixed_mle_bytes = fixed_mles
+        .iter()
+        .map(|mle| match &mle.mle {
+            gkr_iop::gpu::gpu_prover::GpuFieldType::Base(poly) => {
+                poly.evaluations().len() * std::mem::size_of::<BB31Base>()
+            }
+            gkr_iop::gpu::gpu_prover::GpuFieldType::Ext(poly) => {
+                poly.evaluations().len() * std::mem::size_of::<BB31Ext>()
+            }
+            gkr_iop::gpu::gpu_prover::GpuFieldType::Unreachable => 0,
+        })
+        .sum::<usize>();
+    let replay_cache = current_replay_cache_stats();
+    let accounted_bytes = replay_cache.total_bytes()
+        + pcs.digest_tree_bytes
+        + pcs.codeword_leaves_bytes
+        + pcs.trace_gpu_bytes
+        + pcs.rmms_device_bytes
+        + fixed_mle_bytes;
+    let unaccounted_bytes = (used_bytes as usize).saturating_sub(accounted_bytes);
+    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+    tracing::info!(
+        "[gpu device][{label}] cuda_used={:.2}MB cuda_free={:.2}MB cuda_total={:.2}MB | pool_used={:.2}MB pool_reserved={:.2}MB pool_booked={:.2}MB pool_max={:.2}MB",
+        mb(cuda_used_bytes),
+        mb(cuda_free_bytes),
+        mb(cuda_total_bytes),
+        mb(used_bytes as usize),
+        mb(reserved_bytes as usize),
+        mb(pool.get_booked_total() as usize),
+        mb(pool.get_max_size() as usize),
+    );
+    tracing::info!(
+        "[gpu baseline][{label}] pool: used={:.2}MB reserved={:.2}MB | replay: steps={:.2}MB meta={:.2}MB shared={:.2}MB total={:.2}MB | pcs: digest_tree={:.2}MB leaves={:.2}MB trace_gpu={:.2}MB rmms_device={:.2}MB ({}/{}) | fixed_mles={:.2}MB | unaccounted={:.2}MB",
+        mb(used_bytes as usize),
+        mb(reserved_bytes as usize),
+        mb(replay_cache.shard_steps_bytes),
+        mb(replay_cache.shard_meta_bytes),
+        mb(replay_cache.shared_side_effect_bytes),
+        mb(replay_cache.total_bytes()),
+        mb(pcs.digest_tree_bytes),
+        mb(pcs.codeword_leaves_bytes),
+        mb(pcs.trace_gpu_bytes),
+        mb(pcs.rmms_device_bytes),
+        pcs.rmms_device_count,
+        pcs.total_rmms,
+        mb(fixed_mle_bytes),
+        mb(unaccounted_bytes),
+    );
+}
+
+pub fn log_gpu_pool_usage(label: &str) {
+    let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu pool logging");
+    let pool = cuda_hal.inner.mem_pool();
+    let used_bytes = pool.get_used_size().unwrap_or(0);
+    let reserved_bytes = pool.get_reserved_size().unwrap_or(0);
+    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+    tracing::info!(
+        "[gpu pool][{label}] used={:.2}MB reserved={:.2}MB",
+        mb(used_bytes as usize),
+        mb(reserved_bytes as usize),
+    );
+}
+
+pub fn log_gpu_device_state(label: &str) {
+    let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu device logging");
+    let pool = cuda_hal.inner.mem_pool();
+    let used_bytes = pool.get_used_size().unwrap_or(0);
+    let reserved_bytes = pool.get_reserved_size().unwrap_or(0);
+    let booked_bytes = pool.get_booked_total();
+    let max_bytes = pool.get_max_size();
+    let (cuda_free_bytes, cuda_total_bytes) = get_cuda_mem_info().unwrap_or((0usize, 0usize));
+    let cuda_used_bytes = cuda_total_bytes.saturating_sub(cuda_free_bytes);
+    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+    tracing::info!(
+        "[gpu device][{label}] cuda_used={:.2}MB cuda_free={:.2}MB cuda_total={:.2}MB | pool_used={:.2}MB pool_reserved={:.2}MB pool_booked={:.2}MB pool_max={:.2}MB",
+        mb(cuda_used_bytes),
+        mb(cuda_free_bytes),
+        mb(cuda_total_bytes),
+        mb(used_bytes as usize),
+        mb(reserved_bytes as usize),
+        mb(booked_bytes as usize),
+        mb(max_bytes as usize),
+    );
+}
 use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
 use gkr_iop::{
     gpu::{ArcMultilinearExtensionGpu, BB31Base, MultilinearExtensionGpu},
@@ -169,7 +396,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
 
 // Extract out_evals from GPU-built tower witnesses
 #[allow(clippy::type_complexity)]
-fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
+pub(crate) fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     prod_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built product towers
     logup_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built logup towers
     r_set_len: usize,
@@ -315,6 +542,22 @@ pub fn prove_main_constraints_impl<
     let Some(gkr_circuit) = gkr_circuit else {
         panic!("empty gkr circuit")
     };
+    let estimated_main_constraints_bytes =
+        estimate_main_constraints_bytes::<E, PCS>(composed_cs, input);
+    if let Ok(cuda_hal) = get_cuda_hal() {
+        let mem_pool = cuda_hal.inner.mem_pool();
+        let used_bytes = mem_pool.get_used_size().unwrap_or(0);
+        let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
+        tracing::info!(
+            "[gpu] entering prove_main_constraints: estimated={:.2}MB, used={:.2}MB, reserved={:.2}MB, witness={}, fixed={}, structural={}",
+            estimated_main_constraints_bytes as f64 / (1024.0 * 1024.0),
+            used_bytes as f64 / (1024.0 * 1024.0),
+            reserved_bytes as f64 / (1024.0 * 1024.0),
+            input.witness.len(),
+            input.fixed.len(),
+            input.structural_witness.len(),
+        );
+    }
     let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
     let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, gkr_circuit);
     let selector_ctxs = first_layer
@@ -724,6 +967,159 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
     }))
 }
 
+pub(crate) fn normalize_traces_to_device_col_major<E: ExtensionField>(
+    cuda_hal: &Arc<CudaHalBB31>,
+    vec_traces: &mut [witness::RowMajorMatrix<E::BaseField>],
+) {
+    let mut already_col_major = 0usize;
+    let mut cpu_upload_and_transpose = 0usize;
+    let device_retranspose_todo = 0usize;
+
+    for (idx, trace) in vec_traces.iter_mut().enumerate() {
+        if trace.has_device_backing() {
+            if trace.device_backing_layout() != Some(DeviceMatrixLayout::ColMajor) {
+                panic!("TODO: GPU trace at index {idx} is device-backed but not col-major");
+            }
+            already_col_major += 1;
+            continue;
+        }
+
+        let rows = trace.height();
+        let cols = trace.width();
+        if rows == 0 || cols == 0 {
+            continue;
+        }
+        let host_vals_bb31: &[BB31Base] = unsafe { std::mem::transmute(trace.values()) };
+
+        let row_major_buf = cuda_hal
+            .alloc_elems_from_host(host_vals_bb31, None)
+            .unwrap_or_else(|e| panic!("failed to upload cpu trace {idx} to gpu: {e}"));
+        let mut col_major_buf = cuda_hal
+            .alloc_elems_on_device(rows * cols, false, None)
+            .unwrap_or_else(|e| panic!("failed to alloc col-major buffer for trace {idx}: {e}"));
+        matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+            &cuda_hal.inner,
+            &mut col_major_buf,
+            &row_major_buf,
+            rows,
+            cols,
+        )
+        .unwrap_or_else(|e| panic!("failed to transpose trace {idx} to col-major: {e}"));
+
+        trace.set_device_backing(col_major_buf, DeviceMatrixLayout::ColMajor);
+        cpu_upload_and_transpose += 1;
+    }
+
+    tracing::debug!(
+        total_traces = vec_traces.len(),
+        already_col_major,
+        cpu_upload_and_transpose,
+        device_retranspose_todo,
+        "normalized gpu trace backing to device col-major"
+    );
+}
+
+pub fn commit_traces_deferred_cache_none<E, PCS>(
+    prover: &GpuProver<GpuBackend<E, PCS>>,
+    traces: BTreeMap<usize, DeferredGpuTrace<E>>,
+) -> (
+    Vec<MultilinearExtensionGpu<'static, E>>,
+    <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    PCS::Commitment,
+)
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
+        panic!("GPU backend only supports BabyBear base field");
+    }
+
+    let ordered_sources = traces.into_values().collect_vec();
+    let max_poly_size_log2 = ordered_sources
+        .iter()
+        .map(|source| match source {
+            DeferredGpuTrace::Eager(rmm) => ceil_log2(rmm.height()),
+            DeferredGpuTrace::Replay(plan) => ceil_log2(plan.trace_height),
+        })
+        .max()
+        .unwrap();
+    if max_poly_size_log2 > prover.backend.max_poly_size_log2 {
+        panic!(
+            "max_poly_size_log2 {} > max_poly_size_log2 backend {}",
+            max_poly_size_log2, prover.backend.max_poly_size_log2
+        );
+    }
+
+    let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
+        == std::mem::size_of::<PCS::CommitmentWithWitness>();
+    if !is_pcs_match {
+        panic!("GPU commitment data is not compatible with the PCS");
+    }
+
+    let cuda_hal = get_cuda_hal().unwrap();
+    cuda_hal
+        .inner
+        .synchronize()
+        .expect("cuda synchronize before deferred batch_commit mem snapshot");
+    let mem_pool = cuda_hal.inner.mem_pool();
+    let used_bytes = mem_pool
+        .get_used_size()
+        .expect("cudaMemPoolGetAttribute UsedMemCurrent before deferred batch_commit");
+    let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
+    tracing::info!(
+        "[gpu] entering deferred batch_commit: traces={}, used={:.2}MB, reserved={:.2}MB",
+        ordered_sources.len(),
+        used_bytes as f64 / (1024.0 * 1024.0),
+        reserved_bytes as f64 / (1024.0 * 1024.0),
+    );
+
+    let specs = ordered_sources
+        .iter()
+        .map(|source| match source {
+            DeferredGpuTrace::Eager(rmm) => ceno_gpu::common::poseidon2::DeferredRmmSpec {
+                height: rmm.height(),
+                persist_actual: true,
+            },
+            DeferredGpuTrace::Replay(plan) => ceno_gpu::common::poseidon2::DeferredRmmSpec {
+                height: plan.trace_height,
+                persist_actual: false,
+            },
+        })
+        .collect_vec();
+    let mut ordered_sources = ordered_sources.into_iter().map(Some).collect_vec();
+    let pcs_data = cuda_hal
+        .basefold
+        .batch_commit_cache_none_deferred(&cuda_hal, specs, |trace_idx| {
+            let source = ordered_sources[trace_idx]
+                .take()
+                .expect("deferred commit source reused");
+            let witness_rmm: witness::RowMajorMatrix<E::BaseField> = match source {
+                DeferredGpuTrace::Eager(rmm) => rmm,
+                DeferredGpuTrace::Replay(plan) => plan
+                    .replay_witness()
+                    .map(|witness_rmm| {
+                        assert_eq!(
+                            witness_rmm.height(),
+                            plan.trace_height,
+                            "replayed trace height changed between plan build and deferred commit",
+                        );
+                        witness_rmm
+                    })
+                    .map_err(|e| ceno_gpu::HalError::InvalidInput(format!("{e:?}")))?,
+            };
+            Ok(unsafe { std::mem::transmute(witness_rmm) })
+        })
+        .unwrap();
+
+    let basefold_commit = cuda_hal.basefold.get_pure_commitment(&pcs_data);
+    let commit: PCS::Commitment = unsafe { std::mem::transmute_copy(&basefold_commit) };
+    let pcs_data_generic: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
+        unsafe { std::mem::transmute_copy(&pcs_data) };
+    std::mem::forget(pcs_data);
+    (vec![], pcs_data_generic, commit)
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
@@ -731,7 +1127,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
-        Vec<MultilinearExtensionGpu<'a, E>>,
+        Vec<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
         <GpuBackend<E, PCS> as ProverBackend>::PcsData,
         PCS::Commitment,
     ) {
@@ -756,8 +1152,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         let is_pcs_match = std::mem::size_of::<mpcs::BasefoldCommitmentWithWitness<BB31Ext>>()
             == std::mem::size_of::<PCS::CommitmentWithWitness>();
         let (mles, pcs_data, commit) = if is_pcs_match {
-            let vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
+            let mut vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
                 traces.into_values().collect();
+
+            if crate::instructions::gpu::config::should_materialize_witness_on_gpu() {
+                let span = entered_span!("[gpu] normalize_trace_backing", profiling_2 = true);
+                let cuda_hal = get_cuda_hal().unwrap();
+                normalize_traces_to_device_col_major::<E>(&cuda_hal, &mut vec_traces);
+                drop(cuda_hal);
+                for (idx, trace) in vec_traces.iter().enumerate() {
+                    assert!(
+                        trace.has_device_backing(),
+                        "GPU mode requires device-backed witness trace at index {idx}"
+                    );
+                    assert_eq!(
+                        trace.device_backing_layout(),
+                        Some(DeviceMatrixLayout::ColMajor),
+                        "GPU mode requires col-major device-backed witness trace at index {idx}"
+                    );
+                }
+                exit_span!(span);
+            }
 
             let span = entered_span!("[gpu] hal init", profiling_2 = true);
             let cuda_hal = get_cuda_hal().unwrap();
@@ -767,6 +1182,21 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 unsafe { std::mem::transmute(vec_traces) };
 
             let span = entered_span!("[gpu] batch_commit", profiling_2 = true);
+            cuda_hal
+                .inner
+                .synchronize()
+                .expect("cuda synchronize before batch_commit mem snapshot");
+            let mem_pool = cuda_hal.inner.mem_pool();
+            let used_bytes = mem_pool
+                .get_used_size()
+                .expect("cudaMemPoolGetAttribute UsedMemCurrent before batch_commit");
+            let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
+            tracing::info!(
+                "[gpu] entering batch_commit: traces={}, used={:.2}MB, reserved={:.2}MB",
+                traces_gl64.len(),
+                used_bytes as f64 / (1024.0 * 1024.0),
+                reserved_bytes as f64 / (1024.0 * 1024.0),
+            );
             let pcs_data = cuda_hal
                 .basefold
                 .batch_commit(&cuda_hal, traces_gl64)
@@ -843,7 +1273,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                     0
                 };
 
-                let (resident, temporary) = estimate_trace_extraction_bytes(num_witin, num_vars);
+                let (resident, temporary) =
+                    estimate_trace_extraction_bytes(num_witin, num_vars, true);
                 check_gpu_mem_estimation(gpu_mem_tracker, resident + temporary);
 
                 trace_idx += 1;
@@ -893,7 +1324,7 @@ where
         .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, stream.as_ref())
         .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
 
-    let (resident, temporary) = estimate_trace_extraction_bytes(expected_num, num_vars);
+    let (resident, temporary) = estimate_trace_extraction_bytes(expected_num, num_vars, false);
     check_gpu_mem_estimation(gpu_mem_tracker, resident + temporary);
 
     let mles: Vec<Arc<MultilinearExtensionGpu<'a, E>>> = poly_group
@@ -913,13 +1344,152 @@ where
     mles
 }
 
+pub fn extract_witness_mles_for_trace_rmm<'a, E>(
+    witness_rmm: witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
+where
+    E: ExtensionField,
+{
+    let cuda_hal = get_cuda_hal().unwrap();
+    let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "extract_witness_mles_for_trace_rmm");
+
+    assert_eq!(
+        witness_rmm.device_backing_layout(),
+        Some(DeviceMatrixLayout::ColMajor),
+        "replayed witness RMM must keep col-major device backing",
+    );
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU replay only supports BabyBear base field",
+    );
+
+    let device_buffer = witness_rmm
+        .device_backing_ref::<BufferImpl<'static, BB31Base>>()
+        .unwrap_or_else(|| panic!("col-major replay witness device backing type mismatch"));
+    let rows = witness_rmm.height();
+    let cols = witness_rmm.width();
+    let poly_len_bytes = rows * std::mem::size_of::<BB31Base>();
+
+    // This helper only wraps already-materialized col-major device backing in
+    // owned subrange handles. The preceding witness replay paid the actual
+    // witness-buffer allocation cost; converting those columns into MLE
+    // handles does not allocate more VRAM here.
+    check_gpu_mem_estimation(gpu_mem_tracker, 0);
+
+    (0..cols)
+        .map(|col_idx| {
+            let src_byte_offset = col_idx * poly_len_bytes;
+            // Keep an owned handle to the parent GPU allocation instead of a
+            // borrowed CudaView. The resulting MLE outlives this helper.
+            let view_buf =
+                device_buffer.owned_subrange(src_byte_offset..src_byte_offset + poly_len_bytes);
+            let view_poly = GpuPolynomial::new(view_buf, rows.trailing_zeros() as usize);
+            let view_poly_static: GpuPolynomial<'static> =
+                unsafe { std::mem::transmute(view_poly) };
+            let mle_static = MultilinearExtensionGpu::from_ceno_gpu_base(view_poly_static);
+            Arc::new(unsafe {
+                std::mem::transmute::<
+                    MultilinearExtensionGpu<'static, E>,
+                    MultilinearExtensionGpu<'a, E>,
+                >(mle_static)
+            })
+        })
+        .collect()
+}
+
+pub fn clear_replayable_trace_device_backing<E, PCS>(
+    pcs_data: &mut <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
+) where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    let pcs_data_basefold: &mut BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(pcs_data) };
+
+    let Some(rmms) = pcs_data_basefold.rmms.as_mut() else {
+        return;
+    };
+
+    let before_device_count = rmms.iter().filter(|rmm| rmm.has_device_backing()).count();
+    let before_device_bytes = rmms
+        .iter()
+        .filter(|rmm| rmm.has_device_backing())
+        .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<BB31Base>())
+        .sum::<usize>();
+
+    for (trace_idx, _) in replayable_traces {
+        rmms[*trace_idx].clear_device_backing();
+    }
+
+    let after_device_count = rmms.iter().filter(|rmm| rmm.has_device_backing()).count();
+    let after_device_bytes = rmms
+        .iter()
+        .filter(|rmm| rmm.has_device_backing())
+        .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<BB31Base>())
+        .sum::<usize>();
+    tracing::info!(
+        "[gpu] cleared replayable PCS RMM device backing: replayable_traces={}, rmms_device_before={:.2}MB ({}) -> after={:.2}MB ({})",
+        replayable_traces.len(),
+        before_device_bytes as f64 / (1024.0 * 1024.0),
+        before_device_count,
+        after_device_bytes as f64 / (1024.0 * 1024.0),
+        after_device_count,
+    );
+}
+
+pub fn restore_replayable_trace_device_backing<E, PCS>(
+    pcs_data: &mut <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
+) -> Result<(), ZKVMError>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU replay restore only supports BabyBear base field",
+    );
+    let pcs_data_basefold: &mut BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(pcs_data) };
+
+    let Some(rmms) = pcs_data_basefold.rmms.as_mut() else {
+        return Ok(());
+    };
+
+    for (trace_idx, replay_plan) in replayable_traces {
+        let witness_rmm = replay_plan.replay_witness()?;
+        assert_eq!(
+            witness_rmm.height(),
+            replay_plan.trace_height,
+            "replayed trace height changed before PCS opening restore",
+        );
+        let witness_rmm_bb31: witness::RowMajorMatrix<BB31Base> =
+            unsafe { std::mem::transmute(witness_rmm) };
+        rmms[*trace_idx] = witness_rmm_bb31;
+    }
+    Ok(())
+}
+
 /// Transport a CPU-side structural witness RowMajorMatrix to GPU MLEs.
 /// Standalone version that doesn't require `&self` on GpuProver, enabling
 /// just-in-time GPU upload inside parallel task closures.
 ///
 /// `num_structural_witin` and `num_vars` are used for memory estimation validation.
 pub fn transport_structural_witness_to_gpu<'a, E>(
-    structural_rmm: witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    structural_rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
     num_structural_witin: usize,
     num_vars: usize,
 ) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
@@ -927,23 +1497,69 @@ where
     E: ExtensionField,
 {
     let cuda_hal = get_cuda_hal().unwrap();
-    let structural_mles = structural_rmm.to_mles();
-
     let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "transport_structural_witness_to_gpu");
 
-    let result = structural_mles
-        .iter()
-        .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
-        .collect();
+    let result = if structural_rmm.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor) {
+        assert_eq!(
+            std::any::TypeId::of::<E::BaseField>(),
+            std::any::TypeId::of::<BB31Base>(),
+            "GPU structural fast path only supports BabyBear base field"
+        );
+        let device_buffer = structural_rmm
+            .device_backing_ref::<BufferImpl<'static, BB31Base>>()
+            .unwrap_or_else(|| panic!("col-major structural device backing type mismatch"));
+        let rows = structural_rmm.height();
+        let cols = structural_rmm.width();
+        let poly_len_bytes = rows * std::mem::size_of::<BB31Base>();
+        let total_bytes = cols * poly_len_bytes;
+        assert_eq!(
+            device_buffer.len() * std::mem::size_of::<BB31Base>(),
+            total_bytes,
+            "structural col-major buffer size mismatch"
+        );
+        let num_vars_in_poly = rows.trailing_zeros() as usize;
+        assert_eq!(rows, 1usize << num_vars_in_poly);
 
-    let estimated_bytes = estimate_structural_mle_bytes(num_structural_witin, num_vars);
+        (0..cols)
+            .map(|col_idx| {
+                let src_byte_offset = col_idx * poly_len_bytes;
+                // Structural MLEs also escape this helper; use an owned-range
+                // buffer handle rather than a borrowed view into `structural_rmm`.
+                let view_buf =
+                    device_buffer.owned_subrange(src_byte_offset..src_byte_offset + poly_len_bytes);
+                let view_poly = GpuPolynomial::new(view_buf, num_vars_in_poly);
+                let view_poly_static: GpuPolynomial<'static> =
+                    unsafe { std::mem::transmute(view_poly) };
+                let mle_static = MultilinearExtensionGpu::from_ceno_gpu_base(view_poly_static);
+                Arc::new(unsafe {
+                    std::mem::transmute::<
+                        MultilinearExtensionGpu<'static, E>,
+                        MultilinearExtensionGpu<'a, E>,
+                    >(mle_static)
+                })
+            })
+            .collect()
+    } else {
+        let structural_mles = structural_rmm.to_mles();
+        structural_mles
+            .iter()
+            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
+            .collect()
+    };
+
+    let estimated_bytes =
+        if structural_rmm.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor) {
+            0
+        } else {
+            estimate_structural_mle_bytes(num_structural_witin, num_vars)
+        };
     check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
 
     result
 }
 
 #[allow(clippy::too_many_arguments)]
-fn build_tower_witness_gpu<'buf, E: ExtensionField>(
+pub(crate) fn build_tower_witness_gpu<'buf, E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
     records: &[ArcMultilinearExtensionGpu<'_, E>],
@@ -1464,9 +2080,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
         >,
     ) -> DeviceProvingKey<'static, GpuBackend<E, PCS>> {
         let pcs_data_original = if is_first_shard {
-            pk.fixed_commit_wd.clone().unwrap()
+            pk.fixed_commit_wd.as_ref().unwrap().clone()
         } else {
-            pk.fixed_no_omc_init_commit_wd.clone().unwrap()
+            pk.fixed_no_omc_init_commit_wd.as_ref().unwrap().clone()
         };
 
         // assert pcs match
@@ -1486,17 +2102,35 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
             GpuDigestLayer,
             GpuMatrix,
             GpuPolynomial,
-        >(&cuda_hal, basefold_commitment);
+        >(&cuda_hal, basefold_commitment)
+        .expect("failed to convert fixed pcs_data to GPU basefold commitment");
+
+        // cuda buffer as view
+        let fixed_mles: Vec<Arc<MultilinearExtensionGpu<'static, E>>> = pcs_data_basefold
+            .trace
+            .as_ref()
+            .expect("trace must be populated by convert_ceno_to_gpu_basefold_commitment")
+            .iter()
+            .flat_map(|poly_group| poly_group.iter())
+            .map(|gpu_poly| {
+                let evals = gpu_poly.evaluations();
+                let byte_len = evals.len() * std::mem::size_of::<BB31Base>();
+                // Fixed-trace MLEs live for the whole proving key lifetime on
+                // the GPU side, so they must not borrow a temporary CudaView.
+                let view_buf = evals.owned_subrange(0..byte_len);
+                let view_poly = GpuPolynomial::new(view_buf, gpu_poly.num_vars());
+                let view_poly_static: GpuPolynomial<'static> =
+                    unsafe { std::mem::transmute(view_poly) };
+                Arc::new(MultilinearExtensionGpu::from_ceno_gpu_base(
+                    view_poly_static,
+                ))
+            })
+            .collect_vec();
+
         let pcs_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData =
             unsafe { std::mem::transmute_copy(&pcs_data_basefold) };
         std::mem::forget(pcs_data_basefold);
         let pcs_data = Arc::new(pcs_data);
-
-        let fixed_mles = PCS::get_arc_mle_witness_from_commitment(pcs_data_original.as_ref());
-        let fixed_mles = fixed_mles
-            .iter()
-            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
-            .collect_vec();
 
         DeviceProvingKey {
             pcs_data,
@@ -1507,7 +2141,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Gp
     fn transport_mles<'a>(
         &self,
         mles: &[MultilinearExtension<'a, E>],
-    ) -> Vec<ArcMultilinearExtensionGpu<'a, E>> {
+    ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let cuda_hal = get_cuda_hal().unwrap();
         mles.iter()
             .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
@@ -1523,6 +2157,36 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         task: &mut crate::scheme::scheduler::ChipTask<'_, GpuBackend<E, PCS>>,
         pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     ) {
+        if let Some(replay_plan) = task.gpu_replay_plan.as_ref() {
+            let cuda_hal = get_cuda_hal().unwrap();
+            let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
+            let num_vars =
+                task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
+            let estimated_replay_bytes =
+                estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
+            tracing::info!(
+                "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
+                task.circuit_name,
+                estimated_replay_bytes as f64 / (1024.0 * 1024.0),
+            );
+            let witness_rmm = replay_plan.replay_witness().expect("GPU raw replay failed");
+            check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
+            task.input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
+                .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
+            if let Some(rmm) = task.structural_rmm.as_ref() {
+                task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
+                    .in_scope(|| {
+                        transport_structural_witness_to_gpu::<E>(
+                            rmm,
+                            task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
+                            task.input.log2_num_instances()
+                                + task.pk.get_cs().rotation_vars().unwrap_or(0),
+                        )
+                    });
+            }
+            return;
+        }
+
         let num_vars =
             task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
 
@@ -1539,7 +2203,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         }
 
         // Deferred structural witness transport: CPU -> GPU just-in-time
-        if let Some(rmm) = task.structural_rmm.take() {
+        if let Some(rmm) = task.structural_rmm.as_ref() {
             let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
             task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
                 .in_scope(|| {

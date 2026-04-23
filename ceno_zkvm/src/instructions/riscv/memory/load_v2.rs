@@ -4,6 +4,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::SignedExtendConfig,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
         riscv::{
@@ -25,17 +26,17 @@ use p3::field::{Field, FieldAlgebra};
 use std::marker::PhantomData;
 
 pub struct LoadConfig<E: ExtensionField> {
-    im_insn: IMInstructionConfig<E>,
+    pub im_insn: IMInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    imm: WitIn,
-    imm_sign: WitIn,
-    memory_addr: MemAddr<E>,
+    pub rs1_read: UInt<E>,
+    pub imm: WitIn,
+    pub imm_sign: WitIn,
+    pub memory_addr: MemAddr<E>,
 
-    memory_read: UInt<E>,
-    target_limb: Option<WitIn>,
-    target_limb_bytes: Option<Vec<WitIn>>,
-    signed_extend_config: Option<SignedExtendConfig<E>>,
+    pub memory_read: UInt<E>,
+    pub target_limb: Option<WitIn>,
+    pub target_limb_bytes: Option<Vec<WitIn>>,
+    pub signed_extend_config: Option<SignedExtendConfig<E>>,
 }
 
 pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
@@ -43,6 +44,11 @@ pub struct LoadInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E, I> {
     type InstructionConfig = LoadConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = matches!(
+        I::INST_KIND,
+        InsnKind::LW | InsnKind::LB | InsnKind::LBU | InsnKind::LH | InsnKind::LHU
+    );
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -251,4 +257,38 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for LoadInstruction<E,
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(im_insn, |sink, step, config, _ctx| {
+        // Shardram (shard send/addr) are identical for all load types (LW/LH/LB/LHU/LBU).
+        // Sub-word extraction only affects LK emissions, handled separately by GPU kernel.
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
+        let unaligned_addr =
+            ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
+        config
+            .memory_addr
+            .emit_lk_and_shardram(sink, unaligned_addr.into());
+    });
+
+    impl_collect_shardram!(im_insn);
+
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::LW => Some(dispatch::GpuWitgenKind::Lw),
+        InsnKind::LH => Some(dispatch::GpuWitgenKind::LoadSub {
+            load_width: 16,
+            is_signed: 1,
+        }),
+        InsnKind::LHU => Some(dispatch::GpuWitgenKind::LoadSub {
+            load_width: 16,
+            is_signed: 0,
+        }),
+        InsnKind::LB => Some(dispatch::GpuWitgenKind::LoadSub {
+            load_width: 8,
+            is_signed: 1,
+        }),
+        InsnKind::LBU => Some(dispatch::GpuWitgenKind::LoadSub {
+            load_width: 8,
+            is_signed: 0,
+        }),
+        _ => None,
+    });
 }

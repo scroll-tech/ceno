@@ -123,6 +123,7 @@ fn bench_add(c: &mut Criterion) {
                             pk: circuit_pk,
                             input,
                             estimated_memory_bytes: 0,
+                            booked_memory_bytes: 0,
                             has_witness_or_fixed: true,
                             challenges,
                             witness_trace_idx: None,

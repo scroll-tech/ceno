@@ -19,11 +19,16 @@ use rayon::{
 };
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
+pub mod gpu;
 pub mod riscv;
+
+pub use gpu::utils::{cpu_assign_instances, cpu_collect_lk_and_shardram, cpu_collect_shardram};
 
 pub trait Instruction<E: ExtensionField> {
     type InstructionConfig: Send + Sync;
     type InsnType: Clone + Copy;
+
+    const GPU_LK_SHARDRAM: bool = false;
 
     fn padding_strategy() -> InstancePaddingStrategy {
         InstancePaddingStrategy::Default
@@ -95,6 +100,36 @@ pub trait Instruction<E: ExtensionField> {
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError>;
+
+    fn collect_lk_and_shardram(
+        _config: &Self::InstructionConfig,
+        _shard_ctx: &mut ShardContext,
+        _lk_multiplicity: &mut LkMultiplicity,
+        _step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        Err(ZKVMError::InvalidWitness(
+            format!(
+                "{} does not implement lk and shardram collection",
+                Self::name()
+            )
+            .into(),
+        ))
+    }
+
+    fn collect_shardram(
+        _config: &Self::InstructionConfig,
+        _shard_ctx: &mut ShardContext,
+        _lk_multiplicity: &mut LkMultiplicity,
+        _step: &StepRecord,
+    ) -> Result<(), ZKVMError> {
+        Err(ZKVMError::InvalidWitness(
+            format!(
+                "{} does not implement shardram-only collection",
+                Self::name()
+            )
+            .into(),
+        ))
+    }
 
     fn assign_instances(
         config: &Self::InstructionConfig,
@@ -185,8 +220,189 @@ pub trait Instruction<E: ExtensionField> {
             &indices,
         )
     }
+
+    #[cfg(feature = "gpu")]
+    fn build_gpu_replay_plan(
+        _config: &Self::InstructionConfig,
+        _shard_ctx: &ShardContext,
+        _num_witin: usize,
+        _num_structural_witin: usize,
+        _shard_steps: &[StepRecord],
+        _step_indices: &[StepIndex],
+    ) -> Option<crate::structs::GpuReplayPlan<E>> {
+        None
+    }
 }
 
 pub fn full_step_indices(steps: &[StepRecord]) -> Vec<StepIndex> {
     (0..steps.len()).collect()
+}
+
+// ---------------------------------------------------------------------------
+// Macros to reduce per-chip boilerplate
+// ---------------------------------------------------------------------------
+
+/// Implement `collect_lk_and_shardram` with a common prologue
+/// (create `CpuLkShardramSink`, dispatch to `config.$field.emit_lk_and_shardram`)
+/// and a chip-specific body for additional LK ops.
+///
+/// The closure receives `(sink, step, config, ctx)`:
+/// - `sink: &mut CpuLkShardramSink` — emit LK ops and send events
+/// - `step: &StepRecord` — current step
+/// - `config: &Self::InstructionConfig` — circuit config (for sub-configs)
+/// - `ctx: &ShardContext` — read-only shard context
+///
+/// Usage inside `impl Instruction<E> for MyChip`:
+/// ```ignore
+/// impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
+///     emit_u16_limbs(sink, step.rd().unwrap().value.after);
+/// });
+/// ```
+#[macro_export]
+macro_rules! impl_collect_lk_and_shardram {
+    ($field:ident, |$sink:ident, $step:ident, $config:ident, $ctx:ident| $body:block) => {
+        fn collect_lk_and_shardram(
+            config: &Self::InstructionConfig,
+            shard_ctx: &mut $crate::e2e::ShardContext,
+            lk_multiplicity: &mut $crate::witness::LkMultiplicity,
+            step: &ceno_emul::StepRecord,
+        ) -> Result<(), $crate::error::ZKVMError> {
+            let shard_ctx_ptr = shard_ctx as *mut $crate::e2e::ShardContext;
+            let _ctx = unsafe { &*shard_ctx_ptr };
+            let mut _sink_val = unsafe {
+                $crate::instructions::gpu::utils::CpuLkShardramSink::from_raw(
+                    shard_ctx_ptr,
+                    lk_multiplicity,
+                )
+            };
+            config.$field.emit_lk_and_shardram(&mut _sink_val, _ctx, step);
+            let $sink = &mut _sink_val;
+            let $step = step;
+            let $config = config;
+            let $ctx = _ctx;
+            $body
+            Ok(())
+        }
+    };
+}
+
+/// Implement `collect_shardram` by delegating to
+/// `config.$field.emit_shardram(shard_ctx, lk_multiplicity, step)`.
+///
+/// Every chip's implementation is identical except for the config field name
+/// (`r_insn`, `i_insn`, `b_insn`, `s_insn`, `j_insn`, `im_insn`).
+///
+/// Usage inside `impl Instruction<E> for MyChip`:
+/// ```ignore
+/// impl_collect_shardram!(r_insn);
+/// ```
+#[macro_export]
+macro_rules! impl_collect_shardram {
+    ($field:ident) => {
+        fn collect_shardram(
+            config: &Self::InstructionConfig,
+            shard_ctx: &mut $crate::e2e::ShardContext,
+            lk_multiplicity: &mut $crate::witness::LkMultiplicity,
+            step: &ceno_emul::StepRecord,
+        ) -> Result<(), $crate::error::ZKVMError> {
+            config
+                .$field
+                .emit_shardram(shard_ctx, lk_multiplicity, step);
+            Ok(())
+        }
+    };
+}
+
+/// Implement the `#[cfg(feature = "gpu")] fn assign_instances` override that:
+/// 1. Computes `Option<GpuWitgenKind>` from `$kind_expr`
+/// 2. Tries `try_gpu_assign_instances` → returns on success
+/// 3. Falls back to `cpu_assign_instances`
+///
+/// Usage inside `impl Instruction<E> for MyChip`:
+/// ```ignore
+/// // Single kind (always GPU):
+/// impl_gpu_assign!(GpuWitgenKind::Lui);
+///
+/// // Match expression → Option<GpuWitgenKind>:
+/// impl_gpu_assign!(match I::INST_KIND {
+///     InsnKind::ADD => Some(GpuWitgenKind::Add),
+///     InsnKind::SUB => Some(GpuWitgenKind::Sub),
+///     _ => None,
+/// });
+/// ```
+#[macro_export]
+macro_rules! impl_gpu_assign {
+    // Match/block → Option<GpuWitgenKind>
+    (match $($rest:tt)*) => {
+        $crate::impl_gpu_assign!(@ match $($rest)*);
+    };
+    // Single kind — always use GPU
+    ($kind:expr) => {
+        $crate::impl_gpu_assign!(@ Some($kind));
+    };
+    (@ $kind_expr:expr) => {
+        #[cfg(feature = "gpu")]
+        fn assign_instances(
+            config: &Self::InstructionConfig,
+            shard_ctx: &mut $crate::e2e::ShardContext,
+            num_witin: usize,
+            num_structural_witin: usize,
+            shard_steps: &[ceno_emul::StepRecord],
+            step_indices: &[ceno_emul::StepIndex],
+        ) -> Result<
+            (
+                $crate::tables::RMMCollections<E::BaseField>,
+                gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
+            ),
+            $crate::error::ZKVMError,
+        > {
+            use $crate::instructions::gpu::dispatch;
+            let gpu_kind: Option<dispatch::GpuWitgenKind> = $kind_expr;
+            if let Some(kind) = gpu_kind {
+                if let Some(result) = dispatch::try_gpu_assign_instances::<E, Self>(
+                    config,
+                    shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    shard_steps,
+                    step_indices,
+                    kind,
+                )? {
+                    return Ok(result);
+                }
+            }
+            $crate::instructions::cpu_assign_instances::<E, Self>(
+                config,
+                shard_ctx,
+                num_witin,
+                num_structural_witin,
+                shard_steps,
+                step_indices,
+            )
+        }
+
+        #[cfg(feature = "gpu")]
+        fn build_gpu_replay_plan(
+            config: &Self::InstructionConfig,
+            shard_ctx: &$crate::e2e::ShardContext,
+            num_witin: usize,
+            num_structural_witin: usize,
+            shard_steps: &[ceno_emul::StepRecord],
+            step_indices: &[ceno_emul::StepIndex],
+        ) -> Option<$crate::structs::GpuReplayPlan<E>> {
+            use $crate::instructions::gpu::dispatch;
+            let gpu_kind: Option<dispatch::GpuWitgenKind> = $kind_expr;
+            gpu_kind.map(|kind| {
+                dispatch::build_gpu_replay_plan::<E, Self>(
+                    config,
+                    shard_ctx,
+                    num_witin,
+                    num_structural_witin,
+                    shard_steps,
+                    step_indices,
+                    kind,
+                )
+            })
+        }
+    };
 }
