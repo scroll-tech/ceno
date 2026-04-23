@@ -46,7 +46,7 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-7fd1c292.js";
+            window.path_to_searchindex_js = "searchindex-1c74709d.js";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc-01723f21.js"></script>
@@ -1226,7 +1226,52 @@ begins executing a task. This reduces peak VRAM usage.</p>
 <h1 id="differences-from-risc-v"><a class="header" href="#differences-from-risc-v">Differences from RISC-V</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="technical-overview"><a class="header" href="#technical-overview">Technical Overview</a></h1>
-<p>This section covers the internal design and cryptographic protocols used in Ceno.</p>
+<p>This section covers the internal design and cryptographic protocols
+used in Ceno. Before diving into the machinery, it is worth stating
+plainly what the machinery is <em>for</em> — i.e. what a successful
+verification actually binds the proof to.</p>
+<h2 id="what-the-verifier-guarantees"><a class="header" href="#what-the-verifier-guarantees">What the verifier guarantees</a></h2>
+<p>A successful Ceno verification attests to the following program-level
+statements. Everything else in the verifier — transcript flow,
+sumcheck, PCS openings, tower and GKR reductions, per-shard EC
+accumulators, cross-shard memory consistency — is machinery whose
+purpose is to make these meaningful.</p>
+<ol>
+<li><strong>Start: execution begins at the program entry point declared in
+the verifying key.</strong> The first shard’s initial program counter is
+bound to the verifying key’s entry PC; every subsequent shard’s
+initial PC is chained to the previous shard’s final PC. The proof
+is of an execution of <em>this specific program image</em> starting from
+<em>its declared entry point</em>, not of some arbitrary subtrace the
+prover chose to begin at a convenient PC.</li>
+<li><strong>Halt: the terminal shard invokes the halt ecall.</strong> Intermediate
+shards must not halt, and the terminal shard must, so the proof
+covers a complete execution ending exactly where the guest invokes
+halt. A prover cannot hide a halt or manufacture one.</li>
+</ol>
+<h3 id="what-is-not-a-verifier-level-guarantee"><a class="header" href="#what-is-not-a-verifier-level-guarantee">What is not a verifier-level guarantee</a></h3>
+<p>The verifier does <em>not</em> require a specific exit code. The halt-ecall
+chip binds <code>public_values.exit_code</code> to the value the guest passed
+in register <code>a0</code> at the halt site, so the field is a faithful readout
+of what the guest passed — but the guest program defines its own
+exit-code semantics, and a non-zero value may be a legitimate
+application signal (for example, distinguishing error classes). A
+caller that wants “exited successfully” must compare
+<code>exit_code == 0</code> itself, outside the verifier.</p>
+<h2 id="sections"><a class="header" href="#sections">Sections</a></h2>
+<p>The rest of this chapter details the machinery that supports the
+guarantees above:</p>
+<ul>
+<li><a href="#architecture-overview-1">Architecture Overview</a> — the multi-chip
+structure, and how large traces are segmented
+across shards.</li>
+<li><a href="#prover-workflow">Prover Workflow</a> — how a proof is constructed
+end-to-end.</li>
+<li><a href="#optimizations">Optimizations</a> — performance-sensitive design
+choices.</li>
+<li><a href="#appendix">Appendix</a> — the PIOP constructions: grand-product
+GKR, local rotation, EC-sum Quark.</li>
+</ul>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="architecture-overview-1"><a class="header" href="#architecture-overview-1">Architecture Overview</a></h1>
 <h2 id="1-multi-chip-architecture"><a class="header" href="#1-multi-chip-architecture">1. Multi-chip Architecture</a></h2>
