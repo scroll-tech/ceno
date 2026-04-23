@@ -14,6 +14,12 @@ Each shard exposes the start address and length of its current heap and
 hint segment. The verifier then checks that these segments form one
 continuous sequence over the full trace.
 
+Intuitively, this supports lazy dynamic init: early shards can expose
+zero length for heap/hints, and the segment only extends once those
+addresses are first accessed. Because every next segment must start at
+the previous end, the exposed ranges are append-only and non-overlapping,
+so an address cannot be initialized twice across shards.
+
 <p align="center">
 
 ```text
@@ -29,6 +35,7 @@ heap / hint address space
 Requirements:
 - every start/end stays inside the allowed platform range
 - next shard starts exactly at previous shard end
+- segments are append-only (no overlaps or rewinds)
 - proof table length matches the public length
 ```
 
