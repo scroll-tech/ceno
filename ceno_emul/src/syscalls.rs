@@ -64,19 +64,15 @@ pub fn handle_syscall<T: Tracer>(vm: &VMState<T>, function_code: u32) -> Result<
 /// A syscall event, available to the circuit witness generators.
 /// TODO: separate mem_ops into two stages: reads-and-writes
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SyscallWitness {
     pub mem_ops: Vec<WriteOp>,
     pub reg_ops: Vec<WriteOp>,
-    _marker: (),
 }
 
 impl SyscallWitness {
     fn new(mem_ops: Vec<WriteOp>, reg_ops: Vec<WriteOp>) -> SyscallWitness {
-        SyscallWitness {
-            mem_ops,
-            reg_ops,
-            _marker: (),
-        }
+        SyscallWitness { mem_ops, reg_ops }
     }
 }
 

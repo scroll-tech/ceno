@@ -2,7 +2,7 @@
 mod logic_imm_circuit;
 
 #[cfg(feature = "u16limb_circuit")]
-mod logic_imm_circuit_v2;
+pub(crate) mod logic_imm_circuit_v2;
 
 #[cfg(not(feature = "u16limb_circuit"))]
 pub use crate::instructions::riscv::logic_imm::logic_imm_circuit::LogicInstruction;

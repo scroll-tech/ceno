@@ -1,8 +1,10 @@
 use crate::e2e::ShardContext;
 /// constrain implementation follow from https://github.com/openvm-org/openvm/blob/main/extensions/rv32im/circuit/src/shift/core.rs
 use crate::{
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::{LkOp, LkShardramSink, emit_byte_decomposition_ops, emit_const_range_op},
         riscv::{
             RIVInstruction,
             constants::{UINT_BYTE_LIMBS, UInt8},
@@ -206,6 +208,41 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         })
     }
 
+    pub fn emit_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        kind: InsnKind,
+        b: u32,
+        c: u32,
+    ) {
+        let b: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(b).try_into().unwrap();
+        let c: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(c).try_into().unwrap();
+        let (_, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(kind, &b, &c);
+
+        let bit_shift_carry: [u32; NUM_LIMBS] = array::from_fn(|i| match kind {
+            InsnKind::SLL | InsnKind::SLLI => b[i] >> (LIMB_BITS - bit_shift),
+            _ => b[i] % (1 << bit_shift),
+        });
+        for val in bit_shift_carry {
+            sink.emit_lk(LkOp::DynamicRange {
+                value: val as u64,
+                bits: bit_shift as u32,
+            });
+        }
+
+        let num_bits_log = (NUM_LIMBS * LIMB_BITS).ilog2();
+        let carry_quotient =
+            (((c[0] as usize) - bit_shift - limb_shift * LIMB_BITS) >> num_bits_log) as u64;
+        emit_const_range_op(sink, carry_quotient, LIMB_BITS - num_bits_log as usize);
+
+        if matches!(kind, InsnKind::SRA | InsnKind::SRAI) {
+            sink.emit_lk(LkOp::Xor {
+                a: b[NUM_LIMBS - 1] as u8,
+                b: (1 << (LIMB_BITS - 1)) as u8,
+            });
+        }
+    }
+
     pub fn assign_instances(
         &self,
         instance: &mut [<E as ExtensionField>::BaseField],
@@ -214,13 +251,9 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
         b: u32,
         c: u32,
     ) {
-        let b = split_to_limb::<_, LIMB_BITS>(b);
-        let c = split_to_limb::<_, LIMB_BITS>(c);
-        let (_, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(
-            kind,
-            &b.clone().try_into().unwrap(),
-            &c.clone().try_into().unwrap(),
-        );
+        let b: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(b).try_into().unwrap();
+        let c: [u32; NUM_LIMBS] = split_to_limb::<u32, LIMB_BITS>(c).try_into().unwrap();
+        let (_, limb_shift, bit_shift) = run_shift::<NUM_LIMBS, LIMB_BITS>(kind, &b, &c);
 
         match kind {
             InsnKind::SLL | InsnKind::SLLI => set_val!(
@@ -265,11 +298,11 @@ impl<E: ExtensionField, const NUM_LIMBS: usize, const LIMB_BITS: usize>
 }
 
 pub struct ShiftRTypeConfig<E: ExtensionField> {
-    shift_base_config: ShiftBaseConfig<E, UINT_BYTE_LIMBS, 8>,
-    rs1_read: UInt8<E>,
-    rs2_read: UInt8<E>,
+    pub(crate) shift_base_config: ShiftBaseConfig<E, UINT_BYTE_LIMBS, 8>,
+    pub(crate) rs1_read: UInt8<E>,
+    pub(crate) rs2_read: UInt8<E>,
     pub rd_written: UInt8<E>,
-    r_insn: RInstructionConfig<E>,
+    pub(crate) r_insn: RInstructionConfig<E>,
 }
 
 pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
@@ -277,6 +310,8 @@ pub struct ShiftLogicalInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstruction<E, I> {
     type InstructionConfig = ShiftRTypeConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -363,14 +398,34 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, config, _ctx| {
+        let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
+        emit_byte_decomposition_ops(sink, &rd_written);
+        config.shift_base_config.emit_lk_and_shardram(
+            sink,
+            I::INST_KIND,
+            step.rs1().unwrap().value,
+            step.rs2().unwrap().value,
+        );
+    });
+
+    impl_collect_shardram!(r_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::ShiftR(match I::INST_KIND {
+        InsnKind::SLL => 0u32,
+        InsnKind::SRL => 1u32,
+        InsnKind::SRA => 2u32,
+        _ => unreachable!(),
+    }));
 }
 
 pub struct ShiftImmConfig<E: ExtensionField> {
-    shift_base_config: ShiftBaseConfig<E, UINT_BYTE_LIMBS, 8>,
-    rs1_read: UInt8<E>,
+    pub(crate) shift_base_config: ShiftBaseConfig<E, UINT_BYTE_LIMBS, 8>,
+    pub(crate) rs1_read: UInt8<E>,
     pub rd_written: UInt8<E>,
-    i_insn: IInstructionConfig<E>,
-    imm: WitIn,
+    pub(crate) i_insn: IInstructionConfig<E>,
+    pub(crate) imm: WitIn,
 }
 
 pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
@@ -378,6 +433,8 @@ pub struct ShiftImmInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstruction<E, I> {
     type InstructionConfig = ShiftImmConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -466,6 +523,26 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, config, _ctx| {
+        let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
+        emit_byte_decomposition_ops(sink, &rd_written);
+        config.shift_base_config.emit_lk_and_shardram(
+            sink,
+            I::INST_KIND,
+            step.rs1().unwrap().value,
+            step.insn().imm as i16 as u16 as u32,
+        );
+    });
+
+    impl_collect_shardram!(i_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::ShiftI(match I::INST_KIND {
+        InsnKind::SLLI => 0u32,
+        InsnKind::SRLI => 1u32,
+        InsnKind::SRAI => 2u32,
+        _ => unreachable!(),
+    }));
 }
 
 fn run_shift<const NUM_LIMBS: usize, const LIMB_BITS: usize>(

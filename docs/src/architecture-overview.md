@@ -102,6 +102,13 @@ compose into a single consistent execution:
   $\text{shard}_i.\text{end\_pc} = \text{shard}_{i+1}.\text{init\_pc}$
   (and likewise for other `GlobalState` fields) at every shard
   boundary.
+- **Dynamic heap/hint continuity.** Shards also expose the start
+  address and length of the dynamic heap and hint init regions. The
+  verifier checks that these segments stay within the platform's heap
+  and hint windows and that each shard starts exactly where the
+  previous shard ended, so dynamic init data cannot skip, overlap, or
+  move out of range across shard boundaries. See
+  [Memory Continuation Checks](./memory-continuation-checks.md).
 - **Cross-shard memory consistency.** Memory written in shard $i$
   must remain readable in any later shard $j > i$. The within-shard
   RAM grand product $\prod R = \prod W$ cannot be reused across
@@ -154,4 +161,3 @@ compose into a single consistent execution:
   $\sum_{\text{shard}} \Sigma_{\text{shard}} = \mathcal{O}$
   (the point at infinity) directly. The number of shards is at most
   in the hundreds, so this is a few hundred EC additions.
-

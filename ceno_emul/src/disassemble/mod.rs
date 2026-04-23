@@ -1,4 +1,7 @@
-use crate::rv32im::{InsnKind, Instruction};
+use crate::{
+    addr::RegIdx,
+    rv32im::{InsnKind, Instruction},
+};
 use itertools::izip;
 use rrs_lib::{
     InstructionProcessor,
@@ -19,9 +22,9 @@ impl Instruction {
     pub const fn from_r_type(kind: InsnKind, dec_insn: &RType, raw: u32) -> Self {
         Self {
             kind,
-            rd: dec_insn.rd,
-            rs1: dec_insn.rs1,
-            rs2: dec_insn.rs2,
+            rd: dec_insn.rd as RegIdx,
+            rs1: dec_insn.rs1 as RegIdx,
+            rs2: dec_insn.rs2 as RegIdx,
             imm: 0,
             raw,
         }
@@ -32,8 +35,8 @@ impl Instruction {
     pub const fn from_i_type(kind: InsnKind, dec_insn: &IType, raw: u32) -> Self {
         Self {
             kind,
-            rd: dec_insn.rd,
-            rs1: dec_insn.rs1,
+            rd: dec_insn.rd as RegIdx,
+            rs1: dec_insn.rs1 as RegIdx,
             imm: dec_insn.imm,
             rs2: 0,
             raw,
@@ -45,8 +48,8 @@ impl Instruction {
     pub const fn from_i_type_shamt(kind: InsnKind, dec_insn: &ITypeShamt, raw: u32) -> Self {
         Self {
             kind,
-            rd: dec_insn.rd,
-            rs1: dec_insn.rs1,
+            rd: dec_insn.rd as RegIdx,
+            rs1: dec_insn.rs1 as RegIdx,
             imm: dec_insn.shamt as i32,
             rs2: 0,
             raw,
@@ -59,8 +62,8 @@ impl Instruction {
         Self {
             kind,
             rd: 0,
-            rs1: dec_insn.rs1,
-            rs2: dec_insn.rs2,
+            rs1: dec_insn.rs1 as RegIdx,
+            rs2: dec_insn.rs2 as RegIdx,
             imm: dec_insn.imm,
             raw,
         }
@@ -72,8 +75,8 @@ impl Instruction {
         Self {
             kind,
             rd: 0,
-            rs1: dec_insn.rs1,
-            rs2: dec_insn.rs2,
+            rs1: dec_insn.rs1 as RegIdx,
+            rs2: dec_insn.rs2 as RegIdx,
             imm: dec_insn.imm,
             raw,
         }
@@ -231,7 +234,7 @@ impl InstructionProcessor for InstructionTranspiler {
     fn process_jal(&mut self, dec_insn: JType) -> Self::InstructionResult {
         Instruction {
             kind: InsnKind::JAL,
-            rd: dec_insn.rd,
+            rd: dec_insn.rd as RegIdx,
             rs1: 0,
             rs2: 0,
             imm: dec_insn.imm,
@@ -242,8 +245,8 @@ impl InstructionProcessor for InstructionTranspiler {
     fn process_jalr(&mut self, dec_insn: IType) -> Self::InstructionResult {
         Instruction {
             kind: InsnKind::JALR,
-            rd: dec_insn.rd,
-            rs1: dec_insn.rs1,
+            rd: dec_insn.rd as RegIdx,
+            rs1: dec_insn.rs1 as RegIdx,
             rs2: 0,
             imm: dec_insn.imm,
             raw: self.word,
@@ -265,7 +268,7 @@ impl InstructionProcessor for InstructionTranspiler {
             // See [`InstructionTranspiler::process_auipc`] for more background on the conversion.
             Instruction {
                 kind: InsnKind::ADDI,
-                rd: dec_insn.rd,
+                rd: dec_insn.rd as RegIdx,
                 rs1: 0,
                 rs2: 0,
                 imm: dec_insn.imm,
@@ -276,7 +279,7 @@ impl InstructionProcessor for InstructionTranspiler {
         {
             Instruction {
                 kind: InsnKind::LUI,
-                rd: dec_insn.rd,
+                rd: dec_insn.rd as RegIdx,
                 rs1: 0,
                 rs2: 0,
                 imm: dec_insn.imm,
@@ -311,7 +314,7 @@ impl InstructionProcessor for InstructionTranspiler {
             // real world scenarios like a `reth` run.
             Instruction {
                 kind: InsnKind::ADDI,
-                rd: dec_insn.rd,
+                rd: dec_insn.rd as RegIdx,
                 rs1: 0,
                 rs2: 0,
                 imm: dec_insn.imm.wrapping_add(pc as i32),
@@ -322,7 +325,7 @@ impl InstructionProcessor for InstructionTranspiler {
         {
             Instruction {
                 kind: InsnKind::AUIPC,
-                rd: dec_insn.rd,
+                rd: dec_insn.rd as RegIdx,
                 rs1: 0,
                 rs2: 0,
                 imm: dec_insn.imm,

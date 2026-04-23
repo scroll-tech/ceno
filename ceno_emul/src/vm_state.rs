@@ -162,7 +162,7 @@ impl<T: Tracer> VMState<T> {
     }
 
     pub fn init_register_unsafe(&mut self, idx: RegIdx, value: Word) {
-        self.registers[idx] = value;
+        self.registers[idx as usize] = value;
     }
 
     fn halt(&mut self, exit_code: u32) {
@@ -178,7 +178,7 @@ impl<T: Tracer> VMState<T> {
         }
 
         for (idx, value) in effects.iter_reg_values() {
-            self.registers[idx] = value;
+            self.registers[idx as usize] = value;
         }
 
         let next_pc = effects.next_pc.unwrap_or(self.pc + PC_STEP_SIZE as u32);
@@ -259,7 +259,7 @@ impl<T: Tracer> EmuContext for VMState<T> {
         if idx != 0 {
             let before = self.peek_register(idx);
             self.tracer.store_register(idx, Change { before, after });
-            self.registers[idx] = after;
+            self.registers[idx as usize] = after;
         }
         Ok(())
     }
@@ -283,7 +283,7 @@ impl<T: Tracer> EmuContext for VMState<T> {
 
     /// Get the value of a register without side-effects.
     fn peek_register(&self, idx: RegIdx) -> Word {
-        self.registers[idx]
+        self.registers[idx as usize]
     }
 
     /// Get the value of a memory word without side-effects.

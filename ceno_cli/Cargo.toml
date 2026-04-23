@@ -43,7 +43,7 @@ openvm-stark-sdk.workspace = true
 
 ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
-mpcs.workspace = true
+mpcs = { workspace = true, features = ["whir"] }
 
 [build-dependencies]
 vergen-git2 = { version = "9.1.0", features = ["build", "cargo", "rustc", "emit_and_set"] }

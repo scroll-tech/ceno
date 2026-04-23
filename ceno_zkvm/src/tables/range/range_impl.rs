@@ -3,7 +3,7 @@
 use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::{error::CircuitBuilderError, tables::LookupTable};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use witness::{InstancePaddingStrategy, RowMajorMatrix, set_val};
 
 use crate::{
@@ -56,7 +56,7 @@ impl DynamicRangeTableConfig {
         &self,
         num_witin: usize,
         num_structural_witin: usize,
-        multiplicity: &HashMap<u64, usize>,
+        multiplicity: &FxHashMap<u64, usize>,
         max_bits: usize,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         let length = 1 << (max_bits + 1);
@@ -158,7 +158,7 @@ impl DoubleRangeTableConfig {
         &self,
         num_witin: usize,
         num_structural_witin: usize,
-        multiplicity: &HashMap<u64, usize>,
+        multiplicity: &FxHashMap<u64, usize>,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         let length = 1 << (self.range_a_bits + self.range_b_bits);
         let mut witness: RowMajorMatrix<F> =
