@@ -44,13 +44,13 @@ use crate::{
 #[derive(Debug)]
 pub struct EcallKeccakConfig<E: ExtensionField> {
     pub layout: KeccakLayout<E>,
-    vm_state: StateInOut<E>,
-    ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    mem_rw: Vec<WriteMEM>,
+    pub(crate) vm_state: StateInOut<E>,
+    pub(crate) ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
+    pub(crate) state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    pub(crate) mem_rw: Vec<WriteMEM>,
 }
 
-/// KeccakInstruction can handle any instruction and produce its side-effects.
+/// KeccakInstruction can handle any instruction and produce its lk and shardram data.
 pub struct KeccakInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
@@ -175,6 +175,21 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         steps: &[StepRecord],
         step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        #[cfg(feature = "gpu")]
+        {
+            use crate::instructions::gpu::chips::keccak::gpu_assign_keccak_instances;
+            if let Some(result) = gpu_assign_keccak_instances::<E>(
+                config,
+                shard_ctx,
+                num_witin,
+                num_structural_witin,
+                steps,
+                step_indices,
+            )? {
+                return Ok(result);
+            }
+        }
+
         let mut lk_multiplicity = LkMultiplicity::default();
         if step_indices.is_empty() {
             return Ok((
@@ -218,7 +233,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                     .zip_eq(indices.iter().copied())
                     .map(|(instance_with_rotation, idx)| {
                         let step = &steps[idx];
-                        let ops = &step.syscall().expect("syscall step");
+                        let sw = shard_ctx.syscall_witnesses.clone();
+                        let ops = &step.syscall(&sw).expect("syscall step");
 
                         let bh = BooleanHypercube::new(KECCAK_ROUNDS_CEIL_LOG2);
                         let mut cyclic_group = bh.into_iter();
@@ -282,7 +298,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .map(|&idx| -> KeccakInstance {
                 let step = &steps[idx];
                 let (instance, prev_ts): (Vec<u32>, Vec<Cycle>) = step
-                    .syscall()
+                    .syscall(&shard_ctx.syscall_witnesses)
                     .unwrap()
                     .mem_ops
                     .iter()
@@ -313,5 +329,26 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             [raw_witin, raw_structural_witin],
             lk_multiplicity.into_finalize_result(),
         ))
+    }
+
+    #[cfg(feature = "gpu")]
+    fn build_gpu_replay_plan(
+        config: &Self::InstructionConfig,
+        shard_ctx: &ShardContext,
+        num_witin: usize,
+        num_structural_witin: usize,
+        shard_steps: &[StepRecord],
+        step_indices: &[StepIndex],
+    ) -> Option<crate::structs::GpuReplayPlan<E>> {
+        Some(
+            crate::instructions::gpu::chips::keccak::build_keccak_replay_plan(
+                config,
+                shard_ctx,
+                num_witin,
+                num_structural_witin,
+                shard_steps,
+                step_indices,
+            ),
+        )
     }
 }

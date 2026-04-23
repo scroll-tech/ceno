@@ -3,8 +3,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::{emit_const_range_op, emit_u16_limbs},
         riscv::{
             RIVInstruction,
             constants::{MEM_BITS, UInt},
@@ -24,16 +26,16 @@ use p3::field::{Field, FieldAlgebra};
 use std::marker::PhantomData;
 
 pub struct StoreConfig<E: ExtensionField, const N_ZEROS: usize> {
-    s_insn: SInstructionConfig<E>,
+    pub(crate) s_insn: SInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
-    imm: WitIn,
-    imm_sign: WitIn,
-    prev_memory_value: UInt<E>,
+    pub(crate) rs1_read: UInt<E>,
+    pub(crate) rs2_read: UInt<E>,
+    pub(crate) imm: WitIn,
+    pub(crate) imm_sign: WitIn,
+    pub(crate) prev_memory_value: UInt<E>,
 
-    memory_addr: MemAddr<E>,
-    next_memory_value: Option<MemWordUtil<E, N_ZEROS>>,
+    pub(crate) memory_addr: MemAddr<E>,
+    pub(crate) next_memory_value: Option<MemWordUtil<E, N_ZEROS>>,
 }
 
 pub struct StoreInstruction<E, I, const N_ZEROS: usize>(PhantomData<(E, I)>);
@@ -43,6 +45,8 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
 {
     type InstructionConfig = StoreConfig<E, N_ZEROS>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -171,4 +175,36 @@ impl<E: ExtensionField, I: RIVInstruction, const N_ZEROS: usize> Instruction<E>
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(s_insn, |sink, step, config, _ctx| {
+        emit_u16_limbs(sink, step.memory_op().unwrap().value.before);
+
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn());
+        let addr = ByteAddr::from(step.rs1().unwrap().value.wrapping_add_signed(imm.0 as i32));
+        config.memory_addr.emit_lk_and_shardram(sink, addr.into());
+
+        if N_ZEROS == 0 {
+            let memory_op = step.memory_op().unwrap();
+            let prev_value = Value::new_unchecked(memory_op.value.before);
+            let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
+            let prev_limb = prev_value.as_u16_limbs()[((addr.shift() >> 1) & 1) as usize];
+            let rs2_limb = rs2_value.as_u16_limbs()[0];
+
+            for byte in prev_limb.to_le_bytes() {
+                emit_const_range_op(sink, byte as u64, 8);
+            }
+            for byte in rs2_limb.to_le_bytes() {
+                emit_const_range_op(sink, byte as u64, 8);
+            }
+        }
+    });
+
+    impl_collect_shardram!(s_insn);
+
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::SW => Some(dispatch::GpuWitgenKind::Sw),
+        InsnKind::SH => Some(dispatch::GpuWitgenKind::Sh),
+        InsnKind::SB => Some(dispatch::GpuWitgenKind::Sb),
+        _ => None,
+    });
 }
