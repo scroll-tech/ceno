@@ -46,10 +46,10 @@
             const path_to_root = "";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
-            window.path_to_searchindex_js = "searchindex-3b7a2681.js";
+            window.path_to_searchindex_js = "searchindex-7fd1c292.js";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc-84d6e1fa.js"></script>
+        <script src="toc-01723f21.js"></script>
     </head>
     <body>
     <div id="mdbook-help-container">
@@ -1323,6 +1323,15 @@ $\text{shard}<em>i.\text{end_pc} = \text{shard}</em>{i+1}.\text{init_pc}$
 boundary.</p>
 </li>
 <li>
+<p><strong>Dynamic heap/hint continuity.</strong> Shards also expose the start
+address and length of the dynamic heap and hint init regions. The
+verifier checks that these segments stay within the platform’s heap
+and hint windows and that each shard starts exactly where the
+previous shard ended, so dynamic init data cannot skip, overlap, or
+move out of range across shard boundaries. See
+<a href="#memory-continuation-checks">Memory Continuation Checks</a>.</p>
+</li>
+<li>
 <p><strong>Cross-shard memory consistency.</strong> Memory written in shard $i$
 must remain readable in any later shard $j &gt; i$. The within-shard
 RAM grand product $\prod R = \prod W$ cannot be reused across
@@ -1374,6 +1383,91 @@ $\sum_{\text{shard}} \Sigma_{\text{shard}} = \mathcal{O}$
 in the hundreds, so this is a few hundred EC additions.</p>
 </li>
 </ul>
+<div style="break-before: page; page-break-before: always;"></div>
+<h1 id="memory-continuation-checks"><a class="header" href="#memory-continuation-checks">Memory Continuation Checks</a></h1>
+<p>When execution is split into multiple shards, Ceno must check not only
+that control flow continues correctly, but also that the dynamic memory
+regions exposed through public values remain consistent across shard
+boundaries.</p>
+<p>The two dynamic regions are:</p>
+<ul>
+<li><strong>Heap</strong></li>
+<li><strong>Hints</strong></li>
+</ul>
+<p>Each shard exposes the start address and length of its current heap and
+hint segment. The verifier then checks that these segments form one
+continuous sequence over the full trace.</p>
+<p>Intuitively, this supports lazy dynamic init: early shards can expose
+zero length for heap/hints, and the segment only extends once those
+addresses are first accessed. Because every next segment must start at
+the previous end, the exposed ranges are append-only and non-overlapping,
+so an address cannot be initialized twice across shards.</p>
+<p align="center">
+<pre><code class="language-text">heap / hint address space
+
+ shard 0             shard 1             shard 2
+┌──────────────┐    ┌──────────────┐    ┌──────────────┐
+│ start = s0   │    │ start = e0   │    │ start = e1   │
+│ len   = l0   │    │ len   = l1   │    │ len   = l2   │
+│ end   = e0   │───▶│ end   = e1   │───▶│ end   = e2   │
+└──────────────┘    └──────────────┘    └──────────────┘
+
+Requirements:
+- every start/end stays inside the allowed platform range
+- next shard starts exactly at previous shard end
+- segments are append-only (no overlaps or rewinds)
+- proof table length matches the public length
+</code></pre>
+</p>
+
+<h2 id="what-is-being-checked"><a class="header" href="#what-is-being-checked">What Is Being Checked</a></h2>
+<p>For both heap and hints, full-trace verification enforces:</p>
+<ul>
+<li><strong>Range correctness</strong>: each shard’s start and end must stay inside the
+configured memory window</li>
+<li><strong>Continuation</strong>: shard <code>i + 1</code> must start exactly where shard <code>i</code>
+ended</li>
+<li><strong>Length consistency</strong>: the dynamic init table proved inside the shard
+must have the same length as the public value</li>
+</ul>
+<p>These checks rule out three classes of errors:</p>
+<ul>
+<li>a shard claiming memory outside the allowed heap or hint range</li>
+<li>a gap or overlap between consecutive shards</li>
+<li>a mismatch between the public memory length and the table actually
+proved</li>
+</ul>
+<h2 id="how-this-fits-with-the-other-memory-checks"><a class="header" href="#how-this-fits-with-the-other-memory-checks">How This Fits with the Other Memory Checks</a></h2>
+<p>These continuation checks are different from the cross-shard RAM
+consistency check.</p>
+<ul>
+<li><strong>RAM consistency</strong> checks that reads and writes across shards compose
+to one valid memory history</li>
+<li><strong>Memory continuation</strong> checks that the dynamic heap and hint segments
+themselves are chained correctly from shard to shard</li>
+</ul>
+<p>Both are needed:</p>
+<ul>
+<li>RAM consistency protects the memory contents</li>
+<li>continuation checks protect the public memory layout</li>
+</ul>
+<h2 id="full-trace-vs-single-shard-verification"><a class="header" href="#full-trace-vs-single-shard-verification">Full-Trace vs Single-Shard Verification</a></h2>
+<p>Continuation is a <strong>full-trace</strong> property.</p>
+<ul>
+<li>In full-trace verification, heap and hint segments are chained across
+all shards</li>
+<li>In single-shard debug verification, Ceno only checks that the selected
+shard is internally valid; it does not claim that the shard forms a
+complete continuation of the whole execution</li>
+</ul>
+<h2 id="where-this-lives-in-the-system"><a class="header" href="#where-this-lives-in-the-system">Where This Lives in the System</a></h2>
+<ul>
+<li>the platform defines the allowed heap and hint ranges</li>
+<li>the native verifier checks shard-by-shard continuation</li>
+<li>the recursion verifier enforces the same bounds in aggregation</li>
+</ul>
+<p>This keeps the memory-state invariant aligned across both native and
+recursive verification.</p>
 <div style="break-before: page; page-break-before: always;"></div>
 <h1 id="prover-workflow"><a class="header" href="#prover-workflow">Prover Workflow</a></h1>
 <div style="break-before: page; page-break-before: always;"></div>
