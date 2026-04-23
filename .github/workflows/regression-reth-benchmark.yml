@@ -27,7 +27,7 @@ jobs:
             ceno_version: ${{ github.event.pull_request.head.sha }}
             source_repository: ${{ github.repository }}
             source_pr_number: ${{ github.event.pull_request.number }}
-            block_number: 23100006
+            block_number: 23817600
             rerun_keygen: false
             recompile_reth: false
             cleanup: true
