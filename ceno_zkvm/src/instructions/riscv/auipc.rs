@@ -6,8 +6,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::{LkOp, LkShardramSink, emit_byte_decomposition_ops, emit_const_range_op},
         riscv::{
             constants::{PC_BITS, UINT_BYTE_LIMBS, UInt8},
             i_insn::IInstructionConfig,
@@ -38,6 +40,8 @@ pub struct AuipcInstruction<E>(PhantomData<E>);
 impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
     type InstructionConfig = AuipcConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[InsnKind::AUIPC]
@@ -185,6 +189,38 @@ impl<E: ExtensionField> Instruction<E> for AuipcInstruction<E> {
 
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, config, _ctx| {
+        let rd_written = split_to_u8(step.rd().unwrap().value.after);
+        emit_byte_decomposition_ops(sink, &rd_written);
+
+        let pc = split_to_u8(step.pc().before.0);
+        // Only iterate over the middle limbs that have witness columns (pc_limbs has UINT_BYTE_LIMBS-2 elements).
+        // The MSB limb is range-checked via XOR below, the LSB is shared with rd_written[0].
+        for val in pc.iter().skip(1).take(config.pc_limbs.len()) {
+            emit_const_range_op(sink, *val as u64, 8);
+        }
+
+        let imm = InsnRecord::<E::BaseField>::imm_internal(&step.insn()).0 as u32;
+        for val in split_to_u8::<u8>(imm)
+            .into_iter()
+            .take(config.imm_limbs.len())
+        {
+            emit_const_range_op(sink, val as u64, 8);
+        }
+
+        let last_limb_bits = PC_BITS - UInt8::<E>::LIMB_BITS * (UINT_BYTE_LIMBS - 1);
+        let additional_bits =
+            (last_limb_bits..UInt8::<E>::LIMB_BITS).fold(0, |acc, x| acc + (1 << x));
+        sink.emit_lk(LkOp::Xor {
+            a: pc[3],
+            b: additional_bits as u8,
+        });
+    });
+
+    impl_collect_shardram!(i_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Auipc);
 }
 
 #[cfg(test)]

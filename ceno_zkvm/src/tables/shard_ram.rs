@@ -1,4 +1,5 @@
-use std::{collections::HashMap, iter::repeat_n, marker::PhantomData};
+use rustc_hash::FxHashMap;
+use std::{iter::repeat_n, marker::PhantomData};
 
 use crate::{
     Value,
@@ -165,21 +166,21 @@ impl ShardRamRecord {
 /// 3. For a local memory write record which will be read in the future,
 ///    the shard ram circuit will insert a local read record and write it to the **global set**.
 pub struct ShardRamConfig<E: ExtensionField> {
-    addr: WitIn,
-    is_ram_register: WitIn,
-    value: UInt<E>,
-    shard: WitIn,
-    global_clk: WitIn,
-    local_clk: WitIn,
-    nonce: WitIn,
+    pub(crate) addr: WitIn,
+    pub(crate) is_ram_register: WitIn,
+    pub(crate) value: UInt<E>,
+    pub(crate) shard: WitIn,
+    pub(crate) global_clk: WitIn,
+    pub(crate) local_clk: WitIn,
+    pub(crate) nonce: WitIn,
     // if it's write to global set, then insert a local read record
     // s.t. local offline memory checking can cancel out
     // serves as propagating local write to global.
-    is_global_write: WitIn,
-    x: Vec<WitIn>,
-    y: Vec<WitIn>,
-    slope: Vec<WitIn>,
-    perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
+    pub(crate) is_global_write: WitIn,
+    pub(crate) x: Vec<WitIn>,
+    pub(crate) y: Vec<WitIn>,
+    pub(crate) slope: Vec<WitIn>,
+    pub(crate) perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
 }
 
 impl<E: ExtensionField> ShardRamConfig<E> {
@@ -418,6 +419,11 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         let selector_r = cb.create_placeholder_structural_witin(|| "selector_r");
         let selector_w = cb.create_placeholder_structural_witin(|| "selector_w");
         let selector_zero = cb.create_placeholder_structural_witin(|| "selector_zero");
+        let selector_ecc_x = cb.create_placeholder_structural_witin(|| "selector_ecc_x");
+        let selector_ecc_y = cb.create_placeholder_structural_witin(|| "selector_ecc_y");
+        let selector_ecc_s = cb.create_placeholder_structural_witin(|| "selector_ecc_s");
+        let selector_ecc_x3 = cb.create_placeholder_structural_witin(|| "selector_ecc_x3");
+        let selector_ecc_y3 = cb.create_placeholder_structural_witin(|| "selector_ecc_y3");
 
         let config = Self::construct_circuit(cb, param)?;
 
@@ -439,6 +445,13 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         cb.cs.w_selector = Some(selector_w);
         cb.cs.zero_selector = Some(selector_zero.clone());
         cb.cs.lk_selector = Some(selector_zero);
+        cb.cs.ec_bridge_selectors = Some([
+            SelectorType::Whole(selector_ecc_x.expr()),
+            SelectorType::Whole(selector_ecc_y.expr()),
+            SelectorType::Whole(selector_ecc_s.expr()),
+            SelectorType::Whole(selector_ecc_x3.expr()),
+            SelectorType::Whole(selector_ecc_y3.expr()),
+        ]);
 
         // all shared the same selector
         let (out_evals, mut chip) = (
@@ -474,7 +487,7 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
+        _multiplicity: &[FxHashMap<u64, usize>],
         steps: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         if steps.is_empty() {
@@ -483,14 +496,33 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
                 witness::RowMajorMatrix::empty(),
             ]);
         }
+
+        #[cfg(feature = "gpu")]
+        {
+            if let Some(result) =
+                Self::try_gpu_assign_instances(config, num_witin, num_structural_witin, steps)?
+            {
+                return Ok(result);
+            }
+        }
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
 
-        assert_eq!(num_structural_witin, 3);
+        // ShardRam expects exactly these structural selectors:
+        // r, w, zero, ecc_x, ecc_y, ecc_s, ecc_x3, ecc_y3.
+        assert_eq!(
+            num_structural_witin, 8,
+            "ShardRam requires exactly 8 structural selectors (r,w,zero,ecc_x,ecc_y,ecc_s,ecc_x3,ecc_y3)"
+        );
         let selector_r_witin = WitIn { id: 0 };
         let selector_w_witin = WitIn { id: 1 };
         let selector_zero_witin = WitIn { id: 2 };
+        let selector_ecc_x_witin = WitIn { id: 3 };
+        let selector_ecc_y_witin = WitIn { id: 4 };
+        let selector_ecc_s_witin = WitIn { id: 5 };
+        let selector_ecc_x3_witin = WitIn { id: 6 };
+        let selector_ecc_y3_witin = WitIn { id: 7 };
 
         let nthreads = max_usable_threads();
 
@@ -539,6 +571,17 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
             );
             RowMajorMatrix::new(value, num_structural_witin)
         };
+        // ECC bridge selectors are `Whole`, so keep them active on all rows.
+        raw_structual_witin
+            .values
+            .par_chunks_mut(num_structural_witin)
+            .for_each(|row| {
+                set_val!(row, selector_ecc_x_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_y_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_s_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_x3_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_y3_witin, E::BaseField::ONE);
+            });
         let raw_witin_iter = raw_witin.values[0..steps.len() * num_witin]
             .par_chunks_mut(num_instance_per_batch * num_witin);
         let raw_structual_witin_iter = raw_structual_witin.values
@@ -640,6 +683,42 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
             InstancePaddingStrategy::Default,
         );
         Ok([raw_witin, raw_structual_witin])
+    }
+}
+
+#[cfg(feature = "gpu")]
+impl<E: ExtensionField> ShardRamCircuit<E> {
+    fn try_gpu_assign_instances(
+        config: &ShardRamConfig<E>,
+        num_witin: usize,
+        num_structural_witin: usize,
+        steps: &[ShardRamInput<E>],
+    ) -> Result<Option<RMMCollections<E::BaseField>>, ZKVMError> {
+        crate::instructions::gpu::chips::shard_ram::try_gpu_assign_shard_ram(
+            config,
+            num_witin,
+            num_structural_witin,
+            steps,
+        )
+    }
+
+    #[cfg(feature = "gpu")]
+    pub fn try_gpu_assign_instances_from_device(
+        config: &ShardRamConfig<E>,
+        num_witin: usize,
+        num_structural_witin: usize,
+        device_records: &ceno_gpu::common::buffer::BufferImpl<'static, u32>,
+        num_records: usize,
+        num_local_writes: usize,
+    ) -> Result<Option<RMMCollections<E::BaseField>>, ZKVMError> {
+        crate::instructions::gpu::chips::shard_ram::try_gpu_assign_shard_ram_from_device(
+            config,
+            num_witin,
+            num_structural_witin,
+            device_records,
+            num_records,
+            num_local_writes,
+        )
     }
 }
 
@@ -847,9 +926,12 @@ mod tests {
             pk: &pk,
             input: proof_input,
             estimated_memory_bytes: 0,
+            booked_memory_bytes: 0,
             has_witness_or_fixed: true,
             challenges,
             witness_trace_idx: None,
+            #[cfg(feature = "gpu")]
+            gpu_replay_plan: None,
             num_witin: 0,
             structural_rmm: None,
         };
