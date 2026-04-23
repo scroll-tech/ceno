@@ -77,6 +77,18 @@ Before declaring a change done: at minimum run `cargo make clippy` and
 the tests for the crate you touched. For anything in prover/verifier
 code paths, also run `cargo make tests` end-to-end.
 
+## Verifier semantic contract
+
+A valid Ceno proof attests that **execution starts at the verifying
+key's entry PC** and (when the caller expects a halt) **the terminal
+shard invokes the halt ecall**. Exit code is *not* required to be
+zero — `public_values.exit_code` is bound to register `a0` at the
+halt site but the guest defines its own exit-code semantics; callers
+that want success check `exit_code == 0` themselves. Relaxing the
+entry-PC or halt-presence statement is a blocker. Prefix proofs
+(`expect-halt = false`) are a dev/bench affordance, not a production
+surface. See `docs/src/technical-overview.md` for the long form.
+
 ## What to prioritize when editing
 
 Verifier code — including the recursive verifier in `ceno_recursion/`

@@ -4,8 +4,10 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_uint_limbs_lt_ops,
         riscv::{
             RIVInstruction,
             constants::{UINT_LIMBS, UInt},
@@ -25,16 +27,16 @@ use witness::set_val;
 
 #[derive(Debug)]
 pub struct SetLessThanImmConfig<E: ExtensionField> {
-    i_insn: IInstructionConfig<E>,
+    pub(crate) i_insn: IInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    imm: WitIn,
+    pub(crate) rs1_read: UInt<E>,
+    pub(crate) imm: WitIn,
     // 0 positive, 1 negative
-    imm_sign: WitIn,
+    pub(crate) imm_sign: WitIn,
     #[allow(dead_code)]
     pub(crate) rd_written: UInt<E>,
 
-    uint_lt_config: UIntLimbsLTConfig<E>,
+    pub(crate) uint_lt_config: UIntLimbsLTConfig<E>,
 }
 
 pub struct SetLessThanImmInstruction<E, I>(PhantomData<(E, I)>);
@@ -42,6 +44,8 @@ pub struct SetLessThanImmInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInstruction<E, I> {
     type InstructionConfig = SetLessThanImmConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -133,4 +137,24 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanImmInst
         )?;
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(i_insn, |sink, step, _config, _ctx| {
+        let rs1_value = Value::new_unchecked(step.rs1().unwrap().value);
+        let rs1_limbs = rs1_value.as_u16_limbs();
+        let imm_sign_extend = imm_sign_extend(true, step.insn().imm as i16);
+        emit_uint_limbs_lt_ops(
+            sink,
+            matches!(I::INST_KIND, InsnKind::SLTI),
+            rs1_limbs,
+            &imm_sign_extend,
+        );
+    });
+
+    impl_collect_shardram!(i_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Slti(match I::INST_KIND {
+        InsnKind::SLTI => 1u32,
+        InsnKind::SLTIU => 0u32,
+        _ => unreachable!(),
+    }));
 }

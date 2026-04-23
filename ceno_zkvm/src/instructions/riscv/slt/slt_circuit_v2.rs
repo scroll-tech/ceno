@@ -4,8 +4,10 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_uint_limbs_lt_ops,
         riscv::{RIVInstruction, constants::UInt, r_insn::RInstructionConfig},
     },
     structs::ProgramParams,
@@ -19,18 +21,20 @@ pub struct SetLessThanInstruction<E, I>(PhantomData<(E, I)>);
 
 /// This config handles R-Instructions that represent registers values as 2 * u16.
 pub struct SetLessThanConfig<E: ExtensionField> {
-    r_insn: RInstructionConfig<E>,
+    pub(crate) r_insn: RInstructionConfig<E>,
 
-    rs1_read: UInt<E>,
-    rs2_read: UInt<E>,
+    pub(crate) rs1_read: UInt<E>,
+    pub(crate) rs2_read: UInt<E>,
     #[allow(dead_code)]
     pub(crate) rd_written: UInt<E>,
 
-    uint_lt_config: UIntLimbsLTConfig<E>,
+    pub(crate) uint_lt_config: UIntLimbsLTConfig<E>,
 }
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruction<E, I> {
     type InstructionConfig = SetLessThanConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -113,4 +117,25 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for SetLessThanInstruc
         )?;
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
+        let rs1_value = Value::new_unchecked(step.rs1().unwrap().value);
+        let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
+        let rs1_limbs = rs1_value.as_u16_limbs();
+        let rs2_limbs = rs2_value.as_u16_limbs();
+        emit_uint_limbs_lt_ops(
+            sink,
+            matches!(I::INST_KIND, InsnKind::SLT),
+            rs1_limbs,
+            rs2_limbs,
+        );
+    });
+
+    impl_collect_shardram!(r_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::Slt(match I::INST_KIND {
+        InsnKind::SLT => 1u32,
+        InsnKind::SLTU => 0u32,
+        _ => unreachable!(),
+    }));
 }

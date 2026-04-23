@@ -13,6 +13,7 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::AssertLtConfig,
+    instructions::gpu::utils::{LkOp, LkShardramSink, SendEvent, emit_assert_lt_ops},
     structs::RAMType,
     uint::Value,
     witness::{LkMultiplicity, set_val},
@@ -141,6 +142,47 @@ impl<E: ExtensionField> ReadRS1<E> {
 
         Ok(())
     }
+
+    pub fn emit_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        let op = step.rs1().expect("rs1 op");
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let shard_cycle = step.cycle() - shard_ctx.current_shard_offset_cycle();
+        emit_assert_lt_ops(
+            sink,
+            &self.lt_cfg,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_RS1,
+        );
+        sink.emit_send(SendEvent {
+            ram_type: RAMType::Register,
+            addr: op.addr,
+            id: op.register_index() as u64,
+            cycle: step.cycle() + Tracer::SUBCYCLE_RS1,
+            prev_cycle: op.previous_cycle,
+            value: op.value,
+            prev_value: None,
+        });
+        sink.touch_addr(op.addr);
+    }
+
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+        let op = step.rs1().expect("rs1 op");
+        shard_ctx.record_send_without_touch(
+            RAMType::Register,
+            op.addr,
+            op.register_index() as u64,
+            step.cycle() + Tracer::SUBCYCLE_RS1,
+            op.previous_cycle,
+            op.value,
+            None,
+        );
+        shard_ctx.push_addr_accessed(op.addr);
+    }
 }
 
 #[derive(Debug)]
@@ -208,6 +250,47 @@ impl<E: ExtensionField> ReadRS2<E> {
         );
 
         Ok(())
+    }
+
+    pub fn emit_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        let op = step.rs2().expect("rs2 op");
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let shard_cycle = step.cycle() - shard_ctx.current_shard_offset_cycle();
+        emit_assert_lt_ops(
+            sink,
+            &self.lt_cfg,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_RS2,
+        );
+        sink.emit_send(SendEvent {
+            ram_type: RAMType::Register,
+            addr: op.addr,
+            id: op.register_index() as u64,
+            cycle: step.cycle() + Tracer::SUBCYCLE_RS2,
+            prev_cycle: op.previous_cycle,
+            value: op.value,
+            prev_value: None,
+        });
+        sink.touch_addr(op.addr);
+    }
+
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+        let op = step.rs2().expect("rs2 op");
+        shard_ctx.record_send_without_touch(
+            RAMType::Register,
+            op.addr,
+            op.register_index() as u64,
+            step.cycle() + Tracer::SUBCYCLE_RS2,
+            op.previous_cycle,
+            op.value,
+            None,
+        );
+        shard_ctx.push_addr_accessed(op.addr);
     }
 }
 
@@ -295,6 +378,61 @@ impl<E: ExtensionField> WriteRD<E> {
 
         Ok(())
     }
+
+    pub fn emit_op_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        shard_ctx: &ShardContext,
+        cycle: Cycle,
+        op: &WriteOp,
+    ) {
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let shard_cycle = cycle - shard_ctx.current_shard_offset_cycle();
+        emit_assert_lt_ops(
+            sink,
+            &self.lt_cfg,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_RD,
+        );
+        sink.emit_send(SendEvent {
+            ram_type: RAMType::Register,
+            addr: op.addr,
+            id: op.register_index() as u64,
+            cycle: cycle + Tracer::SUBCYCLE_RD,
+            prev_cycle: op.previous_cycle,
+            value: op.value.after,
+            prev_value: Some(op.value.before),
+        });
+        sink.touch_addr(op.addr);
+    }
+
+    pub fn emit_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        let op = step.rd().expect("rd op");
+        self.emit_op_lk_and_shardram(sink, shard_ctx, step.cycle(), &op)
+    }
+
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+        let op = step.rd().expect("rd op");
+        self.emit_op_shardram(shard_ctx, step.cycle(), &op)
+    }
+
+    pub fn emit_op_shardram(&self, shard_ctx: &mut ShardContext, cycle: Cycle, op: &WriteOp) {
+        shard_ctx.record_send_without_touch(
+            RAMType::Register,
+            op.addr,
+            op.register_index() as u64,
+            cycle + Tracer::SUBCYCLE_RD,
+            op.previous_cycle,
+            op.value.after,
+            Some(op.value.before),
+        );
+        shard_ctx.push_addr_accessed(op.addr);
+    }
 }
 
 #[derive(Debug)]
@@ -372,6 +510,47 @@ impl<E: ExtensionField> ReadMEM<E> {
 
         Ok(())
     }
+
+    pub fn emit_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        let op = step.memory_op().expect("memory op");
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let shard_cycle = step.cycle() - shard_ctx.current_shard_offset_cycle();
+        emit_assert_lt_ops(
+            sink,
+            &self.lt_cfg,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_MEM,
+        );
+        sink.emit_send(SendEvent {
+            ram_type: RAMType::Memory,
+            addr: op.addr,
+            id: op.addr.baddr().0 as u64,
+            cycle: step.cycle() + Tracer::SUBCYCLE_MEM,
+            prev_cycle: op.previous_cycle,
+            value: op.value.after,
+            prev_value: None,
+        });
+        sink.touch_addr(op.addr);
+    }
+
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+        let op = step.memory_op().expect("memory op");
+        shard_ctx.record_send_without_touch(
+            RAMType::Memory,
+            op.addr,
+            op.addr.baddr().0 as u64,
+            step.cycle() + Tracer::SUBCYCLE_MEM,
+            op.previous_cycle,
+            op.value.after,
+            None,
+        );
+        shard_ctx.push_addr_accessed(op.addr);
+    }
 }
 
 #[derive(Debug)]
@@ -445,13 +624,68 @@ impl WriteMEM {
 
         Ok(())
     }
+
+    pub fn emit_op_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        shard_ctx: &ShardContext,
+        cycle: Cycle,
+        op: &WriteOp,
+    ) {
+        let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+        let shard_cycle = cycle - shard_ctx.current_shard_offset_cycle();
+        emit_assert_lt_ops(
+            sink,
+            &self.lt_cfg,
+            shard_prev_cycle,
+            shard_cycle + Tracer::SUBCYCLE_MEM,
+        );
+        sink.emit_send(SendEvent {
+            ram_type: RAMType::Memory,
+            addr: op.addr,
+            id: op.addr.baddr().0 as u64,
+            cycle: cycle + Tracer::SUBCYCLE_MEM,
+            prev_cycle: op.previous_cycle,
+            value: op.value.after,
+            prev_value: Some(op.value.before),
+        });
+        sink.touch_addr(op.addr);
+    }
+
+    pub fn emit_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        let op = step.memory_op().expect("memory op");
+        self.emit_op_lk_and_shardram(sink, shard_ctx, step.cycle(), &op)
+    }
+
+    pub fn emit_shardram(&self, shard_ctx: &mut ShardContext, step: &StepRecord) {
+        let op = step.memory_op().expect("memory op");
+        self.emit_op_shardram(shard_ctx, step.cycle(), &op)
+    }
+
+    pub fn emit_op_shardram(&self, shard_ctx: &mut ShardContext, cycle: Cycle, op: &WriteOp) {
+        shard_ctx.record_send_without_touch(
+            RAMType::Memory,
+            op.addr,
+            op.addr.baddr().0 as u64,
+            cycle + Tracer::SUBCYCLE_MEM,
+            op.previous_cycle,
+            op.value.after,
+            Some(op.value.before),
+        );
+        shard_ctx.push_addr_accessed(op.addr);
+    }
 }
 
 #[derive(Debug)]
 pub struct MemAddr<E: ExtensionField> {
-    addr: UInt<E>,
-    low_bits: Vec<WitIn>,
-    max_bits: usize,
+    pub addr: UInt<E>,
+    pub low_bits: Vec<WitIn>,
+    pub max_bits: usize,
 }
 
 impl<E: ExtensionField> MemAddr<E> {
@@ -593,6 +827,22 @@ impl<E: ExtensionField> MemAddr<E> {
         }
 
         Ok(())
+    }
+
+    pub fn emit_lk_and_shardram(&self, sink: &mut impl LkShardramSink, addr: Word) {
+        let mid_u14 = ((addr & 0xffff) >> Self::N_LOW_BITS) as u16;
+        sink.emit_lk(LkOp::AssertU14 { value: mid_u14 });
+
+        for i in 1..UINT_LIMBS {
+            let high_u16 = ((addr >> (i * 16)) & 0xffff) as u64;
+            let bits = (self.max_bits - i * 16).min(16);
+            if bits > 1 {
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: high_u16,
+                    bits: bits as u32,
+                });
+            }
+        }
     }
 
     fn n_zeros(&self) -> usize {

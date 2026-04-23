@@ -29,9 +29,9 @@ use super::addr::{ByteAddr, RegIdx, WORD_SIZE, Word, WordAddr};
 pub const fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: i32) -> Instruction {
     Instruction {
         kind,
-        rs1: rs1 as usize,
-        rs2: rs2 as usize,
-        rd: rd as usize,
+        rs1: rs1 as RegIdx,
+        rs2: rs2 as RegIdx,
+        rd: rd as RegIdx,
         imm,
         raw: 0,
     }
@@ -43,9 +43,9 @@ pub const fn encode_rv32(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: i32) 
 pub const fn encode_rv32u(kind: InsnKind, rs1: u32, rs2: u32, rd: u32, imm: u32) -> Instruction {
     Instruction {
         kind,
-        rs1: rs1 as usize,
-        rs2: rs2 as usize,
-        rd: rd as usize,
+        rs1: rs1 as RegIdx,
+        rs2: rs2 as RegIdx,
+        rd: rd as RegIdx,
         imm: imm as i32,
         raw: 0,
     }
@@ -113,6 +113,7 @@ pub enum TrapCause {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[repr(C)]
 pub struct Instruction {
     pub kind: InsnKind,
     pub rs1: RegIdx,
@@ -162,6 +163,7 @@ use InsnFormat::*;
     ToPrimitive,
     Default,
 )]
+#[repr(u8)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum InsnKind {
     #[default]
@@ -425,7 +427,7 @@ fn step_compute<M: EmuContext>(ctx: &mut M, kind: InsnKind, insn: &Instruction) 
     if !new_pc.is_aligned() {
         return ctx.trap(TrapCause::InstructionAddressMisaligned);
     }
-    ctx.store_register(insn.rd_internal() as usize, out)?;
+    ctx.store_register(insn.rd_internal() as RegIdx, out)?;
     ctx.set_pc(new_pc);
     Ok(true)
 }
@@ -502,7 +504,7 @@ fn step_load<M: EmuContext>(ctx: &mut M, kind: InsnKind, decoded: &Instruction) 
         }
         _ => unreachable!(),
     };
-    ctx.store_register(decoded.rd_internal() as usize, out)?;
+    ctx.store_register(decoded.rd_internal() as RegIdx, out)?;
     ctx.set_pc(ctx.get_pc() + WORD_SIZE);
     Ok(true)
 }
