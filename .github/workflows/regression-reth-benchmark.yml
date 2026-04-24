@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Dispatch benchmark workflow
-        uses: peter-evans/workflow-dispatch@v3
+        uses: benc-uk/workflow-dispatch@v1
         with:
           token: ${{ secrets.CENO_RETH_BENCHMARK_DISPATCH_TOKEN }}
-          repository: scroll-tech/ceno-reth-benchmark
+          repo: scroll-tech/ceno-reth-benchmark
           workflow: run-benchmark-v2.yml
           ref: ceno
           inputs: |
