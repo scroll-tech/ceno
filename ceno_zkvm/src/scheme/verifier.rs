@@ -516,6 +516,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                             .into(),
                         ));
                     };
+                    if q1 == E::ZERO || q2 == E::ZERO {
+                        return Err(ZKVMError::InvalidProof(
+                            format!(
+                                "{shard_id}th shard {circuit_name} has zero logup denominator in lk_out_evals: {evals:?}"
+                            )
+                            .into(),
+                        ));
+                    }
                     Ok(p1 * q1.inverse() + p2 * q2.inverse())
                 })
                 .sum::<Result<E, ZKVMError>>()?;

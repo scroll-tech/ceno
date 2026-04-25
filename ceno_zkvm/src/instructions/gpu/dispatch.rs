@@ -481,7 +481,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
             total_instances,
             num_witin,
             I::padding_strategy(),
-        )
+        )?
     };
     if materialize_initial_witness {
         raw_witin.padding_by_strategy();
@@ -1484,7 +1484,7 @@ fn replay_gpu_witness_from_resident_raw<E: ExtensionField, I: Instruction<E>>(
         total_instances,
         replay.num_witin,
         I::padding_strategy(),
-    );
+    )?;
 
     // Keep replayed witness immutable after attaching the col-major device backing.
     // Mutating/padding a RowMajorMatrix clears device metadata, but replay consumers

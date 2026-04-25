@@ -352,17 +352,10 @@ fn run_inner<
     fs::write(&vk_file, vk_bytes).unwrap();
 
     if checkpoint > Checkpoint::PrepVerify {
+        // `run_e2e_with_checkpoint` already performs the real verification for the
+        // complete flow. Re-running it here without the emulation exit code causes
+        // a false "Unfinished execution" error to be logged.
         let verifier = ZKVMVerifier::new(vk);
-        if target_shard_id.is_some() {
-            run_e2e_single_shard_debug_verify(
-                &verifier,
-                zkvm_proofs.first().cloned().expect("missing shard proof"),
-                None,
-                max_steps,
-            );
-        } else {
-            run_e2e_full_trace_verify(&verifier, zkvm_proofs.clone(), None, max_steps);
-        }
         soundness_test(zkvm_proofs.first().cloned().unwrap(), &verifier);
     }
 }

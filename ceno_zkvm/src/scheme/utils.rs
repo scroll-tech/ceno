@@ -680,7 +680,10 @@ pub fn build_main_witness<
             .iter()
             .chain(&input.structural_witness)
             .chain(&input.fixed)
-            .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
+            .all(|v| {
+                v.num_vars() == num_var_with_rotation
+                    && v.evaluations_len() <= (1 << num_var_with_rotation)
+            })
     );
 
     // GPU memory estimation
@@ -704,8 +707,9 @@ pub fn build_main_witness<
     // GPU memory check: validate estimation against actual usage
     #[cfg(feature = "gpu")]
     {
+        let occupied_rows = input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
         let estimated_bytes =
-            crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
+            crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, occupied_rows);
         crate::scheme::gpu::check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
     }
 

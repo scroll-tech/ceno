@@ -1264,22 +1264,12 @@ where
         );
         let tower_build_mem_tracker =
             crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "build_tower_witness_gpu");
-        let mut big_buffers = Vec::new();
-        let mut ones_buffer = Vec::new();
-        let mut view_last_layers = Vec::new();
         log_gpu_device_state(&format!("{name}:before_build_tower_witness"));
         log_gpu_pool_usage(&format!("{name}:before_build_tower_witness"));
         let (prod_gpu, logup_gpu, lk_out_evals, w_out_evals, r_out_evals) =
             info_span!("[ceno] build_tower_witness_gpu").in_scope(|| {
                 let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
-                    cs,
-                    &input,
-                    &records,
-                    challenges,
-                    &cuda_hal,
-                    &mut big_buffers,
-                    &mut ones_buffer,
-                    &mut view_last_layers,
+                    cs, &input, &records, challenges, &cuda_hal,
                 )
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(format!("build_tower_witness_gpu failed: {e}").into())
@@ -1332,9 +1322,6 @@ where
         check_gpu_mem_estimation(tower_prove_mem_tracker, tower_prove_estimated_bytes);
         drop(records);
         drop(tower_input);
-        drop(big_buffers);
-        drop(ones_buffer);
-        drop(view_last_layers);
         log_gpu_device_state(&format!("{name}:after_drop_tower"));
         exit_span!(span);
 
