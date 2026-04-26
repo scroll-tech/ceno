@@ -11,11 +11,15 @@ use ceno_gpu::{
     estimate_build_tower_memory, estimate_prove_tower_memory, estimate_sumcheck_memory,
 };
 use ff_ext::ExtensionField;
-use gkr_iop::gpu::{
-    BB31Base, GpuBackend,
-    gpu_prover::{
-        BB31Ext, CacheLevel, CudaHalBB31, MemTracker, get_gpu_cache_level, get_mem_tracking_mode,
+use gkr_iop::{
+    gpu::{
+        BB31Base, GpuBackend,
+        gpu_prover::{
+            BB31Ext, CacheLevel, CudaHalBB31, MemTracker, get_gpu_cache_level,
+            get_mem_tracking_mode,
+        },
     },
+    hal::MultilinearPolynomial,
 };
 use mpcs::PolynomialCommitmentScheme;
 
@@ -116,8 +120,8 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     );
 
     // Part 2: main witness (base usage)
-    let occupied_rows = input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
-    let main_witness_bytes = estimate_main_witness_bytes(composed_cs, occupied_rows);
+    let main_witness_rows = main_witness_output_rows(composed_cs, input);
+    let main_witness_bytes = estimate_main_witness_bytes(composed_cs, main_witness_rows);
 
     // Part 3: ecc quark (temporary usage)
     let n = num_var_with_rotation.saturating_sub(1);
@@ -369,10 +373,21 @@ pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 
 pub fn estimate_main_witness_bytes<E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
-    occupied_rows: usize,
+    output_rows: usize,
 ) -> usize {
     let elem_size = std::mem::size_of::<BB31Ext>();
-    tower_output_count(composed_cs) * occupied_rows * elem_size
+    tower_output_count(composed_cs) * output_rows * elem_size
+}
+
+pub fn main_witness_output_rows<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'_, GpuBackend<E, PCS>>,
+) -> usize {
+    input
+        .witness
+        .first()
+        .map(|mle| mle.evaluations_len())
+        .unwrap_or_else(|| input.num_instances() << composed_cs.rotation_vars().unwrap_or(0))
 }
 
 pub(crate) fn estimate_main_constraints_bytes<
