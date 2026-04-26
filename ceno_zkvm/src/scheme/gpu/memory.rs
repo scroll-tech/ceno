@@ -1,7 +1,7 @@
 use crate::{
     instructions::gpu::dispatch::GpuWitgenKind,
     scheme::{
-        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE},
         hal::ProofInput,
         utils::tower_output_count,
     },
@@ -461,27 +461,29 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
     let elem_size = std::mem::size_of::<BB31Ext>();
     let has_logup_numerator = composed_cs.is_with_lk_table();
 
+    let occupied_rows = input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
     let build_est = estimate_build_tower_memory(
         num_prod_towers,
         num_logup_towers,
         num_vars,
         num_vars,
+        occupied_rows,
         elem_size,
         has_logup_numerator,
     );
     let prod_split_bytes = if num_prod_towers > 0 {
-        num_prod_towers * (1 << (num_vars + 1)) * elem_size
+        num_prod_towers
+            * compact_split_stored_elems(occupied_rows, 1 << (num_vars + 1), NUM_FANIN)
+            * elem_size
     } else {
         0
     };
     let logup_split_bytes = if num_logup_towers > 0 {
-        let denominator_bytes = num_logup_towers * (1 << (num_vars + 1)) * elem_size;
-        let numerator_bytes = if has_logup_numerator {
-            denominator_bytes
-        } else {
-            0
-        };
-        denominator_bytes + numerator_bytes
+        let denominator_bytes = num_logup_towers
+            * compact_split_stored_elems(occupied_rows, 1 << (num_vars + 1), NUM_FANIN_LOGUP)
+            * elem_size;
+        let numerator_or_ones_bytes = denominator_bytes;
+        denominator_bytes + numerator_or_ones_bytes
     } else {
         0
     };
@@ -491,6 +493,7 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         num_logup_towers,
         num_vars,
         num_vars,
+        occupied_rows,
         NUM_FANIN,
         elem_size,
     );
@@ -500,6 +503,19 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
     let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes);
 
     (build_bytes, prove_local_bytes, tower_input_live_bytes)
+}
+
+fn compact_split_stored_elems(occupied_len: usize, logical_len: usize, num_chunks: usize) -> usize {
+    let chunk_size = logical_len / num_chunks;
+    (0..num_chunks)
+        .map(|chunk_idx| {
+            let chunk_start = chunk_idx * chunk_size;
+            occupied_len
+                .saturating_sub(chunk_start)
+                .min(chunk_size)
+                .max(1)
+        })
+        .sum()
 }
 
 /// Estimate temporary GPU memory for the tower proving stage (build + prove).
