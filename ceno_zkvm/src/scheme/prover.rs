@@ -1117,12 +1117,11 @@ where
         scheme::{
             constants::NUM_FANIN,
             gpu::{
-                build_tower_witness_gpu, check_gpu_mem_estimation,
-                estimate_replay_materialization_bytes_for_plan, estimate_tower_stage_bytes,
-                extract_out_evals_from_gpu_towers, extract_witness_mles_for_trace,
-                log_gpu_device_state, log_gpu_pool_usage, prove_ec_sum_quark_impl,
-                prove_main_constraints_impl, prove_rotation_impl, prove_tower_relation_impl,
-                transport_structural_witness_to_gpu,
+                build_tower_witness_gpu, estimate_replay_materialization_bytes_for_plan,
+                estimate_tower_stage_bytes, extract_out_evals_from_gpu_towers,
+                extract_witness_mles_for_trace, log_gpu_device_state, log_gpu_pool_usage,
+                prove_ec_sum_quark_impl, prove_main_constraints_impl, prove_rotation_impl,
+                prove_tower_relation_impl, transport_structural_witness_to_gpu,
             },
         },
     };
@@ -1164,7 +1163,11 @@ where
         log_gpu_device_state(&format!("{name}:before_replay"));
         log_gpu_pool_usage(&format!("{name}:before_replay"));
         let witness_rmm = replay_plan.replay_witness()?;
-        check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
+        crate::scheme::gpu::check_gpu_mem_estimation_with_context(
+            gpu_mem_tracker,
+            estimated_replay_bytes,
+            Some(name),
+        );
         input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
             .in_scope(|| crate::scheme::gpu::extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
         if let Some(structural_rmm_cached) = structural_rmm.as_ref() {
@@ -1278,7 +1281,11 @@ where
                     extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
                 Ok::<_, ZKVMError>((prod_gpu, logup_gpu, lk_out_evals, w_out_evals, r_out_evals))
             })?;
-        check_gpu_mem_estimation(tower_build_mem_tracker, tower_build_estimated_bytes);
+        crate::scheme::gpu::check_gpu_mem_estimation_with_context(
+            tower_build_mem_tracker,
+            tower_build_estimated_bytes,
+            Some(name),
+        );
         log_gpu_device_state(&format!("{name}:after_build_tower_witness"));
         log_gpu_pool_usage(&format!("{name}:after_build_tower_witness"));
 
@@ -1319,7 +1326,11 @@ where
         log_gpu_pool_usage(&format!("{name}:after_prove_tower"));
         let rt_tower: Point<E> = unsafe { std::mem::transmute(rt_tower_gl) };
         let tower_proof: TowerProofs<E> = unsafe { std::mem::transmute(tower_proof_gpu) };
-        check_gpu_mem_estimation(tower_prove_mem_tracker, tower_prove_estimated_bytes);
+        crate::scheme::gpu::check_gpu_mem_estimation_with_context(
+            tower_prove_mem_tracker,
+            tower_prove_estimated_bytes,
+            Some(name),
+        );
         drop(records);
         drop(tower_input);
         log_gpu_device_state(&format!("{name}:after_drop_tower"));

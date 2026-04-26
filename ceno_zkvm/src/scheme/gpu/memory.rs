@@ -50,10 +50,22 @@ const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved head
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
 /// - Over-estimate (estimated > actual): diff must be <= `ESTIMATION_SAFETY_MARGIN_BYTES`
 pub fn check_gpu_mem_estimation(mem_tracker: Option<MemTracker>, estimated_bytes: usize) {
+    check_gpu_mem_estimation_with_context(mem_tracker, estimated_bytes, None);
+}
+
+pub fn check_gpu_mem_estimation_with_context(
+    mem_tracker: Option<MemTracker>,
+    estimated_bytes: usize,
+    context: Option<&str>,
+) {
     // `mem_tracker will` be Some only in sequential mode with mem tracking enabled, so if it's None, do nothing
     if let Some(mem_tracker) = mem_tracker {
         const ONE_MB: usize = 1024 * 1024;
         let label = mem_tracker.name();
+        let label = context
+            .filter(|context| !context.is_empty())
+            .map(|context| format!("{label}[{context}]"))
+            .unwrap_or_else(|| label.to_string());
         let mem_stats = mem_tracker.finish();
         let actual_bytes = mem_stats.mem_occupancy as usize;
         let diff = estimated_bytes as isize - actual_bytes as isize;
@@ -424,6 +436,17 @@ pub fn main_witness_output_rows<E: ExtensionField, PCS: PolynomialCommitmentSche
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
 ) -> usize {
+    if composed_cs
+        .gkr_circuit
+        .as_ref()
+        .and_then(|circuit| circuit.layers.last())
+        .is_some_and(|input_layer| input_layer.in_eval_expr.is_empty())
+    {
+        if let Some(structural_mle) = input.structural_witness.first() {
+            return structural_mle.evaluations_len();
+        }
+    }
+
     input
         .witness
         .first()
@@ -547,7 +570,17 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
     } else {
         0
     };
-    let build_bytes = build_est.total_bytes + prod_split_bytes + logup_split_bytes;
+    let shard_ram_tower_batch_overhead = composed_cs
+        .gkr_circuit
+        .as_ref()
+        .and_then(|circuit| circuit.layers.first())
+        .is_some_and(|layer| layer.name == "ShardRamCircuit_main")
+        .then_some(10 * 1024 * 1024)
+        .unwrap_or(0);
+    let build_bytes = build_est.total_bytes
+        + prod_split_bytes
+        + logup_split_bytes
+        + shard_ram_tower_batch_overhead;
     let prove_est = estimate_prove_tower_memory(
         num_prod_towers,
         num_logup_towers,

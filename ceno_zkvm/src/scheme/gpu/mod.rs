@@ -124,9 +124,9 @@ fn pad_gpu_mles_to_full_domain<E: ExtensionField>(
 }
 mod util;
 pub(crate) use memory::{
-    check_gpu_mem_estimation, estimate_chip_proof_memory, estimate_main_witness_bytes,
-    estimate_replay_materialization_bytes_for_plan, estimate_tower_bytes,
-    estimate_tower_stage_bytes, init_gpu_mem_tracker,
+    check_gpu_mem_estimation, check_gpu_mem_estimation_with_context, estimate_chip_proof_memory,
+    estimate_main_witness_bytes, estimate_replay_materialization_bytes_for_plan,
+    estimate_tower_bytes, estimate_tower_stage_bytes, init_gpu_mem_tracker,
 };
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
@@ -1907,7 +1907,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         );
 
         let estimated_bytes = estimate_tower_bytes::<E, PCS>(composed_cs, input);
-        check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
+        check_gpu_mem_estimation_with_context(
+            gpu_mem_tracker,
+            estimated_bytes,
+            composed_cs
+                .gkr_circuit
+                .as_ref()
+                .and_then(|circuit| circuit.layers.first())
+                .map(|layer| layer.name.as_str()),
+        );
 
         res
     }
@@ -1956,7 +1964,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
         );
 
         let estimated_bytes = estimate_main_constraints_bytes::<E, PCS>(composed_cs, input);
-        check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
+        check_gpu_mem_estimation_with_context(
+            gpu_mem_tracker,
+            estimated_bytes,
+            composed_cs
+                .gkr_circuit
+                .as_ref()
+                .and_then(|circuit| circuit.layers.first())
+                .map(|layer| layer.name.as_str()),
+        );
 
         res
     }
@@ -1993,7 +2009,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> EccQuarkProver<GpuBa
 
         if let Ok(Some(proof)) = &res {
             let estimated_bytes = estimate_ecc_quark_bytes_from_num_vars(proof.rt.len());
-            check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
+            check_gpu_mem_estimation_with_context(
+                gpu_mem_tracker,
+                estimated_bytes,
+                composed_cs
+                    .gkr_circuit
+                    .as_ref()
+                    .and_then(|circuit| circuit.layers.first())
+                    .map(|layer| layer.name.as_str()),
+            );
         }
 
         res
@@ -2199,7 +2223,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 estimated_replay_bytes as f64 / (1024.0 * 1024.0),
             );
             task.input.witness = if let Some(trace_idx) = task.witness_trace_idx {
-                check_gpu_mem_estimation(gpu_mem_tracker, 0);
+                check_gpu_mem_estimation_with_context(
+                    gpu_mem_tracker,
+                    0,
+                    Some(task.circuit_name.as_str()),
+                );
                 info_span!("[ceno] extract_witness_mles").in_scope(|| {
                     extract_witness_mles_for_trace::<E, PCS>(
                         pcs_data,
@@ -2210,7 +2238,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 })
             } else {
                 let witness_rmm = replay_plan.replay_witness().expect("GPU raw replay failed");
-                check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
+                check_gpu_mem_estimation_with_context(
+                    gpu_mem_tracker,
+                    estimated_replay_bytes,
+                    Some(task.circuit_name.as_str()),
+                );
                 info_span!("[ceno] replay_gpu_witness_from_raw")
                     .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm))
             };
