@@ -19,8 +19,9 @@ use sumcheck::{
 use transcript::Transcript;
 
 use super::{
-    CommonFactoredTermPlan, CommonTermGroup, Layer, LayerWitness, linear_layer::LayerClaims,
-    sumcheck_layer::LayerProof,
+    CommonFactoredTermPlan, CommonTermGroup, Layer, LayerWitness,
+    linear_layer::LayerClaims,
+    sumcheck_layer::{LayerProof, bind_prover_evals},
 };
 use crate::{
     error::BackendError,
@@ -289,6 +290,7 @@ impl<E: ExtensionField> ZerocheckLayer<E> for Layer<E> {
         );
         let in_point = in_point.into_iter().map(|c| c.elements).collect_vec();
 
+        bind_prover_evals(transcript, &main_evals);
         let structural_witin_offset = self.n_witin + self.n_fixed;
         // eval selector and set to respective witin
         izip!(
@@ -710,6 +712,8 @@ pub fn verify_rotation<E: ExtensionField>(
         transcript,
     );
     let origin_point = in_point.into_iter().map(|c| c.elements).collect_vec();
+
+    bind_prover_evals(transcript, &evals);
 
     // compute the selector evaluation
     let bh = BooleanHypercube::new(rotation_cyclic_group_log2);

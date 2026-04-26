@@ -90,14 +90,16 @@ pub struct EccQuarkProof<E: ExtensionField> {
 ))]
 pub struct TowerProofs<E: ExtensionField> {
     pub proofs: Vec<Vec<IOPProverMessage<E>>>,
-    // specs -> layers -> evals
+    // specs -> active rounds -> evals
+    // A spec contributes only while `round < num_variables[spec] - 1`, so inactive rounds are
+    // omitted rather than stored as empty placeholders.
     pub prod_specs_eval: Vec<Vec<Vec<E>>>,
-    // specs -> layers -> point
+    // specs -> active rounds -> point
     #[serde(skip)] // verifier can derive points itself
     pub prod_specs_points: Vec<Vec<Point<E>>>,
-    // specs -> layers -> evals
+    // specs -> active rounds -> evals
     pub logup_specs_eval: Vec<Vec<Vec<E>>>,
-    // specs -> layers -> point
+    // specs -> active rounds -> point
     #[serde(skip)] // verifier can derive points itself
     pub logup_specs_points: Vec<Vec<Point<E>>>,
 }
