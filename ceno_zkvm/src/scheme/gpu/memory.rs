@@ -12,6 +12,7 @@ use ceno_gpu::{
 };
 use ff_ext::ExtensionField;
 use gkr_iop::{
+    evaluation::EvalExpression,
     gpu::{
         BB31Base, GpuBackend,
         gpu_prover::{
@@ -376,7 +377,47 @@ pub fn estimate_main_witness_bytes<E: ExtensionField>(
     output_rows: usize,
 ) -> usize {
     let elem_size = std::mem::size_of::<BB31Ext>();
-    tower_output_count(composed_cs) * output_rows * elem_size
+    main_witness_materialized_output_count(composed_cs) * output_rows * elem_size
+}
+
+fn main_witness_materialized_output_count<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+) -> usize {
+    let Some(gkr_circuit) = composed_cs.gkr_circuit.as_ref() else {
+        return 0;
+    };
+    let final_layer_output_count = tower_output_count(composed_cs);
+
+    gkr_circuit
+        .layers
+        .iter()
+        .enumerate()
+        .map(|(layer_index, layer)| {
+            let final_layer = layer_index == 0;
+            let out_evals = layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .flat_map(|(_, out_eval)| out_eval.iter());
+
+            if final_layer {
+                out_evals
+                    .take(final_layer_output_count)
+                    .filter(|out_eval| main_witness_materializes_output(out_eval))
+                    .count()
+            } else {
+                out_evals
+                    .filter(|out_eval| main_witness_materializes_output(out_eval))
+                    .count()
+            }
+        })
+        .sum()
+}
+
+fn main_witness_materializes_output<E: ExtensionField>(out_eval: &EvalExpression<E>) -> bool {
+    matches!(
+        out_eval,
+        EvalExpression::Single(_) | EvalExpression::Linear(_, _, _)
+    )
 }
 
 pub fn main_witness_output_rows<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
