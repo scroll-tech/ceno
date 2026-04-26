@@ -482,7 +482,11 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         let denominator_bytes = num_logup_towers
             * compact_split_stored_elems(occupied_rows, 1 << (num_vars + 1), NUM_FANIN_LOGUP)
             * elem_size;
-        let numerator_or_ones_bytes = denominator_bytes;
+        let numerator_or_ones_bytes = if has_logup_numerator {
+            denominator_bytes
+        } else {
+            elem_size
+        };
         denominator_bytes + numerator_or_ones_bytes
     } else {
         0

@@ -1749,33 +1749,34 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
     } else if lk_denominator_last_layer.is_empty() {
         vec![]
     } else {
-        // Case when numerator is empty: create one-polynomials matching each
-        // denominator chunk's stored length.
+        // Case when numerator is empty: share one scalar compact polynomial.
+        // Its tail default is also ONE, so all logical numerator entries read as ONE
+        // without materializing per-chunk denominator-sized buffers.
         let nv = lk_denominator_last_layer[0][0].num_vars();
+        let ones_poly = GpuPolynomialExt::new_with_scalar_len(
+            &cuda_hal.inner,
+            nv,
+            1,
+            BB31Ext::ONE,
+            stream.as_ref(),
+        )
+        .map_err(|e| format!("Failed to create compact shared ones numerator: {e:?}"))?;
+        let ones_poly: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(ones_poly) };
+        let one_len_bytes = ones_poly.buf.len() * std::mem::size_of::<BB31Ext>();
 
         lk_denominator_last_layer
             .into_iter()
             .map(|lk_d_chunks| {
-                let p1_len = lk_d_chunks[0].evaluations().len();
-                let p2_len = lk_d_chunks[1].evaluations().len();
-                let p1_gpu = GpuPolynomialExt::new_with_scalar_len(
-                    &cuda_hal.inner,
+                let p1_gpu = GpuPolynomialExt::new_with_tail_default(
+                    ones_poly.buf.owned_subrange(0..one_len_bytes),
                     nv,
-                    p1_len,
                     BB31Ext::ONE,
-                    stream.as_ref(),
-                )
-                .map_err(|e| format!("Failed to create compact ones numerator p1: {e:?}"))?;
-                let p2_gpu = GpuPolynomialExt::new_with_scalar_len(
-                    &cuda_hal.inner,
+                );
+                let p2_gpu = GpuPolynomialExt::new_with_tail_default(
+                    ones_poly.buf.owned_subrange(0..one_len_bytes),
                     nv,
-                    p2_len,
                     BB31Ext::ONE,
-                    stream.as_ref(),
-                )
-                .map_err(|e| format!("Failed to create compact ones numerator p2: {e:?}"))?;
-                let p1_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p1_gpu) };
-                let p2_gpu: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(p2_gpu) };
+                );
                 let mut last_layer = vec![p1_gpu, p2_gpu];
                 last_layer.extend(lk_d_chunks);
                 Ok(last_layer)
