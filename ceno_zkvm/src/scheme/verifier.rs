@@ -59,6 +59,38 @@ pub struct ZKVMVerifier<
     pub vk: ZKVMVerifyingKey<E, PCS, M>,
 }
 
+fn bind_active_tower_eval_round<E: ExtensionField>(
+    transcript: &mut impl Transcript<E>,
+    tower_proofs: &TowerProofs<E>,
+    num_variables: &[usize],
+    num_prod_spec: usize,
+    round: usize,
+) {
+    for (spec_index, max_round) in num_variables
+        .iter()
+        .copied()
+        .enumerate()
+        .take(num_prod_spec)
+    {
+        if round < max_round.saturating_sub(1) {
+            transcript.append_field_element_exts(&tower_proofs.prod_specs_eval[spec_index][round]);
+        }
+    }
+
+    for (global_spec_index, max_round) in num_variables
+        .iter()
+        .copied()
+        .enumerate()
+        .skip(num_prod_spec)
+    {
+        if round < max_round.saturating_sub(1) {
+            transcript.append_field_element_exts(
+                &tower_proofs.logup_specs_eval[global_spec_index - num_prod_spec][round],
+            );
+        }
+    }
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, M> ZKVMVerifier<E, PCS, M>
 where
     M: Clone + Default + serde::Serialize + serde::de::DeserializeOwned,
@@ -1167,6 +1199,14 @@ impl TowerVerify {
                 // check expected_evaluation
                 let rt: Point<E> = sumcheck_claim.point.iter().map(|c| c.elements).collect();
                 let eq = eq_eval(out_rt, &rt);
+
+                bind_active_tower_eval_round(
+                    transcript,
+                    tower_proofs,
+                    &num_variables,
+                    num_prod_spec,
+                    round,
+                );
 
                 let expected_evaluation: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
