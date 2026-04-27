@@ -32,7 +32,7 @@ use gkr_iop::{
         layer::{LayerWitness, gpu::utils::extract_mle_relationships_from_monomial_terms},
     },
     gpu::{GpuBackend, GpuProver, gpu_prover::BB31Ext},
-    hal::{MultilinearPolynomial, ProverBackend},
+    hal::ProverBackend,
 };
 use itertools::{Itertools, chain};
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -69,59 +69,6 @@ use gkr_iop::gpu::gpu_prover::*;
 
 mod memory;
 
-fn pad_gpu_mles_to_full_domain<E: ExtensionField>(
-    mles: impl IntoIterator<Item = ArcMultilinearExtensionGpu<'static, E>>,
-) -> Vec<ArcMultilinearExtensionGpu<'static, E>> {
-    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
-    let stream = gkr_iop::gpu::get_thread_stream();
-    mles.into_iter()
-        .map(|mle| {
-            let mle_ref = mle.as_ref();
-            let full_len = 1usize << mle_ref.num_vars();
-            if mle_ref.evaluations_len() == full_len {
-                return mle;
-            }
-            let padded: gkr_iop::gpu::MultilinearExtensionGpu<'static, E> = match mle_ref.inner() {
-                gkr_iop::gpu::GpuFieldType::Base(poly) => {
-                    let mut host = poly.to_cpu_vec(stream.as_ref());
-                    host.resize(full_len, BB31Base::ZERO);
-                    unsafe {
-                        std::mem::transmute(
-                            gkr_iop::gpu::MultilinearExtensionGpu::<E>::from_ceno_gpu_base(
-                                ceno_gpu::bb31::GpuPolynomial::from_ceno_vec(
-                                    &cuda_hal,
-                                    &host,
-                                    mle_ref.num_vars(),
-                                    stream.as_ref(),
-                                )
-                                .expect("pad base mle"),
-                            ),
-                        )
-                    }
-                }
-                gkr_iop::gpu::GpuFieldType::Ext(poly) => {
-                    let mut host = poly.to_cpu_vec(stream.as_ref());
-                    host.resize(full_len, BB31Ext::ZERO);
-                    unsafe {
-                        std::mem::transmute(
-                            gkr_iop::gpu::MultilinearExtensionGpu::<E>::from_ceno_gpu_ext(
-                                ceno_gpu::bb31::GpuPolynomialExt::from_ceno_vec(
-                                    &cuda_hal,
-                                    &host,
-                                    mle_ref.num_vars(),
-                                    stream.as_ref(),
-                                )
-                                .expect("pad ext mle"),
-                            ),
-                        )
-                    }
-                }
-                gkr_iop::gpu::GpuFieldType::Unreachable => unreachable!(),
-            };
-            Arc::new(padded)
-        })
-        .collect()
-}
 mod util;
 pub(crate) use memory::{
     check_gpu_mem_estimation, check_gpu_mem_estimation_with_context, estimate_chip_proof_memory,
@@ -539,12 +486,12 @@ pub fn prove_rotation_impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>
     let log2_num_instances = input.log2_num_instances();
     let num_threads = optimal_sumcheck_threads(log2_num_instances);
     let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
-    let padded_wit_storage = pad_gpu_mles_to_full_domain(
+    let wit = LayerWitness(
         chain!(&input.witness, &input.fixed, &input.structural_witness)
             .cloned()
-            .map(|mle| unsafe { std::mem::transmute(mle) }),
+            .map(|mle| unsafe { std::mem::transmute(mle) })
+            .collect(),
     );
-    let wit = LayerWitness(padded_wit_storage);
 
     let (proof, points) = gkr_iop::gkr::layer::gpu::prove_rotation_gpu::<E, PCS>(
         num_threads,
@@ -758,11 +705,12 @@ pub fn prove_main_constraints_impl<
         num_threads,
         num_var_with_rotation,
         gkr::GKRCircuitWitness {
-            layers: vec![LayerWitness(pad_gpu_mles_to_full_domain(
+            layers: vec![LayerWitness(
                 chain!(&input.witness, &input.fixed, &input.structural_witness,)
                     .cloned()
-                    .map(|mle| unsafe { std::mem::transmute(mle) }),
-            ))],
+                    .map(|mle| unsafe { std::mem::transmute(mle) })
+                    .collect(),
+            )],
         },
         &out_evals,
         &input
@@ -1807,7 +1755,7 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
         let last_layers_refs: Vec<&[GpuPolynomialExt<'_>]> =
             prod_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = {
-            cuda_hal.tower.build_prod_tower_from_gpu_polys_batch(
+            cuda_hal.tower.build_prod_tower_dense_from_gpu_polys_batch(
                 cuda_hal,
                 &last_layers_refs,
                 num_vars,
@@ -1815,7 +1763,12 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
                 stream.as_ref(),
             )
         }
-        .map_err(|e| format!("build_prod_tower_from_gpu_polys_batch failed: {:?}", e))?;
+        .map_err(|e| {
+            format!(
+                "build_prod_tower_dense_from_gpu_polys_batch failed: {:?}",
+                e
+            )
+        })?;
         prod_gpu_specs.extend(gpu_specs);
         exit_span!(span_prod);
     }
@@ -1837,14 +1790,19 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
             logup_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = cuda_hal
             .tower
-            .build_logup_tower_from_gpu_polys_batch(
+            .build_logup_tower_dense_from_gpu_polys_batch(
                 cuda_hal,
                 &last_layers_refs,
                 num_vars,
                 num_towers,
                 stream.as_ref(),
             )
-            .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
+            .map_err(|e| {
+                format!(
+                    "build_logup_tower_dense_from_gpu_polys_batch failed: {:?}",
+                    e
+                )
+            })?;
         logup_gpu_specs.extend(gpu_specs);
         exit_span!(span_logup);
     }
