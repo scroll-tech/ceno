@@ -340,6 +340,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: impl ForkableTranscript<E>,
     ) -> Result<SepticPoint<E::BaseField>, ZKVMError> {
+        tracing::info!(
+            "verifying shard proof: expected_shard_id={}, proof_shard_id={}, chip_groups={}",
+            shard_id,
+            vm_proof.public_values.shard_id,
+            vm_proof.chip_proofs.len()
+        );
+
         // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
