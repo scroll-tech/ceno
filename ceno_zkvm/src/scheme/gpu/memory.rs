@@ -145,9 +145,17 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     // `tower_prove_local_bytes` is only the new allocation occupancy inside
     // `create_proof`, while `tower_input_live_bytes` tracks the already-built
     // TowerInput buffers that remain live during that stage.
-    let (tower_build_bytes, tower_prove_local_bytes, tower_input_live_bytes) =
-        estimate_tower_stage_components(composed_cs, input);
+    let (
+        tower_build_bytes,
+        tower_prove_local_bytes,
+        tower_input_live_bytes,
+        borrowed_tower_input_bytes,
+    ) = estimate_tower_stage_components(composed_cs, input);
+    let scheduler_tower_input_live_bytes =
+        tower_input_live_bytes.saturating_sub(borrowed_tower_input_bytes);
     let tower_prove_peak_bytes = tower_input_live_bytes + tower_prove_local_bytes;
+    let scheduler_tower_prove_peak_bytes =
+        scheduler_tower_input_live_bytes + tower_prove_local_bytes;
 
     // Part 5: main constraints (temporary usage)
     let main_constraints_temporary_bytes = estimate_main_constraints_bytes(composed_cs, input);
@@ -189,7 +197,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         // to stay live through tower proving. They are dropped before the
         // ECC/rotation/main-constraint stages.
         let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
-        let tower_prove_stage_bytes = main_witness_bytes + tower_prove_peak_bytes;
+        let tower_prove_stage_bytes = main_witness_bytes + scheduler_tower_prove_peak_bytes;
         let stage_peak = trace_est
             .trace_temporary_bytes
             .max(tower_build_stage_bytes)
@@ -525,7 +533,7 @@ pub(crate) fn estimate_main_constraints_bytes<
 fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
-) -> (usize, usize, usize) {
+) -> (usize, usize, usize, usize) {
     let cs = &composed_cs.zkvm_v1_css;
     let num_prod_towers = composed_cs.num_reads() + composed_cs.num_writes();
     let num_logup_towers = if composed_cs.is_with_lk_table() {
@@ -571,9 +579,16 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
 
     let tower_input_live_bytes =
         prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
+    let borrowed_input_bytes =
+        prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes;
     let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes);
 
-    (build_bytes, prove_local_bytes, tower_input_live_bytes)
+    (
+        build_bytes,
+        prove_local_bytes,
+        tower_input_live_bytes,
+        borrowed_input_bytes,
+    )
 }
 
 /// Estimate temporary GPU memory for the tower proving stage (build + prove).
@@ -582,7 +597,8 @@ pub(crate) fn estimate_tower_stage_bytes<E: ExtensionField, PCS: PolynomialCommi
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
 ) -> (usize, usize) {
-    let (build_bytes, prove_local_bytes, _) = estimate_tower_stage_components(composed_cs, input);
+    let (build_bytes, prove_local_bytes, _, _) =
+        estimate_tower_stage_components(composed_cs, input);
     (build_bytes, prove_local_bytes)
 }
 
@@ -590,7 +606,7 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
 ) -> usize {
-    let (build_bytes, prove_local_bytes, tower_input_live_bytes) =
+    let (build_bytes, prove_local_bytes, tower_input_live_bytes, _) =
         estimate_tower_stage_components(composed_cs, input);
     build_bytes.max(tower_input_live_bytes + prove_local_bytes)
 }
