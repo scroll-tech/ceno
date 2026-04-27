@@ -71,7 +71,8 @@ mod memory;
 
 mod util;
 pub(crate) use memory::{
-    check_gpu_mem_estimation, check_gpu_mem_estimation_with_context, estimate_chip_proof_memory,
+    check_gpu_mem_estimation, check_gpu_mem_estimation_with_context,
+    check_gpu_scheduler_mem_estimation_with_context, estimate_chip_proof_memory,
     estimate_main_witness_bytes, estimate_replay_materialization_bytes_for_plan,
     estimate_tower_bytes, estimate_tower_stage_bytes, init_gpu_mem_tracker,
 };

@@ -603,6 +603,12 @@ impl<
                         task.circuit_idx as u64,
                     ));
 
+                    let task_name = task.circuit_name.clone();
+                    let estimated_memory_bytes = task.estimated_memory_bytes as usize;
+                    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+                    let chip_mem_tracker =
+                        crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "create_chip_proof");
+
                     let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
                         unsafe { std::mem::transmute(task.input) };
 
@@ -619,6 +625,11 @@ impl<
                             task.num_witin,
                             task.structural_rmm,
                         )?;
+                    crate::scheme::gpu::check_gpu_scheduler_mem_estimation_with_context(
+                        chip_mem_tracker,
+                        estimated_memory_bytes,
+                        Some(task_name.as_str()),
+                    );
 
                     Ok(ChipTaskResult {
                         task_id: task.task_id,

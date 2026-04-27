@@ -45,6 +45,7 @@ pub fn init_gpu_mem_tracker<'a>(
 
 const ESTIMATION_TOLERANCE_BYTES: usize = 2 * 1024 * 1024; // max under-estimation error: 2 MB
 const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved headroom / allowed over-estimate margin: 10 MB
+const SCHEDULER_ESTIMATION_WARNING_MARGIN_BYTES: usize = 512 * 1024 * 1024;
 
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
@@ -57,6 +58,70 @@ pub fn check_gpu_mem_estimation_with_context(
     mem_tracker: Option<MemTracker>,
     estimated_bytes: usize,
     context: Option<&str>,
+) {
+    check_gpu_mem_estimation_with_margins(
+        mem_tracker,
+        estimated_bytes,
+        context,
+        ESTIMATION_TOLERANCE_BYTES,
+        ESTIMATION_SAFETY_MARGIN_BYTES,
+    );
+}
+
+pub fn check_gpu_scheduler_mem_estimation_with_context(
+    mem_tracker: Option<MemTracker>,
+    estimated_bytes: usize,
+    context: Option<&str>,
+) {
+    // Scheduler estimates are admission-control estimates, not exact stage-local allocation
+    // estimates. They intentionally include safety margins and conservative lifetime overlap, so
+    // large over-estimates should be surfaced as warnings rather than failing the proof. Under-
+    // estimates remain hard failures because they can admit unsafe concurrent work.
+    if let Some(mem_tracker) = mem_tracker {
+        const ONE_MB: usize = 1024 * 1024;
+        let label = mem_tracker.name();
+        let label = context
+            .filter(|context| !context.is_empty())
+            .map(|context| format!("{label}[{context}]"))
+            .unwrap_or_else(|| label.to_string());
+        let mem_stats = mem_tracker.finish();
+        let actual_bytes = mem_stats.mem_occupancy as usize;
+        let diff = estimated_bytes as isize - actual_bytes as isize;
+        let to_mb = |b: usize| b as f64 / ONE_MB as f64;
+        let diff_mb = diff as f64 / ONE_MB as f64;
+        tracing::info!(
+            "[memcheck] {label}: scheduler_estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB",
+            to_mb(estimated_bytes),
+            to_mb(actual_bytes),
+            diff_mb
+        );
+        if diff < 0 {
+            assert!(
+                (-diff) as usize <= ESTIMATION_TOLERANCE_BYTES,
+                "[memcheck] {label}: scheduler under-estimate! estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, tolerance={:.2}MB",
+                to_mb(estimated_bytes),
+                to_mb(actual_bytes),
+                diff_mb,
+                to_mb(ESTIMATION_TOLERANCE_BYTES),
+            );
+        } else if diff as usize > SCHEDULER_ESTIMATION_WARNING_MARGIN_BYTES {
+            tracing::warn!(
+                "[memcheck] {label}: scheduler over-estimate warning: estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, warning_margin={:.2}MB",
+                to_mb(estimated_bytes),
+                to_mb(actual_bytes),
+                diff_mb,
+                to_mb(SCHEDULER_ESTIMATION_WARNING_MARGIN_BYTES),
+            );
+        }
+    }
+}
+
+fn check_gpu_mem_estimation_with_margins(
+    mem_tracker: Option<MemTracker>,
+    estimated_bytes: usize,
+    context: Option<&str>,
+    under_tolerance_bytes: usize,
+    over_tolerance_bytes: usize,
 ) {
     // `mem_tracker will` be Some only in sequential mode with mem tracking enabled, so if it's None, do nothing
     if let Some(mem_tracker) = mem_tracker {
@@ -80,22 +145,22 @@ pub fn check_gpu_mem_estimation_with_context(
         if diff < 0 {
             // Under-estimate: actual exceeds estimated
             assert!(
-                (-diff) as usize <= ESTIMATION_TOLERANCE_BYTES,
+                (-diff) as usize <= under_tolerance_bytes,
                 "[memcheck] {label}: under-estimate! estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, tolerance={:.2}MB",
                 to_mb(estimated_bytes),
                 to_mb(actual_bytes),
                 diff_mb,
-                to_mb(ESTIMATION_TOLERANCE_BYTES),
+                to_mb(under_tolerance_bytes),
             );
         } else {
             // Over-estimate: estimated exceeds actual
             assert!(
-                diff as usize <= ESTIMATION_SAFETY_MARGIN_BYTES,
+                diff as usize <= over_tolerance_bytes,
                 "[memcheck] {label}: over-estimate! estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, margin={:.2}MB",
                 to_mb(estimated_bytes),
                 to_mb(actual_bytes),
                 diff_mb,
-                to_mb(ESTIMATION_SAFETY_MARGIN_BYTES),
+                to_mb(over_tolerance_bytes),
             );
         }
     }
