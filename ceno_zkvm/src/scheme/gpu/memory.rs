@@ -240,7 +240,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         );
     } else {
         let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
-        let tower_prove_stage_bytes = main_witness_bytes + tower_prove_peak_bytes;
+        let tower_prove_stage_bytes = main_witness_bytes + scheduler_tower_prove_peak_bytes;
         // Resident memory (always occupied during chip proof)
         tracing::info!(
             "[mem estimate][{}] resident: trace={:.2}MB",
