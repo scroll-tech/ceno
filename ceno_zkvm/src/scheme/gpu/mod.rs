@@ -1339,9 +1339,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
                 } else {
                     0
                 };
+                let occupied_rows = poly_group
+                    .first()
+                    .map(|poly| poly.evaluations().len())
+                    .unwrap_or(0);
 
                 let (resident, temporary) =
-                    estimate_trace_extraction_bytes(num_witin, num_vars, true);
+                    estimate_trace_extraction_bytes(num_witin, num_vars, occupied_rows, true);
                 check_gpu_mem_estimation(gpu_mem_tracker, resident + temporary);
 
                 trace_idx += 1;
@@ -1391,7 +1395,12 @@ where
         .get_trace(&cuda_hal, pcs_data_basefold, trace_idx, stream.as_ref())
         .unwrap_or_else(|err| panic!("Failed to extract trace {trace_idx}: {err}"));
 
-    let (resident, temporary) = estimate_trace_extraction_bytes(expected_num, num_vars, false);
+    let occupied_rows = poly_group
+        .first()
+        .map(|poly| poly.evaluations().len())
+        .unwrap_or(0);
+    let (resident, temporary) =
+        estimate_trace_extraction_bytes(expected_num, num_vars, occupied_rows, false);
     check_gpu_mem_estimation(gpu_mem_tracker, resident + temporary);
 
     let mles: Vec<Arc<MultilinearExtensionGpu<'a, E>>> = poly_group

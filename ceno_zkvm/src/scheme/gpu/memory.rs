@@ -374,6 +374,7 @@ pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
             estimate_trace_extraction_bytes(
                 cs.num_witin as usize,
                 num_var_with_rotation,
+                input.num_instances() << composed_cs.rotation_vars().unwrap_or(0),
                 witness_replayable,
             )
         };
@@ -640,11 +641,13 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 pub(crate) fn estimate_trace_extraction_bytes(
     num_witin: usize,
     num_vars: usize,
+    occupied_rows: usize,
     witness_replayable: bool,
 ) -> (usize, usize) {
     let base_elem_size = std::mem::size_of::<BB31Base>();
     let mle_len = 1usize << num_vars;
-    let poly_bytes = num_witin * mle_len * base_elem_size;
+    let compact_poly_bytes = num_witin * occupied_rows * base_elem_size;
+    let logical_poly_bytes = num_witin * mle_len * base_elem_size;
 
     if should_materialize_witness_on_gpu() {
         if should_retain_witness_device_backing_after_commit() {
@@ -660,19 +663,19 @@ pub(crate) fn estimate_trace_extraction_bytes(
             // duration of the chip proof. There is no separate extraction temp
             // buffer, but the replayed witness itself must be accounted for as
             // resident task memory.
-            return (poly_bytes, 0);
+            return (compact_poly_bytes, 0);
         }
 
         // GPU witgen alone does not imply replayability. Non-replayable traces
         // still go through basefold::get_trace in cache-none mode, which
         // allocates the extracted witness plus a temporary 2x transpose buffer.
-        return (poly_bytes, 2 * poly_bytes);
+        return (compact_poly_bytes, 2 * logical_poly_bytes);
     }
 
     if matches!(get_gpu_cache_level(), CacheLevel::None) {
         // Default cache level is None
         // get_trace allocates poly copies (resident) + temp_buffer (2x, freed after)
-        (poly_bytes, 2 * poly_bytes)
+        (compact_poly_bytes, 2 * logical_poly_bytes)
     } else {
         (0, 0)
     }
