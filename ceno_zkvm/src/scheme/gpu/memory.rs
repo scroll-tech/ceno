@@ -566,6 +566,7 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         occupied_rows,
         NUM_FANIN,
         elem_size,
+        has_logup_numerator,
     );
 
     let tower_input_live_bytes =
