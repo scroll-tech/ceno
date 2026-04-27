@@ -1694,13 +1694,7 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
         .map(|wit| match wit.inner() {
             gkr_iop::gpu::GpuFieldType::Ext(poly) => cuda_hal
                 .tower
-                .masked_mle_split_to_chunks(
-                    &*cuda_hal,
-                    poly,
-                    NUM_FANIN,
-                    BB31Ext::ONE,
-                    stream.as_ref(),
-                )
+                .masked_mle_view_chunks(&*cuda_hal, poly, NUM_FANIN, BB31Ext::ONE, stream.as_ref())
                 .map_err(|e| format!("Failed to split compact prod tower input: {e}")),
             _ => return Err("tower witness expects extension-field record MLEs".to_string()),
         })
@@ -1716,7 +1710,7 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
         .map(|wit| match wit.inner() {
             gkr_iop::gpu::GpuFieldType::Ext(poly) => cuda_hal
                 .tower
-                .masked_mle_split_to_chunks(
+                .masked_mle_view_chunks(
                     &*cuda_hal,
                     poly,
                     NUM_FANIN_LOGUP,
@@ -1732,7 +1726,7 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
         .map(|wit| match wit.inner() {
             gkr_iop::gpu::GpuFieldType::Ext(poly) => cuda_hal
                 .tower
-                .masked_mle_split_to_chunks(
+                .masked_mle_view_chunks(
                     &*cuda_hal,
                     poly,
                     NUM_FANIN_LOGUP,
