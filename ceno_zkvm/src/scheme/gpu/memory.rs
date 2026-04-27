@@ -148,7 +148,6 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     let (tower_build_bytes, tower_prove_local_bytes, tower_input_live_bytes) =
         estimate_tower_stage_components(composed_cs, input);
     let tower_prove_peak_bytes = tower_input_live_bytes + tower_prove_local_bytes;
-    let tower_temporary_bytes = tower_build_bytes.max(tower_prove_peak_bytes);
 
     // Part 5: main constraints (temporary usage)
     let main_constraints_temporary_bytes = estimate_main_constraints_bytes(composed_cs, input);

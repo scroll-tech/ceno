@@ -1315,7 +1315,7 @@ where
                     .tower
                     .create_proof(
                         &cuda_hal,
-                        &tower_input,
+                        tower_input,
                         NUM_FANIN,
                         basic_tr,
                         gkr_iop::gpu::get_thread_stream().as_ref(),
@@ -1332,7 +1332,6 @@ where
             Some(name),
         );
         drop(records);
-        drop(tower_input);
         log_gpu_device_state(&format!("{name}:after_drop_tower"));
         exit_span!(span);
 

@@ -446,7 +446,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
         let (point_gl, proof_gpu) = info_span!("[ceno] prove_tower_relation_gpu").in_scope(|| {
             cuda_hal
                 .tower
-                .create_proof(cuda_hal, &tower_input, NUM_FANIN, basic_tr, stream.as_ref())
+                .create_proof(cuda_hal, tower_input, NUM_FANIN, basic_tr, stream.as_ref())
                 .expect("gpu tower create_proof failed")
         });
         exit_span!(span);
