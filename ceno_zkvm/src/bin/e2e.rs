@@ -5,8 +5,7 @@ use ceno_zkvm::print_allocated_bytes;
 use ceno_zkvm::{
     e2e::{
         Checkpoint, FieldType, MultiProver, PcsKind, Preset, public_io_words_to_digest_words,
-        run_e2e_full_trace_verify, run_e2e_single_shard_debug_verify, run_e2e_with_checkpoint,
-        setup_platform, setup_platform_debug,
+        run_e2e_with_checkpoint, setup_platform, setup_platform_debug,
     },
     scheme::{
         ZKVMProof, constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice,
