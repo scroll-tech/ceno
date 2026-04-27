@@ -1268,13 +1268,13 @@ where
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         let r_set_len =
             cs.zkvm_v1_css.r_expressions.len() + cs.zkvm_v1_css.r_table_expressions.len();
-        let (tower_build_estimated_bytes, tower_prove_estimated_bytes) =
+        let (tower_build_estimated_bytes, tower_prove_prebuild_estimated_bytes) =
             estimate_tower_stage_bytes::<E, PCS>(cs, &input);
         tracing::info!(
             "[gpu tower][{}] estimated: build_tower={:.2}MB, prove_tower={:.2}MB",
             name,
             tower_build_estimated_bytes as f64 / (1024.0 * 1024.0),
-            tower_prove_estimated_bytes as f64 / (1024.0 * 1024.0),
+            tower_prove_prebuild_estimated_bytes as f64 / (1024.0 * 1024.0),
         );
         let tower_build_mem_tracker =
             crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "build_tower_witness_gpu");
@@ -1316,6 +1316,27 @@ where
             prod_specs: prod_gpu,
             logup_specs: logup_gpu,
         };
+        let tower_prove_estimate = cuda_hal
+            .tower
+            .estimate_memory_requirements(&tower_input, NUM_FANIN);
+        let tower_input_live_bytes = tower_prove_estimate.prod_tower_buffer_bytes
+            + tower_prove_estimate.logup_tower_buffer_bytes;
+        let runtime_layout_prove_bytes = tower_prove_estimate
+            .total_bytes
+            .saturating_sub(tower_input_live_bytes);
+        let release_adjusted_prebuild_bytes =
+            tower_prove_prebuild_estimated_bytes / NUM_FANIN + 4 * 1024 * 1024;
+        let tower_prove_estimated_bytes =
+            runtime_layout_prove_bytes.max(release_adjusted_prebuild_bytes);
+        tracing::info!(
+            "[gpu tower][{}] refined prove_tower estimate: prebuild={:.2}MB, runtime_layout={:.2}MB, release_adjusted={:.2}MB, local={:.2}MB, tower_live={:.2}MB",
+            name,
+            tower_prove_prebuild_estimated_bytes as f64 / (1024.0 * 1024.0),
+            runtime_layout_prove_bytes as f64 / (1024.0 * 1024.0),
+            release_adjusted_prebuild_bytes as f64 / (1024.0 * 1024.0),
+            tower_prove_estimated_bytes as f64 / (1024.0 * 1024.0),
+            tower_input_live_bytes as f64 / (1024.0 * 1024.0),
+        );
         let tower_prove_mem_tracker =
             crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "prove_tower_relation_gpu");
         log_gpu_device_state(&format!("{name}:before_prove_tower"));
