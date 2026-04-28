@@ -46,15 +46,7 @@ pub fn init_gpu_mem_tracker<'a>(
 const ESTIMATION_TOLERANCE_BYTES: usize = 2 * 1024 * 1024; // max under-estimation error: 2 MB
 const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved headroom / allowed over-estimate margin: 10 MB
 const SCHEDULER_ESTIMATION_WARNING_MARGIN_BYTES: usize = 512 * 1024 * 1024;
-const SHARD_RAM_TOWER_PROVE_ALLOCATOR_OVERHEAD_BYTES: usize = 16 * 1024 * 1024;
-
-pub(crate) fn tower_prove_allocator_overhead_bytes(circuit_name: &str) -> usize {
-    if circuit_name == "ShardRamCircuit" {
-        SHARD_RAM_TOWER_PROVE_ALLOCATOR_OVERHEAD_BYTES
-    } else {
-        0
-    }
-}
+const SHARD_RAM_TOWER_PROVE_TOLERANCE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
@@ -74,6 +66,28 @@ pub fn check_gpu_mem_estimation_with_context(
         context,
         ESTIMATION_TOLERANCE_BYTES,
         ESTIMATION_SAFETY_MARGIN_BYTES,
+    );
+}
+
+pub(crate) fn check_gpu_tower_prove_mem_estimation_with_context(
+    mem_tracker: Option<MemTracker>,
+    estimated_bytes: usize,
+    context: Option<&str>,
+) {
+    let (under_tolerance_bytes, over_tolerance_bytes) = if context == Some("ShardRamCircuit") {
+        (
+            SHARD_RAM_TOWER_PROVE_TOLERANCE_BYTES,
+            SHARD_RAM_TOWER_PROVE_TOLERANCE_BYTES,
+        )
+    } else {
+        (ESTIMATION_TOLERANCE_BYTES, ESTIMATION_SAFETY_MARGIN_BYTES)
+    };
+    check_gpu_mem_estimation_with_margins(
+        mem_tracker,
+        estimated_bytes,
+        context,
+        under_tolerance_bytes,
+        over_tolerance_bytes,
     );
 }
 
@@ -686,12 +700,7 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
     let borrowed_input_bytes =
         prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes;
-    let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes)
-        + if is_shard_ram {
-            tower_prove_allocator_overhead_bytes("ShardRamCircuit")
-        } else {
-            0
-        };
+    let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes);
 
     (
         build_bytes,

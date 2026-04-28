@@ -1361,18 +1361,14 @@ where
             .saturating_sub(tower_input_live_bytes);
         let release_adjusted_prebuild_bytes =
             tower_prove_prebuild_estimated_bytes / NUM_FANIN + 4 * 1024 * 1024;
-        let allocator_overhead_bytes =
-            crate::scheme::gpu::tower_prove_allocator_overhead_bytes(name);
-        let tower_prove_estimated_bytes = runtime_layout_prove_bytes
-            .max(release_adjusted_prebuild_bytes)
-            + allocator_overhead_bytes;
+        let tower_prove_estimated_bytes =
+            runtime_layout_prove_bytes.max(release_adjusted_prebuild_bytes);
         tracing::info!(
-            "[gpu tower][{}] refined prove_tower estimate: prebuild={:.2}MB, runtime_layout={:.2}MB, release_adjusted={:.2}MB, allocator_overhead={:.2}MB, local={:.2}MB, tower_live={:.2}MB",
+            "[gpu tower][{}] refined prove_tower estimate: prebuild={:.2}MB, runtime_layout={:.2}MB, release_adjusted={:.2}MB, local={:.2}MB, tower_live={:.2}MB",
             name,
             tower_prove_prebuild_estimated_bytes as f64 / (1024.0 * 1024.0),
             runtime_layout_prove_bytes as f64 / (1024.0 * 1024.0),
             release_adjusted_prebuild_bytes as f64 / (1024.0 * 1024.0),
-            allocator_overhead_bytes as f64 / (1024.0 * 1024.0),
             tower_prove_estimated_bytes as f64 / (1024.0 * 1024.0),
             tower_input_live_bytes as f64 / (1024.0 * 1024.0),
         );
@@ -1402,7 +1398,7 @@ where
         log_gpu_pool_usage(&format!("{name}:after_prove_tower"));
         let rt_tower: Point<E> = unsafe { std::mem::transmute(rt_tower_gl) };
         let tower_proof: TowerProofs<E> = unsafe { std::mem::transmute(tower_proof_gpu) };
-        crate::scheme::gpu::check_gpu_mem_estimation_with_context(
+        crate::scheme::gpu::check_gpu_tower_prove_mem_estimation_with_context(
             tower_prove_mem_tracker,
             tower_prove_estimated_bytes,
             Some(name),
