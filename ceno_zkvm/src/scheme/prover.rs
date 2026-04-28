@@ -1,7 +1,8 @@
 use ff_ext::ExtensionField;
+#[cfg(feature = "gpu")]
+use gkr_iop::error::BackendError;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
-    error::BackendError,
     hal::ProverBackend,
 };
 use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
