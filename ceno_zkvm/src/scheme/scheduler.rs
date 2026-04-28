@@ -90,6 +90,9 @@ pub struct ChipTask<'a, PB: ProverBackend> {
     /// Replay witness directly from shard-resident raw GPU data when available.
     #[cfg(feature = "gpu")]
     pub gpu_replay_plan: Option<GpuReplayPlan<PB::E>>,
+    /// Actual witness trace rows used for cache-none extraction estimates.
+    #[cfg(feature = "gpu")]
+    pub witness_trace_rows: Option<usize>,
     /// Expected number of witness polynomials for this circuit
     pub num_witin: usize,
     /// CPU-side structural witness RowMajorMatrix, transported to GPU on-demand

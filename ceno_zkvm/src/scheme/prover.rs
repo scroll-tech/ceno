@@ -222,6 +222,8 @@ impl<
             let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
             #[cfg(feature = "gpu")]
             let mut gpu_replay_plans = Vec::with_capacity(name_and_instances.len());
+            #[cfg(feature = "gpu")]
+            let mut witness_trace_rows = Vec::with_capacity(name_and_instances.len());
             // commit to opcode circuits first and then commit to table circuits, sorted by name
             for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
                 let crate::structs::ChipInput {
@@ -235,6 +237,15 @@ impl<
                 #[cfg(feature = "gpu")]
                 let use_deferred_gpu_commit = crate::instructions::gpu::config::is_gpu_witgen_enabled()
                     && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit();
+                #[cfg(feature = "gpu")]
+                let trace_rows_for_estimate =
+                    if !crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                        && witness_rmm.num_instances() > 0
+                    {
+                        Some(witness_rmm.height())
+                    } else {
+                        None
+                    };
 
                 #[cfg(feature = "gpu")]
                 if use_deferred_gpu_commit {
@@ -254,6 +265,8 @@ impl<
                     wits_rmms.insert(i, witness_rmm);
                 }
                 structural_rmms.push(structural_witness_rmm);
+                #[cfg(feature = "gpu")]
+                witness_trace_rows.push(trace_rows_for_estimate);
                 #[cfg(feature = "gpu")]
                 gpu_replay_plans.push(gpu_replay_plan);
             }
@@ -366,6 +379,8 @@ impl<
                 structural_rmms,
                 #[cfg(feature = "gpu")]
                 gpu_replay_plans,
+                #[cfg(feature = "gpu")]
+                witness_trace_rows,
                 witness_mles,
                 &witness_data,
                 fixed_mles,
@@ -873,6 +888,7 @@ impl<
         name_and_instances: Vec<(String, [usize; 2])>,
         structural_rmms: Vec<witness::RowMajorMatrix<E::BaseField>>,
         #[cfg(feature = "gpu")] gpu_replay_plans: Vec<Option<crate::structs::GpuReplayPlan<E>>>,
+        #[cfg(feature = "gpu")] witness_trace_rows: Vec<Option<usize>>,
         #[allow(unused_mut)] mut witness_mles: Vec<PB::MultilinearPoly<'data>>,
         witness_data: &PB::PcsData,
         mut fixed_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
@@ -1001,6 +1017,7 @@ impl<
                     gpu_input,
                     &circuit_name,
                     gpu_replay_plans[this_idx].as_ref(),
+                    witness_trace_rows[this_idx],
                     structural_cached_on_device,
                 )
             };
@@ -1054,6 +1071,8 @@ impl<
                 witness_trace_idx,
                 #[cfg(feature = "gpu")]
                 gpu_replay_plan,
+                #[cfg(feature = "gpu")]
+                witness_trace_rows: witness_trace_rows[this_idx],
                 num_witin: cs.num_witin(),
                 structural_rmm: task_structural_rmm,
             });

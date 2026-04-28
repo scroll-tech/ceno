@@ -183,11 +183,14 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     circuit_name: &str,
     replay_plan: Option<&GpuReplayPlan<E>>,
+    witness_trace_rows: Option<usize>,
     structural_cached_on_device: bool,
 ) -> u64 {
     let num_var_with_rotation =
         input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
     let witness_replayable = replay_plan.is_some();
+    let occupied_rows =
+        estimate_witness_occupied_rows(composed_cs, input, replay_plan, witness_trace_rows);
     let structural_resident_bytes = if structural_cached_on_device {
         0
     } else {
@@ -204,10 +207,11 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         replay_plan,
         witness_replayable,
         structural_cached_on_device,
+        Some(occupied_rows),
     );
 
     // Part 2: main witness (base usage)
-    let main_witness_rows = main_witness_output_rows(composed_cs, input);
+    let main_witness_rows = main_witness_output_rows(composed_cs, input, Some(occupied_rows));
     let main_witness_bytes = estimate_main_witness_bytes(composed_cs, main_witness_rows);
 
     // Part 3: ecc quark (temporary usage)
@@ -224,7 +228,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         tower_prove_local_bytes,
         tower_input_live_bytes,
         borrowed_tower_input_bytes,
-    ) = estimate_tower_stage_components(composed_cs, input);
+    ) = estimate_tower_stage_components(composed_cs, input, Some(occupied_rows));
     let tower_input_non_borrowed_bytes =
         tower_input_live_bytes.saturating_sub(borrowed_tower_input_bytes);
     let tower_input_backing_bytes = main_witness_bytes.max(borrowed_tower_input_bytes);
@@ -344,6 +348,23 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     total_usage_bytes as u64
 }
 
+fn estimate_witness_occupied_rows<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    input: &ProofInput<'_, GpuBackend<E, PCS>>,
+    replay_plan: Option<&GpuReplayPlan<E>>,
+    witness_trace_rows: Option<usize>,
+) -> usize {
+    if let Some(replay_plan) = replay_plan {
+        return replay_plan_actual_rows(replay_plan);
+    }
+    input
+        .witness
+        .first()
+        .map(|mle| mle.evaluations_len())
+        .or(witness_trace_rows)
+        .unwrap_or_else(|| input.num_instances() << composed_cs.rotation_vars().unwrap_or(0))
+}
+
 pub(crate) struct TraceEstimate {
     /// Persistent resident bytes (witness polys + structural MLEs)
     pub(crate) trace_resident_bytes: usize,
@@ -421,6 +442,7 @@ pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
     replay_plan: Option<&GpuReplayPlan<E>>,
     witness_replayable: bool,
     structural_cached_on_device: bool,
+    occupied_rows_override: Option<usize>,
 ) -> TraceEstimate {
     let cs = &composed_cs.zkvm_v1_css;
     let num_var_with_rotation =
@@ -455,7 +477,9 @@ pub(crate) fn estimate_trace_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
             estimate_trace_extraction_bytes(
                 cs.num_witin as usize,
                 num_var_with_rotation,
-                input.num_instances() << composed_cs.rotation_vars().unwrap_or(0),
+                occupied_rows_override.unwrap_or_else(|| {
+                    input.num_instances() << composed_cs.rotation_vars().unwrap_or(0)
+                }),
                 witness_replayable,
             )
         };
@@ -517,6 +541,7 @@ fn main_witness_materializes_output<E: ExtensionField>(out_eval: &EvalExpression
 pub fn main_witness_output_rows<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
+    occupied_rows_override: Option<usize>,
 ) -> usize {
     if composed_cs
         .gkr_circuit
@@ -533,6 +558,7 @@ pub fn main_witness_output_rows<E: ExtensionField, PCS: PolynomialCommitmentSche
         .witness
         .first()
         .map(|mle| mle.evaluations_len())
+        .or(occupied_rows_override)
         .unwrap_or_else(|| input.num_instances() << composed_cs.rotation_vars().unwrap_or(0))
 }
 
@@ -607,6 +633,7 @@ pub(crate) fn estimate_main_constraints_bytes<
 fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
+    occupied_rows_override: Option<usize>,
 ) -> (usize, usize, usize, usize) {
     let cs = &composed_cs.zkvm_v1_css;
     let num_prod_towers = composed_cs.num_reads() + composed_cs.num_writes();
@@ -622,7 +649,12 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
     let elem_size = std::mem::size_of::<BB31Ext>();
     let has_logup_numerator = composed_cs.is_with_lk_table();
 
-    let occupied_rows = input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
+    let occupied_rows = input
+        .witness
+        .first()
+        .map(|mle| mle.evaluations_len())
+        .or(occupied_rows_override)
+        .unwrap_or_else(|| input.num_instances() << composed_cs.rotation_vars().unwrap_or(0));
     let build_est = estimate_build_tower_memory(
         num_prod_towers,
         num_logup_towers,
@@ -676,7 +708,7 @@ pub(crate) fn estimate_tower_stage_bytes<E: ExtensionField, PCS: PolynomialCommi
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
 ) -> (usize, usize) {
     let (build_bytes, prove_local_bytes, _, _) =
-        estimate_tower_stage_components(composed_cs, input);
+        estimate_tower_stage_components(composed_cs, input, None);
     (build_bytes, prove_local_bytes)
 }
 
@@ -685,7 +717,7 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
 ) -> usize {
     let (build_bytes, prove_local_bytes, tower_input_live_bytes, _) =
-        estimate_tower_stage_components(composed_cs, input);
+        estimate_tower_stage_components(composed_cs, input, None);
     build_bytes.max(tower_input_live_bytes + prove_local_bytes)
 }
 
