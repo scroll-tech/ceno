@@ -27,6 +27,7 @@ use ceno_gpu::{
 use either::Either;
 use ff_ext::ExtensionField;
 use gkr_iop::{
+    error::BackendError,
     gkr::{
         self, Evaluation, GKRProof, GKRProverOutput,
         layer::{LayerWitness, gpu::utils::extract_mle_relationships_from_monomial_terms},
@@ -345,7 +346,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
     challenges: &[E; 2],
     transcript: &mut impl Transcript<<GpuBackend<E, PCS> as ProverBackend>::E>,
     cuda_hal: &Arc<CudaHalBB31>,
-) -> TowerRelationOutput<E> {
+) -> Result<TowerRelationOutput<E>, ZKVMError> {
     let stream = gkr_iop::gpu::get_thread_stream();
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
         panic!("GPU backend only supports Goldilocks base field");
@@ -360,11 +361,12 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
     let (point, proof, lk_out_evals, w_out_evals, r_out_evals) = {
         // build_tower_witness_gpu builds compact GPU specs directly.
         let span = entered_span!("build_tower_witness", profiling_2 = true);
-        let (prod_gpu, logup_gpu) = info_span!("[ceno] build_tower_witness_gpu").in_scope(|| {
-            build_tower_witness_gpu(composed_cs, input, records, challenges, cuda_hal)
-                .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
-                .unwrap()
-        });
+        let (prod_gpu, logup_gpu) =
+            info_span!("[ceno] build_tower_witness_gpu").in_scope(|| {
+                build_tower_witness_gpu(composed_cs, input, records, challenges, cuda_hal)
+                    .map_err(|e| format!("build_tower_witness_gpu failed: {}", e))
+                    .map_err(|e| ZKVMError::InvalidWitness(e.into()))
+            })?;
         exit_span!(span);
 
         // GPU optimization: Extract out_evals from GPU-built towers before consuming them
@@ -392,12 +394,17 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
         };
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
-        let (point_gl, proof_gpu) = info_span!("[ceno] prove_tower_relation_gpu").in_scope(|| {
-            cuda_hal
-                .tower
-                .create_proof(cuda_hal, tower_input, NUM_FANIN, basic_tr, stream.as_ref())
-                .expect("gpu tower create_proof failed")
-        });
+        let (point_gl, proof_gpu) =
+            info_span!("[ceno] prove_tower_relation_gpu").in_scope(|| {
+                cuda_hal
+                    .tower
+                    .create_proof(cuda_hal, tower_input, NUM_FANIN, basic_tr, stream.as_ref())
+                    .map_err(|e| {
+                        ZKVMError::BackendError(BackendError::CircuitError(
+                            format!("gpu tower create_proof failed: {e:?}").into_boxed_str(),
+                        ))
+                    })
+            })?;
         exit_span!(span);
 
         // TowerProofs
@@ -406,7 +413,7 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
         (point, proof, lk_out_evals, w_out_evals, r_out_evals)
     };
 
-    (point, proof, lk_out_evals, w_out_evals, r_out_evals)
+    Ok((point, proof, lk_out_evals, w_out_evals, r_out_evals))
 }
 
 // Extract out_evals from GPU-built tower witnesses
@@ -1867,7 +1874,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
             challenges,
             transcript,
             &cuda_hal,
-        );
+        )
+        .expect("prove_tower_relation_impl failed");
 
         let estimated_bytes = estimate_tower_bytes::<E, PCS>(composed_cs, input);
         check_gpu_mem_estimation_with_context(

@@ -1372,8 +1372,13 @@ where
                         basic_tr,
                         gkr_iop::gpu::get_thread_stream().as_ref(),
                     )
-                    .expect("gpu tower create_proof failed")
-            });
+                    .map_err(|e| {
+                        ZKVMError::BackendError(BackendError::CircuitError(
+                            format!("gpu tower create_proof failed for {name}: {e:?}")
+                                .into_boxed_str(),
+                        ))
+                    })
+            })?;
         log_gpu_device_state(&format!("{name}:after_prove_tower"));
         log_gpu_pool_usage(&format!("{name}:after_prove_tower"));
         let rt_tower: Point<E> = unsafe { std::mem::transmute(rt_tower_gl) };
@@ -1469,7 +1474,7 @@ where
             prove_tower_relation_impl::<E, PCS>(
                 cs, &input, &records, challenges, transcript, &cuda_hal,
             )
-        });
+        })?;
     exit_span!(span);
     drop(records);
 

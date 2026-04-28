@@ -225,11 +225,11 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         tower_input_live_bytes,
         borrowed_tower_input_bytes,
     ) = estimate_tower_stage_components(composed_cs, input);
-    let scheduler_tower_input_live_bytes =
+    let tower_input_non_borrowed_bytes =
         tower_input_live_bytes.saturating_sub(borrowed_tower_input_bytes);
-    let tower_prove_peak_bytes = tower_input_live_bytes + tower_prove_local_bytes;
-    let scheduler_tower_prove_peak_bytes =
-        scheduler_tower_input_live_bytes + tower_prove_local_bytes;
+    let tower_input_backing_bytes = main_witness_bytes.max(borrowed_tower_input_bytes);
+    let tower_prove_stage_bytes =
+        tower_input_backing_bytes + tower_input_non_borrowed_bytes + tower_prove_local_bytes;
 
     // Part 5: main constraints (temporary usage)
     let main_constraints_temporary_bytes = estimate_main_constraints_bytes(composed_cs, input);
@@ -251,7 +251,6 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         // During tower prove, the replayed witness/device backing has already
         // been cleared, but the built TowerInput buffers remain live and
         // overlap with the fresh create_proof allocations.
-        let tower_prove_stage_bytes = tower_prove_peak_bytes;
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
         let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
         let replay_stage_bytes = structural_resident_bytes + replay_materialization_bytes;
@@ -271,7 +270,6 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         // to stay live through tower proving. They are dropped before the
         // ECC/rotation/main-constraint stages.
         let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
-        let tower_prove_stage_bytes = main_witness_bytes + scheduler_tower_prove_peak_bytes;
         let stage_peak = trace_est
             .trace_temporary_bytes
             .max(tower_build_stage_bytes)
@@ -290,18 +288,19 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     if replay_stage_split {
         let tower_build_stage_bytes =
             trace_est.trace_resident_bytes + main_witness_bytes + tower_build_bytes;
-        let tower_prove_stage_bytes = tower_prove_peak_bytes;
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
         let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
         let replay_stage_bytes = structural_resident_bytes + replay_materialization_bytes;
         tracing::info!(
-            "[mem estimate][{}] replay_split: trace={:.2}MB, main_witness={:.2}MB, replay={:.2}MB, tower_build_stage={:.2}MB, prove_tower_stage={:.2}MB, ecc_stage={:.2}MB, prove_main_stage={:.2}MB",
+            "[mem estimate][{}] replay_split: trace={:.2}MB, main_witness={:.2}MB, replay={:.2}MB, tower_build_stage={:.2}MB, prove_tower_stage={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_stage={:.2}MB, prove_main_stage={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_resident_bytes),
             to_mb(main_witness_bytes),
             to_mb(replay_stage_bytes),
             to_mb(tower_build_stage_bytes),
             to_mb(tower_prove_stage_bytes),
+            to_mb(tower_input_backing_bytes),
+            to_mb(borrowed_tower_input_bytes),
             to_mb(ecc_stage_bytes),
             to_mb(main_stage_bytes),
         );
@@ -314,7 +313,6 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         );
     } else {
         let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
-        let tower_prove_stage_bytes = main_witness_bytes + scheduler_tower_prove_peak_bytes;
         // Resident memory (always occupied during chip proof)
         tracing::info!(
             "[mem estimate][{}] resident: trace={:.2}MB",
@@ -323,11 +321,13 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         );
         // Stage-scoped memory beyond the always-live extracted trace.
         tracing::info!(
-            "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_main={:.2}MB, ecc_quark={:.2}MB, prove_main={:.2}MB",
+            "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_backing={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_quark={:.2}MB, prove_main={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_temporary_bytes),
             to_mb(tower_build_stage_bytes),
             to_mb(tower_prove_stage_bytes),
+            to_mb(tower_input_backing_bytes),
+            to_mb(borrowed_tower_input_bytes),
             to_mb(ecc_quark_temporary_bytes),
             to_mb(main_constraints_temporary_bytes),
         );
@@ -698,14 +698,13 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
 /// When cache is disabled (`CacheLevel::None`, the default), estimates actual allocation costs.
 pub(crate) fn estimate_trace_extraction_bytes(
     num_witin: usize,
-    num_vars: usize,
+    _num_vars: usize,
     occupied_rows: usize,
     witness_replayable: bool,
 ) -> (usize, usize) {
     let base_elem_size = std::mem::size_of::<BB31Base>();
-    let mle_len = 1usize << num_vars;
     let compact_poly_bytes = num_witin * occupied_rows * base_elem_size;
-    let logical_poly_bytes = num_witin * mle_len * base_elem_size;
+    let transpose_temporary_bytes = 2 * compact_poly_bytes;
 
     if should_materialize_witness_on_gpu() {
         if should_retain_witness_device_backing_after_commit() {
@@ -725,15 +724,17 @@ pub(crate) fn estimate_trace_extraction_bytes(
         }
 
         // GPU witgen alone does not imply replayability. Non-replayable traces
-        // still go through basefold::get_trace in cache-none mode, which
-        // allocates the extracted witness plus a temporary 2x transpose buffer.
-        return (compact_poly_bytes, 2 * logical_poly_bytes);
+        // still go through basefold::get_trace in cache-none mode. The fallback
+        // transpose buffer is 2x the compact RMM backing, not 2x the logical
+        // domain length.
+        return (compact_poly_bytes, transpose_temporary_bytes);
     }
 
     if matches!(get_gpu_cache_level(), CacheLevel::None) {
         // Default cache level is None
-        // get_trace allocates poly copies (resident) + temp_buffer (2x, freed after)
-        (compact_poly_bytes, 2 * logical_poly_bytes)
+        // get_trace allocates poly copies (resident) + temp_buffer over the
+        // compact RMM backing (2x, freed after).
+        (compact_poly_bytes, transpose_temporary_bytes)
     } else {
         (0, 0)
     }
