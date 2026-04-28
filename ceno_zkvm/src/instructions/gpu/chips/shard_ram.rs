@@ -845,6 +845,7 @@ pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionFiel
 
     let n = next_pow2_instance_padding(num_records);
     let num_rows_padded = 2 * n;
+    let stream = hal.inner.stream_or_default(None);
 
     let col_map = extract_shard_ram_column_map(config, num_witin);
 
@@ -863,7 +864,7 @@ pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionFiel
                 num_local_writes as u32,
                 num_witin as u32,
                 num_rows_padded as u32,
-                None,
+                Some(&stream),
             )
             .map_err(|e| {
                 ZKVMError::InvalidWitness(
@@ -875,13 +876,15 @@ pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionFiel
     let witness_buf = tracing::info_span!("gpu_shard_ram_ec_tree_from_device", n).in_scope(
         || -> Result<_, ZKVMError> {
             let col_offsets = col_map.to_flat();
-            let gpu_cols = hal.alloc_u32_from_host(&col_offsets, None).map_err(|e| {
-                ZKVMError::InvalidWitness(format!("GPU alloc col offsets failed: {e}").into())
-            })?;
+            let gpu_cols = hal
+                .alloc_u32_from_host(&col_offsets, Some(&stream))
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(format!("GPU alloc col offsets failed: {e}").into())
+                })?;
 
             let (mut cur_x, mut cur_y) = hal
                 .witgen
-                .extract_ec_points_from_device(device_records, num_records, n, None)
+                .extract_ec_points_from_device(device_records, num_records, n, Some(&stream))
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(format!("GPU extract_ec_points failed: {e}").into())
                 })?;
@@ -889,6 +892,7 @@ pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionFiel
             let mut witness_buf = gpu_witness.device_buffer;
             let mut offset = num_rows_padded / 2;
             let mut current_layer_len = n;
+            let mut retained_layers = Vec::new();
 
             loop {
                 if current_layer_len <= 1 {
@@ -897,7 +901,7 @@ pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionFiel
 
                 let (next_x, next_y) = hal
                     .witgen
-                    .shard_ram_ec_tree_layer(
+                    .shard_ram_ec_tree_layer_async(
                         &gpu_cols,
                         &cur_x,
                         &cur_y,
@@ -905,7 +909,7 @@ pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionFiel
                         current_layer_len,
                         offset,
                         num_rows_padded,
-                        None,
+                        Some(&stream),
                     )
                     .map_err(|e| {
                         ZKVMError::InvalidWitness(format!("GPU EC tree layer failed: {e}").into())
@@ -913,9 +917,14 @@ pub(crate) fn try_gpu_assign_shard_ram_witness_only_from_device<E: ExtensionFiel
 
                 current_layer_len /= 2;
                 offset += current_layer_len;
+                retained_layers.push((cur_x, cur_y));
                 cur_x = next_x;
                 cur_y = next_y;
             }
+
+            hal.inner.synchronize_stream(&stream).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU EC tree stream sync failed: {e}").into())
+            })?;
 
             Ok(witness_buf)
         },

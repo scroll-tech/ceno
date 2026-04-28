@@ -239,9 +239,7 @@ impl<
                     && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit();
                 #[cfg(feature = "gpu")]
                 let trace_rows_for_estimate =
-                    if !crate::instructions::gpu::config::is_gpu_witgen_enabled()
-                        && witness_rmm.num_instances() > 0
-                    {
+                    if witness_rmm.num_instances() > 0 && gpu_replay_plan.is_none() {
                         Some(witness_rmm.height())
                     } else {
                         None
