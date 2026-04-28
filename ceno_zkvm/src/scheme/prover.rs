@@ -1134,6 +1134,20 @@ where
         .get_pool_stream()
         .expect("should acquire stream");
     let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(_stream.clone());
+    let sync_concurrent_chip_stream = || -> Result<(), ZKVMError> {
+        if ChipScheduler::is_concurrent_mode() {
+            cuda_hal
+                .inner
+                .synchronize_stream(_stream.stream())
+                .map_err(|e| {
+                    ZKVMError::BackendError(BackendError::CircuitError(
+                        format!("failed to synchronize GPU chip proof stream for {name}: {e:?}")
+                            .into_boxed_str(),
+                    ))
+                })?;
+        }
+        Ok(())
+    };
     let replay_stage_split = gpu_replay_plan
         .as_ref()
         .is_some_and(|plan| matches!(plan.kind, GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam));
@@ -1370,6 +1384,7 @@ where
             wits_in_evals,
             fixed_in_evals,
         } = evals;
+        sync_concurrent_chip_stream()?;
         clear_materialized_input(&mut input);
         log_gpu_device_state(&format!("{name}:after_main_constraints"));
         exit_span!(span);
@@ -1454,6 +1469,7 @@ where
         wits_in_evals,
         fixed_in_evals,
     } = evals;
+    sync_concurrent_chip_stream()?;
     exit_span!(span);
 
     Ok((
