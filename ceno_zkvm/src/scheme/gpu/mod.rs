@@ -1120,17 +1120,25 @@ where
                 .expect("deferred commit source reused");
             let witness_rmm: witness::RowMajorMatrix<E::BaseField> = match source {
                 DeferredGpuTrace::Eager(rmm) => rmm,
-                DeferredGpuTrace::Replay(plan) => plan
-                    .replay_witness()
-                    .map(|witness_rmm| {
-                        assert_eq!(
-                            witness_rmm.height(),
-                            plan.trace_height,
-                            "replayed trace height changed between plan build and deferred commit",
-                        );
-                        witness_rmm
-                    })
-                    .map_err(|e| ceno_gpu::HalError::InvalidInput(format!("{e:?}")))?,
+                DeferredGpuTrace::Replay(plan) => info_span!(
+                    "[ceno] replay_witness_materialize",
+                    phase = "commit_traces",
+                    trace_idx,
+                    kind = ?plan.kind,
+                    rows = plan.trace_height,
+                    num_witin = plan.num_witin,
+                    steps = plan.step_indices.len(),
+                )
+                .in_scope(|| plan.replay_witness())
+                .map(|witness_rmm| {
+                    assert_eq!(
+                        witness_rmm.height(),
+                        plan.trace_height,
+                        "replayed trace height changed between plan build and deferred commit",
+                    );
+                    witness_rmm
+                })
+                .map_err(|e| ceno_gpu::HalError::InvalidInput(format!("{e:?}")))?,
             };
             Ok(unsafe { std::mem::transmute(witness_rmm) })
         })
@@ -1501,7 +1509,16 @@ where
     };
 
     for (trace_idx, replay_plan) in replayable_traces {
-        let witness_rmm = replay_plan.replay_witness()?;
+        let witness_rmm = info_span!(
+            "[ceno] replay_witness_materialize",
+            phase = "restore_pcs_backing",
+            trace_idx = *trace_idx,
+            kind = ?replay_plan.kind,
+            rows = replay_plan.trace_height,
+            num_witin = replay_plan.num_witin,
+            steps = replay_plan.step_indices.len(),
+        )
+        .in_scope(|| replay_plan.replay_witness())?;
         assert_eq!(
             witness_rmm.height(),
             replay_plan.trace_height,
@@ -2190,7 +2207,18 @@ where
                 else {
                     return Ok(None);
                 };
-                let witness_rmm = replay_plan.replay_witness().map_err(|err| {
+                let witness_rmm = info_span!(
+                    "[ceno] replay_witness_materialize",
+                    phase = "pcs_opening",
+                    round_idx,
+                    trace_idx,
+                    kind = ?replay_plan.kind,
+                    rows = replay_plan.trace_height,
+                    num_witin = replay_plan.num_witin,
+                    steps = replay_plan.step_indices.len(),
+                )
+                .in_scope(|| replay_plan.replay_witness())
+                .map_err(|err| {
                     ceno_gpu::HalError::InvalidInput(format!(
                         "failed to replay trace {trace_idx} for PCS opening: {err:?}"
                     ))
@@ -2334,7 +2362,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     )
                 })
             } else {
-                let witness_rmm = replay_plan.replay_witness().expect("GPU raw replay failed");
+                let witness_rmm = info_span!(
+                    "[ceno] replay_witness_materialize",
+                    phase = "gpu_task",
+                    circuit = task.circuit_name.as_str(),
+                    kind = ?replay_plan.kind,
+                    rows = replay_plan.trace_height,
+                    num_witin = replay_plan.num_witin,
+                    steps = replay_plan.step_indices.len(),
+                )
+                .in_scope(|| replay_plan.replay_witness())
+                .expect("GPU raw replay failed");
                 check_gpu_mem_estimation_with_context(
                     gpu_mem_tracker,
                     estimated_replay_bytes,

@@ -1221,7 +1221,16 @@ where
         );
         log_gpu_device_state(&format!("{name}:before_replay"));
         log_gpu_pool_usage(&format!("{name}:before_replay"));
-        let witness_rmm = replay_plan.replay_witness()?;
+        let witness_rmm = info_span!(
+            "[ceno] replay_witness_materialize",
+            phase = "chip_proof",
+            circuit = name,
+            kind = ?replay_plan.kind,
+            rows = replay_plan.trace_height,
+            num_witin = replay_plan.num_witin,
+            steps = replay_plan.step_indices.len(),
+        )
+        .in_scope(|| replay_plan.replay_witness())?;
         crate::scheme::gpu::check_gpu_mem_estimation_with_context(
             gpu_mem_tracker,
             estimated_replay_bytes,
