@@ -1341,14 +1341,18 @@ where
             .saturating_sub(tower_input_live_bytes);
         let release_adjusted_prebuild_bytes =
             tower_prove_prebuild_estimated_bytes / NUM_FANIN + 4 * 1024 * 1024;
-        let tower_prove_estimated_bytes =
-            runtime_layout_prove_bytes.max(release_adjusted_prebuild_bytes);
+        let allocator_overhead_bytes =
+            crate::scheme::gpu::tower_prove_allocator_overhead_bytes(name);
+        let tower_prove_estimated_bytes = runtime_layout_prove_bytes
+            .max(release_adjusted_prebuild_bytes)
+            + allocator_overhead_bytes;
         tracing::info!(
-            "[gpu tower][{}] refined prove_tower estimate: prebuild={:.2}MB, runtime_layout={:.2}MB, release_adjusted={:.2}MB, local={:.2}MB, tower_live={:.2}MB",
+            "[gpu tower][{}] refined prove_tower estimate: prebuild={:.2}MB, runtime_layout={:.2}MB, release_adjusted={:.2}MB, allocator_overhead={:.2}MB, local={:.2}MB, tower_live={:.2}MB",
             name,
             tower_prove_prebuild_estimated_bytes as f64 / (1024.0 * 1024.0),
             runtime_layout_prove_bytes as f64 / (1024.0 * 1024.0),
             release_adjusted_prebuild_bytes as f64 / (1024.0 * 1024.0),
+            allocator_overhead_bytes as f64 / (1024.0 * 1024.0),
             tower_prove_estimated_bytes as f64 / (1024.0 * 1024.0),
             tower_input_live_bytes as f64 / (1024.0 * 1024.0),
         );

@@ -46,6 +46,15 @@ pub fn init_gpu_mem_tracker<'a>(
 const ESTIMATION_TOLERANCE_BYTES: usize = 2 * 1024 * 1024; // max under-estimation error: 2 MB
 const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved headroom / allowed over-estimate margin: 10 MB
 const SCHEDULER_ESTIMATION_WARNING_MARGIN_BYTES: usize = 512 * 1024 * 1024;
+const SHARD_RAM_TOWER_PROVE_ALLOCATOR_OVERHEAD_BYTES: usize = 16 * 1024 * 1024;
+
+pub(crate) fn tower_prove_allocator_overhead_bytes(circuit_name: &str) -> usize {
+    if circuit_name == "ShardRamCircuit" {
+        SHARD_RAM_TOWER_PROVE_ALLOCATOR_OVERHEAD_BYTES
+    } else {
+        0
+    }
+}
 
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
@@ -623,13 +632,12 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         elem_size,
         has_logup_numerator,
     );
-    let shard_ram_tower_batch_overhead = composed_cs
+    let is_shard_ram = composed_cs
         .gkr_circuit
         .as_ref()
         .and_then(|circuit| circuit.layers.first())
-        .is_some_and(|layer| layer.name == "ShardRamCircuit_main")
-        .then_some(10 * 1024 * 1024)
-        .unwrap_or(0);
+        .is_some_and(|layer| layer.name == "ShardRamCircuit_main");
+    let shard_ram_tower_batch_overhead = is_shard_ram.then_some(10 * 1024 * 1024).unwrap_or(0);
     let build_bytes = build_est.total_bytes + shard_ram_tower_batch_overhead;
     let prove_est = estimate_prove_tower_memory(
         num_prod_towers,
@@ -646,7 +654,12 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
     let borrowed_input_bytes =
         prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes;
-    let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes);
+    let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes)
+        + if is_shard_ram {
+            tower_prove_allocator_overhead_bytes("ShardRamCircuit")
+        } else {
+            0
+        };
 
     (
         build_bytes,
