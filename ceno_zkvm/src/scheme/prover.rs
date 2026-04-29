@@ -553,7 +553,28 @@ impl<
                 transcript.append_field_element_ext(&sample);
             }
 
-            let main_constraints_span = entered_span!("prove_batched_main_constraints", profiling_1 = true);
+            #[cfg(feature = "gpu")]
+            if needs_replay_restore {
+                let replay_cache = current_replay_cache_stats();
+                tracing::info!(
+                    "[gpu replay cache][before_restore_main] shard_steps={:.2}MB shard_meta={:.2}MB shared_side_effect={:.2}MB total={:.2}MB",
+                    replay_cache.shard_steps_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.shard_meta_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.shared_side_effect_bytes as f64 / (1024.0 * 1024.0),
+                    replay_cache.total_bytes() as f64 / (1024.0 * 1024.0),
+                );
+                crate::scheme::gpu::log_gpu_device_state("before_restore_main");
+                let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                    unsafe { std::mem::transmute(&mut witness_data) };
+                crate::scheme::gpu::restore_replayable_trace_device_backing::<E, PCS>(
+                    gpu_witness_data,
+                    &replayable_traces,
+                )?;
+                crate::scheme::gpu::log_gpu_device_state("after_restore_main");
+            }
+
+            let main_constraints_span =
+                entered_span!("prove_batched_main_constraints", profiling_1 = true);
             let (main_constraint_proof, main_constraint_results) =
                 info_span!("[ceno] prove_batched_main_constraints").in_scope(|| {
                     self.device
@@ -569,25 +590,6 @@ impl<
             // batch opening pcs
             // generate static info from prover key for expected num variable
             let pcs_opening = entered_span!("pcs_opening", profiling_1 = true);
-            #[cfg(feature = "gpu")]
-            if needs_replay_restore {
-                let replay_cache = current_replay_cache_stats();
-                tracing::info!(
-                    "[gpu replay cache][before_restore_pcs] shard_steps={:.2}MB shard_meta={:.2}MB shared_side_effect={:.2}MB total={:.2}MB",
-                    replay_cache.shard_steps_bytes as f64 / (1024.0 * 1024.0),
-                    replay_cache.shard_meta_bytes as f64 / (1024.0 * 1024.0),
-                    replay_cache.shared_side_effect_bytes as f64 / (1024.0 * 1024.0),
-                    replay_cache.total_bytes() as f64 / (1024.0 * 1024.0),
-                );
-                crate::scheme::gpu::log_gpu_device_state("before_restore_pcs");
-                let gpu_witness_data: &mut <gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
-                    unsafe { std::mem::transmute(&mut witness_data) };
-                crate::scheme::gpu::restore_replayable_trace_device_backing::<E, PCS>(
-                    gpu_witness_data,
-                    &replayable_traces,
-                )?;
-                crate::scheme::gpu::log_gpu_device_state("after_restore_pcs");
-            }
             let mpcs_opening_proof = info_span!("[ceno] pcs_opening").in_scope(|| {
                 #[cfg(feature = "gpu")]
                 {
