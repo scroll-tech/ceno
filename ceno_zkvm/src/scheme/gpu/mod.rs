@@ -2493,6 +2493,143 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
     }
 }
 
+pub fn open_with_incremental_replay<E, PCS>(
+    prover: &GpuProver<GpuBackend<E, PCS>>,
+    witness_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    fixed_data: Option<Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData>>,
+    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
+    points: Vec<Point<E>>,
+    mut evals: Vec<Vec<Vec<E>>>,
+    transcript: &mut (impl Transcript<E> + 'static),
+) -> PCS::Proof
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
+        panic!("GPU backend only supports BabyBear base field");
+    }
+
+    let mut rounds = vec![];
+    rounds.push((&witness_data, {
+        evals
+            .iter_mut()
+            .zip(&points)
+            .filter_map(|(evals, point)| {
+                let witin_evals = evals.remove(0);
+                if !witin_evals.is_empty() {
+                    Some((point.clone(), witin_evals))
+                } else {
+                    None
+                }
+            })
+            .collect_vec()
+    }));
+    if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
+        rounds.push((fixed_data, {
+            evals
+                .iter_mut()
+                .zip(points.iter().cloned())
+                .filter_map(|(evals, point)| {
+                    if !evals.is_empty() && !evals[0].is_empty() {
+                        Some((point.clone(), evals.remove(0)))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec()
+        }));
+    }
+
+    let prover_param = &prover.backend.pp;
+    let pp_gl64: &mpcs::basefold::structure::BasefoldProverParams<BB31Ext, mpcs::BasefoldRSParams> =
+        unsafe { std::mem::transmute(prover_param) };
+    let rounds_gl64: Vec<_> = rounds
+        .iter()
+        .map(|(commitment, point_eval_pairs)| {
+            let commitment_gl64: &BasefoldCommitmentWithWitnessGpu<
+                BB31Base,
+                BufferImpl<BB31Base>,
+                GpuDigestLayer,
+                GpuMatrix<'static>,
+                GpuPolynomial<'static>,
+            > = unsafe { std::mem::transmute(*commitment) };
+            let point_eval_pairs_gl64: Vec<_> = point_eval_pairs
+                .iter()
+                .map(|(point, evals)| {
+                    let point_gl64: &Vec<BB31Ext> = unsafe { std::mem::transmute(point) };
+                    let evals_gl64: &Vec<BB31Ext> = unsafe { std::mem::transmute(evals) };
+                    (point_gl64.clone(), evals_gl64.clone())
+                })
+                .collect();
+            (commitment_gl64, point_eval_pairs_gl64)
+        })
+        .collect();
+
+    if std::any::TypeId::of::<E>() != std::any::TypeId::of::<BB31Ext>() {
+        panic!("GPU backend only supports BabyBear field extension");
+    }
+
+    let transcript_any = transcript as &mut dyn std::any::Any;
+    let basic_transcript = transcript_any
+        .downcast_mut::<BasicTranscript<BB31Ext>>()
+        .expect("Type should match");
+
+    let cuda_hal = get_cuda_hal().unwrap();
+    let gpu_proof_basefold = cuda_hal
+        .basefold
+        .batch_open_with_trace_materializer(
+            &cuda_hal,
+            pp_gl64,
+            rounds_gl64,
+            basic_transcript,
+            |round_idx, trace_idx| {
+                if round_idx != 0 {
+                    return Ok(None);
+                }
+                let Some((_, replay_plan)) = replayable_traces
+                    .iter()
+                    .find(|(replay_trace_idx, _)| *replay_trace_idx == trace_idx)
+                else {
+                    return Ok(None);
+                };
+                let witness_rmm = info_span!(
+                    "[ceno] replay_witness_materialize",
+                    phase = "pcs_opening",
+                    round_idx,
+                    trace_idx,
+                    kind = ?replay_plan.kind,
+                    rows = replay_plan.trace_height,
+                    num_witin = replay_plan.num_witin,
+                    steps = replay_plan.step_indices.len(),
+                )
+                .in_scope(|| replay_plan.replay_witness())
+                .map_err(|err| {
+                    ceno_gpu::HalError::InvalidInput(format!(
+                        "failed to replay trace {trace_idx} for PCS opening: {err:?}"
+                    ))
+                })?;
+                if witness_rmm.height() != replay_plan.trace_height {
+                    return Err(ceno_gpu::HalError::InvalidInput(format!(
+                        "replayed trace {trace_idx} height changed before PCS opening: expected {}, got {}",
+                        replay_plan.trace_height,
+                        witness_rmm.height(),
+                    )));
+                }
+                let witness_rmm_bb31: witness::RowMajorMatrix<BB31Base> =
+                    unsafe { std::mem::transmute(witness_rmm) };
+                Ok(Some(witness_rmm_bb31))
+            },
+        )
+        .unwrap();
+
+    let gpu_proof: PCS::Proof = unsafe { std::mem::transmute_copy(&gpu_proof_basefold) };
+    std::mem::forget(gpu_proof_basefold);
+    drop(rounds);
+    drop(witness_data);
+    gpu_proof
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
