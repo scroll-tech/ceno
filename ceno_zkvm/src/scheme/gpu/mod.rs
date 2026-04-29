@@ -1200,6 +1200,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         let (mles, pcs_data, commit) = if is_pcs_match {
             let mut vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
                 traces.into_values().collect();
+            for (trace_idx, trace) in vec_traces.iter_mut().enumerate() {
+                if trace.width() == 0 {
+                    tracing::warn!(
+                        "[gpu] replacing zero-width witness trace at index {trace_idx} with a dummy column"
+                    );
+                    *trace = witness::RowMajorMatrix::<E::BaseField>::new(
+                        trace.num_instances(),
+                        1,
+                        InstancePaddingStrategy::Default,
+                    );
+                }
+            }
 
             if crate::instructions::gpu::config::should_materialize_witness_on_gpu() {
                 let span = entered_span!("[gpu] normalize_trace_backing", profiling_2 = true);
@@ -1395,6 +1407,144 @@ where
         trace_idx,
         mles.len()
     );
+
+    mles
+}
+
+fn shard_ram_compact_physical_rows(col_idx: usize, num_records: usize, full_rows: usize) -> usize {
+    // ShardRAM witness columns are laid out as:
+    //   0..7   x EC coordinates
+    //   7..14  y EC coordinates
+    //   14..21 EC addition slopes
+    //   21..30 scalar record fields
+    //   30..   Poseidon2 trace columns
+    //
+    // Only the scalar record fields and Poseidon2 trace are prefix-populated
+    // on real record rows. EC columns also carry internal tree rows in the
+    // upper half, so they must keep the full logical backing.
+    if col_idx < 21 { full_rows } else { num_records }
+}
+
+pub fn extract_shard_ram_witness_mles_for_trace<'a, E, PCS>(
+    pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    trace_idx: usize,
+    expected_num: usize,
+    num_vars: usize,
+    num_records: usize,
+) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU ShardRAM compact extraction only supports BabyBear base field",
+    );
+
+    let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(pcs_data) };
+
+    let Some(rmms) = pcs_data_basefold.rmms.as_ref() else {
+        return extract_witness_mles_for_trace::<E, PCS>(
+            pcs_data,
+            trace_idx,
+            expected_num,
+            num_vars,
+        );
+    };
+    let rmm = &rmms[trace_idx];
+    assert_eq!(
+        rmm.width(),
+        expected_num,
+        "ShardRAM trace width mismatch: expected {}, got {}",
+        expected_num,
+        rmm.width(),
+    );
+
+    let cuda_hal = get_cuda_hal().unwrap();
+    let full_rows = rmm.height();
+    assert_eq!(
+        full_rows,
+        1usize << num_vars,
+        "ShardRAM trace height must match logical num_vars",
+    );
+    assert!(
+        num_records <= full_rows,
+        "ShardRAM compact rows exceed full rows: {} > {}",
+        num_records,
+        full_rows,
+    );
+
+    let mles = if rmm.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor) {
+        let device_buffer = rmm
+            .device_backing_ref::<BufferImpl<'static, BB31Base>>()
+            .unwrap_or_else(|| panic!("ShardRAM col-major device backing type mismatch"));
+        let elem_size = std::mem::size_of::<BB31Base>();
+        let col_stride_bytes = full_rows * elem_size;
+        (0..expected_num)
+            .map(|col_idx| {
+                let physical_rows =
+                    shard_ram_compact_physical_rows(col_idx, num_records, full_rows);
+                let start = col_idx * col_stride_bytes;
+                let end = start + physical_rows * elem_size;
+                let view_buf = device_buffer.owned_subrange(start..end);
+                let view_poly = GpuPolynomial::new(view_buf, num_vars);
+                let poly_static: GpuPolynomial<'static> = unsafe { std::mem::transmute(view_poly) };
+                let mle_static = MultilinearExtensionGpu::from_ceno_gpu_base(poly_static);
+                Arc::new(unsafe {
+                    std::mem::transmute::<
+                        MultilinearExtensionGpu<'static, E>,
+                        MultilinearExtensionGpu<'a, E>,
+                    >(mle_static)
+                })
+            })
+            .collect::<Vec<_>>()
+    } else {
+        let values = rmm.values();
+        (0..expected_num)
+            .map(|col_idx| {
+                let physical_rows =
+                    shard_ram_compact_physical_rows(col_idx, num_records, full_rows);
+                let mut column = Vec::with_capacity(physical_rows);
+                column.extend((0..physical_rows).map(|row| values[row * expected_num + col_idx]));
+                let column_bb31: Vec<BB31Base> = unsafe {
+                    let mut column = std::mem::ManuallyDrop::new(column);
+                    Vec::from_raw_parts(
+                        column.as_mut_ptr() as *mut BB31Base,
+                        column.len(),
+                        column.capacity(),
+                    )
+                };
+                let gpu_poly = cuda_hal
+                    .alloc_elems_from_host(&column_bb31, None)
+                    .map(|buffer| GpuPolynomial::new(buffer, num_vars))
+                    .unwrap_or_else(|err| panic!("ShardRAM compact H2D failed: {err:?}"));
+                let mle_static = MultilinearExtensionGpu::from_ceno_gpu_base(gpu_poly);
+                Arc::new(unsafe {
+                    std::mem::transmute::<
+                        MultilinearExtensionGpu<'static, E>,
+                        MultilinearExtensionGpu<'a, E>,
+                    >(mle_static)
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+
+    eprintln!(
+        "[ceno][shard-ram-compact-mle] trace_idx={} cols={} records={} full_rows={} compact_cols={}",
+        trace_idx,
+        expected_num,
+        num_records,
+        full_rows,
+        expected_num.saturating_sub(21),
+    );
+    let _ = std::io::stderr().flush();
 
     mles
 }
@@ -2013,12 +2163,22 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 if let Some(trace_idx) = job.witness_trace_idx {
                     job.input.witness =
                         info_span!("[ceno] extract_main_witness_mles").in_scope(|| {
-                            extract_witness_mles_for_trace::<E, PCS>(
-                                pcs_data,
-                                trace_idx,
-                                job.num_witin,
-                                num_vars,
-                            )
+                            if job.circuit_name == "ShardRamCircuit" {
+                                extract_shard_ram_witness_mles_for_trace::<E, PCS>(
+                                    pcs_data,
+                                    trace_idx,
+                                    job.num_witin,
+                                    num_vars,
+                                    job.input.num_instances(),
+                                )
+                            } else {
+                                extract_witness_mles_for_trace::<E, PCS>(
+                                    pcs_data,
+                                    trace_idx,
+                                    job.num_witin,
+                                    num_vars,
+                                )
+                            }
                         });
                 }
             }
@@ -2752,40 +2912,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     ) {
         if let Some(replay_plan) = task.gpu_replay_plan.as_ref() {
-            let cuda_hal = get_cuda_hal().unwrap();
-            let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
             let num_vars =
                 task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
-            let estimated_replay_bytes =
-                estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
-            tracing::info!(
-                "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
-                task.circuit_name,
-                estimated_replay_bytes as f64 / (1024.0 * 1024.0),
-            );
-            task.input.witness = if let Some(trace_idx) = task.witness_trace_idx {
-                check_gpu_mem_estimation_with_context(
-                    gpu_mem_tracker,
-                    0,
-                    Some(task.circuit_name.as_str()),
+            if task.num_witin > 0 {
+                let cuda_hal = get_cuda_hal().unwrap();
+                let gpu_mem_tracker =
+                    init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
+                let estimated_replay_bytes =
+                    estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
+                tracing::info!(
+                    "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
+                    task.circuit_name,
+                    estimated_replay_bytes as f64 / (1024.0 * 1024.0),
                 );
-                info_span!("[ceno] extract_witness_mles").in_scope(|| {
-                    extract_witness_mles_for_trace::<E, PCS>(
-                        pcs_data,
-                        trace_idx,
-                        task.num_witin,
-                        num_vars,
-                    )
-                })
-            } else {
                 let witness_rmm = replay_plan.replay_witness().expect("GPU raw replay failed");
                 check_gpu_mem_estimation_with_context(
                     gpu_mem_tracker,
                     estimated_replay_bytes,
                     Some(task.circuit_name.as_str()),
                 );
-                info_span!("[ceno] replay_gpu_witness_from_raw")
-                    .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm))
+                task.input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
+                    .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
             };
             if let Some(rmm) = task.structural_rmm.as_ref() {
                 task.input.structural_witness = info_span!("[ceno] transport_structural_witness")

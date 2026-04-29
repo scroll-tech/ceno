@@ -184,6 +184,7 @@ pub struct MainSumcheckEvals<E: ExtensionField> {
 }
 
 pub struct MainConstraintJob<'a, PB: ProverBackend> {
+    pub circuit_name: String,
     pub circuit_idx: usize,
     pub input: ProofInput<'static, PB>,
     pub witness_trace_idx: Option<usize>,

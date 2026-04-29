@@ -250,23 +250,23 @@ impl<
                         None
                     };
 
-                #[cfg(feature = "gpu")]
-                if use_deferred_gpu_commit {
-                    if let Some(plan) = gpu_replay_plan.clone() {
-                        deferred_gpu_traces
-                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Replay(plan));
-                    } else if witness_rmm.num_instances() > 0 {
-                        deferred_gpu_traces
-                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Eager(witness_rmm));
-                    }
-                } else if witness_rmm.num_instances() > 0 {
-                    wits_rmms.insert(i, witness_rmm);
-                }
+	                #[cfg(feature = "gpu")]
+	                if use_deferred_gpu_commit {
+	                    if let Some(plan) = gpu_replay_plan.clone().filter(|plan| plan.num_witin > 0) {
+	                        deferred_gpu_traces
+	                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Replay(plan));
+	                    } else if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
+	                        deferred_gpu_traces
+	                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Eager(witness_rmm));
+	                    }
+	                } else if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
+	                    wits_rmms.insert(i, witness_rmm);
+	                }
 
-                #[cfg(not(feature = "gpu"))]
-                if witness_rmm.num_instances() > 0 {
-                    wits_rmms.insert(i, witness_rmm);
-                }
+	                #[cfg(not(feature = "gpu"))]
+	                if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
+	                    wits_rmms.insert(i, witness_rmm);
+	                }
                 structural_rmms.push(structural_witness_rmm);
                 #[cfg(feature = "gpu")]
                 witness_trace_rows.push(trace_rows_for_estimate);
@@ -924,6 +924,7 @@ impl<
                 num_instances: input.num_instances,
             },
             MainConstraintJob {
+                circuit_name: task.circuit_name.clone(),
                 circuit_idx: task.circuit_idx,
                 input: main_input,
                 witness_trace_idx: task.witness_trace_idx,
