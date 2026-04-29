@@ -53,6 +53,7 @@ use rayon::iter::{
 };
 use std::{
     collections::BTreeMap,
+    io::Write,
     iter::{once, repeat_n},
     sync::Arc,
 };
@@ -1995,6 +1996,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             ));
         }
 
+        log_gpu_device_state("batched_main_entry");
+        log_gpu_pool_usage("batched_main_entry");
+
         let stream = gkr_iop::gpu::get_thread_stream();
         let cuda_hal = get_cuda_hal().map_err(hal_to_backend_error)?;
         for job in jobs.iter_mut() {
@@ -2026,6 +2030,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 }
             }
         }
+        log_gpu_device_state("batched_main_after_inputs");
+        log_gpu_pool_usage("batched_main_after_inputs");
+
         let mut selector_eqs_by_chip = Vec::with_capacity(jobs.len());
         let mut chip_data = Vec::with_capacity(jobs.len());
         let mut total_exprs = 0usize;
@@ -2218,6 +2225,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             total_mles += num_mles;
             total_exprs += first_layer.exprs.len();
         }
+        log_gpu_device_state("batched_main_after_selector_eqs");
+        log_gpu_pool_usage("batched_main_after_selector_eqs");
 
         let mut all_witins_gpu = Vec::with_capacity(total_mles);
         for ((job, chip), selector_eq_by_wit_id) in jobs
@@ -2299,6 +2308,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+        eprintln!(
+            "[ceno][batched-main-sumcheck][start] jobs={} total_mles={} total_terms={} max_num_variables={} max_degree={}",
+            chip_data.len(),
+            total_mles,
+            mle_indices_per_term.len(),
+            max_num_variables,
+            max_degree,
+        );
+        let _ = std::io::stderr().flush();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
             .prove_generic_sumcheck_gpu(
                 all_witins_gpu_type_gl64,
@@ -2312,6 +2330,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 stream.as_ref(),
             )
             .map_err(|e| hal_to_backend_error(format!("GPU main sumcheck failed: {e:?}")))?;
+        eprintln!(
+            "[ceno][batched-main-sumcheck][done] eval_vectors={} challenges={}",
+            evals_gpu.len(),
+            challenges_gpu.len(),
+        );
+        let _ = std::io::stderr().flush();
         let proof: IOPProof<E> = unsafe { std::mem::transmute(proof_gpu) };
         let evals_gpu_e: Vec<Vec<E>> = unsafe { std::mem::transmute(evals_gpu) };
         let global_evals = evals_gpu_e.into_iter().flatten().collect_vec();
