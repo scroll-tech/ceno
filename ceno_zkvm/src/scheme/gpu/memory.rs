@@ -249,8 +249,8 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     let tower_prove_stage_bytes =
         tower_input_backing_bytes + tower_input_non_borrowed_bytes + tower_prove_local_bytes;
 
-    // Part 5: main constraints (temporary usage)
-    let main_constraints_temporary_bytes = estimate_main_constraints_bytes(composed_cs, input);
+    // Main constraints are proved in the shard-level batched stage, not in the
+    // chip-local scheduler reservation.
 
     let replay_stage_split =
         witness_replayable && matches!(circuit_name, "Ecall_Keccak" | "ShardRamCircuit");
@@ -270,12 +270,10 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         // been cleared, but the built TowerInput buffers remain live and
         // overlap with the fresh create_proof allocations.
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
-        let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
         let replay_stage_bytes = structural_resident_bytes + replay_materialization_bytes;
         let stage_peak = tower_build_stage_bytes
             .max(tower_prove_stage_bytes)
             .max(ecc_stage_bytes)
-            .max(main_stage_bytes)
             .max(replay_stage_bytes);
         (
             0usize,
@@ -292,8 +290,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             .trace_temporary_bytes
             .max(tower_build_stage_bytes)
             .max(tower_prove_stage_bytes)
-            .max(ecc_quark_temporary_bytes)
-            .max(main_constraints_temporary_bytes);
+            .max(ecc_quark_temporary_bytes);
         let resident = trace_est.trace_resident_bytes;
         (
             resident,
@@ -307,10 +304,9 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         let tower_build_stage_bytes =
             trace_est.trace_resident_bytes + main_witness_bytes + tower_build_bytes;
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
-        let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
         let replay_stage_bytes = structural_resident_bytes + replay_materialization_bytes;
         tracing::info!(
-            "[mem estimate][{}] replay_split: trace={:.2}MB, main_witness={:.2}MB, replay={:.2}MB, tower_build_stage={:.2}MB, prove_tower_stage={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_stage={:.2}MB, prove_main_stage={:.2}MB",
+            "[mem estimate][{}] replay_split: trace={:.2}MB, main_witness={:.2}MB, replay={:.2}MB, tower_build_stage={:.2}MB, prove_tower_stage={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_stage={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_resident_bytes),
             to_mb(main_witness_bytes),
@@ -320,7 +316,6 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             to_mb(tower_input_backing_bytes),
             to_mb(borrowed_tower_input_bytes),
             to_mb(ecc_stage_bytes),
-            to_mb(main_stage_bytes),
         );
         tracing::info!(
             "[mem estimate][{}] total_usage={:.2}MB (replay_split_peak={:.2}MB + safety={:.2}MB)",
@@ -339,7 +334,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         );
         // Stage-scoped memory beyond the always-live extracted trace.
         tracing::info!(
-            "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_backing={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_quark={:.2}MB, prove_main={:.2}MB",
+            "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_backing={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_quark={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_temporary_bytes),
             to_mb(tower_build_stage_bytes),
@@ -347,7 +342,6 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             to_mb(tower_input_backing_bytes),
             to_mb(borrowed_tower_input_bytes),
             to_mb(ecc_quark_temporary_bytes),
-            to_mb(main_constraints_temporary_bytes),
         );
         // Total peak = resident + max(stage temporaries)
         tracing::info!(

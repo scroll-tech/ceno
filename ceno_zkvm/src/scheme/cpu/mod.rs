@@ -1,10 +1,12 @@
 use super::hal::{
-    DeviceTransporter, MainSumcheckEvals, MainSumcheckProver, OpeningProver, ProverDevice,
-    RotationProver, RotationProverOutput, TowerProver, TraceCommitter,
+    BatchedMainConstraintProver, DeviceTransporter, MainConstraintJob, MainConstraintResult,
+    MainSumcheckEvals, MainSumcheckProver, OpeningProver, ProverDevice, RotationProver,
+    RotationProverOutput, TowerProver, TraceCommitter,
 };
 use crate::{
     error::ZKVMError,
     scheme::{
+        MainConstraintProof,
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         hal::{DeviceProvingKey, EccQuarkProver, ProofInput, TowerProverSpec},
         septic_curve::{SepticExtension, SepticPoint, SymbolicSepticExtension},
@@ -29,7 +31,9 @@ use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression, ToExpr,
     mle::{ArcMultilinearExtension, FieldType, IntoMLE, MultilinearExtension},
+    monomial::Term,
     util::ceil_log2,
+    utils::eval_by_expr_with_instance,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
     virtual_polys::VirtualPolynomialsBuilder,
 };
@@ -44,7 +48,7 @@ use std::{
 };
 use sumcheck::{
     macros::{entered_span, exit_span},
-    structs::{IOPProverMessage, IOPProverState},
+    structs::{IOPProof, IOPProverMessage, IOPProverState},
     util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
@@ -1094,6 +1098,329 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             },
             None,
             Some(gkr_proof),
+        ))
+    }
+}
+
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
+    BatchedMainConstraintProver<CpuBackend<E, PCS>> for CpuProver<CpuBackend<E, PCS>>
+{
+    fn prove_batched_main_constraints<'a>(
+        &self,
+        jobs: Vec<MainConstraintJob<'a, CpuBackend<E, PCS>>>,
+        _pcs_data: &<CpuBackend<E, PCS> as ProverBackend>::PcsData,
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<(MainConstraintProof<E>, Vec<MainConstraintResult<E>>), ZKVMError> {
+        struct ChipMainData<'a, E: ExtensionField> {
+            circuit_idx: usize,
+            layer: &'a gkr_iop::gkr::layer::Layer<E>,
+            mle_start: usize,
+            num_mles: usize,
+            num_var_with_rotation: usize,
+            pi: Vec<E>,
+            alpha_start: usize,
+        }
+
+        if jobs.is_empty() {
+            return Ok((
+                MainConstraintProof {
+                    proof: gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof {
+                        proof: IOPProof { proofs: vec![] },
+                        evals: vec![],
+                    },
+                },
+                vec![],
+            ));
+        }
+
+        let mut owned_mles = Vec::<MultilinearExtension<'_, E>>::new();
+        let mut chip_data = Vec::with_capacity(jobs.len());
+        let mut total_exprs = 0usize;
+        let mut max_num_variables = 0usize;
+        let mut max_degree = 0usize;
+
+        for job in &jobs {
+            let ComposedConstrainSystem {
+                zkvm_v1_css: cs,
+                gkr_circuit,
+            } = job.cs;
+
+            let num_instances = job.input.num_instances();
+            let log2_num_instances = job.input.log2_num_instances();
+            let num_var_with_rotation = log2_num_instances + job.cs.rotation_vars().unwrap_or(0);
+            max_num_variables = max_num_variables.max(num_var_with_rotation);
+
+            let Some(gkr_circuit) = gkr_circuit else {
+                panic!("empty gkr circuit")
+            };
+            let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+            max_degree = max_degree.max(first_layer.max_expr_degree + 1);
+            let group_stage_masks = first_layer_output_group_stage_masks(job.cs, gkr_circuit);
+            let selector_ctxs = first_layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .zip_eq(group_stage_masks.iter())
+                .map(|((selector, _), stage_mask)| {
+                    if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty()
+                    {
+                        SelectorContext {
+                            offset: 0,
+                            num_instances,
+                            num_vars: num_var_with_rotation,
+                        }
+                    } else if cs.r_selector.as_ref() == Some(selector) {
+                        SelectorContext {
+                            offset: 0,
+                            num_instances: job.input.num_instances[0],
+                            num_vars: num_var_with_rotation,
+                        }
+                    } else if cs.w_selector.as_ref() == Some(selector) {
+                        SelectorContext {
+                            offset: job.input.num_instances[0],
+                            num_instances: job.input.num_instances[1],
+                            num_vars: num_var_with_rotation,
+                        }
+                    } else {
+                        SelectorContext {
+                            offset: 0,
+                            num_instances,
+                            num_vars: num_var_with_rotation,
+                        }
+                    }
+                })
+                .collect_vec();
+
+            let mut out_evals =
+                vec![PointAndEval::new(job.rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
+
+            if let Some(rotation) = job.rotation.as_ref() {
+                let Some([left_group_idx, right_group_idx, point_group_idx]) =
+                    first_layer.rotation_selector_group_indices()
+                else {
+                    panic!("rotation proof provided for non-rotation layer")
+                };
+                let (left_evals, right_evals, point_evals) =
+                    split_rotation_evals(&rotation.proof.evals);
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
+                    &left_evals,
+                    &rotation.left_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
+                    &right_evals,
+                    &rotation.right_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
+                    &point_evals,
+                    &rotation.point,
+                );
+            }
+
+            if let Some(ecc_proof) = job.ecc_proof.as_ref() {
+                let Some(
+                    [
+                        x_group_idx,
+                        y_group_idx,
+                        slope_group_idx,
+                        x3_group_idx,
+                        y3_group_idx,
+                    ],
+                ) = first_layer.ecc_bridge_group_indices()
+                else {
+                    panic!("ecc proof provided for non-ecc layer")
+                };
+
+                let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
+                let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation)
+                    .expect("invalid internal ecc bridge claims");
+
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[x_group_idx].1,
+                    &claims.x_evals,
+                    &claims.xy_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[y_group_idx].1,
+                    &claims.y_evals,
+                    &claims.xy_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[slope_group_idx].1,
+                    &claims.s_evals,
+                    &claims.s_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[x3_group_idx].1,
+                    &claims.x3_evals,
+                    &claims.x3y3_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[y3_group_idx].1,
+                    &claims.y3_evals,
+                    &claims.x3y3_point,
+                );
+            }
+
+            let eval_and_dedup_points = first_layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .map(|(_, out_eval_exprs)| {
+                    out_eval_exprs
+                        .first()
+                        .map(|out_eval| out_eval.evaluate(&out_evals, &job.challenges).point)
+                })
+                .collect_vec();
+            let selector_eq_pairs = first_layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .zip(eval_and_dedup_points.iter())
+                .zip(selector_ctxs.iter())
+                .filter_map(|(((sel_type, _), point), selector_ctx)| {
+                    let eq = sel_type.compute(point.as_ref()?, selector_ctx)?;
+                    let selector_expr = match sel_type {
+                        SelectorType::Whole(expr)
+                        | SelectorType::Prefix(expr)
+                        | SelectorType::OrderedSparse {
+                            expression: expr, ..
+                        }
+                        | SelectorType::QuarkBinaryTreeLessThan(expr) => expr,
+                        SelectorType::None => return None,
+                    };
+                    let Expression::StructuralWitIn(wit_id, _) = selector_expr else {
+                        panic!("selector expression must be StructuralWitIn");
+                    };
+                    let wit_id = *wit_id as usize;
+                    assert!(wit_id < first_layer.n_structural_witin);
+                    Some((wit_id, eq))
+                })
+                .collect_vec();
+            let mut selector_eq_by_wit_id = vec![None; first_layer.n_structural_witin];
+            for (wit_id, eq) in selector_eq_pairs {
+                if selector_eq_by_wit_id[wit_id].is_none() {
+                    selector_eq_by_wit_id[wit_id] = Some(eq);
+                }
+            }
+
+            let mle_start = owned_mles.len();
+            owned_mles.extend(job.input.witness.iter().map(|mle| mle.as_ref().clone()));
+            owned_mles.extend(job.input.fixed.iter().map(|mle| mle.as_ref().clone()));
+            for (selector_eq, mle) in selector_eq_by_wit_id
+                .into_iter()
+                .zip(job.input.structural_witness.iter())
+            {
+                owned_mles.push(selector_eq.unwrap_or_else(|| mle.as_ref().clone()));
+            }
+            let num_mles =
+                first_layer.n_witin + first_layer.n_fixed + first_layer.n_structural_witin;
+            assert_eq!(owned_mles.len() - mle_start, num_mles);
+
+            chip_data.push(ChipMainData {
+                circuit_idx: job.circuit_idx,
+                layer: first_layer,
+                mle_start,
+                num_mles,
+                num_var_with_rotation,
+                pi: job
+                    .input
+                    .pi
+                    .iter()
+                    .map(|v| v.map_either(E::from, |v| v).into_inner())
+                    .collect_vec(),
+                alpha_start: total_exprs,
+            });
+            total_exprs += first_layer.exprs.len();
+        }
+
+        let num_threads = optimal_sumcheck_threads(max_num_variables);
+        let alpha_pows = get_challenge_pows(total_exprs, transcript);
+        let mut builder = VirtualPolynomialsBuilder::new(num_threads, max_num_variables);
+        let global_mle_exprs = owned_mles
+            .iter()
+            .map(|mle| builder.lift(Either::Left(mle)))
+            .collect_vec();
+        let mut global_expr = Expression::ZERO;
+
+        for chip in &chip_data {
+            let main_sumcheck_challenges = chain!(
+                jobs[0].challenges.iter().copied(),
+                alpha_pows[chip.alpha_start..chip.alpha_start + chip.layer.exprs.len()]
+                    .iter()
+                    .copied()
+            )
+            .collect_vec();
+            for Term {
+                scalar: scalar_expr,
+                product,
+            } in chip
+                .layer
+                .main_sumcheck_expression_monomial_terms
+                .as_ref()
+                .unwrap()
+            {
+                let scalar = eval_by_expr_with_instance(
+                    &[],
+                    &[],
+                    &[],
+                    &chip.pi,
+                    &main_sumcheck_challenges,
+                    scalar_expr,
+                );
+                let product_expr = product
+                    .iter()
+                    .map(|expr| {
+                        let Expression::WitIn(wit_id) = expr else {
+                            panic!("main monomial product must be converted to WitIn")
+                        };
+                        global_mle_exprs[chip.mle_start + *wit_id as usize].clone()
+                    })
+                    .fold(Expression::ONE, |acc, expr| acc * expr);
+                global_expr = global_expr + Expression::Constant(scalar) * product_expr;
+            }
+        }
+
+        let span = entered_span!("IOPProverState::prove_batched_main", profiling_4 = true);
+        let (proof, prover_state) =
+            IOPProverState::prove(builder.to_virtual_polys(&[global_expr], &[]), transcript);
+        let global_evals = prover_state.get_mle_flatten_final_evaluations();
+        transcript.append_field_element_exts(&global_evals);
+        let global_rt = prover_state.collect_raw_challenges();
+        exit_span!(span);
+
+        let mut results = Vec::with_capacity(jobs.len());
+        for chip in &chip_data {
+            let input_opening_point =
+                global_rt[global_rt.len() - chip.num_var_with_rotation..].to_vec();
+            let chip_evals = &global_evals[chip.mle_start..chip.mle_start + chip.num_mles];
+            results.push(MainConstraintResult {
+                circuit_idx: chip.circuit_idx,
+                input_opening_point,
+                opening_evals: MainSumcheckEvals {
+                    wits_in_evals: chip_evals[..chip.layer.n_witin].to_vec(),
+                    fixed_in_evals: chip_evals
+                        [chip.layer.n_witin..chip.layer.n_witin + chip.layer.n_fixed]
+                        .to_vec(),
+                },
+            });
+        }
+
+        Ok((
+            MainConstraintProof {
+                proof: gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof {
+                    proof,
+                    evals: global_evals,
+                },
+            },
+            results,
         ))
     }
 }

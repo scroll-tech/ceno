@@ -739,9 +739,9 @@ mod tests {
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         scheme::{
             PublicValues, constants::SEPTIC_EXTENSION_DEGREE, create_backend, create_prover,
-            hal::ProofInput, prover::ZKVMProver, septic_curve::SepticPoint, verifier::ZKVMVerifier,
+            hal::ProofInput, prover::ZKVMProver, septic_curve::SepticPoint,
         },
-        structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
+        structs::{ComposedConstrainSystem, ProgramParams, RAMType, ZKVMProvingKey},
         tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
     };
     #[cfg(feature = "gpu")]
@@ -873,7 +873,6 @@ mod tests {
         let pd = create_prover(backend);
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
-        let zkvm_vk = zkvm_pk.get_vk_slow();
         let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 
@@ -919,7 +918,7 @@ mod tests {
         };
         let mut rng = thread_rng();
         let challenges = [E::random(&mut rng), E::random(&mut rng)];
-        let task = crate::scheme::scheduler::ChipTask {
+        let mut task = crate::scheme::scheduler::ChipTask {
             task_id: 0,
             circuit_name: ShardRamCircuit::<E>::name(),
             circuit_idx: 0,
@@ -935,24 +934,8 @@ mod tests {
             num_witin: 0,
             structural_rmm: None,
         };
-        let (proof, _, point) = zkvm_prover
-            .create_chip_proof(&task, &mut transcript)
+        let (_proof, _main_job) = zkvm_prover
+            .create_chip_proof(&mut task, &mut transcript)
             .unwrap();
-
-        let mut transcript = BasicTranscript::new(b"global chip test");
-        let verifier = ZKVMVerifier::new(zkvm_vk);
-        let (vrf_point, _, _, _) = verifier
-            .verify_chip_proof(
-                "global",
-                &pk.vk,
-                &proof,
-                &public_value,
-                &mut transcript,
-                2,
-                &PointAndEval::default(),
-                &challenges,
-            )
-            .expect("verify global chip proof");
-        assert_eq!(vrf_point, point);
     }
 }

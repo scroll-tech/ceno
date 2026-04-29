@@ -14,7 +14,7 @@ use crate::scheme::gpu::estimate_chip_proof_memory;
 #[cfg(feature = "gpu")]
 use crate::scheme::scheduler::get_chip_proving_mode;
 use crate::scheme::{
-    hal::MainSumcheckEvals,
+    hal::{MainConstraintJob, MainConstraintResult, MainSumcheckEvals},
     scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
 };
 #[cfg(feature = "gpu")]
@@ -47,7 +47,10 @@ use crate::{
     structs::{TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
-type CreateTableProof<E> = (ZKVMChipProof<E>, MainSumcheckEvals<E>, Point<E>);
+type CreateTableProof<'a, PB> = (
+    ZKVMChipProof<<PB as ProverBackend>::E>,
+    MainConstraintJob<'a, PB>,
+);
 
 pub type ZkVMCpuProver<E, PCS> =
     ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
@@ -541,7 +544,7 @@ impl<
 
             // Phase 3: Collect results
             let collect_results_span = entered_span!("collect_chip_results", profiling_1 = true);
-            let (chip_proofs, points, evaluations) = Self::collect_chip_results(results);
+            let (chip_proofs, main_constraint_jobs) = Self::collect_chip_results(results);
             exit_span!(collect_results_span);
             exit_span!(main_proofs_span);
 
@@ -549,6 +552,19 @@ impl<
             for sample in forked_samples {
                 transcript.append_field_element_ext(&sample);
             }
+
+            let main_constraints_span = entered_span!("prove_batched_main_constraints", profiling_1 = true);
+            let (main_constraint_proof, main_constraint_results) =
+                info_span!("[ceno] prove_batched_main_constraints").in_scope(|| {
+                    self.device
+                        .prove_batched_main_constraints(
+                            main_constraint_jobs,
+                            &witness_data,
+                            &mut transcript,
+                        )
+                })?;
+            let (points, evaluations) = Self::collect_main_constraint_results(main_constraint_results);
+            exit_span!(main_constraints_span);
 
             // batch opening pcs
             // generate static info from prover key for expected num variable
@@ -587,7 +603,13 @@ impl<
             });
             exit_span!(pcs_opening);
 
-            let vm_proof = ZKVMProof::new(pi, chip_proofs, witin_commit, mpcs_opening_proof);
+            let vm_proof = ZKVMProof::new(
+                pi,
+                chip_proofs,
+                main_constraint_proof,
+                witin_commit,
+                mpcs_opening_proof,
+            );
 
             Ok(vm_proof)
         })
@@ -604,13 +626,14 @@ impl<
         tasks: Vec<ChipTask<'data, PB>>,
         transcript: &T,
         witness_data: &PB::PcsData,
-    ) -> Result<(Vec<ChipTaskResult<E>>, Vec<E>), ZKVMError> {
+    ) -> Result<(Vec<ChipTaskResult<'data, PB>>, Vec<E>), ZKVMError> {
         let scheduler = ChipScheduler::new();
 
         #[cfg(feature = "gpu")]
         {
-            if std::any::TypeId::of::<PB>()
-                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+            if false
+                && std::any::TypeId::of::<PB>()
+                    == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
             {
                 let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData =
                     unsafe { std::mem::transmute(witness_data) };
@@ -654,11 +677,12 @@ impl<
                         proof,
                         opening_evals,
                         input_opening_point,
+                        main_constraint_job: None,
                         has_witness_or_fixed: task.has_witness_or_fixed,
                     })
                 };
 
-                if ChipScheduler::is_concurrent_mode() {
+                if false && ChipScheduler::is_concurrent_mode() {
                     // SAFETY: pcs_data is only read (via get_trace) during concurrent execution.
                     use crate::scheme::utils::SyncRef;
                     let gpu_wd = SyncRef(gpu_witness_data);
@@ -704,15 +728,18 @@ impl<
                 ));
             }
 
-            let (proof, opening_evals, input_opening_point) =
-                self.create_chip_proof(&task, transcript)?;
+            let (proof, main_constraint_job) = self.create_chip_proof(&mut task, transcript)?;
 
             Ok(ChipTaskResult {
                 task_id: task.task_id,
                 circuit_idx: task.circuit_idx,
                 proof,
-                opening_evals,
-                input_opening_point,
+                opening_evals: MainSumcheckEvals {
+                    wits_in_evals: vec![],
+                    fixed_in_evals: vec![],
+                },
+                input_opening_point: vec![],
+                main_constraint_job: Some(main_constraint_job),
                 has_witness_or_fixed: task.has_witness_or_fixed,
             })
         })
@@ -724,11 +751,11 @@ impl<
     /// into a single tower tree, and then feed these trees into tower prover.
     #[tracing::instrument(skip_all, name = "create_chip_proof", fields(table_name=%task.circuit_name, profiling_2
     ), level = "trace")]
-    pub fn create_chip_proof(
+    pub fn create_chip_proof<'a>(
         &self,
-        task: &ChipTask<'_, PB>,
+        task: &mut ChipTask<'a, PB>,
         transcript: &mut impl Transcript<E>,
-    ) -> Result<CreateTableProof<E>, ZKVMError> {
+    ) -> Result<CreateTableProof<'a, PB>, ZKVMError> {
         let circuit_pk = task.pk;
         let input = &task.input;
         let challenges = &task.challenges;
@@ -814,68 +841,48 @@ impl<
         })?;
         exit_span!(span);
 
-        // 1. prove the main constraints among witness polynomials
-        // 2. prove the relation between last layer in the tower and read/write/logup records
-        let span = entered_span!("prove_main_constraints", profiling_2 = true);
         #[cfg(feature = "gpu")]
-        if task.gpu_replay_plan.as_ref().is_some_and(|plan| {
-            matches!(
-                plan.kind,
-                crate::instructions::gpu::dispatch::GpuWitgenKind::Keccak
-            )
-        }) {
-            crate::scheme::gpu::log_gpu_pool_usage(&format!(
-                "{}:before_prove_main",
-                task.circuit_name
-            ));
-        }
-        let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
-            info_span!("[ceno] prove_main_constraints").in_scope(|| {
-                self.device.prove_main_constraints(
-                    rt_tower,
-                    rotation.clone(),
-                    ecc_proof.as_ref(),
-                    input,
-                    cs,
-                    challenges,
-                    transcript,
-                )
-            })?;
+        let main_input = {
+            let mut input = input.clone();
+            if std::any::TypeId::of::<PB>()
+                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+            {
+                input.witness.clear();
+                input.structural_witness.clear();
+            }
+            input
+        };
+        #[cfg(not(feature = "gpu"))]
+        let main_input = input.clone();
         #[cfg(feature = "gpu")]
-        if task.gpu_replay_plan.as_ref().is_some_and(|plan| {
-            matches!(
-                plan.kind,
-                crate::instructions::gpu::dispatch::GpuWitgenKind::Keccak
-            )
-        }) {
-            crate::scheme::gpu::log_gpu_pool_usage(&format!(
-                "{}:after_prove_main",
-                task.circuit_name
-            ));
-        }
-        let MainSumcheckEvals {
-            wits_in_evals,
-            fixed_in_evals,
-        } = evals;
-        exit_span!(span);
+        let structural_rmm = task.structural_rmm.take();
+        #[cfg(not(feature = "gpu"))]
+        let structural_rmm = None;
 
         Ok((
             ZKVMChipProof {
                 r_out_evals,
                 w_out_evals,
                 lk_out_evals,
-                main_sumcheck_proofs,
-                gkr_iop_proof,
-                rotation_proof: rotation.map(|r| r.proof),
+                main_sumcheck_proofs: None,
+                gkr_iop_proof: None,
+                rotation_proof: rotation.clone().map(|r| r.proof),
                 tower_proof,
-                ecc_proof,
+                ecc_proof: ecc_proof.clone(),
                 num_instances: input.num_instances,
             },
-            MainSumcheckEvals {
-                wits_in_evals,
-                fixed_in_evals,
+            MainConstraintJob {
+                circuit_idx: task.circuit_idx,
+                input: main_input,
+                witness_trace_idx: task.witness_trace_idx,
+                num_witin: task.num_witin,
+                structural_rmm,
+                rt_tower,
+                rotation,
+                ecc_proof,
+                challenges: *challenges,
+                cs,
             },
-            input_opening_point,
         ))
     }
 
@@ -1086,16 +1093,14 @@ impl<
 
     /// Phase 3: Collect chip proof results into proof components.
     #[allow(clippy::type_complexity)]
-    fn collect_chip_results(
-        results: Vec<ChipTaskResult<E>>,
+    fn collect_chip_results<'a>(
+        results: Vec<ChipTaskResult<'a, PB>>,
     ) -> (
         BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
-        Vec<Point<E>>,
-        Vec<Vec<Vec<E>>>,
+        Vec<MainConstraintJob<'a, PB>>,
     ) {
         let mut chip_proofs = BTreeMap::new();
-        let mut points = Vec::new();
-        let mut evaluations = Vec::new();
+        let mut main_constraint_jobs = Vec::new();
 
         for result in results {
             tracing::trace!(
@@ -1104,12 +1109,8 @@ impl<
                 result.task_id
             );
 
-            if result.has_witness_or_fixed {
-                points.push(result.input_opening_point);
-                evaluations.push(vec![
-                    result.opening_evals.wits_in_evals,
-                    result.opening_evals.fixed_in_evals,
-                ]);
+            if let Some(job) = result.main_constraint_job {
+                main_constraint_jobs.push(job);
             }
             chip_proofs
                 .entry(result.circuit_idx)
@@ -1117,7 +1118,26 @@ impl<
                 .push(result.proof);
         }
 
-        (chip_proofs, points, evaluations)
+        (chip_proofs, main_constraint_jobs)
+    }
+
+    fn collect_main_constraint_results(
+        results: Vec<MainConstraintResult<E>>,
+    ) -> (Vec<Point<E>>, Vec<Vec<Vec<E>>>) {
+        let mut points = Vec::new();
+        let mut evaluations = Vec::new();
+        for result in results {
+            if !result.opening_evals.wits_in_evals.is_empty()
+                || !result.opening_evals.fixed_in_evals.is_empty()
+            {
+                points.push(result.input_opening_point);
+                evaluations.push(vec![
+                    result.opening_evals.wits_in_evals,
+                    result.opening_evals.fixed_in_evals,
+                ]);
+            }
+        }
+        (points, evaluations)
     }
 }
 
@@ -1139,7 +1159,7 @@ pub fn create_chip_proof_gpu_impl<'a, E, PCS>(
     #[cfg(feature = "gpu")] gpu_replay_plan: Option<crate::structs::GpuReplayPlan<E>>,
     num_witin: usize,
     structural_rmm: Option<witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
-) -> Result<CreateTableProof<E>, ZKVMError>
+) -> Result<(ZKVMChipProof<E>, MainSumcheckEvals<E>, Point<E>), ZKVMError>
 where
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E> + 'static,
