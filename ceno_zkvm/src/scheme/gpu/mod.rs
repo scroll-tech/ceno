@@ -307,11 +307,14 @@ pub fn log_gpu_pool_usage(label: &str) {
     let used_bytes = pool.get_used_size().unwrap_or(0);
     let reserved_bytes = pool.get_reserved_size().unwrap_or(0);
     let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
-    tracing::info!(
+    let message = format!(
         "[gpu pool][{label}] used={:.2}MB reserved={:.2}MB",
         mb(used_bytes as usize),
         mb(reserved_bytes as usize),
     );
+    eprintln!("{message}");
+    let _ = std::io::stderr().flush();
+    tracing::info!("{}", message);
 }
 
 pub fn log_gpu_device_state(label: &str) {
@@ -324,7 +327,7 @@ pub fn log_gpu_device_state(label: &str) {
     let (cuda_free_bytes, cuda_total_bytes) = get_cuda_mem_info().unwrap_or((0usize, 0usize));
     let cuda_used_bytes = cuda_total_bytes.saturating_sub(cuda_free_bytes);
     let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
-    tracing::info!(
+    let message = format!(
         "[gpu device][{label}] cuda_used={:.2}MB cuda_free={:.2}MB cuda_total={:.2}MB | pool_used={:.2}MB pool_reserved={:.2}MB pool_booked={:.2}MB pool_max={:.2}MB",
         mb(cuda_used_bytes),
         mb(cuda_free_bytes),
@@ -334,6 +337,9 @@ pub fn log_gpu_device_state(label: &str) {
         mb(booked_bytes as usize),
         mb(max_bytes as usize),
     );
+    eprintln!("{message}");
+    let _ = std::io::stderr().flush();
+    tracing::info!("{}", message);
 }
 use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
 use gkr_iop::{

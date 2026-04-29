@@ -46,6 +46,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::Write,
     marker::PhantomData,
     ops::Range,
     sync::Arc,
@@ -2193,9 +2194,18 @@ fn create_proofs_streaming<
 
                         let transcript = Transcript::new(b"riscv");
                         let start = std::time::Instant::now();
-                        let zkvm_proof = prover
-                            .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                            .expect("create_proof failed");
+                        let zkvm_proof =
+                            match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+                                Ok(proof) => proof,
+                                Err(err) => {
+                                    eprintln!(
+                                        "create_proof failed for shard {}: {err:?}",
+                                        shard_ctx.shard_id
+                                    );
+                                    let _ = std::io::stderr().flush();
+                                    std::process::exit(1);
+                                }
+                            };
                         tracing::debug!(
                             "{}th shard proof created in {:?}",
                             shard_ctx.shard_id,
@@ -2254,9 +2264,18 @@ fn create_proofs_streaming<
 
                     let transcript = Transcript::new(b"riscv");
                     let start = std::time::Instant::now();
-                    let zkvm_proof = prover
-                        .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                        .expect("create_proof failed");
+                    let zkvm_proof =
+                        match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+                            Ok(proof) => proof,
+                            Err(err) => {
+                                eprintln!(
+                                    "create_proof failed for shard {}: {err:?}",
+                                    shard_ctx.shard_id
+                                );
+                                let _ = std::io::stderr().flush();
+                                std::process::exit(1);
+                            }
+                        };
                     tracing::debug!(
                         "{}th shard proof created in {:?}",
                         shard_ctx.shard_id,
