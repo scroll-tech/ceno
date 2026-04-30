@@ -2558,6 +2558,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 max_num_variables,
                 max_degree,
                 None,
+                0,
                 basic_transcript,
                 stream.as_ref(),
             )
