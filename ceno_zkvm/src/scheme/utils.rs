@@ -680,7 +680,10 @@ pub fn build_main_witness<
             .iter()
             .chain(&input.structural_witness)
             .chain(&input.fixed)
-            .all(|v| { v.evaluations_len() == 1 << num_var_with_rotation })
+            .all(|v| {
+                v.num_vars() == num_var_with_rotation
+                    && v.evaluations_len() <= (1 << num_var_with_rotation)
+            })
     );
 
     // GPU memory estimation
@@ -704,9 +707,28 @@ pub fn build_main_witness<
     // GPU memory check: validate estimation against actual usage
     #[cfg(feature = "gpu")]
     {
+        let input_layer_has_only_structural_inputs = composed_cs
+            .gkr_circuit
+            .as_ref()
+            .and_then(|circuit| circuit.layers.last())
+            .is_some_and(|input_layer| input_layer.in_eval_expr.is_empty());
+        let output_rows = if input_layer_has_only_structural_inputs {
+            input
+                .structural_witness
+                .first()
+                .map(|mle| mle.evaluations_len())
+        } else {
+            None
+        }
+        .or_else(|| input.witness.first().map(|mle| mle.evaluations_len()))
+        .unwrap_or_else(|| input.num_instances() << composed_cs.rotation_vars().unwrap_or(0));
         let estimated_bytes =
-            crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, num_var_with_rotation);
-        crate::scheme::gpu::check_gpu_mem_estimation(gpu_mem_tracker, estimated_bytes);
+            crate::scheme::gpu::estimate_main_witness_bytes(composed_cs, output_rows);
+        crate::scheme::gpu::check_gpu_mem_estimation_with_context(
+            gpu_mem_tracker,
+            estimated_bytes,
+            gkr_circuit.layers.first().map(|layer| layer.name.as_str()),
+        );
     }
 
     gkr_circuit_out.0.0

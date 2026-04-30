@@ -251,8 +251,9 @@ pub fn build_rotation_mles_gpu<E: ExtensionField, PCS: PolynomialCommitmentSchem
                     GpuFieldType::Ext(_) => panic!("should be base field"),
                     _ => panic!("unimplemented input mle"),
                 };
+                let logical_len = 1usize << input_mle.mle.num_vars();
                 let mut output_buf = cuda_hal
-                    .alloc_elems_on_device(input_buf.len(), false, stream.as_ref())
+                    .alloc_elems_on_device(logical_len, false, stream.as_ref())
                     .unwrap();
 
                 // Safety: GPU buffers are actually 'static lifetime. We only read from input_buf
@@ -294,8 +295,8 @@ pub fn build_rotation_selector_gpu<E: ExtensionField, PCS: PolynomialCommitmentS
     rotation_cyclic_group_log2: usize,
 ) -> MultilinearExtensionGpu<'static, E> {
     let stream = crate::gpu::get_thread_stream();
-    let total_len = wit[0].evaluations_len(); // Take first mle just to retrieve total length
-    assert!(total_len.is_power_of_two());
+    let num_vars = wit[0].num_vars();
+    let total_len = 1usize << num_vars;
     let mut output_buf = cuda_hal
         .alloc_ext_elems_on_device(total_len, false, stream.as_ref())
         .unwrap();
@@ -322,10 +323,8 @@ pub fn build_rotation_selector_gpu<E: ExtensionField, PCS: PolynomialCommitmentS
         stream.as_ref(),
     )
     .unwrap();
-    let output_mle = MultilinearExtensionGpu::from_ceno_gpu_ext(GpuPolynomialExt::new(
-        output_buf,
-        total_len.ilog2() as usize,
-    ));
+    let output_mle =
+        MultilinearExtensionGpu::from_ceno_gpu_ext(GpuPolynomialExt::new(output_buf, num_vars));
     unsafe {
         std::mem::transmute::<
             MultilinearExtensionGpu<'static, BB31Ext>,

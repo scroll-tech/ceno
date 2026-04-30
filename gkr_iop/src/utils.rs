@@ -5,7 +5,6 @@ use itertools::Itertools;
 use multilinear_extensions::{
     Fixed, WitIn, WitnessId,
     mle::{ArcMultilinearExtension, MultilinearExtension},
-    util::ceil_log2,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
 use p3::field::FieldAlgebra;
@@ -49,7 +48,7 @@ pub fn rotation_next_base_mle<'a, E: ExtensionField>(
                 rotate_chunk[to] = original_chunk[from];
             }
         });
-    MultilinearExtension::from_evaluation_vec_smart(mle.num_vars(), rotated_mle_evals)
+    MultilinearExtension::from_evaluation_vec_smart_compact(mle.num_vars(), rotated_mle_evals)
 }
 
 pub fn rotation_selector<'a, E: ExtensionField>(
@@ -59,7 +58,6 @@ pub fn rotation_selector<'a, E: ExtensionField>(
     cyclic_group_log2_size: usize,
     total_len: usize,
 ) -> MultilinearExtension<'a, E> {
-    assert!(total_len.is_power_of_two());
     let cyclic_group_size = 1 << cyclic_group_log2_size;
     assert!(cyclic_subgroup_size <= cyclic_group_size);
     let rotation_index = bh.into_iter().take(cyclic_subgroup_size).collect_vec();
@@ -74,7 +72,10 @@ pub fn rotation_selector<'a, E: ExtensionField>(
                 rotate_chunk[to] = eq_chunk[to];
             }
         });
-    MultilinearExtension::from_evaluation_vec_smart(ceil_log2(total_len), rotated_mle_evals)
+    MultilinearExtension::from_evaluation_vec_smart_compact(
+        eq.len().ilog2() as usize,
+        rotated_mle_evals,
+    )
 }
 
 /// sel(rx)
