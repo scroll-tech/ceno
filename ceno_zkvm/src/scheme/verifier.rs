@@ -18,7 +18,10 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
-        utils::{assign_group_evals, derive_ecc_bridge_claims},
+        utils::{
+            GkrOutputStageMask, assign_group_evals, derive_ecc_bridge_claims,
+            first_layer_output_group_stage_masks,
+        },
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
@@ -76,6 +79,73 @@ pub(crate) struct PendingMainConstraintVerification<'a, E: ExtensionField> {
     out_evals: Vec<PointAndEval<E>>,
     pi: Vec<E>,
     selector_ctxs: Vec<SelectorContext>,
+}
+
+fn validate_batched_main_structural_evals<E: ExtensionField>(
+    circuit_name: &str,
+    layer: &gkr_iop::gkr::layer::Layer<E>,
+    eval_and_dedup_points: &[(Vec<E>, Option<Point<E>>)],
+    selector_ctxs: &[SelectorContext],
+    pi: &[E],
+    layer_evals: &[E],
+    structural_witin_offset: usize,
+    in_point: &Point<E>,
+) -> Result<(), String> {
+    for (((sel_type, _), (_, out_point)), selector_ctx) in layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .zip(eval_and_dedup_points.iter())
+        .zip(selector_ctxs.iter())
+    {
+        if let Some((expected_eval, wit_id)) =
+            sel_type.evaluate(out_point.as_ref().unwrap(), in_point, selector_ctx)
+        {
+            let wit_id = wit_id as usize + structural_witin_offset;
+            if layer_evals[wit_id] != expected_eval {
+                return Err(format!("{circuit_name} selector structural witin mismatch"));
+            }
+        }
+    }
+
+    for StructuralWitIn { id, witin_type } in &layer.structural_witins {
+        let wit_id = *id as usize + structural_witin_offset;
+        let expected_eval = match witin_type {
+            EqualDistanceSequence {
+                offset,
+                multi_factor,
+                descending,
+                ..
+            } => eval_wellform_address_vec(
+                *offset as u64,
+                *multi_factor as u64,
+                in_point,
+                *descending,
+            ),
+            EqualDistanceDynamicSequence {
+                offset_instance_id,
+                multi_factor,
+                descending,
+                ..
+            } => {
+                let offset = pi[*offset_instance_id as usize].to_canonical_u64();
+                eval_wellform_address_vec(offset, *multi_factor as u64, in_point, *descending)
+            }
+            StackedIncrementalSequence { .. } => eval_stacked_wellform_address_vec(in_point),
+            StackedConstantSequence { .. } => eval_stacked_constant_vec(in_point),
+            InnerRepeatingIncrementalSequence { k, .. } => {
+                eval_inner_repeated_incremental_vec(*k as u64, in_point)
+            }
+            OuterRepeatingIncrementalSequence { k, .. } => {
+                eval_outer_repeated_incremental_vec(*k as u64, in_point)
+            }
+            Empty => continue,
+        };
+        if expected_eval != layer_evals[wit_id] {
+            return Err(format!("{circuit_name} structural witin mismatch"));
+        }
+    }
+
+    Ok(())
 }
 
 fn bind_active_tower_eval_round<E: ExtensionField>(
@@ -844,11 +914,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let first_layer = gkr_circuit.layers.first().ok_or_else(|| {
             ZKVMError::InvalidProof(format!("{_name} empty gkr circuit layers").into())
         })?;
+        let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, gkr_circuit);
         let selector_ctxs = first_layer
             .out_sel_and_eval_exprs
             .iter()
-            .map(|(selector, _)| {
-                if cs.ec_final_sum.is_empty() {
+            .zip_eq(group_stage_masks.iter())
+            .map(|((selector, _), stage_mask)| {
+                if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty() {
                     SelectorContext::new(0, num_instances, num_var_with_rotation)
                 } else if cs.r_selector.as_ref() == Some(selector) {
                     SelectorContext::new(0, proof.num_instances[0], num_var_with_rotation)
@@ -1138,80 +1210,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 [pending_layer.eval_start..pending_layer.eval_start + pending_layer.eval_len];
             let structural_witin_offset = pending_layer.layer.n_witin + pending_layer.layer.n_fixed;
 
-            for (((sel_type, _), (_, out_point)), selector_ctx) in pending_layer
-                .layer
-                .out_sel_and_eval_exprs
-                .iter()
-                .zip(pending_layer.eval_and_dedup_points.iter())
-                .zip(pending_layer.pending.selector_ctxs.iter())
-            {
-                if let Some((expected_eval, wit_id)) =
-                    sel_type.evaluate(out_point.as_ref().unwrap(), &in_point, selector_ctx)
-                {
-                    let wit_id = wit_id as usize + structural_witin_offset;
-                    if layer_evals[wit_id] != expected_eval {
-                        return Err(ZKVMError::InvalidProof(
-                            format!(
-                                "{} selector structural witin mismatch",
-                                pending_layer.pending.circuit_name
-                            )
-                            .into(),
-                        ));
-                    }
-                }
-            }
-
-            for StructuralWitIn { id, witin_type } in &pending_layer.layer.structural_witins {
-                let wit_id = *id as usize + structural_witin_offset;
-                let expected_eval = match witin_type {
-                    EqualDistanceSequence {
-                        offset,
-                        multi_factor,
-                        descending,
-                        ..
-                    } => eval_wellform_address_vec(
-                        *offset as u64,
-                        *multi_factor as u64,
-                        &in_point,
-                        *descending,
-                    ),
-                    EqualDistanceDynamicSequence {
-                        offset_instance_id,
-                        multi_factor,
-                        descending,
-                        ..
-                    } => {
-                        let offset = pending_layer.pending.pi[*offset_instance_id as usize]
-                            .to_canonical_u64();
-                        eval_wellform_address_vec(
-                            offset,
-                            *multi_factor as u64,
-                            &in_point,
-                            *descending,
-                        )
-                    }
-                    StackedIncrementalSequence { .. } => {
-                        eval_stacked_wellform_address_vec(&in_point)
-                    }
-                    StackedConstantSequence { .. } => eval_stacked_constant_vec(&in_point),
-                    InnerRepeatingIncrementalSequence { k, .. } => {
-                        eval_inner_repeated_incremental_vec(*k as u64, &in_point)
-                    }
-                    OuterRepeatingIncrementalSequence { k, .. } => {
-                        eval_outer_repeated_incremental_vec(*k as u64, &in_point)
-                    }
-                    Empty => continue,
-                };
-                if expected_eval != layer_evals[wit_id] {
-                    return Err(ZKVMError::InvalidProof(
-                        format!(
-                            "{} structural witin mismatch",
-                            pending_layer.pending.circuit_name
-                        )
-                        .into(),
-                    ));
-                }
-            }
+            validate_batched_main_structural_evals(
+                pending_layer.pending.circuit_name,
+                pending_layer.layer,
+                &pending_layer.eval_and_dedup_points,
+                &pending_layer.pending.selector_ctxs,
+                &pending_layer.pending.pi,
+                layer_evals,
+                structural_witin_offset,
+                &in_point,
+            )
+            .map_err(|err| ZKVMError::InvalidProof(err.into()))?;
 
             let main_sumcheck_challenges = chain!(
                 challenges.iter().copied(),

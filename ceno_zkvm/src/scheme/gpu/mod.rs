@@ -2519,6 +2519,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     mle_size_info.push((0, 0));
                 }
             }
+            for mle_idx in chip.mle_start..chip.mle_start + chip.num_mles {
+                term_coefficients.push(E::ZERO);
+                mle_indices_per_term.push(vec![mle_idx]);
+                let num_vars = all_witins_gpu[mle_idx].mle.num_vars();
+                mle_size_info.push((num_vars, num_vars));
+            }
         }
 
         let max_degree = mle_indices_per_term
@@ -2542,7 +2548,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         );
         let _ = std::io::stderr().flush();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
-            .prove_generic_sumcheck_gpu(
+            .sumcheck
+            .prove_generic_sumcheck_gpu_v2(
+                cuda_hal.as_ref(),
                 all_witins_gpu_type_gl64,
                 &mle_size_info,
                 &term_coefficients_gl64,
@@ -2573,8 +2581,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         let mut results = Vec::with_capacity(chip_data.len());
         for chip in &chip_data {
-            let input_opening_point =
-                global_rt[global_rt.len() - chip.num_var_with_rotation..].to_vec();
+            let input_opening_point = gpu_v2_input_opening_point(
+                &global_rt,
+                chip.num_var_with_rotation,
+            );
             let chip_evals = &global_evals[chip.mle_start..chip.mle_start + chip.num_mles];
             results.push(MainConstraintResult {
                 circuit_idx: chip.circuit_idx,
@@ -2598,6 +2608,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             results,
         ))
     }
+}
+
+fn gpu_v2_input_opening_point<E: ExtensionField>(
+    global_rt: &[E],
+    num_var_with_rotation: usize,
+) -> Point<E> {
+    global_rt[global_rt.len() - num_var_with_rotation..].to_vec()
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> RotationProver<GpuBackend<E, PCS>>
