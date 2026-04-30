@@ -27,16 +27,16 @@ version = "0.1.0"
 ceno_crypto_primitives = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_crypto_primitives", branch = "main" }
 ceno_syscall = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_syscall", branch = "main" }
 
-ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", branch = "feat/mle_no_padding" }
-mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", branch = "feat/mle_no_padding" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", branch = "feat/mle_no_padding" }
-p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", branch = "feat/mle_no_padding" }
-poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", branch = "feat/mle_no_padding" }
-sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", branch = "feat/mle_no_padding" }
-sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", branch = "feat/mle_no_padding" }
-transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", branch = "feat/mle_no_padding" }
-whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", branch = "feat/mle_no_padding" }
-witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", branch = "feat/mle_no_padding" }
+ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", tag = "v1.0.0-alpha.25" }
+mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", tag = "v1.0.0-alpha.25" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", tag = "v1.0.0-alpha.25" }
+p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", tag = "v1.0.0-alpha.25" }
+poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", tag = "v1.0.0-alpha.25" }
+sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", tag = "v1.0.0-alpha.25" }
+sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", tag = "v1.0.0-alpha.25" }
+transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", tag = "v1.0.0-alpha.25" }
+whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", tag = "v1.0.0-alpha.25" }
+witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", tag = "v1.0.0-alpha.25" }
 
 anyhow = { version = "1.0", default-features = false }
 bincode = "1"
