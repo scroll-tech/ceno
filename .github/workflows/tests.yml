@@ -15,6 +15,14 @@ concurrency:
 jobs:
   tests:
     name: Run Tests
+    strategy:
+      fail-fast: false
+      matrix:
+        features:
+          - name: default
+            task: tests
+          - name: goldilocks
+            task: tests_goldilock
     timeout-minutes: 60
     runs-on: ubuntu-24.04
 
@@ -36,8 +44,8 @@ jobs:
             target/
             ceno_rt/target/
             examples/target/
-          key: tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: tests-${{ runner.os }}-cargo-
+          key: tests-${{ matrix.features.name }}-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: tests-${{ matrix.features.name }}-${{ runner.os }}-cargo-
 
       - name: Install m4
         run: sudo apt-get install -y m4
@@ -61,10 +69,5 @@ jobs:
       - name: run test
         env:
           RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
-        run: cargo make tests
-
-      - name: run test + goldilocks
-        env:
-          RUSTFLAGS: "" # cleanup RUSTFLAGS and avoid target-cpu=native
-        run: cargo make tests_goldilock
+        run: cargo make ${{ matrix.features.task }}
 
