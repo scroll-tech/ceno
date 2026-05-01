@@ -8,7 +8,7 @@ use std::{
 #[cfg(debug_assertions)]
 use ff_ext::{Instrumented, PoseidonField};
 
-use super::{PublicValues, ZKVMChipProof, ZKVMProof};
+use super::{MainConstraintProof, PublicValues, ZKVMChipProof, ZKVMProof};
 use crate::{
     error::ZKVMError,
     instructions::riscv::constants::{
@@ -18,7 +18,10 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
-        utils::{assign_group_evals, derive_ecc_bridge_claims},
+        utils::{
+            GkrOutputStageMask, assign_group_evals, derive_ecc_bridge_claims,
+            first_layer_output_group_stage_masks,
+        },
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
@@ -29,19 +32,28 @@ use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
 use gkr_iop::{
     self,
     selector::{SelectorContext, SelectorType},
+    utils::{
+        eval_inner_repeated_incremental_vec, eval_outer_repeated_incremental_vec,
+        eval_stacked_constant_vec, eval_stacked_wellform_address_vec, eval_wellform_address_vec,
+    },
 };
 use itertools::{Itertools, chain, interleave, izip};
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{
     Expression, StructuralWitIn,
-    StructuralWitInType::StackedConstantSequence,
+    StructuralWitInType::{
+        Empty, EqualDistanceDynamicSequence, EqualDistanceSequence,
+        InnerRepeatingIncrementalSequence, OuterRepeatingIncrementalSequence,
+        StackedConstantSequence, StackedIncrementalSequence,
+    },
     mle::IntoMLE,
     util::ceil_log2,
+    utils::eval_by_expr_with_instance,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
 };
-use p3::field::FieldAlgebra;
+use p3::field::{FieldAlgebra, dot_product};
 use sumcheck::{
-    structs::{IOPProof, IOPVerifierState},
+    structs::{IOPProof, IOPVerifierState, SumCheckSubClaim},
     util::get_challenge_pows,
 };
 use transcript::{ForkableTranscript, Transcript};
@@ -57,6 +69,83 @@ pub struct ZKVMVerifier<
     M: Clone + Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     pub vk: ZKVMVerifyingKey<E, PCS, M>,
+}
+
+pub(crate) struct PendingMainConstraintVerification<'a, E: ExtensionField> {
+    circuit_name: &'a str,
+    circuit_vk: &'a VerifyingKey<E>,
+    proof: &'a ZKVMChipProof<E>,
+    num_var_with_rotation: usize,
+    out_evals: Vec<PointAndEval<E>>,
+    pi: Vec<E>,
+    selector_ctxs: Vec<SelectorContext>,
+}
+
+fn validate_batched_main_structural_evals<E: ExtensionField>(
+    circuit_name: &str,
+    layer: &gkr_iop::gkr::layer::Layer<E>,
+    eval_and_dedup_points: &[(Vec<E>, Option<Point<E>>)],
+    selector_ctxs: &[SelectorContext],
+    pi: &[E],
+    layer_evals: &[E],
+    structural_witin_offset: usize,
+    in_point: &Point<E>,
+) -> Result<(), String> {
+    for (((sel_type, _), (_, out_point)), selector_ctx) in layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .zip(eval_and_dedup_points.iter())
+        .zip(selector_ctxs.iter())
+    {
+        if let Some((expected_eval, wit_id)) =
+            sel_type.evaluate(out_point.as_ref().unwrap(), in_point, selector_ctx)
+        {
+            let wit_id = wit_id as usize + structural_witin_offset;
+            if layer_evals[wit_id] != expected_eval {
+                return Err(format!("{circuit_name} selector structural witin mismatch"));
+            }
+        }
+    }
+
+    for StructuralWitIn { id, witin_type } in &layer.structural_witins {
+        let wit_id = *id as usize + structural_witin_offset;
+        let expected_eval = match witin_type {
+            EqualDistanceSequence {
+                offset,
+                multi_factor,
+                descending,
+                ..
+            } => eval_wellform_address_vec(
+                *offset as u64,
+                *multi_factor as u64,
+                in_point,
+                *descending,
+            ),
+            EqualDistanceDynamicSequence {
+                offset_instance_id,
+                multi_factor,
+                descending,
+                ..
+            } => {
+                let offset = pi[*offset_instance_id as usize].to_canonical_u64();
+                eval_wellform_address_vec(offset, *multi_factor as u64, in_point, *descending)
+            }
+            StackedIncrementalSequence { .. } => eval_stacked_wellform_address_vec(in_point),
+            StackedConstantSequence { .. } => eval_stacked_constant_vec(in_point),
+            InnerRepeatingIncrementalSequence { k, .. } => {
+                eval_inner_repeated_incremental_vec(*k as u64, in_point)
+            }
+            OuterRepeatingIncrementalSequence { k, .. } => {
+                eval_outer_repeated_incremental_vec(*k as u64, in_point)
+            }
+            Empty => continue,
+        };
+        if expected_eval != layer_evals[wit_id] {
+            return Err(format!("{circuit_name} structural witin mismatch"));
+        }
+    }
+
+    Ok(())
 }
 
 fn bind_active_tower_eval_round<E: ExtensionField>(
@@ -158,39 +247,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         }
 
         Ok((next_heap_addr_end, next_hint_addr_end))
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn split_input_opening_evals(
-        circuit_vk: &VerifyingKey<E>,
-        proof: &ZKVMChipProof<E>,
-    ) -> Result<(Vec<E>, Vec<E>), ZKVMError> {
-        let cs = circuit_vk.get_cs();
-        let Some(gkr_proof) = proof.gkr_iop_proof.as_ref() else {
-            return Err(ZKVMError::InvalidProof("missing gkr proof".into()));
-        };
-        let Some(last_layer) = gkr_proof.0.last() else {
-            return Err(ZKVMError::InvalidProof("empty gkr proof layers".into()));
-        };
-
-        let evals = &last_layer.main.evals;
-        let wit_len = cs.num_witin();
-        let fixed_len = cs.num_fixed();
-        let min_len = wit_len + fixed_len;
-        if evals.len() < min_len {
-            return Err(ZKVMError::InvalidProof(
-                format!(
-                    "insufficient main evals: {} < required {}",
-                    evals.len(),
-                    min_len
-                )
-                .into(),
-            ));
-        }
-
-        let wits_in_evals = evals[..wit_len].to_vec();
-        let fixed_in_evals = evals[wit_len..(wit_len + fixed_len)].to_vec();
-        Ok((wits_in_evals, fixed_in_evals))
     }
 
     /// Verify a full zkVM trace from program entry to halt.
@@ -468,6 +524,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         }
 
         // fork transcript to support chip concurrently proved
+        let mut pending_main_constraints = Vec::with_capacity(num_proofs);
         let mut forked_transcripts = transcript.fork(num_proofs);
         for ((index, proof), transcript) in vm_proof
             .chip_proofs
@@ -585,29 +642,17 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // accumulate logup_sum
             logup_sum += chip_logup_sum;
 
-            let (input_opening_point, chip_shard_ec_sum, wits_in_evals, fixed_in_evals) = self
-                .verify_chip_proof(
-                    circuit_name,
-                    circuit_vk,
-                    proof,
-                    &vm_proof.public_values,
-                    transcript,
-                    NUM_FANIN,
-                    &point_eval,
-                    &challenges,
-                )?;
-            if circuit_vk.get_cs().num_witin() > 0 {
-                witin_openings.push((
-                    input_opening_point.len(),
-                    (input_opening_point.clone(), wits_in_evals),
-                ));
-            }
-            if circuit_vk.get_cs().num_fixed() > 0 {
-                fixed_openings.push((
-                    input_opening_point.len(),
-                    (input_opening_point.clone(), fixed_in_evals),
-                ));
-            }
+            let (pending_main_constraint, chip_shard_ec_sum) = self.verify_chip_proof_pre_main(
+                circuit_name,
+                circuit_vk,
+                proof,
+                &vm_proof.public_values,
+                transcript,
+                NUM_FANIN,
+                &point_eval,
+                &challenges,
+            )?;
+            pending_main_constraints.push(pending_main_constraint);
             prod_w *= proof.w_out_evals.iter().flatten().copied().product::<E>();
             prod_r *= proof.r_out_evals.iter().flatten().copied().product::<E>();
             tracing::debug!(
@@ -635,6 +680,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .collect_vec();
         for sample in forked_samples {
             transcript.append_field_element_ext(&sample);
+        }
+
+        for (input_opening_point, wits_in_evals, fixed_in_evals) in self
+            .verify_batched_main_constraints(
+                pending_main_constraints,
+                &vm_proof.main_constraint_proof,
+                &mut transcript,
+                &challenges,
+            )?
+        {
+            if !wits_in_evals.is_empty() {
+                witin_openings.push((
+                    input_opening_point.len(),
+                    (input_opening_point.clone(), wits_in_evals),
+                ));
+            }
+            if !fixed_in_evals.is_empty() {
+                fixed_openings.push((
+                    input_opening_point.len(),
+                    (input_opening_point.clone(), fixed_in_evals),
+                ));
+            }
         }
 
         // verify mpcs
@@ -676,17 +743,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
     /// verify proof and return input opening point
     #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-    pub fn verify_chip_proof(
+    pub(crate) fn verify_chip_proof_pre_main<'a>(
         &self,
-        _name: &str,
-        circuit_vk: &VerifyingKey<E>,
-        proof: &ZKVMChipProof<E>,
+        _name: &'a str,
+        circuit_vk: &'a VerifyingKey<E>,
+        proof: &'a ZKVMChipProof<E>,
         public_values: &PublicValues,
         transcript: &mut impl Transcript<E>,
         num_product_fanin: usize,
         _out_evals: &PointAndEval<E>,
         challenges: &[E; 2], // derive challenge from PCS
-    ) -> Result<(Point<E>, Option<SepticPoint<E::BaseField>>, Vec<E>, Vec<E>), ZKVMError> {
+    ) -> Result<
+        (
+            PendingMainConstraintVerification<'a, E>,
+            Option<SepticPoint<E::BaseField>>,
+        ),
+        ZKVMError,
+    > {
         let composed_cs = circuit_vk.get_cs();
         let ComposedConstrainSystem {
             zkvm_v1_css: cs,
@@ -841,11 +914,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let first_layer = gkr_circuit.layers.first().ok_or_else(|| {
             ZKVMError::InvalidProof(format!("{_name} empty gkr circuit layers").into())
         })?;
+        let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, gkr_circuit);
         let selector_ctxs = first_layer
             .out_sel_and_eval_exprs
             .iter()
-            .map(|(selector, _)| {
-                if cs.ec_final_sum.is_empty() {
+            .zip_eq(group_stage_masks.iter())
+            .map(|((selector, _), stage_mask)| {
+                if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty() {
                     SelectorContext::new(0, num_instances, num_var_with_rotation)
                 } else if cs.r_selector.as_ref() == Some(selector) {
                     SelectorContext::new(0, proof.num_instances[0], num_var_with_rotation)
@@ -921,76 +996,272 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             );
         }
 
-        if let Some(ecc_proof) = proof.ecc_proof.as_ref() {
-            let Some(
-                [
-                    x_group_idx,
-                    y_group_idx,
-                    slope_group_idx,
-                    x3_group_idx,
-                    y3_group_idx,
-                ],
-            ) = first_layer.ecc_bridge_group_indices()
-            else {
-                return Err(ZKVMError::InvalidProof(
-                    "ecc bridge claims expected but selectors are missing".into(),
-                ));
-            };
-
-            let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
-            let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation)?;
-
-            assign_group_evals(
-                &mut out_evals,
-                &first_layer.out_sel_and_eval_exprs[x_group_idx].1,
-                &claims.x_evals,
-                &claims.xy_point,
-            );
-            assign_group_evals(
-                &mut out_evals,
-                &first_layer.out_sel_and_eval_exprs[y_group_idx].1,
-                &claims.y_evals,
-                &claims.xy_point,
-            );
-            assign_group_evals(
-                &mut out_evals,
-                &first_layer.out_sel_and_eval_exprs[slope_group_idx].1,
-                &claims.s_evals,
-                &claims.s_point,
-            );
-            assign_group_evals(
-                &mut out_evals,
-                &first_layer.out_sel_and_eval_exprs[x3_group_idx].1,
-                &claims.x3_evals,
-                &claims.x3y3_point,
-            );
-            assign_group_evals(
-                &mut out_evals,
-                &first_layer.out_sel_and_eval_exprs[y3_group_idx].1,
-                &claims.y3_evals,
-                &claims.x3y3_point,
-            );
-        }
-
         let pi = cs
             .instance
             .iter()
             .map(|instance| E::from(public_values.query_by_index::<E>(instance.0)))
             .collect_vec();
-        let (wits_in_evals, fixed_in_evals) = Self::split_input_opening_evals(circuit_vk, proof)?;
-        let gkr_iop_proof = proof.gkr_iop_proof.clone().ok_or_else(|| {
-            ZKVMError::InvalidProof(format!("{_name} missing gkr iop proof").into())
-        })?;
-        let (_, rt) = gkr_circuit.verify(
-            num_var_with_rotation,
-            gkr_iop_proof,
-            &out_evals,
-            &pi,
-            challenges,
+        Ok((
+            PendingMainConstraintVerification {
+                circuit_name: _name,
+                circuit_vk,
+                proof,
+                num_var_with_rotation,
+                out_evals,
+                pi,
+                selector_ctxs,
+            },
+            shard_ec_sum,
+        ))
+    }
+
+    fn verify_batched_main_constraints(
+        &self,
+        pending_main_constraints: Vec<PendingMainConstraintVerification<'_, E>>,
+        main_constraint_proof: &MainConstraintProof<E>,
+        transcript: &mut impl Transcript<E>,
+        challenges: &[E; 2],
+    ) -> Result<Vec<(Point<E>, Vec<E>, Vec<E>)>, ZKVMError> {
+        if pending_main_constraints.is_empty() {
+            if !main_constraint_proof.proof.proof.proofs.is_empty()
+                || !main_constraint_proof.proof.evals.is_empty()
+            {
+                return Err(ZKVMError::InvalidProof(
+                    "empty main constraints with non-empty proof".into(),
+                ));
+            }
+            return Ok(vec![]);
+        }
+
+        struct PendingLayer<'a, E: ExtensionField> {
+            pending: PendingMainConstraintVerification<'a, E>,
+            layer: &'a gkr_iop::gkr::layer::Layer<E>,
+            eval_and_dedup_points: Vec<(Vec<E>, Option<Point<E>>)>,
+            eval_start: usize,
+            eval_len: usize,
+            alpha_start: usize,
+        }
+
+        let mut layers = Vec::with_capacity(pending_main_constraints.len());
+        let mut total_exprs = 0usize;
+        let mut total_evals = 0usize;
+        let mut max_num_variables = 0usize;
+        let mut max_degree = 0usize;
+
+        for pending in pending_main_constraints {
+            let gkr_circuit = pending
+                .circuit_vk
+                .get_cs()
+                .gkr_circuit
+                .as_ref()
+                .ok_or_else(|| {
+                    ZKVMError::InvalidProof(
+                        format!("{} missing gkr circuit in vk", pending.circuit_name).into(),
+                    )
+                })?;
+            let layer = gkr_circuit.layers.first().ok_or_else(|| {
+                ZKVMError::InvalidProof(
+                    format!("{} empty gkr circuit layers", pending.circuit_name).into(),
+                )
+            })?;
+            max_num_variables = max_num_variables.max(pending.num_var_with_rotation);
+            max_degree = max_degree.max(layer.max_expr_degree + 1);
+
+            let mut out_evals = pending.out_evals.clone();
+            if let Some(ecc_proof) = pending.proof.ecc_proof.as_ref() {
+                let Some(
+                    [
+                        x_group_idx,
+                        y_group_idx,
+                        slope_group_idx,
+                        x3_group_idx,
+                        y3_group_idx,
+                    ],
+                ) = layer.ecc_bridge_group_indices()
+                else {
+                    return Err(ZKVMError::InvalidProof(
+                        "ecc bridge claims expected but selectors are missing".into(),
+                    ));
+                };
+
+                let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
+                let claims =
+                    derive_ecc_bridge_claims(ecc_proof, sample_r, pending.num_var_with_rotation)?;
+
+                assign_group_evals(
+                    &mut out_evals,
+                    &layer.out_sel_and_eval_exprs[x_group_idx].1,
+                    &claims.x_evals,
+                    &claims.xy_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &layer.out_sel_and_eval_exprs[y_group_idx].1,
+                    &claims.y_evals,
+                    &claims.xy_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &layer.out_sel_and_eval_exprs[slope_group_idx].1,
+                    &claims.s_evals,
+                    &claims.s_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &layer.out_sel_and_eval_exprs[x3_group_idx].1,
+                    &claims.x3_evals,
+                    &claims.x3y3_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &layer.out_sel_and_eval_exprs[y3_group_idx].1,
+                    &claims.y3_evals,
+                    &claims.x3y3_point,
+                );
+            }
+
+            out_evals.resize(gkr_circuit.n_evaluations, PointAndEval::default());
+            let eval_and_dedup_points = layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .map(|(_, out_eval_exprs)| {
+                    let evals = out_eval_exprs
+                        .iter()
+                        .map(|out_eval| out_eval.evaluate(&out_evals, challenges).eval)
+                        .collect_vec();
+                    let point = out_eval_exprs
+                        .first()
+                        .map(|out_eval| out_eval.evaluate(&out_evals, challenges).point);
+                    (evals, point)
+                })
+                .collect_vec();
+
+            let eval_len = layer.n_witin + layer.n_fixed + layer.n_structural_witin;
+            layers.push(PendingLayer {
+                pending,
+                layer,
+                eval_and_dedup_points,
+                eval_start: total_evals,
+                eval_len,
+                alpha_start: total_exprs,
+            });
+            total_evals += eval_len;
+            total_exprs += layer.exprs.len();
+        }
+
+        let main_evals = &main_constraint_proof.proof.evals;
+        if main_evals.len() != total_evals {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "main constraint eval length mismatch: {} != {}",
+                    main_evals.len(),
+                    total_evals
+                )
+                .into(),
+            ));
+        }
+
+        let alpha_pows = get_challenge_pows(total_exprs, transcript);
+        let sigma = layers
+            .iter()
+            .map(|pending_layer| {
+                let alpha = &alpha_pows[pending_layer.alpha_start
+                    ..pending_layer.alpha_start + pending_layer.layer.exprs.len()];
+                let local_sigma: E = dot_product(
+                    alpha.iter().copied(),
+                    pending_layer
+                        .eval_and_dedup_points
+                        .iter()
+                        .flat_map(|(sigmas, _)| sigmas)
+                        .copied(),
+                );
+                E::from_canonical_u64(
+                    1u64 << (max_num_variables - pending_layer.pending.num_var_with_rotation),
+                ) * local_sigma
+            })
+            .sum::<E>();
+
+        let SumCheckSubClaim {
+            point: global_in_point,
+            expected_evaluation,
+        } = IOPVerifierState::verify(
+            sigma,
+            &main_constraint_proof.proof.proof,
+            &VPAuxInfo {
+                max_degree,
+                max_num_variables,
+                phantom: PhantomData,
+            },
             transcript,
-            &selector_ctxs,
-        )?;
-        Ok((rt, shard_ec_sum, wits_in_evals, fixed_in_evals))
+        );
+        let global_in_point = global_in_point
+            .into_iter()
+            .map(|challenge| challenge.elements)
+            .collect_vec();
+        transcript.append_field_element_exts(main_evals);
+
+        let mut got_claim = E::ZERO;
+        let mut results = Vec::with_capacity(layers.len());
+        for pending_layer in &layers {
+            let in_point = global_in_point
+                [global_in_point.len() - pending_layer.pending.num_var_with_rotation..]
+                .to_vec();
+            let layer_evals = &main_evals
+                [pending_layer.eval_start..pending_layer.eval_start + pending_layer.eval_len];
+            let structural_witin_offset = pending_layer.layer.n_witin + pending_layer.layer.n_fixed;
+
+            validate_batched_main_structural_evals(
+                pending_layer.pending.circuit_name,
+                pending_layer.layer,
+                &pending_layer.eval_and_dedup_points,
+                &pending_layer.pending.selector_ctxs,
+                &pending_layer.pending.pi,
+                layer_evals,
+                structural_witin_offset,
+                &in_point,
+            )
+            .map_err(|err| ZKVMError::InvalidProof(err.into()))?;
+
+            let main_sumcheck_challenges = chain!(
+                challenges.iter().copied(),
+                alpha_pows[pending_layer.alpha_start
+                    ..pending_layer.alpha_start + pending_layer.layer.exprs.len()]
+                    .iter()
+                    .copied()
+            )
+            .collect_vec();
+            got_claim += eval_by_expr_with_instance(
+                &[],
+                layer_evals,
+                &[],
+                &pending_layer.pending.pi,
+                &main_sumcheck_challenges,
+                pending_layer
+                    .layer
+                    .main_sumcheck_expression
+                    .as_ref()
+                    .unwrap(),
+            )
+            .map_either(E::from, |v| v)
+            .into_inner();
+
+            results.push((
+                in_point,
+                layer_evals[..pending_layer.layer.n_witin].to_vec(),
+                layer_evals[pending_layer.layer.n_witin
+                    ..pending_layer.layer.n_witin + pending_layer.layer.n_fixed]
+                    .to_vec(),
+            ));
+        }
+
+        if got_claim != expected_evaluation {
+            return Err(ZKVMError::InvalidProof(
+                format!("main constraint claim mismatch: {expected_evaluation} != {got_claim}")
+                    .into(),
+            ));
+        }
+
+        Ok(results)
     }
 }
 

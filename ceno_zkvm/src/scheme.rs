@@ -75,6 +75,15 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub num_instances: [usize; 2],
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct MainConstraintProof<E: ExtensionField> {
+    pub proof: SumcheckLayerProof<E>,
+}
+
 /// each field will be interpret to (constant) polynomial
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]
 pub struct PublicValues {
@@ -202,6 +211,7 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub public_values: PublicValues,
     // each circuit may have multiple proof instances
     pub chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+    pub main_constraint_proof: MainConstraintProof<E>,
     pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub opening_proof: PCS::Proof,
 }
@@ -210,12 +220,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
         public_values: PublicValues,
         chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+        main_constraint_proof: MainConstraintProof<E>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         opening_proof: PCS::Proof,
     ) -> Self {
         Self {
             public_values,
             chip_proofs,
+            main_constraint_proof,
             witin_commit,
             opening_proof,
         }

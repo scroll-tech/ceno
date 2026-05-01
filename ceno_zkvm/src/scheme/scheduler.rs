@@ -16,7 +16,7 @@ use crate::{
     error::ZKVMError,
     scheme::{
         ZKVMChipProof,
-        hal::{MainSumcheckEvals, ProofInput},
+        hal::{MainConstraintJob, MainSumcheckEvals, ProofInput},
     },
     structs::ProvingKey,
 };
@@ -100,32 +100,34 @@ pub struct ChipTask<'a, PB: ProverBackend> {
 }
 
 /// Result from a completed chip proof task
-pub struct ChipTaskResult<E: ExtensionField> {
+pub struct ChipTaskResult<'a, PB: ProverBackend> {
     /// Task ID for ordering
     pub task_id: usize,
     /// Circuit index for proof collection
     pub circuit_idx: usize,
     /// The generated proof
-    pub proof: ZKVMChipProof<E>,
+    pub proof: ZKVMChipProof<PB::E>,
     /// Prover-only opening evaluations split by witness/fixed/pi domains.
-    pub opening_evals: MainSumcheckEvals<E>,
+    pub opening_evals: MainSumcheckEvals<PB::E>,
     /// Opening point for this proof
-    pub input_opening_point: Point<E>,
+    pub input_opening_point: Point<PB::E>,
+    /// Deferred main-constraint proving job.
+    pub main_constraint_job: Option<MainConstraintJob<'a, PB>>,
     /// Whether this circuit has witness or fixed polynomials
     pub has_witness_or_fixed: bool,
 }
 
 /// Message sent from worker to scheduler on task completion
 #[cfg(feature = "gpu")]
-struct CompletionMessage<E: ExtensionField> {
+struct CompletionMessage<'a, PB: ProverBackend> {
     /// The result of the proof
-    result: Result<ChipTaskResult<E>, ZKVMError>,
+    result: Result<ChipTaskResult<'a, PB>, ZKVMError>,
     /// Memory that was reserved for this task (to release)
     memory_reserved: u64,
     /// Task ID for ordering
     task_id: usize,
     /// Sampled value from the forked transcript (for gather phase)
-    forked_sample: E,
+    forked_sample: PB::E,
 }
 
 /// Memory-aware parallel chip proof scheduler
@@ -152,12 +154,12 @@ impl ChipScheduler {
         tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
         execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError> + Send + Sync,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError> + Send + Sync,
     {
         #[cfg(feature = "gpu")]
         {
@@ -188,12 +190,12 @@ impl ChipScheduler {
         tasks: Vec<ChipTask<'a, PB>>,
         parent_transcript: &T,
         execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError>,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError>,
     {
         if tasks.is_empty() {
             return Ok((vec![], vec![]));
@@ -253,12 +255,12 @@ impl ChipScheduler {
         mut tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
         execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError> + Send + Sync,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError> + Send + Sync,
     {
         if tasks.is_empty() {
             return Ok((vec![], vec![]));
@@ -311,15 +313,15 @@ impl ChipScheduler {
         //    Worker -> Scheduler: CompletionMessage (includes sampled value)
         let (task_tx, task_rx) = mpsc::channel::<ChipTask<'a, PB>>();
         let task_rx = Arc::new(Mutex::new(task_rx));
-        let (done_tx, done_rx) = mpsc::channel::<CompletionMessage<PB::E>>();
+        let (done_tx, done_rx) = mpsc::channel::<CompletionMessage<'a, PB>>();
 
         // 3. State tracking
         let mut tasks_inflight = 0usize;
-        let mut results: Vec<ChipTaskResult<PB::E>> = Vec::with_capacity(total_tasks);
+        let mut results: Vec<ChipTaskResult<'a, PB>> = Vec::with_capacity(total_tasks);
         let mut samples: Vec<(usize, PB::E)> = Vec::with_capacity(total_tasks);
 
         // Helper to handle a completion message
-        let mut handle_completion = |msg: CompletionMessage<PB::E>,
+        let mut handle_completion = |msg: CompletionMessage<'a, PB>,
                                      mem_pool: &ceno_gpu::common::mem_pool::CudaMemPool,
                                      tasks_inflight: &mut usize,
                                      label: &str|

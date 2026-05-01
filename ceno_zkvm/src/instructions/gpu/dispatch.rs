@@ -135,6 +135,7 @@ pub(crate) fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
     let total_instances = step_indices.len();
     if total_instances == 0 {
         // Empty: just return empty matrices
+        let num_witin = num_witin.max(1);
         let num_structural_witin = num_structural_witin.max(1);
         let raw_witin = RowMajorMatrix::<E::BaseField>::new(0, num_witin, I::padding_strategy());
         let raw_structural =

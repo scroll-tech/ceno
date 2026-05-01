@@ -1,11 +1,13 @@
 use super::hal::{
-    DeviceTransporter, EccQuarkProver, MainSumcheckProver, OpeningProver, ProverDevice,
-    RotationProver, TowerProver, TraceCommitter,
+    BatchedMainConstraintProver, DeviceTransporter, EccQuarkProver, MainConstraintJob,
+    MainConstraintResult, MainSumcheckProver, OpeningProver, ProverDevice, RotationProver,
+    TowerProver, TraceCommitter,
 };
 use crate::{
     error::ZKVMError,
     instructions::gpu::cache::current_replay_cache_stats,
     scheme::{
+        MainConstraintProof,
         constants::SEPTIC_EXTENSION_DEGREE,
         cpu::TowerRelationOutput,
         hal::{
@@ -41,6 +43,7 @@ use multilinear_extensions::{
     Expression, ToExpr,
     mle::{FieldType, IntoMLE, MultilinearExtension},
     util::ceil_log2,
+    utils::eval_by_expr_constant,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
 use p3::{field::FieldAlgebra, matrix::Matrix};
@@ -50,16 +53,17 @@ use rayon::iter::{
 };
 use std::{
     collections::BTreeMap,
+    io::Write,
     iter::{once, repeat_n},
     sync::Arc,
 };
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage},
-    util::optimal_sumcheck_threads,
+    util::{get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::next_pow2_instance_padding;
+use witness::{InstancePaddingStrategy, next_pow2_instance_padding};
 
 use ceno_gpu::common::transpose::matrix_transpose;
 use tracing::info_span;
@@ -303,11 +307,14 @@ pub fn log_gpu_pool_usage(label: &str) {
     let used_bytes = pool.get_used_size().unwrap_or(0);
     let reserved_bytes = pool.get_reserved_size().unwrap_or(0);
     let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
-    tracing::info!(
+    let message = format!(
         "[gpu pool][{label}] used={:.2}MB reserved={:.2}MB",
         mb(used_bytes as usize),
         mb(reserved_bytes as usize),
     );
+    eprintln!("{message}");
+    let _ = std::io::stderr().flush();
+    tracing::info!("{}", message);
 }
 
 pub fn log_gpu_device_state(label: &str) {
@@ -320,7 +327,7 @@ pub fn log_gpu_device_state(label: &str) {
     let (cuda_free_bytes, cuda_total_bytes) = get_cuda_mem_info().unwrap_or((0usize, 0usize));
     let cuda_used_bytes = cuda_total_bytes.saturating_sub(cuda_free_bytes);
     let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
-    tracing::info!(
+    let message = format!(
         "[gpu device][{label}] cuda_used={:.2}MB cuda_free={:.2}MB cuda_total={:.2}MB | pool_used={:.2}MB pool_reserved={:.2}MB pool_booked={:.2}MB pool_max={:.2}MB",
         mb(cuda_used_bytes),
         mb(cuda_free_bytes),
@@ -330,6 +337,9 @@ pub fn log_gpu_device_state(label: &str) {
         mb(booked_bytes as usize),
         mb(max_bytes as usize),
     );
+    eprintln!("{message}");
+    let _ = std::io::stderr().flush();
+    tracing::info!("{}", message);
 }
 use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
 use gkr_iop::{
@@ -1132,6 +1142,18 @@ where
                     })
                     .map_err(|e| ceno_gpu::HalError::InvalidInput(format!("{e:?}")))?,
             };
+            let witness_rmm = if witness_rmm.width() == 0 {
+                tracing::warn!(
+                    "[gpu] replacing zero-width deferred witness trace at index {trace_idx} with a dummy column"
+                );
+                witness::RowMajorMatrix::<E::BaseField>::new(
+                    witness_rmm.num_instances(),
+                    1,
+                    InstancePaddingStrategy::Default,
+                )
+            } else {
+                witness_rmm
+            };
             Ok(unsafe { std::mem::transmute(witness_rmm) })
         })
         .unwrap();
@@ -1178,6 +1200,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<GpuBa
         let (mles, pcs_data, commit) = if is_pcs_match {
             let mut vec_traces: Vec<witness::RowMajorMatrix<E::BaseField>> =
                 traces.into_values().collect();
+            for (trace_idx, trace) in vec_traces.iter_mut().enumerate() {
+                if trace.width() == 0 {
+                    tracing::warn!(
+                        "[gpu] replacing zero-width witness trace at index {trace_idx} with a dummy column"
+                    );
+                    *trace = witness::RowMajorMatrix::<E::BaseField>::new(
+                        trace.num_instances(),
+                        1,
+                        InstancePaddingStrategy::Default,
+                    );
+                }
+            }
 
             if crate::instructions::gpu::config::should_materialize_witness_on_gpu() {
                 let span = entered_span!("[gpu] normalize_trace_backing", profiling_2 = true);
@@ -1373,6 +1407,144 @@ where
         trace_idx,
         mles.len()
     );
+
+    mles
+}
+
+fn shard_ram_compact_physical_rows(col_idx: usize, num_records: usize, full_rows: usize) -> usize {
+    // ShardRAM witness columns are laid out as:
+    //   0..7   x EC coordinates
+    //   7..14  y EC coordinates
+    //   14..21 EC addition slopes
+    //   21..30 scalar record fields
+    //   30..   Poseidon2 trace columns
+    //
+    // Only the scalar record fields and Poseidon2 trace are prefix-populated
+    // on real record rows. EC columns also carry internal tree rows in the
+    // upper half, so they must keep the full logical backing.
+    if col_idx < 21 { full_rows } else { num_records }
+}
+
+pub fn extract_shard_ram_witness_mles_for_trace<'a, E, PCS>(
+    pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    trace_idx: usize,
+    expected_num: usize,
+    num_vars: usize,
+    num_records: usize,
+) -> Vec<Arc<MultilinearExtensionGpu<'a, E>>>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    assert_eq!(
+        std::any::TypeId::of::<E::BaseField>(),
+        std::any::TypeId::of::<BB31Base>(),
+        "GPU ShardRAM compact extraction only supports BabyBear base field",
+    );
+
+    let pcs_data_basefold: &BasefoldCommitmentWithWitnessGpu<
+        BB31Base,
+        BufferImpl<BB31Base>,
+        GpuDigestLayer,
+        GpuMatrix<'static>,
+        GpuPolynomial<'static>,
+    > = unsafe { std::mem::transmute(pcs_data) };
+
+    let Some(rmms) = pcs_data_basefold.rmms.as_ref() else {
+        return extract_witness_mles_for_trace::<E, PCS>(
+            pcs_data,
+            trace_idx,
+            expected_num,
+            num_vars,
+        );
+    };
+    let rmm = &rmms[trace_idx];
+    assert_eq!(
+        rmm.width(),
+        expected_num,
+        "ShardRAM trace width mismatch: expected {}, got {}",
+        expected_num,
+        rmm.width(),
+    );
+
+    let cuda_hal = get_cuda_hal().unwrap();
+    let full_rows = rmm.height();
+    assert_eq!(
+        full_rows,
+        1usize << num_vars,
+        "ShardRAM trace height must match logical num_vars",
+    );
+    assert!(
+        num_records <= full_rows,
+        "ShardRAM compact rows exceed full rows: {} > {}",
+        num_records,
+        full_rows,
+    );
+
+    let mles = if rmm.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor) {
+        let device_buffer = rmm
+            .device_backing_ref::<BufferImpl<'static, BB31Base>>()
+            .unwrap_or_else(|| panic!("ShardRAM col-major device backing type mismatch"));
+        let elem_size = std::mem::size_of::<BB31Base>();
+        let col_stride_bytes = full_rows * elem_size;
+        (0..expected_num)
+            .map(|col_idx| {
+                let physical_rows =
+                    shard_ram_compact_physical_rows(col_idx, num_records, full_rows);
+                let start = col_idx * col_stride_bytes;
+                let end = start + physical_rows * elem_size;
+                let view_buf = device_buffer.owned_subrange(start..end);
+                let view_poly = GpuPolynomial::new(view_buf, num_vars);
+                let poly_static: GpuPolynomial<'static> = unsafe { std::mem::transmute(view_poly) };
+                let mle_static = MultilinearExtensionGpu::from_ceno_gpu_base(poly_static);
+                Arc::new(unsafe {
+                    std::mem::transmute::<
+                        MultilinearExtensionGpu<'static, E>,
+                        MultilinearExtensionGpu<'a, E>,
+                    >(mle_static)
+                })
+            })
+            .collect::<Vec<_>>()
+    } else {
+        let values = rmm.values();
+        (0..expected_num)
+            .map(|col_idx| {
+                let physical_rows =
+                    shard_ram_compact_physical_rows(col_idx, num_records, full_rows);
+                let mut column = Vec::with_capacity(physical_rows);
+                column.extend((0..physical_rows).map(|row| values[row * expected_num + col_idx]));
+                let column_bb31: Vec<BB31Base> = unsafe {
+                    let mut column = std::mem::ManuallyDrop::new(column);
+                    Vec::from_raw_parts(
+                        column.as_mut_ptr() as *mut BB31Base,
+                        column.len(),
+                        column.capacity(),
+                    )
+                };
+                let gpu_poly = cuda_hal
+                    .alloc_elems_from_host(&column_bb31, None)
+                    .map(|buffer| GpuPolynomial::new(buffer, num_vars))
+                    .unwrap_or_else(|err| panic!("ShardRAM compact H2D failed: {err:?}"));
+                let mle_static = MultilinearExtensionGpu::from_ceno_gpu_base(gpu_poly);
+                Arc::new(unsafe {
+                    std::mem::transmute::<
+                        MultilinearExtensionGpu<'static, E>,
+                        MultilinearExtensionGpu<'a, E>,
+                    >(mle_static)
+                })
+            })
+            .collect::<Vec<_>>()
+    };
+
+    eprintln!(
+        "[ceno][shard-ram-compact-mle] trace_idx={} cols={} records={} full_rows={} compact_cols={}",
+        trace_idx,
+        expected_num,
+        num_records,
+        full_rows,
+        expected_num.saturating_sub(21),
+    );
+    let _ = std::io::stderr().flush();
 
     mles
 }
@@ -1949,6 +2121,412 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<G
     }
 }
 
+impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
+    BatchedMainConstraintProver<GpuBackend<E, PCS>> for GpuProver<GpuBackend<E, PCS>>
+{
+    fn prove_batched_main_constraints<'a>(
+        &self,
+        mut jobs: Vec<MainConstraintJob<'a, GpuBackend<E, PCS>>>,
+        pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
+        transcript: &mut impl Transcript<E>,
+    ) -> Result<(MainConstraintProof<E>, Vec<MainConstraintResult<E>>), ZKVMError> {
+        struct ChipMainData<'a, E: ExtensionField> {
+            circuit_idx: usize,
+            layer: &'a gkr_iop::gkr::layer::Layer<E>,
+            mle_start: usize,
+            num_mles: usize,
+            num_var_with_rotation: usize,
+            pi: Vec<Either<E::BaseField, E>>,
+            alpha_start: usize,
+        }
+
+        if jobs.is_empty() {
+            return Ok((
+                MainConstraintProof {
+                    proof: gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof {
+                        proof: IOPProof { proofs: vec![] },
+                        evals: vec![],
+                    },
+                },
+                vec![],
+            ));
+        }
+
+        let stream = gkr_iop::gpu::get_thread_stream();
+        let cuda_hal = get_cuda_hal().map_err(hal_to_backend_error)?;
+        for job in jobs.iter_mut() {
+            let num_vars = job.input.log2_num_instances() + job.cs.rotation_vars().unwrap_or(0);
+            if job.input.witness.is_empty() {
+                if let Some(trace_idx) = job.witness_trace_idx {
+                    job.input.witness =
+                        info_span!("[ceno] extract_main_witness_mles").in_scope(|| {
+                            if job.circuit_name == "ShardRamCircuit" {
+                                extract_shard_ram_witness_mles_for_trace::<E, PCS>(
+                                    pcs_data,
+                                    trace_idx,
+                                    job.num_witin,
+                                    num_vars,
+                                    job.input.num_instances(),
+                                )
+                            } else {
+                                extract_witness_mles_for_trace::<E, PCS>(
+                                    pcs_data,
+                                    trace_idx,
+                                    job.num_witin,
+                                    num_vars,
+                                )
+                            }
+                        });
+                }
+            }
+            if job.input.structural_witness.is_empty() {
+                if let Some(rmm) = job.structural_rmm.as_ref() {
+                    let num_structural_witin = job.cs.zkvm_v1_css.num_structural_witin as usize;
+                    job.input.structural_witness =
+                        info_span!("[ceno] transport_main_structural_witness").in_scope(|| {
+                            transport_structural_witness_to_gpu::<E>(
+                                rmm,
+                                num_structural_witin,
+                                num_vars,
+                            )
+                        });
+                }
+            }
+        }
+        let mut selector_eqs_by_chip = Vec::with_capacity(jobs.len());
+        let mut chip_data = Vec::with_capacity(jobs.len());
+        let mut total_exprs = 0usize;
+        let mut total_mles = 0usize;
+        let mut max_num_variables = 0usize;
+
+        for job in &jobs {
+            let ComposedConstrainSystem {
+                zkvm_v1_css: cs,
+                gkr_circuit,
+            } = job.cs;
+            let num_instances = job.input.num_instances();
+            let log2_num_instances = job.input.log2_num_instances();
+            let num_var_with_rotation = log2_num_instances + job.cs.rotation_vars().unwrap_or(0);
+            max_num_variables = max_num_variables.max(num_var_with_rotation);
+
+            let Some(gkr_circuit) = gkr_circuit else {
+                panic!("empty gkr circuit")
+            };
+            let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
+            let group_stage_masks = first_layer_output_group_stage_masks(job.cs, gkr_circuit);
+            let selector_ctxs = first_layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .zip_eq(group_stage_masks.iter())
+                .map(|((selector, _), stage_mask)| {
+                    if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty()
+                    {
+                        SelectorContext {
+                            offset: 0,
+                            num_instances,
+                            num_vars: num_var_with_rotation,
+                        }
+                    } else if cs.r_selector.as_ref() == Some(selector) {
+                        SelectorContext {
+                            offset: 0,
+                            num_instances: job.input.num_instances[0],
+                            num_vars: num_var_with_rotation,
+                        }
+                    } else if cs.w_selector.as_ref() == Some(selector) {
+                        SelectorContext {
+                            offset: job.input.num_instances[0],
+                            num_instances: job.input.num_instances[1],
+                            num_vars: num_var_with_rotation,
+                        }
+                    } else {
+                        SelectorContext {
+                            offset: 0,
+                            num_instances,
+                            num_vars: num_var_with_rotation,
+                        }
+                    }
+                })
+                .collect_vec();
+
+            let mut out_evals =
+                vec![PointAndEval::new(job.rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
+
+            if let Some(rotation) = job.rotation.as_ref() {
+                let Some([left_group_idx, right_group_idx, point_group_idx]) =
+                    first_layer.rotation_selector_group_indices()
+                else {
+                    panic!("rotation proof provided for non-rotation layer")
+                };
+                let (left_evals, right_evals, point_evals) =
+                    split_rotation_evals(&rotation.proof.evals);
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[left_group_idx].1,
+                    &left_evals,
+                    &rotation.left_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[right_group_idx].1,
+                    &right_evals,
+                    &rotation.right_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[point_group_idx].1,
+                    &point_evals,
+                    &rotation.point,
+                );
+            }
+
+            if let Some(ecc_proof) = job.ecc_proof.as_ref() {
+                let Some(
+                    [
+                        x_group_idx,
+                        y_group_idx,
+                        slope_group_idx,
+                        x3_group_idx,
+                        y3_group_idx,
+                    ],
+                ) = first_layer.ecc_bridge_group_indices()
+                else {
+                    panic!("ecc proof provided for non-ecc layer")
+                };
+                let sample_r = transcript.sample_and_append_vec(b"ecc_gkr_bridge_r", 1)[0];
+                let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation)
+                    .expect("invalid internal ecc bridge claims");
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[x_group_idx].1,
+                    &claims.x_evals,
+                    &claims.xy_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[y_group_idx].1,
+                    &claims.y_evals,
+                    &claims.xy_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[slope_group_idx].1,
+                    &claims.s_evals,
+                    &claims.s_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[x3_group_idx].1,
+                    &claims.x3_evals,
+                    &claims.x3y3_point,
+                );
+                assign_group_evals(
+                    &mut out_evals,
+                    &first_layer.out_sel_and_eval_exprs[y3_group_idx].1,
+                    &claims.y3_evals,
+                    &claims.x3y3_point,
+                );
+            }
+
+            let eval_and_dedup_points = first_layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .map(|(_, out_eval_exprs)| {
+                    out_eval_exprs
+                        .first()
+                        .map(|out_eval| out_eval.evaluate(&out_evals, &job.challenges).point)
+                })
+                .collect_vec();
+            let selector_eq_pairs = first_layer
+                .out_sel_and_eval_exprs
+                .iter()
+                .zip(eval_and_dedup_points.iter())
+                .zip(selector_ctxs.iter())
+                .filter_map(|(((sel_type, _), point), selector_ctx)| {
+                    let eq = gkr_iop::gkr::layer::gpu::utils::build_eq_x_r_with_sel_gpu(
+                        &cuda_hal,
+                        point.as_ref()?,
+                        selector_ctx,
+                        sel_type,
+                    );
+                    let selector_expr = match sel_type {
+                        SelectorType::Whole(expr)
+                        | SelectorType::Prefix(expr)
+                        | SelectorType::OrderedSparse {
+                            expression: expr, ..
+                        }
+                        | SelectorType::QuarkBinaryTreeLessThan(expr) => expr,
+                        SelectorType::None => return None,
+                    };
+                    let Expression::StructuralWitIn(wit_id, _) = selector_expr else {
+                        panic!("selector expression must be StructuralWitIn");
+                    };
+                    Some((*wit_id as usize, eq))
+                })
+                .collect_vec();
+            let mut selector_eq_by_wit_id = vec![None; first_layer.n_structural_witin];
+            for (wit_id, eq) in selector_eq_pairs {
+                if selector_eq_by_wit_id[wit_id].is_none() {
+                    selector_eq_by_wit_id[wit_id] = Some(eq);
+                }
+            }
+            selector_eqs_by_chip.push(selector_eq_by_wit_id);
+
+            let num_mles =
+                first_layer.n_witin + first_layer.n_fixed + first_layer.n_structural_witin;
+            chip_data.push(ChipMainData {
+                circuit_idx: job.circuit_idx,
+                layer: first_layer,
+                mle_start: total_mles,
+                num_mles,
+                num_var_with_rotation,
+                pi: job.input.pi.clone(),
+                alpha_start: total_exprs,
+            });
+            total_mles += num_mles;
+            total_exprs += first_layer.exprs.len();
+        }
+        let mut all_witins_gpu = Vec::with_capacity(total_mles);
+        for ((job, chip), selector_eq_by_wit_id) in jobs
+            .iter()
+            .zip(chip_data.iter())
+            .zip(selector_eqs_by_chip.iter())
+        {
+            all_witins_gpu.extend(job.input.witness.iter().map(|mle| mle.as_ref()));
+            all_witins_gpu.extend(job.input.fixed.iter().map(|mle| mle.as_ref()));
+            for (selector_eq, mle) in selector_eq_by_wit_id
+                .iter()
+                .zip(job.input.structural_witness.iter())
+            {
+                if let Some(eq) = selector_eq.as_ref() {
+                    all_witins_gpu.push(eq);
+                } else {
+                    all_witins_gpu.push(mle.as_ref());
+                }
+            }
+            assert_eq!(
+                all_witins_gpu.len(),
+                chip.mle_start + chip.num_mles,
+                "invalid gpu main witness layout"
+            );
+        }
+        let alpha_pows = get_challenge_pows(total_exprs, transcript);
+        let mut term_coefficients = Vec::new();
+        let mut mle_indices_per_term = Vec::new();
+        let mut mle_size_info = Vec::new();
+        for chip in &chip_data {
+            let main_sumcheck_challenges = chain!(
+                jobs[0].challenges.iter().copied(),
+                alpha_pows[chip.alpha_start..chip.alpha_start + chip.layer.exprs.len()]
+                    .iter()
+                    .copied()
+            )
+            .collect_vec();
+            for term in chip
+                .layer
+                .main_sumcheck_expression_monomial_terms
+                .as_ref()
+                .unwrap()
+            {
+                let scalar =
+                    eval_by_expr_constant(&chip.pi, &main_sumcheck_challenges, &term.scalar)
+                        .map_either(E::from, |v| v)
+                        .into_inner();
+                term_coefficients.push(scalar);
+                let indices = term
+                    .product
+                    .iter()
+                    .map(|expr| {
+                        let Expression::WitIn(wit_id) = expr else {
+                            panic!("main monomial product must be converted to WitIn")
+                        };
+                        chip.mle_start + *wit_id as usize
+                    })
+                    .collect_vec();
+                let first_idx = indices.first().copied();
+                mle_indices_per_term.push(indices);
+                if let Some(first_idx) = first_idx {
+                    let num_vars = all_witins_gpu[first_idx].mle.num_vars();
+                    mle_size_info.push((num_vars, num_vars));
+                } else {
+                    mle_size_info.push((0, 0));
+                }
+            }
+        }
+
+        let max_degree = mle_indices_per_term
+            .iter()
+            .map(|indices| indices.len())
+            .max()
+            .unwrap_or(0);
+        let basic_transcript = expect_basic_transcript(transcript);
+        let term_coefficients_gl64: Vec<BB31Ext> =
+            unsafe { std::mem::transmute(term_coefficients) };
+        let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
+            unsafe { std::mem::transmute(all_witins_gpu) };
+        let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+        let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
+            .sumcheck
+            .prove_generic_sumcheck_gpu_v2(
+                cuda_hal.as_ref(),
+                all_witins_gpu_type_gl64,
+                &mle_size_info,
+                &term_coefficients_gl64,
+                &mle_indices_per_term,
+                max_num_variables,
+                max_degree,
+                None,
+                1,
+                basic_transcript,
+                stream.as_ref(),
+            )
+            .map_err(|e| hal_to_backend_error(format!("GPU main sumcheck failed: {e:?}")))?;
+        let proof: IOPProof<E> = unsafe { std::mem::transmute(proof_gpu) };
+        let evals_gpu_e: Vec<Vec<E>> = unsafe { std::mem::transmute(evals_gpu) };
+        let global_evals = evals_gpu_e.into_iter().flatten().collect_vec();
+        let global_rt: Point<E> = unsafe {
+            std::mem::transmute::<Vec<BB31Ext>, Vec<E>>(
+                challenges_gpu.iter().map(|c| c.elements).collect(),
+            )
+        };
+
+        transcript.append_field_element_exts(&global_evals);
+
+        let mut results = Vec::with_capacity(chip_data.len());
+        for chip in &chip_data {
+            let input_opening_point =
+                gpu_v2_input_opening_point(&global_rt, chip.num_var_with_rotation);
+            let chip_evals = &global_evals[chip.mle_start..chip.mle_start + chip.num_mles];
+            results.push(MainConstraintResult {
+                circuit_idx: chip.circuit_idx,
+                input_opening_point,
+                opening_evals: MainSumcheckEvals {
+                    wits_in_evals: chip_evals[..chip.layer.n_witin].to_vec(),
+                    fixed_in_evals: chip_evals
+                        [chip.layer.n_witin..chip.layer.n_witin + chip.layer.n_fixed]
+                        .to_vec(),
+                },
+            });
+        }
+
+        Ok((
+            MainConstraintProof {
+                proof: gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof {
+                    proof,
+                    evals: global_evals,
+                },
+            },
+            results,
+        ))
+    }
+}
+
+fn gpu_v2_input_opening_point<E: ExtensionField>(
+    global_rt: &[E],
+    num_var_with_rotation: usize,
+) -> Point<E> {
+    global_rt[global_rt.len() - num_var_with_rotation..].to_vec()
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> RotationProver<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
@@ -2090,6 +2668,143 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<GpuBac
     }
 }
 
+pub fn open_with_incremental_replay<E, PCS>(
+    prover: &GpuProver<GpuBackend<E, PCS>>,
+    witness_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData,
+    fixed_data: Option<Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData>>,
+    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
+    points: Vec<Point<E>>,
+    mut evals: Vec<Vec<Vec<E>>>,
+    transcript: &mut (impl Transcript<E> + 'static),
+) -> PCS::Proof
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
+        panic!("GPU backend only supports BabyBear base field");
+    }
+
+    let mut rounds = vec![];
+    rounds.push((&witness_data, {
+        evals
+            .iter_mut()
+            .zip(&points)
+            .filter_map(|(evals, point)| {
+                let witin_evals = evals.remove(0);
+                if !witin_evals.is_empty() {
+                    Some((point.clone(), witin_evals))
+                } else {
+                    None
+                }
+            })
+            .collect_vec()
+    }));
+    if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
+        rounds.push((fixed_data, {
+            evals
+                .iter_mut()
+                .zip(points.iter().cloned())
+                .filter_map(|(evals, point)| {
+                    if !evals.is_empty() && !evals[0].is_empty() {
+                        Some((point.clone(), evals.remove(0)))
+                    } else {
+                        None
+                    }
+                })
+                .collect_vec()
+        }));
+    }
+
+    let prover_param = &prover.backend.pp;
+    let pp_gl64: &mpcs::basefold::structure::BasefoldProverParams<BB31Ext, mpcs::BasefoldRSParams> =
+        unsafe { std::mem::transmute(prover_param) };
+    let rounds_gl64: Vec<_> = rounds
+        .iter()
+        .map(|(commitment, point_eval_pairs)| {
+            let commitment_gl64: &BasefoldCommitmentWithWitnessGpu<
+                BB31Base,
+                BufferImpl<BB31Base>,
+                GpuDigestLayer,
+                GpuMatrix<'static>,
+                GpuPolynomial<'static>,
+            > = unsafe { std::mem::transmute(*commitment) };
+            let point_eval_pairs_gl64: Vec<_> = point_eval_pairs
+                .iter()
+                .map(|(point, evals)| {
+                    let point_gl64: &Vec<BB31Ext> = unsafe { std::mem::transmute(point) };
+                    let evals_gl64: &Vec<BB31Ext> = unsafe { std::mem::transmute(evals) };
+                    (point_gl64.clone(), evals_gl64.clone())
+                })
+                .collect();
+            (commitment_gl64, point_eval_pairs_gl64)
+        })
+        .collect();
+
+    if std::any::TypeId::of::<E>() != std::any::TypeId::of::<BB31Ext>() {
+        panic!("GPU backend only supports BabyBear field extension");
+    }
+
+    let transcript_any = transcript as &mut dyn std::any::Any;
+    let basic_transcript = transcript_any
+        .downcast_mut::<BasicTranscript<BB31Ext>>()
+        .expect("Type should match");
+
+    let cuda_hal = get_cuda_hal().unwrap();
+    let gpu_proof_basefold = cuda_hal
+        .basefold
+        .batch_open_with_trace_materializer(
+            &cuda_hal,
+            pp_gl64,
+            rounds_gl64,
+            basic_transcript,
+            |round_idx, trace_idx| {
+                if round_idx != 0 {
+                    return Ok(None);
+                }
+                let Some((_, replay_plan)) = replayable_traces
+                    .iter()
+                    .find(|(replay_trace_idx, _)| *replay_trace_idx == trace_idx)
+                else {
+                    return Ok(None);
+                };
+                let witness_rmm = info_span!(
+                    "[ceno] replay_witness_materialize",
+                    phase = "pcs_opening",
+                    round_idx,
+                    trace_idx,
+                    kind = ?replay_plan.kind,
+                    rows = replay_plan.trace_height,
+                    num_witin = replay_plan.num_witin,
+                    steps = replay_plan.step_indices.len(),
+                )
+                .in_scope(|| replay_plan.replay_witness())
+                .map_err(|err| {
+                    ceno_gpu::HalError::InvalidInput(format!(
+                        "failed to replay trace {trace_idx} for PCS opening: {err:?}"
+                    ))
+                })?;
+                if witness_rmm.height() != replay_plan.trace_height {
+                    return Err(ceno_gpu::HalError::InvalidInput(format!(
+                        "replayed trace {trace_idx} height changed before PCS opening: expected {}, got {}",
+                        replay_plan.trace_height,
+                        witness_rmm.height(),
+                    )));
+                }
+                let witness_rmm_bb31: witness::RowMajorMatrix<BB31Base> =
+                    unsafe { std::mem::transmute(witness_rmm) };
+                Ok(Some(witness_rmm_bb31))
+            },
+        )
+        .unwrap();
+
+    let gpu_proof: PCS::Proof = unsafe { std::mem::transmute_copy(&gpu_proof_basefold) };
+    std::mem::forget(gpu_proof_basefold);
+    drop(rounds);
+    drop(witness_data);
+    gpu_proof
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<GpuBackend<E, PCS>>
     for GpuProver<GpuBackend<E, PCS>>
 {
@@ -2182,40 +2897,27 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     ) {
         if let Some(replay_plan) = task.gpu_replay_plan.as_ref() {
-            let cuda_hal = get_cuda_hal().unwrap();
-            let gpu_mem_tracker = init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
             let num_vars =
                 task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
-            let estimated_replay_bytes =
-                estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
-            tracing::info!(
-                "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
-                task.circuit_name,
-                estimated_replay_bytes as f64 / (1024.0 * 1024.0),
-            );
-            task.input.witness = if let Some(trace_idx) = task.witness_trace_idx {
-                check_gpu_mem_estimation_with_context(
-                    gpu_mem_tracker,
-                    0,
-                    Some(task.circuit_name.as_str()),
+            if task.num_witin > 0 {
+                let cuda_hal = get_cuda_hal().unwrap();
+                let gpu_mem_tracker =
+                    init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
+                let estimated_replay_bytes =
+                    estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
+                tracing::info!(
+                    "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
+                    task.circuit_name,
+                    estimated_replay_bytes as f64 / (1024.0 * 1024.0),
                 );
-                info_span!("[ceno] extract_witness_mles").in_scope(|| {
-                    extract_witness_mles_for_trace::<E, PCS>(
-                        pcs_data,
-                        trace_idx,
-                        task.num_witin,
-                        num_vars,
-                    )
-                })
-            } else {
                 let witness_rmm = replay_plan.replay_witness().expect("GPU raw replay failed");
                 check_gpu_mem_estimation_with_context(
                     gpu_mem_tracker,
                     estimated_replay_bytes,
                     Some(task.circuit_name.as_str()),
                 );
-                info_span!("[ceno] replay_gpu_witness_from_raw")
-                    .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm))
+                task.input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
+                    .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
             };
             if let Some(rmm) = task.structural_rmm.as_ref() {
                 task.input.structural_witness = info_span!("[ceno] transport_structural_witness")

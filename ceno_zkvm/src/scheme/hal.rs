@@ -20,6 +20,7 @@ pub trait ProverDevice<PB>:
     TraceCommitter<PB>
     + TowerProver<PB>
     + MainSumcheckProver<PB>
+    + BatchedMainConstraintProver<PB>
     + OpeningProver<PB>
     + DeviceTransporter<PB>
     + ProtocolWitnessGeneratorProver<PB>
@@ -31,6 +32,21 @@ where
     PB: ProverBackend,
 {
     fn get_pb(&self) -> &PB;
+}
+
+pub trait BatchedMainConstraintProver<PB: ProverBackend> {
+    fn prove_batched_main_constraints<'a>(
+        &self,
+        jobs: Vec<MainConstraintJob<'a, PB>>,
+        pcs_data: &PB::PcsData,
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> Result<
+        (
+            crate::scheme::MainConstraintProof<PB::E>,
+            Vec<MainConstraintResult<PB::E>>,
+        ),
+        ZKVMError,
+    >;
 }
 
 /// Prepare a chip task's input for proving.
@@ -52,6 +68,19 @@ pub struct ProofInput<'a, PB: ProverBackend> {
     pub pi: Vec<Either<<PB::E as ExtensionField>::BaseField, PB::E>>,
     pub num_instances: [usize; 2],
     pub has_ecc_ops: bool,
+}
+
+impl<'a, PB: ProverBackend> Clone for ProofInput<'a, PB> {
+    fn clone(&self) -> Self {
+        Self {
+            witness: self.witness.clone(),
+            structural_witness: self.structural_witness.clone(),
+            fixed: self.fixed.clone(),
+            pi: self.pi.clone(),
+            num_instances: self.num_instances,
+            has_ecc_ops: self.has_ecc_ops,
+        }
+    }
 }
 
 impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
@@ -152,6 +181,26 @@ pub trait TowerProver<PB: ProverBackend> {
 pub struct MainSumcheckEvals<E: ExtensionField> {
     pub wits_in_evals: Vec<E>,
     pub fixed_in_evals: Vec<E>,
+}
+
+pub struct MainConstraintJob<'a, PB: ProverBackend> {
+    pub circuit_name: String,
+    pub circuit_idx: usize,
+    pub input: ProofInput<'static, PB>,
+    pub witness_trace_idx: Option<usize>,
+    pub num_witin: usize,
+    pub structural_rmm: Option<witness::RowMajorMatrix<<PB::E as ExtensionField>::BaseField>>,
+    pub rt_tower: Point<PB::E>,
+    pub rotation: Option<RotationProverOutput<PB::E>>,
+    pub ecc_proof: Option<EccQuarkProof<PB::E>>,
+    pub challenges: [PB::E; 2],
+    pub cs: &'a ComposedConstrainSystem<PB::E>,
+}
+
+pub struct MainConstraintResult<E: ExtensionField> {
+    pub circuit_idx: usize,
+    pub input_opening_point: Point<E>,
+    pub opening_evals: MainSumcheckEvals<E>,
 }
 
 #[derive(Clone)]
