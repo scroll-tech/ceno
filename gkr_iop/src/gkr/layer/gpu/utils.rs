@@ -115,6 +115,7 @@ pub fn encode_common_term_plan(plan: &CommonFactoredTermPlan, total_mles: usize)
         common_mle_indices,
         common_scalar_offsets,
         common_scalar_indices,
+        active_counts_by_num_vars: vec![],
     }
 }
 

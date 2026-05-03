@@ -24,6 +24,7 @@ use crate::{
 use ceno_gpu::{
     Buffer, CudaHal,
     bb31::{CudaHalBB31, GpuPolynomial},
+    common::sumcheck::CommonTermPlan,
     get_cuda_mem_info,
 };
 use either::Either;
@@ -2140,6 +2141,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             alpha_start: usize,
         }
 
+        struct HostCommonGroup {
+            num_vars: usize,
+            term_terms: Vec<u32>,
+            common_mle_indices: Vec<u32>,
+        }
+
         if jobs.is_empty() {
             return Ok((
                 MainConstraintProof {
@@ -2413,6 +2420,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let mut term_coefficients = Vec::new();
         let mut mle_indices_per_term = Vec::new();
         let mut mle_size_info = Vec::new();
+        let mut common_groups = Vec::new();
         for chip in &chip_data {
             let main_sumcheck_challenges = chain!(
                 jobs[0].challenges.iter().copied(),
@@ -2421,12 +2429,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     .copied()
             )
             .collect_vec();
-            for term in chip
-                .layer
-                .main_sumcheck_expression_monomial_terms
-                .as_ref()
-                .unwrap()
-            {
+            let common_plan = chip.layer.main_sumcheck_expression_common_factored.as_ref();
+            let monomial_terms = match (
+                common_plan,
+                chip.layer
+                    .main_sumcheck_expression_monomial_terms_excluded_shared
+                    .as_ref(),
+            ) {
+                (Some(_), Some(residual_terms)) => residual_terms,
+                (Some(_), None) => {
+                    panic!("common factoring plan present without residual monomials")
+                }
+                (None, Some(terms)) => terms,
+                (None, None) => chip
+                    .layer
+                    .main_sumcheck_expression_monomial_terms
+                    .as_ref()
+                    .unwrap(),
+            };
+            let term_start = term_coefficients.len();
+            for term in monomial_terms {
                 let scalar =
                     eval_by_expr_constant(&chip.pi, &main_sumcheck_challenges, &term.scalar)
                         .map_either(E::from, |v| v)
@@ -2451,14 +2473,115 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     mle_size_info.push((0, 0));
                 }
             }
+            let mut covered_terms = vec![false; monomial_terms.len()];
+            if let Some(common_plan) = common_plan {
+                for group in &common_plan.groups {
+                    assert!(
+                        !group.term_indices.is_empty(),
+                        "common term group must include at least one term"
+                    );
+                    let mut group_term_terms = Vec::with_capacity(group.term_indices.len());
+                    for &term_idx in &group.term_indices {
+                        assert!(
+                            term_idx < monomial_terms.len(),
+                            "common term index {} out of range (terms={})",
+                            term_idx,
+                            monomial_terms.len()
+                        );
+                        covered_terms[term_idx] = true;
+                        group_term_terms.push(
+                            u32::try_from(term_start + term_idx)
+                                .expect("term index exceeds supported range for GPU plan"),
+                        );
+                    }
+
+                    let mut group_mle_indices = Vec::with_capacity(group.witness_indices.len());
+                    for &wit_idx in &group.witness_indices {
+                        assert!(
+                            wit_idx < chip.num_mles,
+                            "common witness index {} out of range (mles={})",
+                            wit_idx,
+                            chip.num_mles
+                        );
+                        group_mle_indices.push(
+                            u32::try_from(chip.mle_start + wit_idx)
+                                .expect("witness index exceeds supported range for GPU plan"),
+                        );
+                    }
+                    common_groups.push(HostCommonGroup {
+                        num_vars: chip.num_var_with_rotation,
+                        term_terms: group_term_terms,
+                        common_mle_indices: group_mle_indices,
+                    });
+                }
+            }
+            let mut uncovered_terms = Vec::new();
+            for (term_idx, covered) in covered_terms.iter().copied().enumerate() {
+                if !covered {
+                    uncovered_terms.push(
+                        u32::try_from(term_start + term_idx)
+                            .expect("term index exceeds supported range for GPU plan"),
+                    );
+                }
+            }
+            if !uncovered_terms.is_empty() {
+                common_groups.push(HostCommonGroup {
+                    num_vars: chip.num_var_with_rotation,
+                    term_terms: uncovered_terms,
+                    common_mle_indices: Vec::new(),
+                });
+            }
         }
 
-        let max_degree = mle_indices_per_term
+        common_groups.sort_by(|lhs, rhs| rhs.num_vars.cmp(&lhs.num_vars));
+
+        let mut common_term_offsets = Vec::with_capacity(common_groups.len() + 1);
+        let mut common_term_terms = Vec::new();
+        let mut common_mle_offsets = Vec::with_capacity(common_groups.len() + 1);
+        let mut common_mle_indices = Vec::new();
+        common_term_offsets.push(0);
+        common_mle_offsets.push(0);
+        for group in &common_groups {
+            common_term_terms.extend(group.term_terms.iter().copied());
+            common_term_offsets.push(common_term_terms.len() as u32);
+            common_mle_indices.extend(group.common_mle_indices.iter().copied());
+            common_mle_offsets.push(common_mle_indices.len() as u32);
+        }
+
+        let active_counts_by_num_vars = (0..=max_num_variables)
+            .map(|num_vars| {
+                common_groups
+                    .iter()
+                    .take_while(|group| group.num_vars >= num_vars)
+                    .count() as u32
+            })
+            .collect_vec();
+
+        let max_degree = common_groups
             .iter()
-            .map(|indices| indices.len())
+            .map(|group| {
+                let common_len = group.common_mle_indices.len();
+                let max_residual_len = group
+                    .term_terms
+                    .iter()
+                    .map(|&term_idx| mle_indices_per_term[term_idx as usize].len())
+                    .max()
+                    .unwrap_or(0);
+                common_len + max_residual_len
+            })
             .max()
             .unwrap_or(0);
         let basic_transcript = expect_basic_transcript(transcript);
+        let common_scalar_offsets = vec![0u32; common_mle_offsets.len()];
+        let common_term_plan = CommonTermPlan {
+            term_offsets: common_term_offsets,
+            term_terms: common_term_terms,
+            common_mle_offsets,
+            common_mle_indices,
+            common_scalar_offsets,
+            common_scalar_indices: vec![],
+            active_counts_by_num_vars,
+        };
         let term_coefficients_gl64: Vec<BB31Ext> =
             unsafe { std::mem::transmute(term_coefficients) };
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
@@ -2466,7 +2589,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
             .sumcheck
-            .prove_generic_sumcheck_gpu_v2(
+            .prove_generic_sumcheck_gpu_v2_with_staggered_domain(
                 cuda_hal.as_ref(),
                 all_witins_gpu_type_gl64,
                 &mle_size_info,
@@ -2474,8 +2597,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 &mle_indices_per_term,
                 max_num_variables,
                 max_degree,
-                None,
+                Some(&common_term_plan),
                 1,
+                true,
                 basic_transcript,
                 stream.as_ref(),
             )
