@@ -2589,7 +2589,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
             .sumcheck
-            .prove_generic_sumcheck_gpu_v2_with_staggered_domain(
+            .prove_batched_main_sumcheck_gpu_v2(
                 cuda_hal.as_ref(),
                 all_witins_gpu_type_gl64,
                 &mle_size_info,
@@ -2599,7 +2599,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 max_degree,
                 Some(&common_term_plan),
                 1,
-                true,
                 basic_transcript,
                 stream.as_ref(),
             )
