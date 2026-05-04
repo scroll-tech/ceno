@@ -340,6 +340,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: impl ForkableTranscript<E>,
     ) -> Result<SepticPoint<E::BaseField>, ZKVMError> {
+        tracing::info!(
+            "verifying shard proof: expected_shard_id={}, proof_shard_id={}, chip_groups={}",
+            shard_id,
+            vm_proof.public_values.shard_id,
+            vm_proof.chip_proofs.len()
+        );
+
         // main invariant between opcode circuits and table circuits
         let mut prod_r = E::ONE;
         let mut prod_w = E::ONE;
@@ -548,6 +555,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                             .into(),
                         ));
                     };
+                    if q1 == E::ZERO || q2 == E::ZERO {
+                        return Err(ZKVMError::InvalidProof(
+                            format!(
+                                "{shard_id}th shard {circuit_name} has zero logup denominator in lk_out_evals: {evals:?}"
+                            )
+                            .into(),
+                        ));
+                    }
                     Ok(p1 * q1.inverse() + p2 * q2.inverse())
                 })
                 .sum::<Result<E, ZKVMError>>()?;

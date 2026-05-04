@@ -303,9 +303,9 @@ pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
     num_rows: usize,
     num_cols: usize,
     padding: InstancePaddingStrategy,
-) -> RowMajorMatrix<E::BaseField> {
+) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
     let mut rmm = RowMajorMatrix::<E::BaseField>::new(num_rows, num_cols, padding);
     // Keep the original col-major witness buffer as the source of truth for GPU commit.
     rmm.set_device_backing(gpu_result.device_buffer, DeviceMatrixLayout::ColMajor);
-    rmm
+    Ok(rmm)
 }

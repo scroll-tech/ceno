@@ -348,8 +348,7 @@ fn replay_keccak_witness_only_from_packed<E: ExtensionField>(
 ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
     use crate::precompiles::KECCAK_ROUNDS_CEIL_LOG2;
 
-    let num_padded_instances = num_instances.next_power_of_two().max(2);
-    let num_padded_rows = num_padded_instances * 32;
+    let num_rows = num_instances * 32;
     let rotation = KECCAK_ROUNDS_CEIL_LOG2;
 
     let col_map = info_span!("col_map").in_scope(|| extract_keccak_column_map(config, num_witin));
@@ -358,7 +357,7 @@ fn replay_keccak_witness_only_from_packed<E: ExtensionField>(
             .witgen_keccak(
                 &col_map,
                 packed_instances,
-                num_padded_rows,
+                num_rows,
                 shard_offset,
                 fetch_base_pc,
                 fetch_num_slots,
@@ -372,9 +371,10 @@ fn replay_keccak_witness_only_from_packed<E: ExtensionField>(
     let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !should_materialize_witness_on_gpu()
     {
-        info_span!("transpose_d2h", rows = num_padded_rows, cols = num_witin).in_scope(|| {
+        let produced_rows = gpu_result.witness.num_rows;
+        info_span!("transpose_d2h", rows = produced_rows, cols = num_witin).in_scope(|| {
             let mut rmm_buffer = hal
-                .alloc_elems_on_device(num_padded_rows * num_witin, false, None)
+                .alloc_elems_on_device(produced_rows * num_witin, false, None)
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
                 })?;
@@ -382,7 +382,7 @@ fn replay_keccak_witness_only_from_packed<E: ExtensionField>(
                 &hal.inner,
                 &mut rmm_buffer,
                 &gpu_result.witness.device_buffer,
-                num_padded_rows,
+                produced_rows,
                 num_witin,
             )
             .map_err(|e| ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into()))?;
@@ -445,8 +445,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     use crate::precompiles::KECCAK_ROUNDS_CEIL_LOG2;
 
     let num_instances = step_indices.len();
-    let num_padded_instances = num_instances.next_power_of_two().max(2);
-    let num_padded_rows = num_padded_instances * 32; // 2^5 = 32 rows per instance
+    let num_rows = num_instances * 32; // 2^5 = 32 rows per instance
     let rotation = KECCAK_ROUNDS_CEIL_LOG2; // = 5
     let materialize_initial_witness = crate::instructions::gpu::config::is_debug_compare_enabled()
         || should_materialize_witness_on_initial_assign();
@@ -479,7 +478,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
                 .witgen_keccak(
                     &col_map,
                     &packed_instances,
-                    num_padded_rows,
+                    num_rows,
                     shard_ctx.current_shard_offset_cycle(),
                     fetch_base_pc,
                     fetch_num_slots,
@@ -565,9 +564,10 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     } else if crate::instructions::gpu::config::is_debug_compare_enabled()
         || !should_materialize_witness_on_gpu()
     {
-        info_span!("transpose_d2h", rows = num_padded_rows, cols = num_witin).in_scope(|| {
+        let produced_rows = gpu_result.witness.num_rows;
+        info_span!("transpose_d2h", rows = produced_rows, cols = num_witin).in_scope(|| {
             let mut rmm_buffer = hal
-                .alloc_elems_on_device(num_padded_rows * num_witin, false, None)
+                .alloc_elems_on_device(produced_rows * num_witin, false, None)
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
                 })?;
@@ -575,7 +575,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
                 &hal.inner,
                 &mut rmm_buffer,
                 &gpu_result.witness.device_buffer,
-                num_padded_rows,
+                produced_rows,
                 num_witin,
             )
             .map_err(|e| ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into()))?;

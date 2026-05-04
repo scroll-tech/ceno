@@ -222,7 +222,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                 let cpu_evaluations = poly.to_cpu_vec(stream.as_ref());
                 let cpu_evaluations_base: Vec<E::BaseField> =
                     unsafe { std::mem::transmute(cpu_evaluations) };
-                MultilinearExtension::from_evaluations_vec(
+                MultilinearExtension::from_evaluations_vec_compact(
                     self.mle.num_vars(),
                     cpu_evaluations_base,
                 )
@@ -230,7 +230,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
             GpuFieldType::Ext(poly) => {
                 let cpu_evaluations = poly.to_cpu_vec(stream.as_ref());
                 let cpu_evaluations_ext: Vec<E> = unsafe { std::mem::transmute(cpu_evaluations) };
-                MultilinearExtension::from_evaluations_ext_vec(
+                MultilinearExtension::from_evaluations_ext_vec_compact(
                     self.mle.num_vars(),
                     cpu_evaluations_ext,
                 )
@@ -506,13 +506,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+        // Match the CPU witness inference path: layer outputs are materialized over
+        // the occupied prefix of the layer witness domain, not the maximum length of
+        // any referenced structural/fixed MLE.
+        let output_len = all_witins_gpu_gl64
+            .first()
+            .map(|mle| mle.evaluations_len())
+            .unwrap_or(0);
+        let output_lengths =
+            std::iter::repeat_n(output_len, mle_indices_per_term.len()).collect_vec();
 
         // buffer for output witness from gpu
         let cuda_hal = get_cuda_hal().unwrap();
-        let mut next_witness_buf = (0..num_non_zero_expr)
-            .map(|_| {
+        let mut next_witness_buf = output_lengths
+            .iter()
+            .map(|&output_len| {
                 cuda_hal
-                    .alloc_ext_elems_on_device(1 << num_vars, false, stream.as_ref())
+                    .alloc_ext_elems_on_device(output_len, false, stream.as_ref())
                     .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
             })
             .collect::<Result<Vec<_>, _>>()

@@ -1,4 +1,6 @@
 use ff_ext::ExtensionField;
+#[cfg(feature = "gpu")]
+use gkr_iop::error::BackendError;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
@@ -220,6 +222,8 @@ impl<
             let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
             #[cfg(feature = "gpu")]
             let mut gpu_replay_plans = Vec::with_capacity(name_and_instances.len());
+            #[cfg(feature = "gpu")]
+            let mut witness_trace_rows = Vec::with_capacity(name_and_instances.len());
             // commit to opcode circuits first and then commit to table circuits, sorted by name
             for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
                 let crate::structs::ChipInput {
@@ -233,6 +237,15 @@ impl<
                 #[cfg(feature = "gpu")]
                 let use_deferred_gpu_commit = crate::instructions::gpu::config::is_gpu_witgen_enabled()
                     && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit();
+                #[cfg(feature = "gpu")]
+                let trace_rows_for_estimate =
+                    if !crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                        && witness_rmm.num_instances() > 0
+                    {
+                        Some(witness_rmm.height())
+                    } else {
+                        None
+                    };
 
                 #[cfg(feature = "gpu")]
                 if use_deferred_gpu_commit {
@@ -252,6 +265,8 @@ impl<
                     wits_rmms.insert(i, witness_rmm);
                 }
                 structural_rmms.push(structural_witness_rmm);
+                #[cfg(feature = "gpu")]
+                witness_trace_rows.push(trace_rows_for_estimate);
                 #[cfg(feature = "gpu")]
                 gpu_replay_plans.push(gpu_replay_plan);
             }
@@ -364,6 +379,8 @@ impl<
                 structural_rmms,
                 #[cfg(feature = "gpu")]
                 gpu_replay_plans,
+                #[cfg(feature = "gpu")]
+                witness_trace_rows,
                 witness_mles,
                 &witness_data,
                 fixed_mles,
@@ -603,6 +620,12 @@ impl<
                         task.circuit_idx as u64,
                     ));
 
+                    let task_name = task.circuit_name.clone();
+                    let estimated_memory_bytes = task.estimated_memory_bytes as usize;
+                    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+                    let chip_mem_tracker =
+                        crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "create_chip_proof");
+
                     let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
                         unsafe { std::mem::transmute(task.input) };
 
@@ -619,6 +642,11 @@ impl<
                             task.num_witin,
                             task.structural_rmm,
                         )?;
+                    crate::scheme::gpu::check_gpu_scheduler_mem_estimation_with_context(
+                        chip_mem_tracker,
+                        estimated_memory_bytes,
+                        Some(task_name.as_str()),
+                    );
 
                     Ok(ChipTaskResult {
                         task_id: task.task_id,
@@ -860,6 +888,7 @@ impl<
         name_and_instances: Vec<(String, [usize; 2])>,
         structural_rmms: Vec<witness::RowMajorMatrix<E::BaseField>>,
         #[cfg(feature = "gpu")] gpu_replay_plans: Vec<Option<crate::structs::GpuReplayPlan<E>>>,
+        #[cfg(feature = "gpu")] witness_trace_rows: Vec<Option<usize>>,
         #[allow(unused_mut)] mut witness_mles: Vec<PB::MultilinearPoly<'data>>,
         witness_data: &PB::PcsData,
         mut fixed_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
@@ -988,6 +1017,7 @@ impl<
                     gpu_input,
                     &circuit_name,
                     gpu_replay_plans[this_idx].as_ref(),
+                    witness_trace_rows[this_idx],
                     structural_cached_on_device,
                 )
             };
@@ -1041,6 +1071,8 @@ impl<
                 witness_trace_idx,
                 #[cfg(feature = "gpu")]
                 gpu_replay_plan,
+                #[cfg(feature = "gpu")]
+                witness_trace_rows: witness_trace_rows[this_idx],
                 num_witin: cs.num_witin(),
                 structural_rmm: task_structural_rmm,
             });
@@ -1117,12 +1149,11 @@ where
         scheme::{
             constants::NUM_FANIN,
             gpu::{
-                build_tower_witness_gpu, check_gpu_mem_estimation,
-                estimate_replay_materialization_bytes_for_plan, estimate_tower_stage_bytes,
-                extract_out_evals_from_gpu_towers, extract_witness_mles_for_trace,
-                log_gpu_device_state, log_gpu_pool_usage, prove_ec_sum_quark_impl,
-                prove_main_constraints_impl, prove_rotation_impl, prove_tower_relation_impl,
-                transport_structural_witness_to_gpu,
+                build_tower_witness_gpu, estimate_replay_materialization_bytes_for_plan,
+                estimate_tower_stage_bytes, extract_out_evals_from_gpu_towers,
+                extract_witness_mles_for_trace, log_gpu_device_state, log_gpu_pool_usage,
+                prove_ec_sum_quark_impl, prove_main_constraints_impl, prove_rotation_impl,
+                prove_tower_relation_impl, transport_structural_witness_to_gpu,
             },
         },
     };
@@ -1134,6 +1165,20 @@ where
         .get_pool_stream()
         .expect("should acquire stream");
     let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(_stream.clone());
+    let sync_concurrent_chip_stream = || -> Result<(), ZKVMError> {
+        if ChipScheduler::is_concurrent_mode() {
+            cuda_hal
+                .inner
+                .synchronize_stream(_stream.stream())
+                .map_err(|e| {
+                    ZKVMError::BackendError(BackendError::CircuitError(
+                        format!("failed to synchronize GPU chip proof stream for {name}: {e:?}")
+                            .into_boxed_str(),
+                    ))
+                })?;
+        }
+        Ok(())
+    };
     let replay_stage_split = gpu_replay_plan
         .as_ref()
         .is_some_and(|plan| matches!(plan.kind, GpuWitgenKind::Keccak | GpuWitgenKind::ShardRam));
@@ -1164,7 +1209,11 @@ where
         log_gpu_device_state(&format!("{name}:before_replay"));
         log_gpu_pool_usage(&format!("{name}:before_replay"));
         let witness_rmm = replay_plan.replay_witness()?;
-        check_gpu_mem_estimation(gpu_mem_tracker, estimated_replay_bytes);
+        crate::scheme::gpu::check_gpu_mem_estimation_with_context(
+            gpu_mem_tracker,
+            estimated_replay_bytes,
+            Some(name),
+        );
         input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
             .in_scope(|| crate::scheme::gpu::extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
         if let Some(structural_rmm_cached) = structural_rmm.as_ref() {
@@ -1254,32 +1303,22 @@ where
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         let r_set_len =
             cs.zkvm_v1_css.r_expressions.len() + cs.zkvm_v1_css.r_table_expressions.len();
-        let (tower_build_estimated_bytes, tower_prove_estimated_bytes) =
+        let (tower_build_estimated_bytes, tower_prove_prebuild_estimated_bytes) =
             estimate_tower_stage_bytes::<E, PCS>(cs, &input);
         tracing::info!(
             "[gpu tower][{}] estimated: build_tower={:.2}MB, prove_tower={:.2}MB",
             name,
             tower_build_estimated_bytes as f64 / (1024.0 * 1024.0),
-            tower_prove_estimated_bytes as f64 / (1024.0 * 1024.0),
+            tower_prove_prebuild_estimated_bytes as f64 / (1024.0 * 1024.0),
         );
         let tower_build_mem_tracker =
             crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "build_tower_witness_gpu");
-        let mut big_buffers = Vec::new();
-        let mut ones_buffer = Vec::new();
-        let mut view_last_layers = Vec::new();
         log_gpu_device_state(&format!("{name}:before_build_tower_witness"));
         log_gpu_pool_usage(&format!("{name}:before_build_tower_witness"));
         let (prod_gpu, logup_gpu, lk_out_evals, w_out_evals, r_out_evals) =
             info_span!("[ceno] build_tower_witness_gpu").in_scope(|| {
                 let (prod_gpu, logup_gpu) = build_tower_witness_gpu(
-                    cs,
-                    &input,
-                    &records,
-                    challenges,
-                    &cuda_hal,
-                    &mut big_buffers,
-                    &mut ones_buffer,
-                    &mut view_last_layers,
+                    cs, &input, &records, challenges, &cuda_hal,
                 )
                 .map_err(|e| {
                     ZKVMError::InvalidWitness(format!("build_tower_witness_gpu failed: {e}").into())
@@ -1288,7 +1327,11 @@ where
                     extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
                 Ok::<_, ZKVMError>((prod_gpu, logup_gpu, lk_out_evals, w_out_evals, r_out_evals))
             })?;
-        check_gpu_mem_estimation(tower_build_mem_tracker, tower_build_estimated_bytes);
+        crate::scheme::gpu::check_gpu_mem_estimation_with_context(
+            tower_build_mem_tracker,
+            tower_build_estimated_bytes,
+            Some(name),
+        );
         log_gpu_device_state(&format!("{name}:after_build_tower_witness"));
         log_gpu_pool_usage(&format!("{name}:after_build_tower_witness"));
 
@@ -1308,6 +1351,27 @@ where
             prod_specs: prod_gpu,
             logup_specs: logup_gpu,
         };
+        let tower_prove_estimate = cuda_hal
+            .tower
+            .estimate_memory_requirements(&tower_input, NUM_FANIN);
+        let tower_input_live_bytes = tower_prove_estimate.prod_tower_buffer_bytes
+            + tower_prove_estimate.logup_tower_buffer_bytes;
+        let runtime_layout_prove_bytes = tower_prove_estimate
+            .total_bytes
+            .saturating_sub(tower_input_live_bytes);
+        let release_adjusted_prebuild_bytes =
+            tower_prove_prebuild_estimated_bytes / NUM_FANIN + 4 * 1024 * 1024;
+        let tower_prove_estimated_bytes =
+            runtime_layout_prove_bytes.max(release_adjusted_prebuild_bytes);
+        tracing::info!(
+            "[gpu tower][{}] refined prove_tower estimate: prebuild={:.2}MB, runtime_layout={:.2}MB, release_adjusted={:.2}MB, local={:.2}MB, tower_live={:.2}MB",
+            name,
+            tower_prove_prebuild_estimated_bytes as f64 / (1024.0 * 1024.0),
+            runtime_layout_prove_bytes as f64 / (1024.0 * 1024.0),
+            release_adjusted_prebuild_bytes as f64 / (1024.0 * 1024.0),
+            tower_prove_estimated_bytes as f64 / (1024.0 * 1024.0),
+            tower_input_live_bytes as f64 / (1024.0 * 1024.0),
+        );
         let tower_prove_mem_tracker =
             crate::scheme::gpu::init_gpu_mem_tracker(&cuda_hal, "prove_tower_relation_gpu");
         log_gpu_device_state(&format!("{name}:before_prove_tower"));
@@ -1318,23 +1382,28 @@ where
                     .tower
                     .create_proof(
                         &cuda_hal,
-                        &tower_input,
+                        tower_input,
                         NUM_FANIN,
                         basic_tr,
                         gkr_iop::gpu::get_thread_stream().as_ref(),
                     )
-                    .expect("gpu tower create_proof failed")
-            });
+                    .map_err(|e| {
+                        ZKVMError::BackendError(BackendError::CircuitError(
+                            format!("gpu tower create_proof failed for {name}: {e:?}")
+                                .into_boxed_str(),
+                        ))
+                    })
+            })?;
         log_gpu_device_state(&format!("{name}:after_prove_tower"));
         log_gpu_pool_usage(&format!("{name}:after_prove_tower"));
         let rt_tower: Point<E> = unsafe { std::mem::transmute(rt_tower_gl) };
         let tower_proof: TowerProofs<E> = unsafe { std::mem::transmute(tower_proof_gpu) };
-        check_gpu_mem_estimation(tower_prove_mem_tracker, tower_prove_estimated_bytes);
+        crate::scheme::gpu::check_gpu_tower_prove_mem_estimation_with_context(
+            tower_prove_mem_tracker,
+            tower_prove_estimated_bytes,
+            Some(name),
+        );
         drop(records);
-        drop(tower_input);
-        drop(big_buffers);
-        drop(ones_buffer);
-        drop(view_last_layers);
         log_gpu_device_state(&format!("{name}:after_drop_tower"));
         exit_span!(span);
 
@@ -1370,6 +1439,7 @@ where
             wits_in_evals,
             fixed_in_evals,
         } = evals;
+        sync_concurrent_chip_stream()?;
         clear_materialized_input(&mut input);
         log_gpu_device_state(&format!("{name}:after_main_constraints"));
         exit_span!(span);
@@ -1419,7 +1489,7 @@ where
             prove_tower_relation_impl::<E, PCS>(
                 cs, &input, &records, challenges, transcript, &cuda_hal,
             )
-        });
+        })?;
     exit_span!(span);
     drop(records);
 
@@ -1454,6 +1524,7 @@ where
         wits_in_evals,
         fixed_in_evals,
     } = evals;
+    sync_concurrent_chip_stream()?;
     exit_span!(span);
 
     Ok((

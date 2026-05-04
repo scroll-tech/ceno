@@ -439,11 +439,11 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
     {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_structural_transpose_d2h",
-            num_rows_padded,
+            rows = gpu_structural.num_rows,
             num_structural_witin,
         )
         .in_scope(|| -> Result<_, ZKVMError> {
-            let wit_num_rows = num_rows_padded;
+            let wit_num_rows = gpu_structural.num_rows;
             let struct_num_cols = num_structural_witin;
             let mut struct_rmm_buf = hal
                 .witgen
@@ -684,11 +684,11 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
     {
         let struct_data = tracing::info_span!(
             "gpu_shard_ram_structural_transpose_d2h_from_device",
-            num_rows_padded,
+            rows = gpu_structural.num_rows,
             num_structural_witin,
         )
         .in_scope(|| -> Result<_, ZKVMError> {
-            let wit_num_rows = num_rows_padded;
+            let wit_num_rows = gpu_structural.num_rows;
             let struct_num_cols = num_structural_witin;
             let mut struct_rmm_buf = hal
                 .witgen
