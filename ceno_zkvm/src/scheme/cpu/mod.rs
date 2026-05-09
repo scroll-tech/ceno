@@ -1392,14 +1392,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let (proof, prover_state) =
             IOPProverState::prove(builder.to_virtual_polys(&[global_expr], &[]), transcript);
         let global_evals = prover_state.get_mle_flatten_final_evaluations();
-        transcript.append_field_element_exts(&global_evals);
         let global_rt = prover_state.collect_raw_challenges();
+        transcript.append_field_element_exts(&global_evals);
         exit_span!(span);
 
         let mut results = Vec::with_capacity(jobs.len());
         for chip in &chip_data {
-            let input_opening_point =
-                global_rt[global_rt.len() - chip.num_var_with_rotation..].to_vec();
+            let input_opening_point = global_rt[..chip.num_var_with_rotation].to_vec();
             let chip_evals = &global_evals[chip.mle_start..chip.mle_start + chip.num_mles];
             results.push(MainConstraintResult {
                 circuit_idx: chip.circuit_idx,

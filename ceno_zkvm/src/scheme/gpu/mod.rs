@@ -2548,15 +2548,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             common_mle_offsets.push(common_mle_indices.len() as u32);
         }
 
-        let active_counts_by_num_vars = (0..=max_num_variables)
-            .map(|num_vars| {
-                common_groups
-                    .iter()
-                    .take_while(|group| group.num_vars >= num_vars)
-                    .count() as u32
-            })
-            .collect_vec();
-
         let max_degree = common_groups
             .iter()
             .map(|group| {
@@ -2580,7 +2571,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             common_mle_indices,
             common_scalar_offsets,
             common_scalar_indices: vec![],
-            active_counts_by_num_vars,
         };
         let term_coefficients_gl64: Vec<BB31Ext> =
             unsafe { std::mem::transmute(term_coefficients) };
@@ -2589,7 +2579,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
         let (proof_gpu, evals_gpu, challenges_gpu) = cuda_hal
             .sumcheck
-            .prove_batched_main_sumcheck_gpu_v2(
+            .prove_generic_sumcheck_gpu_v2(
                 cuda_hal.as_ref(),
                 all_witins_gpu_type_gl64,
                 &mle_size_info,
@@ -2598,7 +2588,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 max_num_variables,
                 max_degree,
                 Some(&common_term_plan),
-                1,
                 basic_transcript,
                 stream.as_ref(),
             )
@@ -2617,7 +2606,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let mut results = Vec::with_capacity(chip_data.len());
         for chip in &chip_data {
             let input_opening_point =
-                gpu_v2_input_opening_point(&global_rt, chip.num_var_with_rotation);
+                frontload_input_opening_point(&global_rt, chip.num_var_with_rotation);
             let chip_evals = &global_evals[chip.mle_start..chip.mle_start + chip.num_mles];
             results.push(MainConstraintResult {
                 circuit_idx: chip.circuit_idx,
@@ -2643,11 +2632,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
     }
 }
 
-fn gpu_v2_input_opening_point<E: ExtensionField>(
+fn frontload_input_opening_point<E: ExtensionField>(
     global_rt: &[E],
     num_var_with_rotation: usize,
 ) -> Point<E> {
-    global_rt[global_rt.len() - num_var_with_rotation..].to_vec()
+    global_rt[..num_var_with_rotation].to_vec()
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> RotationProver<GpuBackend<E, PCS>>
@@ -3033,15 +3022,31 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     task.circuit_name,
                     estimated_replay_bytes as f64 / (1024.0 * 1024.0),
                 );
-                let witness_rmm = replay_plan.replay_witness().expect("GPU raw replay failed");
-                check_gpu_mem_estimation_with_context(
-                    gpu_mem_tracker,
-                    estimated_replay_bytes,
-                    Some(task.circuit_name.as_str()),
-                );
-                task.input.witness = info_span!("[ceno] replay_gpu_witness_from_raw")
-                    .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm));
-            };
+                task.input.witness = if let Some(trace_idx) = task.witness_trace_idx {
+                    check_gpu_mem_estimation_with_context(
+                        gpu_mem_tracker,
+                        0,
+                        Some(task.circuit_name.as_str()),
+                    );
+                    info_span!("[ceno] extract_witness_mles").in_scope(|| {
+                        extract_witness_mles_for_trace::<E, PCS>(
+                            pcs_data,
+                            trace_idx,
+                            task.num_witin,
+                            num_vars,
+                        )
+                    })
+                } else {
+                    let witness_rmm = replay_plan.replay_witness().expect("GPU raw replay failed");
+                    check_gpu_mem_estimation_with_context(
+                        gpu_mem_tracker,
+                        estimated_replay_bytes,
+                        Some(task.circuit_name.as_str()),
+                    );
+                    info_span!("[ceno] replay_gpu_witness_from_raw")
+                        .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm))
+                };
+            }
             if let Some(rmm) = task.structural_rmm.as_ref() {
                 task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
                     .in_scope(|| {

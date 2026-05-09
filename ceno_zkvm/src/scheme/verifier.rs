@@ -46,13 +46,16 @@ use multilinear_extensions::{
         InnerRepeatingIncrementalSequence, OuterRepeatingIncrementalSequence,
         StackedConstantSequence, StackedIncrementalSequence,
     },
-    mle::IntoMLE,
+    mle::{IntoMLE, MultilinearExtension},
+    monomial::Term,
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
+    virtual_polys::VirtualPolynomials,
 };
 use p3::field::{FieldAlgebra, dot_product};
 use sumcheck::{
+    frontload,
     structs::{IOPProof, IOPVerifierState, SumCheckSubClaim},
     util::get_challenge_pows,
 };
@@ -102,7 +105,10 @@ fn validate_batched_main_structural_evals<E: ExtensionField>(
         {
             let wit_id = wit_id as usize + structural_witin_offset;
             if layer_evals[wit_id] != expected_eval {
-                return Err(format!("{circuit_name} selector structural witin mismatch"));
+                return Err(format!(
+                    "{circuit_name} selector structural witin mismatch wit_id={wit_id} expected={expected_eval} got={}",
+                    layer_evals[wit_id]
+                ));
             }
         }
     }
@@ -146,6 +152,66 @@ fn validate_batched_main_structural_evals<E: ExtensionField>(
     }
 
     Ok(())
+}
+
+fn eval_batched_main_frontload_terms<E: ExtensionField>(
+    layer_evals: &[E],
+    pi: &[E],
+    challenges: &[E],
+    global_in_point: &[E],
+    num_var_with_rotation: usize,
+    terms: &[Term<Expression<E>, Expression<E>>],
+) -> E {
+    let evaluated_terms = terms
+        .iter()
+        .map(|term| {
+            let scalar = eval_by_expr_with_instance(&[], &[], &[], pi, challenges, &term.scalar);
+            let product_wit_ids = term
+                .product
+                .iter()
+                .map(|expr| {
+                    let Expression::WitIn(wit_id) = expr else {
+                        panic!("main monomial product must be converted to WitIn")
+                    };
+                    *wit_id as usize
+                })
+                .collect_vec();
+            (scalar, product_wit_ids)
+        })
+        .collect_vec();
+
+    let constant_mles = evaluated_terms
+        .iter()
+        .flat_map(|(_, product_wit_ids)| {
+            product_wit_ids.iter().map(|wit_id| {
+                MultilinearExtension::from_evaluations_ext_vec(0, vec![layer_evals[*wit_id]])
+            })
+        })
+        .collect_vec();
+
+    let mut raw_mle_evals = Vec::with_capacity(constant_mles.len());
+    let mut mle_index = 0usize;
+    let monomial_terms = evaluated_terms
+        .into_iter()
+        .map(|(scalar, product_wit_ids)| {
+            let product = product_wit_ids
+                .into_iter()
+                .map(|wit_id| {
+                    let mle = &constant_mles[mle_index];
+                    mle_index += 1;
+                    raw_mle_evals.push(layer_evals[wit_id]);
+                    Either::Left(mle)
+                })
+                .collect_vec();
+            Term { scalar, product }
+        })
+        .collect_vec();
+
+    let tail_point = &global_in_point[num_var_with_rotation..];
+    let (mut polys, _) =
+        VirtualPolynomials::new_from_monimials(1, tail_point.len(), monomial_terms)
+            .get_batched_polys();
+    frontload::evaluate(&polys.remove(0), tail_point, &raw_mle_evals)
 }
 
 fn bind_active_tower_eval_round<E: ExtensionField>(
@@ -1167,17 +1233,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .map(|pending_layer| {
                 let alpha = &alpha_pows[pending_layer.alpha_start
                     ..pending_layer.alpha_start + pending_layer.layer.exprs.len()];
-                let local_sigma: E = dot_product(
+                dot_product(
                     alpha.iter().copied(),
                     pending_layer
                         .eval_and_dedup_points
                         .iter()
                         .flat_map(|(sigmas, _)| sigmas)
                         .copied(),
-                );
-                E::from_canonical_u64(
-                    1u64 << (max_num_variables - pending_layer.pending.num_var_with_rotation),
-                ) * local_sigma
+                )
             })
             .sum::<E>();
 
@@ -1203,9 +1266,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let mut got_claim = E::ZERO;
         let mut results = Vec::with_capacity(layers.len());
         for pending_layer in &layers {
-            let in_point = global_in_point
-                [global_in_point.len() - pending_layer.pending.num_var_with_rotation..]
-                .to_vec();
+            let in_point = global_in_point[..pending_layer.pending.num_var_with_rotation].to_vec();
             let layer_evals = &main_evals
                 [pending_layer.eval_start..pending_layer.eval_start + pending_layer.eval_len];
             let structural_witin_offset = pending_layer.layer.n_witin + pending_layer.layer.n_fixed;
@@ -1230,20 +1291,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     .copied()
             )
             .collect_vec();
-            got_claim += eval_by_expr_with_instance(
-                &[],
+            got_claim += eval_batched_main_frontload_terms(
                 layer_evals,
-                &[],
                 &pending_layer.pending.pi,
                 &main_sumcheck_challenges,
+                &global_in_point,
+                pending_layer.pending.num_var_with_rotation,
                 pending_layer
                     .layer
-                    .main_sumcheck_expression
+                    .main_sumcheck_expression_monomial_terms
                     .as_ref()
                     .unwrap(),
-            )
-            .map_either(E::from, |v| v)
-            .into_inner();
+            );
 
             results.push((
                 in_point,
