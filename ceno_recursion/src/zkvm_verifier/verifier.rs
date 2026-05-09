@@ -358,7 +358,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     .range(0, pending_chip_main.out_evals.len())
                     .for_each(|idx_vec, builder| {
                         let idx = idx_vec[0];
-                        let dst: Usize<C::N> = builder.eval(out_offset.clone() + idx.clone());
+                        let dst: Usize<C::N> = builder.eval(out_offset.clone() + idx);
                         let value = builder.get(&pending_chip_main.out_evals, idx);
                         builder.set(&pending_out_evals, dst, value);
                     });
@@ -368,7 +368,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     .range(0, pending_chip_main.selector_ctxs.len())
                     .for_each(|idx_vec, builder| {
                         let idx = idx_vec[0];
-                        let dst: Usize<C::N> = builder.eval(selector_offset.clone() + idx.clone());
+                        let dst: Usize<C::N> = builder.eval(selector_offset.clone() + idx);
                         let value = builder.get(&pending_chip_main.selector_ctxs, idx);
                         builder.set(&pending_selector_ctxs, dst, value);
                     });
@@ -378,7 +378,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                     .range(0, pending_chip_main.pi_evals.len())
                     .for_each(|idx_vec, builder| {
                         let idx = idx_vec[0];
-                        let dst: Usize<C::N> = builder.eval(pi_offset.clone() + idx.clone());
+                        let dst: Usize<C::N> = builder.eval(pi_offset.clone() + idx);
                         let value = builder.get(&pending_chip_main.pi_evals, idx);
                         builder.set(&pending_pi_evals, dst, value);
                     });
@@ -728,7 +728,7 @@ pub fn verify_chip_proof_pre_main<C: Config>(
             .clone(),
     );
 
-    let group_has_tower = first_layer_output_group_has_tower(&composed_cs, &gkr_circuit);
+    let group_has_tower = first_layer_output_group_has_tower(composed_cs, &gkr_circuit);
     let selector_ctxs: Array<C, SelectorContextVariable<C>> =
         builder.dyn_array(first_layer.out_sel_and_eval_exprs.len());
     for (group_idx, ((selector, _), has_tower)) in first_layer

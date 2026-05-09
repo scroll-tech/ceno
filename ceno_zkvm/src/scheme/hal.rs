@@ -40,14 +40,16 @@ pub trait BatchedMainConstraintProver<PB: ProverBackend> {
         jobs: Vec<MainConstraintJob<'a, PB>>,
         pcs_data: &PB::PcsData,
         transcript: &mut impl Transcript<PB::E>,
-    ) -> Result<
-        (
-            crate::scheme::MainConstraintProof<PB::E>,
-            Vec<MainConstraintResult<PB::E>>,
-        ),
-        ZKVMError,
-    >;
+    ) -> BatchedMainConstraintResult<PB::E>;
 }
+
+pub type BatchedMainConstraintResult<E> = Result<
+    (
+        crate::scheme::MainConstraintProof<E>,
+        Vec<MainConstraintResult<E>>,
+    ),
+    ZKVMError,
+>;
 
 /// Prepare a chip task's input for proving.
 /// CPU: no-op (input already fully populated during task building).

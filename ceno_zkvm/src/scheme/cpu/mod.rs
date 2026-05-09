@@ -1384,7 +1384,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                         global_mle_exprs[chip.mle_start + *wit_id as usize].clone()
                     })
                     .fold(Expression::ONE, |acc, expr| acc * expr);
-                global_expr = global_expr + Expression::Constant(scalar) * product_expr;
+                global_expr += Expression::Constant(scalar) * product_expr;
             }
         }
 

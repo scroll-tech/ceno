@@ -56,24 +56,6 @@ use tracing::info_span;
 use transcript::BasicTranscript as Transcript;
 use witness::next_pow2_instance_padding;
 
-#[cfg(feature = "gpu")]
-fn log_gpu_mem_pool_after_shard(label: &str, shard_id: usize) {
-    use gkr_iop::gpu::gpu_prover::*;
-
-    info_span!("[ceno] log_gpu_mem_pool_after_shard").in_scope(|| {
-        let cuda_hal = get_cuda_hal().unwrap();
-        let mem_pool = cuda_hal.inner().mem_pool();
-        let used_bytes = mem_pool.get_used_size().unwrap_or(0);
-        let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
-        tracing::info!(
-            "[gpu shard end][{label}] shard_id={} used={:.2}MB reserved={:.2}MB",
-            shard_id,
-            used_bytes as f64 / (1024.0 * 1024.0),
-            reserved_bytes as f64 / (1024.0 * 1024.0),
-        );
-    });
-}
-
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
@@ -1371,11 +1353,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
         emul_result.max_step_shard,
     );
     std::iter::from_fn(move || {
-        let debug_start = std::time::Instant::now();
-        eprintln!(
-            "[ceno-debug][witgen] shard={} enter",
-            shard_ctx_builder.cur_shard_id
-        );
         info_span!(
             "[ceno] app_prove.generate_witness",
             shard_id = shard_ctx_builder.cur_shard_id
@@ -1392,12 +1369,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     Some(result) => result,
                     None => return None,
                 };
-            eprintln!(
-                "[ceno-debug][witgen] shard={} positioned steps={} elapsed={:?}",
-                shard_ctx.shard_id,
-                shard_summary.step_count,
-                debug_start.elapsed()
-            );
 
             // Move (not clone) syscall witnesses from tracer into Arc.
             // take_syscall_witnesses() swaps the tracer's Vec with an empty one — zero copy.
@@ -1504,11 +1475,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &mut zkvm_witness,
                     )
             }).unwrap();
-            eprintln!(
-                "[ceno-debug][witgen] shard={} opcode_done elapsed={:?}",
-                shard_ctx.shard_id,
-                debug_start.elapsed()
-            );
 
             // Flush shared EC/addr buffers from GPU after all opcode circuits are done.
             // This batch-D2Hs accumulated EC records and addr_accessed into shard_ctx.
@@ -1623,11 +1589,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .config
                     .assign_table_circuit(&system_config.zkvm_cs, &mut zkvm_witness)
             }).unwrap();
-            eprintln!(
-                "[ceno-debug][witgen] shard={} tables_done elapsed={:?}",
-                shard_ctx.shard_id,
-                debug_start.elapsed()
-            );
 
             info_span!("assign_init_table").in_scope(|| {
                 if shard_ctx.is_first_shard() {
@@ -1682,11 +1643,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &emul_result.final_mem_state.heap,
                     )
             }).unwrap();
-            eprintln!(
-                "[ceno-debug][witgen] shard={} continuation_done elapsed={:?}",
-                shard_ctx.shard_id,
-                debug_start.elapsed()
-            );
 
             info_span!("assign_program_table").in_scope(|| {
                 zkvm_witness
@@ -1726,11 +1682,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
             // Keep per-shard GPU caches alive for prove-time reuse in this shard.
             // They are explicitly released at shard-end after create_proof.
 
-            eprintln!(
-                "[ceno-debug][witgen] shard={} yield elapsed={:?}",
-                shard_ctx.shard_id,
-                debug_start.elapsed()
-            );
             Some((zkvm_witness, shard_ctx, pi, witgen_mem_baseline))
         })
     })
@@ -2244,9 +2195,7 @@ fn create_proofs_streaming<
                         );
                         #[cfg(feature = "gpu")]
                         if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                            log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                             crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                            log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
                         }
                         #[cfg(feature = "gpu")]
                         if let Some(baseline) = _witgen_mem_baseline {
@@ -2263,7 +2212,6 @@ fn create_proofs_streaming<
         // Sequential: witgen → prove, one shard at a time.
         // Used by: GPU witgen mode (CENO_GPU_ENABLE_WITGEN=1) and CPU-only builds.
         {
-            eprintln!("[ceno-debug][prove] sequential begin");
             let wit_iter = generate_witness(
                 &ctx.system_config,
                 emulation_result,
@@ -2282,7 +2230,6 @@ fn create_proofs_streaming<
 
             wit_iter
                 .map(|(zkvm_witness, shard_ctx, pi, _witgen_mem_baseline)| {
-                    eprintln!("[ceno-debug][prove] shard={} received_witness", shard_ctx.shard_id);
                     if is_mock_proving {
                         MockProver::assert_satisfied_full(
                             &shard_ctx,
@@ -2297,7 +2244,6 @@ fn create_proofs_streaming<
 
                     let transcript = Transcript::new(b"riscv");
                     let start = std::time::Instant::now();
-                    eprintln!("[ceno-debug][prove] shard={} create_proof_start", shard_ctx.shard_id);
                     let zkvm_proof =
                         match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
                             Ok(proof) => proof,
@@ -2310,11 +2256,6 @@ fn create_proofs_streaming<
                                 std::process::exit(1);
                             }
                         };
-                    eprintln!(
-                        "[ceno-debug][prove] shard={} create_proof_done elapsed={:?}",
-                        shard_ctx.shard_id,
-                        start.elapsed()
-                    );
                     tracing::debug!(
                         "{}th shard proof created in {:?}",
                         shard_ctx.shard_id,
@@ -2322,9 +2263,7 @@ fn create_proofs_streaming<
                     );
                     #[cfg(feature = "gpu")]
                     if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                        log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                         crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                        log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
                     }
                     #[cfg(feature = "gpu")]
                     if let Some(baseline) = _witgen_mem_baseline {

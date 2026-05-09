@@ -116,7 +116,7 @@ fn bench_add(c: &mut Criterion) {
                             num_instances: [num_instances, 0],
                             has_ecc_ops: false,
                         };
-                        let task = ChipTask {
+                        let mut task = ChipTask {
                             task_id: 0,
                             circuit_name: AddInstruction::<E>::name(),
                             circuit_idx: 0,
@@ -131,7 +131,7 @@ fn bench_add(c: &mut Criterion) {
                             structural_rmm: None,
                         };
                         let _ = prover
-                            .create_chip_proof(&task, &mut transcript)
+                            .create_chip_proof(&mut task, &mut transcript)
                             .expect("create_proof failed");
                         let elapsed = instant.elapsed();
                         println!(

@@ -305,7 +305,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             trace_est.trace_resident_bytes + main_witness_bytes + tower_build_bytes;
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
         let replay_stage_bytes = structural_resident_bytes + replay_materialization_bytes;
-        tracing::info!(
+        tracing::debug!(
             "[mem estimate][{}] replay_split: trace={:.2}MB, main_witness={:.2}MB, replay={:.2}MB, tower_build_stage={:.2}MB, prove_tower_stage={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_stage={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_resident_bytes),
@@ -317,7 +317,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             to_mb(borrowed_tower_input_bytes),
             to_mb(ecc_stage_bytes),
         );
-        tracing::info!(
+        tracing::debug!(
             "[mem estimate][{}] total_usage={:.2}MB (replay_split_peak={:.2}MB + safety={:.2}MB)",
             circuit_name,
             to_mb(total_usage_bytes),
@@ -327,13 +327,13 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     } else {
         let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
         // Resident memory (always occupied during chip proof)
-        tracing::info!(
+        tracing::debug!(
             "[mem estimate][{}] resident: trace={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_resident_bytes),
         );
         // Stage-scoped memory beyond the always-live extracted trace.
-        tracing::info!(
+        tracing::debug!(
             "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_backing={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_quark={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_temporary_bytes),
@@ -344,7 +344,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             to_mb(ecc_quark_temporary_bytes),
         );
         // Total peak = resident + max(stage temporaries)
-        tracing::info!(
+        tracing::debug!(
             "[mem estimate][{}] total_usage={:.2}MB (resident={:.2}MB + temporary={:.2}MB)",
             circuit_name,
             to_mb(total_usage_bytes),

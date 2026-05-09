@@ -160,11 +160,6 @@ impl<
             shard_id = shard_ctx.shard_id
         )
         .in_scope(|| {
-            let debug_start = std::time::Instant::now();
-            eprintln!(
-                "[ceno-debug][create_proof] shard={} enter",
-                shard_ctx.shard_id
-            );
             let span = entered_span!("commit_to_pi", profiling_1 = true);
             // Include transcript-visible public values in canonical circuit order.
             // The order must match verifier and recursion verifier exactly.
@@ -366,11 +361,6 @@ impl<
             };
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
-            eprintln!(
-                "[ceno-debug][create_proof] shard={} commit_traces_done elapsed={:?}",
-                shard_ctx.shard_id,
-                debug_start.elapsed()
-            );
 
             // Use pre-loaded fixed_mles (extracted before in_scope to avoid lifetime issues)
             let fixed_mles = fixed_mles_preload.clone();
@@ -587,23 +577,12 @@ impl<
                 entered_span!("prove_batched_main_constraints", profiling_1 = true);
             let (main_constraint_proof, main_constraint_results) =
                 info_span!("[ceno] prove_batched_main_constraints").in_scope(|| {
-                    eprintln!(
-                        "[ceno-debug][create_proof] shard={} batched_main_start elapsed={:?}",
-                        shard_ctx.shard_id,
-                        debug_start.elapsed()
-                    );
-                    self.device
-                        .prove_batched_main_constraints(
-                            main_constraint_jobs,
-                            &witness_data,
-                            &mut transcript,
-                        )
+                    self.device.prove_batched_main_constraints(
+                        main_constraint_jobs,
+                        &witness_data,
+                        &mut transcript,
+                    )
                 })?;
-            eprintln!(
-                "[ceno-debug][create_proof] shard={} batched_main_done elapsed={:?}",
-                shard_ctx.shard_id,
-                debug_start.elapsed()
-            );
             let (points, evaluations) =
                 Self::collect_main_constraint_results(main_constraint_results);
             exit_span!(main_constraints_span);

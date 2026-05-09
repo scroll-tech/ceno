@@ -64,6 +64,8 @@ use witness::next_pow2_instance_padding;
 
 pub use crate::structs::RV32imMemStateConfig;
 
+type BatchedMainOpeningEvals<E> = Vec<(Point<E>, Vec<E>, Vec<E>)>;
+
 pub struct ZKVMVerifier<
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
@@ -85,20 +87,18 @@ pub(crate) struct PendingMainConstraintVerification<'a, E: ExtensionField> {
 }
 
 fn validate_batched_main_structural_evals<E: ExtensionField>(
-    circuit_name: &str,
+    pending: &PendingMainConstraintVerification<'_, E>,
     layer: &gkr_iop::gkr::layer::Layer<E>,
     eval_and_dedup_points: &[(Vec<E>, Option<Point<E>>)],
-    selector_ctxs: &[SelectorContext],
-    pi: &[E],
     layer_evals: &[E],
-    structural_witin_offset: usize,
     in_point: &Point<E>,
 ) -> Result<(), String> {
+    let structural_witin_offset = layer.n_witin + layer.n_fixed;
     for (((sel_type, _), (_, out_point)), selector_ctx) in layer
         .out_sel_and_eval_exprs
         .iter()
         .zip(eval_and_dedup_points.iter())
-        .zip(selector_ctxs.iter())
+        .zip(pending.selector_ctxs.iter())
     {
         if let Some((expected_eval, wit_id)) =
             sel_type.evaluate(out_point.as_ref().unwrap(), in_point, selector_ctx)
@@ -106,8 +106,8 @@ fn validate_batched_main_structural_evals<E: ExtensionField>(
             let wit_id = wit_id as usize + structural_witin_offset;
             if layer_evals[wit_id] != expected_eval {
                 return Err(format!(
-                    "{circuit_name} selector structural witin mismatch wit_id={wit_id} expected={expected_eval} got={}",
-                    layer_evals[wit_id]
+                    "{} selector structural witin mismatch wit_id={wit_id} expected={expected_eval} got={}",
+                    pending.circuit_name, layer_evals[wit_id]
                 ));
             }
         }
@@ -133,7 +133,7 @@ fn validate_batched_main_structural_evals<E: ExtensionField>(
                 descending,
                 ..
             } => {
-                let offset = pi[*offset_instance_id as usize].to_canonical_u64();
+                let offset = pending.pi[*offset_instance_id as usize].to_canonical_u64();
                 eval_wellform_address_vec(offset, *multi_factor as u64, in_point, *descending)
             }
             StackedIncrementalSequence { .. } => eval_stacked_wellform_address_vec(in_point),
@@ -147,7 +147,10 @@ fn validate_batched_main_structural_evals<E: ExtensionField>(
             Empty => continue,
         };
         if expected_eval != layer_evals[wit_id] {
-            return Err(format!("{circuit_name} structural witin mismatch"));
+            return Err(format!(
+                "{} structural witin mismatch",
+                pending.circuit_name
+            ));
         }
     }
 
@@ -1087,7 +1090,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         main_constraint_proof: &MainConstraintProof<E>,
         transcript: &mut impl Transcript<E>,
         challenges: &[E; 2],
-    ) -> Result<Vec<(Point<E>, Vec<E>, Vec<E>)>, ZKVMError> {
+    ) -> Result<BatchedMainOpeningEvals<E>, ZKVMError> {
         if pending_main_constraints.is_empty() {
             if !main_constraint_proof.proof.proof.proofs.is_empty()
                 || !main_constraint_proof.proof.evals.is_empty()
@@ -1269,16 +1272,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             let in_point = global_in_point[..pending_layer.pending.num_var_with_rotation].to_vec();
             let layer_evals = &main_evals
                 [pending_layer.eval_start..pending_layer.eval_start + pending_layer.eval_len];
-            let structural_witin_offset = pending_layer.layer.n_witin + pending_layer.layer.n_fixed;
 
             validate_batched_main_structural_evals(
-                pending_layer.pending.circuit_name,
+                &pending_layer.pending,
                 pending_layer.layer,
                 &pending_layer.eval_and_dedup_points,
-                &pending_layer.pending.selector_ctxs,
-                &pending_layer.pending.pi,
                 layer_evals,
-                structural_witin_offset,
                 &in_point,
             )
             .map_err(|err| ZKVMError::InvalidProof(err.into()))?;
