@@ -1348,7 +1348,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .iter()
             .map(|mle| builder.lift(Either::Left(mle)))
             .collect_vec();
-        let mut global_expr = Expression::ZERO;
+        let mut global_terms = Vec::new();
 
         for chip in &chip_data {
             let main_sumcheck_challenges = chain!(
@@ -1375,7 +1375,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     &main_sumcheck_challenges,
                     scalar_expr,
                 );
-                let product_expr = product
+                let product = product
                     .iter()
                     .map(|expr| {
                         let Expression::WitIn(wit_id) = expr else {
@@ -1383,14 +1383,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                         };
                         global_mle_exprs[chip.mle_start + *wit_id as usize].clone()
                     })
-                    .fold(Expression::ONE, |acc, expr| acc * expr);
-                global_expr += Expression::Constant(scalar) * product_expr;
+                    .collect_vec();
+                global_terms.push(Term {
+                    scalar: Expression::Constant(scalar),
+                    product,
+                });
             }
         }
 
         let span = entered_span!("IOPProverState::prove_batched_main", profiling_4 = true);
-        let (proof, prover_state) =
-            IOPProverState::prove(builder.to_virtual_polys(&[global_expr], &[]), transcript);
+        let (proof, prover_state) = IOPProverState::prove(
+            builder.to_virtual_polys_with_monomial_terms(&global_terms, &[], &[]),
+            transcript,
+        );
         let global_evals = prover_state.get_mle_flatten_final_evaluations();
         let global_rt = prover_state.collect_raw_challenges();
         transcript.append_field_element_exts(&global_evals);
