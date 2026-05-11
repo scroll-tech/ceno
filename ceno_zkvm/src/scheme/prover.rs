@@ -814,6 +814,8 @@ impl<
         let cs = circuit_pk.get_cs();
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
+        let input_num_instances = input.num_instances;
+        let input_has_ecc_ops = input.has_ecc_ops;
 
         // build main witness
         let records = info_span!("[ceno] build_main_witness").in_scope(|| {
@@ -904,7 +906,17 @@ impl<
             input
         };
         #[cfg(not(feature = "gpu"))]
-        let main_input = input.clone();
+        let main_input = std::mem::replace(
+            &mut task.input,
+            ProofInput {
+                witness: Vec::new(),
+                structural_witness: Vec::new(),
+                fixed: Vec::new(),
+                pi: Vec::new(),
+                num_instances: input_num_instances,
+                has_ecc_ops: input_has_ecc_ops,
+            },
+        );
         #[cfg(feature = "gpu")]
         let structural_rmm = task.structural_rmm.take();
         #[cfg(not(feature = "gpu"))]
@@ -920,7 +932,7 @@ impl<
                 rotation_proof: rotation.clone().map(|r| r.proof),
                 tower_proof,
                 ecc_proof: ecc_proof.clone(),
-                num_instances: input.num_instances,
+                num_instances: input_num_instances,
             },
             MainConstraintJob {
                 circuit_name: task.circuit_name.clone(),

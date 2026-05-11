@@ -33,7 +33,7 @@ jobs:
       (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
 
     name: Integration testing
-    timeout-minutes: 60
+    timeout-minutes: 30
     runs-on: [ self-hosted, Linux, X64 ]
 
     steps:
@@ -145,16 +145,12 @@ jobs:
       - name: Run bn254_curve_syscall (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: |
-          ulimit -s 65536
-          cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_curve_syscalls
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_curve_syscalls
 
       - name: Run bn254_fptower_syscalls (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: |
-          ulimit -s 65536
-          cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_fptower_syscalls
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/bn254_fptower_syscalls
 
       - name: Run k256 ecrecover (release)
         env:

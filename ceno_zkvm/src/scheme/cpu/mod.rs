@@ -1133,8 +1133,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             ));
         }
 
-        let mut owned_mles = Vec::<MultilinearExtension<'_, E>>::new();
         let mut chip_data = Vec::with_capacity(jobs.len());
+        let mut owned_selector_eqs =
+            Vec::<Vec<Option<MultilinearExtension<'_, E>>>>::with_capacity(jobs.len());
         let mut total_exprs = 0usize;
         let mut max_num_variables = 0usize;
         let mut max_degree = 0usize;
@@ -1311,23 +1312,15 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 }
             }
 
-            let mle_start = owned_mles.len();
-            owned_mles.extend(job.input.witness.iter().map(|mle| mle.as_ref().clone()));
-            owned_mles.extend(job.input.fixed.iter().map(|mle| mle.as_ref().clone()));
-            for (selector_eq, mle) in selector_eq_by_wit_id
-                .into_iter()
-                .zip(job.input.structural_witness.iter())
-            {
-                owned_mles.push(selector_eq.unwrap_or_else(|| mle.as_ref().clone()));
-            }
             let num_mles =
                 first_layer.n_witin + first_layer.n_fixed + first_layer.n_structural_witin;
-            assert_eq!(owned_mles.len() - mle_start, num_mles);
+            assert_eq!(selector_eq_by_wit_id.len(), first_layer.n_structural_witin);
+            owned_selector_eqs.push(selector_eq_by_wit_id);
 
             chip_data.push(ChipMainData {
                 circuit_idx: job.circuit_idx,
                 layer: first_layer,
-                mle_start,
+                mle_start: 0,
                 num_mles,
                 num_var_with_rotation,
                 pi: job
@@ -1344,10 +1337,31 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let num_threads = optimal_sumcheck_threads(max_num_variables);
         let alpha_pows = get_challenge_pows(total_exprs, transcript);
         let mut builder = VirtualPolynomialsBuilder::new(num_threads, max_num_variables);
-        let global_mle_exprs = owned_mles
+        let mut global_mle_exprs = Vec::new();
+        for ((job, chip), selector_eqs) in jobs
             .iter()
-            .map(|mle| builder.lift(Either::Left(mle)))
-            .collect_vec();
+            .zip(chip_data.iter_mut())
+            .zip(owned_selector_eqs.iter())
+        {
+            chip.mle_start = global_mle_exprs.len();
+            global_mle_exprs.extend(
+                job.input
+                    .witness
+                    .iter()
+                    .map(|mle| builder.lift(Either::Left(mle.as_ref()))),
+            );
+            global_mle_exprs.extend(
+                job.input
+                    .fixed
+                    .iter()
+                    .map(|mle| builder.lift(Either::Left(mle.as_ref()))),
+            );
+            for (selector_eq, mle) in selector_eqs.iter().zip(job.input.structural_witness.iter()) {
+                let mle = selector_eq.as_ref().unwrap_or_else(|| mle.as_ref());
+                global_mle_exprs.push(builder.lift(Either::Left(mle)));
+            }
+            assert_eq!(global_mle_exprs.len() - chip.mle_start, chip.num_mles);
+        }
         let mut global_terms = Vec::new();
 
         for chip in &chip_data {
@@ -1375,6 +1389,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     &main_sumcheck_challenges,
                     scalar_expr,
                 );
+                let scalar_is_zero = match &scalar {
+                    Either::Left(scalar) => E::from(*scalar) == E::ZERO,
+                    Either::Right(scalar) => *scalar == E::ZERO,
+                };
+                if scalar_is_zero {
+                    continue;
+                }
                 let product = product
                     .iter()
                     .map(|expr| {
