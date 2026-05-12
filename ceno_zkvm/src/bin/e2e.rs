@@ -17,7 +17,8 @@ use clap::Parser;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
 use gkr_iop::hal::ProverBackend;
 use mpcs::{
-    Basefold, BasefoldRSParams, PolynomialCommitmentScheme, SecurityLevel, Whir, WhirDefaultSpec,
+    Basefold, BasefoldRSParams, Jagged, PolynomialCommitmentScheme, SecurityLevel, Whir,
+    WhirDefaultSpec,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use std::{fs, panic, panic::AssertUnwindSafe, path::PathBuf};
@@ -233,6 +234,45 @@ fn main() {
     let public_io_digest = public_io_words_to_digest_words(&public_io);
 
     match (args.pcs, args.field) {
+        (PcsKind::Jagged, FieldType::Goldilocks) => {
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
+            run_inner::<
+                GoldilocksExt2,
+                Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>,
+                _,
+                _,
+            >(
+                prover,
+                program,
+                platform,
+                multi_prover,
+                &hints,
+                public_io_digest,
+                max_steps,
+                args.proof_file,
+                args.vk_file,
+                Checkpoint::Complete,
+                target_shard_id,
+            )
+        }
+        (PcsKind::Jagged, FieldType::BabyBear) => {
+            let backend = create_backend(args.max_num_variables, args.security_level);
+            let prover = create_prover(backend);
+            run_inner::<BabyBearExt4, Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>, _, _>(
+                prover,
+                program,
+                platform,
+                multi_prover,
+                &hints,
+                public_io_digest,
+                max_steps,
+                args.proof_file,
+                args.vk_file,
+                Checkpoint::Complete,
+                target_shard_id,
+            )
+        }
         (PcsKind::Basefold, FieldType::Goldilocks) => {
             let backend = create_backend(args.max_num_variables, args.security_level);
             let prover = create_prover(backend);
