@@ -27,8 +27,8 @@ use ceno_gpu::{
     common::{
         CacheLevel, get_gpu_cache_level,
         jagged::{
-            JaggedSumcheckGpuCtx, eval_cols_at_point_gpu, jagged_batch_open_gpu,
-            jagged_sumcheck_prove_gpu,
+            JaggedSumcheckGpuCtx, batch_commit_gpu_grouped, eval_cols_at_point_gpu,
+            jagged_batch_open_gpu, jagged_sumcheck_prove_gpu,
         },
         sumcheck::CommonTermPlan,
     },
@@ -69,6 +69,7 @@ use std::{
     collections::BTreeMap,
     io::Write,
     iter::{once, repeat_n},
+    mem::MaybeUninit,
     sync::Arc,
 };
 use sumcheck::{
@@ -1183,8 +1184,8 @@ pub(crate) fn normalize_traces_to_device_col_major<E: ExtensionField>(
             &cuda_hal.inner,
             &mut col_major_buf,
             &row_major_buf,
-            rows,
             cols,
+            rows,
         )
         .unwrap_or_else(|e| panic!("failed to transpose trace {idx} to col-major: {e}"));
 
@@ -1207,6 +1208,52 @@ fn jagged_batch_commit_from_host(
     reshape_log_height: usize,
     prefer_device_backing: bool,
 ) -> (GpuJaggedHostPreprocessed, GpuBasefoldPcsData) {
+    if prefer_device_backing
+        && traces
+            .iter()
+            .all(|trace| trace.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor))
+    {
+        let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
+        let (preprocessed, mut inner) = batch_commit_gpu_grouped(
+            cuda_hal.as_ref(),
+            traces,
+            reshape_log_height,
+            group_width,
+            |reshape_rmms| {
+                cuda_hal
+                    .basefold
+                    .batch_commit_cache_none(cuda_hal.as_ref(), reshape_rmms)
+            },
+        )
+        .expect("failed to commit Jagged q' with GPU q' construction");
+        let q_host_evals = if matches!(get_gpu_cache_level(), CacheLevel::None) {
+            preprocessed
+                .q_evals
+                .to_vec()
+                .expect("Jagged q' D2H copy failed after GPU commit")
+        } else {
+            Vec::new()
+        };
+        if matches!(get_gpu_cache_level(), CacheLevel::None) {
+            if let Some(rmms) = inner.rmms.as_mut() {
+                for rmm in rmms {
+                    rmm.clear_device_backing();
+                }
+            }
+        }
+        return (
+            GpuJaggedHostPreprocessed {
+                q_host_evals,
+                q_device_evals: Some(preprocessed.q_evals),
+                cumulative_heights: preprocessed.cumulative_heights,
+                poly_heights: preprocessed.poly_heights,
+                total_evaluations: preprocessed.total_evaluations,
+                reshape_log_height: preprocessed.reshape_log_height,
+            },
+            inner,
+        );
+    }
+
     let mut poly_heights = Vec::new();
     for trace in traces {
         for _ in 0..trace.width() {
@@ -1226,7 +1273,16 @@ fn jagged_batch_commit_from_host(
     let padded_total = w * h;
     let q_len = 1usize << ceil_log2(padded_total.max(1));
 
-    let mut q_host = vec![BB31Base::ZERO; q_len];
+    // q' is large, and `vec![ZERO; q_len]` serializes a full-buffer zero fill
+    // before the actual witness copy overwrites most entries. Allocate
+    // uninitialized storage instead; the loops below initialize every real
+    // q' element, and the final parallel pass initializes all padding. If a
+    // panic happens mid-construction, proving aborts and the `MaybeUninit`
+    // buffer will not drop uninitialized field elements.
+    let mut q_host_uninit = Vec::<MaybeUninit<BB31Base>>::with_capacity(q_len);
+    unsafe {
+        q_host_uninit.set_len(q_len);
+    }
     let mut poly_idx = 0usize;
     for trace in traces {
         let rows = trace.height();
@@ -1247,27 +1303,47 @@ fn jagged_batch_commit_from_host(
             let device_values = device_buffer
                 .to_vec()
                 .expect("Jagged trace device backing D2H failed");
-            q_host[start..start + rows * cols]
+            q_host_uninit[start..start + rows * cols]
                 .par_chunks_mut(rows)
                 .enumerate()
                 .for_each(|(col_idx, out)| {
                     let src_start = col_idx * col_rows;
                     let src_end = src_start + col_rows;
-                    out[..col_rows].copy_from_slice(&device_values[src_start..src_end]);
+                    for (dst, src) in out[..col_rows]
+                        .iter_mut()
+                        .zip(&device_values[src_start..src_end])
+                    {
+                        dst.write(*src);
+                    }
+                    for dst in &mut out[col_rows..] {
+                        dst.write(BB31Base::ZERO);
+                    }
                 });
         } else {
             let values = trace.values();
-            q_host[start..start + rows * cols]
+            q_host_uninit[start..start + rows * cols]
                 .par_chunks_mut(rows)
                 .enumerate()
                 .for_each(|(col_idx, out)| {
                     for row_idx in 0..rows {
-                        out[row_idx] = values[row_idx * cols + col_idx];
+                        out[row_idx].write(values[row_idx * cols + col_idx]);
                     }
                 });
         }
         poly_idx += cols;
     }
+    q_host_uninit[total_evaluations..]
+        .par_iter_mut()
+        .for_each(|dst| {
+            dst.write(BB31Base::ZERO);
+        });
+    let q_host = unsafe {
+        let ptr = q_host_uninit.as_mut_ptr() as *mut BB31Base;
+        let len = q_host_uninit.len();
+        let cap = q_host_uninit.capacity();
+        std::mem::forget(q_host_uninit);
+        Vec::from_raw_parts(ptr, len, cap)
+    };
 
     let q_device = cuda_hal
         .alloc_elems_from_host(&q_host, None)
@@ -1637,7 +1713,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
                     &cuda_hal,
                     &traces_gl64,
                     reshape_log_height,
-                    false,
+                    true,
                 );
                 for trace in &mut traces_gl64 {
                     trace.clear_device_backing();
@@ -3294,11 +3370,10 @@ where
                         transcript,
                         |_round_idx, trace_idx| {
                             let h = 1usize << jagged_data.reshape_log_height;
-                            let inner_rmms = jagged_data
-                                .inner
-                                .rmms
-                                .as_ref()
-                                .expect("Jagged cache-none opening requires inner RMM metadata");
+                            let inner_rmms =
+                                jagged_data.inner.rmms.as_ref().expect(
+                                    "Jagged cache-none opening requires inner RMM metadata",
+                                );
                             assert!(
                                 trace_idx < inner_rmms.len(),
                                 "Jagged inner q' trace index out of range"
@@ -3308,22 +3383,21 @@ where
                                 .map(|rmm| rmm.width())
                                 .sum::<usize>();
                             let group_cols = inner_rmms[trace_idx].width();
-                            let mut reshape_values = vec![BB31Base::ZERO; h * group_cols];
-                            reshape_values
-                                .par_chunks_mut(group_cols)
-                                .enumerate()
-                                .for_each(|(row_idx, row)| {
-                                    for (local_col, value) in row.iter_mut().enumerate() {
-                                        let src_idx = (group_start_col + local_col) * h + row_idx;
-                                        if src_idx < jagged_data.total_evaluations {
-                                            *value = q_host[src_idx];
-                                        }
-                                    }
-                                });
-                            Ok(Some(witness::RowMajorMatrix::new_by_values(
-                                reshape_values,
+                            let start = group_start_col * h;
+                            let end = start + group_cols * h;
+                            let q_view = cuda_hal
+                                .alloc_elems_from_host(&q_host[start..end], None)
+                                .map_err(|e| {
+                                    ceno_gpu::HalError::Unknown(format!(
+                                        "failed to upload Jagged q' group for opening: {e:?}"
+                                    ))
+                                })?;
+                            Ok(Some(witness::RowMajorMatrix::new_by_device_backing(
+                                h,
                                 group_cols,
                                 InstancePaddingStrategy::Default,
+                                q_view,
+                                DeviceMatrixLayout::ColMajor,
                             )))
                         },
                     )
