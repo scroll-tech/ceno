@@ -375,8 +375,8 @@ pub struct GpuJaggedTraceLayout {
 
 pub struct GpuJaggedPcsData {
     pub inner: GpuBasefoldPcsData,
-    pub q_evals: BufferImpl<'static, BB31Base>,
-    pub original_traces: Vec<RowMajorMatrix<BB31Base>>,
+    pub q_evals: Option<BufferImpl<'static, BB31Base>>,
+    pub q_host_evals: Option<Vec<BB31Base>>,
     pub cumulative_heights: Vec<usize>,
     pub poly_heights: Vec<usize>,
     pub total_evaluations: usize,

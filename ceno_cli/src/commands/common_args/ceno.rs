@@ -207,16 +207,20 @@ impl CenoOptions {
     ) -> anyhow::Result<()> {
         self.try_setup_logger();
         match (self.pcs, self.field) {
-            (PcsKind::Jagged, FieldType::Goldilocks) => keygen_inner::<
-                GoldilocksExt2,
-                Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>,
-                P,
-            >(self, compilation_options, elf_path),
-            (PcsKind::Jagged, FieldType::BabyBear) => keygen_inner::<
-                BabyBearExt4,
-                Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>,
-                P,
-            >(self, compilation_options, elf_path),
+            (PcsKind::Jagged, FieldType::Goldilocks) => {
+                keygen_inner::<GoldilocksExt2, Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>, P>(
+                    self,
+                    compilation_options,
+                    elf_path,
+                )
+            }
+            (PcsKind::Jagged, FieldType::BabyBear) => {
+                keygen_inner::<BabyBearExt4, Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>, P>(
+                    self,
+                    compilation_options,
+                    elf_path,
+                )
+            }
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 keygen_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
                     self,
@@ -261,14 +265,20 @@ impl CenoOptions {
                     GoldilocksExt2,
                     Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>,
                     P,
-                >(self, compilation_options, elf_path, Checkpoint::PrepWitnessGen)?;
+                >(
+                    self,
+                    compilation_options,
+                    elf_path,
+                    Checkpoint::PrepWitnessGen,
+                )?;
             }
             (PcsKind::Jagged, FieldType::BabyBear) => {
-                run_elf_inner::<
-                    BabyBearExt4,
-                    Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>,
-                    P,
-                >(self, compilation_options, elf_path, Checkpoint::PrepWitnessGen)?;
+                run_elf_inner::<BabyBearExt4, Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>, P>(
+                    self,
+                    compilation_options,
+                    elf_path,
+                    Checkpoint::PrepWitnessGen,
+                )?;
             }
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 run_elf_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
@@ -314,16 +324,22 @@ impl CenoOptions {
     ) -> anyhow::Result<()> {
         self.try_setup_logger();
         match (self.pcs, self.field) {
-            (PcsKind::Jagged, FieldType::Goldilocks) => prove_inner::<
-                GoldilocksExt2,
-                Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>,
-                P,
-            >(self, compilation_options, elf_path, Checkpoint::Complete),
-            (PcsKind::Jagged, FieldType::BabyBear) => prove_inner::<
-                BabyBearExt4,
-                Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>,
-                P,
-            >(self, compilation_options, elf_path, Checkpoint::Complete),
+            (PcsKind::Jagged, FieldType::Goldilocks) => {
+                prove_inner::<GoldilocksExt2, Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>, P>(
+                    self,
+                    compilation_options,
+                    elf_path,
+                    Checkpoint::Complete,
+                )
+            }
+            (PcsKind::Jagged, FieldType::BabyBear) => {
+                prove_inner::<BabyBearExt4, Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>, P>(
+                    self,
+                    compilation_options,
+                    elf_path,
+                    Checkpoint::Complete,
+                )
+            }
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 prove_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
                     self,

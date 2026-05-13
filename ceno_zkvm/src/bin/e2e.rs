@@ -237,12 +237,7 @@ fn main() {
         (PcsKind::Jagged, FieldType::Goldilocks) => {
             let backend = create_backend(args.max_num_variables, args.security_level);
             let prover = create_prover(backend);
-            run_inner::<
-                GoldilocksExt2,
-                Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>,
-                _,
-                _,
-            >(
+            run_inner::<GoldilocksExt2, Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>, _, _>(
                 prover,
                 program,
                 platform,
