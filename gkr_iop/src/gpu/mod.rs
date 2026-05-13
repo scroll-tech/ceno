@@ -30,6 +30,7 @@ pub mod gpu_prover {
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
             get_ceno_gpu_device_id, get_gpu_cache_level, get_mem_tracking_mode,
+            jagged::GpuJaggedPreprocessed,
             mem_pool::MemTracker,
             mle::{
                 build_mle_as_ceno, ordered_sparse_selector_gpu, rotation_next_base_mle_gpu,
@@ -357,19 +358,44 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
 
 pub type ArcMultilinearExtensionGpu<'a, E> = Arc<MultilinearExtensionGpu<'a, E>>;
 
+pub type GpuBasefoldPcsData = BasefoldCommitmentWithWitnessGpu<
+    BB31Base,
+    BufferImpl<'static, BB31Base>,
+    GpuDigestLayer,
+    GpuMatrix<'static>,
+    GpuPolynomial<'static>,
+>;
+
+#[derive(Clone, Debug)]
+pub struct GpuJaggedTraceLayout {
+    pub first_poly_idx: usize,
+    pub num_polys: usize,
+    pub num_vars: usize,
+}
+
+pub struct GpuJaggedPcsData {
+    pub inner: GpuBasefoldPcsData,
+    pub q_evals: BufferImpl<'static, BB31Base>,
+    pub original_traces: Vec<RowMajorMatrix<BB31Base>>,
+    pub cumulative_heights: Vec<usize>,
+    pub poly_heights: Vec<usize>,
+    pub total_evaluations: usize,
+    pub reshape_log_height: usize,
+    pub trace_layouts: Vec<GpuJaggedTraceLayout>,
+}
+
+pub enum GpuPcsData {
+    Basefold(GpuBasefoldPcsData),
+    Jagged(GpuJaggedPcsData),
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
     type E = E;
     type Pcs = PCS;
     type MultilinearPoly<'a> = MultilinearExtensionGpu<'static, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
-    type PcsData = BasefoldCommitmentWithWitnessGpu<
-        E::BaseField,
-        BufferImpl<'static, E::BaseField>,
-        GpuDigestLayer,
-        GpuMatrix<'static>,
-        GpuPolynomial<'static>,
-    >;
+    type PcsData = GpuPcsData;
     #[cfg(not(feature = "gpu"))]
     type PcsData = <PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
