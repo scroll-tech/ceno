@@ -1209,6 +1209,7 @@ fn jagged_batch_commit_from_host(
     prefer_device_backing: bool,
 ) -> (GpuJaggedHostPreprocessed, GpuBasefoldPcsData) {
     if prefer_device_backing
+        && !matches!(get_gpu_cache_level(), CacheLevel::None)
         && traces
             .iter()
             .all(|trace| trace.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor))
@@ -1345,10 +1346,55 @@ fn jagged_batch_commit_from_host(
         Vec::from_raw_parts(ptr, len, cap)
     };
 
+    let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
+    if matches!(get_gpu_cache_level(), CacheLevel::None) {
+        let specs = (0..w)
+            .step_by(group_width)
+            .map(
+                |_group_start_col| ceno_gpu::common::poseidon2::DeferredRmmSpec {
+                    height: h,
+                    persist_actual: true,
+                },
+            )
+            .collect_vec();
+        let mut inner = cuda_hal
+            .basefold
+            .batch_commit_cache_none_deferred(cuda_hal.as_ref(), specs, |trace_idx| {
+                let group_start_col = trace_idx * group_width;
+                let group_cols = (w - group_start_col).min(group_width);
+                let start = group_start_col * h;
+                let end = start + group_cols * h;
+                let q_view = cuda_hal.alloc_elems_from_host(&q_host[start..end], None)?;
+                Ok(witness::RowMajorMatrix::new_by_device_backing(
+                    h,
+                    group_cols,
+                    InstancePaddingStrategy::Default,
+                    q_view,
+                    DeviceMatrixLayout::ColMajor,
+                ))
+            })
+            .expect("failed to commit Jagged q' with deferred GPU Basefold");
+        if let Some(rmms) = inner.rmms.as_mut() {
+            for rmm in rmms {
+                rmm.clear_device_backing();
+            }
+        }
+        return (
+            GpuJaggedHostPreprocessed {
+                q_host_evals: q_host,
+                q_device_evals: None,
+                cumulative_heights,
+                poly_heights,
+                total_evaluations,
+                reshape_log_height: log_h,
+            },
+            inner,
+        );
+    }
+
     let q_device = cuda_hal
         .alloc_elems_from_host(&q_host, None)
         .expect("failed to upload Jagged q' evaluations for commit");
-    let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
     let reshape_rmms = (0..w)
         .step_by(group_width)
         .map(|group_start_col| {
