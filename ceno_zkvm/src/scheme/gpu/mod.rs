@@ -1395,26 +1395,32 @@ fn jagged_batch_commit_from_host(
     let q_device = cuda_hal
         .alloc_elems_from_host(&q_host, None)
         .expect("failed to upload Jagged q' evaluations for commit");
-    let reshape_rmms = (0..w)
+    let specs = (0..w)
         .step_by(group_width)
-        .map(|group_start_col| {
+        .map(
+            |_group_start_col| ceno_gpu::common::poseidon2::DeferredRmmSpec {
+                height: h,
+                persist_actual: false,
+            },
+        )
+        .collect_vec();
+    let mut inner = cuda_hal
+        .basefold
+        .batch_commit_cache_none_deferred(cuda_hal.as_ref(), specs, |trace_idx| {
+            let group_start_col = trace_idx * group_width;
             let group_cols = (w - group_start_col).min(group_width);
             let start = group_start_col * h * std::mem::size_of::<BB31Base>();
             let end = start + group_cols * h * std::mem::size_of::<BB31Base>();
             let commit_view = q_device.owned_subrange(start..end);
-            witness::RowMajorMatrix::new_by_device_backing(
+            Ok(witness::RowMajorMatrix::new_by_device_backing(
                 h,
                 group_cols,
                 InstancePaddingStrategy::Default,
                 commit_view,
                 DeviceMatrixLayout::ColMajor,
-            )
+            ))
         })
-        .collect_vec();
-    let mut inner = cuda_hal
-        .basefold
-        .batch_commit_cache_none(cuda_hal.as_ref(), reshape_rmms)
-        .expect("failed to commit Jagged q' with GPU Basefold");
+        .expect("failed to commit Jagged q' with deferred GPU Basefold");
     let q_device_evals = if matches!(get_gpu_cache_level(), CacheLevel::None) {
         if let Some(rmms) = inner.rmms.as_mut() {
             for rmm in rmms {
@@ -1939,27 +1945,14 @@ where
             let start_elem = pcs_data.cumulative_heights[poly_idx];
             let len = pcs_data.poly_heights[poly_idx];
             let gpu_buffer = if let Some(q_evals) = &pcs_data.q_evals {
+                assert_eq!(
+                    len, logical_len,
+                    "Jagged q' MLE extraction would require a padded D2D copy: \
+                     trace_idx={trace_idx}, col_idx={col_idx}, len={len}, logical_len={logical_len}"
+                );
                 let start = start_elem * elem_size;
                 let end = start + len * elem_size;
-                if len == logical_len {
-                    q_evals.owned_subrange(start..end)
-                } else {
-                    let cuda_hal = get_cuda_hal().unwrap();
-                    let src = q_evals.as_slice_range(start..end);
-                    let mut padded_buffer = cuda_hal
-                        .alloc_elems_on_device(logical_len, true, None)
-                        .unwrap_or_else(|err| {
-                            panic!("Jagged q' padded column allocation failed: {err:?}")
-                        });
-                    let mut dst = padded_buffer.as_mut_slice_range(0..len * elem_size);
-                    cuda_hal
-                        .inner
-                        .dtod_copy_sync(&src, &mut dst)
-                        .unwrap_or_else(|err| {
-                            panic!("Jagged q' compact-to-padded D2D copy failed: {err:?}")
-                        });
-                    padded_buffer
-                }
+                q_evals.owned_subrange(start..end)
             } else if let Some(q_host) = pcs_data.q_host_evals.as_ref() {
                 let cuda_hal = get_cuda_hal().unwrap();
                 if len == logical_len {
@@ -3361,105 +3354,101 @@ where
                 .alloc_elems_from_host(q_host, None)
                 .expect("failed to upload Jagged q' for opening")
         };
-        let proof = jagged_batch_open_gpu::<BB31Ext, BabyBearBasefold, _>(
-            &jagged_data.cumulative_heights,
-            jagged_data.total_evaluations,
-            jagged_data.reshape_log_height,
-            &point,
-            &evals,
-            basic_transcript,
-            |num_giga_vars, w, cumulative_heights, eq_row, eq_col, transcript| {
-                let ctx = JaggedSumcheckGpuCtx::<CudaHalBB31>::from_gpu_q_evals(
-                    &cuda_hal,
-                    q_evals,
-                    cumulative_heights,
-                    &eq_row,
-                    &eq_col,
-                    num_giga_vars,
-                )
-                .expect("create Jagged GPU sumcheck ctx");
-                let (proof, rho) = jagged_sumcheck_prove_gpu::<
-                    CudaHalBB31,
-                    BB31Ext,
-                    BB31Base,
-                    GpuMatrix,
-                    GpuPolynomial,
-                    GpuPolynomialExt,
-                    GpuFieldType,
-                >(&cuda_hal, &ctx, transcript, None)
-                .expect("Jagged GPU sumcheck failed");
-                let col_evals = eval_cols_at_point_gpu::<CudaHalBB31, BB31Ext, BB31Base>(
-                    &cuda_hal,
-                    &ctx.q_evals,
-                    &rho[..jagged_data.reshape_log_height],
-                    jagged_data.reshape_log_height,
-                    w,
-                )
-                .expect("Jagged GPU column eval failed");
-                (proof, rho, col_evals)
-            },
-            |rho_row, col_evals, transcript| {
-                let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
-                let inner_openings = col_evals
-                    .chunks(group_width)
-                    .map(|evals| (rho_row.clone(), evals.to_vec()))
-                    .collect_vec();
-                let gpu_basefold_proof = if jagged_data.q_evals.is_none() {
-                    let q_host = jagged_data
-                        .q_host_evals
-                        .as_ref()
-                        .expect("Jagged q' host backing missing for cache-none opening");
-                    cuda_hal.basefold.batch_open_with_trace_materializer(
+        let proof =
+            jagged_batch_open_gpu::<BB31Ext, BabyBearBasefold, _>(
+                &jagged_data.cumulative_heights,
+                jagged_data.total_evaluations,
+                jagged_data.reshape_log_height,
+                &point,
+                &evals,
+                basic_transcript,
+                |num_giga_vars, w, cumulative_heights, eq_row, eq_col, transcript| {
+                    let ctx = JaggedSumcheckGpuCtx::<CudaHalBB31>::from_gpu_q_evals(
                         &cuda_hal,
-                        pp_bb31,
-                        vec![(&jagged_data.inner, inner_openings)],
-                        transcript,
-                        |_round_idx, trace_idx| {
-                            let h = 1usize << jagged_data.reshape_log_height;
-                            let w = jagged_data.total_evaluations.div_ceil(h);
-                            let group_start_col = trace_idx * group_width;
-                            assert!(
-                                group_start_col < w,
-                                "Jagged inner q' trace index out of range"
-                            );
-                            let group_cols = (w - group_start_col).min(group_width);
-                            let start = group_start_col * h;
-                            let end = start + group_cols * h;
-                            let q_view = cuda_hal
-                                .alloc_elems_from_host(&q_host[start..end], None)
-                                .map_err(|e| {
+                        q_evals,
+                        cumulative_heights,
+                        &eq_row,
+                        &eq_col,
+                        num_giga_vars,
+                    )
+                    .expect("create Jagged GPU sumcheck ctx");
+                    let (proof, rho) = jagged_sumcheck_prove_gpu::<
+                        CudaHalBB31,
+                        BB31Ext,
+                        BB31Base,
+                        GpuMatrix,
+                        GpuPolynomial,
+                        GpuPolynomialExt,
+                        GpuFieldType,
+                    >(&cuda_hal, &ctx, transcript, None)
+                    .expect("Jagged GPU sumcheck failed");
+                    let col_evals = eval_cols_at_point_gpu::<CudaHalBB31, BB31Ext, BB31Base>(
+                        &cuda_hal,
+                        &ctx.q_evals,
+                        &rho[..jagged_data.reshape_log_height],
+                        jagged_data.reshape_log_height,
+                        w,
+                    )
+                    .expect("Jagged GPU column eval failed");
+                    (proof, rho, col_evals)
+                },
+                |rho_row, col_evals, transcript| {
+                    let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
+                    let inner_openings = col_evals
+                        .chunks(group_width)
+                        .map(|evals| (rho_row.clone(), evals.to_vec()))
+                        .collect_vec();
+                    let gpu_basefold_proof = cuda_hal.basefold.batch_open_with_trace_materializer(
+                    &cuda_hal,
+                    pp_bb31,
+                    vec![(&jagged_data.inner, inner_openings)],
+                    transcript,
+                    |_round_idx, trace_idx| {
+                        let h = 1usize << jagged_data.reshape_log_height;
+                        let w = jagged_data.total_evaluations.div_ceil(h);
+                        let group_start_col = trace_idx * group_width;
+                        assert!(group_start_col < w, "Jagged inner q' trace index out of range");
+                        let group_cols = (w - group_start_col).min(group_width);
+                        let start = group_start_col * h;
+                        let end = start + group_cols * h;
+                        let q_view = if let Some(q_evals) = jagged_data.q_evals.as_ref() {
+                            q_evals.owned_subrange(
+                                start * std::mem::size_of::<BB31Base>()
+                                    ..end * std::mem::size_of::<BB31Base>(),
+                            )
+                        } else {
+                            let q_host = jagged_data
+                                .q_host_evals
+                                .as_ref()
+                                .expect("Jagged q' host backing missing for opening");
+                            cuda_hal.alloc_elems_from_host(&q_host[start..end], None).map_err(
+                                |e| {
                                     ceno_gpu::HalError::Unknown(format!(
                                         "failed to upload Jagged q' group for opening: {e:?}"
                                     ))
-                                })?;
-                            Ok(Some(witness::RowMajorMatrix::new_by_device_backing(
-                                h,
-                                group_cols,
-                                InstancePaddingStrategy::Default,
-                                q_view,
-                                DeviceMatrixLayout::ColMajor,
-                            )))
-                        },
-                    )
-                } else {
-                    cuda_hal.basefold.batch_open(
-                        &cuda_hal,
-                        pp_bb31,
-                        vec![(&jagged_data.inner, inner_openings)],
-                        transcript,
-                    )
-                }
+                                },
+                            )?
+                        };
+                        Ok(Some(witness::RowMajorMatrix::new_by_device_backing(
+                            h,
+                            group_cols,
+                            InstancePaddingStrategy::Default,
+                            q_view,
+                            DeviceMatrixLayout::ColMajor,
+                        )))
+                    },
+                )
                 .map_err(|e| mpcs::Error::InvalidPcsOpen(e.to_string()))?;
-                Ok(mpcs::basefold::structure::BasefoldProof {
-                    commits: gpu_basefold_proof.commits,
-                    query_opening_proof: gpu_basefold_proof.query_opening_proof,
-                    sumcheck_proof: gpu_basefold_proof.sumcheck_proof,
-                    final_message: gpu_basefold_proof.final_message,
-                    pow_witness: gpu_basefold_proof.pow_witness,
-                })
-            },
-        )
-        .expect("Jagged GPU batch open failed");
+                    Ok(mpcs::basefold::structure::BasefoldProof {
+                        commits: gpu_basefold_proof.commits,
+                        query_opening_proof: gpu_basefold_proof.query_opening_proof,
+                        sumcheck_proof: gpu_basefold_proof.sumcheck_proof,
+                        final_message: gpu_basefold_proof.final_message,
+                        pow_witness: gpu_basefold_proof.pow_witness,
+                    })
+                },
+            )
+            .expect("Jagged GPU batch open failed");
         proofs.push(proof);
     }
 
