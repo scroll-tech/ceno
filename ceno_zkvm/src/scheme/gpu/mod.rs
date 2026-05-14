@@ -1353,7 +1353,7 @@ fn jagged_batch_commit_from_host(
             .map(
                 |_group_start_col| ceno_gpu::common::poseidon2::DeferredRmmSpec {
                     height: h,
-                    persist_actual: true,
+                    persist_actual: false,
                 },
             )
             .collect_vec();
@@ -3416,19 +3416,13 @@ where
                         transcript,
                         |_round_idx, trace_idx| {
                             let h = 1usize << jagged_data.reshape_log_height;
-                            let inner_rmms =
-                                jagged_data.inner.rmms.as_ref().expect(
-                                    "Jagged cache-none opening requires inner RMM metadata",
-                                );
+                            let w = jagged_data.total_evaluations.div_ceil(h);
+                            let group_start_col = trace_idx * group_width;
                             assert!(
-                                trace_idx < inner_rmms.len(),
+                                group_start_col < w,
                                 "Jagged inner q' trace index out of range"
                             );
-                            let group_start_col = inner_rmms[..trace_idx]
-                                .iter()
-                                .map(|rmm| rmm.width())
-                                .sum::<usize>();
-                            let group_cols = inner_rmms[trace_idx].width();
+                            let group_cols = (w - group_start_col).min(group_width);
                             let start = group_start_col * h;
                             let end = start + group_cols * h;
                             let q_view = cuda_hal
