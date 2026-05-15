@@ -2673,7 +2673,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         .expect("prove_tower_relation_impl failed");
 
         let estimated_bytes = estimate_tower_bytes::<E, PCS>(composed_cs, input);
-        check_gpu_mem_estimation_with_context(
+        check_gpu_tower_prove_mem_estimation_with_context(
             gpu_mem_tracker,
             estimated_bytes,
             composed_cs
