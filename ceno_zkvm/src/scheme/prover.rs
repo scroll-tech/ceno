@@ -247,7 +247,11 @@ impl<
                     if !crate::instructions::gpu::config::is_gpu_witgen_enabled()
                         && witness_rmm.num_instances() > 0
                     {
-                        Some(witness_rmm.height())
+                        Some(if is_babybear_jagged_pcs::<E, PCS>() {
+                            witness_rmm.occupied_physical_rows()
+                        } else {
+                            witness_rmm.height()
+                        })
                     } else {
                         None
                     };

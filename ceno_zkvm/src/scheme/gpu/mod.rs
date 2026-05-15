@@ -295,6 +295,18 @@ where
     Some(device_buffer.len() / cols)
 }
 
+fn jagged_trace_physical_rows<T>(trace: &witness::RowMajorMatrix<T>) -> usize
+where
+    T: FieldAlgebra + Default + Sync + Clone + Send + Copy + 'static,
+{
+    if trace.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor) {
+        rmm_col_major_device_rows(trace)
+            .unwrap_or_else(|| panic!("Jagged trace col-major device row count mismatch"))
+    } else {
+        trace.occupied_physical_rows()
+    }
+}
+
 fn pcs_resident_stats(pcs_data_basefold: &GpuBasefoldPcsData) -> PcsResidentStats {
     let digest_tree_bytes =
         pcs_data_basefold.codeword.digest_buf.len() * std::mem::size_of::<BB31Base>();
@@ -1153,6 +1165,7 @@ pub fn prove_ec_sum_quark_impl<'a, E: ExtensionField, PCS: PolynomialCommitmentS
 pub(crate) fn normalize_traces_to_device_col_major<E: ExtensionField>(
     cuda_hal: &Arc<CudaHalBB31>,
     vec_traces: &mut [witness::RowMajorMatrix<E::BaseField>],
+    compact_prefix_rows: bool,
 ) {
     let mut already_col_major = 0usize;
     let mut cpu_upload_and_transpose = 0usize;
@@ -1167,12 +1180,17 @@ pub(crate) fn normalize_traces_to_device_col_major<E: ExtensionField>(
             continue;
         }
 
-        let rows = trace.height();
+        let rows = if compact_prefix_rows {
+            trace.occupied_physical_rows()
+        } else {
+            trace.height()
+        };
         let cols = trace.width();
         if rows == 0 || cols == 0 {
             continue;
         }
-        let host_vals_bb31: &[BB31Base] = unsafe { std::mem::transmute(trace.values()) };
+        let host_vals_bb31: &[BB31Base] =
+            unsafe { std::mem::transmute(&trace.values()[..rows * cols]) };
 
         let row_major_buf = cuda_hal
             .alloc_elems_from_host(host_vals_bb31, None)
@@ -1257,8 +1275,13 @@ fn jagged_batch_commit_from_host(
 
     let mut poly_heights = Vec::new();
     for trace in traces {
+        let physical_rows = jagged_trace_physical_rows(trace);
+        assert!(
+            physical_rows <= trace.height(),
+            "Jagged trace physical rows exceed logical height"
+        );
         for _ in 0..trace.width() {
-            poly_heights.push(trace.height());
+            poly_heights.push(physical_rows);
         }
     }
     let cumulative_heights = std::iter::once(0)
@@ -1286,47 +1309,46 @@ fn jagged_batch_commit_from_host(
     }
     let mut poly_idx = 0usize;
     for trace in traces {
-        let rows = trace.height();
+        let physical_rows = jagged_trace_physical_rows(trace);
         let cols = trace.width();
         let start = cumulative_heights[poly_idx];
+        if physical_rows == 0 {
+            poly_idx += cols;
+            continue;
+        }
         if prefer_device_backing
             && trace.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor)
         {
             let device_buffer = trace
                 .device_backing_ref::<BufferImpl<'static, BB31Base>>()
                 .unwrap_or_else(|| panic!("Jagged trace col-major device backing type mismatch"));
-            let col_rows = rmm_col_major_device_rows(trace)
-                .unwrap_or_else(|| panic!("Jagged trace col-major device row count mismatch"));
             assert!(
-                col_rows <= rows,
+                physical_rows <= trace.height(),
                 "Jagged trace col-major device rows exceed logical height"
             );
             let device_values = device_buffer
                 .to_vec()
                 .expect("Jagged trace device backing D2H failed");
-            q_host_uninit[start..start + rows * cols]
-                .par_chunks_mut(rows)
+            q_host_uninit[start..start + physical_rows * cols]
+                .par_chunks_mut(physical_rows)
                 .enumerate()
                 .for_each(|(col_idx, out)| {
-                    let src_start = col_idx * col_rows;
-                    let src_end = src_start + col_rows;
-                    for (dst, src) in out[..col_rows]
+                    let src_start = col_idx * physical_rows;
+                    let src_end = src_start + physical_rows;
+                    for (dst, src) in out[..physical_rows]
                         .iter_mut()
                         .zip(&device_values[src_start..src_end])
                     {
                         dst.write(*src);
                     }
-                    for dst in &mut out[col_rows..] {
-                        dst.write(BB31Base::ZERO);
-                    }
                 });
         } else {
             let values = trace.values();
-            q_host_uninit[start..start + rows * cols]
-                .par_chunks_mut(rows)
+            q_host_uninit[start..start + physical_rows * cols]
+                .par_chunks_mut(physical_rows)
                 .enumerate()
                 .for_each(|(col_idx, out)| {
-                    for row_idx in 0..rows {
+                    for row_idx in 0..physical_rows {
                         out[row_idx].write(values[row_idx * cols + col_idx]);
                     }
                 });
@@ -1706,7 +1728,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
             if crate::instructions::gpu::config::should_materialize_witness_on_gpu() {
                 let span = entered_span!("[gpu] normalize_trace_backing", profiling_2 = true);
                 let cuda_hal = get_cuda_hal().unwrap();
-                normalize_traces_to_device_col_major::<E>(&cuda_hal, &mut vec_traces);
+                normalize_traces_to_device_col_major::<E>(
+                    &cuda_hal,
+                    &mut vec_traces,
+                    is_jagged_pcs,
+                );
                 drop(cuda_hal);
                 for (idx, trace) in vec_traces.iter().enumerate() {
                     assert!(
@@ -1944,28 +1970,19 @@ where
             let poly_idx = layout.first_poly_idx + col_idx;
             let start_elem = pcs_data.cumulative_heights[poly_idx];
             let len = pcs_data.poly_heights[poly_idx];
+            assert!(
+                len <= logical_len,
+                "Jagged q' compact MLE length exceeds logical length: trace_idx={trace_idx}, col_idx={col_idx}, len={len}, logical_len={logical_len}"
+            );
             let gpu_buffer = if let Some(q_evals) = &pcs_data.q_evals {
-                assert_eq!(
-                    len, logical_len,
-                    "Jagged q' MLE extraction would require a padded D2D copy: \
-                     trace_idx={trace_idx}, col_idx={col_idx}, len={len}, logical_len={logical_len}"
-                );
                 let start = start_elem * elem_size;
                 let end = start + len * elem_size;
                 q_evals.owned_subrange(start..end)
             } else if let Some(q_host) = pcs_data.q_host_evals.as_ref() {
                 let cuda_hal = get_cuda_hal().unwrap();
-                if len == logical_len {
-                    cuda_hal
-                        .alloc_elems_from_host(&q_host[start_elem..start_elem + len], None)
-                        .unwrap_or_else(|err| panic!("Jagged q' column H2D failed: {err:?}"))
-                } else {
-                    let mut column = vec![BB31Base::ZERO; logical_len];
-                    column[..len].copy_from_slice(&q_host[start_elem..start_elem + len]);
-                    cuda_hal
-                        .alloc_elems_from_host(&column, None)
-                        .unwrap_or_else(|err| panic!("Jagged q' padded column H2D failed: {err:?}"))
-                }
+                cuda_hal
+                    .alloc_elems_from_host(&q_host[start_elem..start_elem + len], None)
+                    .unwrap_or_else(|err| panic!("Jagged q' compact column H2D failed: {err:?}"))
             } else {
                 panic!("Jagged q' is missing both device and host backing");
             };
