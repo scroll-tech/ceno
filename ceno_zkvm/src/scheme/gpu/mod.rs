@@ -2559,7 +2559,7 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
         let last_layers_refs: Vec<&[GpuPolynomialExt<'_>]> =
             prod_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = {
-            cuda_hal.tower.build_prod_tower_dense_from_gpu_polys_batch(
+            cuda_hal.tower.build_prod_tower_from_gpu_polys_batch(
                 cuda_hal,
                 &last_layers_refs,
                 num_vars,
@@ -2567,12 +2567,13 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
                 stream.as_ref(),
             )
         }
-        .map_err(|e| {
-            format!(
-                "build_prod_tower_dense_from_gpu_polys_batch failed: {:?}",
-                e
-            )
-        })?;
+        .map_err(|e| format!("build_prod_tower_from_gpu_polys_batch failed: {:?}", e))?;
+        let gpu_specs = unsafe {
+            std::mem::transmute::<
+                Vec<ceno_gpu::GpuProverSpec<'_>>,
+                Vec<ceno_gpu::GpuProverSpec<'static>>,
+            >(gpu_specs)
+        };
         prod_gpu_specs.extend(gpu_specs);
         exit_span!(span_prod);
     }
@@ -2594,19 +2595,20 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
             logup_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = cuda_hal
             .tower
-            .build_logup_tower_dense_from_gpu_polys_batch(
+            .build_logup_tower_from_gpu_polys_batch(
                 cuda_hal,
                 &last_layers_refs,
                 num_vars,
                 num_towers,
                 stream.as_ref(),
             )
-            .map_err(|e| {
-                format!(
-                    "build_logup_tower_dense_from_gpu_polys_batch failed: {:?}",
-                    e
-                )
-            })?;
+            .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
+        let gpu_specs = unsafe {
+            std::mem::transmute::<
+                Vec<ceno_gpu::GpuProverSpec<'_>>,
+                Vec<ceno_gpu::GpuProverSpec<'static>>,
+            >(gpu_specs)
+        };
         logup_gpu_specs.extend(gpu_specs);
         exit_span!(span_logup);
     }
