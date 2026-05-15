@@ -1295,7 +1295,7 @@ fn jagged_batch_commit_from_host(
     let h = 1usize << log_h;
     let w = total_evaluations.div_ceil(h);
     let padded_total = w * h;
-    let q_len = 1usize << ceil_log2(padded_total.max(1));
+    let q_len = padded_total.max(1);
 
     // q' is large, and `vec![ZERO; q_len]` serializes a full-buffer zero fill
     // before the actual witness copy overwrites most entries. Allocate
@@ -3748,7 +3748,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
             let h = 1usize << jagged_commitment.reshape_log_height;
             let w = total_evaluations.div_ceil(h);
             let padded_total = w * h;
-            let q_len = 1usize << ceil_log2(padded_total.max(1));
+            let q_len = padded_total.max(1);
             let mut q_evals = vec![BB31Base::ZERO; q_len];
             for (poly_idx, poly) in jagged_commitment.polys.iter().enumerate() {
                 let start = jagged_commitment.cumulative_heights[poly_idx];
