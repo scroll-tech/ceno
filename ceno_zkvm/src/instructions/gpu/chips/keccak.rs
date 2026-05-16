@@ -30,7 +30,7 @@ use crate::{
         },
         config::{
             is_debug_compare_enabled, is_gpu_witgen_enabled, is_kind_disabled,
-            should_materialize_witness_on_gpu, should_materialize_witness_on_initial_assign,
+            should_materialize_witness_on_gpu,
         },
         dispatch::{GpuWitgenKind, compute_fetch_params, is_force_cpu_path},
         utils::{
@@ -447,8 +447,7 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     let num_instances = step_indices.len();
     let num_rows = num_instances * 32; // 2^5 = 32 rows per instance
     let rotation = KECCAK_ROUNDS_CEIL_LOG2; // = 5
-    let materialize_initial_witness = crate::instructions::gpu::config::is_debug_compare_enabled()
-        || should_materialize_witness_on_initial_assign();
+    let materialize_initial_witness = crate::instructions::gpu::config::is_debug_compare_enabled();
 
     // Step 1: Extract column map
     let col_map = info_span!("col_map").in_scope(|| extract_keccak_column_map(config, num_witin));

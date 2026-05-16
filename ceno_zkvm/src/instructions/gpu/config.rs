@@ -68,10 +68,6 @@ pub(crate) fn is_gpu_witgen_enabled() -> bool {
     *ENABLED.get_or_init(|| {
         let val = std::env::var("CENO_GPU_ENABLE_WITGEN").ok();
         let enabled = matches!(val.as_deref(), Some("1"));
-        eprintln!(
-            "[GPU witgen] CENO_GPU_ENABLE_WITGEN={:?} → enabled={}",
-            val, enabled
-        );
         enabled
     })
 }
@@ -84,15 +80,6 @@ pub(crate) fn is_gpu_witgen_enabled() -> bool {
 ///   can consume the col-major GPU trace directly without a D2H/H2D round-trip
 pub(crate) fn should_materialize_witness_on_gpu() -> bool {
     is_gpu_witgen_enabled()
-}
-
-/// Whether the initial opcode-assignment pass should eagerly materialize witness
-/// RMM/device backing.
-///
-/// Replay metadata is the canonical GPU-witgen source for proving. Cache level
-/// controls later q'/PCS residency, not eager per-chip witness materialization.
-pub(crate) fn should_materialize_witness_on_initial_assign() -> bool {
-    false
 }
 
 /// Whether replayable witness device backing should remain resident after commit.

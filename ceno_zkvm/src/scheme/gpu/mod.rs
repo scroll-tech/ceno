@@ -162,75 +162,6 @@ where
     commit
 }
 
-fn flatten_jagged_openings_as_native<E: ExtensionField>(
-    poly_heights: &[usize],
-    openings: Vec<(Point<E>, Vec<E>)>,
-) -> Result<(Point<E>, Vec<E>), mpcs::Error> {
-    let max_native_point_len = poly_heights
-        .iter()
-        .map(|&height| ceil_log2(height))
-        .max()
-        .unwrap_or(0);
-    let mut common_point = vec![None; max_native_point_len];
-    let mut evals = Vec::with_capacity(poly_heights.len());
-    let mut poly_idx = 0usize;
-
-    for (point, point_evals) in openings {
-        for value in point_evals {
-            let height = poly_heights.get(poly_idx).ok_or_else(|| {
-                mpcs::Error::InvalidPcsParam("jagged: too many opening evaluations".to_string())
-            })?;
-            let native_num_vars = ceil_log2(*height);
-            if point.len() < native_num_vars {
-                return Err(mpcs::Error::InvalidPcsParam(format!(
-                    "jagged: opening point length {} is smaller than poly num_vars {}",
-                    point.len(),
-                    native_num_vars
-                )));
-            }
-            for (dst, src) in common_point.iter_mut().zip(point.iter()) {
-                match dst {
-                    Some(existing) if *existing != *src => {
-                        return Err(mpcs::Error::InvalidPcsParam(
-                            "jagged: opening points are not prefix-compatible".to_string(),
-                        ));
-                    }
-                    Some(_) => {}
-                    None => *dst = Some(*src),
-                }
-            }
-            let tail_zero_factor = point[native_num_vars..]
-                .iter()
-                .fold(E::ONE, |acc, r| acc * (E::ONE - *r));
-            if tail_zero_factor == E::ZERO {
-                return Err(mpcs::Error::InvalidPcsParam(
-                    "jagged: padded opening tail factor is zero".to_string(),
-                ));
-            }
-            evals.push(value * tail_zero_factor.inverse());
-            poly_idx += 1;
-        }
-    }
-
-    if poly_idx != poly_heights.len() {
-        return Err(mpcs::Error::InvalidPcsParam(format!(
-            "jagged: expected {} opening evaluations, got {}",
-            poly_heights.len(),
-            poly_idx
-        )));
-    }
-
-    let point = common_point
-        .into_iter()
-        .map(|value| {
-            value.ok_or_else(|| {
-                mpcs::Error::InvalidPcsParam("jagged: missing common opening point".to_string())
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((point, evals))
-}
-
 #[cfg(feature = "gpu")]
 use gkr_iop::gpu::gpu_prover::*;
 
@@ -1368,72 +1299,37 @@ fn jagged_batch_commit_from_host(
         Vec::from_raw_parts(ptr, len, cap)
     };
 
+    let q_device = if matches!(get_gpu_cache_level(), CacheLevel::None) {
+        None
+    } else {
+        Some(
+            cuda_hal
+                .alloc_elems_from_host(&q_host, None)
+                .expect("failed to upload Jagged q' evaluations for commit"),
+        )
+    };
     let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
-    if matches!(get_gpu_cache_level(), CacheLevel::None) {
-        let specs = (0..w)
-            .step_by(group_width)
-            .map(
-                |_group_start_col| ceno_gpu::common::poseidon2::DeferredRmmSpec {
-                    height: h,
-                    persist_actual: false,
-                },
-            )
-            .collect_vec();
-        let mut inner = cuda_hal
-            .basefold
-            .batch_commit_cache_none_deferred(cuda_hal.as_ref(), specs, |trace_idx| {
-                let group_start_col = trace_idx * group_width;
-                let group_cols = (w - group_start_col).min(group_width);
-                let start = group_start_col * h;
-                let end = start + group_cols * h;
-                let q_view = cuda_hal.alloc_elems_from_host(&q_host[start..end], None)?;
-                Ok(witness::RowMajorMatrix::new_by_device_backing(
-                    h,
-                    group_cols,
-                    InstancePaddingStrategy::Default,
-                    q_view,
-                    DeviceMatrixLayout::ColMajor,
-                ))
-            })
-            .expect("failed to commit Jagged q' with deferred GPU Basefold");
-        if let Some(rmms) = inner.rmms.as_mut() {
-            for rmm in rmms {
-                rmm.clear_device_backing();
-            }
-        }
-        return (
-            GpuJaggedHostPreprocessed {
-                q_host_evals: q_host,
-                q_device_evals: None,
-                cumulative_heights,
-                poly_heights,
-                total_evaluations,
-                reshape_log_height: log_h,
-            },
-            inner,
-        );
-    }
-
-    let q_device = cuda_hal
-        .alloc_elems_from_host(&q_host, None)
-        .expect("failed to upload Jagged q' evaluations for commit");
     let specs = (0..w)
         .step_by(group_width)
-        .map(
-            |_group_start_col| ceno_gpu::common::poseidon2::DeferredRmmSpec {
-                height: h,
-                persist_actual: false,
-            },
-        )
+        .map(|_| ceno_gpu::common::poseidon2::DeferredRmmSpec {
+            height: h,
+            persist_actual: false,
+        })
         .collect_vec();
     let mut inner = cuda_hal
         .basefold
         .batch_commit_cache_none_deferred(cuda_hal.as_ref(), specs, |trace_idx| {
             let group_start_col = trace_idx * group_width;
             let group_cols = (w - group_start_col).min(group_width);
-            let start = group_start_col * h * std::mem::size_of::<BB31Base>();
-            let end = start + group_cols * h * std::mem::size_of::<BB31Base>();
-            let commit_view = q_device.owned_subrange(start..end);
+            let commit_view = if let Some(q_device) = &q_device {
+                let start = group_start_col * h * std::mem::size_of::<BB31Base>();
+                let end = start + group_cols * h * std::mem::size_of::<BB31Base>();
+                q_device.owned_subrange(start..end)
+            } else {
+                let start = group_start_col * h;
+                let end = start + group_cols * h;
+                cuda_hal.alloc_elems_from_host(&q_host[start..end], None)?
+            };
             Ok(witness::RowMajorMatrix::new_by_device_backing(
                 h,
                 group_cols,
@@ -1443,21 +1339,18 @@ fn jagged_batch_commit_from_host(
             ))
         })
         .expect("failed to commit Jagged q' with deferred GPU Basefold");
-    let q_device_evals = if matches!(get_gpu_cache_level(), CacheLevel::None) {
+    if q_device.is_none() {
         if let Some(rmms) = inner.rmms.as_mut() {
             for rmm in rmms {
                 rmm.clear_device_backing();
             }
         }
-        None
-    } else {
-        Some(q_device)
-    };
+    }
 
     (
         GpuJaggedHostPreprocessed {
             q_host_evals: q_host,
-            q_device_evals,
+            q_device_evals: q_device,
             cumulative_heights,
             poly_heights,
             total_evaluations,
@@ -1487,6 +1380,42 @@ fn jagged_q_storage(
             (Some(q_evals), None)
         }
     }
+}
+
+fn finish_jagged_commit<E, PCS>(
+    cuda_hal: &Arc<CudaHalBB31>,
+    preprocessed: GpuJaggedHostPreprocessed,
+    inner: GpuBasefoldPcsData,
+    trace_layouts: Vec<GpuJaggedTraceLayout>,
+) -> (GpuPcsData, PCS::Commitment)
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+{
+    let inner_commit = cuda_hal.basefold.get_pure_commitment(&inner);
+    let commit = wrap_jagged_commitment_as_pcs::<E, PCS>(
+        inner_commit,
+        preprocessed.cumulative_heights.clone(),
+        preprocessed.reshape_log_height,
+    );
+    let (q_evals, q_host_evals) = jagged_q_storage(
+        cuda_hal,
+        preprocessed.q_host_evals,
+        preprocessed.q_device_evals,
+    );
+    (
+        GpuPcsData::Jagged(GpuJaggedPcsData {
+            inner,
+            q_evals,
+            q_host_evals,
+            cumulative_heights: preprocessed.cumulative_heights,
+            poly_heights: preprocessed.poly_heights,
+            total_evaluations: preprocessed.total_evaluations,
+            reshape_log_height: preprocessed.reshape_log_height,
+            trace_layouts,
+        }),
+        commit,
+    )
 }
 
 pub fn commit_traces_deferred_cache_none<E, PCS>(
@@ -1596,27 +1525,8 @@ where
         for trace in &mut traces_bb31 {
             trace.clear_device_backing();
         }
-        let inner_commit = cuda_hal.basefold.get_pure_commitment(&inner_pcs_data);
-        let commit = wrap_jagged_commitment_as_pcs::<E, PCS>(
-            inner_commit,
-            preprocessed.cumulative_heights.clone(),
-            preprocessed.reshape_log_height,
-        );
-        let (q_evals, q_host_evals) = jagged_q_storage(
-            &cuda_hal,
-            preprocessed.q_host_evals,
-            preprocessed.q_device_evals,
-        );
-        let pcs_data = GpuPcsData::Jagged(GpuJaggedPcsData {
-            inner: inner_pcs_data,
-            q_evals,
-            q_host_evals,
-            cumulative_heights: preprocessed.cumulative_heights,
-            poly_heights: preprocessed.poly_heights,
-            total_evaluations: preprocessed.total_evaluations,
-            reshape_log_height: preprocessed.reshape_log_height,
-            trace_layouts,
-        });
+        let (pcs_data, commit) =
+            finish_jagged_commit::<E, PCS>(&cuda_hal, preprocessed, inner_pcs_data, trace_layouts);
         return (vec![], pcs_data, commit);
     }
 
@@ -1796,28 +1706,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
                 for trace in &mut traces_gl64 {
                     trace.clear_device_backing();
                 }
-                let inner_commit = cuda_hal.basefold.get_pure_commitment(&inner_pcs_data);
-                let commit = wrap_jagged_commitment_as_pcs::<E, PCS>(
-                    inner_commit,
-                    preprocessed.cumulative_heights.clone(),
-                    preprocessed.reshape_log_height,
-                );
-                let (q_evals, q_host_evals) = jagged_q_storage(
+                finish_jagged_commit::<E, PCS>(
                     &cuda_hal,
-                    preprocessed.q_host_evals,
-                    preprocessed.q_device_evals,
-                );
-                let pcs_data = GpuPcsData::Jagged(GpuJaggedPcsData {
-                    inner: inner_pcs_data,
-                    q_evals,
-                    q_host_evals,
-                    cumulative_heights: preprocessed.cumulative_heights,
-                    poly_heights: preprocessed.poly_heights,
-                    total_evaluations: preprocessed.total_evaluations,
-                    reshape_log_height: preprocessed.reshape_log_height,
-                    trace_layouts: trace_layouts.expect("jagged trace layouts must exist"),
-                });
-                (pcs_data, commit)
+                    preprocessed,
+                    inner_pcs_data,
+                    trace_layouts.expect("jagged trace layouts must exist"),
+                )
             } else {
                 let pcs_data = cuda_hal
                     .basefold
@@ -2181,16 +2075,6 @@ where
             })
             .collect::<Vec<_>>()
     };
-
-    eprintln!(
-        "[ceno][shard-ram-compact-mle] trace_idx={} cols={} records={} full_rows={} compact_cols={}",
-        trace_idx,
-        expected_num,
-        num_records,
-        full_rows,
-        expected_num.saturating_sub(21),
-    );
-    let _ = std::io::stderr().flush();
 
     mles
 }
@@ -3358,9 +3242,11 @@ where
                 (point_bb31.clone(), evals_bb31.clone())
             })
             .collect();
-        let (point, evals) =
-            flatten_jagged_openings_as_native(&jagged_data.poly_heights, openings_bb31)
-                .expect("invalid Jagged GPU opening shape");
+        let (point, evals) = mpcs::jagged::flatten_padded_openings_as_native(
+            &jagged_data.poly_heights,
+            openings_bb31,
+        )
+        .expect("invalid Jagged GPU opening shape");
         let q_evals = if let Some(q_evals) = &jagged_data.q_evals {
             let q_evals_len_bytes = q_evals.len() * std::mem::size_of::<BB31Base>();
             q_evals.owned_subrange(0..q_evals_len_bytes)
