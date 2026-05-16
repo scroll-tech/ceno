@@ -5,7 +5,6 @@ use super::hal::{
 };
 use crate::{
     error::ZKVMError,
-    instructions::gpu::cache::current_replay_cache_stats,
     scheme::{
         MainConstraintProof,
         constants::SEPTIC_EXTENSION_DEGREE,
@@ -71,6 +70,7 @@ use std::{
     iter::{once, repeat_n},
     mem::MaybeUninit,
     sync::Arc,
+    time::Instant,
 };
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -170,10 +170,8 @@ mod memory;
 mod util;
 pub(crate) use memory::{
     check_gpu_mem_estimation, check_gpu_mem_estimation_with_context,
-    check_gpu_scheduler_mem_estimation_with_context,
     check_gpu_tower_prove_mem_estimation_with_context, estimate_chip_proof_memory,
-    estimate_main_witness_bytes, estimate_replay_materialization_bytes_for_plan,
-    estimate_tower_bytes, estimate_tower_stage_bytes, init_gpu_mem_tracker,
+    estimate_main_witness_bytes, estimate_tower_bytes, init_gpu_mem_tracker,
 };
 use memory::{
     estimate_ecc_quark_bytes_from_num_vars, estimate_main_constraints_bytes,
@@ -186,11 +184,6 @@ use util::{
 };
 
 pub struct GpuTowerProver;
-#[derive(Clone)]
-pub enum DeferredGpuTrace<E: ExtensionField> {
-    Eager(witness::RowMajorMatrix<E::BaseField>),
-    Replay(crate::structs::GpuReplayPlan<E>),
-}
 
 #[derive(Debug, Default, Clone, Copy)]
 struct PcsResidentStats {
@@ -354,9 +347,7 @@ pub fn log_gpu_proof_baseline<E, PCS>(
             gkr_iop::gpu::gpu_prover::GpuFieldType::Unreachable => 0,
         })
         .sum::<usize>();
-    let replay_cache = current_replay_cache_stats();
-    let accounted_bytes = replay_cache.total_bytes()
-        + pcs.digest_tree_bytes
+    let accounted_bytes = pcs.digest_tree_bytes
         + pcs.codeword_leaves_bytes
         + pcs.trace_gpu_bytes
         + pcs.rmms_device_bytes
@@ -374,13 +365,9 @@ pub fn log_gpu_proof_baseline<E, PCS>(
         mb(pool.get_max_size() as usize),
     );
     tracing::info!(
-        "[gpu baseline][{label}] pool: used={:.2}MB reserved={:.2}MB | replay: steps={:.2}MB meta={:.2}MB shared={:.2}MB total={:.2}MB | pcs: digest_tree={:.2}MB leaves={:.2}MB trace_gpu={:.2}MB rmms_device={:.2}MB ({}/{}) | fixed_mles={:.2}MB | unaccounted={:.2}MB",
+        "[gpu baseline][{label}] pool: used={:.2}MB reserved={:.2}MB | pcs: digest_tree={:.2}MB leaves={:.2}MB trace_gpu={:.2}MB rmms_device={:.2}MB ({}/{}) | fixed_mles={:.2}MB | unaccounted={:.2}MB",
         mb(used_bytes as usize),
         mb(reserved_bytes as usize),
-        mb(replay_cache.shard_steps_bytes),
-        mb(replay_cache.shard_meta_bytes),
-        mb(replay_cache.shared_side_effect_bytes),
-        mb(replay_cache.total_bytes()),
         mb(pcs.digest_tree_bytes),
         mb(pcs.codeword_leaves_bytes),
         mb(pcs.trace_gpu_bytes),
@@ -1157,12 +1144,52 @@ fn jagged_batch_commit_from_host(
     reshape_log_height: usize,
     prefer_device_backing: bool,
 ) -> (GpuJaggedHostPreprocessed, GpuBasefoldPcsData) {
+    let total_start = Instant::now();
+    let device_ready_traces = traces
+        .iter()
+        .filter(|trace| trace.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor))
+        .count();
+    let device_backed_traces = traces
+        .iter()
+        .filter(|trace| trace.has_device_backing())
+        .count();
+    tracing::info!(
+        "[gpu-jagged-profile] branch_select prefer_device_backing={} cache_level={:?} device_backed_traces={}/{} col_major_device_traces={}/{}",
+        prefer_device_backing,
+        get_gpu_cache_level(),
+        device_backed_traces,
+        traces.len(),
+        device_ready_traces,
+        traces.len()
+    );
+    if device_ready_traces != 0 && device_ready_traces != traces.len() {
+        let missing_device_traces = traces
+            .iter()
+            .enumerate()
+            .filter(|(_, trace)| trace.device_backing_layout() != Some(DeviceMatrixLayout::ColMajor))
+            .map(|(idx, trace)| {
+                format!(
+                    "#{idx}:{}x{}:phys{}:backing={}:layout={:?}",
+                    trace.height(),
+                    trace.width(),
+                    trace.occupied_physical_rows(),
+                    trace.has_device_backing(),
+                    trace.device_backing_layout()
+                )
+            })
+            .join(", ");
+        tracing::info!(
+            "[gpu-jagged-profile] missing_device_col_major_traces {}",
+            missing_device_traces
+        );
+    }
     if prefer_device_backing
         && !matches!(get_gpu_cache_level(), CacheLevel::None)
         && traces
             .iter()
             .all(|trace| trace.device_backing_layout() == Some(DeviceMatrixLayout::ColMajor))
     {
+        let device_branch_start = Instant::now();
         let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
         let (preprocessed, mut inner) = batch_commit_gpu_grouped(
             cuda_hal.as_ref(),
@@ -1176,6 +1203,12 @@ fn jagged_batch_commit_from_host(
             },
         )
         .expect("failed to commit Jagged q' with GPU q' construction");
+        tracing::info!(
+            "[gpu-jagged-profile] device_q batch_commit_gpu_grouped_return total_evals={} elapsed_ms={:.3}",
+            preprocessed.total_evaluations,
+            device_branch_start.elapsed().as_secs_f64() * 1000.0
+        );
+        let finish_storage_start = Instant::now();
         let q_host_evals = if matches!(get_gpu_cache_level(), CacheLevel::None) {
             preprocessed
                 .q_evals
@@ -1191,6 +1224,14 @@ fn jagged_batch_commit_from_host(
                 }
             }
         }
+        tracing::info!(
+            "[gpu-jagged-profile] device_q post_commit_storage elapsed_ms={:.3}",
+            finish_storage_start.elapsed().as_secs_f64() * 1000.0
+        );
+        tracing::info!(
+            "[gpu-jagged-profile] device_q jagged_batch_commit_from_host total elapsed_ms={:.3}",
+            total_start.elapsed().as_secs_f64() * 1000.0
+        );
         return (
             GpuJaggedHostPreprocessed {
                 q_host_evals,
@@ -1204,6 +1245,7 @@ fn jagged_batch_commit_from_host(
         );
     }
 
+    let metadata_start = Instant::now();
     let mut poly_heights = Vec::new();
     for trace in traces {
         let physical_rows = jagged_trace_physical_rows(trace);
@@ -1227,6 +1269,16 @@ fn jagged_batch_commit_from_host(
     let w = total_evaluations.div_ceil(h);
     let padded_total = w * h;
     let q_len = padded_total.max(1);
+    tracing::info!(
+        "[gpu-jagged-profile] host_q metadata traces={} segments={} total_evals={} padded_evals={} h={} w={} elapsed_ms={:.3}",
+        traces.len(),
+        poly_heights.len(),
+        total_evaluations,
+        padded_total,
+        h,
+        w,
+        metadata_start.elapsed().as_secs_f64() * 1000.0
+    );
 
     // q' is large, and `vec![ZERO; q_len]` serializes a full-buffer zero fill
     // before the actual witness copy overwrites most entries. Allocate
@@ -1238,6 +1290,7 @@ fn jagged_batch_commit_from_host(
     unsafe {
         q_host_uninit.set_len(q_len);
     }
+    let host_build_start = Instant::now();
     let mut poly_idx = 0usize;
     for trace in traces {
         let physical_rows = jagged_trace_physical_rows(trace);
@@ -1253,6 +1306,8 @@ fn jagged_batch_commit_from_host(
             let device_buffer = trace
                 .device_backing_ref::<BufferImpl<'static, BB31Base>>()
                 .unwrap_or_else(|| panic!("Jagged trace col-major device backing type mismatch"));
+            let backing_rows = rmm_col_major_device_rows(trace)
+                .unwrap_or_else(|| panic!("Jagged trace col-major device row count mismatch"));
             assert!(
                 physical_rows <= trace.height(),
                 "Jagged trace col-major device rows exceed logical height"
@@ -1264,7 +1319,7 @@ fn jagged_batch_commit_from_host(
                 .par_chunks_mut(physical_rows)
                 .enumerate()
                 .for_each(|(col_idx, out)| {
-                    let src_start = col_idx * physical_rows;
+                    let src_start = col_idx * backing_rows;
                     let src_end = src_start + physical_rows;
                     for (dst, src) in out[..physical_rows]
                         .iter_mut()
@@ -1298,7 +1353,12 @@ fn jagged_batch_commit_from_host(
         std::mem::forget(q_host_uninit);
         Vec::from_raw_parts(ptr, len, cap)
     };
+    tracing::info!(
+        "[gpu-jagged-profile] host_q build_cpu_q elapsed_ms={:.3}",
+        host_build_start.elapsed().as_secs_f64() * 1000.0
+    );
 
+    let h2d_start = Instant::now();
     let q_device = if matches!(get_gpu_cache_level(), CacheLevel::None) {
         None
     } else {
@@ -1308,7 +1368,13 @@ fn jagged_batch_commit_from_host(
                 .expect("failed to upload Jagged q' evaluations for commit"),
         )
     };
+    tracing::info!(
+        "[gpu-jagged-profile] host_q upload_q h2d_bytes={} elapsed_ms={:.3}",
+        q_host.len() * std::mem::size_of::<BB31Base>(),
+        h2d_start.elapsed().as_secs_f64() * 1000.0
+    );
     let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
+    let specs_start = Instant::now();
     let specs = (0..w)
         .step_by(group_width)
         .map(|_| ceno_gpu::common::poseidon2::DeferredRmmSpec {
@@ -1316,6 +1382,12 @@ fn jagged_batch_commit_from_host(
             persist_actual: false,
         })
         .collect_vec();
+    tracing::info!(
+        "[gpu-jagged-profile] host_q build_specs groups={} elapsed_ms={:.3}",
+        specs.len(),
+        specs_start.elapsed().as_secs_f64() * 1000.0
+    );
+    let inner_commit_start = Instant::now();
     let mut inner = cuda_hal
         .basefold
         .batch_commit_cache_none_deferred(cuda_hal.as_ref(), specs, |trace_idx| {
@@ -1339,6 +1411,10 @@ fn jagged_batch_commit_from_host(
             ))
         })
         .expect("failed to commit Jagged q' with deferred GPU Basefold");
+    tracing::info!(
+        "[gpu-jagged-profile] host_q inner_commit elapsed_ms={:.3}",
+        inner_commit_start.elapsed().as_secs_f64() * 1000.0
+    );
     if q_device.is_none() {
         if let Some(rmms) = inner.rmms.as_mut() {
             for rmm in rmms {
@@ -1346,6 +1422,10 @@ fn jagged_batch_commit_from_host(
             }
         }
     }
+    tracing::info!(
+        "[gpu-jagged-profile] host_q jagged_batch_commit_from_host total elapsed_ms={:.3}",
+        total_start.elapsed().as_secs_f64() * 1000.0
+    );
 
     (
         GpuJaggedHostPreprocessed {
@@ -1418,9 +1498,9 @@ where
     )
 }
 
-pub fn commit_traces_deferred_cache_none<E, PCS>(
+pub fn commit_gpu_witness_traces_cache_none<E, PCS>(
     prover: &GpuProver<GpuBackend<E, PCS>>,
-    traces: BTreeMap<usize, DeferredGpuTrace<E>>,
+    traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
 ) -> (
     Vec<MultilinearExtensionGpu<'static, E>>,
     <GpuBackend<E, PCS> as ProverBackend>::PcsData,
@@ -1434,13 +1514,10 @@ where
         panic!("GPU backend only supports BabyBear base field");
     }
 
-    let ordered_sources = traces.into_values().collect_vec();
-    let max_poly_size_log2 = ordered_sources
+    let ordered_traces = traces.into_values().collect_vec();
+    let max_poly_size_log2 = ordered_traces
         .iter()
-        .map(|source| match source {
-            DeferredGpuTrace::Eager(rmm) => ceil_log2(rmm.height()),
-            DeferredGpuTrace::Replay(plan) => ceil_log2(plan.trace_height),
-        })
+        .map(|rmm| ceil_log2(rmm.height()))
         .max()
         .unwrap();
     if max_poly_size_log2 > prover.backend.max_poly_size_log2 {
@@ -1461,41 +1538,27 @@ where
     cuda_hal
         .inner
         .synchronize()
-        .expect("cuda synchronize before deferred batch_commit mem snapshot");
+        .expect("cuda synchronize before gpu batch_commit mem snapshot");
     let mem_pool = cuda_hal.inner.mem_pool();
     let used_bytes = mem_pool
         .get_used_size()
-        .expect("cudaMemPoolGetAttribute UsedMemCurrent before deferred batch_commit");
+        .expect("cudaMemPoolGetAttribute UsedMemCurrent before gpu batch_commit");
     let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
     tracing::info!(
-        "[gpu] entering deferred batch_commit: traces={}, used={:.2}MB, reserved={:.2}MB",
-        ordered_sources.len(),
+        "[gpu] entering gpu batch_commit: traces={}, used={:.2}MB, reserved={:.2}MB",
+        ordered_traces.len(),
         used_bytes as f64 / (1024.0 * 1024.0),
         reserved_bytes as f64 / (1024.0 * 1024.0),
     );
 
     if is_jagged_pcs {
-        let vec_traces = ordered_sources
+        let mut vec_traces = ordered_traces
             .into_iter()
             .enumerate()
-            .map(|(trace_idx, source)| {
-                let witness_rmm: witness::RowMajorMatrix<E::BaseField> = match source {
-                    DeferredGpuTrace::Eager(rmm) => rmm,
-                    DeferredGpuTrace::Replay(plan) => plan
-                        .replay_witness()
-                        .map(|witness_rmm| {
-                            assert_eq!(
-                                witness_rmm.height(),
-                                plan.trace_height,
-                                "replayed trace height changed between plan build and deferred commit",
-                            );
-                            witness_rmm
-                        })
-                        .unwrap_or_else(|e| panic!("failed to replay trace {trace_idx}: {e:?}")),
-                };
+            .map(|(trace_idx, witness_rmm)| {
                 if witness_rmm.width() == 0 {
                     tracing::warn!(
-                        "[gpu] replacing zero-width deferred witness trace at index {trace_idx} with a dummy column"
+                        "[gpu] replacing zero-width gpu witness trace at index {trace_idx} with a dummy column"
                     );
                     witness::RowMajorMatrix::<E::BaseField>::new(
                         witness_rmm.num_instances(),
@@ -1508,11 +1571,28 @@ where
             })
             .collect_vec();
         let trace_layouts = jagged_trace_layouts(&vec_traces);
+        let normalize_start = Instant::now();
+        normalize_traces_to_device_col_major::<E>(&cuda_hal, &mut vec_traces, true);
+        tracing::info!(
+            "[gpu-jagged-profile] eager_jagged_normalize_missing_traces elapsed_ms={:.3}",
+            normalize_start.elapsed().as_secs_f64() * 1000.0
+        );
+        for (idx, trace) in vec_traces.iter().enumerate() {
+            assert!(
+                trace.has_device_backing(),
+                "GPU jagged commit requires device-backed witness trace at index {idx}"
+            );
+            assert_eq!(
+                trace.device_backing_layout(),
+                Some(DeviceMatrixLayout::ColMajor),
+                "GPU jagged commit requires col-major device-backed witness trace at index {idx}"
+            );
+        }
         let mut traces_bb31: Vec<witness::RowMajorMatrix<BB31Base>> =
             unsafe { std::mem::transmute(vec_traces) };
         let total_size: usize = traces_bb31
             .iter()
-            .map(|trace| trace.height() * trace.width())
+            .map(|trace| jagged_trace_physical_rows(trace) * trace.width())
             .sum();
         let reshape_log_height = prover
             .backend
@@ -1530,43 +1610,23 @@ where
         return (vec![], pcs_data, commit);
     }
 
-    let specs = ordered_sources
+    let specs = ordered_traces
         .iter()
-        .map(|source| match source {
-            DeferredGpuTrace::Eager(rmm) => ceno_gpu::common::poseidon2::DeferredRmmSpec {
-                height: rmm.height(),
-                persist_actual: true,
-            },
-            DeferredGpuTrace::Replay(plan) => ceno_gpu::common::poseidon2::DeferredRmmSpec {
-                height: plan.trace_height,
-                persist_actual: false,
-            },
+        .map(|rmm| ceno_gpu::common::poseidon2::DeferredRmmSpec {
+            height: rmm.height(),
+            persist_actual: true,
         })
         .collect_vec();
-    let mut ordered_sources = ordered_sources.into_iter().map(Some).collect_vec();
+    let mut ordered_traces = ordered_traces.into_iter().map(Some).collect_vec();
     let pcs_data = cuda_hal
         .basefold
         .batch_commit_cache_none_deferred(&cuda_hal, specs, |trace_idx| {
-            let source = ordered_sources[trace_idx]
+            let witness_rmm = ordered_traces[trace_idx]
                 .take()
-                .expect("deferred commit source reused");
-            let witness_rmm: witness::RowMajorMatrix<E::BaseField> = match source {
-                DeferredGpuTrace::Eager(rmm) => rmm,
-                DeferredGpuTrace::Replay(plan) => plan
-                    .replay_witness()
-                    .map(|witness_rmm| {
-                        assert_eq!(
-                            witness_rmm.height(),
-                            plan.trace_height,
-                            "replayed trace height changed between plan build and deferred commit",
-                        );
-                        witness_rmm
-                    })
-                    .map_err(|e| ceno_gpu::HalError::InvalidInput(format!("{e:?}")))?,
-            };
+                .expect("gpu commit source reused");
             let witness_rmm = if witness_rmm.width() == 0 {
                 tracing::warn!(
-                    "[gpu] replacing zero-width deferred witness trace at index {trace_idx} with a dummy column"
+                    "[gpu] replacing zero-width gpu witness trace at index {trace_idx} with a dummy column"
                 );
                 witness::RowMajorMatrix::<E::BaseField>::new(
                     witness_rmm.num_instances(),
@@ -1689,7 +1749,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
             let pcs_data = if is_jagged_pcs {
                 let total_size: usize = traces_gl64
                     .iter()
-                    .map(|trace| trace.height() * trace.width())
+                    .map(|trace| jagged_trace_physical_rows(trace) * trace.width())
                     .sum();
                 let reshape_log_height = self
                     .backend
@@ -1806,7 +1866,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
                     .unwrap_or(0);
 
                 let (resident, temporary) =
-                    estimate_trace_extraction_bytes(num_witin, num_vars, occupied_rows, true);
+                    estimate_trace_extraction_bytes(num_witin, num_vars, occupied_rows);
                 check_gpu_mem_estimation(gpu_mem_tracker, resident + temporary);
 
                 trace_idx += 1;
@@ -1928,7 +1988,7 @@ where
         .map(|poly| poly.evaluations().len())
         .unwrap_or(0);
     let (resident, temporary) =
-        estimate_trace_extraction_bytes(expected_num, num_vars, occupied_rows, false);
+        estimate_trace_extraction_bytes(expected_num, num_vars, occupied_rows);
     check_gpu_mem_estimation(gpu_mem_tracker, resident + temporary);
 
     let mles: Vec<Arc<MultilinearExtensionGpu<'a, E>>> = poly_group
@@ -2129,85 +2189,6 @@ where
             })
         })
         .collect()
-}
-
-pub fn clear_replayable_trace_device_backing<E, PCS>(
-    pcs_data: &mut <GpuBackend<E, PCS> as ProverBackend>::PcsData,
-    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
-) where
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E>,
-{
-    let pcs_data_basefold = match pcs_data {
-        GpuPcsData::Basefold(data) => data,
-        GpuPcsData::Jagged(_) => return,
-    };
-
-    let Some(rmms) = pcs_data_basefold.rmms.as_mut() else {
-        return;
-    };
-
-    let before_device_count = rmms.iter().filter(|rmm| rmm.has_device_backing()).count();
-    let before_device_bytes = rmms
-        .iter()
-        .filter(|rmm| rmm.has_device_backing())
-        .map(rmm_device_backing_bytes)
-        .sum::<usize>();
-
-    for (trace_idx, _) in replayable_traces {
-        rmms[*trace_idx].clear_device_backing();
-    }
-
-    let after_device_count = rmms.iter().filter(|rmm| rmm.has_device_backing()).count();
-    let after_device_bytes = rmms
-        .iter()
-        .filter(|rmm| rmm.has_device_backing())
-        .map(rmm_device_backing_bytes)
-        .sum::<usize>();
-    tracing::info!(
-        "[gpu] cleared replayable PCS RMM device backing: replayable_traces={}, rmms_device_before={:.2}MB ({}) -> after={:.2}MB ({})",
-        replayable_traces.len(),
-        before_device_bytes as f64 / (1024.0 * 1024.0),
-        before_device_count,
-        after_device_bytes as f64 / (1024.0 * 1024.0),
-        after_device_count,
-    );
-}
-
-pub fn restore_replayable_trace_device_backing<E, PCS>(
-    pcs_data: &mut <GpuBackend<E, PCS> as ProverBackend>::PcsData,
-    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
-) -> Result<(), ZKVMError>
-where
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E>,
-{
-    assert_eq!(
-        std::any::TypeId::of::<E::BaseField>(),
-        std::any::TypeId::of::<BB31Base>(),
-        "GPU replay restore only supports BabyBear base field",
-    );
-    let pcs_data_basefold = match pcs_data {
-        GpuPcsData::Basefold(data) => data,
-        GpuPcsData::Jagged(_) => return Ok(()),
-    };
-
-    let Some(rmms) = pcs_data_basefold.rmms.as_mut() else {
-        return Ok(());
-    };
-
-    for (trace_idx, replay_plan) in replayable_traces {
-        let witness_rmm = replay_plan.replay_witness()?;
-        assert_eq!(
-            witness_rmm.height(),
-            replay_plan.trace_height,
-            "replayed trace height changed before PCS opening restore",
-        );
-        let witness_rmm_bb31: witness::RowMajorMatrix<BB31Base> =
-            unsafe { std::mem::transmute(witness_rmm) };
-        rmms[*trace_idx] = witness_rmm_bb31;
-    }
-    Ok(())
 }
 
 /// Transport a CPU-side structural witness RowMajorMatrix to GPU MLEs.
@@ -3293,6 +3274,7 @@ where
                         &rho[..jagged_data.reshape_log_height],
                         jagged_data.reshape_log_height,
                         w,
+                        jagged_data.total_evaluations,
                     )
                     .expect("Jagged GPU column eval failed");
                     (proof, rho, col_evals)
@@ -3315,18 +3297,47 @@ where
                         assert!(group_start_col < w, "Jagged inner q' trace index out of range");
                         let group_cols = (w - group_start_col).min(group_width);
                         let start = group_start_col * h;
-                        let end = start + group_cols * h;
+                        let group_elems = group_cols * h;
+                        let available_elems = jagged_data
+                            .total_evaluations
+                            .saturating_sub(start)
+                            .min(group_elems);
                         let q_view = if let Some(q_evals) = jagged_data.q_evals.as_ref() {
-                            q_evals.owned_subrange(
-                                start * std::mem::size_of::<BB31Base>()
-                                    ..end * std::mem::size_of::<BB31Base>(),
-                            )
+                            if available_elems == group_elems {
+                                q_evals.owned_subrange(
+                                    start * std::mem::size_of::<BB31Base>()
+                                        ..(start + group_elems) * std::mem::size_of::<BB31Base>(),
+                                )
+                            } else {
+                                let mut padded = cuda_hal
+                                    .alloc_elems_on_device(group_elems, true, None)
+                                    .map_err(|e| {
+                                        ceno_gpu::HalError::Unknown(format!(
+                                            "failed to alloc padded Jagged q' opening group: {e:?}"
+                                        ))
+                                    })?;
+                                if available_elems > 0 {
+                                    let src_start = start * std::mem::size_of::<BB31Base>();
+                                    let src_end = src_start
+                                        + available_elems * std::mem::size_of::<BB31Base>();
+                                    let src = q_evals.as_slice_range(src_start..src_end);
+                                    let mut dst = padded.as_mut_slice_range(
+                                        0..available_elems * std::mem::size_of::<BB31Base>(),
+                                    );
+                                    cuda_hal.inner.dtod_copy_sync(&src, &mut dst).map_err(|e| {
+                                        ceno_gpu::HalError::Unknown(format!(
+                                            "failed to pad Jagged q' opening group: {e:?}"
+                                        ))
+                                    })?;
+                                }
+                                padded
+                            }
                         } else {
                             let q_host = jagged_data
                                 .q_host_evals
                                 .as_ref()
                                 .expect("Jagged q' host backing missing for opening");
-                            cuda_hal.alloc_elems_from_host(&q_host[start..end], None).map_err(
+                            cuda_hal.alloc_elems_from_host(&q_host[start..start + group_elems], None).map_err(
                                 |e| {
                                     ceno_gpu::HalError::Unknown(format!(
                                         "failed to upload Jagged q' group for opening: {e:?}"
@@ -3454,141 +3465,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
             panic!("GPU backend only supports BabyBear base field");
         }
     }
-}
-
-pub fn open_with_incremental_replay<E, PCS>(
-    prover: &GpuProver<GpuBackend<E, PCS>>,
-    witness_data: <GpuBackend<E, PCS> as ProverBackend>::PcsData,
-    fixed_data: Option<Arc<<GpuBackend<E, PCS> as ProverBackend>::PcsData>>,
-    replayable_traces: &[(usize, crate::structs::GpuReplayPlan<E>)],
-    points: Vec<Point<E>>,
-    mut evals: Vec<Vec<Vec<E>>>,
-    transcript: &mut (impl Transcript<E> + 'static),
-) -> PCS::Proof
-where
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E> + 'static,
-{
-    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
-        panic!("GPU backend only supports BabyBear base field");
-    }
-
-    let mut rounds = vec![];
-    rounds.push((&witness_data, {
-        evals
-            .iter_mut()
-            .zip(&points)
-            .filter_map(|(evals, point)| {
-                let witin_evals = evals.remove(0);
-                if !witin_evals.is_empty() {
-                    Some((point.clone(), witin_evals))
-                } else {
-                    None
-                }
-            })
-            .collect_vec()
-    }));
-    if let Some(fixed_data) = fixed_data.as_ref().map(|f| f.as_ref()) {
-        rounds.push((fixed_data, {
-            evals
-                .iter_mut()
-                .zip(points.iter().cloned())
-                .filter_map(|(evals, point)| {
-                    if !evals.is_empty() && !evals[0].is_empty() {
-                        Some((point.clone(), evals.remove(0)))
-                    } else {
-                        None
-                    }
-                })
-                .collect_vec()
-        }));
-    }
-
-    if matches!(&witness_data, GpuPcsData::Jagged(_)) {
-        return open_jagged_gpu::<E, PCS>(&prover.backend.pp, rounds, transcript);
-    }
-
-    let prover_param = &prover.backend.pp;
-    let pp_gl64: &mpcs::basefold::structure::BasefoldProverParams<BB31Ext, mpcs::BasefoldRSParams> =
-        unsafe { std::mem::transmute(prover_param) };
-    let rounds_gl64: Vec<_> = rounds
-        .iter()
-        .map(|(commitment, point_eval_pairs)| {
-            let commitment_gl64 = expect_basefold_pcs_data(commitment);
-            let point_eval_pairs_gl64: Vec<_> = point_eval_pairs
-                .iter()
-                .map(|(point, evals)| {
-                    let point_gl64: &Vec<BB31Ext> = unsafe { std::mem::transmute(point) };
-                    let evals_gl64: &Vec<BB31Ext> = unsafe { std::mem::transmute(evals) };
-                    (point_gl64.clone(), evals_gl64.clone())
-                })
-                .collect();
-            (commitment_gl64, point_eval_pairs_gl64)
-        })
-        .collect();
-
-    if std::any::TypeId::of::<E>() != std::any::TypeId::of::<BB31Ext>() {
-        panic!("GPU backend only supports BabyBear field extension");
-    }
-
-    let transcript_any = transcript as &mut dyn std::any::Any;
-    let basic_transcript = transcript_any
-        .downcast_mut::<BasicTranscript<BB31Ext>>()
-        .expect("Type should match");
-
-    let cuda_hal = get_cuda_hal().unwrap();
-    let gpu_proof_basefold = cuda_hal
-        .basefold
-        .batch_open_with_trace_materializer(
-            &cuda_hal,
-            pp_gl64,
-            rounds_gl64,
-            basic_transcript,
-            |round_idx, trace_idx| {
-                if round_idx != 0 {
-                    return Ok(None);
-                }
-                let Some((_, replay_plan)) = replayable_traces
-                    .iter()
-                    .find(|(replay_trace_idx, _)| *replay_trace_idx == trace_idx)
-                else {
-                    return Ok(None);
-                };
-                let witness_rmm = info_span!(
-                    "[ceno] replay_witness_materialize",
-                    phase = "pcs_opening",
-                    round_idx,
-                    trace_idx,
-                    kind = ?replay_plan.kind,
-                    rows = replay_plan.trace_height,
-                    num_witin = replay_plan.num_witin,
-                    steps = replay_plan.step_indices.len(),
-                )
-                .in_scope(|| replay_plan.replay_witness())
-                .map_err(|err| {
-                    ceno_gpu::HalError::InvalidInput(format!(
-                        "failed to replay trace {trace_idx} for PCS opening: {err:?}"
-                    ))
-                })?;
-                if witness_rmm.height() != replay_plan.trace_height {
-                    return Err(ceno_gpu::HalError::InvalidInput(format!(
-                        "replayed trace {trace_idx} height changed before PCS opening: expected {}, got {}",
-                        replay_plan.trace_height,
-                        witness_rmm.height(),
-                    )));
-                }
-                let witness_rmm_bb31: witness::RowMajorMatrix<BB31Base> =
-                    unsafe { std::mem::transmute(witness_rmm) };
-                Ok(Some(witness_rmm_bb31))
-            },
-        )
-        .unwrap();
-
-    let gpu_proof: PCS::Proof = unsafe { std::mem::transmute_copy(&gpu_proof_basefold) };
-    std::mem::forget(gpu_proof_basefold);
-    drop(rounds);
-    drop(witness_data);
-    gpu_proof
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
@@ -3739,59 +3615,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         task: &mut crate::scheme::scheduler::ChipTask<'_, GpuBackend<E, PCS>>,
         pcs_data: &<GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
     ) {
-        if let Some(replay_plan) = task.gpu_replay_plan.as_ref() {
-            let num_vars =
-                task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
-            if task.num_witin > 0 {
-                let cuda_hal = get_cuda_hal().unwrap();
-                let gpu_mem_tracker =
-                    init_gpu_mem_tracker(&cuda_hal, "replay_gpu_witness_from_raw");
-                let estimated_replay_bytes =
-                    estimate_replay_materialization_bytes_for_plan(replay_plan, num_vars);
-                tracing::info!(
-                    "[gpu] replaying witness from raw: circuit={}, estimated={:.2}MB",
-                    task.circuit_name,
-                    estimated_replay_bytes as f64 / (1024.0 * 1024.0),
-                );
-                task.input.witness = if let Some(trace_idx) = task.witness_trace_idx {
-                    check_gpu_mem_estimation_with_context(
-                        gpu_mem_tracker,
-                        0,
-                        Some(task.circuit_name.as_str()),
-                    );
-                    info_span!("[ceno] extract_witness_mles").in_scope(|| {
-                        extract_witness_mles_for_trace::<E, PCS>(
-                            pcs_data,
-                            trace_idx,
-                            task.num_witin,
-                            num_vars,
-                        )
-                    })
-                } else {
-                    let witness_rmm = replay_plan.replay_witness().expect("GPU raw replay failed");
-                    check_gpu_mem_estimation_with_context(
-                        gpu_mem_tracker,
-                        estimated_replay_bytes,
-                        Some(task.circuit_name.as_str()),
-                    );
-                    info_span!("[ceno] replay_gpu_witness_from_raw")
-                        .in_scope(|| extract_witness_mles_for_trace_rmm::<E>(witness_rmm))
-                };
-            }
-            if let Some(rmm) = task.structural_rmm.as_ref() {
-                task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
-                    .in_scope(|| {
-                        transport_structural_witness_to_gpu::<E>(
-                            rmm,
-                            task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize,
-                            task.input.log2_num_instances()
-                                + task.pk.get_cs().rotation_vars().unwrap_or(0),
-                        )
-                    });
-            }
-            return;
-        }
-
         let num_vars =
             task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
 

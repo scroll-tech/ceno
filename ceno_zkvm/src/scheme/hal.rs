@@ -53,7 +53,7 @@ pub type BatchedMainConstraintResult<E> = Result<
 
 /// Prepare a chip task's input for proving.
 /// CPU: no-op (input already fully populated during task building).
-/// GPU: deferred witness extraction + structural witness transport.
+/// GPU: witness extraction + structural witness transport.
 pub trait ChipInputPreparer<PB: ProverBackend> {
     fn prepare_chip_input(
         &self,

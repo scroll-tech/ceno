@@ -10,8 +10,6 @@
 //! This approach eliminates long-tail latency by prioritizing large tasks and
 //! maximizes GPU utilization through backfilling with smaller tasks.
 
-#[cfg(feature = "gpu")]
-use crate::structs::GpuReplayPlan;
 use crate::{
     error::ZKVMError,
     scheme::{
@@ -87,9 +85,6 @@ pub struct ChipTask<'a, PB: ProverBackend> {
     pub challenges: [PB::E; 2],
     /// Deferred witness extraction: trace index in pcs_data (None if num_witin == 0)
     pub witness_trace_idx: Option<usize>,
-    /// Replay witness directly from shard-resident raw GPU data when available.
-    #[cfg(feature = "gpu")]
-    pub gpu_replay_plan: Option<GpuReplayPlan<PB::E>>,
     /// Actual witness trace rows used for cache-none extraction estimates.
     #[cfg(feature = "gpu")]
     pub witness_trace_rows: Option<usize>,
@@ -171,12 +166,6 @@ impl ChipScheduler {
             );
         }
         self.execute_sequentially(tasks, transcript, execute_task)
-    }
-
-    /// Check if concurrent mode is enabled (GPU only).
-    #[cfg(feature = "gpu")]
-    pub(crate) fn is_concurrent_mode() -> bool {
-        get_chip_proving_mode() == ChipProvingMode::Concurrent
     }
 
     /// Execute tasks sequentially with automatic transcript forking and sampling.
