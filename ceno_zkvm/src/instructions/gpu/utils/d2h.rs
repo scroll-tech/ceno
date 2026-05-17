@@ -308,10 +308,8 @@ pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
     let produced_rows = gpu_result.num_rows;
     if produced_rows < num_rows {
         return Err(ZKVMError::InvalidWitness(
-            format!(
-                "GPU witness rows ({produced_rows}) smaller than logical rows ({num_rows})"
-            )
-            .into(),
+            format!("GPU witness rows ({produced_rows}) smaller than logical rows ({num_rows})")
+                .into(),
         ));
     }
 

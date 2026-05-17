@@ -165,8 +165,12 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     let main_witness_bytes = estimate_main_witness_bytes(composed_cs, main_witness_rows);
 
     // Part 3: ecc quark (temporary usage)
-    let n = num_var_with_rotation.saturating_sub(1);
-    let ecc_quark_temporary_bytes = estimate_ecc_quark_bytes_from_num_vars(n);
+    let ecc_quark_temporary_bytes = if input.has_ecc_ops {
+        let n = num_var_with_rotation.saturating_sub(1);
+        estimate_ecc_quark_bytes_from_num_vars(n)
+    } else {
+        0
+    };
 
     // Part 4: build/prove tower
     //

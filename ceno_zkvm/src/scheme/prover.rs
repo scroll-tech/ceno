@@ -99,8 +99,8 @@ fn prepare_gpu_chip_input<E, PCS>(
 
     if let Some(rmm) = task.structural_rmm.as_ref() {
         let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
-        task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
-            .in_scope(|| {
+        task.input.structural_witness =
+            info_span!("[ceno] transport_structural_witness").in_scope(|| {
                 crate::scheme::gpu::transport_structural_witness_to_gpu::<E>(
                     rmm,
                     num_structural_witin,
@@ -146,12 +146,7 @@ where
     let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
         info_span!("[ceno] prove_tower_relation").in_scope(|| {
             crate::scheme::gpu::prove_tower_relation_impl::<E, PCS>(
-                cs,
-                input,
-                &records,
-                challenges,
-                transcript,
-                &cuda_hal,
+                cs, input, &records, challenges, transcript, &cuda_hal,
             )
         })?;
     exit_span!(span);
@@ -160,18 +155,15 @@ where
     assert_eq!(rt_tower.len(), num_var_with_rotation);
 
     let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
-    let ecc_proof = info_span!("[ceno] prove_ec_sum_quark")
-        .in_scope(|| crate::scheme::gpu::prove_ec_sum_quark_impl::<E, PCS>(cs, input, transcript))?;
+    let ecc_proof = info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
+        crate::scheme::gpu::prove_ec_sum_quark_impl::<E, PCS>(cs, input, transcript)
+    })?;
     exit_span!(span);
 
     let span = entered_span!("prove_rotation", profiling_2 = true);
     let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
         crate::scheme::gpu::prove_rotation_impl::<E, PCS>(
-            cs,
-            input,
-            &rt_tower,
-            challenges,
-            transcript,
+            cs, input, &rt_tower, challenges, transcript,
         )
     })?;
     exit_span!(span);
