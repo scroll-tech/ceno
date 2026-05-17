@@ -1,5 +1,4 @@
 use ff_ext::ExtensionField;
-#[cfg(feature = "gpu")]
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
