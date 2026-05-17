@@ -42,6 +42,175 @@ type CreateTableProof<'a, PB> = (
     MainConstraintJob<'a, PB>,
 );
 
+#[cfg(feature = "gpu")]
+fn cast_gpu_chip_task<'a, E, PCS, PB>(
+    task: ChipTask<'a, PB>,
+) -> ChipTask<'a, gkr_iop::gpu::GpuBackend<E, PCS>>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+{
+    let task = std::mem::ManuallyDrop::new(task);
+    unsafe {
+        std::ptr::read(
+            (&*task as *const ChipTask<'a, PB>)
+                .cast::<ChipTask<'a, gkr_iop::gpu::GpuBackend<E, PCS>>>(),
+        )
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn cast_gpu_chip_result<'a, E, PCS, PB>(
+    result: ChipTaskResult<'a, gkr_iop::gpu::GpuBackend<E, PCS>>,
+) -> ChipTaskResult<'a, PB>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+{
+    let result = std::mem::ManuallyDrop::new(result);
+    unsafe {
+        std::ptr::read(
+            (&*result as *const ChipTaskResult<'a, gkr_iop::gpu::GpuBackend<E, PCS>>)
+                .cast::<ChipTaskResult<'a, PB>>(),
+        )
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn prepare_gpu_chip_input<E, PCS>(
+    task: &mut ChipTask<'_, gkr_iop::gpu::GpuBackend<E, PCS>>,
+    pcs_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData,
+) where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+{
+    let num_vars = task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
+
+    if let Some(trace_idx) = task.witness_trace_idx {
+        task.input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
+            crate::scheme::gpu::extract_witness_mles_for_trace::<E, PCS>(
+                pcs_data,
+                trace_idx,
+                task.num_witin,
+                num_vars,
+            )
+        });
+    }
+
+    if let Some(rmm) = task.structural_rmm.as_ref() {
+        let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
+        task.input.structural_witness = info_span!("[ceno] transport_structural_witness")
+            .in_scope(|| {
+                crate::scheme::gpu::transport_structural_witness_to_gpu::<E>(
+                    rmm,
+                    num_structural_witin,
+                    num_vars,
+                )
+            });
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn create_gpu_chip_proof<'a, E, PCS>(
+    task: &mut ChipTask<'a, gkr_iop::gpu::GpuBackend<E, PCS>>,
+    transcript: &mut impl Transcript<E>,
+) -> Result<CreateTableProof<'a, gkr_iop::gpu::GpuBackend<E, PCS>>, ZKVMError>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+{
+    let circuit_pk = task.pk;
+    let input = &task.input;
+    let challenges = &task.challenges;
+    let cs = circuit_pk.get_cs();
+    let log2_num_instances = input.log2_num_instances();
+    let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
+    let input_num_instances = input.num_instances;
+
+    let records = info_span!("[ceno] build_main_witness").in_scope(|| {
+        build_main_witness::<
+            E,
+            PCS,
+            gkr_iop::gpu::GpuBackend<E, PCS>,
+            gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>>,
+        >(
+            cs,
+            input,
+            challenges,
+            crate::scheme::utils::WitnessBuildStage::Tower,
+        )
+    });
+
+    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+    let span = entered_span!("prove_tower_relation", profiling_2 = true);
+    let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
+        info_span!("[ceno] prove_tower_relation").in_scope(|| {
+            crate::scheme::gpu::prove_tower_relation_impl::<E, PCS>(
+                cs,
+                input,
+                &records,
+                challenges,
+                transcript,
+                &cuda_hal,
+            )
+        })?;
+    exit_span!(span);
+    drop(records);
+
+    assert_eq!(rt_tower.len(), num_var_with_rotation);
+
+    let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
+    let ecc_proof = info_span!("[ceno] prove_ec_sum_quark")
+        .in_scope(|| crate::scheme::gpu::prove_ec_sum_quark_impl::<E, PCS>(cs, input, transcript))?;
+    exit_span!(span);
+
+    let span = entered_span!("prove_rotation", profiling_2 = true);
+    let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
+        crate::scheme::gpu::prove_rotation_impl::<E, PCS>(
+            cs,
+            input,
+            &rt_tower,
+            challenges,
+            transcript,
+        )
+    })?;
+    exit_span!(span);
+
+    let mut main_input = input.clone();
+    main_input.witness.clear();
+    main_input.structural_witness.clear();
+    let structural_rmm = task.structural_rmm.take();
+
+    Ok((
+        ZKVMChipProof {
+            r_out_evals,
+            w_out_evals,
+            lk_out_evals,
+            main_sumcheck_proofs: None,
+            gkr_iop_proof: None,
+            rotation_proof: rotation.clone().map(|r| r.proof),
+            tower_proof,
+            ecc_proof: ecc_proof.clone(),
+            num_instances: input_num_instances,
+        },
+        MainConstraintJob {
+            circuit_name: task.circuit_name.clone(),
+            circuit_idx: task.circuit_idx,
+            input: main_input,
+            witness_trace_idx: task.witness_trace_idx,
+            num_witin: task.num_witin,
+            structural_rmm,
+            rt_tower,
+            rotation,
+            ecc_proof,
+            challenges: *challenges,
+            cs,
+        },
+    ))
+}
+
 pub type ZkVMCpuProver<E, PCS> =
     ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
 
@@ -504,7 +673,55 @@ impl<
     ) -> Result<(Vec<ChipTaskResult<'data, PB>>, Vec<E>), ZKVMError> {
         let scheduler = ChipScheduler::new();
 
-        // Sequential path (GPU + CPU unified):
+        #[cfg(feature = "gpu")]
+        {
+            if std::any::TypeId::of::<PB>()
+                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+            {
+                let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                    unsafe { std::mem::transmute(witness_data) };
+
+                let exec_gpu_task = |task: ChipTask<'data, PB>, transcript: &mut T| {
+                    let mut task = cast_gpu_chip_task::<E, PCS, PB>(task);
+
+                    transcript.append_field_element(&E::BaseField::from_canonical_u64(
+                        task.circuit_idx as u64,
+                    ));
+
+                    prepare_gpu_chip_input::<E, PCS>(&mut task, gpu_witness_data);
+                    let (proof, main_constraint_job) =
+                        create_gpu_chip_proof::<E, PCS>(&mut task, transcript)?;
+                    let result = ChipTaskResult {
+                        task_id: task.task_id,
+                        circuit_idx: task.circuit_idx,
+                        proof,
+                        opening_evals: MainSumcheckEvals {
+                            wits_in_evals: vec![],
+                            fixed_in_evals: vec![],
+                        },
+                        input_opening_point: vec![],
+                        main_constraint_job: Some(main_constraint_job),
+                        has_witness_or_fixed: task.has_witness_or_fixed,
+                    };
+
+                    Ok(cast_gpu_chip_result::<E, PCS, PB>(result))
+                };
+
+                if ChipScheduler::is_concurrent_mode() {
+                    // SAFETY: pcs_data is only read during concurrent execution.
+                    use crate::scheme::utils::SyncRef;
+                    let gpu_wd = SyncRef(gpu_witness_data);
+                    return scheduler.execute(tasks, transcript, |task, transcript| {
+                        let _ = gpu_wd;
+                        exec_gpu_task(task, transcript)
+                    });
+                } else {
+                    return scheduler.execute_sequentially(tasks, transcript, exec_gpu_task);
+                }
+            }
+        }
+
+        // Sequential path (CPU and non-GPU fallback):
         // Uses execute_sequentially directly to avoid Send+Sync requirement on the closure.
         scheduler.execute_sequentially(tasks, transcript, |mut task, transcript| {
             // Append circuit_idx to per-task forked transcript (matching verifier)

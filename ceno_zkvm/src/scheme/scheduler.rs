@@ -168,6 +168,12 @@ impl ChipScheduler {
         self.execute_sequentially(tasks, transcript, execute_task)
     }
 
+    /// Check if concurrent mode is enabled (GPU only).
+    #[cfg(feature = "gpu")]
+    pub(crate) fn is_concurrent_mode() -> bool {
+        get_chip_proving_mode() == ChipProvingMode::Concurrent
+    }
+
     /// Execute tasks sequentially with automatic transcript forking and sampling.
     ///
     /// Each task gets a transcript cloned from `parent_transcript` with `task_id`
