@@ -27,16 +27,16 @@ version = "0.1.0"
 ceno_crypto_primitives = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_crypto_primitives", branch = "main" }
 ceno_syscall = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_syscall", branch = "main" }
 
-ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", branch = "feat/jagged_pcs" }
-mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", branch = "feat/jagged_pcs" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", branch = "feat/jagged_pcs" }
-p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", branch = "feat/jagged_pcs" }
-poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", branch = "feat/jagged_pcs" }
-sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", branch = "feat/jagged_pcs" }
-sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", branch = "feat/jagged_pcs" }
-transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", branch = "feat/jagged_pcs" }
-whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", branch = "feat/jagged_pcs" }
-witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", branch = "feat/jagged_pcs" }
+ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", branch = "feat/witgen_gpu" }
+mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", branch = "feat/witgen_gpu" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", branch = "feat/witgen_gpu" }
+p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", branch = "feat/witgen_gpu" }
+poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", branch = "feat/witgen_gpu" }
+sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", branch = "feat/witgen_gpu" }
+sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", branch = "feat/witgen_gpu" }
+transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", branch = "feat/witgen_gpu" }
+whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", branch = "feat/witgen_gpu" }
+witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", branch = "feat/witgen_gpu" }
 
 anyhow = { version = "1.0", default-features = false }
 bincode = "1"
@@ -88,7 +88,7 @@ uint = "0.8"
 
 revm-precompile = { version = "27.0.0", default-features = false }
 
-ceno_gpu = { git = "https://github.com/scroll-tech/ceno-gpu-mock.git", package = "cuda_hal", branch = "main", default-features = false, features = ["bb31"] }
+ceno_gpu = { git = "https://github.com/scroll-tech/ceno-gpu-mock.git", package = "cuda_hal", branch = "feat/witgen_gpu", default-features = false, features = ["bb31"] }
 cudarc = { version = "0.17.3", features = ["driver", "cuda-version-from-build-system"] }
 
 # ceno-recursion dependencies
