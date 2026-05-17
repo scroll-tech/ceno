@@ -1197,9 +1197,26 @@ fn jagged_batch_commit_from_host(
             reshape_log_height,
             group_width,
             |reshape_rmms| {
+                let specs = reshape_rmms
+                    .iter()
+                    .map(|rmm| ceno_gpu::common::poseidon2::DeferredRmmSpec {
+                        height: rmm.height(),
+                        persist_actual: false,
+                    })
+                    .collect_vec();
+                let mut reshape_rmms = reshape_rmms.into_iter().map(Some).collect_vec();
                 cuda_hal
                     .basefold
-                    .batch_commit_cache_none(cuda_hal.as_ref(), reshape_rmms)
+                    .batch_commit_cache_none_deferred(cuda_hal.as_ref(), specs, |trace_idx| {
+                        reshape_rmms
+                            .get_mut(trace_idx)
+                            .and_then(Option::take)
+                            .ok_or_else(|| {
+                                ceno_gpu::HalError::InvalidInput(format!(
+                                    "Jagged q' commit RMM group {trace_idx} materialized more than once"
+                                ))
+                            })
+                    })
             },
         )
         .expect("failed to commit Jagged q' with GPU q' construction");
@@ -1217,11 +1234,9 @@ fn jagged_batch_commit_from_host(
         } else {
             Vec::new()
         };
-        if matches!(get_gpu_cache_level(), CacheLevel::None) {
-            if let Some(rmms) = inner.rmms.as_mut() {
-                for rmm in rmms {
-                    rmm.clear_device_backing();
-                }
+        if let Some(rmms) = inner.rmms.as_mut() {
+            for rmm in rmms {
+                rmm.clear_device_backing();
             }
         }
         tracing::info!(
@@ -1415,11 +1430,9 @@ fn jagged_batch_commit_from_host(
         "[gpu-jagged-profile] host_q inner_commit elapsed_ms={:.3}",
         inner_commit_start.elapsed().as_secs_f64() * 1000.0
     );
-    if q_device.is_none() {
-        if let Some(rmms) = inner.rmms.as_mut() {
-            for rmm in rmms {
-                rmm.clear_device_backing();
-            }
+    if let Some(rmms) = inner.rmms.as_mut() {
+        for rmm in rmms {
+            rmm.clear_device_backing();
         }
     }
     tracing::info!(
