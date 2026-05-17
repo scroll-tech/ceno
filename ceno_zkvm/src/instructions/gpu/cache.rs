@@ -823,8 +823,3 @@ pub fn release_all_shard_gpu_caches() {
     invalidate_shard_steps_cache();
     invalidate_shard_meta_cache();
 }
-
-/// End a shard session and free all shard-scoped GPU caches.
-pub fn end_gpu_shard_session(_session: GpuShardSession) {
-    release_all_shard_gpu_caches();
-}

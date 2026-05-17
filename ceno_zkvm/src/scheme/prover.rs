@@ -140,11 +140,6 @@ impl<
         pi: PublicValues,
         mut transcript: impl ForkableTranscript<E> + 'static,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
-        #[cfg(feature = "gpu")]
-        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-            crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-        }
-
         // Pre-extract fixed_mles before entering the tracing scope to avoid lifetime issues with std::thread::scope
         let fixed_mles_preload = self
             .get_device_proving_key(shard_ctx)

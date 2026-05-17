@@ -1486,9 +1486,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 )
             }).unwrap();
 
-            // Keep shard_steps cache alive across witgen and prove for this shard.
-            // It is released at shard-end after create_proof.
-
             info_span!("assign_dummy_circuits").in_scope(|| {
                 system_config
                     .dummy_config
@@ -1654,6 +1651,13 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     )
             }).unwrap();
 
+            #[cfg(feature = "gpu")]
+            if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                info_span!("release_shard_gpu_caches").in_scope(|| {
+                    crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                });
+            }
+
             if let Some(shard_ram_witnesses) =
                 zkvm_witness.get_witness(&ShardRamCircuit::<E>::name())
             {
@@ -1679,9 +1683,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     }
                 });
             }
-
-            // Keep per-shard GPU caches alive for prove-time reuse in this shard.
-            // They are explicitly released at shard-end after create_proof.
 
             Some((zkvm_witness, shard_ctx, pi, witgen_mem_baseline))
         })
@@ -2195,10 +2196,6 @@ fn create_proofs_streaming<
                             start.elapsed()
                         );
                         #[cfg(feature = "gpu")]
-                        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                            crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                        }
-                        #[cfg(feature = "gpu")]
                         if let Some(baseline) = _witgen_mem_baseline {
                             assert_witgen_mem_released(shard_ctx.shard_id, baseline);
                         }
@@ -2262,10 +2259,6 @@ fn create_proofs_streaming<
                         shard_ctx.shard_id,
                         start.elapsed()
                     );
-                    #[cfg(feature = "gpu")]
-                    if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                        crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                    }
                     #[cfg(feature = "gpu")]
                     if let Some(baseline) = _witgen_mem_baseline {
                         assert_witgen_mem_released(shard_ctx.shard_id, baseline);

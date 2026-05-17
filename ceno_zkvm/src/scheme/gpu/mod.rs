@@ -1513,6 +1513,7 @@ where
     if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
         panic!("GPU backend only supports BabyBear base field");
     }
+    crate::instructions::gpu::cache::assert_caches_released_before_prove();
 
     let ordered_traces = traces.into_values().collect_vec();
     let max_poly_size_log2 = ordered_traces
