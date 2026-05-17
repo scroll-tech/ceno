@@ -25,8 +25,6 @@ use p3::field::FieldAlgebra;
 use std::sync::OnceLock;
 use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
-#[cfg(feature = "gpu")]
-static LARGE_GPU_TASK_BOOKING_MARGIN_MB: OnceLock<u64> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChipProvingMode {
@@ -41,21 +39,6 @@ pub fn get_chip_proving_mode() -> ChipProvingMode {
             _ => ChipProvingMode::Concurrent,
         }
     })
-}
-
-#[cfg(feature = "gpu")]
-pub fn large_gpu_task_booking_margin_bytes() -> u64 {
-    *LARGE_GPU_TASK_BOOKING_MARGIN_MB.get_or_init(|| {
-        // Large replay-heavy chips such as Keccak and ShardRam can transiently
-        // need materially more schedulable headroom under concurrent proving
-        // than their chip-local estimate suggests. Keep a conservative default
-        // booking margin so production runs stay stable on 4090-class cards,
-        // while still allowing operators to override it explicitly.
-        std::env::var("CENO_GPU_LARGE_TASK_BOOKING_MARGIN_MB")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(3072)
-    }) << 20
 }
 
 #[cfg(feature = "gpu")]

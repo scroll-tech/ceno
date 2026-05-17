@@ -7,8 +7,6 @@ use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 #[cfg(feature = "gpu")]
 use crate::scheme::gpu::{estimate_chip_proof_memory, is_babybear_jagged_pcs};
-#[cfg(feature = "gpu")]
-use crate::scheme::scheduler::get_chip_proving_mode;
 use crate::scheme::{
     hal::{MainConstraintJob, MainConstraintResult, MainSumcheckEvals},
     scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
@@ -398,18 +396,15 @@ impl<
                         && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
                             || is_babybear_jagged_pcs::<E, PCS>());
                 #[cfg(feature = "gpu")]
-                let trace_rows_for_estimate =
-                    if !crate::instructions::gpu::config::is_gpu_witgen_enabled()
-                        && witness_rmm.num_instances() > 0
-                    {
-                        Some(if is_babybear_jagged_pcs::<E, PCS>() {
-                            witness_rmm.occupied_physical_rows()
-                        } else {
-                            witness_rmm.height()
-                        })
+                let trace_rows_for_estimate = if witness_rmm.num_instances() > 0 {
+                    Some(if is_babybear_jagged_pcs::<E, PCS>() {
+                        witness_rmm.occupied_physical_rows()
                     } else {
-                        None
-                    };
+                        witness_rmm.height()
+                    })
+                } else {
+                    None
+                };
 
                 #[cfg(feature = "gpu")]
                 if use_gpu_witness_commit {
@@ -1009,23 +1004,7 @@ impl<
             let estimated_memory = 0u64; // CPU path doesn't need memory tracking
 
             #[cfg(feature = "gpu")]
-            let booked_memory = {
-                let margin = if crate::instructions::gpu::config::is_gpu_witgen_enabled()
-                    && matches!(circuit_name.as_str(), "Ecall_Keccak" | "ShardRamCircuit")
-                    && matches!(
-                        get_chip_proving_mode(),
-                        crate::scheme::scheduler::ChipProvingMode::Concurrent
-                    ) {
-                    // Concurrent scheduling needs extra exclusion space for the
-                    // largest replay-heavy chips. Their standalone estimate is
-                    // good enough for proving/memcheck, but booking without an
-                    // added margin can admit unsafe overlap and trigger OOMs.
-                    crate::scheme::scheduler::large_gpu_task_booking_margin_bytes()
-                } else {
-                    0
-                };
-                estimated_memory.saturating_add(margin)
-            };
+            let booked_memory = estimated_memory;
             #[cfg(not(feature = "gpu"))]
             let booked_memory = estimated_memory;
 
