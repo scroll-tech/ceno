@@ -1651,13 +1651,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     )
             }).unwrap();
 
-            #[cfg(feature = "gpu")]
-            if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                info_span!("release_shard_gpu_caches").in_scope(|| {
-                    crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                });
-            }
-
             if let Some(shard_ram_witnesses) =
                 zkvm_witness.get_witness(&ShardRamCircuit::<E>::name())
             {
