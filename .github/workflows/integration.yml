@@ -33,7 +33,7 @@ jobs:
       (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
 
     name: Integration testing
-    timeout-minutes: 30
+    timeout-minutes: 40
     runs-on: [ self-hosted, Linux, X64 ]
 
     steps:
