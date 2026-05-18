@@ -104,6 +104,7 @@ pub fn public_io_words_to_digest_words(words: &[u32]) -> [u32; 8] {
 )]
 pub enum PcsKind {
     #[default]
+    Jagged,
     Basefold,
     Whir,
 }

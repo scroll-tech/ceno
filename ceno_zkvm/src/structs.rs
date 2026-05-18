@@ -532,8 +532,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         #[cfg(feature = "gpu")]
         if cs.zkvm_v1_css.num_witin > 0
             && crate::instructions::gpu::config::is_gpu_witgen_enabled()
-            && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit(
-            )
             && (input.witness_rmms[0].has_device_backing()
                 || (num_instances[0] > 0
                     && input.witness_rmms[0].num_instances() == 0
@@ -551,12 +549,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                 shard_steps,
                 indices,
             );
-            assert_eq!(
-                input.witness_rmms[0].num_instances(),
-                0,
-                "{}: cache-none GPU replay path must not keep an eager witness RMM after initial assign",
-                OC::name()
-            );
+            if !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit(
+            ) {
+                assert_eq!(
+                    input.witness_rmms[0].num_instances(),
+                    0,
+                    "{}: cache-none GPU replay path must not keep an eager witness RMM after initial assign",
+                    OC::name()
+                );
+            }
         }
         assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
         assert!(

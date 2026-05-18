@@ -10,7 +10,7 @@ use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 #[cfg(feature = "gpu")]
 use crate::instructions::gpu::cache::current_replay_cache_stats;
 #[cfg(feature = "gpu")]
-use crate::scheme::gpu::estimate_chip_proof_memory;
+use crate::scheme::gpu::{estimate_chip_proof_memory, is_babybear_jagged_pcs};
 #[cfg(feature = "gpu")]
 use crate::scheme::scheduler::get_chip_proving_mode;
 use crate::scheme::{
@@ -238,35 +238,41 @@ impl<
                 let [witness_rmm, structural_witness_rmm] = witness_rmms;
 
                 #[cfg(feature = "gpu")]
-                let use_deferred_gpu_commit = crate::instructions::gpu::config::is_gpu_witgen_enabled()
-                    && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit();
+                let use_deferred_gpu_commit =
+                    crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                        && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                            || is_babybear_jagged_pcs::<E, PCS>());
                 #[cfg(feature = "gpu")]
                 let trace_rows_for_estimate =
                     if !crate::instructions::gpu::config::is_gpu_witgen_enabled()
                         && witness_rmm.num_instances() > 0
                     {
-                        Some(witness_rmm.height())
+                        Some(if is_babybear_jagged_pcs::<E, PCS>() {
+                            witness_rmm.occupied_physical_rows()
+                        } else {
+                            witness_rmm.height()
+                        })
                     } else {
                         None
                     };
 
-	                #[cfg(feature = "gpu")]
-	                if use_deferred_gpu_commit {
-	                    if let Some(plan) = gpu_replay_plan.clone().filter(|plan| plan.num_witin > 0) {
-	                        deferred_gpu_traces
-	                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Replay(plan));
-	                    } else if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
-	                        deferred_gpu_traces
-	                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Eager(witness_rmm));
-	                    }
-	                } else if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
-	                    wits_rmms.insert(i, witness_rmm);
-	                }
+                #[cfg(feature = "gpu")]
+                if use_deferred_gpu_commit {
+                    if let Some(plan) = gpu_replay_plan.clone().filter(|plan| plan.num_witin > 0) {
+                        deferred_gpu_traces
+                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Replay(plan));
+                    } else if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
+                        deferred_gpu_traces
+                            .insert(i, crate::scheme::gpu::DeferredGpuTrace::Eager(witness_rmm));
+                    }
+                } else if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
+                    wits_rmms.insert(i, witness_rmm);
+                }
 
-	                #[cfg(not(feature = "gpu"))]
-	                if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
-	                    wits_rmms.insert(i, witness_rmm);
-	                }
+                #[cfg(not(feature = "gpu"))]
+                if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
+                    wits_rmms.insert(i, witness_rmm);
+                }
                 structural_rmms.push(structural_witness_rmm);
                 #[cfg(feature = "gpu")]
                 witness_trace_rows.push(trace_rows_for_estimate);
@@ -292,7 +298,8 @@ impl<
                     .map(|i| {
                         #[cfg(feature = "gpu")]
                         let has_trace = if crate::instructions::gpu::config::is_gpu_witgen_enabled()
-                            && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                            && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                                || is_babybear_jagged_pcs::<E, PCS>())
                         {
                             deferred_gpu_traces.contains_key(&i)
                         } else {
@@ -316,14 +323,16 @@ impl<
                 == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>();
             #[cfg(feature = "gpu")]
             let needs_replay_restore = crate::instructions::gpu::config::is_gpu_witgen_enabled()
-                && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                    || is_babybear_jagged_pcs::<E, PCS>())
                 && using_gpu_backend;
             #[cfg(not(feature = "gpu"))]
             let _needs_replay_restore = false;
 
             #[cfg(feature = "gpu")]
             let use_deferred_gpu_commit = crate::instructions::gpu::config::is_gpu_witgen_enabled()
-                && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                    || is_babybear_jagged_pcs::<E, PCS>())
                 && using_gpu_backend;
             #[cfg(not(feature = "gpu"))]
             let _use_deferred_gpu_commit = false;
