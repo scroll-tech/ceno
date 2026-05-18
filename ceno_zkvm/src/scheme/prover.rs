@@ -1,4 +1,6 @@
 use ff_ext::ExtensionField;
+#[cfg(feature = "gpu")]
+use gkr_iop::error::BackendError;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
@@ -675,6 +677,15 @@ impl<
                     unsafe { std::mem::transmute(witness_data) };
 
                 let exec_gpu_task = |task: ChipTask<'data, PB>, transcript: &mut T| {
+                    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+                    let stream = cuda_hal.inner.get_pool_stream().map_err(|err| {
+                        ZKVMError::BackendError(BackendError::CircuitError(
+                            format!("failed to acquire GPU chip proof stream: {err:?}")
+                                .into_boxed_str(),
+                        ))
+                    })?;
+                    let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(stream.clone());
+
                     let mut task = cast_gpu_chip_task::<E, PCS, PB>(task);
 
                     transcript.append_field_element(&E::BaseField::from_canonical_u64(
@@ -684,6 +695,20 @@ impl<
                     prepare_gpu_chip_input::<E, PCS>(&mut task, gpu_witness_data);
                     let (proof, main_constraint_job) =
                         create_gpu_chip_proof::<E, PCS>(&mut task, transcript)?;
+                    if ChipScheduler::is_concurrent_mode() {
+                        cuda_hal
+                            .inner
+                            .synchronize_stream(stream.stream())
+                            .map_err(|err| {
+                                ZKVMError::BackendError(BackendError::CircuitError(
+                                    format!(
+                                        "failed to synchronize GPU chip proof stream for {}: {err:?}",
+                                        task.circuit_name
+                                    )
+                                    .into_boxed_str(),
+                                ))
+                            })?;
+                    }
                     let result = ChipTaskResult {
                         task_id: task.task_id,
                         circuit_idx: task.circuit_idx,
