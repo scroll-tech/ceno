@@ -45,7 +45,6 @@ pub fn init_gpu_mem_tracker<'a>(
 
 const ESTIMATION_TOLERANCE_BYTES: usize = 2 * 1024 * 1024; // max under-estimation error: 2 MB
 const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved headroom / allowed over-estimate margin: 10 MB
-const SCHEDULER_ESTIMATION_WARNING_MARGIN_BYTES: usize = 512 * 1024 * 1024;
 const SHARD_RAM_TOWER_PROVE_TOLERANCE_BYTES: usize = 16 * 1024 * 1024;
 
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
@@ -96,47 +95,13 @@ pub fn check_gpu_scheduler_mem_estimation_with_context(
     estimated_bytes: usize,
     context: Option<&str>,
 ) {
-    // Scheduler estimates are admission-control estimates, not exact stage-local allocation
-    // estimates. They intentionally include safety margins and conservative lifetime overlap, so
-    // large over-estimates should be surfaced as warnings rather than failing the proof. Under-
-    // estimates remain hard failures because they can admit unsafe concurrent work.
-    if let Some(mem_tracker) = mem_tracker {
-        const ONE_MB: usize = 1024 * 1024;
-        let label = mem_tracker.name();
-        let label = context
-            .filter(|context| !context.is_empty())
-            .map(|context| format!("{label}[{context}]"))
-            .unwrap_or_else(|| label.to_string());
-        let mem_stats = mem_tracker.finish();
-        let actual_bytes = mem_stats.mem_occupancy as usize;
-        let diff = estimated_bytes as isize - actual_bytes as isize;
-        let to_mb = |b: usize| b as f64 / ONE_MB as f64;
-        let diff_mb = diff as f64 / ONE_MB as f64;
-        tracing::info!(
-            "[memcheck] {label}: scheduler_estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB",
-            to_mb(estimated_bytes),
-            to_mb(actual_bytes),
-            diff_mb
-        );
-        if diff < 0 {
-            assert!(
-                (-diff) as usize <= ESTIMATION_TOLERANCE_BYTES,
-                "[memcheck] {label}: scheduler under-estimate! estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, tolerance={:.2}MB",
-                to_mb(estimated_bytes),
-                to_mb(actual_bytes),
-                diff_mb,
-                to_mb(ESTIMATION_TOLERANCE_BYTES),
-            );
-        } else if diff as usize > SCHEDULER_ESTIMATION_WARNING_MARGIN_BYTES {
-            tracing::warn!(
-                "[memcheck] {label}: scheduler over-estimate warning: estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB, warning_margin={:.2}MB",
-                to_mb(estimated_bytes),
-                to_mb(actual_bytes),
-                diff_mb,
-                to_mb(SCHEDULER_ESTIMATION_WARNING_MARGIN_BYTES),
-            );
-        }
-    }
+    check_gpu_mem_estimation_with_margins(
+        mem_tracker,
+        estimated_bytes,
+        context,
+        ESTIMATION_TOLERANCE_BYTES,
+        ESTIMATION_SAFETY_MARGIN_BYTES,
+    );
 }
 
 fn check_gpu_mem_estimation_with_margins(
@@ -159,7 +124,7 @@ fn check_gpu_mem_estimation_with_margins(
         let diff = estimated_bytes as isize - actual_bytes as isize;
         let to_mb = |b: usize| b as f64 / ONE_MB as f64;
         let diff_mb = diff as f64 / ONE_MB as f64;
-        tracing::info!(
+        tracing::debug!(
             "[memcheck] {label}: estimated={:.2}MB, actual={:.2}MB, diff={:.2}MB",
             to_mb(estimated_bytes),
             to_mb(actual_bytes),
@@ -249,8 +214,8 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     let tower_prove_stage_bytes =
         tower_input_backing_bytes + tower_input_non_borrowed_bytes + tower_prove_local_bytes;
 
-    // Part 5: main constraints (temporary usage)
-    let main_constraints_temporary_bytes = estimate_main_constraints_bytes(composed_cs, input);
+    // Main constraints are proved in the shard-level batched stage, not in the
+    // chip-local scheduler reservation.
 
     let replay_stage_split =
         witness_replayable && matches!(circuit_name, "Ecall_Keccak" | "ShardRamCircuit");
@@ -270,12 +235,10 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         // been cleared, but the built TowerInput buffers remain live and
         // overlap with the fresh create_proof allocations.
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
-        let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
         let replay_stage_bytes = structural_resident_bytes + replay_materialization_bytes;
         let stage_peak = tower_build_stage_bytes
             .max(tower_prove_stage_bytes)
             .max(ecc_stage_bytes)
-            .max(main_stage_bytes)
             .max(replay_stage_bytes);
         (
             0usize,
@@ -292,8 +255,7 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             .trace_temporary_bytes
             .max(tower_build_stage_bytes)
             .max(tower_prove_stage_bytes)
-            .max(ecc_quark_temporary_bytes)
-            .max(main_constraints_temporary_bytes);
+            .max(ecc_quark_temporary_bytes);
         let resident = trace_est.trace_resident_bytes;
         (
             resident,
@@ -307,10 +269,9 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         let tower_build_stage_bytes =
             trace_est.trace_resident_bytes + main_witness_bytes + tower_build_bytes;
         let ecc_stage_bytes = trace_est.trace_resident_bytes + ecc_quark_temporary_bytes;
-        let main_stage_bytes = trace_est.trace_resident_bytes + main_constraints_temporary_bytes;
         let replay_stage_bytes = structural_resident_bytes + replay_materialization_bytes;
-        tracing::info!(
-            "[mem estimate][{}] replay_split: trace={:.2}MB, main_witness={:.2}MB, replay={:.2}MB, tower_build_stage={:.2}MB, prove_tower_stage={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_stage={:.2}MB, prove_main_stage={:.2}MB",
+        tracing::debug!(
+            "[mem estimate][{}] replay_split: trace={:.2}MB, main_witness={:.2}MB, replay={:.2}MB, tower_build_stage={:.2}MB, prove_tower_stage={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_stage={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_resident_bytes),
             to_mb(main_witness_bytes),
@@ -320,9 +281,8 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             to_mb(tower_input_backing_bytes),
             to_mb(borrowed_tower_input_bytes),
             to_mb(ecc_stage_bytes),
-            to_mb(main_stage_bytes),
         );
-        tracing::info!(
+        tracing::debug!(
             "[mem estimate][{}] total_usage={:.2}MB (replay_split_peak={:.2}MB + safety={:.2}MB)",
             circuit_name,
             to_mb(total_usage_bytes),
@@ -332,14 +292,14 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     } else {
         let tower_build_stage_bytes = main_witness_bytes + tower_build_bytes;
         // Resident memory (always occupied during chip proof)
-        tracing::info!(
+        tracing::debug!(
             "[mem estimate][{}] resident: trace={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_resident_bytes),
         );
         // Stage-scoped memory beyond the always-live extracted trace.
-        tracing::info!(
-            "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_backing={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_quark={:.2}MB, prove_main={:.2}MB",
+        tracing::debug!(
+            "[mem estimate][{}] temporary: extract_trace={:.2}MB, tower_build_with_main={:.2}MB, tower_prove_with_backing={:.2}MB, tower_backing={:.2}MB, borrowed_tower_input={:.2}MB, ecc_quark={:.2}MB",
             circuit_name,
             to_mb(trace_est.trace_temporary_bytes),
             to_mb(tower_build_stage_bytes),
@@ -347,10 +307,9 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
             to_mb(tower_input_backing_bytes),
             to_mb(borrowed_tower_input_bytes),
             to_mb(ecc_quark_temporary_bytes),
-            to_mb(main_constraints_temporary_bytes),
         );
         // Total peak = resident + max(stage temporaries)
-        tracing::info!(
+        tracing::debug!(
             "[mem estimate][{}] total_usage={:.2}MB (resident={:.2}MB + temporary={:.2}MB)",
             circuit_name,
             to_mb(total_usage_bytes),
@@ -695,12 +654,35 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         elem_size,
         has_logup_numerator,
     );
+    if get_mem_tracking_mode() {
+        let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+        tracing::debug!(
+            "[mem estimate][tower_components] prod_towers={}, logup_towers={}, num_vars={}, occupied_rows={}, build_total={:.2}MB, build_prod={:.2}MB, build_logup={:.2}MB, build_aux={:.2}MB, prove_total={:.2}MB, prove_local_total={:.2}MB, prove_prod_live={:.2}MB, prove_logup_live={:.2}MB, prove_borrowed={:.2}MB, prove_eq={:.2}MB, prove_sumcheck={:.2}MB",
+            num_prod_towers,
+            num_logup_towers,
+            num_vars,
+            occupied_rows,
+            to_mb(build_bytes),
+            to_mb(build_est.prod_tower_buffer_bytes),
+            to_mb(build_est.logup_tower_buffer_bytes),
+            to_mb(build_est.aux_buffer_bytes),
+            to_mb(prove_est.total_bytes),
+            to_mb(prove_est.local_total_bytes),
+            to_mb(prove_est.prod_tower_buffer_bytes),
+            to_mb(prove_est.logup_tower_buffer_bytes),
+            to_mb(prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes),
+            to_mb(prove_est.eq_mle_buffer_bytes),
+            to_mb(prove_est.sumcheck_estimate.total_bytes),
+        );
+    }
 
     let tower_input_live_bytes =
         prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
     let borrowed_input_bytes =
         prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes;
-    let prove_local_bytes = prove_est.total_bytes.saturating_sub(tower_input_live_bytes);
+    let prove_local_bytes = prove_est
+        .local_total_bytes
+        .saturating_sub(tower_input_live_bytes.saturating_sub(borrowed_input_bytes));
 
     (
         build_bytes,
@@ -725,9 +707,23 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
 ) -> usize {
-    let (build_bytes, prove_local_bytes, tower_input_live_bytes, _) =
+    let (build_bytes, prove_local_bytes, tower_input_live_bytes, borrowed_input_bytes) =
         estimate_tower_stage_components(composed_cs, input, None);
-    build_bytes.max(tower_input_live_bytes + prove_local_bytes)
+    let prove_bytes = tower_input_live_bytes
+        .saturating_sub(borrowed_input_bytes)
+        .saturating_add(prove_local_bytes);
+    if get_mem_tracking_mode() {
+        let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
+        tracing::debug!(
+            "[mem estimate][tower_local] build={:.2}MB, prove={:.2}MB, tower_live={:.2}MB, borrowed={:.2}MB, prove_local={:.2}MB",
+            to_mb(build_bytes),
+            to_mb(prove_bytes),
+            to_mb(tower_input_live_bytes),
+            to_mb(borrowed_input_bytes),
+            to_mb(prove_local_bytes),
+        );
+    }
+    build_bytes.max(prove_bytes)
 }
 
 /// Estimate GPU memory for trace extraction (get_trace).

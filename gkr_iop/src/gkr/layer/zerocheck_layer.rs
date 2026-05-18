@@ -660,7 +660,7 @@ fn log_common_term_plan_stats<E: ExtensionField>(
     let naive_mul_count: usize = term_factor_counts.iter().sum();
     let coverage_percentage = (shared_terms as f64 / total_terms.max(1) as f64) * 100.0;
     let factored_percentage = (factored_terms as f64 / total_terms.max(1) as f64) * 100.0;
-    tracing::info!(
+    tracing::debug!(
         target: "gkr::layer",
         "[CommonFactoredTermPlan] gkr::layer {} groups={} shared_terms={}/{} ({coverage_percentage:.2}%) factored_terms={}/{} ({factored_percentage:.2}%) common_wit_range=[{}, {}] naive_mul={} factored_mul={}",
         layer_name,

@@ -12,7 +12,7 @@ use gkr_iop::{
 };
 use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
-use p3::{field::FieldAlgebra, matrix::Matrix};
+use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,

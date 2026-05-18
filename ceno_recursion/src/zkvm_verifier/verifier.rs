@@ -7,8 +7,8 @@ use crate::{
         PolyEvaluator, UniPolyExtrapolator, arr_product, assert_ext_arr_eq,
         build_eq_x_r_vec_sequential, challenger_hint_observe, challenger_multi_observe, concat,
         dot_product as ext_dot_product, eq_eval, eq_eval_less_or_equal_than,
-        eval_ceno_expr_with_instance, eval_wellform_address_vec, exts_to_felts, gen_alpha_pows,
-        mask_arr, reverse,
+        eval_ceno_expr_with_instance, eval_stacked_constant, eval_stacked_wellform_address_vec,
+        eval_wellform_address_vec, exts_to_felts, gen_alpha_pows, mask_arr, reverse,
     },
     basefold_verifier::{
         basefold::{BasefoldCommitmentVariable, RoundOpeningVariable, RoundVariable},
@@ -18,10 +18,12 @@ use crate::{
         verifier::batch_verify,
     },
     tower_verifier::{
-        binding::{PointAndEvalVariable, PointVariable},
+        binding::{IOPProverMessageVecVariable, PointAndEvalVariable, PointVariable},
         program::{iop_verifier_state_verify, verify_tower_proof},
     },
-    transcript::transcript_observe_label,
+    transcript::{
+        transcript_label_as_array, transcript_observe_label, transcript_observe_label_felts,
+    },
     zkvm_verifier::binding::{
         EccQuarkProofVariable, GKRProofVariable, LayerProofVariable, SelectorContextVariable,
         SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable,
@@ -55,6 +57,17 @@ type Pcs = Basefold<E, BasefoldRSParams>;
 
 const NUM_FANIN: usize = 2;
 const SEPTIC_EXTENSION_DEGREE: usize = 7;
+
+#[derive(DslVariable, Clone)]
+pub struct PendingChipMainVariable<C: Config> {
+    pub num_var_with_rotation: Usize<C::N>,
+    pub out_evals: Array<C, PointAndEvalVariable<C>>,
+    pub pi_evals: Array<C, Ext<C::F, C::EF>>,
+    pub selector_ctxs: Array<C, SelectorContextVariable<C>>,
+    pub shard_ec_sum: SepticPointVariable<C>,
+    pub prod_out_evals: Array<C, Ext<C::F, C::EF>>,
+    pub logup_out_evals: Array<C, Ext<C::F, C::EF>>,
+}
 
 pub fn transcript_group_observe_label<C: Config>(
     builder: &mut Builder<C>,
@@ -249,6 +262,21 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     // collect fork sampling result
     let forked_samples: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(proofs_len.get_var());
     let forked_sample_index: Usize<C::N> = builder.eval(C::N::ZERO);
+    let max_out_evals = max_first_layer_out_evals(vk);
+    let max_selector_ctxs = max_first_layer_selector_ctxs(vk);
+    let max_pi_evals = max_pi_evals(vk);
+    let pending_num_vars: Array<C, Usize<C::N>> = builder.dyn_array(proofs_len.clone());
+    let pending_out_evals_len: Usize<C::N> =
+        builder.eval(proofs_len.clone() * Usize::from(max_out_evals));
+    let pending_out_evals: Array<C, PointAndEvalVariable<C>> =
+        builder.dyn_array(pending_out_evals_len);
+    let pending_selector_ctxs_len: Usize<C::N> =
+        builder.eval(proofs_len.clone() * Usize::from(max_selector_ctxs));
+    let pending_selector_ctxs: Array<C, SelectorContextVariable<C>> =
+        builder.dyn_array(pending_selector_ctxs_len);
+    let pending_pi_evals_len: Usize<C::N> =
+        builder.eval(proofs_len.clone() * Usize::from(max_pi_evals));
+    let pending_pi_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(pending_pi_evals_len);
 
     for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
         let circuit_vk = &vk.circuit_vks[circuit_name];
@@ -306,12 +334,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
 
                 builder.cycle_tracker_start("Verify chip proof");
-                let (
-                    input_opening_point,
-                    chip_shard_ec_sum,
-                    chip_prod_out_evals,
-                    chip_logup_out_evals,
-                ) = verify_chip_proof(
+                let pending_chip_main = verify_chip_proof_pre_main(
                     circuit_name,
                     builder,
                     &mut chip_challenger,
@@ -324,6 +347,42 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 );
                 builder.cycle_tracker_end("Verify chip proof");
 
+                builder.set(
+                    &pending_num_vars,
+                    forked_sample_index.get_var(),
+                    pending_chip_main.num_var_with_rotation.clone(),
+                );
+                let out_offset: Usize<C::N> =
+                    builder.eval(forked_sample_index.clone() * Usize::from(max_out_evals));
+                builder
+                    .range(0, pending_chip_main.out_evals.len())
+                    .for_each(|idx_vec, builder| {
+                        let idx = idx_vec[0];
+                        let dst: Usize<C::N> = builder.eval(out_offset.clone() + idx);
+                        let value = builder.get(&pending_chip_main.out_evals, idx);
+                        builder.set(&pending_out_evals, dst, value);
+                    });
+                let selector_offset: Usize<C::N> =
+                    builder.eval(forked_sample_index.clone() * Usize::from(max_selector_ctxs));
+                builder
+                    .range(0, pending_chip_main.selector_ctxs.len())
+                    .for_each(|idx_vec, builder| {
+                        let idx = idx_vec[0];
+                        let dst: Usize<C::N> = builder.eval(selector_offset.clone() + idx);
+                        let value = builder.get(&pending_chip_main.selector_ctxs, idx);
+                        builder.set(&pending_selector_ctxs, dst, value);
+                    });
+                let pi_offset: Usize<C::N> =
+                    builder.eval(forked_sample_index.clone() * Usize::from(max_pi_evals));
+                builder
+                    .range(0, pending_chip_main.pi_evals.len())
+                    .for_each(|idx_vec, builder| {
+                        let idx = idx_vec[0];
+                        let dst: Usize<C::N> = builder.eval(pi_offset.clone() + idx);
+                        let value = builder.get(&pending_chip_main.pi_evals, idx);
+                        builder.set(&pending_pi_evals, dst, value);
+                    });
+
                 let chip_logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
                 builder
                     .range(0, chip_proof.lk_out_evals_len.clone())
@@ -333,7 +392,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                         let end: Usize<C::N> =
                             builder.eval(start.clone() + C::N::from_canonical_usize(4));
 
-                        let evals = chip_logup_out_evals.slice(builder, start, end);
+                        let evals = pending_chip_main.logup_out_evals.slice(builder, start, end);
                         let p1 = builder.get(&evals, 0);
                         let p2 = builder.get(&evals, 1);
                         let q1 = builder.get(&evals, 2);
@@ -345,60 +404,32 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
 
                 builder.assign(&logup_sum, logup_sum + chip_logup_sum);
 
-                let point_clone: Array<C, Ext<C::F, C::EF>> =
-                    builder.eval(input_opening_point.clone());
-                let (wits_in_evals, fixed_in_evals) = split_input_opening_evals(
-                    builder,
-                    &chip_proof,
-                    circuit_vk.get_cs().num_witin(),
-                    circuit_vk.get_cs().num_fixed(),
-                );
-
-                if circuit_vk.get_cs().num_witin() > 0 {
-                    let witin_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
-                        num_var: input_opening_point.len().get_var(),
-                        point_and_evals: PointAndEvalsVariable {
-                            point: PointVariable { fs: point_clone },
-                            evals: wits_in_evals,
-                        },
-                    });
-                    builder.set_value(&witin_openings, num_witin_openings.get_var(), witin_round);
-                    builder.inc(&num_witin_openings);
-                }
-                if circuit_vk.get_cs().num_fixed() > 0 {
-                    let fixed_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
-                        num_var: input_opening_point.len().get_var(),
-                        point_and_evals: PointAndEvalsVariable {
-                            point: PointVariable {
-                                fs: input_opening_point,
-                            },
-                            evals: fixed_in_evals,
-                        },
-                    });
-
-                    builder.set_value(&fixed_openings, num_fixed_openings.get_var(), fixed_round);
-                    builder.inc(&num_fixed_openings);
-                }
-
                 let r_out_evals_end: Usize<C::N> =
                     builder.eval(chip_proof.r_out_evals_len * Usize::from(2));
                 builder
                     .range(0, r_out_evals_end.clone())
                     .for_each(|idx_vec, builder| {
-                        let e = builder.get(&chip_prod_out_evals, idx_vec[0]);
+                        let e = builder.get(&pending_chip_main.prod_out_evals, idx_vec[0]);
                         builder.assign(&prod_r, prod_r * e);
                     });
                 builder
-                    .range(r_out_evals_end, chip_prod_out_evals.len())
+                    .range(r_out_evals_end, pending_chip_main.prod_out_evals.len())
                     .for_each(|idx_vec, builder| {
-                        let e = builder.get(&chip_prod_out_evals, idx_vec[0]);
+                        let e = builder.get(&pending_chip_main.prod_out_evals, idx_vec[0]);
                         builder.assign(&prod_w, prod_w * e);
                     });
 
                 builder
-                    .if_ne(chip_shard_ec_sum.is_infinity.clone(), Usize::from(1))
+                    .if_ne(
+                        pending_chip_main.shard_ec_sum.is_infinity.clone(),
+                        Usize::from(1),
+                    )
                     .then(|builder| {
-                        add_septic_points_in_place(builder, &shard_ec_sum, &chip_shard_ec_sum);
+                        add_septic_points_in_place(
+                            builder,
+                            &shard_ec_sum,
+                            &pending_chip_main.shard_ec_sum,
+                        );
                     });
 
                 let chip_sample = chip_challenger.sample_ext(builder);
@@ -408,10 +439,6 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
             builder.inc(&num_chips_verified);
         });
     }
-
-    // truncate the witin and fixed opening arrays
-    witin_openings.truncate(builder, num_witin_openings);
-    fixed_openings.truncate(builder, num_fixed_openings);
 
     // all proofs must be verified without missing
     builder.assert_eq::<Usize<_>>(num_chips_verified, chip_indices.len());
@@ -429,6 +456,32 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
         let sample_felts = builder.ext2felt(sample);
         challenger.observe_slice(builder, sample_felts);
     });
+
+    verify_batched_main_constraints(
+        builder,
+        &mut challenger,
+        &zkvm_proof_input,
+        vk,
+        &challenges,
+        proofs_len.clone(),
+        &chip_indices,
+        &pending_num_vars,
+        &pending_out_evals,
+        &pending_selector_ctxs,
+        &pending_pi_evals,
+        max_out_evals,
+        max_selector_ctxs,
+        max_pi_evals,
+        &witin_openings,
+        &fixed_openings,
+        &num_witin_openings,
+        &num_fixed_openings,
+        &unipoly_extrapolator,
+    );
+
+    // truncate the witin and fixed opening arrays
+    witin_openings.truncate(builder, num_witin_openings);
+    fixed_openings.truncate(builder, num_fixed_openings);
 
     let rounds: Array<C, RoundVariable<C>> = if num_fixed_opening > 0 {
         builder.dyn_array(2)
@@ -512,30 +565,7 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     shard_ec_sum
 }
 
-fn split_input_opening_evals<C: Config>(
-    builder: &mut Builder<C>,
-    chip_proof: &ZKVMChipProofInputVariable<C>,
-    num_witin: usize,
-    num_fixed: usize,
-) -> (Array<C, Ext<C::F, C::EF>>, Array<C, Ext<C::F, C::EF>>) {
-    let last_layer_idx: Usize<C::N> =
-        builder.eval(chip_proof.gkr_iop_proof.layer_proofs.len() - Usize::from(1));
-    let last_layer = builder.get(&chip_proof.gkr_iop_proof.layer_proofs, last_layer_idx);
-    let main_evals = last_layer.main.evals;
-
-    let wit_end = Usize::from(num_witin);
-    let fixed_end: Usize<C::N> = builder.eval(wit_end.clone() + Usize::from(num_fixed));
-    // Native verifier accepts extra trailing evals; only the prefix is consumed here.
-    // Keep recursion semantics aligned by slicing the required prefix.
-    let eval_prefix = main_evals.slice(builder, Usize::from(0), fixed_end.clone());
-
-    (
-        eval_prefix.slice(builder, Usize::from(0), wit_end),
-        eval_prefix.slice(builder, Usize::from(num_witin), fixed_end),
-    )
-}
-
-pub fn verify_chip_proof<C: Config>(
+pub fn verify_chip_proof_pre_main<C: Config>(
     circuit_name: &str,
     builder: &mut Builder<C>,
     challenger: &mut DuplexChallengerVariable<C>,
@@ -544,13 +574,8 @@ pub fn verify_chip_proof<C: Config>(
     challenges: &Array<C, Ext<C::F, C::EF>>,
     vk: &VerifyingKey<E>,
     unipoly_extrapolator: &UniPolyExtrapolator<C>,
-    poly_evaluator: &mut PolyEvaluator<C>,
-) -> (
-    Array<C, Ext<C::F, C::EF>>,
-    SepticPointVariable<C>,
-    Array<C, Ext<C::F, C::EF>>,
-    Array<C, Ext<C::F, C::EF>>,
-) {
+    _poly_evaluator: &mut PolyEvaluator<C>,
+) -> PendingChipMainVariable<C> {
     let composed_cs = vk.get_cs();
     let ComposedConstrainSystem {
         zkvm_v1_css: cs,
@@ -703,11 +728,20 @@ pub fn verify_chip_proof<C: Config>(
             .clone(),
     );
 
-    let mut selector_ctxs = Vec::with_capacity(first_layer.out_sel_and_eval_exprs.len());
-    for (selector, _) in &first_layer.out_sel_and_eval_exprs {
-        let ctx = if cs.ec_final_sum.is_empty() {
-            let non_shard_n1 = Usize::Var(builder.get(&chip_proof.num_instances, 1));
-            builder.assert_usize_eq(non_shard_n1, Usize::from(0));
+    let group_has_tower = first_layer_output_group_has_tower(composed_cs, &gkr_circuit);
+    let selector_ctxs: Array<C, SelectorContextVariable<C>> =
+        builder.dyn_array(first_layer.out_sel_and_eval_exprs.len());
+    for (group_idx, ((selector, _), has_tower)) in first_layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .zip(group_has_tower.iter())
+        .enumerate()
+    {
+        let ctx = if !has_tower || cs.ec_final_sum.is_empty() {
+            if cs.ec_final_sum.is_empty() {
+                let non_shard_n1 = Usize::Var(builder.get(&chip_proof.num_instances, 1));
+                builder.assert_usize_eq(non_shard_n1, Usize::from(0));
+            }
             SelectorContextVariable {
                 offset: Usize::from(0),
                 offset_bit_decomps: zero_bit_decomps.clone(),
@@ -766,7 +800,7 @@ pub fn verify_chip_proof<C: Config>(
                 num_vars: num_var_with_rotation.clone(),
             }
         };
-        selector_ctxs.push(ctx);
+        builder.set(&selector_ctxs, group_idx, ctx);
     }
 
     if !first_layer.rotation_exprs.1.is_empty() {
@@ -861,170 +895,781 @@ pub fn verify_chip_proof<C: Config>(
         }
     }
 
-    if composed_cs.has_ecc_ops() {
-        let [
-            x_group_idx,
-            y_group_idx,
-            slope_group_idx,
-            x3_group_idx,
-            y3_group_idx,
-        ] = first_layer
-            .ecc_bridge_group_indices()
-            .expect("ecc bridge selectors missing");
+    PendingChipMainVariable {
+        num_var_with_rotation,
+        out_evals,
+        pi_evals: circuit_pi_evals,
+        selector_ctxs,
+        shard_ec_sum,
+        prod_out_evals,
+        logup_out_evals,
+    }
+}
 
-        transcript_observe_label(builder, challenger, b"ecc_gkr_bridge_r");
-        let sample_r: Ext<C::F, C::EF> = challenger.sample_ext(builder);
-        let one_minus_r: Ext<C::F, C::EF> = builder.eval(one - sample_r);
-        let ecc_proof = &chip_proof.ecc_proof;
+fn tower_output_count(composed_cs: &ComposedConstrainSystem<E>) -> usize {
+    let cs = &composed_cs.zkvm_v1_css;
+    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+    let num_lk_num = cs.lk_table_expressions.len();
+    let num_lk_den = if !cs.lk_table_expressions.is_empty() {
+        cs.lk_table_expressions.len()
+    } else {
+        cs.lk_expressions.len()
+    };
+    num_reads + num_writes + num_lk_num + num_lk_den
+}
 
-        let xy_point_len: Usize<C::N> = builder.eval(ecc_proof.rt.fs.len() + Usize::from(1));
-        let xy_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(xy_point_len);
-        builder.set(&xy_point, 0, sample_r);
-        builder
-            .range(0, ecc_proof.rt.fs.len())
-            .for_each(|idx_vec, builder| {
-                let idx = idx_vec[0];
-                let v = builder.get(&ecc_proof.rt.fs, idx);
-                let shifted_idx = Usize::Var(Var::uninit(builder));
-                builder.assign(&shifted_idx, idx + Usize::from(1));
-                builder.set(&xy_point, shifted_idx, v);
-            });
+fn first_layer_output_group_has_tower(
+    composed_cs: &ComposedConstrainSystem<E>,
+    circuit: &GKRCircuit<E>,
+) -> Vec<bool> {
+    let first_layer = circuit.layers.first().expect("empty gkr circuit layer");
+    let tower_outputs = tower_output_count(composed_cs);
+    let mut remaining = tower_outputs;
+    first_layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .map(|(_, outputs)| {
+            if remaining == 0 {
+                false
+            } else {
+                remaining = remaining.saturating_sub(outputs.len());
+                true
+            }
+        })
+        .collect()
+}
 
-        let s_point_len: Usize<C::N> = builder.eval(ecc_proof.rt.fs.len() + Usize::from(1));
-        let s_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(s_point_len.clone());
-        builder
-            .range(0, ecc_proof.rt.fs.len())
-            .for_each(|idx_vec, builder| {
-                let idx = idx_vec[0];
-                let v = builder.get(&ecc_proof.rt.fs, idx);
-                builder.set(&s_point, idx, v);
-            });
-        builder.set(&s_point, ecc_proof.rt.fs.len(), sample_r);
+fn max_first_layer_out_evals(vk: &ZKVMVerifyingKey<E, Pcs>) -> usize {
+    vk.circuit_vks
+        .values()
+        .filter_map(|chip_vk| chip_vk.get_cs().gkr_circuit.as_ref())
+        .map(|circuit| circuit.n_evaluations)
+        .max()
+        .unwrap_or(0)
+}
 
-        let x3y3_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(s_point_len.clone());
-        builder
-            .range(0, ecc_proof.rt.fs.len())
-            .for_each(|idx_vec, builder| {
-                let idx = idx_vec[0];
-                let v = builder.get(&ecc_proof.rt.fs, idx);
-                builder.set(&x3y3_point, idx, v);
-            });
-        builder.set(&x3y3_point, ecc_proof.rt.fs.len(), one);
+fn max_first_layer_selector_ctxs(vk: &ZKVMVerifyingKey<E, Pcs>) -> usize {
+    vk.circuit_vks
+        .values()
+        .filter_map(|chip_vk| chip_vk.get_cs().gkr_circuit.as_ref())
+        .filter_map(|circuit| circuit.layers.first())
+        .map(|layer| layer.out_sel_and_eval_exprs.len())
+        .max()
+        .unwrap_or(0)
+}
 
-        let degree = SEPTIC_EXTENSION_DEGREE;
-        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[x_group_idx]
-            .1
-            .iter()
-            .enumerate()
-        {
-            let EvalExpression::Single(out_idx) = eval_expr else {
-                panic!("ecc bridge x group must use EvalExpression::Single");
-            };
-            let x0 = builder.get(&ecc_proof.evals, 3 + degree + idx);
-            let x1 = builder.get(&ecc_proof.evals, 3 + degree * 3 + idx);
-            let eval = builder.eval(x0 * one_minus_r + x1 * sample_r);
-            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                point: PointVariable {
-                    fs: xy_point.clone(),
-                },
-                eval,
-            });
-            builder.set(&out_evals, *out_idx, claim);
-        }
+fn max_pi_evals(vk: &ZKVMVerifyingKey<E, Pcs>) -> usize {
+    vk.circuit_vks
+        .values()
+        .map(|chip_vk| chip_vk.get_cs().zkvm_v1_css.instance.len())
+        .max()
+        .unwrap_or(0)
+}
 
-        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[y_group_idx]
-            .1
-            .iter()
-            .enumerate()
-        {
-            let EvalExpression::Single(out_idx) = eval_expr else {
-                panic!("ecc bridge y group must use EvalExpression::Single");
-            };
-            let y0 = builder.get(&ecc_proof.evals, 3 + degree * 2 + idx);
-            let y1 = builder.get(&ecc_proof.evals, 3 + degree * 4 + idx);
-            let eval = builder.eval(y0 * one_minus_r + y1 * sample_r);
-            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                point: PointVariable {
-                    fs: xy_point.clone(),
-                },
-                eval,
-            });
-            builder.set(&out_evals, *out_idx, claim);
-        }
+fn assign_ecc_bridge_claims<C: Config>(
+    builder: &mut Builder<C>,
+    first_layer: &Layer<E>,
+    out_evals: &Array<C, PointAndEvalVariable<C>>,
+    ecc_proof: &EccQuarkProofVariable<C>,
+    sample_r: Ext<C::F, C::EF>,
+) {
+    let [
+        x_group_idx,
+        y_group_idx,
+        slope_group_idx,
+        x3_group_idx,
+        y3_group_idx,
+    ] = first_layer
+        .ecc_bridge_group_indices()
+        .expect("ecc bridge selectors missing");
+    let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
+    let one_minus_r: Ext<C::F, C::EF> = builder.eval(one - sample_r);
 
-        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[slope_group_idx]
-            .1
-            .iter()
-            .enumerate()
-        {
-            let EvalExpression::Single(out_idx) = eval_expr else {
-                panic!("ecc bridge slope group must use EvalExpression::Single");
-            };
-            let s1 = builder.get(&ecc_proof.evals, 3 + idx);
-            let eval = builder.eval(s1 * sample_r);
-            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                point: PointVariable {
-                    fs: s_point.clone(),
-                },
-                eval,
-            });
-            builder.set(&out_evals, *out_idx, claim);
-        }
+    let xy_point_len: Usize<C::N> = builder.eval(ecc_proof.rt.fs.len() + Usize::from(1));
+    let xy_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(xy_point_len);
+    builder.set(&xy_point, 0, sample_r);
+    builder
+        .range(0, ecc_proof.rt.fs.len())
+        .for_each(|idx_vec, builder| {
+            let idx = idx_vec[0];
+            let v = builder.get(&ecc_proof.rt.fs, idx);
+            let shifted_idx = Usize::Var(Var::uninit(builder));
+            builder.assign(&shifted_idx, idx + Usize::from(1));
+            builder.set(&xy_point, shifted_idx, v);
+        });
 
-        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[x3_group_idx]
-            .1
-            .iter()
-            .enumerate()
-        {
-            let EvalExpression::Single(out_idx) = eval_expr else {
-                panic!("ecc bridge x3 group must use EvalExpression::Single");
-            };
-            let eval = builder.get(&ecc_proof.evals, 3 + degree * 5 + idx);
-            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                point: PointVariable {
-                    fs: x3y3_point.clone(),
-                },
-                eval,
-            });
-            builder.set(&out_evals, *out_idx, claim);
-        }
+    let s_point_len: Usize<C::N> = builder.eval(ecc_proof.rt.fs.len() + Usize::from(1));
+    let s_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(s_point_len.clone());
+    builder
+        .range(0, ecc_proof.rt.fs.len())
+        .for_each(|idx_vec, builder| {
+            let idx = idx_vec[0];
+            let v = builder.get(&ecc_proof.rt.fs, idx);
+            builder.set(&s_point, idx, v);
+        });
+    builder.set(&s_point, ecc_proof.rt.fs.len(), sample_r);
 
-        for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[y3_group_idx]
-            .1
-            .iter()
-            .enumerate()
-        {
-            let EvalExpression::Single(out_idx) = eval_expr else {
-                panic!("ecc bridge y3 group must use EvalExpression::Single");
-            };
-            let eval = builder.get(&ecc_proof.evals, 3 + degree * 6 + idx);
-            let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
-                point: PointVariable {
-                    fs: x3y3_point.clone(),
-                },
-                eval,
-            });
-            builder.set(&out_evals, *out_idx, claim);
-        }
+    let x3y3_point: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(s_point_len);
+    builder
+        .range(0, ecc_proof.rt.fs.len())
+        .for_each(|idx_vec, builder| {
+            let idx = idx_vec[0];
+            let v = builder.get(&ecc_proof.rt.fs, idx);
+            builder.set(&x3y3_point, idx, v);
+        });
+    builder.set(&x3y3_point, ecc_proof.rt.fs.len(), one);
+
+    let degree = SEPTIC_EXTENSION_DEGREE;
+    for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[x_group_idx]
+        .1
+        .iter()
+        .enumerate()
+    {
+        let EvalExpression::Single(out_idx) = eval_expr else {
+            panic!("ecc bridge x group must use EvalExpression::Single");
+        };
+        let x0 = builder.get(&ecc_proof.evals, 3 + degree + idx);
+        let x1 = builder.get(&ecc_proof.evals, 3 + degree * 3 + idx);
+        let eval = builder.eval(x0 * one_minus_r + x1 * sample_r);
+        let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+            point: PointVariable {
+                fs: xy_point.clone(),
+            },
+            eval,
+        });
+        builder.set(out_evals, *out_idx, claim);
     }
 
-    builder.cycle_tracker_start("Verify GKR Circuit");
-    let rt = verify_gkr_circuit(
+    for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[y_group_idx]
+        .1
+        .iter()
+        .enumerate()
+    {
+        let EvalExpression::Single(out_idx) = eval_expr else {
+            panic!("ecc bridge y group must use EvalExpression::Single");
+        };
+        let y0 = builder.get(&ecc_proof.evals, 3 + degree * 2 + idx);
+        let y1 = builder.get(&ecc_proof.evals, 3 + degree * 4 + idx);
+        let eval = builder.eval(y0 * one_minus_r + y1 * sample_r);
+        let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+            point: PointVariable {
+                fs: xy_point.clone(),
+            },
+            eval,
+        });
+        builder.set(out_evals, *out_idx, claim);
+    }
+
+    for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[slope_group_idx]
+        .1
+        .iter()
+        .enumerate()
+    {
+        let EvalExpression::Single(out_idx) = eval_expr else {
+            panic!("ecc bridge slope group must use EvalExpression::Single");
+        };
+        let s1 = builder.get(&ecc_proof.evals, 3 + idx);
+        let eval = builder.eval(s1 * sample_r);
+        let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+            point: PointVariable {
+                fs: s_point.clone(),
+            },
+            eval,
+        });
+        builder.set(out_evals, *out_idx, claim);
+    }
+
+    for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[x3_group_idx]
+        .1
+        .iter()
+        .enumerate()
+    {
+        let EvalExpression::Single(out_idx) = eval_expr else {
+            panic!("ecc bridge x3 group must use EvalExpression::Single");
+        };
+        let eval = builder.get(&ecc_proof.evals, 3 + degree * 5 + idx);
+        let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+            point: PointVariable {
+                fs: x3y3_point.clone(),
+            },
+            eval,
+        });
+        builder.set(out_evals, *out_idx, claim);
+    }
+
+    for (idx, eval_expr) in first_layer.out_sel_and_eval_exprs[y3_group_idx]
+        .1
+        .iter()
+        .enumerate()
+    {
+        let EvalExpression::Single(out_idx) = eval_expr else {
+            panic!("ecc bridge y3 group must use EvalExpression::Single");
+        };
+        let eval = builder.get(&ecc_proof.evals, 3 + degree * 6 + idx);
+        let claim: PointAndEvalVariable<C> = builder.eval(PointAndEvalVariable {
+            point: PointVariable {
+                fs: x3y3_point.clone(),
+            },
+            eval,
+        });
+        builder.set(out_evals, *out_idx, claim);
+    }
+}
+
+fn iop_verifier_state_verify_with_proof_degree<C: Config>(
+    builder: &mut Builder<C>,
+    challenger: &mut DuplexChallengerVariable<C>,
+    out_claim: &Ext<C::F, C::EF>,
+    prover_messages: &IOPProverMessageVecVariable<C>,
+    max_num_variables: Felt<C::F>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
+) -> (
+    Array<C, Ext<<C as Config>::F, <C as Config>::EF>>,
+    Ext<<C as Config>::F, <C as Config>::EF>,
+) {
+    let max_num_variables_usize: Usize<C::N> =
+        Usize::from(builder.cast_felt_to_var(max_num_variables));
+    let max_degree_felt = builder.unsafe_cast_var_to_felt(prover_messages.prover_message_size);
+    let pre_verified_integrity_data: Array<C, Felt<C::F>> = builder.dyn_array(4);
+    builder.set_value(&pre_verified_integrity_data, 0, max_num_variables);
+    builder.set_value(&pre_verified_integrity_data, 2, max_degree_felt);
+    challenger_multi_observe(builder, challenger, &pre_verified_integrity_data);
+
+    builder.assert_var_eq(max_num_variables_usize.get_var(), prover_messages.len());
+
+    let challenges: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(max_num_variables_usize.clone());
+    let expected: Ext<C::F, C::EF> = builder.eval(*out_claim);
+    let internal_round_label = transcript_label_as_array(builder, b"Internal round");
+
+    let curr_offset: Var<C::N> = builder.eval(C::N::ZERO);
+    builder
+        .range(0, max_num_variables_usize.clone())
+        .for_each(|i_vec, builder| {
+            let i = i_vec[0];
+            let next_offset: Var<C::N> =
+                builder.eval(curr_offset + prover_messages.prover_message_size);
+            let prover_msg = prover_messages
+                .evaluations
+                .slice(builder, curr_offset, next_offset);
+            builder.assign(&curr_offset, next_offset);
+
+            unsafe {
+                let prover_msg_felts = exts_to_felts(builder, &prover_msg);
+                challenger_multi_observe(builder, challenger, &prover_msg_felts);
+            }
+
+            transcript_observe_label_felts(builder, challenger, &internal_round_label);
+            let challenge = challenger.sample_ext(builder);
+
+            let e1 = builder.get(&prover_msg, 0);
+            let e0 = builder.eval(expected - e1);
+            let p_r: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+            builder
+                .if_eq(
+                    Usize::Var(prover_messages.prover_message_size),
+                    Usize::from(1),
+                )
+                .then(|builder| {
+                    let value =
+                        unipoly_extrapolator.extrapolate_uni_poly_deg_1(builder, e0, e1, challenge);
+                    builder.assign(&p_r, value);
+                });
+            builder
+                .if_eq(
+                    Usize::Var(prover_messages.prover_message_size),
+                    Usize::from(2),
+                )
+                .then(|builder| {
+                    let p1 = e1;
+                    let p2 = builder.get(&prover_msg, 1);
+                    let value = unipoly_extrapolator
+                        .extrapolate_uni_poly_deg_2(builder, e0, p1, p2, challenge);
+                    builder.assign(&p_r, value);
+                });
+            builder
+                .if_eq(
+                    Usize::Var(prover_messages.prover_message_size),
+                    Usize::from(3),
+                )
+                .then(|builder| {
+                    let p1 = e1;
+                    let p2 = builder.get(&prover_msg, 1);
+                    let p3 = builder.get(&prover_msg, 2);
+                    let value = unipoly_extrapolator
+                        .extrapolate_uni_poly_deg_3(builder, e0, p1, p2, p3, challenge);
+                    builder.assign(&p_r, value);
+                });
+            builder
+                .if_eq(
+                    Usize::Var(prover_messages.prover_message_size),
+                    Usize::from(4),
+                )
+                .then(|builder| {
+                    let p1 = e1;
+                    let p2 = builder.get(&prover_msg, 1);
+                    let p3 = builder.get(&prover_msg, 2);
+                    let p4 = builder.get(&prover_msg, 3);
+                    let value = unipoly_extrapolator
+                        .extrapolate_uni_poly_deg_4(builder, e0, p1, p2, p3, p4, challenge);
+                    builder.assign(&p_r, value);
+                });
+
+            builder.assign(&expected, p_r);
+            builder.set_value(&challenges, i, challenge);
+        });
+
+    (challenges, expected)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_batched_main_constraints<C: Config<F = F>>(
+    builder: &mut Builder<C>,
+    challenger: &mut DuplexChallengerVariable<C>,
+    zkvm_proof_input: &ZKVMProofInputVariable<C>,
+    vk: &ZKVMVerifyingKey<E, Pcs>,
+    challenges: &Array<C, Ext<C::F, C::EF>>,
+    proofs_len: Usize<C::N>,
+    chip_indices: &Array<C, Var<C::N>>,
+    pending_num_vars: &Array<C, Usize<C::N>>,
+    pending_out_evals: &Array<C, PointAndEvalVariable<C>>,
+    pending_selector_ctxs: &Array<C, SelectorContextVariable<C>>,
+    pending_pi_evals: &Array<C, Ext<C::F, C::EF>>,
+    max_out_evals: usize,
+    max_selector_ctxs: usize,
+    max_pi_evals: usize,
+    witin_openings: &Array<C, RoundOpeningVariable<C>>,
+    fixed_openings: &Array<C, RoundOpeningVariable<C>>,
+    num_witin_openings: &Usize<C::N>,
+    num_fixed_openings: &Usize<C::N>,
+    unipoly_extrapolator: &UniPolyExtrapolator<C>,
+) {
+    let total_evals: Usize<C::N> = builder.eval(C::N::ZERO);
+    let total_exprs: Usize<C::N> = builder.eval(C::N::ZERO);
+    let num_chip_groups_counted: Usize<C::N> = builder.eval(C::N::ZERO);
+
+    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+        let chip_id: Var<C::N> = builder.get(chip_indices, num_chip_groups_counted.get_var());
+        builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
+            let chip_proofs = builder.get(
+                &zkvm_proof_input.chip_proofs,
+                num_chip_groups_counted.get_var(),
+            );
+            let gkr_circuit = chip_vk
+                .get_cs()
+                .gkr_circuit
+                .as_ref()
+                .unwrap_or_else(|| panic!("{circuit_name} missing gkr circuit"));
+            let layer = gkr_circuit
+                .layers
+                .first()
+                .unwrap_or_else(|| panic!("{circuit_name} empty gkr circuit"));
+            let eval_len = Usize::from(layer.n_witin + layer.n_fixed + layer.n_structural_witin);
+            let expr_len = Usize::from(layer.exprs.len());
+            iter_zip!(builder, chip_proofs).for_each(|_, builder| {
+                builder.assign(&total_evals, total_evals.clone() + eval_len.clone());
+                builder.assign(&total_exprs, total_exprs.clone() + expr_len.clone());
+            });
+            builder.inc(&num_chip_groups_counted);
+        });
+    }
+    builder.assert_eq::<Usize<_>>(num_chip_groups_counted, chip_indices.len());
+    builder.assert_usize_eq(
+        zkvm_proof_input.main_constraint_proof.evals.len(),
+        total_evals,
+    );
+
+    let ecc_bridge_samples: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(proofs_len.clone());
+    let proof_idx: Usize<C::N> = builder.eval(C::N::ZERO);
+    let num_chip_groups_bridge_sampled: Usize<C::N> = builder.eval(C::N::ZERO);
+
+    for (i, (circuit_name, _chip_vk)) in vk.circuit_vks.iter().enumerate() {
+        let circuit_vk = &vk.circuit_vks[circuit_name];
+        let chip_id: Var<C::N> =
+            builder.get(chip_indices, num_chip_groups_bridge_sampled.get_var());
+
+        builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
+            let chip_proofs = builder.get(
+                &zkvm_proof_input.chip_proofs,
+                num_chip_groups_bridge_sampled.get_var(),
+            );
+            iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
+                let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
+                let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+                builder.set(&ecc_bridge_samples, proof_idx.get_var(), zero);
+                if circuit_vk.get_cs().has_ecc_ops() {
+                    transcript_observe_label(builder, challenger, b"ecc_gkr_bridge_r");
+                    let sample_r = challenger.sample_ext(builder);
+                    builder.set(&ecc_bridge_samples, proof_idx.get_var(), sample_r);
+                    builder.assert_nonzero(&chip_proof.has_ecc_proof);
+                }
+                builder.inc(&proof_idx);
+            });
+            builder.inc(&num_chip_groups_bridge_sampled);
+        });
+    }
+    builder.assert_eq::<Usize<_>>(num_chip_groups_bridge_sampled, chip_indices.len());
+
+    transcript_observe_label(builder, challenger, b"combine subset evals");
+    let alpha_pows = gen_alpha_pows(builder, challenger, total_exprs.clone());
+
+    let sigma: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    let alpha_idx: Usize<C::N> = builder.eval(C::N::ZERO);
+    let proof_idx: Usize<C::N> = builder.eval(C::N::ZERO);
+    let num_chip_groups_verified: Usize<C::N> = builder.eval(C::N::ZERO);
+
+    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+        let circuit_vk = &vk.circuit_vks[circuit_name];
+        let chip_id: Var<C::N> = builder.get(chip_indices, num_chip_groups_verified.get_var());
+
+        builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
+            let chip_proofs = builder.get(
+                &zkvm_proof_input.chip_proofs,
+                num_chip_groups_verified.get_var(),
+            );
+            let gkr_circuit = chip_vk
+                .get_cs()
+                .gkr_circuit
+                .as_ref()
+                .unwrap_or_else(|| panic!("{circuit_name} missing gkr circuit"));
+            let layer = gkr_circuit
+                .layers
+                .first()
+                .unwrap_or_else(|| panic!("{circuit_name} empty gkr circuit"));
+
+            iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
+                let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
+                let out_offset: Usize<C::N> =
+                    builder.eval(proof_idx.clone() * Usize::from(max_out_evals));
+                let out_end: Usize<C::N> =
+                    builder.eval(out_offset.clone() + Usize::from(max_out_evals));
+                let out_evals = pending_out_evals.slice(builder, out_offset, out_end);
+
+                if circuit_vk.get_cs().has_ecc_ops() {
+                    let sample_r = builder.get(&ecc_bridge_samples, proof_idx.get_var());
+                    assign_ecc_bridge_claims(
+                        builder,
+                        layer,
+                        &out_evals,
+                        &chip_proof.ecc_proof,
+                        sample_r,
+                    );
+                }
+
+                let eval_and_dedup_points =
+                    extract_claim_and_point(builder, layer, &out_evals, challenges);
+                builder.assert_usize_eq(
+                    Usize::from(layer.out_sel_and_eval_exprs.len()),
+                    eval_and_dedup_points.len(),
+                );
+
+                builder
+                    .range(0, eval_and_dedup_points.len())
+                    .for_each(|idx_vec, builder| {
+                        let ClaimAndPoint { evals, .. } =
+                            builder.get(&eval_and_dedup_points, idx_vec[0]);
+                        let end_idx: Usize<C::N> = builder.eval(alpha_idx.clone() + evals.len());
+                        let alpha_slice =
+                            alpha_pows.slice(builder, alpha_idx.clone(), end_idx.clone());
+                        let sub_sum = ext_dot_product(builder, &evals, &alpha_slice);
+                        builder.assign(&sigma, sigma + sub_sum);
+                        builder.assign(&alpha_idx, end_idx);
+                    });
+                builder.inc(&proof_idx);
+            });
+            builder.inc(&num_chip_groups_verified);
+        });
+    }
+    builder.assert_eq::<Usize<_>>(num_chip_groups_verified, chip_indices.len());
+
+    let max_num_variables =
+        builder.unsafe_cast_var_to_felt(zkvm_proof_input.main_constraint_proof.proof.len());
+    let (global_in_point, expected_evaluation) = iop_verifier_state_verify_with_proof_degree(
         builder,
         challenger,
-        num_var_with_rotation,
-        gkr_circuit,
-        &chip_proof.gkr_iop_proof,
-        challenges,
-        &circuit_pi_evals,
-        &out_evals,
-        selector_ctxs,
+        &sigma,
+        &zkvm_proof_input.main_constraint_proof.proof,
+        max_num_variables,
         unipoly_extrapolator,
-        poly_evaluator,
     );
-    builder.cycle_tracker_end("Verify GKR Circuit");
+    challenger_observe_exts(
+        builder,
+        challenger,
+        &zkvm_proof_input.main_constraint_proof.evals,
+    );
 
-    (rt.fs, shard_ec_sum, prod_out_evals, logup_out_evals)
+    let got_claim: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+    let eval_idx: Usize<C::N> = builder.eval(C::N::ZERO);
+    let alpha_idx: Usize<C::N> = builder.eval(C::N::ZERO);
+    let proof_idx: Usize<C::N> = builder.eval(C::N::ZERO);
+    let num_chip_groups_claimed: Usize<C::N> = builder.eval(C::N::ZERO);
+
+    for (i, (circuit_name, chip_vk)) in vk.circuit_vks.iter().enumerate() {
+        let circuit_vk = &vk.circuit_vks[circuit_name];
+        let chip_id: Var<C::N> = builder.get(chip_indices, num_chip_groups_claimed.get_var());
+
+        builder.if_eq(chip_id, RVar::from(i)).then(|builder| {
+            let chip_proofs = builder.get(
+                &zkvm_proof_input.chip_proofs,
+                num_chip_groups_claimed.get_var(),
+            );
+            let gkr_circuit = chip_vk
+                .get_cs()
+                .gkr_circuit
+                .as_ref()
+                .unwrap_or_else(|| panic!("{circuit_name} missing gkr circuit"));
+            let layer = gkr_circuit
+                .layers
+                .first()
+                .unwrap_or_else(|| panic!("{circuit_name} empty gkr circuit"));
+            let eval_len = Usize::from(layer.n_witin + layer.n_fixed + layer.n_structural_witin);
+            let expr_len = Usize::from(layer.exprs.len());
+
+            iter_zip!(builder, chip_proofs).for_each(|ptr_vec, builder| {
+                let chip_proof = builder.iter_ptr_get(&chip_proofs, ptr_vec[0]);
+                let out_offset: Usize<C::N> =
+                    builder.eval(proof_idx.clone() * Usize::from(max_out_evals));
+                let out_end: Usize<C::N> =
+                    builder.eval(out_offset.clone() + Usize::from(max_out_evals));
+                let out_evals = pending_out_evals.slice(builder, out_offset, out_end);
+                let selector_offset: Usize<C::N> =
+                    builder.eval(proof_idx.clone() * Usize::from(max_selector_ctxs));
+                let selector_end: Usize<C::N> =
+                    builder.eval(selector_offset.clone() + Usize::from(max_selector_ctxs));
+                let selector_ctxs =
+                    pending_selector_ctxs.slice(builder, selector_offset, selector_end);
+                let pi_offset: Usize<C::N> =
+                    builder.eval(proof_idx.clone() * Usize::from(max_pi_evals));
+                let pi_end: Usize<C::N> =
+                    builder.eval(pi_offset.clone() + Usize::from(max_pi_evals));
+                let pi_evals = pending_pi_evals.slice(builder, pi_offset, pi_end);
+                let num_var_with_rotation = builder.get(pending_num_vars, proof_idx.get_var());
+
+                if circuit_vk.get_cs().has_ecc_ops() {
+                    let sample_r = builder.get(&ecc_bridge_samples, proof_idx.get_var());
+                    assign_ecc_bridge_claims(
+                        builder,
+                        layer,
+                        &out_evals,
+                        &chip_proof.ecc_proof,
+                        sample_r,
+                    );
+                }
+
+                let eval_and_dedup_points =
+                    extract_claim_and_point(builder, layer, &out_evals, challenges);
+                let eval_end: Usize<C::N> = builder.eval(eval_idx.clone() + eval_len.clone());
+                let layer_evals = zkvm_proof_input.main_constraint_proof.evals.slice(
+                    builder,
+                    eval_idx.clone(),
+                    eval_end.clone(),
+                );
+                let in_point =
+                    global_in_point.slice(builder, Usize::from(0), num_var_with_rotation.clone());
+
+                validate_batched_main_structural_evals(
+                    builder,
+                    layer,
+                    &eval_and_dedup_points,
+                    &selector_ctxs,
+                    &pi_evals,
+                    &layer_evals,
+                    &in_point,
+                );
+
+                let alpha_end: Usize<C::N> = builder.eval(alpha_idx.clone() + expr_len.clone());
+                let alpha_slice = alpha_pows.slice(builder, alpha_idx.clone(), alpha_end.clone());
+                let main_sumcheck_challenges_len: Usize<C::N> =
+                    builder.eval(alpha_slice.len() + Usize::from(2));
+                let main_sumcheck_challenges: Array<C, Ext<C::F, C::EF>> =
+                    builder.dyn_array(main_sumcheck_challenges_len.clone());
+                let alpha = builder.get(challenges, 0);
+                let beta = builder.get(challenges, 1);
+                builder.set(&main_sumcheck_challenges, 0, alpha);
+                builder.set(&main_sumcheck_challenges, 1, beta);
+                let challenge_slice =
+                    main_sumcheck_challenges.slice(builder, 2, main_sumcheck_challenges_len);
+                builder
+                    .range(0, alpha_slice.len())
+                    .for_each(|idx_vec, builder| {
+                        let alpha = builder.get(&alpha_slice, idx_vec[0]);
+                        builder.set(&challenge_slice, idx_vec[0], alpha);
+                    });
+
+                let term_claim = eval_batched_main_frontload_terms(
+                    builder,
+                    &layer_evals,
+                    &pi_evals,
+                    &main_sumcheck_challenges,
+                    &global_in_point,
+                    num_var_with_rotation,
+                    layer
+                        .main_sumcheck_expression
+                        .as_ref()
+                        .expect("missing main sumcheck expression"),
+                );
+                builder.assign(&got_claim, got_claim + term_claim);
+
+                if circuit_vk.get_cs().num_witin() > 0 {
+                    let wit_end = Usize::from(layer.n_witin);
+                    let wits_in_evals = layer_evals.slice(builder, Usize::from(0), wit_end);
+                    let point_clone: Array<C, Ext<C::F, C::EF>> = builder.eval(in_point.clone());
+                    let witin_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
+                        num_var: in_point.len().get_var(),
+                        point_and_evals: PointAndEvalsVariable {
+                            point: PointVariable { fs: point_clone },
+                            evals: wits_in_evals,
+                        },
+                    });
+                    builder.set_value(witin_openings, num_witin_openings.get_var(), witin_round);
+                    builder.inc(num_witin_openings);
+                }
+                if circuit_vk.get_cs().num_fixed() > 0 {
+                    let fixed_start = Usize::from(layer.n_witin);
+                    let fixed_end: Usize<C::N> =
+                        builder.eval(fixed_start.clone() + Usize::from(layer.n_fixed));
+                    let fixed_in_evals = layer_evals.slice(builder, fixed_start, fixed_end);
+                    let fixed_round: RoundOpeningVariable<C> = builder.eval(RoundOpeningVariable {
+                        num_var: in_point.len().get_var(),
+                        point_and_evals: PointAndEvalsVariable {
+                            point: PointVariable { fs: in_point },
+                            evals: fixed_in_evals,
+                        },
+                    });
+                    builder.set_value(fixed_openings, num_fixed_openings.get_var(), fixed_round);
+                    builder.inc(num_fixed_openings);
+                }
+
+                builder.assign(&eval_idx, eval_end);
+                builder.assign(&alpha_idx, alpha_end);
+                builder.inc(&proof_idx);
+            });
+            builder.inc(&num_chip_groups_claimed);
+        });
+    }
+    builder.assert_eq::<Usize<_>>(num_chip_groups_claimed, chip_indices.len());
+    builder.assert_ext_eq(got_claim, expected_evaluation);
+}
+
+fn validate_batched_main_structural_evals<C: Config>(
+    builder: &mut Builder<C>,
+    layer: &Layer<E>,
+    eval_and_dedup_points: &Array<C, ClaimAndPoint<C>>,
+    selector_ctxs: &Array<C, SelectorContextVariable<C>>,
+    pi: &Array<C, Ext<C::F, C::EF>>,
+    layer_evals: &Array<C, Ext<C::F, C::EF>>,
+    in_point: &Array<C, Ext<C::F, C::EF>>,
+) {
+    let structural_witin_offset = layer.n_witin + layer.n_fixed;
+
+    layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .enumerate()
+        .for_each(|(idx, (sel_type, _))| {
+            let out_point = builder.get(eval_and_dedup_points, idx).point.fs;
+            let ctx = builder.get(selector_ctxs, idx);
+            let (wit_id, expected_eval) =
+                evaluate_selector(builder, sel_type, &out_point, in_point, &ctx);
+            let main_eval = builder.get(layer_evals, wit_id + structural_witin_offset);
+            builder.assert_ext_eq(main_eval, expected_eval);
+        });
+
+    let zero_const = builder.constant::<Ext<C::F, C::EF>>(C::EF::ZERO);
+    for s in &layer.structural_witins {
+        let id = s.id;
+        let witin_type = s.witin_type;
+        let wit_id = id as usize + structural_witin_offset;
+        let expected_eval: Ext<C::F, C::EF> = match witin_type {
+            StructuralWitInType::EqualDistanceSequence {
+                offset,
+                multi_factor,
+                descending,
+                ..
+            } => {
+                let offset =
+                    builder.constant::<Ext<C::F, C::EF>>(C::EF::from_canonical_u32(offset));
+                eval_wellform_address_vec(
+                    builder,
+                    offset,
+                    multi_factor as u32,
+                    in_point,
+                    descending,
+                )
+            }
+            StructuralWitInType::EqualDistanceDynamicSequence {
+                multi_factor,
+                descending,
+                offset_instance_id,
+                ..
+            } => {
+                let offset = builder.get(pi, offset_instance_id as usize);
+                eval_wellform_address_vec(
+                    builder,
+                    offset,
+                    multi_factor as u32,
+                    in_point,
+                    descending,
+                )
+            }
+            StructuralWitInType::StackedIncrementalSequence { .. } => {
+                eval_stacked_wellform_address_vec(builder, in_point)
+            }
+            StructuralWitInType::StackedConstantSequence { .. } => {
+                eval_stacked_constant(builder, in_point)
+            }
+            StructuralWitInType::InnerRepeatingIncrementalSequence { k, .. } => {
+                let r_slice = in_point.slice(builder, k, in_point.len());
+                eval_wellform_address_vec(builder, zero_const, 1, &r_slice, false)
+            }
+            StructuralWitInType::OuterRepeatingIncrementalSequence { k, .. } => {
+                let r_slice = in_point.slice(builder, 0, k);
+                eval_wellform_address_vec(builder, zero_const, 1, &r_slice, false)
+            }
+            StructuralWitInType::Empty => continue,
+        };
+
+        let main_wit_eval = builder.get(layer_evals, wit_id);
+        builder.assert_ext_eq(expected_eval, main_wit_eval);
+    }
+}
+
+fn eval_batched_main_frontload_terms<C: Config>(
+    builder: &mut Builder<C>,
+    layer_evals: &Array<C, Ext<C::F, C::EF>>,
+    pi: &Array<C, Ext<C::F, C::EF>>,
+    challenges: &Array<C, Ext<C::F, C::EF>>,
+    global_in_point: &Array<C, Ext<C::F, C::EF>>,
+    num_var_with_rotation: Usize<C::N>,
+    expression: &Expression<E>,
+) -> Ext<C::F, C::EF> {
+    let tail_factor: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
+    builder
+        .range(num_var_with_rotation, global_in_point.len())
+        .for_each(|idx_vec, builder| {
+            let point = builder.get(global_in_point, idx_vec[0]);
+            builder.assign(&tail_factor, tail_factor * point);
+        });
+
+    let empty_arr: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(0);
+    let weighted_layer_evals: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(layer_evals.len());
+    builder
+        .range(0, layer_evals.len())
+        .for_each(|idx_vec, builder| {
+            let eval = builder.get(layer_evals, idx_vec[0]);
+            let weighted: Ext<C::F, C::EF> = builder.eval(eval * tail_factor);
+            builder.set(&weighted_layer_evals, idx_vec[0], weighted);
+        });
+
+    eval_ceno_expr_with_instance(
+        builder,
+        &empty_arr,
+        &weighted_layer_evals,
+        &empty_arr,
+        pi,
+        challenges,
+        expression,
+    )
 }
 
 pub fn verify_gkr_circuit<C: Config>(

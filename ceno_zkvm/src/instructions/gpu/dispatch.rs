@@ -22,10 +22,7 @@ use tracing::info_span;
 use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
 
 use super::{
-    config::{
-        is_gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu,
-        should_materialize_witness_on_initial_assign,
-    },
+    config::{is_gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
     utils::debug_compare::{
         debug_compare_final_lk, debug_compare_shard_ec, debug_compare_shardram,
         debug_compare_witness,
@@ -135,6 +132,7 @@ pub(crate) fn try_gpu_assign_instances<E: ExtensionField, I: Instruction<E>>(
     let total_instances = step_indices.len();
     if total_instances == 0 {
         // Empty: just return empty matrices
+        let num_witin = num_witin.max(1);
         let num_structural_witin = num_structural_witin.max(1);
         let raw_witin = RowMajorMatrix::<E::BaseField>::new(0, num_witin, I::padding_strategy());
         let raw_structural =
@@ -282,8 +280,7 @@ fn gpu_assign_instances_inner<E: ExtensionField, I: Instruction<E>>(
 ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
     let num_structural_witin = num_structural_witin.max(1);
     let total_instances = step_indices.len();
-    let materialize_initial_witness = crate::instructions::gpu::config::is_debug_compare_enabled()
-        || should_materialize_witness_on_initial_assign();
+    let materialize_initial_witness = crate::instructions::gpu::config::is_debug_compare_enabled();
 
     // Step 1: GPU fills witness matrix (+ LK counters + shard records for merged kinds)
     let (gpu_witness, gpu_lk_counters, gpu_ram_slots, gpu_compact_ec, gpu_compact_addr) =

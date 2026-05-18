@@ -46,6 +46,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::Write,
     marker::PhantomData,
     ops::Range,
     sync::Arc,
@@ -54,24 +55,6 @@ use tiny_keccak::{Hasher, Keccak};
 use tracing::info_span;
 use transcript::BasicTranscript as Transcript;
 use witness::next_pow2_instance_padding;
-
-#[cfg(feature = "gpu")]
-fn log_gpu_mem_pool_after_shard(label: &str, shard_id: usize) {
-    use gkr_iop::gpu::gpu_prover::*;
-
-    info_span!("[ceno] log_gpu_mem_pool_after_shard").in_scope(|| {
-        let cuda_hal = get_cuda_hal().unwrap();
-        let mem_pool = cuda_hal.inner().mem_pool();
-        let used_bytes = mem_pool.get_used_size().unwrap_or(0);
-        let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
-        tracing::info!(
-            "[gpu shard end][{label}] shard_id={} used={:.2}MB reserved={:.2}MB",
-            shard_id,
-            used_bytes as f64 / (1024.0 * 1024.0),
-            reserved_bytes as f64 / (1024.0 * 1024.0),
-        );
-    });
-}
 
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
@@ -121,6 +104,7 @@ pub fn public_io_words_to_digest_words(words: &[u32]) -> [u32; 8] {
 )]
 pub enum PcsKind {
     #[default]
+    Jagged,
     Basefold,
     Whir,
 }
@@ -2193,9 +2177,18 @@ fn create_proofs_streaming<
 
                         let transcript = Transcript::new(b"riscv");
                         let start = std::time::Instant::now();
-                        let zkvm_proof = prover
-                            .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                            .expect("create_proof failed");
+                        let zkvm_proof =
+                            match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+                                Ok(proof) => proof,
+                                Err(err) => {
+                                    eprintln!(
+                                        "create_proof failed for shard {}: {err:?}",
+                                        shard_ctx.shard_id
+                                    );
+                                    let _ = std::io::stderr().flush();
+                                    std::process::exit(1);
+                                }
+                            };
                         tracing::debug!(
                             "{}th shard proof created in {:?}",
                             shard_ctx.shard_id,
@@ -2203,9 +2196,7 @@ fn create_proofs_streaming<
                         );
                         #[cfg(feature = "gpu")]
                         if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                            log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                             crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                            log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
                         }
                         #[cfg(feature = "gpu")]
                         if let Some(baseline) = _witgen_mem_baseline {
@@ -2254,9 +2245,18 @@ fn create_proofs_streaming<
 
                     let transcript = Transcript::new(b"riscv");
                     let start = std::time::Instant::now();
-                    let zkvm_proof = prover
-                        .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                        .expect("create_proof failed");
+                    let zkvm_proof =
+                        match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+                            Ok(proof) => proof,
+                            Err(err) => {
+                                eprintln!(
+                                    "create_proof failed for shard {}: {err:?}",
+                                    shard_ctx.shard_id
+                                );
+                                let _ = std::io::stderr().flush();
+                                std::process::exit(1);
+                            }
+                        };
                     tracing::debug!(
                         "{}th shard proof created in {:?}",
                         shard_ctx.shard_id,
@@ -2264,9 +2264,7 @@ fn create_proofs_streaming<
                     );
                     #[cfg(feature = "gpu")]
                     if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                        log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                         crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                        log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
                     }
                     #[cfg(feature = "gpu")]
                     if let Some(baseline) = _witgen_mem_baseline {
