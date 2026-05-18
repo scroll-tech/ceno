@@ -2189,6 +2189,10 @@ fn create_proofs_streaming<
                             start.elapsed()
                         );
                         #[cfg(feature = "gpu")]
+                        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                            crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                        }
+                        #[cfg(feature = "gpu")]
                         if let Some(baseline) = _witgen_mem_baseline {
                             assert_witgen_mem_released(shard_ctx.shard_id, baseline);
                         }
@@ -2252,6 +2256,10 @@ fn create_proofs_streaming<
                         shard_ctx.shard_id,
                         start.elapsed()
                     );
+                    #[cfg(feature = "gpu")]
+                    if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+                        crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+                    }
                     #[cfg(feature = "gpu")]
                     if let Some(baseline) = _witgen_mem_baseline {
                         assert_witgen_mem_released(shard_ctx.shard_id, baseline);
