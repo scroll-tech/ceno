@@ -224,6 +224,21 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         to_mb(resident_bytes),
         to_mb(stage_peak_usage_bytes),
     );
+    if total_usage_bytes >= 8 * 1024 * 1024 * 1024 || circuit_name.contains("Keccak") {
+        tracing::info!(
+            "[mem estimate][{}] rows={}, vars={}, resident={:.2}MB, trace_tmp={:.2}MB, main_witness={:.2}MB, tower_build={:.2}MB, tower_prove={:.2}MB, ecc={:.2}MB, total={:.2}MB",
+            circuit_name,
+            occupied_rows,
+            num_var_with_rotation,
+            to_mb(resident_bytes),
+            to_mb(trace_est.trace_temporary_bytes),
+            to_mb(main_witness_bytes),
+            to_mb(tower_build_stage_bytes),
+            to_mb(tower_prove_stage_bytes),
+            to_mb(ecc_quark_temporary_bytes),
+            to_mb(total_usage_bytes),
+        );
+    }
     total_usage_bytes as u64
 }
 

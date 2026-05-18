@@ -498,10 +498,31 @@ impl ChipScheduler {
                             task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
                         );
                     }
+                    let max_size = mem_pool.get_max_size();
+                    let booked_total = mem_pool.get_booked_total();
+                    let available = max_size.saturating_sub(booked_total);
+                    let pending_summary = pending
+                        .iter()
+                        .map(|task| {
+                            format!(
+                                "id={} circuit={} estimated={:.2}MB booked={:.2}MB",
+                                task.task_id,
+                                task.circuit_name,
+                                task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                                task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
                     return Err(ZKVMError::BackendError(BackendError::CircuitError(
-                        "Deadlock: Remaining tasks are too big for the memory pool!"
-                            .to_string()
-                            .into_boxed_str(),
+                        format!(
+                            "Deadlock: Remaining tasks are too big for the memory pool: available={:.2}MB, max={:.2}MB, booked={:.2}MB, pending=[{}]",
+                            available as f64 / (1024.0 * 1024.0),
+                            max_size as f64 / (1024.0 * 1024.0),
+                            booked_total as f64 / (1024.0 * 1024.0),
+                            pending_summary,
+                        )
+                        .into_boxed_str(),
                     )));
                 }
 
