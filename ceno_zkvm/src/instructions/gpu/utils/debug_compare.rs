@@ -1137,11 +1137,8 @@ pub(crate) fn debug_compare_shard_ram_witness_from_device<E: ExtensionField>(
     gpu_witin: &RowMajorMatrix<E::BaseField>,
     gpu_structural: &RowMajorMatrix<E::BaseField>,
 ) {
-    use crate::{
-        instructions::gpu::cache::take_and_convert_compact_shard_records, tables::ShardRamCircuit,
-    };
+    use crate::tables::ShardRamCircuit;
     use ceno_gpu::Buffer;
-    use gkr_iop::utils::lk_multiplicity::LkMultiplicity;
 
     // D2H device records → raw bytes
     let record_size = std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>() / 4;

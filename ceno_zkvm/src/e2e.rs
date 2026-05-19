@@ -1486,9 +1486,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 )
             }).unwrap();
 
-            // Keep shard_steps cache alive across witgen and prove for this shard.
-            // It is released at shard-end after create_proof.
-
             info_span!("assign_dummy_circuits").in_scope(|| {
                 system_config
                     .dummy_config
@@ -1679,9 +1676,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     }
                 });
             }
-
-            // Keep per-shard GPU caches alive for prove-time reuse in this shard.
-            // They are explicitly released at shard-end after create_proof.
 
             Some((zkvm_witness, shard_ctx, pi, witgen_mem_baseline))
         })

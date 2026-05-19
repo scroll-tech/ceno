@@ -16,9 +16,7 @@ use ceno_gpu::{
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use p3::field::FieldAlgebra;
 use tracing::info_span;
-use witness::{
-    DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding,
-};
+use witness::{DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix};
 
 use crate::{
     e2e::ShardContext,
@@ -28,10 +26,7 @@ use crate::{
             ensure_shard_metadata_cached, read_shared_addr_count, read_shared_addr_range,
             with_cached_shard_meta,
         },
-        config::{
-            is_debug_compare_enabled, is_gpu_witgen_enabled, is_kind_disabled,
-            should_materialize_witness_on_gpu,
-        },
+        config::{is_gpu_witgen_enabled, is_kind_disabled, should_materialize_witness_on_gpu},
         dispatch::{GpuWitgenKind, compute_fetch_params, is_force_cpu_path},
         utils::{
             d2h::{gpu_compact_ec_d2h, gpu_lk_counters_to_multiplicity},
@@ -280,159 +275,6 @@ pub fn gpu_assign_keccak_instances<E: ExtensionField>(
     })
 }
 
-pub fn build_keccak_replay_plan<E: ExtensionField>(
-    config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
-    shard_ctx: &ShardContext,
-    num_witin: usize,
-    num_structural_witin: usize,
-    shard_steps: &[StepRecord],
-    step_indices: &[StepIndex],
-) -> crate::structs::GpuReplayPlan<E> {
-    let (fetch_base_pc, fetch_num_slots) = compute_fetch_params(shard_steps, step_indices);
-    let packed_instances =
-        pack_keccak_instances(shard_steps, step_indices, &shard_ctx.syscall_witnesses);
-    crate::structs::GpuReplayPlan::new(
-        shard_ctx.shard_id,
-        GpuWitgenKind::Keccak,
-        std::sync::Arc::<[StepIndex]>::from(step_indices.to_vec()),
-        next_pow2_instance_padding(step_indices.len()) * 32,
-        num_witin,
-        num_structural_witin,
-        shard_ctx.current_shard_offset_cycle(),
-        fetch_base_pc,
-        fetch_num_slots,
-        Some(Arc::<[GpuKeccakInstance]>::from(packed_instances)),
-        None,
-        0,
-        0,
-        config as *const crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E> as usize,
-        replay_keccak_witness_from_resident_raw::<E>,
-    )
-}
-
-fn replay_keccak_witness_from_resident_raw<E: ExtensionField>(
-    config_ptr: usize,
-    replay: &crate::structs::GpuReplayPlan<E>,
-) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-    use gkr_iop::gpu::get_cuda_hal;
-
-    let hal = get_cuda_hal()
-        .map_err(|e| ZKVMError::InvalidWitness(format!("Failed to get CUDA HAL: {e}").into()))?;
-    let config = unsafe {
-        &*(config_ptr as *const crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>)
-    };
-    let packed_instances = replay.keccak_instances.as_ref().ok_or_else(|| {
-        ZKVMError::InvalidWitness("keccak replay missing packed instance data".into())
-    })?;
-    replay_keccak_witness_only_from_packed::<E>(
-        config,
-        replay.num_witin,
-        packed_instances.as_ref(),
-        replay.step_indices.len(),
-        replay.shard_offset,
-        replay.fetch_base_pc,
-        replay.fetch_num_slots,
-        &hal,
-    )
-}
-
-fn replay_keccak_witness_only_from_packed<E: ExtensionField>(
-    config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
-    num_witin: usize,
-    packed_instances: &[GpuKeccakInstance],
-    num_instances: usize,
-    shard_offset: u64,
-    fetch_base_pc: u32,
-    fetch_num_slots: usize,
-    hal: &CudaHalBB31,
-) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-    use crate::precompiles::KECCAK_ROUNDS_CEIL_LOG2;
-
-    let num_rows = num_instances * 32;
-    let rotation = KECCAK_ROUNDS_CEIL_LOG2;
-
-    let col_map = info_span!("col_map").in_scope(|| extract_keccak_column_map(config, num_witin));
-    let gpu_result = info_span!("gpu_kernel").in_scope(|| {
-        hal.witgen
-            .witgen_keccak(
-                &col_map,
-                packed_instances,
-                num_rows,
-                shard_offset,
-                fetch_base_pc,
-                fetch_num_slots,
-                true,
-                None,
-                None,
-            )
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU witgen_keccak failed: {e}").into()))
-    })?;
-
-    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
-        || !should_materialize_witness_on_gpu()
-    {
-        let produced_rows = gpu_result.witness.num_rows;
-        info_span!("transpose_d2h", rows = produced_rows, cols = num_witin).in_scope(|| {
-            let mut rmm_buffer = hal
-                .alloc_elems_on_device(produced_rows * num_witin, false, None)
-                .map_err(|e| {
-                    ZKVMError::InvalidWitness(format!("GPU alloc for transpose failed: {e}").into())
-                })?;
-            matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
-                &hal.inner,
-                &mut rmm_buffer,
-                &gpu_result.witness.device_buffer,
-                produced_rows,
-                num_witin,
-            )
-            .map_err(|e| ZKVMError::InvalidWitness(format!("GPU transpose failed: {e}").into()))?;
-
-            let gpu_data: Vec<<ff_ext::BabyBearExt4 as ExtensionField>::BaseField> =
-                rmm_buffer.to_vec().map_err(|e| {
-                    ZKVMError::InvalidWitness(format!("GPU D2H copy failed: {e}").into())
-                })?;
-
-            let data: Vec<E::BaseField> = unsafe {
-                let mut data = std::mem::ManuallyDrop::new(gpu_data);
-                Vec::from_raw_parts(
-                    data.as_mut_ptr() as *mut E::BaseField,
-                    data.len(),
-                    data.capacity(),
-                )
-            };
-
-            let mut rmm = RowMajorMatrix::<E::BaseField>::new_by_rotation(
-                num_instances,
-                rotation,
-                num_witin,
-                InstancePaddingStrategy::Default,
-            );
-            std::ops::DerefMut::deref_mut(&mut rmm).values[..data.len()].copy_from_slice(&data);
-            Ok::<_, ZKVMError>(rmm)
-        })?
-    } else {
-        let mut rmm = RowMajorMatrix::<E::BaseField>::new_by_rotation(
-            num_instances,
-            rotation,
-            num_witin,
-            InstancePaddingStrategy::Default,
-        );
-        rmm.set_device_backing(
-            gpu_result.witness.device_buffer,
-            DeviceMatrixLayout::ColMajor,
-        );
-        rmm
-    };
-    Ok(raw_witin)
-}
-
-/// Keccak-specific GPU witness generation, separate from `gpu_assign_instances_inner` because:
-///   1. Rotation: each instance spans 32 rows (not 1), requiring `new_by_rotation`
-///   2. Structural witness: 3 selectors (sel_first/sel_last/sel_all) vs the standard 1
-///   3. Input packing: needs `packed_instances` with `syscall_witnesses`
-///
-/// The LK/shardram collection logic (Steps 6-7) is identical to the standard path;
-/// it is duplicated here rather than shared.
 fn gpu_assign_keccak_inner<E: ExtensionField>(
     config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
     shard_ctx: &mut ShardContext,
@@ -447,7 +289,8 @@ fn gpu_assign_keccak_inner<E: ExtensionField>(
     let num_instances = step_indices.len();
     let num_rows = num_instances * 32; // 2^5 = 32 rows per instance
     let rotation = KECCAK_ROUNDS_CEIL_LOG2; // = 5
-    let materialize_initial_witness = crate::instructions::gpu::config::is_debug_compare_enabled();
+    let materialize_initial_witness = should_materialize_witness_on_gpu()
+        || crate::instructions::gpu::config::is_debug_compare_enabled();
 
     // Step 1: Extract column map
     let col_map = info_span!("col_map").in_scope(|| extract_keccak_column_map(config, num_witin));
