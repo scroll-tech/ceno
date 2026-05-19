@@ -27,16 +27,16 @@ version = "0.1.0"
 ceno_crypto_primitives = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_crypto_primitives", branch = "main" }
 ceno_syscall = { git = "https://github.com/scroll-tech/ceno-patch.git", package = "ceno_syscall", branch = "main" }
 
-ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", branch = "feat/witgen_gpu" }
-mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", branch = "feat/witgen_gpu" }
-multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", branch = "feat/witgen_gpu" }
-p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", branch = "feat/witgen_gpu" }
-poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", branch = "feat/witgen_gpu" }
-sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", branch = "feat/witgen_gpu" }
-sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", branch = "feat/witgen_gpu" }
-transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", branch = "feat/witgen_gpu" }
-whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", branch = "feat/witgen_gpu" }
-witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", branch = "feat/witgen_gpu" }
+ff_ext = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "ff_ext", branch = "feat/jagged_single_commit" }
+mpcs = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "mpcs", branch = "feat/jagged_single_commit" }
+multilinear_extensions = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "multilinear_extensions", branch = "feat/jagged_single_commit" }
+p3 = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "p3", branch = "feat/jagged_single_commit" }
+poseidon = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "poseidon", branch = "feat/jagged_single_commit" }
+sp1-curves = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sp1-curves", branch = "feat/jagged_single_commit" }
+sumcheck = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "sumcheck", branch = "feat/jagged_single_commit" }
+transcript = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "transcript", branch = "feat/jagged_single_commit" }
+whir = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "whir", branch = "feat/jagged_single_commit" }
+witness = { git = "https://github.com/scroll-tech/gkr-backend.git", package = "witness", branch = "feat/jagged_single_commit" }
 
 anyhow = { version = "1.0", default-features = false }
 bincode = "1"
