@@ -117,7 +117,7 @@ pub trait TraceCommitter<PB: ProverBackend> {
         &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<<PB::E as ExtensionField>::BaseField>>,
     ) -> (
-        Vec<PB::MultilinearPoly<'a>>,
+        Vec<Arc<PB::MultilinearPoly<'a>>>,
         PB::PcsData,
         <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Commitment,
     );
@@ -125,7 +125,7 @@ pub trait TraceCommitter<PB: ProverBackend> {
     /// Return an iterator over witness polynomials so backends can decide how to source them
     fn extract_witness_mles<'a, 'b>(
         &self,
-        witness_mles: &'b mut Vec<PB::MultilinearPoly<'a>>,
+        witness_mles: &'b mut Vec<Arc<PB::MultilinearPoly<'a>>>,
         pcs_data: &'b PB::PcsData, // used by GPU backend
     ) -> Box<dyn Iterator<Item = Arc<PB::MultilinearPoly<'a>>> + 'b>;
 }
@@ -280,7 +280,7 @@ pub trait DeviceTransporter<PB: ProverBackend> {
 
     fn transport_mles<'a>(
         &self,
-        mles: &[MultilinearExtension<'a, PB::E>],
+        mles: Vec<MultilinearExtension<'a, PB::E>>,
     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
 

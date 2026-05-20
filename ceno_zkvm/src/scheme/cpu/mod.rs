@@ -558,7 +558,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
         &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
-        Vec<MultilinearExtension<'a, E>>,
+        Vec<ArcMultilinearExtension<'a, E>>,
         PCS::CommitmentWithWitness,
         PCS::Commitment,
     ) {
@@ -576,22 +576,19 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TraceCommitter<CpuBa
         let prover_param = &self.backend.pp;
         let pcs_data = PCS::batch_commit(prover_param, traces.into_values().collect_vec()).unwrap();
         let commit = PCS::get_pure_commitment(&pcs_data);
-        let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data)
-            .into_par_iter()
-            .map(|mle| mle.as_ref().clone())
-            .collect::<Vec<_>>();
+        let mles = PCS::get_arc_mle_witness_from_commitment(&pcs_data);
 
         (mles, pcs_data, commit)
     }
 
     fn extract_witness_mles<'a, 'b>(
         &self,
-        witness_mles: &'b mut Vec<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
+        witness_mles: &'b mut Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>>,
         _pcs_data: &'b <CpuBackend<E, PCS> as ProverBackend>::PcsData,
     ) -> Box<
         dyn Iterator<Item = Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> + 'b,
     > {
-        let iter = witness_mles.drain(..).map(Arc::new);
+        let iter = witness_mles.drain(..);
         Box::new(iter)
     }
 }
@@ -1524,9 +1521,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> DeviceTransporter<Cp
 
     fn transport_mles<'a>(
         &self,
-        mles: &[MultilinearExtension<'a, E>],
+        mles: Vec<MultilinearExtension<'a, E>>,
     ) -> Vec<ArcMultilinearExtension<'a, E>> {
-        mles.iter().map(|mle| mle.clone().into()).collect_vec()
+        mles.into_iter().map(Arc::new).collect_vec()
     }
 }
 
