@@ -3229,8 +3229,11 @@ where
     let cuda_hal = get_cuda_hal().unwrap();
 
     let mut proofs = Vec::with_capacity(rounds.len());
+    let mut jagged_rounds = Vec::with_capacity(rounds.len());
+    let mut inner_rounds = Vec::with_capacity(rounds.len());
     for (pcs_data, openings) in rounds {
         let jagged_data = expect_jagged_pcs_data(pcs_data);
+        jagged_rounds.push(jagged_data);
         let openings_bb31: Vec<(Point<BB31Ext>, Vec<BB31Ext>)> = openings
             .iter()
             .map(|(point, evals)| {
@@ -3256,7 +3259,7 @@ where
                 .alloc_elems_from_host(q_host, None)
                 .expect("failed to upload Jagged q' for opening")
         };
-        let proof = jagged_batch_open_gpu::<BB31Ext, BabyBearBasefold, _>(
+        let (proof, rho_row, col_evals) = jagged_batch_open_gpu::<BB31Ext, BabyBearBasefold, _>(
             &jagged_data.cumulative_heights,
             jagged_data.total_evaluations,
             jagged_data.reshape_log_height,
@@ -3294,107 +3297,105 @@ where
                 .expect("Jagged GPU column eval failed");
                 (proof, rho, col_evals)
             },
-            |rho_row, col_evals, transcript| {
-                let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
-                let inner_openings = col_evals
-                    .chunks(group_width)
-                    .map(|evals| (rho_row.clone(), evals.to_vec()))
-                    .collect_vec();
-                let gpu_basefold_proof = cuda_hal
-                    .basefold
-                    .batch_open_with_trace_materializer(
-                        &cuda_hal,
-                        pp_bb31,
-                        vec![(&jagged_data.inner, inner_openings)],
-                        transcript,
-                        |_round_idx, trace_idx| {
-                            let h = 1usize << jagged_data.reshape_log_height;
-                            let w = jagged_data.total_evaluations.div_ceil(h);
-                            let group_start_col = trace_idx * group_width;
-                            assert!(
-                                group_start_col < w,
-                                "Jagged inner q' trace index out of range"
-                            );
-                            let group_cols = (w - group_start_col).min(group_width);
-                            let start = group_start_col * h;
-                            let group_elems = group_cols * h;
-                            let available_elems = jagged_data
-                                .total_evaluations
-                                .saturating_sub(start)
-                                .min(group_elems);
-                            let q_view = if let Some(q_evals) = jagged_data.q_evals.as_ref() {
-                                if available_elems == group_elems {
-                                    q_evals.owned_subrange(
-                                        start * std::mem::size_of::<BB31Base>()
-                                            ..(start + group_elems)
-                                                * std::mem::size_of::<BB31Base>(),
-                                    )
-                                } else {
-                                    let mut padded = cuda_hal
-                                    .alloc_elems_on_device(group_elems, true, None)
-                                    .map_err(|e| {
-                                        ceno_gpu::HalError::Unknown(format!(
-                                            "failed to alloc padded Jagged q' opening group: {e:?}"
-                                        ))
-                                    })?;
-                                    if available_elems > 0 {
-                                        let src_start = start * std::mem::size_of::<BB31Base>();
-                                        let src_end = src_start
-                                            + available_elems * std::mem::size_of::<BB31Base>();
-                                        let src = q_evals.as_slice_range(src_start..src_end);
-                                        let mut dst = padded.as_mut_slice_range(
-                                            0..available_elems * std::mem::size_of::<BB31Base>(),
-                                        );
-                                        cuda_hal.inner.dtod_copy_sync(&src, &mut dst).map_err(
-                                            |e| {
-                                                ceno_gpu::HalError::Unknown(format!(
-                                                    "failed to pad Jagged q' opening group: {e:?}"
-                                                ))
-                                            },
-                                        )?;
-                                    }
-                                    padded
-                                }
-                            } else {
-                                let q_host = jagged_data
-                                    .q_host_evals
-                                    .as_ref()
-                                    .expect("Jagged q' host backing missing for opening");
-                                cuda_hal
-                                    .alloc_elems_from_host(
-                                        &q_host[start..start + group_elems],
-                                        None,
-                                    )
-                                    .map_err(|e| {
-                                        ceno_gpu::HalError::Unknown(format!(
-                                            "failed to upload Jagged q' group for opening: {e:?}"
-                                        ))
-                                    })?
-                            };
-                            Ok(Some(witness::RowMajorMatrix::new_by_device_backing(
-                                h,
-                                group_cols,
-                                InstancePaddingStrategy::Default,
-                                q_view,
-                                DeviceMatrixLayout::ColMajor,
-                            )))
-                        },
-                    )
-                    .map_err(|e| mpcs::Error::InvalidPcsOpen(e.to_string()))?;
-                Ok(mpcs::basefold::structure::BasefoldProof {
-                    commits: gpu_basefold_proof.commits,
-                    query_opening_proof: gpu_basefold_proof.query_opening_proof,
-                    sumcheck_proof: gpu_basefold_proof.sumcheck_proof,
-                    final_message: gpu_basefold_proof.final_message,
-                    pow_witness: gpu_basefold_proof.pow_witness,
-                })
-            },
         )
         .expect("Jagged GPU batch open failed");
+        let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
+        let inner_openings = col_evals
+            .chunks(group_width)
+            .map(|evals| (rho_row.clone(), evals.to_vec()))
+            .collect_vec();
+        inner_rounds.push((&jagged_data.inner, inner_openings));
         proofs.push(proof);
     }
 
-    let jagged_proof = mpcs::JaggedProof::<BB31Ext, BabyBearBasefold> { rounds: proofs };
+    let gpu_basefold_proof = cuda_hal
+        .basefold
+        .batch_open_with_trace_materializer(
+            &cuda_hal,
+            pp_bb31,
+            inner_rounds,
+            basic_transcript,
+            |round_idx, trace_idx| {
+                let jagged_data = jagged_rounds[round_idx];
+                let group_width = mpcs::JAGGED_RESHAPE_GROUP_WIDTH;
+                let h = 1usize << jagged_data.reshape_log_height;
+                let w = jagged_data.total_evaluations.div_ceil(h);
+                let group_start_col = trace_idx * group_width;
+                assert!(
+                    group_start_col < w,
+                    "Jagged inner q' trace index out of range"
+                );
+                let group_cols = (w - group_start_col).min(group_width);
+                let start = group_start_col * h;
+                let group_elems = group_cols * h;
+                let available_elems = jagged_data
+                    .total_evaluations
+                    .saturating_sub(start)
+                    .min(group_elems);
+                let q_view = if let Some(q_evals) = jagged_data.q_evals.as_ref() {
+                    if available_elems == group_elems {
+                        q_evals.owned_subrange(
+                            start * std::mem::size_of::<BB31Base>()
+                                ..(start + group_elems) * std::mem::size_of::<BB31Base>(),
+                        )
+                    } else {
+                        let mut padded = cuda_hal
+                            .alloc_elems_on_device(group_elems, true, None)
+                            .map_err(|e| {
+                                ceno_gpu::HalError::Unknown(format!(
+                                    "failed to alloc padded Jagged q' opening group: {e:?}"
+                                ))
+                            })?;
+                        if available_elems > 0 {
+                            let src_start = start * std::mem::size_of::<BB31Base>();
+                            let src_end =
+                                src_start + available_elems * std::mem::size_of::<BB31Base>();
+                            let src = q_evals.as_slice_range(src_start..src_end);
+                            let mut dst = padded.as_mut_slice_range(
+                                0..available_elems * std::mem::size_of::<BB31Base>(),
+                            );
+                            cuda_hal.inner.dtod_copy_sync(&src, &mut dst).map_err(|e| {
+                                ceno_gpu::HalError::Unknown(format!(
+                                    "failed to pad Jagged q' opening group: {e:?}"
+                                ))
+                            })?;
+                        }
+                        padded
+                    }
+                } else {
+                    let q_host = jagged_data
+                        .q_host_evals
+                        .as_ref()
+                        .expect("Jagged q' host backing missing");
+                    cuda_hal
+                        .alloc_elems_from_host(&q_host[start..start + group_elems], None)
+                        .map_err(|e| {
+                            ceno_gpu::HalError::Unknown(format!(
+                                "failed to upload Jagged q' group for opening: {e:?}"
+                            ))
+                        })?
+                };
+                Ok(Some(witness::RowMajorMatrix::new_by_device_backing(
+                    h,
+                    group_cols,
+                    InstancePaddingStrategy::Default,
+                    q_view,
+                    DeviceMatrixLayout::ColMajor,
+                )))
+            },
+        )
+        .expect("Jagged GPU inner batch open failed");
+    let inner_proof = mpcs::basefold::structure::BasefoldProof {
+        commits: gpu_basefold_proof.commits,
+        query_opening_proof: gpu_basefold_proof.query_opening_proof,
+        sumcheck_proof: gpu_basefold_proof.sumcheck_proof,
+        final_message: gpu_basefold_proof.final_message,
+        pow_witness: gpu_basefold_proof.pow_witness,
+    };
+    let jagged_proof = mpcs::JaggedProof::<BB31Ext, BabyBearBasefold> {
+        rounds: proofs,
+        inner_proof,
+    };
     let proof: PCS::Proof = unsafe { std::mem::transmute_copy(&jagged_proof) };
     std::mem::forget(jagged_proof);
     proof
