@@ -198,13 +198,18 @@ pub fn gpu_batch_continuation_ec_on_device(
 }
 
 /// Try to run ShardRamCircuit assign_instances on GPU.
-/// Returns `Ok(None)` if GPU is unavailable or disabled.
+/// Returns `Ok(None)` if GPU is unavailable or disabled. On success the
+/// y6_lo byte / LTU lookup multiplicity is derived from `steps` and pushed
+/// into `lk_multiplicity` so the caller sees the same per-row contribution
+/// the CPU `assign_instance` path would have made.
 pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
     config: &ShardRamConfig<E>,
     num_witin: usize,
     num_structural_witin: usize,
+    lk_multiplicity: &mut crate::witness::LkMultiplicity,
     steps: &[crate::tables::ShardRamInput<E>],
 ) -> Result<Option<crate::tables::RMMCollections<E::BaseField>>, ZKVMError> {
+    use crate::scheme::constants::SEPTIC_EXTENSION_DEGREE;
     use ceno_gpu::{
         Buffer, CudaHal,
         bb31::CudaHalBB31,
@@ -496,6 +501,23 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
         );
     }
 
+    // The GPU witness kernel above writes the row data but does not run
+    // the per-row `assign_instance` CPU path that pushes the y6_lo byte /
+    // LTU lookup multiplicity. Derive the same contribution from `steps`
+    // here so the caller's `lk_multiplicity` mirrors the CPU branch and
+    // `combined_lk_mlt` balances the U8 / LTU table `mlt` columns. Source
+    // of truth for the queries is `ShardRamConfig::configure`.
+    for step in steps {
+        let y6_lo = crate::tables::y6_lo_value::<E>(
+            step.ec_point.point.y.0[SEPTIC_EXTENSION_DEGREE - 1],
+            step.record.is_to_write_set,
+        );
+        for i in 0..3 {
+            lk_multiplicity.assert_const_range((y6_lo >> (8 * i)) & 0xff, 8);
+        }
+        lk_multiplicity.lookup_ltu_byte((y6_lo >> 24) & 0xff, 60);
+    }
+
     Ok(Some([raw_witin, raw_structural_witin]))
 }
 
@@ -749,7 +771,10 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
 }
 
 /// Full GPU pipeline for assign_shared_circuit: device-resident EC merge + partition + assign.
-/// Returns `Ok(None)` if GPU is unavailable, `Ok(Some(inputs))` on success.
+/// Returns `Ok(None)` if GPU is unavailable, `Ok(Some((inputs, lk_mlt)))` on
+/// success — `lk_mlt` carries the y6_lo byte / LTU lookup multiplicity that
+/// `ShardRamConfig::configure` consumes (mirrors the per-row CPU push in
+/// `ShardRamCircuit::assign_instance`).
 #[allow(clippy::type_complexity)]
 pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     shard_ctx: &crate::e2e::ShardContext,
@@ -762,7 +787,13 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     num_witin: usize,
     num_structural_witin: usize,
     max_chunk: usize,
-) -> Result<Option<Vec<crate::structs::ChipInput<E>>>, ZKVMError> {
+) -> Result<
+    Option<(
+        Vec<crate::structs::ChipInput<E>>,
+        gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
+    )>,
+    ZKVMError,
+> {
     use crate::{
         instructions::gpu::{
             chips::shard_ram::gpu_batch_continuation_ec_on_device,
@@ -770,8 +801,10 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         },
         structs::{ChipInput, ZKVMWitnesses},
         tables::{ShardRamCircuit, ShardRamRecord, TableCircuit},
+        witness::LkMultiplicity,
     };
     use ceno_gpu::Buffer;
+    use ff_ext::SmallField;
     use gkr_iop::gpu::get_cuda_hal;
     use rayon::prelude::*;
     use tracing::info_span;
@@ -943,8 +976,51 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         total_records - num_writes,
     );
 
-    // 7. GPU assign_instances from device buffer (chunked by max_cross_shard)
     let record_u32s = std::mem::size_of::<ceno_gpu::common::witgen::types::GpuShardRamRecord>() / 4;
+    // GpuShardRamRecord (#[repr(C)]) layout — derived from shard_ram_record_to_gpu
+    // above: 4xu32 leader (addr, ram_type, value, _pad0), 3xu64
+    // (shard, local_clk, global_clk), 2xu32 (is_to_write_set, nonce),
+    // [u32; 7] point_x, [u32; 7] point_y. Total = 26 u32s.
+    debug_assert_eq!(record_u32s, 26, "GpuShardRamRecord layout changed");
+    const IS_TO_WRITE_SET_U32_OFFSET: usize = 10;
+    const POINT_Y6_U32_OFFSET: usize = 25;
+
+    // 6.5. Derive ShardRam's per-row y6_lo byte / LTU lookup multiplicity
+    // from the partitioned device buffer. Mirrors the per-row CPU push in
+    // `ShardRamCircuit::assign_instance`; the constraint these queries serve
+    // lives in `ShardRamConfig::configure` (y6_lo bytes + lookup_ltu_byte).
+    let lk_mlt = info_span!("gpu_shard_ram_derive_lk_mlt", n = total_records).in_scope(
+        || -> Result<gkr_iop::utils::lk_multiplicity::Multiplicity<u64>, ZKVMError> {
+            if total_records == 0 {
+                return Ok(gkr_iop::utils::lk_multiplicity::Multiplicity::default());
+            }
+            let host_data: Vec<u32> = partitioned_buf.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(
+                    format!("[GPU full pipeline] partitioned_buf D2H: {e}").into(),
+                )
+            })?;
+            debug_assert_eq!(host_data.len(), total_records * record_u32s);
+            let prime = <E::BaseField as SmallField>::MODULUS_U64;
+            let lk_multiplicity = LkMultiplicity::default();
+            host_data.par_chunks_exact(record_u32s).for_each(|rec| {
+                let mut local = lk_multiplicity.clone();
+                let is_to_write_set = rec[IS_TO_WRITE_SET_U32_OFFSET] != 0;
+                let y6 = rec[POINT_Y6_U32_OFFSET] as u64;
+                let y6_lo = if is_to_write_set {
+                    prime - 1 - y6
+                } else {
+                    y6 - 1
+                };
+                for i in 0..3 {
+                    local.assert_const_range((y6_lo >> (8 * i)) & 0xff, 8);
+                }
+                local.lookup_ltu_byte((y6_lo >> 24) & 0xff, 60);
+            });
+            Ok(lk_multiplicity.into_finalize_result())
+        },
+    )?;
+
+    // 7. GPU assign_instances from device buffer (chunked by max_cross_shard)
 
     let circuit_inputs =
         info_span!("shard_ram_assign_from_device", n = total_records).in_scope(|| {
@@ -993,7 +1069,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         total_records,
     );
 
-    Ok(Some(circuit_inputs))
+    Ok(Some((circuit_inputs, lk_mlt)))
 }
 
 #[cfg(test)]

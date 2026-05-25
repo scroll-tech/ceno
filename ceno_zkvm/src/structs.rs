@@ -8,6 +8,7 @@ use crate::{
         ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
         TableCircuit,
     },
+    witness::LkMultiplicity,
 };
 use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepIndex, StepRecord, WordAddr};
 use ff_ext::{ExtensionField, PoseidonField};
@@ -471,13 +472,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         config: &TC::TableConfig,
         input: &TC::WitnessInput<'_>,
     ) -> Result<(), ZKVMError> {
-        assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&TC::name()).unwrap();
+        let empty_mlt: Vec<FxHashMap<u64, usize>> = Vec::new();
+        // Scope the immutable borrow of `self.combined_lk_mlt` so the
+        // `self.witnesses.insert` mutable borrow below is legal.
         let witness = TC::assign_instances(
             config,
             cs.zkvm_v1_css.num_witin as usize,
             cs.zkvm_v1_css.num_structural_witin as usize,
-            self.combined_lk_mlt.as_ref().unwrap(),
+            self.combined_lk_mlt.as_ref().unwrap_or(&empty_mlt),
             input,
         )?;
         let witness_instances = witness[0].num_instances();
@@ -645,19 +648,25 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             }
         }
 
-        assert!(self.combined_lk_mlt.is_some());
+        assert!(self.combined_lk_mlt.is_none());
         let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
         let n_global = global_input.len();
+        // `ShardRamCircuit::assign_instances` ignores the `multiplicity`
+        // argument (its lookup contribution is derived externally above), so
+        // an empty slice is sufficient here and matches the pre-finalize
+        // ordering: `combined_lk_mlt` is intentionally `None` at this point.
+        let lk_multiplicity = LkMultiplicity::default();
         let circuit_inputs =
             info_span!("shard_ram_assign_instances", n = n_global).in_scope(|| {
                 global_input
                     .par_chunks(shard_ctx.max_num_cross_shard_accesses)
                     .map(|shard_accesses| {
-                        let witness = ShardRamCircuit::assign_instances(
+                        let mut lk_multiplicity = lk_multiplicity.clone();
+                        let witness = ShardRamCircuit::assign_instances_with_lk_multiplicities(
                             config,
                             cs.zkvm_v1_css.num_witin as usize,
                             cs.zkvm_v1_css.num_structural_witin as usize,
-                            self.combined_lk_mlt.as_ref().unwrap(),
+                            &mut lk_multiplicity,
                             shard_accesses,
                         )?;
                         let num_reads = shard_accesses
@@ -674,6 +683,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     })
                     .collect::<Result<Vec<_>, ZKVMError>>()
             })?;
+
+        assert!(
+            self.lk_mlts
+                .insert(
+                    ShardRamCircuit::<E>::name(),
+                    lk_multiplicity.into_finalize_result()
+                )
+                .is_none()
+        );
         // set num_read, num_write as separate instance
         assert!(
             self.witnesses
@@ -687,6 +705,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     /// Full GPU pipeline for assign_shared_circuit: keep data on device, minimal CPU roundtrips.
     ///
     /// Returns Ok(true) if successful, Ok(false) if unavailable (no shared device buffers).
+    /// On success, inserts both `ChipInput` and `ShardRamCircuit`'s derived
+    /// lookup multiplicity (for the y6_lo byte / LTU queries) into
+    /// `self.witnesses` / `self.lk_mlts` so the subsequent
+    /// `finalize_lk_multiplicities` folds the contribution into
+    /// `combined_lk_mlt` — matching the CPU shortcut's invariant.
     #[cfg(feature = "gpu")]
     fn try_assign_shared_circuit_gpu(
         &mut self,
@@ -695,7 +718,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<bool, ZKVMError> {
-        assert!(self.combined_lk_mlt.is_some());
+        assert!(self.combined_lk_mlt.is_none());
         let cs_inner = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
         let num_witin = cs_inner.zkvm_v1_css.num_witin as usize;
         let num_structural_witin = cs_inner.zkvm_v1_css.num_structural_witin as usize;
@@ -708,10 +731,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             num_structural_witin,
             shard_ctx.max_num_cross_shard_accesses,
         )? {
-            Some(circuit_inputs) => {
+            Some((circuit_inputs, lk_mlt)) => {
                 assert!(
                     self.witnesses
                         .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
+                        .is_none()
+                );
+                assert!(
+                    self.lk_mlts
+                        .insert(ShardRamCircuit::<E>::name(), lk_mlt)
                         .is_none()
                 );
                 Ok(true)
