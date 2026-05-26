@@ -132,9 +132,8 @@ impl ShardRamRecord {
                 hasher.permute(input.clone())[0..SEPTIC_EXTENSION_DEGREE].into();
             if let Some(p) = SepticPoint::from_x(x) {
                 let y6 = (p.y.0)[SEPTIC_EXTENSION_DEGREE - 1].to_canonical_u64();
-                // Skip the 2-torsion case where (x, y) == (x, -y); the y-sign
-                // binding in the circuit cannot distinguish read from write
-                // when y6 = 0.
+                // Reject cases where y6 = 0 because then the y-sign
+                // binding in the circuit cannot distinguish read from write.
                 if y6 != 0 {
                     // Strict `>`: `prime / 2 = (p-1)/2` belongs to the lower
                     // half (read region `[1, (p-1)/2]`). Using `>=` would
