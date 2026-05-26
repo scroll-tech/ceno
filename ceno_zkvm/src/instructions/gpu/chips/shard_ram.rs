@@ -7,7 +7,7 @@ use rustc_hash::FxHashSet;
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    tables::{MemFinalRecord, ShardRamConfig, ShardRamRecord},
+    tables::{MemFinalRecord, ShardRamConfig, ShardRamRecord, Y6_LO_TOP_BYTE_LT_BOUND},
 };
 
 /// Filter and construct a cross-shard ShardRamRecord without EC computation.
@@ -515,7 +515,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
         for i in 0..3 {
             lk_multiplicity.assert_const_range((y6_lo >> (8 * i)) & 0xff, 8);
         }
-        lk_multiplicity.lookup_ltu_byte((y6_lo >> 24) & 0xff, 60);
+        lk_multiplicity.lookup_ltu_byte((y6_lo >> 24) & 0xff, Y6_LO_TOP_BYTE_LT_BOUND);
     }
 
     Ok(Some([raw_witin, raw_structural_witin]))
@@ -1014,7 +1014,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
                 for i in 0..3 {
                     local.assert_const_range((y6_lo >> (8 * i)) & 0xff, 8);
                 }
-                local.lookup_ltu_byte((y6_lo >> 24) & 0xff, 60);
+                local.lookup_ltu_byte((y6_lo >> 24) & 0xff, Y6_LO_TOP_BYTE_LT_BOUND);
             });
             Ok(lk_multiplicity.into_finalize_result())
         },

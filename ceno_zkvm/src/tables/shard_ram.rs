@@ -41,6 +41,8 @@ use witness::{InstancePaddingStrategy, next_pow2_instance_padding, set_val};
 
 use crate::{instructions::riscv::constants::UInt, scheme::constants::SEPTIC_EXTENSION_DEGREE};
 
+pub(crate) const Y6_LO_TOP_BYTE_LT_BOUND: u64 = 60;
+
 /// A record for a read/write into the shard RAM
 #[derive(Debug, Clone)]
 pub struct ShardRamRecord {
@@ -305,7 +307,7 @@ impl<E: ExtensionField> ShardRamConfig<E> {
         // `lookup_ltu_byte(a, b, 1)` asserts `a, b` are bytes and `a < b`.
         cb.lookup_ltu_byte(
             y6_lo_bytes[3].expr(),
-            E::BaseField::from_canonical_u64(60).expr(),
+            E::BaseField::from_canonical_u64(Y6_LO_TOP_BYTE_LT_BOUND).expr(),
             Expression::ONE,
         )?;
         let y6_lo = y6_lo_bytes[0].expr()
@@ -423,7 +425,7 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
             let b = (y6_lo_u64 >> (8 * i)) & 0xff;
             lk_multiplicity.assert_const_range(b, 8);
         }
-        lk_multiplicity.lookup_ltu_byte((y6_lo_u64 >> 24) & 0xff, 60);
+        lk_multiplicity.lookup_ltu_byte((y6_lo_u64 >> 24) & 0xff, Y6_LO_TOP_BYTE_LT_BOUND);
 
         let ram_type = E::BaseField::from_canonical_u32(record.ram_type as u32);
         let mut input = [E::BaseField::ZERO; 16];
