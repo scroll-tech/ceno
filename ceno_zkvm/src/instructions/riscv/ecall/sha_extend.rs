@@ -40,7 +40,7 @@ pub struct EcallShaExtendConfig<E: ExtensionField> {
     pub layout: ShaExtendLayout<E>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, false>, MemAddr<E>),
     old_value: [WitIn; UINT_LIMBS],
     mem_rw: Vec<WriteMEM>,
 }
@@ -84,7 +84,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
         )?;
 
         let state_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
-        let state_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let state_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, false>::construct_circuit(
             cb,
             state_ptr_value.uint_unaligned().register_expr(),
             vm_state.ts,
@@ -112,7 +112,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
             .map(|(offset, val_before)| {
                 WriteMEM::construct_circuit(
                     cb,
-                    state_ptr.prev_value.as_ref().unwrap().value() + offset * WORD_SIZE as i32,
+                    state_ptr_value.expr_unaligned() + offset * WORD_SIZE as i32,
                     val_before.clone(),
                     val_before.clone(),
                     vm_state.ts,
@@ -122,7 +122,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
 
         mem_rw.push(WriteMEM::construct_circuit(
             cb,
-            state_ptr.prev_value.as_ref().unwrap().value(),
+            state_ptr_value.expr_unaligned(),
             [old_value[0].expr(), old_value[1].expr()],
             layout.output32_expr.clone(),
             vm_state.ts,
