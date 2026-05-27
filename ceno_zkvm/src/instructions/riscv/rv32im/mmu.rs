@@ -139,6 +139,16 @@ impl<E: ExtensionField> MmuConfig<E> {
         Ok(())
     }
 
+    /// Assign LocalFinalCircuit and ShardRamCircuit witnesses. Must run
+    /// *before* `ZKVMWitnesses::finalize_lk_multiplicities`:
+    /// - `ShardRamCircuit` accumulates its per-row y6_lo byte / LTU lookups
+    ///   into `lk_mlts` via `assign_shared_circuit` (which threads a shared
+    ///   `LkMultiplicity` through `assign_instances_with_lk_multiplicities`),
+    ///   so they land in `combined_lk_mlt` and balance the U8 / LTU table
+    ///   `mlt` columns.
+    /// - `LocalFinalCircuit` does not consume `combined_lk_mlt`; the regular
+    ///   `assign_table_circuit` entry tolerates a not-yet-finalized
+    ///   multiplicity by passing an empty slice.
     #[allow(clippy::too_many_arguments)]
     pub fn assign_continuation_circuit(
         &self,

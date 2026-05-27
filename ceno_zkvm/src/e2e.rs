@@ -1497,6 +1497,30 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &mut zkvm_witness,
                     )
             }).unwrap();
+
+            // Assign continuation circuits (LocalFinal + ShardRam) before
+            // `finalize_lk_multiplicities`: ShardRam's per-row y6_lo byte /
+            // LTU lookups must land in `combined_lk_mlt` so the U8 / LTU
+            // table `mlt` columns balance the logup grand product. LocalFinal
+            // does not consume `combined_lk_mlt`, so running it pre-finalize
+            // is safe — `assign_table_circuit` tolerates a not-yet-finalized
+            // multiplicity by passing an empty slice.
+            info_span!("assign_continuation").in_scope(|| {
+                system_config
+                    .mmu_config
+                    .assign_continuation_circuit(
+                        &system_config.zkvm_cs,
+                        &shard_ctx,
+                        &mut zkvm_witness,
+                        &pi,
+                        &emul_result.final_mem_state.reg,
+                        &emul_result.final_mem_state.mem,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.stack,
+                        &emul_result.final_mem_state.heap,
+                    )
+            }).unwrap();
+
             info_span!("finalize_lk_multiplicities").in_scope(|| {
                 zkvm_witness.finalize_lk_multiplicities();
             });
@@ -1533,6 +1557,23 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &cpu_dispatch_ctx,
                         shard_steps,
                         &mut cpu_witness,
+                    )
+                    .unwrap();
+                // Mirror the main path so `combined_lk_mlt` comparison stays
+                // meaningful: continuation pushes ShardRamCircuit's per-row
+                // y6_lo lookups into `lk_mlts` before finalize.
+                system_config
+                    .mmu_config
+                    .assign_continuation_circuit(
+                        &system_config.zkvm_cs,
+                        &cpu_shard_ctx,
+                        &mut cpu_witness,
+                        &pi,
+                        &emul_result.final_mem_state.reg,
+                        &emul_result.final_mem_state.mem,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.stack,
+                        &emul_result.final_mem_state.heap,
                     )
                     .unwrap();
                 cpu_witness.finalize_lk_multiplicities();
@@ -1622,22 +1663,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &mut zkvm_witness,
                         &pi,
                         &emul_result.final_mem_state.hints,
-                        &emul_result.final_mem_state.heap,
-                    )
-            }).unwrap();
-
-            info_span!("assign_continuation").in_scope(|| {
-                system_config
-                    .mmu_config
-                    .assign_continuation_circuit(
-                        &system_config.zkvm_cs,
-                        &shard_ctx,
-                        &mut zkvm_witness,
-                        &pi,
-                        &emul_result.final_mem_state.reg,
-                        &emul_result.final_mem_state.mem,
-                        &emul_result.final_mem_state.hints,
-                        &emul_result.final_mem_state.stack,
                         &emul_result.final_mem_state.heap,
                     )
             }).unwrap();

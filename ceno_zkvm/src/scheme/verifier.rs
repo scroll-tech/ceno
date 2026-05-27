@@ -698,8 +698,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             // compute logup_sum padding
             // getting the number of dummy padding item that we used in this opcode circuit
             let num_lks = circuit_vk.get_cs().num_lks();
+            // Chips with EC-sum ops carry an extra hypercube variable (one extra
+            // log2 row dimension) that the prover fills with EC-tree internal
+            // nodes; those rows are not "active" instances and their lookup
+            // queries collapse to the dummy_table_item via `selector_zero = 0`.
+            // Mirror that here so the verifier subtracts the right number of
+            // dummy queries.
+            let ecc_row_factor = if circuit_vk.get_cs().has_ecc_ops() {
+                2
+            } else {
+                1
+            };
+            let padded_rows = next_pow2_instance_padding(num_instance) * ecc_row_factor;
             // each padding instance contribute to (2^rotation_vars) dummy lookup padding
-            let num_padded_instance = (next_pow2_instance_padding(num_instance) - num_instance)
+            let num_padded_instance = (padded_rows - num_instance)
                 * (1 << circuit_vk.get_cs().rotation_vars().unwrap_or(0));
             // each instance contribute to (2^rotation_vars - rotated) dummy lookup padding
             let num_instance_non_selected = num_instance

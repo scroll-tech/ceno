@@ -307,9 +307,21 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
                 let num_lks: Var<C::N> =
                     builder.eval(C::N::from_canonical_usize(chip_vk.get_cs().num_lks()));
 
+                // Chips with EC-sum ops carry an extra hypercube variable; the
+                // prover fills it with EC-tree internal nodes that are inactive
+                // via `selector_zero = 0` and thus collapse to dummy lookup
+                // queries. Mirror the native verifier's adjustment here so the
+                // dummy multiplicity matches the prover.
+                let ecc_row_factor: usize = if circuit_vk.get_cs().has_ecc_ops() {
+                    2
+                } else {
+                    1
+                };
                 // each padding instance contribute to (2^rotation_vars) dummy lookup padding
-                let next_pow2_instance: Var<C::N> =
+                let next_pow2_chip_rows: Var<C::N> =
                     pow_2(builder, chip_proof.log2_num_instances.get_var());
+                let next_pow2_instance: Var<C::N> =
+                    builder.eval(next_pow2_chip_rows * C::N::from_canonical_usize(ecc_row_factor));
                 let num_padded_instance: Var<C::N> =
                     builder.eval(next_pow2_instance - chip_proof.sum_num_instances.clone());
                 let rotation_var: Var<C::N> = builder.constant(C::N::from_canonical_usize(
