@@ -1670,7 +1670,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
         &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<E::BaseField>>,
     ) -> (
-        Vec<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
+        Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>>,
         <GpuBackend<E, PCS> as ProverBackend>::PcsData,
         PCS::Commitment,
     ) {
@@ -1811,7 +1811,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
 
     fn extract_witness_mles<'a, 'b>(
         &self,
-        _witness_mles: &'b mut Vec<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>,
+        _witness_mles: &'b mut Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>>,
         pcs_data: &'b <GpuBackend<E, PCS> as ProverBackend>::PcsData,
     ) -> Box<
         dyn Iterator<Item = Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> + 'b,
@@ -3625,11 +3625,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
 
     fn transport_mles<'a>(
         &self,
-        mles: &[MultilinearExtension<'a, E>],
+        mles: Vec<MultilinearExtension<'a, E>>,
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let cuda_hal = get_cuda_hal().unwrap();
-        mles.iter()
-            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, mle)))
+        mles.into_iter()
+            .map(|mle| Arc::new(MultilinearExtensionGpu::from_ceno(&cuda_hal, &mle)))
             .collect_vec()
     }
 }

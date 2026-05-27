@@ -476,7 +476,7 @@ impl<
             // commit to witness traces in batch
             #[cfg_attr(not(feature = "gpu"), allow(unused_mut))]
             let (witness_mles, witness_data, witin_commit): (
-                Vec<PB::MultilinearPoly<'_>>,
+                Vec<Arc<PB::MultilinearPoly<'_>>>,
                 PB::PcsData,
                 PCS::Commitment,
             ) = {
@@ -490,7 +490,8 @@ impl<
                                 gpu_device,
                                 gpu_witness_traces,
                             );
-                        let witness_mles = unsafe { std::mem::transmute(gpu_witness_mles) };
+                        drop(gpu_witness_mles);
+                        let witness_mles = Vec::new();
                         let witness_data = unsafe { std::mem::transmute_copy(&gpu_witness_data) };
                         std::mem::forget(gpu_witness_data);
                         (witness_mles, witness_data, witin_commit)
@@ -894,7 +895,7 @@ impl<
         name_and_instances: Vec<(String, [usize; 2])>,
         structural_rmms: Vec<witness::RowMajorMatrix<E::BaseField>>,
         #[cfg(feature = "gpu")] witness_trace_rows: Vec<Option<usize>>,
-        #[allow(unused_mut)] mut witness_mles: Vec<PB::MultilinearPoly<'data>>,
+        #[allow(unused_mut)] mut witness_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
         witness_data: &PB::PcsData,
         mut fixed_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
         challenges: [E; 2],
@@ -967,7 +968,7 @@ impl<
                 let structural_witness = info_span!("[ceno] transport_structural_witness")
                     .in_scope(|| {
                         let structural_mles = structural_rmm.to_mles();
-                        self.device.transport_mles(&structural_mles)
+                        self.device.transport_mles(structural_mles)
                     });
                 (witness_mle, structural_witness, None)
             };
