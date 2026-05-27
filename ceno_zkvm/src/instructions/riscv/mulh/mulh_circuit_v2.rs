@@ -75,6 +75,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         let mut carry_low: [Expression<E>; UINT_LIMBS] =
             array::from_fn(|_| E::BaseField::ZERO.expr());
 
+        // FIXME(#1296): non-canonical over BabyBear.
         for i in 0..UINT_LIMBS {
             let expected_limb = if i == 0 {
                 E::BaseField::ZERO.expr()
