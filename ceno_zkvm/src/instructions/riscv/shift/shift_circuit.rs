@@ -84,6 +84,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let rs2_high = UInt::new(|| "rs2_high", circuit_builder)?;
 
         let outflow = circuit_builder.create_witin(|| "outflow");
+        circuit_builder.assert_const_range(
+            || "outflow in u32",
+            outflow.expr(),
+            UINT_LIMBS * LIMB_BITS,
+        )?;
         let assert_lt_config = AssertLtConfig::construct_circuit(
             circuit_builder,
             || "outflow < pow2_rs2_low5",
@@ -205,6 +210,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         };
 
         set_val!(instance, config.outflow, outflow);
+        lk_multiplicity.assert_const_range(outflow, UInt::<E>::TOTAL_BITS);
 
         config.rs1_read.assign_value(instance, rs1_read);
         config.rd_written.assign_value(instance, rd_written);
