@@ -1,41 +1,78 @@
+//! Byte-limb (u8) multiplication circuit for MUL / MULH / MULHU / MULHSU.
+//!
+//! Design mirrors SP1's `MulOperation`: operands are decomposed into bytes,
+//! the product is computed by a schoolbook convolution, and the carry between
+//! byte positions is a *genuine non-negative magnitude* that is directly
+//! range-checked. This is sound over a small prime field (e.g. BabyBear,
+//! `p ~ 2^31`) because every partial product `b[i] * c[j] <= 255*255 = 65025`
+//! and every byte column sum stays far below `p`, so the field equation is a
+//! faithful integer equation and the byte/carry decomposition is unique.
+//!
+//! For MULH / MULHU / MULHSU we compute the low 64 bits of the product of the
+//! (sign- or zero-extended) 64-bit operands; the high 32 bits are the result.
+
 use crate::{
     circuit_builder::CircuitBuilder,
+    e2e::ShardContext,
     error::ZKVMError,
+    gadgets::SignedExtendConfig,
     impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
-        gpu::utils::{LkOp, LkShardramSink},
+        gpu::utils::{LkOp, LkShardramSink, emit_byte_decomposition_ops},
         riscv::{
             RIVInstruction,
-            constants::{LIMB_BITS, UINT_LIMBS, UInt},
+            constants::{UINT_BYTE_LIMBS, UInt8},
             r_insn::RInstructionConfig,
         },
     },
     structs::ProgramParams,
-    uint::Value,
+    utils::split_to_u8,
     witness::LkMultiplicity,
 };
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
 use multilinear_extensions::{Expression, ToExpr as _, WitIn};
-use p3::field::{Field, FieldAlgebra};
+use std::{array, marker::PhantomData};
 use witness::set_val;
 
-use crate::e2e::ShardContext;
-use itertools::Itertools;
-use std::{array, marker::PhantomData};
+/// Number of bytes of the (possibly sign-extended) operands and product when
+/// the result is the high 32 bits of a 64-bit product.
+const LONG_BYTES: usize = 2 * UINT_BYTE_LIMBS;
+/// Bits used to range-check each byte-column carry. The honest carry is at most
+/// `8 * 255^2 / 255 ~ 2041 < 2^16`, and `2^16 * 256 + (column sum) << p` for the
+/// fields in use, so a 16-bit bound both admits the honest witness and prevents
+/// any field wraparound that could create a second solution.
+const CARRY_BITS: usize = 16;
+const BYTE_MASK: u64 = 0xff;
 
 pub struct MulhInstructionBase<E, I>(PhantomData<(E, I)>);
 
 pub struct MulhConfig<E: ExtensionField> {
-    pub(crate) rs1_read: UInt<E>,
-    pub(crate) rs2_read: UInt<E>,
+    pub(crate) rs1_read: UInt8<E>,
+    pub(crate) rs2_read: UInt8<E>,
+    pub(crate) rd_written: UInt8<E>,
     pub(crate) r_insn: RInstructionConfig<E>,
-    pub(crate) rd_low: [WitIn; UINT_LIMBS],
-    pub(crate) rd_high: Option<[WitIn; UINT_LIMBS]>,
-    pub(crate) rs1_ext: Option<WitIn>,
-    pub(crate) rs2_ext: Option<WitIn>,
+    /// Carry out of each byte column of the schoolbook product.
+    pub(crate) carry: Vec<WitIn>,
+    /// Low product bytes (intermediate) for the high-result variants.
+    pub(crate) prod_low: Option<[WitIn; UINT_BYTE_LIMBS]>,
+    /// Sign bit of `rs1`, present for signed operands (MULH, MULHSU).
+    pub(crate) rs1_sign: Option<SignedExtendConfig<E>>,
+    /// Sign bit of `rs2`, present for signed operands (MULH).
+    pub(crate) rs2_sign: Option<SignedExtendConfig<E>>,
     phantom: PhantomData<E>,
+}
+
+/// Returns `(rs1_signed, rs2_signed, result_is_high)` for the opcode.
+const fn signedness(kind: InsnKind) -> (bool, bool, bool) {
+    match kind {
+        InsnKind::MUL => (false, false, false),
+        InsnKind::MULHU => (false, false, true),
+        InsnKind::MULHSU => (true, false, true),
+        InsnKind::MULH => (true, true, true),
+        _ => panic!("unsupported instruction kind"),
+    }
 }
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBase<E, I> {
@@ -56,160 +93,15 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         circuit_builder: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<MulhConfig<E>, ZKVMError> {
-        assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
-        assert_eq!(UInt::<E>::LIMB_BITS, 16);
-        assert_eq!(UInt::<E>::NUM_LIMBS, 2);
+        let (rs1_signed, rs2_signed, is_high) = signedness(I::INST_KIND);
+        let num_bytes = if is_high { LONG_BYTES } else { UINT_BYTE_LIMBS };
 
-        // 0. Registers and instruction lookup
-        let rs1_read = UInt::new_unchecked(|| "rs1_read", circuit_builder)?;
-        let rs2_read = UInt::new_unchecked(|| "rs2_read", circuit_builder)?;
-
-        let rs1_expr = rs1_read.expr();
-        let rs2_expr = rs2_read.expr();
-
-        let carry_divide = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
-
-        let rd_low: [_; UINT_LIMBS] =
-            array::from_fn(|i| circuit_builder.create_witin(|| format!("rd_low_{i}")));
-
-        let mut carry_low: [Expression<E>; UINT_LIMBS] =
-            array::from_fn(|_| E::BaseField::ZERO.expr());
-
-        // FIXME(#1296): non-canonical over BabyBear.
-        for i in 0..UINT_LIMBS {
-            let expected_limb = if i == 0 {
-                E::BaseField::ZERO.expr()
-            } else {
-                carry_low[i - 1].clone()
-            } + (0..=i).fold(E::BaseField::ZERO.expr(), |ac, k| {
-                ac + (rs1_expr[k].clone() * rs2_expr[i - k].clone())
-            });
-            carry_low[i] = carry_divide.expr() * (expected_limb - rd_low[i].expr());
-        }
-
-        for (i, (rd_low, carry_low)) in rd_low.iter().zip(carry_low.iter()).enumerate() {
-            circuit_builder.assert_dynamic_range(
-                || format!("range_check_rd_low_{i}"),
-                rd_low.expr(),
-                E::BaseField::from_canonical_u32(16).expr(),
-            )?;
-            circuit_builder.assert_dynamic_range(
-                || format!("range_check_carry_low_{i}"),
-                carry_low.expr(),
-                E::BaseField::from_canonical_u32(18).expr(),
-            )?;
-        }
-
-        let (rd_high, rs1_ext, rs2_ext) = match I::INST_KIND {
-            InsnKind::MULH | InsnKind::MULHU | InsnKind::MULHSU => {
-                let rd_high: [_; UINT_LIMBS] =
-                    array::from_fn(|i| circuit_builder.create_witin(|| format!("rd_high_{i}")));
-
-                let rs1_ext = circuit_builder.create_witin(|| "rs1_ext".to_string());
-                let rs2_ext = circuit_builder.create_witin(|| "rs2_ext".to_string());
-
-                let mut carry_high: [Expression<E>; UINT_LIMBS] =
-                    array::from_fn(|_| E::BaseField::ZERO.expr());
-                for j in 0..UINT_LIMBS {
-                    let expected_limb =
-                        if j == 0 {
-                            carry_low[UINT_LIMBS - 1].clone()
-                        } else {
-                            carry_high[j - 1].clone()
-                        } + ((j + 1)..UINT_LIMBS).fold(E::BaseField::ZERO.expr(), |acc, k| {
-                            acc + (rs1_expr[k].clone() * rs2_expr[UINT_LIMBS + j - k].clone())
-                        }) + (0..(j + 1)).fold(E::BaseField::ZERO.expr(), |acc, k| {
-                            acc + (rs1_expr[k].clone() * rs2_ext.expr())
-                                + (rs2_expr[k].clone() * rs1_ext.expr())
-                        });
-                    carry_high[j] = carry_divide.expr() * (expected_limb - rd_high[j].expr());
-                }
-
-                for (i, (rd_high, carry_high)) in rd_high.iter().zip(carry_high.iter()).enumerate()
-                {
-                    circuit_builder.assert_dynamic_range(
-                        || format!("range_check_high_{i}"),
-                        rd_high.expr(),
-                        E::BaseField::from_canonical_u32(16).expr(),
-                    )?;
-                    circuit_builder.assert_dynamic_range(
-                        || format!("range_check_carry_high_{i}"),
-                        carry_high.expr(),
-                        E::BaseField::from_canonical_u32(18).expr(),
-                    )?;
-                }
-
-                let sign_mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1));
-                let ext_inv = E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).inverse();
-                let rs1_sign: Expression<E> = rs1_ext.expr() * ext_inv.expr();
-                let rs2_sign: Expression<E> = rs2_ext.expr() * ext_inv.expr();
-
-                circuit_builder.assert_bit(|| "rs1_sign_bool", rs1_sign.clone())?;
-                circuit_builder.assert_bit(|| "rs2_sign_bool", rs2_sign.clone())?;
-
-                match I::INST_KIND {
-                    InsnKind::MULH => {
-                        // Implement MULH circuit here
-                        circuit_builder.assert_dynamic_range(
-                            || "mulh_range_check_rs1_last",
-                            E::BaseField::from_canonical_u32(2).expr()
-                                * (rs1_expr[UINT_LIMBS - 1].clone() - rs1_sign * sign_mask.expr()),
-                            E::BaseField::from_canonical_u32(16).expr(),
-                        )?;
-                        circuit_builder.assert_dynamic_range(
-                            || "mulh_range_check_rs2_last",
-                            E::BaseField::from_canonical_u32(2).expr()
-                                * (rs2_expr[UINT_LIMBS - 1].clone() - rs2_sign * sign_mask.expr()),
-                            E::BaseField::from_canonical_u32(16).expr(),
-                        )?;
-                    }
-                    InsnKind::MULHU => {
-                        // Implement MULHU circuit here
-                        circuit_builder.require_zero(|| "mulhu_rs1_sign_zero", rs1_sign.clone())?;
-                        circuit_builder.require_zero(|| "mulhu_rs2_sign_zero", rs2_sign.clone())?;
-                    }
-                    InsnKind::MULHSU => {
-                        // Implement MULHSU circuit here
-                        circuit_builder
-                            .require_zero(|| "mulhsu_rs2_sign_zero", rs2_sign.clone())?;
-                        circuit_builder.assert_dynamic_range(
-                            || "mulhsu_range_check_rs1_last",
-                            E::BaseField::from_canonical_u32(2).expr()
-                                * (rs1_expr[UINT_LIMBS - 1].clone() - rs1_sign * sign_mask.expr()),
-                            E::BaseField::from_canonical_u32(16).expr(),
-                        )?;
-                        circuit_builder.assert_dynamic_range(
-                            || "mulhsu_range_check_rs2_last",
-                            rs2_expr[UINT_LIMBS - 1].clone() - rs2_sign * sign_mask.expr(),
-                            E::BaseField::from_canonical_u32(16).expr(),
-                        )?;
-                    }
-                    InsnKind::MUL => (),
-                    _ => unreachable!("Unsupported instruction kind"),
-                }
-
-                Some((rd_high, rs1_ext, rs2_ext))
-            }
-            InsnKind::MUL => None,
-            _ => unreachable!("unsupported instruction kind"),
-        }
-        .map(|(rd_high, rs1_ext, rs2_ext)| (Some(rd_high), Some(rs1_ext), Some(rs2_ext)))
-        .unwrap_or_else(|| (None, None, None));
-
-        let rd_written = match I::INST_KIND {
-            InsnKind::MULH | InsnKind::MULHU | InsnKind::MULHSU => UInt::from_exprs_unchecked(
-                rd_high
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .map(|w| w.expr())
-                    .collect_vec(),
-            ),
-            InsnKind::MUL => {
-                UInt::from_exprs_unchecked(rd_low.iter().map(|w| w.expr()).collect_vec())
-            }
-            _ => unreachable!("unsupported instruction kind"),
-        };
+        // Range-checked byte operands and result. `UInt8::new` constrains each
+        // byte to `[0, 256)` (via `assert_double_u8`), which makes the
+        // recombination into the 16-bit register limbs unique.
+        let rs1_read = UInt8::new(|| "rs1_read", circuit_builder)?;
+        let rs2_read = UInt8::new(|| "rs2_read", circuit_builder)?;
+        let rd_written = UInt8::new(|| "rd_written", circuit_builder)?;
 
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             circuit_builder,
@@ -219,15 +111,113 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
             rd_written.register_expr(),
         )?;
 
+        // Sign bits for signed operands (MSB of the most significant byte).
+        let rs1_sign = if rs1_signed {
+            Some(SignedExtendConfig::construct_byte(
+                circuit_builder,
+                rs1_read.expr()[UINT_BYTE_LIMBS - 1].clone(),
+            )?)
+        } else {
+            None
+        };
+        let rs2_sign = if rs2_signed {
+            Some(SignedExtendConfig::construct_byte(
+                circuit_builder,
+                rs2_read.expr()[UINT_BYTE_LIMBS - 1].clone(),
+            )?)
+        } else {
+            None
+        };
+
+        let byte_mask: Expression<E> = BYTE_MASK.into();
+        let extend =
+            |reg: &[Expression<E>], sign: &Option<SignedExtendConfig<E>>| -> Vec<Expression<E>> {
+                (0..num_bytes)
+                    .map(|i| {
+                        if i < UINT_BYTE_LIMBS {
+                            reg[i].clone()
+                        } else {
+                            match sign {
+                                Some(s) => s.expr() * byte_mask.clone(),
+                                None => Expression::ZERO,
+                            }
+                        }
+                    })
+                    .collect()
+            };
+        let b = extend(&rs1_read.expr(), &rs1_sign);
+        let c = extend(&rs2_read.expr(), &rs2_sign);
+
+        // Low product bytes are explicit (range-checked) witnesses only when the
+        // result is the high half; otherwise the result register *is* the low
+        // product.
+        let prod_low = if is_high {
+            let pl: [WitIn; UINT_BYTE_LIMBS] =
+                array::from_fn(|i| circuit_builder.create_witin(|| format!("prod_low_{i}")));
+            for (i, pair) in pl.chunks(2).enumerate() {
+                circuit_builder.assert_double_u8(
+                    || format!("prod_low_{i}_u8"),
+                    pair[0].expr(),
+                    pair[1].expr(),
+                )?;
+            }
+            Some(pl)
+        } else {
+            None
+        };
+
+        // Product byte at column `i`.
+        let prod_byte = |i: usize| -> Expression<E> {
+            if is_high {
+                if i < UINT_BYTE_LIMBS {
+                    prod_low.as_ref().unwrap()[i].expr()
+                } else {
+                    rd_written.expr()[i - UINT_BYTE_LIMBS].clone()
+                }
+            } else {
+                rd_written.expr()[i].clone()
+            }
+        };
+
+        let carry: Vec<WitIn> = (0..num_bytes)
+            .map(|i| circuit_builder.create_witin(|| format!("carry_{i}")))
+            .collect();
+
+        // Schoolbook convolution with magnitude carry propagation:
+        //   m[i] + carry[i-1] == prod[i] + carry[i] * 2^8
+        let base: Expression<E> = (1u64 << 8).into();
+        for i in 0..num_bytes {
+            let mut m = Expression::ZERO;
+            for j in 0..=i {
+                if i - j < num_bytes {
+                    m += b[j].clone() * c[i - j].clone();
+                }
+            }
+            let carry_in = if i > 0 {
+                carry[i - 1].expr()
+            } else {
+                Expression::ZERO
+            };
+            circuit_builder.require_zero(
+                || format!("mul_byte_{i}"),
+                m + carry_in - prod_byte(i) - carry[i].expr() * base.clone(),
+            )?;
+            circuit_builder.assert_const_range(
+                || format!("carry_{i}_range"),
+                carry[i].expr(),
+                CARRY_BITS,
+            )?;
+        }
+
         Ok(MulhConfig {
             rs1_read,
             rs2_read,
+            rd_written,
             r_insn,
-            rd_high,
-            rd_low,
-            // carry,
-            rs1_ext,
-            rs2_ext,
+            carry,
+            prod_low,
+            rs1_sign,
+            rs2_sign,
             phantom: PhantomData,
         })
     }
@@ -239,95 +229,49 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        // Read registers from step
         let rs1 = step.rs1().unwrap().value;
-        let rs1_val = Value::new_unchecked(rs1);
-        let rs1_limbs = rs1_val.as_u16_limbs();
-        config.rs1_read.assign_limbs(instance, rs1_limbs);
-
         let rs2 = step.rs2().unwrap().value;
-        let rs2_val = Value::new_unchecked(rs2);
-        let rs2_limbs = rs2_val.as_u16_limbs();
-        config.rs2_read.assign_limbs(instance, rs2_limbs);
+        let rd = step.rd().unwrap().value.after;
 
-        // R-type instruction
+        let rs1_bytes = split_to_u8::<u16>(rs1);
+        let rs2_bytes = split_to_u8::<u16>(rs2);
+        let rd_bytes = split_to_u8::<u16>(rd);
+        config.rs1_read.assign_limbs(instance, &rs1_bytes);
+        config.rs2_read.assign_limbs(instance, &rs2_bytes);
+        config.rd_written.assign_limbs(instance, &rd_bytes);
+
+        // Byte range-check lookups for the three operands.
+        for bytes in [&rs1_bytes, &rs2_bytes, &rd_bytes] {
+            for pair in bytes.chunks(2) {
+                lk_multiplicity.assert_double_u8(pair[0] as u64, pair[1] as u64);
+            }
+        }
+
         config
             .r_insn
             .assign_instance(instance, shard_ctx, lk_multiplicity, step)?;
 
-        let (rd_high, rd_low, carry, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
-            I::INST_KIND,
-            rs1_val
-                .as_u16_limbs()
-                .iter()
-                .map(|x| *x as u32)
-                .collect::<Vec<_>>()
-                .as_slice(),
-            rs2_val
-                .as_u16_limbs()
-                .iter()
-                .map(|x| *x as u32)
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
+        let (prod, carry, _rs1_sign, _rs2_sign) = run_mulh_bytes(I::INST_KIND, rs1, rs2);
 
-        for (rd_low, carry_low) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
-            lk_multiplicity.assert_dynamic_range(*rd_low as u64, 16);
-            lk_multiplicity.assert_dynamic_range(*carry_low as u64, 18);
+        if let Some(prod_low) = &config.prod_low {
+            for (i, w) in prod_low.iter().enumerate() {
+                set_val!(instance, w, prod[i] as u64);
+            }
+            for pair in prod[..UINT_BYTE_LIMBS].chunks(2) {
+                lk_multiplicity.assert_double_u8(pair[0] as u64, pair[1] as u64);
+            }
         }
 
-        for i in 0..UINT_LIMBS {
-            set_val!(instance, config.rd_low[i], rd_low[i] as u64);
-        }
-        match I::INST_KIND {
-            InsnKind::MULH | InsnKind::MULHU | InsnKind::MULHSU => {
-                for i in 0..UINT_LIMBS {
-                    set_val!(
-                        instance,
-                        config.rd_high.as_ref().unwrap()[i],
-                        rd_high[i] as u64
-                    );
-                }
-                set_val!(instance, config.rs1_ext.as_ref().unwrap(), rs1_ext as u64);
-                set_val!(instance, config.rs2_ext.as_ref().unwrap(), rs2_ext as u64);
-
-                for (rd_high, carry_high) in rd_high.iter().zip(carry[UINT_LIMBS..].iter()) {
-                    lk_multiplicity.assert_dynamic_range(*rd_high as u64, 16);
-                    lk_multiplicity.assert_dynamic_range(*carry_high as u64, 18);
-                }
-            }
-            _ => (),
+        for (w, c) in config.carry.iter().zip(carry.iter()) {
+            set_val!(instance, w, *c as u64);
+            lk_multiplicity.assert_const_range(*c as u64, CARRY_BITS);
         }
 
-        let sign_mask = 1 << (LIMB_BITS - 1);
-        let ext = (1 << LIMB_BITS) - 1;
-        let rs1_sign = rs1_ext / ext;
-        let rs2_sign = rs2_ext / ext;
-
-        match I::INST_KIND {
-            InsnKind::MULH => {
-                lk_multiplicity.assert_dynamic_range(
-                    (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
-                    16,
-                );
-                lk_multiplicity.assert_dynamic_range(
-                    (2 * (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask)) as u64,
-                    16,
-                );
-            }
-            InsnKind::MULHU => {}
-            InsnKind::MULHSU => {
-                lk_multiplicity.assert_dynamic_range(
-                    (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
-                    16,
-                );
-                lk_multiplicity.assert_dynamic_range(
-                    (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
-                    16,
-                );
-            }
-            InsnKind::MUL => {}
-            _ => unreachable!("Unsupported instruction kind"),
+        if let Some(s) = &config.rs1_sign {
+            s.assign_instance(instance, lk_multiplicity, ((rs1 >> 24) & 0xff) as u64)?;
+        }
+        if let Some(s) = &config.rs2_sign {
+            s.assign_instance(instance, lk_multiplicity, ((rs2 >> 24) & 0xff) as u64)?;
         }
 
         Ok(())
@@ -335,82 +279,39 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
 
     impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
         let rs1 = step.rs1().unwrap().value;
-        let rs1_val = Value::new_unchecked(rs1);
         let rs2 = step.rs2().unwrap().value;
-        let rs2_val = Value::new_unchecked(rs2);
+        let rd = step.rd().unwrap().value.after;
 
-        let (rd_high, rd_low, carry, rs1_ext, rs2_ext) = run_mulh::<UINT_LIMBS, LIMB_BITS>(
-            I::INST_KIND,
-            rs1_val
-                .as_u16_limbs()
-                .iter()
-                .map(|x| *x as u32)
-                .collect::<Vec<_>>()
-                .as_slice(),
-            rs2_val
-                .as_u16_limbs()
-                .iter()
-                .map(|x| *x as u32)
-                .collect::<Vec<_>>()
-                .as_slice(),
-        );
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(rs1));
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(rs2));
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(rd));
 
-        for (rd_low, carry_low) in rd_low.iter().zip(carry[0..UINT_LIMBS].iter()) {
+        let (prod, carry, _rs1_sign, _rs2_sign) = run_mulh_bytes(I::INST_KIND, rs1, rs2);
+        let (rs1_signed, rs2_signed, is_high) = signedness(I::INST_KIND);
+        if is_high {
+            emit_byte_decomposition_ops(sink, &prod[..UINT_BYTE_LIMBS]);
+        }
+        for c in &carry {
             sink.emit_lk(LkOp::DynamicRange {
-                value: *rd_low as u64,
-                bits: 16,
-            });
-            sink.emit_lk(LkOp::DynamicRange {
-                value: *carry_low as u64,
-                bits: 18,
+                value: *c as u64,
+                bits: CARRY_BITS as u32,
             });
         }
-
-        match I::INST_KIND {
-            InsnKind::MULH | InsnKind::MULHU | InsnKind::MULHSU => {
-                for (rd_high, carry_high) in rd_high.iter().zip(carry[UINT_LIMBS..].iter()) {
-                    sink.emit_lk(LkOp::DynamicRange {
-                        value: *rd_high as u64,
-                        bits: 16,
-                    });
-                    sink.emit_lk(LkOp::DynamicRange {
-                        value: *carry_high as u64,
-                        bits: 18,
-                    });
-                }
-            }
-            _ => {}
+        if rs1_signed {
+            let byte = (rs1 >> 24) & 0xff;
+            let msb = byte >> 7;
+            sink.emit_lk(LkOp::DynamicRange {
+                value: (2 * byte - (msb << 8)) as u64,
+                bits: 8,
+            });
         }
-
-        let sign_mask = 1 << (LIMB_BITS - 1);
-        let ext = (1 << LIMB_BITS) - 1;
-        let rs1_sign = rs1_ext / ext;
-        let rs2_sign = rs2_ext / ext;
-        let rs1_limbs = rs1_val.as_u16_limbs();
-        let rs2_limbs = rs2_val.as_u16_limbs();
-
-        match I::INST_KIND {
-            InsnKind::MULH => {
-                sink.emit_lk(LkOp::DynamicRange {
-                    value: (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
-                    bits: 16,
-                });
-                sink.emit_lk(LkOp::DynamicRange {
-                    value: (2 * (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask)) as u64,
-                    bits: 16,
-                });
-            }
-            InsnKind::MULHSU => {
-                sink.emit_lk(LkOp::DynamicRange {
-                    value: (2 * (rs1_limbs[UINT_LIMBS - 1] as u32 - rs1_sign * sign_mask)) as u64,
-                    bits: 16,
-                });
-                sink.emit_lk(LkOp::DynamicRange {
-                    value: (rs2_limbs[UINT_LIMBS - 1] as u32 - rs2_sign * sign_mask) as u64,
-                    bits: 16,
-                });
-            }
-            _ => {}
+        if rs2_signed {
+            let byte = (rs2 >> 24) & 0xff;
+            let msb = byte >> 7;
+            sink.emit_lk(LkOp::DynamicRange {
+                value: (2 * byte - (msb << 8)) as u64,
+                bits: 8,
+            });
         }
     });
 
@@ -425,64 +326,50 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for MulhInstructionBas
     });
 }
 
-fn run_mulh<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
-    kind: InsnKind,
-    x: &[u32],
-    y: &[u32],
-) -> ([u32; NUM_LIMBS], [u32; NUM_LIMBS], Vec<u32>, u32, u32) {
-    let mut mul = [0u64; NUM_LIMBS];
-    let mut carry = vec![0; 2 * NUM_LIMBS];
-    for i in 0..NUM_LIMBS {
-        if i > 0 {
-            mul[i] = carry[i - 1];
+/// Compute the schoolbook product bytes and per-column carries for the given
+/// opcode. Returns `(product_bytes, carries, rs1_sign, rs2_sign)`. For the
+/// low-result opcode (MUL) the product has `UINT_BYTE_LIMBS` bytes; otherwise it
+/// has `LONG_BYTES` (low 4 are the intermediate low product, high 4 the result).
+fn run_mulh_bytes(kind: InsnKind, rs1: u32, rs2: u32) -> (Vec<u8>, Vec<u32>, u8, u8) {
+    let (rs1_signed, rs2_signed, is_high) = signedness(kind);
+    let num_bytes = if is_high { LONG_BYTES } else { UINT_BYTE_LIMBS };
+
+    let rs1_le = rs1.to_le_bytes();
+    let rs2_le = rs2.to_le_bytes();
+    let rs1_sign = if rs1_signed { rs1_le[3] >> 7 } else { 0 };
+    let rs2_sign = if rs2_signed { rs2_le[3] >> 7 } else { 0 };
+
+    let mut b = vec![0u8; num_bytes];
+    let mut c = vec![0u8; num_bytes];
+    b[..UINT_BYTE_LIMBS].copy_from_slice(&rs1_le);
+    c[..UINT_BYTE_LIMBS].copy_from_slice(&rs2_le);
+    if is_high {
+        let b_fill = if rs1_sign == 1 { 0xff } else { 0 };
+        let c_fill = if rs2_sign == 1 { 0xff } else { 0 };
+        for i in UINT_BYTE_LIMBS..num_bytes {
+            b[i] = b_fill;
+            c[i] = c_fill;
         }
-        for j in 0..=i {
-            mul[i] += (x[j] * y[i - j]) as u64;
-        }
-        carry[i] = mul[i] >> LIMB_BITS;
-        mul[i] %= 1 << LIMB_BITS;
     }
 
-    let x_ext = (x[NUM_LIMBS - 1] >> (LIMB_BITS - 1))
-        * if kind == InsnKind::MULHU {
-            0
-        } else {
-            (1 << LIMB_BITS) - 1
-        };
-    let y_ext = (y[NUM_LIMBS - 1] >> (LIMB_BITS - 1))
-        * if kind == InsnKind::MULH {
-            (1 << LIMB_BITS) - 1
-        } else {
-            0
-        };
-
-    let mut mulh = [0; NUM_LIMBS];
-    let mut x_prefix = 0;
-    let mut y_prefix = 0;
-
-    for i in 0..NUM_LIMBS {
-        x_prefix += x[i];
-        y_prefix += y[i];
-        mulh[i] = carry[NUM_LIMBS + i - 1]
-            + (x_prefix as u64 * y_ext as u64)
-            + (y_prefix as u64 * x_ext as u64);
-        for j in (i + 1)..NUM_LIMBS {
-            mulh[i] += (x[j] * y[NUM_LIMBS + i - j]) as u64;
+    let mut acc = vec![0u64; num_bytes];
+    for (j, bj) in b.iter().enumerate() {
+        for (k, ck) in c.iter().enumerate() {
+            if j + k < num_bytes {
+                acc[j + k] += (*bj as u64) * (*ck as u64);
+            }
         }
-        carry[NUM_LIMBS + i] = mulh[i] >> LIMB_BITS;
-        mulh[i] %= 1 << LIMB_BITS;
     }
 
-    let mut mulh_u32 = [0u32; NUM_LIMBS];
-    let mut mul_u32 = [0u32; NUM_LIMBS];
-    let mut carry_u32 = vec![0u32; 2 * NUM_LIMBS];
-
-    for i in 0..NUM_LIMBS {
-        mul_u32[i] = mul[i] as u32;
-        mulh_u32[i] = mulh[i] as u32;
-        carry_u32[i] = carry[i] as u32;
-        carry_u32[i + NUM_LIMBS] = carry[i + NUM_LIMBS] as u32;
+    let mut prod = vec![0u8; num_bytes];
+    let mut carry = vec![0u32; num_bytes];
+    let mut carry_in = 0u64;
+    for i in 0..num_bytes {
+        let v = acc[i] + carry_in;
+        prod[i] = (v & BYTE_MASK) as u8;
+        carry_in = v >> 8;
+        carry[i] = carry_in as u32;
     }
 
-    (mulh_u32, mul_u32, carry_u32, x_ext, y_ext)
+    (prod, carry, rs1_sign, rs2_sign)
 }
