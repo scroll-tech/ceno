@@ -1,20 +1,19 @@
 use std::marker::PhantomData;
 
-use ceno_emul::{Change, InsnKind, StepRecord, SyscallSpec};
+use ceno_emul::{Change, FullTracer as Tracer, InsnKind, StepRecord, SyscallSpec};
 use ff_ext::ExtensionField;
 use itertools::Itertools;
 
 use super::{super::insn_base::WriteMEM, dummy_circuit::DummyConfig};
 use crate::{
     Value,
+    chip_handler::RegisterChipOperations,
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::{
-        Instruction,
-        riscv::{constants::UInt, insn_base::WriteRD},
-    },
-    structs::ProgramParams,
+    gadgets::AssertLtConfig,
+    instructions::{Instruction, riscv::constants::UInt},
+    structs::{ProgramParams, RAMType},
     witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
@@ -59,14 +58,30 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             None
         };
 
-        let reg_writes = (0..S::REG_OPS_COUNT)
+        // Syscall argument registers are read-only pointers. The emulator
+        // tracks them at `SUBCYCLE_RS1` (`SyscallEffects::finalize`), so read
+        // them here at the same subcycle; treating them as RD writes would
+        // desync the register-bus timestamps and break `prod_r == prod_w`.
+        let reg_reads = (0..S::REG_OPS_COUNT)
             .map(|i| {
-                let val_after = UInt::new_unchecked(|| format!("reg_after_{}", i), cb)?;
-
-                WriteRD::construct_circuit(cb, val_after.register_expr(), dummy_insn.ts())
-                    .map(|writer| (val_after, writer))
+                let val = UInt::new_unchecked(|| format!("reg_read_{i}"), cb)?;
+                let id = cb.create_witin(|| format!("reg_id_{i}"));
+                let prev_ts = cb.create_witin(|| format!("prev_reg_ts_{i}"));
+                let (_, lt_cfg) = cb.register_read(
+                    || format!("read_reg_{i}"),
+                    id,
+                    prev_ts.expr(),
+                    dummy_insn.ts().expr() + Tracer::SUBCYCLE_RS1,
+                    val.register_expr(),
+                )?;
+                Ok(RegReadOp {
+                    val,
+                    id,
+                    prev_ts,
+                    lt_cfg,
+                })
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, ZKVMError>>()?;
 
         let mem_writes = (0..S::MEM_OPS_COUNT)
             .map(|i| {
@@ -87,7 +102,7 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
         Ok(LargeEcallConfig {
             dummy_insn,
             start_addr,
-            reg_writes,
+            reg_reads,
             mem_writes,
         })
     }
@@ -115,10 +130,29 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
             );
         }
 
-        // Assign registers.
-        for ((value, writer), op) in config.reg_writes.iter().zip_eq(&ops.reg_ops) {
-            value.assign_value(instance, Value::new_unchecked(op.value.after));
-            writer.assign_op(instance, shard_ctx, lk_multiplicity, step.cycle(), op)?;
+        // Assign registers (read-only, tracked at SUBCYCLE_RS1).
+        for (reg, op) in config.reg_reads.iter().zip_eq(&ops.reg_ops) {
+            reg.val
+                .assign_value(instance, Value::new_unchecked(op.value.after));
+            let shard_prev_cycle = shard_ctx.aligned_prev_ts(op.previous_cycle);
+            let shard_cycle = step.cycle() - shard_ctx.current_shard_offset_cycle();
+            set_val!(instance, reg.id, op.register_index() as u64);
+            set_val!(instance, reg.prev_ts, shard_prev_cycle);
+            reg.lt_cfg.assign_instance(
+                instance,
+                lk_multiplicity,
+                shard_prev_cycle,
+                shard_cycle + Tracer::SUBCYCLE_RS1,
+            )?;
+            shard_ctx.send(
+                RAMType::Register,
+                op.addr,
+                op.register_index() as u64,
+                step.cycle() + Tracer::SUBCYCLE_RS1,
+                op.previous_cycle,
+                op.value.after,
+                None,
+            );
         }
 
         // Assign memory.
@@ -137,11 +171,21 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
     }
 }
 
+/// Read-only access to a syscall argument register, tracked at
+/// `SUBCYCLE_RS1` to match `SyscallEffects::finalize` (#1296).
+#[derive(Debug)]
+struct RegReadOp<E: ExtensionField> {
+    val: UInt<E>,
+    id: WitIn,
+    prev_ts: WitIn,
+    lt_cfg: AssertLtConfig,
+}
+
 #[derive(Debug)]
 pub struct LargeEcallConfig<E: ExtensionField> {
     dummy_insn: DummyConfig<E>,
 
-    reg_writes: Vec<(UInt<E>, WriteRD<E>)>,
+    reg_reads: Vec<RegReadOp<E>>,
 
     start_addr: Option<WitIn>,
     mem_writes: Vec<(WitIn, Change<UInt<E>>, WriteMEM)>,
