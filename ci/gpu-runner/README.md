@@ -114,10 +114,20 @@ runs the example single-shard and multi-shard.
 ```sh
 crontab -e
 # add (replace /ABS/PATH with this checkout's absolute path):
-* * * * * /ABS/PATH/ceno/ci/gpu-runner/watchdog.sh >> /var/log/ceno-gpu-runner.log 2>&1
+* * * * * /ABS/PATH/ceno/ci/gpu-runner/watchdog.sh >> $HOME/ceno-gpu-runner.log 2>&1
 ```
 
 The watchdog checks every minute and restarts on stop or GPU-unreachable.
+
+> **Log to a path the cron user can write.** The example logs to `$HOME`. Do
+> **not** use `/var/log/…` unless the user owning the crontab can write there —
+> if the `>>` redirect can't open its target, cron aborts the line *before*
+> `watchdog.sh` runs, so it silently never executes (the error is mailed to the
+> user, e.g. `/var/mail/<user>`, not logged). To use `/var/log` anyway:
+> `sudo touch /var/log/ceno-gpu-runner.log && sudo chown "$USER" /var/log/ceno-gpu-runner.log`.
+>
+> Also ensure the crontab user is in the `docker` group, or the watchdog can't
+> reach the daemon.
 
 ## Files
 
