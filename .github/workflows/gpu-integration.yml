@@ -44,8 +44,11 @@ jobs:
       # COMMENTED OUT (it's a local-dev affordance), so by default cargo would
       # build the public, API-incompatible ceno-gpu-mock. Clone the backend next
       # to the checkout, then activate the patch.
+      # --recurse-submodules: cuda_hal depends on the `sppark` submodule (public),
+      # whose crate lives at ceno-gpu/sppark/rust; without it cargo fails to find
+      # sppark/rust/Cargo.toml.
       - name: Clone private ceno-gpu backend
-        run: git clone git@github.com:scroll-tech/ceno-gpu.git ../ceno-gpu
+        run: git clone --recurse-submodules git@github.com:scroll-tech/ceno-gpu.git ../ceno-gpu
 
       - name: Activate private ceno-gpu patch
         run: |
