@@ -96,6 +96,19 @@ runs-on: [ self-hosted, Linux, X64, gpu ]
 (Non-GPU jobs keep using `[ self-hosted, Linux, X64 ]` and won't be scheduled
 here because they don't request the `gpu` label.)
 
+## GPU integration workflow
+
+`.github/workflows/gpu-integration.yml` proves an example end-to-end on the GPU
+prover (`--features gpu`) on this runner. It's opt-in (GPU time is scarce):
+
+- **Manually** — Actions tab → *GPU Integration* → *Run workflow*. Optionally
+  set the `example` input (default `keccak_syscall`).
+- **On a PR** — add the `gpu-ci` label to the PR.
+
+It loads `secrets.CENO_GPU_DEPLOY_KEY` into ssh-agent, clones the private
+`ceno-gpu` backend to `../ceno-gpu` (the path the Cargo `[patch]` expects), then
+runs the example single-shard and multi-shard.
+
 ## Enable the cron watchdog
 
 ```sh

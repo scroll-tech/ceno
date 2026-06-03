@@ -1,0 +1,72 @@
+name: GPU Integration
+
+# Runs example proving end-to-end on the GPU prover (`--features gpu`) on the
+# self-hosted GPU runner (see ci/gpu-runner/). Triggered manually via the Actions
+# tab, or on a PR that carries the `gpu-ci` label (kept opt-in because GPU runner
+# time is scarce).
+on:
+  workflow_dispatch:
+    inputs:
+      example:
+        description: "Example target to prove on GPU"
+        default: keccak_syscall
+        type: string
+  pull_request:
+    types: [ labeled, synchronize, opened, reopened, ready_for_review ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  gpu-integration:
+    # Manual dispatch always runs; PRs only when non-draft and labeled `gpu-ci`.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.draft == false &&
+       contains(github.event.pull_request.labels.*.name, 'gpu-ci'))
+
+    name: GPU integration testing
+    timeout-minutes: 60
+    runs-on: [ self-hosted, Linux, X64, gpu ]
+
+    steps:
+      # Load the read-only deploy key for the private GPU backend into ssh-agent
+      # so the clone below can authenticate. No key is stored on the runner image.
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.CENO_GPU_DEPLOY_KEY }}
+
+      - uses: actions/checkout@v4
+
+      # Cargo.toml's active [patch] redirects `ceno_gpu` to the local path
+      # ../ceno-gpu/cuda_hal, so the private backend must be cloned alongside the
+      # checkout before a `--features gpu` build can resolve it.
+      - name: Clone private ceno-gpu backend
+        run: git clone git@github.com:scroll-tech/ceno-gpu.git ../ceno-gpu
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install m4
+        run: sudo apt-get install -y m4
+
+      # No actions/cache here: the GPU runner persists target/ on a host volume
+      # via CARGO_TARGET_DIR (see ci/gpu-runner/README.md), which is bigger and
+      # faster than GitHub's cache backend for a workspace this size.
+
+      - name: Run ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: |
+          cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
+            --platform=ceno \
+            examples/target/riscv32im-ceno-zkvm-elf/release/examples/${{ inputs.example || 'keccak_syscall' }}
+
+      - name: Run multi-shards ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: |
+          cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
+            --platform=ceno \
+            --max-cycle-per-shard=1600 \
+            examples/target/riscv32im-ceno-zkvm-elf/release/examples/${{ inputs.example || 'keccak_syscall' }}
