@@ -10,6 +10,15 @@
 #   * * * * * /ABS/PATH/ceno/ci/gpu-runner/watchdog.sh >> /var/log/ceno-gpu-runner.log 2>&1
 set -uo pipefail
 
+# Serialize watchdog runs with a non-blocking lock. The first startup triggers a
+# long image build during which the container still doesn't exist, so without
+# this the next cron ticks would race a second start-runner.sh. `flock -n` makes
+# overlapping ticks exit immediately instead.
+exec 9>/tmp/ceno-gpu-runner-watchdog.lock
+if ! flock -n 9; then
+    exit 0
+fi
+
 cd "$(dirname "$0")"
 CONTAINER_NAME="${CONTAINER_NAME:-ceno-gpu-runner}"
 TS() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
