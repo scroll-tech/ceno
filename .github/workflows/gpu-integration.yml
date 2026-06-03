@@ -39,11 +39,28 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      # Cargo.toml's active [patch] redirects `ceno_gpu` to the local path
-      # ../ceno-gpu/cuda_hal, so the private backend must be cloned alongside the
-      # checkout before a `--features gpu` build can resolve it.
+      # The real GPU backend lives in the private ceno-gpu repo. Cargo.toml ships
+      # with the [patch] that redirects `ceno_gpu` to ../ceno-gpu/cuda_hal
+      # COMMENTED OUT (it's a local-dev affordance), so by default cargo would
+      # build the public, API-incompatible ceno-gpu-mock. Clone the backend next
+      # to the checkout, then activate the patch.
       - name: Clone private ceno-gpu backend
         run: git clone git@github.com:scroll-tech/ceno-gpu.git ../ceno-gpu
+
+      - name: Activate private ceno-gpu patch
+        run: |
+          sed -i \
+            -e 's|^#\(\[patch\."https://github\.com/scroll-tech/ceno-gpu-mock\.git"\]\)|\1|' \
+            -e 's|^#\(ceno_gpu = { path = "\.\./ceno-gpu/cuda_hal"\)|\1|' \
+            Cargo.toml
+          echo "---- ceno-gpu [patch] block after edit ----"
+          grep -nA1 'patch\."https://github.com/scroll-tech/ceno-gpu-mock.git"' Cargo.toml || true
+          # Fail fast if the patch is still commented — otherwise cargo silently
+          # builds the incompatible mock (the failure mode this guards against).
+          if grep -qE '^[[:space:]]*#[[:space:]]*ceno_gpu = \{ path = "\.\./ceno-gpu/cuda_hal"' Cargo.toml; then
+            echo "::error::ceno-gpu patch still commented; refusing to build against ceno-gpu-mock"
+            exit 1
+          fi
 
       - uses: dtolnay/rust-toolchain@nightly
 
@@ -54,6 +71,10 @@ jobs:
       # via CARGO_TARGET_DIR (see ci/gpu-runner/README.md), which is bigger and
       # faster than GitHub's cache backend for a workspace this size.
 
+      # Release-only on purpose: unlike the CPU integration job we do NOT also
+      # run debug-mode steps. Building both profiles compiles the whole workspace
+      # — including the expensive CUDA cuda_hal crate — twice, doubling GPU build
+      # time for little extra coverage.
       - name: Run ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
