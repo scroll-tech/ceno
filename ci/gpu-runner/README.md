@@ -113,8 +113,8 @@ runs the example single-shard and multi-shard.
 
 ```sh
 crontab -e
-# add (use the ABSOLUTE path):
-* * * * * /home/zbx/blockchain/ceno/ci/gpu-runner/watchdog.sh >> /var/log/ceno-gpu-runner.log 2>&1
+# add (replace /ABS/PATH with this checkout's absolute path):
+* * * * * /ABS/PATH/ceno/ci/gpu-runner/watchdog.sh >> /var/log/ceno-gpu-runner.log 2>&1
 ```
 
 The watchdog checks every minute and restarts on stop or GPU-unreachable.
