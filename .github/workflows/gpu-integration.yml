@@ -78,9 +78,12 @@ jobs:
       # run debug-mode steps. Building both profiles compiles the whole workspace
       # — including the expensive CUDA cuda_hal crate — twice, doubling GPU build
       # time for little extra coverage.
+      # RUST_LOG=info: the e2e binary defaults to DEBUG when RUST_LOG is unset
+      # (see ceno_zkvm/src/bin/e2e.rs), which floods the CI log.
       - name: Run ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
+          RUST_LOG: info
         run: |
           cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
             --platform=ceno \
@@ -89,6 +92,7 @@ jobs:
       - name: Run multi-shards ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
+          RUST_LOG: info
         run: |
           cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
             --platform=ceno \
