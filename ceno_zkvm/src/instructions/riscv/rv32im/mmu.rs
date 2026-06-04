@@ -88,6 +88,12 @@ impl<E: ExtensionField> MmuConfig<E> {
         // fixed.register_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, &());
     }
 
+    /// Assigns the dynamic-init RAM tables (heap + hints). Must run *before*
+    /// `ZKVMWitnesses::finalize_lk_multiplicities`: `HintsInitCircuit` is
+    /// non-zero-init and range-checks its prover-witnessed init limbs (#999),
+    /// contributing per-limb u16 lookups that must land in `combined_lk_mlt`
+    /// via `assign_table_circuit_with_lk`. `HeapInitCircuit` is zero-init and
+    /// emits no lookups, so the plain `assign_table_circuit` path is fine.
     pub fn assign_dynamic_init_table_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
@@ -101,7 +107,7 @@ impl<E: ExtensionField> MmuConfig<E> {
             &self.heap_init_config,
             &(heap_final, pv, pv.heap_shard_len as usize),
         )?;
-        witness.assign_table_circuit::<HintsInitCircuit<E>>(
+        witness.assign_table_circuit_with_lk::<HintsInitCircuit<E>>(
             cs,
             &self.hints_init_config,
             &(hints_final, pv, pv.hint_shard_len as usize),
