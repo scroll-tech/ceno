@@ -491,6 +491,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             }
         }
 
+        let vk_digest = self.vk.compute_digest();
+        transcript.append_field_element_exts(&vk_digest);
+
         // Include transcript-visible public values in canonical circuit order.
         // This must match prover and recursion verifier exactly.
         for (_, circuit_vk) in self.vk.circuit_vks.iter() {

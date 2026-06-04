@@ -19,6 +19,8 @@ use gkr_iop::{
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::Instance;
+use p3::field::FieldAlgebra;
+use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSlice,
@@ -965,6 +967,101 @@ pub struct ZKVMVerifyingKey<
     pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     // circuit index -> circuit name
     // mainly used for debugging
+    #[serde(skip)]
     pub circuit_index_to_name: BTreeMap<usize, String>,
     pub mem_state_verifier: M,
+}
+
+/// Number of extension-field elements squeezed from the digest sponge.
+pub const VK_DIGEST_LEN: usize = 2;
+
+/// Convert bytes into base-field elements using ≤ 3-byte chunks.
+fn bytes_to_felts_safe<F: FieldAlgebra>(bytes: &[u8]) -> Vec<F> {
+    bytes
+        .chunks(3)
+        .map(|chunk| {
+            let mut arr = [0u8; 4];
+            arr[..chunk.len()].copy_from_slice(chunk);
+            F::from_canonical_u32(u32::from_le_bytes(arr))
+        })
+        .collect()
+}
+
+/// Hash the supplied VK preimage into `VK_DIGEST_LEN` extension elements.
+/// `circuits` must iterate in `BTreeMap` lex order on `name`.
+fn compute_vk_digest_inner<'a, E, PCS, M>(
+    vp: &PCS::VerifierParam,
+    entry_pc: u32,
+    fixed_commit: &Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    fixed_no_omc_init_commit: &Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    mem_state_verifier: &M,
+    circuits: impl IntoIterator<Item = (&'a String, &'a VerifyingKey<E>)>,
+) -> [E; VK_DIGEST_LEN]
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M: Serialize,
+{
+    let circuit_view: Vec<(&str, &ComposedConstrainSystem<E>)> = circuits
+        .into_iter()
+        .map(|(name, vk)| (name.as_str(), &vk.cs))
+        .collect();
+    let bytes = bincode::serialize(&(
+        vp,
+        entry_pc,
+        fixed_commit,
+        fixed_no_omc_init_commit,
+        mem_state_verifier,
+        &circuit_view,
+    ))
+    .expect("vk digest serialization is infallible for a valid VK");
+
+    let mut sponge = DefaultChallenger::<E::BaseField>::new_poseidon_default();
+    sponge.observe_slice(&bytes_to_felts_safe::<E::BaseField>(&bytes));
+    std::array::from_fn(|_| sponge.sample_ext_element())
+}
+
+impl<E, PCS, M> ZKVMVerifyingKey<E, PCS, M>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M: Clone + Default + Serialize + DeserializeOwned,
+{
+    /// Poseidon-sponge digest of the verifying key's soundness-bound fields.
+    pub fn compute_digest(&self) -> [E; VK_DIGEST_LEN] {
+        compute_vk_digest_inner::<E, PCS, M>(
+            &self.vp,
+            self.entry_pc,
+            &self.fixed_commit,
+            &self.fixed_no_omc_init_commit,
+            &self.mem_state_verifier,
+            self.circuit_vks.iter(),
+        )
+    }
+}
+
+impl<E, PCS> ZKVMProvingKey<E, PCS>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    /// Prover-side mirror of [`ZKVMVerifyingKey::compute_digest`] for `M`.
+    pub fn compute_vk_digest<M>(&self) -> [E; VK_DIGEST_LEN]
+    where
+        M: Clone + Default + From<Platform> + Serialize,
+    {
+        let mem_state_verifier: M = self
+            .program_ctx
+            .as_ref()
+            .map(|ctx| M::from(ctx.platform.clone()))
+            .unwrap_or_default();
+        compute_vk_digest_inner::<E, PCS, M>(
+            &self.vp,
+            self.entry_pc,
+            &self.fixed_commit,
+            &self.fixed_no_omc_init_commit,
+            &mem_state_verifier,
+            self.circuit_pks.iter().map(|(n, pk)| (n, &pk.vk)),
+        )
+    }
 }

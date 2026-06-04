@@ -23,6 +23,7 @@ mpcs = { workspace = true, features = ["whir"] }
 multilinear_extensions.workspace = true
 once_cell.workspace = true
 p3.workspace = true
+poseidon.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
