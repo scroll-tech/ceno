@@ -117,6 +117,25 @@ jobs:
           printf '[{"name":"%s proving time","unit":"s","value":%s}]\n' "$EXAMPLE" "$secs" > bench.json
           cat bench.json
 
+      # RUST_LOG=info: the e2e binary defaults to DEBUG when RUST_LOG is unset
+      # (see ceno_zkvm/src/bin/e2e.rs), which floods the CI log.
+      - name: Run multi-shards ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+          RUST_LOG: info
+        run: |
+          cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
+            --platform=ceno \
+            --max-cycle-per-shard=1600 \
+            examples/target/riscv32im-ceno-zkvm-elf/release/examples/${{ inputs.example || 'keccak_syscall' }}
+
+      # The benchmark action does `git switch gh-pages` in this working tree, which
+      # fails while the "Activate patch" step's edits to Cargo.toml/Cargo.lock are
+      # uncommitted. All proving steps are done, so restore the manifest to clean
+      # the tree (bench.json is untracked and survives the switch).
+      - name: Restore Cargo manifest before benchmark step
+        run: git checkout -- Cargo.toml Cargo.lock
+
       # Store history on gh-pages (master push only) and fail the job if proving
       # time is >10% slower than the latest recorded baseline.
       # Pinned to v1.20.7: it's the last release on the node20 runtime. v1.21.0+
@@ -134,15 +153,3 @@ jobs:
           comment-on-alert: true
           auto-push: ${{ github.event_name == 'push' }}
           save-data-file: ${{ github.event_name == 'push' }}
-
-      # RUST_LOG=info: the e2e binary defaults to DEBUG when RUST_LOG is unset
-      # (see ceno_zkvm/src/bin/e2e.rs), which floods the CI log.
-      - name: Run multi-shards ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
-        env:
-          RUSTFLAGS: "-C opt-level=3"
-          RUST_LOG: info
-        run: |
-          cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
-            --platform=ceno \
-            --max-cycle-per-shard=1600 \
-            examples/target/riscv32im-ceno-zkvm-elf/release/examples/${{ inputs.example || 'keccak_syscall' }}
