@@ -118,8 +118,11 @@ jobs:
 
       # Store history on gh-pages (master push only) and fail the job if proving
       # time is >10% slower than the latest recorded baseline.
+      # Pinned to v1.20.7: it's the last release on the node20 runtime. v1.21.0+
+      # require node24, which the runner image (actions runner v2.321.0) doesn't
+      # support yet — bump RUNNER_VERSION to a node24-capable runner to unpin.
       - name: Guard proving-time regression (>10%)
-        uses: benchmark-action/github-action-benchmark@v1
+        uses: benchmark-action/github-action-benchmark@v1.20.7
         with:
           name: GPU proving time
           tool: customSmallerIsBetter
