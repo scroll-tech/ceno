@@ -3,7 +3,9 @@ name: GPU Integration
 # Runs example proving end-to-end on the GPU prover (`--features gpu`) on the
 # self-hosted GPU runner (see ci/gpu-runner/). Triggered manually via the Actions
 # tab, or on a PR that carries the `gpu-ci` label (kept opt-in because GPU runner
-# time is scarce).
+# time is scarce). On push to master it records the keccak proving-time baseline
+# to gh-pages via github-action-benchmark; PRs compare against it and fail on a
+# >10% regression.
 on:
   workflow_dispatch:
     inputs:
@@ -13,6 +15,9 @@ on:
         type: string
   pull_request:
     types: [ labeled, synchronize, opened, reopened, ready_for_review ]
+  push:
+    branches:
+      - master
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
@@ -29,6 +34,12 @@ jobs:
     name: GPU integration testing
     timeout-minutes: 60
     runs-on: [ self-hosted, Linux, X64, gpu ]
+
+    # contents: write  -> github-action-benchmark pushes history to gh-pages (on master)
+    # pull-requests: write -> it comments on a PR when a regression is detected
+    permissions:
+      contents: write
+      pull-requests: write
 
     steps:
       # Load the read-only deploy key for the private GPU backend into ssh-agent
@@ -78,17 +89,50 @@ jobs:
       # run debug-mode steps. Building both profiles compiles the whole workspace
       # — including the expensive CUDA cuda_hal crate — twice, doubling GPU build
       # time for little extra coverage.
-      # RUST_LOG=info: the e2e binary defaults to DEBUG when RUST_LOG is unset
-      # (see ceno_zkvm/src/bin/e2e.rs), which floods the CI log.
-      - name: Run ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
+      - name: Build e2e (gpu)
         env:
           RUSTFLAGS: "-C opt-level=3"
-          RUST_LOG: info
-        run: |
-          cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
-            --platform=ceno \
-            examples/target/riscv32im-ceno-zkvm-elf/release/examples/${{ inputs.example || 'keccak_syscall' }}
+        run: cargo build --release --package ceno_zkvm --features gpu --bin e2e
 
+      # Prove single-shard (functional test) and extract the proving time. The
+      # metric is the `run_e2e_proof` span emitted by `--profiling 1` as a
+      # tracing-forest tree: "run_e2e_proof [ <dur> | <pct> / 100.00% ]". It is
+      # the proof-generation time only, independent of compilation.
+      - name: Prove ${{ inputs.example || 'keccak_syscall' }} on GPU + record proving time
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: |
+          set -o pipefail
+          EXAMPLE="${{ inputs.example || 'keccak_syscall' }}"
+          cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
+            --platform=ceno --profiling 1 \
+            "examples/target/riscv32im-ceno-zkvm-elf/release/examples/$EXAMPLE" 2>&1 | tee e2e_out.txt
+          line="$(grep -F 'run_e2e_proof [' e2e_out.txt | head -1)"
+          if [ -z "$line" ]; then echo "::error::run_e2e_proof span not found in output"; exit 1; fi
+          secs="$(echo "$line" \
+            | sed -E 's/.*run_e2e_proof \[ *([0-9.]+)(ns|µs|us|ms|m|s).*/\1 \2/' \
+            | awk '{u=$2;v=$1; if(u=="ns")v/=1e9; else if(u=="µs"||u=="us")v/=1e6; else if(u=="ms")v/=1e3; else if(u=="m")v*=60; printf "%.3f", v}')"
+          echo "proving time: ${secs}s (from: $line)"
+          printf '[{"name":"%s proving time","unit":"s","value":%s}]\n' "$EXAMPLE" "$secs" > bench.json
+          cat bench.json
+
+      # Store history on gh-pages (master push only) and fail the job if proving
+      # time is >10% slower than the latest recorded baseline.
+      - name: Guard proving-time regression (>10%)
+        uses: benchmark-action/github-action-benchmark@v1
+        with:
+          name: GPU proving time
+          tool: customSmallerIsBetter
+          output-file-path: bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          alert-threshold: "110%"
+          fail-on-alert: true
+          comment-on-alert: true
+          auto-push: ${{ github.event_name == 'push' }}
+          save-data-file: ${{ github.event_name == 'push' }}
+
+      # RUST_LOG=info: the e2e binary defaults to DEBUG when RUST_LOG is unset
+      # (see ceno_zkvm/src/bin/e2e.rs), which floods the CI log.
       - name: Run multi-shards ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
         env:
           RUSTFLAGS: "-C opt-level=3"

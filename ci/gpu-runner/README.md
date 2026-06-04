@@ -104,10 +104,28 @@ prover (`--features gpu`) on this runner. It's opt-in (GPU time is scarce):
 - **Manually** — Actions tab → *GPU Integration* → *Run workflow*. Optionally
   set the `example` input (default `keccak_syscall`).
 - **On a PR** — add the `gpu-ci` label to the PR.
+- **On push to master** — records the proving-time baseline (see below).
 
 It loads `secrets.CENO_GPU_DEPLOY_KEY` into ssh-agent, clones the private
 `ceno-gpu` backend to `../ceno-gpu` (the path the Cargo `[patch]` expects), then
 runs the example single-shard and multi-shard.
+
+### Proving-time regression guard
+
+The single-shard step extracts the **proving time** — the `run_e2e_proof` span
+from `--profiling 1` (a `tracing-forest` tree) — and feeds it to
+[`benchmark-action/github-action-benchmark`](https://github.com/benchmark-action/github-action-benchmark)
+(`customSmallerIsBetter`). History is stored on the **`gh-pages`** branch:
+
+- **master push** appends the new measurement (and renders a chart at the repo's
+  GitHub Pages site).
+- **PRs** compare their measurement against the latest baseline and **fail** if
+  proving is **>10% slower** (`alert-threshold: 110%`, `fail-on-alert: true`),
+  posting a comment on the PR.
+
+The first master run seeds `gh-pages`; until then PR runs have nothing to
+compare against and pass. The job needs `contents: write` (push to gh-pages) and
+`pull-requests: write` (regression comment), granted in the workflow.
 
 ## Enable the cron watchdog
 
