@@ -20,6 +20,7 @@ use crate::{
     scheme::PublicValues,
     structs::ProgramParams,
     tables::ram::ram_circuit::DynVolatileRamTableConfigTrait,
+    witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
@@ -182,6 +183,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
         num_witin: usize,
         num_structural_witin: usize,
         (final_mem, _pv, _num_instances): &(&[MemFinalRecord], &PublicValues, usize),
+        lk_multiplicity: Option<&LkMultiplicity>,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         if final_mem.is_empty() {
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
@@ -226,10 +228,15 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
                             // Assign value directly.
                             set_val!(row, init_v[0], rec.init_value as u64);
                         } else {
-                            // Assign value limbs.
+                            // Assign value limbs, recording the per-limb u16
+                            // range-check looked up in `construct_circuit` (#999).
+                            let mut row_lkm = lk_multiplicity.cloned();
                             init_v.iter().enumerate().for_each(|(l, limb)| {
                                 let val = (rec.init_value >> (l * LIMB_BITS)) & LIMB_MASK;
                                 set_val!(row, limb, val as u64);
+                                if let Some(m) = row_lkm.as_mut() {
+                                    m.assert_ux::<LIMB_BITS>(val as u64);
+                                }
                             });
                         }
                     }
@@ -285,6 +292,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
         num_witin: usize,
         num_structural_witin: usize,
         (final_mem, pv, num_instances): &(&[MemFinalRecord], &PublicValues, usize),
+        lk_multiplicity: Option<&LkMultiplicity>,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         // got some duplicated code segment to simplify parallel assignment flow
         let start_addr = DVRAM::dynamic_addr(&config.params, 0, pv);
@@ -329,10 +337,15 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
                             // Assign value directly.
                             set_val!(row, init_v[0], rec.init_value as u64);
                         } else {
-                            // Assign value limbs.
+                            // Assign value limbs, recording the per-limb u16
+                            // range-check looked up in `construct_circuit` (#999).
+                            let mut row_lkm = lk_multiplicity.cloned();
                             init_v.iter().enumerate().for_each(|(l, limb)| {
                                 let val = (rec.init_value >> (l * LIMB_BITS)) & LIMB_MASK;
                                 set_val!(row, limb, val as u64);
+                                if let Some(m) = row_lkm.as_mut() {
+                                    m.assert_ux::<LIMB_BITS>(val as u64);
+                                }
                             });
                         }
                     }
@@ -395,9 +408,27 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         let (init_expr, init_v) = if DVRAM::ZERO_INIT {
             (vec![Expression::ZERO; DVRAM::V_LIMBS], None)
         } else {
+            // Non-zero-init tables (e.g. `HintsTable`) take their initial content
+            // from prover-supplied witnesses. Without a range check a malicious
+            // prover could choose non-canonical limbs (>= 2^LIMB_BITS): the load
+            // path reads memory via `UInt::new_unchecked`, so a non-canonical word
+            // would propagate to a register completely unconstrained (#999). Bind
+            // every limb to `LIMB_BITS` so the reconstructed word is a canonical
+            // u32. This assumes the value is laid out as `LIMB_BITS`-wide limbs,
+            // matching the witness-assignment limb path below.
+            assert!(
+                DVRAM::V_LIMBS > 1,
+                "non-zero-init RAM table must use a multi-limb (LIMB_BITS) layout for the init range check"
+            );
             let init_v = (0..DVRAM::V_LIMBS)
                 .map(|i| cb.create_witin(|| format!("init_v_limb_{i}")))
                 .collect::<Vec<WitIn>>();
+            for (i, limb) in init_v.iter().enumerate() {
+                cb.assert_ux::<_, _, LIMB_BITS>(
+                    || format!("init_v_limb_{i}_in_u{LIMB_BITS}"),
+                    limb.expr(),
+                )?;
+            }
             (init_v.iter().map(|v| v.expr()).collect_vec(), Some(init_v))
         };
 
@@ -432,6 +463,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_witin: usize,
         num_structural_witin: usize,
         data: &(&[MemFinalRecord], &PublicValues, usize),
+        lk_multiplicity: Option<&LkMultiplicity>,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         let (final_mem, _, _) = &data;
         if final_mem.is_empty() {
@@ -439,9 +471,15 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         }
         assert_eq!(num_structural_witin, 2);
         if DVRAM::dynamic_length_instance().is_some() || DVRAM::DYNAMIC_OFFSET {
-            Self::assign_instances_dynamic(config, num_witin, num_structural_witin, data)
+            Self::assign_instances_dynamic(
+                config,
+                num_witin,
+                num_structural_witin,
+                data,
+                lk_multiplicity,
+            )
         } else {
-            Self::assign_instances(config, num_witin, num_structural_witin, data)
+            Self::assign_instances(config, num_witin, num_structural_witin, data, lk_multiplicity)
         }
     }
 }
