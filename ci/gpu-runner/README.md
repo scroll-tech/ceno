@@ -112,8 +112,9 @@ runs the example single-shard and multi-shard.
 
 ### Proving-time regression guard
 
-The single-shard step extracts the **proving time** — the `run_e2e_proof` span
-from `--profiling 1` (a `tracing-forest` tree) — and feeds it to
+The single-shard step extracts the **proving time** — the `ZKVM_create_proof`
+span (pure proof generation) from `--profiling 1` (a `tracing-forest` tree) —
+and feeds it to
 [`benchmark-action/github-action-benchmark`](https://github.com/benchmark-action/github-action-benchmark)
 (`customSmallerIsBetter`). History is stored on the **`gh-pages`** branch:
 

@@ -95,9 +95,9 @@ jobs:
         run: cargo build --release --package ceno_zkvm --features gpu --bin e2e
 
       # Prove single-shard (functional test) and extract the proving time. The
-      # metric is the `run_e2e_proof` span emitted by `--profiling 1` as a
-      # tracing-forest tree: "run_e2e_proof [ <dur> | <pct> / 100.00% ]". It is
-      # the proof-generation time only, independent of compilation.
+      # metric is the `ZKVM_create_proof` span (pure proof generation, excluding
+      # emulation/witgen) emitted by `--profiling 1` as a tracing-forest root:
+      # "ZKVM_create_proof [ <dur> | <pct> / 100.00% ]". Independent of compilation.
       - name: Prove ${{ inputs.example || 'keccak_syscall' }} on GPU + record proving time
         env:
           RUSTFLAGS: "-C opt-level=3"
@@ -107,10 +107,11 @@ jobs:
           cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
             --platform=ceno --profiling 1 \
             "examples/target/riscv32im-ceno-zkvm-elf/release/examples/$EXAMPLE" 2>&1 | tee e2e_out.txt
-          line="$(grep -F 'run_e2e_proof [' e2e_out.txt | head -1)"
-          if [ -z "$line" ]; then echo "::error::run_e2e_proof span not found in output"; exit 1; fi
+          # `|| true` so a no-match doesn't trip set -e before our clear error.
+          line="$(grep -F 'ZKVM_create_proof [' e2e_out.txt | head -1 || true)"
+          if [ -z "$line" ]; then echo "::error::ZKVM_create_proof span not found (did the proof run with --profiling 1?)"; exit 1; fi
           secs="$(echo "$line" \
-            | sed -E 's/.*run_e2e_proof \[ *([0-9.]+)(ns|µs|us|ms|m|s).*/\1 \2/' \
+            | sed -E 's/.*ZKVM_create_proof \[ *([0-9.]+)(ns|µs|us|ms|m|s).*/\1 \2/' \
             | awk '{u=$2;v=$1; if(u=="ns")v/=1e9; else if(u=="µs"||u=="us")v/=1e6; else if(u=="ms")v/=1e3; else if(u=="m")v*=60; printf "%.3f", v}')"
           echo "proving time: ${secs}s (from: $line)"
           printf '[{"name":"%s proving time","unit":"s","value":%s}]\n' "$EXAMPLE" "$secs" > bench.json
