@@ -324,7 +324,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
                             rec.addr, expected_addr,
                         );
                     }
-                    if let Some(rec) = rec_opt {
+                    if i < *num_instances
+                        && let Some(rec) = rec_opt
+                    {
                         if init_v.len() == 1 {
                             // Assign value directly.
                             set_val!(row, init_v[0], rec.init_value as u64);
