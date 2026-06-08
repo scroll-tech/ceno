@@ -1230,6 +1230,7 @@ dependencies = [
  "once_cell",
  "p3",
  "parse-size",
+ "poseidon",
  "pprof2",
  "prettytable-rs",
  "proptest",

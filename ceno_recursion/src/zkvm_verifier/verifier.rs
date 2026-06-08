@@ -113,7 +113,7 @@ fn challenger_observe_exts<C: Config>(
     }
 }
 
-pub fn verify_zkvm_proof<C: Config<F = F>>(
+pub fn verify_zkvm_proof<C: Config<F = F, EF = E>>(
     builder: &mut Builder<C>,
     zkvm_proof_input: ZKVMProofInputVariable<C>,
     vk: &ZKVMVerifyingKey<E, Pcs>,
@@ -124,6 +124,14 @@ pub fn verify_zkvm_proof<C: Config<F = F>>(
     let prod_r: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let prod_w: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
     let logup_sum: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+
+    let vk_digest = vk.compute_digest();
+    let vk_digest_array: Array<C, Ext<C::F, C::EF>> = builder.dyn_array(vk_digest.len());
+    for (i, digest_element) in vk_digest.iter().enumerate() {
+        let baked: Ext<C::F, C::EF> = builder.constant(*digest_element);
+        builder.set_value(&vk_digest_array, i, baked);
+    }
+    challenger_observe_exts(builder, &mut challenger, &vk_digest_array);
 
     for (_, circuit_vk) in vk.circuit_vks.iter() {
         for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
