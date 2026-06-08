@@ -34,7 +34,7 @@ use crate::{
         hal::{DeviceProvingKey, ProofInput},
         utils::build_main_witness,
     },
-    structs::{TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
+    structs::{RV32imMemStateConfig, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
 type CreateTableProof<'a, PB> = (
@@ -317,6 +317,11 @@ impl<
             shard_id = shard_ctx.shard_id
         )
         .in_scope(|| {
+            let digest_span = entered_span!("commit_to_vk_digest", profiling_1 = true);
+            let vk_digest = self.pk.compute_vk_digest::<RV32imMemStateConfig>();
+            transcript.append_field_element_exts(&vk_digest);
+            exit_span!(digest_span);
+
             let span = entered_span!("commit_to_pi", profiling_1 = true);
             // Include transcript-visible public values in canonical circuit order.
             // The order must match verifier and recursion verifier exactly.
