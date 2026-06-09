@@ -65,8 +65,8 @@ pub struct EcallFpOpConfig<E: ExtensionField, P: FpOpField> {
     pub layout: FpOpLayout<E, P>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    value_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    value_ptr_1: (OpFixedRS<E, { Platform::reg_arg1() }, true>, MemAddr<E>),
+    value_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, false>, MemAddr<E>),
+    value_ptr_1: (OpFixedRS<E, { Platform::reg_arg1() }, false>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
@@ -230,13 +230,13 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
     let value_ptr_value_0 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
     let value_ptr_value_1 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
 
-    let value_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+    let value_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, false>::construct_circuit(
         cb,
         value_ptr_value_0.uint_unaligned().register_expr(),
         vm_state.ts,
     )?;
 
-    let value_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
+    let value_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, false>::construct_circuit(
         cb,
         value_ptr_value_1.uint_unaligned().register_expr(),
         vm_state.ts,
@@ -260,7 +260,7 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
         .map(|(i, (val_before, val_after))| {
             WriteMEM::construct_circuit(
                 cb,
-                value_ptr_0.prev_value.as_ref().unwrap().value()
+                value_ptr_value_0.expr_unaligned()
                     + E::BaseField::from_canonical_u32(ByteAddr::from((i * WORD_SIZE) as u32).0)
                         .expr(),
                 val_before.clone(),
@@ -277,7 +277,7 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
             .map(|(i, val_before)| {
                 WriteMEM::construct_circuit(
                     cb,
-                    value_ptr_1.prev_value.as_ref().unwrap().value()
+                    value_ptr_value_1.expr_unaligned()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )

@@ -106,7 +106,7 @@ impl SyscallEffects {
     /// Keep track of the cycles of registers and memory accesses.
     pub fn finalize<T: Tracer>(mut self, tracer: &mut T) -> SyscallWitness {
         for op in &mut self.witness.reg_ops {
-            op.previous_cycle = tracer.track_access(op.addr, T::SUBCYCLE_RD);
+            op.previous_cycle = tracer.track_access(op.addr, T::SUBCYCLE_RS1);
         }
         for op in &mut self.witness.mem_ops {
             op.previous_cycle = tracer.track_access(op.addr, T::SUBCYCLE_MEM);
