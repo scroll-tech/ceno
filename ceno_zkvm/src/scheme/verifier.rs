@@ -16,7 +16,7 @@ use crate::{
         INIT_CYCLE_IDX, INIT_PC_IDX,
     },
     scheme::{
-        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        constants::{MAX_NUM_VARIABLES, NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
         utils::{
             GkrOutputStageMask, assign_group_evals, derive_ecc_bridge_claims,
@@ -604,6 +604,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .flat_map(|(index, proofs)| iter::repeat_n(index, proofs.len()).zip(proofs))
             .zip_eq(forked_transcripts.iter_mut())
         {
+            // (#1178, #1240) bound each untrusted per-shard instance count before
+            // summing so the sum cannot wrap; the authoritative shift/cast guard
+            // lives in `verify_chip_proof_pre_main`.
+            if proof
+                .num_instances
+                .iter()
+                .any(|&n| n > (1usize << MAX_NUM_VARIABLES))
+            {
+                return Err(ZKVMError::InvalidProof(
+                    format!("{shard_id}th shard chip {index} num_instances exceeds 2^{MAX_NUM_VARIABLES}").into(),
+                ));
+            }
             let num_instance: usize = proof.num_instances.iter().sum();
             if num_instance == 0 {
                 return Err(ZKVMError::InvalidProof(
@@ -849,7 +861,35 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             zkvm_v1_css: cs,
             gkr_circuit,
         } = &composed_cs;
-        let num_instances = proof.num_instances.iter().sum();
+        // Soundness / DoS hardening (#1178, #1240): `proof.num_instances` is read
+        // from the untrusted proof. Reject implausibly large counts *before* they
+        // are summed and fed into `next_pow2_instance_padding` / the
+        // `1 << log2_num_instances` shifts / the `from_canonical_usize` transcript
+        // casts. A valid proof's instance count is bounded by the PCS setup size
+        // (`2^MAX_NUM_VARIABLES`); anything larger cannot correspond to a real
+        // witness and, left unchecked, would overflow the usize shift (panic /
+        // wrap) or wrap modulo the base field (`2^MAX_NUM_VARIABLES` is far below
+        // the BabyBear modulus `~2^31`), so the bound below makes both impossible.
+        let max_instances = 1usize << MAX_NUM_VARIABLES;
+        for &n in &proof.num_instances {
+            if n > max_instances {
+                return Err(ZKVMError::InvalidProof(
+                    format!(
+                        "{_name} num_instances entry {n} exceeds max {max_instances} (2^{MAX_NUM_VARIABLES})"
+                    )
+                    .into(),
+                ));
+            }
+        }
+        let num_instances: usize = proof.num_instances.iter().sum();
+        if num_instances > max_instances {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "{_name} total num_instances {num_instances} exceeds max {max_instances} (2^{MAX_NUM_VARIABLES})"
+                )
+                .into(),
+            ));
+        }
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len() + cs.r_table_expressions.len(),
             cs.w_expressions.len() + cs.w_table_expressions.len(),
