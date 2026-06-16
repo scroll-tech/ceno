@@ -118,6 +118,62 @@ impl ChipScheduler {
         Self
     }
 
+    #[cfg(feature = "gpu")]
+    fn booking_headroom_bytes() -> u64 {
+        std::env::var("CENO_GPU_LARGE_TASK_BOOKING_MARGIN_MB")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(0)
+            << 20
+    }
+
+    #[cfg(feature = "gpu")]
+    fn try_book_task_memory<PB: ProverBackend>(
+        task: &ChipTask<'_, PB>,
+        mem_pool: &ceno_gpu::common::mem_pool::CudaMemPool,
+    ) -> Result<(), ZKVMError> {
+        if task.booked_memory_bytes == 0 {
+            return Ok(());
+        }
+
+        let headroom = Self::booking_headroom_bytes();
+        if mem_pool
+            .try_book_capacity_with_cuda_usage_floor_and_headroom(
+                task.booked_memory_bytes,
+                headroom,
+            )
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        let booked_total = mem_pool.get_booked_total();
+        let max_size = mem_pool.get_max_size();
+        let available = max_size.saturating_sub(booked_total);
+        let (cuda_free, cuda_total) = ceno_gpu::get_cuda_mem_info().unwrap_or((0usize, 0usize));
+        let cuda_used = cuda_total.saturating_sub(cuda_free);
+        crate::scheme::gpu::log_gpu_device_state(&format!(
+            "booking_reject:{}:{}",
+            task.task_id, task.circuit_name
+        ));
+        Err(ZKVMError::BackendError(BackendError::CircuitError(
+            format!(
+                "Task is too big for current GPU memory: id={} circuit={} estimated={:.2}MB booked={:.2}MB available_by_pool={:.2}MB pool_max={:.2}MB pool_booked={:.2}MB cuda_used={:.2}MB cuda_free={:.2}MB headroom={:.2}MB",
+                task.task_id,
+                task.circuit_name,
+                task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
+                available as f64 / (1024.0 * 1024.0),
+                max_size as f64 / (1024.0 * 1024.0),
+                booked_total as f64 / (1024.0 * 1024.0),
+                cuda_used as f64 / (1024.0 * 1024.0),
+                cuda_free as f64 / (1024.0 * 1024.0),
+                headroom as f64 / (1024.0 * 1024.0),
+            )
+            .into_boxed_str(),
+        )))
+    }
+
     /// Unified entry point for chip proof execution.
     ///
     /// On GPU: uses concurrent scheduling by default. Set
@@ -191,8 +247,31 @@ impl ChipScheduler {
         let mut results = Vec::with_capacity(tasks.len());
         let mut samples: Vec<(usize, PB::E)> = Vec::with_capacity(tasks.len());
 
+        #[cfg(feature = "gpu")]
+        let cuda_hal = if tasks.iter().any(|task| task.booked_memory_bytes > 0) {
+            Some(get_cuda_hal().expect("Failed to get CUDA HAL"))
+        } else {
+            None
+        };
+        #[cfg(feature = "gpu")]
+        let mem_pool = cuda_hal.as_ref().map(|cuda_hal| {
+            let mem_pool = cuda_hal.inner().mem_pool();
+            mem_pool
+                .init_booking_baseline()
+                .expect("Failed to init booking baseline");
+            mem_pool
+        });
+
         for task in tasks {
             let task_id = task.task_id;
+            #[cfg(feature = "gpu")]
+            if let Some(mem_pool) = mem_pool {
+                if let Err(e) = Self::try_book_task_memory(&task, mem_pool) {
+                    mem_pool.reset_booking();
+                    return Err(e);
+                }
+            }
+
             // Fork: clone parent + append task_id
             // (identical to ForkableTranscript::fork default impl)
             let mut forked = parent_transcript.clone();
@@ -200,11 +279,31 @@ impl ChipScheduler {
                 task_id as u64,
             ));
 
-            let result = execute_task(task, &mut forked)?;
+            let booked_mem = task.booked_memory_bytes;
+            let result = execute_task(task, &mut forked);
+            #[cfg(feature = "gpu")]
+            if let Some(mem_pool) = mem_pool {
+                mem_pool.unbook_capacity(booked_mem);
+            }
+            let result = match result {
+                Ok(result) => result,
+                Err(e) => {
+                    #[cfg(feature = "gpu")]
+                    if let Some(mem_pool) = mem_pool {
+                        mem_pool.reset_booking();
+                    }
+                    return Err(e);
+                }
+            };
             results.push(result);
 
             // Sample from forked transcript
             samples.push((task_id, forked.sample_vec(1)[0]));
+        }
+
+        #[cfg(feature = "gpu")]
+        if let Some(mem_pool) = mem_pool {
+            mem_pool.reset_booking();
         }
 
         // Sort by task_id to restore original order
@@ -256,12 +355,26 @@ impl ChipScheduler {
         // For single task, just execute directly (no threading overhead)
         if tasks.len() == 1 {
             let task = tasks.remove(0);
+            if let Err(e) = Self::try_book_task_memory(&task, mem_pool) {
+                mem_pool.reset_booking();
+                return Err(e);
+            }
             let mut fork = transcript.clone();
             fork.append_field_element(&<PB::E as ExtensionField>::BaseField::from_canonical_u64(
                 task.task_id as u64,
             ));
-            let result = execute_task(task, &mut fork)?;
+            let booked_mem = task.booked_memory_bytes;
+            let result = execute_task(task, &mut fork);
+            mem_pool.unbook_capacity(booked_mem);
+            let result = match result {
+                Ok(result) => result,
+                Err(e) => {
+                    mem_pool.reset_booking();
+                    return Err(e);
+                }
+            };
             let sample = fork.sample_vec(1)[0];
+            mem_pool.reset_booking();
             return Ok((vec![result], vec![sample]));
         }
 
@@ -440,7 +553,10 @@ impl ChipScheduler {
                 if tasks_inflight < stream_pool_size
                     && let Some(vec_idx) = pending.iter().position(|task| {
                         mem_pool
-                            .try_book_capacity(task.booked_memory_bytes)
+                            .try_book_capacity_with_cuda_usage_floor_and_headroom(
+                                task.booked_memory_bytes,
+                                Self::booking_headroom_bytes(),
+                            )
                             .is_some()
                     })
                 {
@@ -498,6 +614,7 @@ impl ChipScheduler {
                             task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
                         );
                     }
+                    crate::scheme::gpu::log_gpu_device_state("deadlock");
                     let max_size = mem_pool.get_max_size();
                     let booked_total = mem_pool.get_booked_total();
                     let available = max_size.saturating_sub(booked_total);
