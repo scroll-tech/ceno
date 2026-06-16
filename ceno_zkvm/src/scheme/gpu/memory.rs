@@ -677,16 +677,15 @@ fn estimate_precise_prove_tower_memory(
         .unwrap_or((0, 0));
 
     let has_tower = !prod_groups.is_empty() || logup_group.is_some();
-    let eq_mle_buffer_bytes = if has_tower {
-        (1usize << (log_num_fanin * (max_round_index + 1))) * elem_size
+    let eq_mle_buffer_bytes = if has_tower && max_round_index > 0 {
+        (1usize << (log_num_fanin * max_round_index)) * elem_size
     } else {
         0
     };
     let tower_input_live_bytes = prod_tower_buffer_bytes + logup_tower_buffer_bytes;
     let borrowed_input_bytes = prod_borrowed_input_bytes + logup_borrowed_input_bytes;
-    let full_tower_entry_peak = tower_input_live_bytes + eq_mle_buffer_bytes;
-    let local_tower_entry_peak =
-        tower_input_live_bytes.saturating_sub(borrowed_input_bytes) + eq_mle_buffer_bytes;
+    let full_tower_entry_peak = tower_input_live_bytes;
+    let local_tower_entry_peak = tower_input_live_bytes.saturating_sub(borrowed_input_bytes);
 
     let mut round_peak = 0usize;
     let mut local_round_peak = 0usize;
@@ -740,10 +739,15 @@ fn estimate_precise_prove_tower_memory(
             })
             .unwrap_or((0, 0));
 
+        let round_eq_mle_buffer_bytes = if has_tower {
+            (1usize << (log_num_fanin * round)) * elem_size
+        } else {
+            0
+        };
         let round_points_buffer = (log_num_fanin * round) * elem_size;
         let local_round_bytes = prod_live_bytes
             + logup_live_bytes
-            + eq_mle_buffer_bytes
+            + round_eq_mle_buffer_bytes
             + round_points_buffer
             + round_sumcheck_estimate.total_bytes;
         round_peak = round_peak
