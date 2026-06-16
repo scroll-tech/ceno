@@ -46,6 +46,7 @@ pub fn init_gpu_mem_tracker<'a>(
 const ESTIMATION_TOLERANCE_BYTES: usize = 2 * 1024 * 1024; // max under-estimation error: 2 MB
 const ESTIMATION_SAFETY_MARGIN_BYTES: usize = 10 * 1024 * 1024; // reserved headroom / allowed over-estimate margin: 10 MB
 const SHARD_RAM_TOWER_PROVE_TOLERANCE_BYTES: usize = 16 * 1024 * 1024;
+const HEAVY_TOWER_SPLIT_THRESHOLD_BYTES: usize = 4 * 1024 * 1024 * 1024;
 
 /// Validate that the estimated GPU memory matches actual usage within tolerance.
 /// - Under-estimate (actual > estimated): diff must be <= `ESTIMATION_TOLERANCE_BYTES`
@@ -525,22 +526,31 @@ fn compact_split_lengths_for_estimate(
 }
 
 fn estimate_prod_compact_internal_elems(group: VirtualTowerGroup, num_fanin: usize) -> usize {
+    estimate_prod_compact_internal_layer_elems(group, num_fanin)
+        .into_iter()
+        .sum()
+}
+
+fn estimate_prod_compact_internal_layer_elems(
+    group: VirtualTowerGroup,
+    num_fanin: usize,
+) -> Vec<usize> {
     if group.num_vars == 0 {
-        return 0;
+        return vec![];
     }
     let mut current_lens =
         compact_split_lengths_for_estimate(group.num_vars, group.occupied_len, num_fanin);
-    let mut total = 0usize;
+    let mut layers = Vec::with_capacity(group.num_vars);
     let mut logical_len = 1usize << group.num_vars;
     for _ in 0..group.num_vars {
         let (left_a, right_a) = compact_half_lengths_for_estimate(current_lens[0], logical_len);
         let (left_b, right_b) = compact_half_lengths_for_estimate(current_lens[1], logical_len);
         let next_lens = vec![left_a.max(left_b).max(1), right_a.max(right_b).max(1)];
-        total += next_lens.iter().sum::<usize>();
+        layers.push(next_lens.iter().sum::<usize>());
         current_lens = next_lens;
         logical_len >>= 1;
     }
-    total
+    layers
 }
 
 fn estimate_logup_compact_internal_elems(
@@ -548,8 +558,18 @@ fn estimate_logup_compact_internal_elems(
     num_fanin: usize,
     has_logup_numerator: bool,
 ) -> usize {
+    estimate_logup_compact_internal_layer_elems(group, num_fanin, has_logup_numerator)
+        .into_iter()
+        .sum()
+}
+
+fn estimate_logup_compact_internal_layer_elems(
+    group: VirtualTowerGroup,
+    num_fanin: usize,
+    has_logup_numerator: bool,
+) -> Vec<usize> {
     if group.num_vars == 0 {
-        return 0;
+        return vec![];
     }
     let denominator_lens =
         compact_split_lengths_for_estimate(group.num_vars, group.occupied_len, num_fanin);
@@ -564,7 +584,7 @@ fn estimate_logup_compact_internal_elems(
         denominator_lens[0],
         denominator_lens[1],
     ];
-    let mut total = 0usize;
+    let mut layers = Vec::with_capacity(group.num_vars);
     let mut logical_len = 1usize << group.num_vars;
     for _ in 0..group.num_vars {
         let (p1l, p1r) = compact_half_lengths_for_estimate(current_lens[0], logical_len);
@@ -583,11 +603,35 @@ fn estimate_logup_compact_internal_elems(
             q1l.max(q2l).max(q1l.min(q2l).max(1)),
             q1r.max(q2r).max(q1r.min(q2r).max(1)),
         ];
-        total += next_lens.iter().sum::<usize>();
+        layers.push(next_lens.iter().sum::<usize>());
         current_lens = next_lens;
         logical_len >>= 1;
     }
-    total
+    layers
+}
+
+fn should_split_heavy_tower(total_bytes: usize, top_layer_bytes: usize) -> bool {
+    total_bytes >= HEAVY_TOWER_SPLIT_THRESHOLD_BYTES
+        && top_layer_bytes > 0
+        && top_layer_bytes < total_bytes
+}
+
+fn split_aware_internal_live_bytes(
+    round: usize,
+    group: VirtualTowerGroup,
+    internal_layer_elems: &[usize],
+    elem_size: usize,
+) -> usize {
+    if round >= group.num_vars {
+        return 0;
+    }
+    let total_bytes = internal_layer_elems.iter().sum::<usize>() * elem_size;
+    let top_layer_bytes = internal_layer_elems.first().copied().unwrap_or(0) * elem_size;
+    if round + 1 == group.num_vars && should_split_heavy_tower(total_bytes, top_layer_bytes) {
+        top_layer_bytes
+    } else {
+        total_bytes
+    }
 }
 
 fn compact_split_elems(group: VirtualTowerGroup, num_fanin: usize) -> usize {
@@ -653,17 +697,39 @@ fn estimate_precise_prove_tower_memory(
 
     let mut prod_tower_buffer_bytes = 0usize;
     let mut prod_borrowed_input_bytes = 0usize;
-    for group in prod_groups {
-        let compact_internal_elems = estimate_prod_compact_internal_elems(*group, NUM_FANIN);
+    let prod_internal_layers = prod_groups
+        .iter()
+        .map(|group| estimate_prod_compact_internal_layer_elems(*group, NUM_FANIN))
+        .collect::<Vec<_>>();
+    for (group, internal_layers) in prod_groups.iter().zip(&prod_internal_layers) {
+        let compact_internal_elems = internal_layers.iter().sum::<usize>();
         let compact_input_elems = compact_split_elems(*group, NUM_FANIN);
         prod_tower_buffer_bytes += (compact_internal_elems + compact_input_elems) * elem_size;
         prod_borrowed_input_bytes += compact_input_elems * elem_size;
     }
 
+    let logup_internal_layers = logup_group.map(|group| {
+        (
+            group,
+            estimate_logup_compact_internal_layer_elems(
+                group,
+                NUM_FANIN_LOGUP,
+                has_logup_numerator,
+            ),
+        )
+    });
     let (logup_tower_buffer_bytes, logup_borrowed_input_bytes) = logup_group
         .map(|group| {
-            let compact_internal_elems =
-                estimate_logup_compact_internal_elems(group, NUM_FANIN_LOGUP, has_logup_numerator);
+            let compact_internal_elems = logup_internal_layers
+                .as_ref()
+                .map(|(_, layers)| layers.iter().sum::<usize>())
+                .unwrap_or_else(|| {
+                    estimate_logup_compact_internal_elems(
+                        group,
+                        NUM_FANIN_LOGUP,
+                        has_logup_numerator,
+                    )
+                });
             let denominator_input_elems = compact_split_elems(group, NUM_FANIN_LOGUP);
             let numerator_input_elems = if has_logup_numerator {
                 denominator_input_elems
@@ -709,8 +775,10 @@ fn estimate_precise_prove_tower_memory(
 
         let prod_live_bytes = prod_groups
             .iter()
-            .filter(|group| round < group.num_vars)
-            .map(|group| estimate_prod_compact_internal_elems(*group, NUM_FANIN) * elem_size)
+            .zip(&prod_internal_layers)
+            .map(|(group, layers)| {
+                split_aware_internal_live_bytes(round, *group, layers, elem_size)
+            })
             .sum::<usize>();
         let prod_borrowed_live_bytes = prod_groups
             .iter()
@@ -721,11 +789,12 @@ fn estimate_precise_prove_tower_memory(
         let (logup_live_bytes, logup_borrowed_live_bytes) = logup_group
             .filter(|group| round <= group.num_vars)
             .map(|group| {
-                let internal = estimate_logup_compact_internal_elems(
-                    group,
-                    NUM_FANIN_LOGUP,
-                    has_logup_numerator,
-                ) * elem_size;
+                let internal = logup_internal_layers
+                    .as_ref()
+                    .map(|(internal_group, layers)| {
+                        split_aware_internal_live_bytes(round, *internal_group, layers, elem_size)
+                    })
+                    .unwrap_or(0);
                 let denominator_input_elems = compact_split_elems(group, NUM_FANIN_LOGUP);
                 let numerator_input_elems = if has_logup_numerator {
                     denominator_input_elems
@@ -733,11 +802,7 @@ fn estimate_precise_prove_tower_memory(
                     NUM_FANIN_LOGUP
                 };
                 let borrowed = (numerator_input_elems + denominator_input_elems) * elem_size;
-                if round < group.num_vars {
-                    (internal, borrowed)
-                } else {
-                    (0, borrowed)
-                }
+                (internal, borrowed)
             })
             .unwrap_or((0, 0));
 
