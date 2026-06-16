@@ -191,7 +191,9 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
     );
     let tower_input_non_borrowed_bytes =
         tower_input_live_bytes.saturating_sub(borrowed_tower_input_bytes);
-    let tower_input_backing_bytes = main_witness_bytes.max(borrowed_tower_input_bytes);
+    // Runtime keeps the main witness and compact tower input backing resident
+    // together during tower proving.
+    let tower_input_backing_bytes = main_witness_bytes + borrowed_tower_input_bytes;
     let tower_prove_stage_bytes =
         tower_input_backing_bytes + tower_input_non_borrowed_bytes + tower_prove_local_bytes;
 
