@@ -6145,7 +6145,6 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?tag=v1.0.0-alpha.32#83cf5bb5e90a2134fc4f2778a025f1f127befbd1"
 dependencies = [
  "cfg-if",
  "dashu",
