@@ -1,14 +1,12 @@
 use crate::{
     scheme::{
-        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        constants::{NUM_FANIN, NUM_FANIN_LOGUP, SEPTIC_EXTENSION_DEGREE},
         hal::ProofInput,
         utils::tower_output_count,
     },
     structs::ComposedConstrainSystem,
 };
-use ceno_gpu::{
-    estimate_build_tower_memory, estimate_prove_tower_memory, estimate_sumcheck_memory,
-};
+use ceno_gpu::estimate_sumcheck_memory;
 use ff_ext::ExtensionField;
 use gkr_iop::{
     evaluation::EvalExpression,
@@ -22,6 +20,9 @@ use gkr_iop::{
     hal::MultilinearPolynomial,
 };
 use mpcs::PolynomialCommitmentScheme;
+use multilinear_extensions::util::ceil_log2;
+use std::ffi::c_void;
+use witness::next_pow2_instance_padding;
 
 #[cfg(feature = "gpu")]
 use crate::instructions::gpu::config::{
@@ -439,22 +440,330 @@ pub(crate) fn estimate_main_constraints_bytes<
     eqs_bytes + sumcheck_bytes
 }
 
+fn virtual_group_num_vars(
+    group_len: usize,
+    occupied_rows: usize,
+    num_limbs: usize,
+) -> Option<usize> {
+    if group_len == 0 {
+        return None;
+    }
+    let row_vars = ceil_log2(next_pow2_instance_padding(occupied_rows));
+    let op_bits = ceil_log2(group_len.next_power_of_two());
+    let limb_bits = ceil_log2(num_limbs);
+    Some(op_bits + row_vars.saturating_sub(limb_bits))
+}
+
+fn virtual_group_occupied_len(group_len: usize, occupied_rows: usize, num_limbs: usize) -> usize {
+    if group_len == 0 {
+        return 0;
+    }
+    let padded_rows = next_pow2_instance_padding(occupied_rows);
+    let per_limb_rows = (padded_rows / num_limbs).max(1);
+    let valid_rows = occupied_rows.min(per_limb_rows).max(1);
+    valid_rows * group_len.next_power_of_two()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VirtualTowerGroup {
+    num_vars: usize,
+    occupied_len: usize,
+}
+
+#[derive(Debug)]
+struct PreciseBuildTowerEstimate {
+    prod_tower_buffer_bytes: usize,
+    logup_tower_buffer_bytes: usize,
+    aux_buffer_bytes: usize,
+    total_bytes: usize,
+}
+
+#[derive(Debug)]
+struct PreciseProveTowerEstimate {
+    prod_tower_buffer_bytes: usize,
+    logup_tower_buffer_bytes: usize,
+    prod_borrowed_input_bytes: usize,
+    logup_borrowed_input_bytes: usize,
+    eq_mle_buffer_bytes: usize,
+    sumcheck_total_bytes: usize,
+    total_bytes: usize,
+    local_total_bytes: usize,
+}
+
+fn compact_half_lengths_for_estimate(occupied_len: usize, logical_len: usize) -> (usize, usize) {
+    let half = logical_len >> 1;
+    let left_len = occupied_len.min(half);
+    let right_len = occupied_len.saturating_sub(half).min(half);
+    (left_len, right_len)
+}
+
+fn compact_split_lengths_for_estimate(
+    chunk_num_vars: usize,
+    occupied_len: usize,
+    num_fanin: usize,
+) -> Vec<usize> {
+    if chunk_num_vars == 0 || num_fanin == 0 {
+        return vec![];
+    }
+    let chunk_len = 1usize << chunk_num_vars;
+    (0..num_fanin)
+        .map(|chunk_idx| {
+            let chunk_start = chunk_idx * chunk_len;
+            occupied_len
+                .saturating_sub(chunk_start)
+                .min(chunk_len)
+                .max(1)
+        })
+        .collect()
+}
+
+fn estimate_prod_compact_internal_elems(group: VirtualTowerGroup, num_fanin: usize) -> usize {
+    if group.num_vars == 0 {
+        return 0;
+    }
+    let mut current_lens =
+        compact_split_lengths_for_estimate(group.num_vars, group.occupied_len, num_fanin);
+    let mut total = 0usize;
+    let mut logical_len = 1usize << group.num_vars;
+    for _ in 0..group.num_vars {
+        let (left_a, right_a) = compact_half_lengths_for_estimate(current_lens[0], logical_len);
+        let (left_b, right_b) = compact_half_lengths_for_estimate(current_lens[1], logical_len);
+        let next_lens = vec![left_a.max(left_b).max(1), right_a.max(right_b).max(1)];
+        total += next_lens.iter().sum::<usize>();
+        current_lens = next_lens;
+        logical_len >>= 1;
+    }
+    total
+}
+
+fn estimate_logup_compact_internal_elems(
+    group: VirtualTowerGroup,
+    num_fanin: usize,
+    has_logup_numerator: bool,
+) -> usize {
+    if group.num_vars == 0 {
+        return 0;
+    }
+    let denominator_lens =
+        compact_split_lengths_for_estimate(group.num_vars, group.occupied_len, num_fanin);
+    let numerator_lens = if has_logup_numerator {
+        denominator_lens.clone()
+    } else {
+        vec![1; num_fanin]
+    };
+    let mut current_lens = vec![
+        numerator_lens[0],
+        numerator_lens[1],
+        denominator_lens[0],
+        denominator_lens[1],
+    ];
+    let mut total = 0usize;
+    let mut logical_len = 1usize << group.num_vars;
+    for _ in 0..group.num_vars {
+        let (p1l, p1r) = compact_half_lengths_for_estimate(current_lens[0], logical_len);
+        let (p2l, p2r) = compact_half_lengths_for_estimate(current_lens[1], logical_len);
+        let (q1l, q1r) = compact_half_lengths_for_estimate(current_lens[2], logical_len);
+        let (q2l, q2r) = compact_half_lengths_for_estimate(current_lens[3], logical_len);
+        let next_lens = vec![
+            p1l.max(q2l)
+                .max(p2l)
+                .max(q1l)
+                .max(p1l.min(q2l).max(p2l.min(q1l)).max(1)),
+            p1r.max(q2r)
+                .max(p2r)
+                .max(q1r)
+                .max(p1r.min(q2r).max(p2r.min(q1r)).max(1)),
+            q1l.max(q2l).max(q1l.min(q2l).max(1)),
+            q1r.max(q2r).max(q1r.min(q2r).max(1)),
+        ];
+        total += next_lens.iter().sum::<usize>();
+        current_lens = next_lens;
+        logical_len >>= 1;
+    }
+    total
+}
+
+fn compact_split_elems(group: VirtualTowerGroup, num_fanin: usize) -> usize {
+    compact_split_lengths_for_estimate(group.num_vars, group.occupied_len, num_fanin)
+        .into_iter()
+        .sum()
+}
+
+fn estimate_precise_build_tower_memory(
+    prod_groups: &[VirtualTowerGroup],
+    logup_group: Option<VirtualTowerGroup>,
+    elem_size: usize,
+    has_logup_numerator: bool,
+) -> PreciseBuildTowerEstimate {
+    const PTR_BYTES: usize = std::mem::size_of::<*const c_void>();
+    const U32_BYTES: usize = std::mem::size_of::<u32>();
+
+    let prod_tower_buffer_bytes = prod_groups
+        .iter()
+        .map(|group| estimate_prod_compact_internal_elems(*group, NUM_FANIN) * elem_size)
+        .sum();
+    let logup_tower_buffer_bytes = logup_group
+        .map(|group| {
+            estimate_logup_compact_internal_elems(group, NUM_FANIN_LOGUP, has_logup_numerator)
+                * elem_size
+        })
+        .unwrap_or(0);
+
+    let prod_aux_buffer_bytes = if prod_groups.is_empty() {
+        0
+    } else {
+        4 * PTR_BYTES + 7 * U32_BYTES + 2 * elem_size
+    };
+    let logup_aux_buffer_bytes = if logup_group.is_some() {
+        8 * PTR_BYTES + 11 * U32_BYTES + 4 * elem_size
+    } else {
+        0
+    };
+    let aux_buffer_bytes = prod_aux_buffer_bytes.max(logup_aux_buffer_bytes);
+    let total_bytes = prod_tower_buffer_bytes + logup_tower_buffer_bytes + aux_buffer_bytes;
+
+    PreciseBuildTowerEstimate {
+        prod_tower_buffer_bytes,
+        logup_tower_buffer_bytes,
+        aux_buffer_bytes,
+        total_bytes,
+    }
+}
+
+fn estimate_precise_prove_tower_memory(
+    prod_groups: &[VirtualTowerGroup],
+    logup_group: Option<VirtualTowerGroup>,
+    elem_size: usize,
+    has_logup_numerator: bool,
+) -> PreciseProveTowerEstimate {
+    let log_num_fanin = ceil_log2(NUM_FANIN);
+    let max_round_index = prod_groups
+        .iter()
+        .map(|group| group.num_vars)
+        .chain(logup_group.map(|group| group.num_vars))
+        .max()
+        .unwrap_or(0);
+
+    let mut prod_tower_buffer_bytes = 0usize;
+    let mut prod_borrowed_input_bytes = 0usize;
+    for group in prod_groups {
+        let compact_internal_elems = estimate_prod_compact_internal_elems(*group, NUM_FANIN);
+        let compact_input_elems = compact_split_elems(*group, NUM_FANIN);
+        prod_tower_buffer_bytes += (compact_internal_elems + compact_input_elems) * elem_size;
+        prod_borrowed_input_bytes += compact_input_elems * elem_size;
+    }
+
+    let (logup_tower_buffer_bytes, logup_borrowed_input_bytes) = logup_group
+        .map(|group| {
+            let compact_internal_elems =
+                estimate_logup_compact_internal_elems(group, NUM_FANIN_LOGUP, has_logup_numerator);
+            let denominator_input_elems = compact_split_elems(group, NUM_FANIN_LOGUP);
+            let numerator_input_elems = if has_logup_numerator {
+                denominator_input_elems
+            } else {
+                NUM_FANIN_LOGUP
+            };
+            let borrowed_input_elems = numerator_input_elems + denominator_input_elems;
+            (
+                (compact_internal_elems + borrowed_input_elems) * elem_size,
+                borrowed_input_elems * elem_size,
+            )
+        })
+        .unwrap_or((0, 0));
+
+    let has_tower = !prod_groups.is_empty() || logup_group.is_some();
+    let eq_mle_buffer_bytes = if has_tower {
+        (1usize << (log_num_fanin * (max_round_index + 1))) * elem_size
+    } else {
+        0
+    };
+    let tower_input_live_bytes = prod_tower_buffer_bytes + logup_tower_buffer_bytes;
+    let borrowed_input_bytes = prod_borrowed_input_bytes + logup_borrowed_input_bytes;
+    let full_tower_entry_peak = tower_input_live_bytes + eq_mle_buffer_bytes;
+    let local_tower_entry_peak =
+        tower_input_live_bytes.saturating_sub(borrowed_input_bytes) + eq_mle_buffer_bytes;
+
+    let mut round_peak = 0usize;
+    let mut local_round_peak = 0usize;
+    let mut sumcheck_total_bytes = 0usize;
+    for round in 1..=max_round_index {
+        let prod_active_groups = prod_groups
+            .iter()
+            .filter(|group| round <= group.num_vars)
+            .count();
+        let logup_active_groups = usize::from(
+            logup_group
+                .as_ref()
+                .is_some_and(|group| round <= group.num_vars),
+        );
+        let mle_count = 1 + prod_active_groups * 2 + logup_active_groups * 4;
+        let round_sumcheck_estimate =
+            estimate_sumcheck_memory(round, NUM_FANIN + 1, &vec![round; mle_count], elem_size);
+        sumcheck_total_bytes = sumcheck_total_bytes.max(round_sumcheck_estimate.total_bytes);
+
+        let prod_live_bytes = prod_groups
+            .iter()
+            .filter(|group| round < group.num_vars)
+            .map(|group| estimate_prod_compact_internal_elems(*group, NUM_FANIN) * elem_size)
+            .sum::<usize>();
+        let prod_borrowed_live_bytes = prod_groups
+            .iter()
+            .filter(|group| round <= group.num_vars)
+            .map(|group| compact_split_elems(*group, NUM_FANIN) * elem_size)
+            .sum::<usize>();
+
+        let (logup_live_bytes, logup_borrowed_live_bytes) = logup_group
+            .filter(|group| round <= group.num_vars)
+            .map(|group| {
+                let internal = estimate_logup_compact_internal_elems(
+                    group,
+                    NUM_FANIN_LOGUP,
+                    has_logup_numerator,
+                ) * elem_size;
+                let denominator_input_elems = compact_split_elems(group, NUM_FANIN_LOGUP);
+                let numerator_input_elems = if has_logup_numerator {
+                    denominator_input_elems
+                } else {
+                    NUM_FANIN_LOGUP
+                };
+                let borrowed = (numerator_input_elems + denominator_input_elems) * elem_size;
+                if round < group.num_vars {
+                    (internal, borrowed)
+                } else {
+                    (0, borrowed)
+                }
+            })
+            .unwrap_or((0, 0));
+
+        let round_points_buffer = (log_num_fanin * round) * elem_size;
+        let local_round_bytes = prod_live_bytes
+            + logup_live_bytes
+            + eq_mle_buffer_bytes
+            + round_points_buffer
+            + round_sumcheck_estimate.total_bytes;
+        round_peak = round_peak
+            .max(local_round_bytes + prod_borrowed_live_bytes + logup_borrowed_live_bytes);
+        local_round_peak = local_round_peak.max(local_round_bytes);
+    }
+
+    PreciseProveTowerEstimate {
+        prod_tower_buffer_bytes,
+        logup_tower_buffer_bytes,
+        prod_borrowed_input_bytes,
+        logup_borrowed_input_bytes,
+        eq_mle_buffer_bytes,
+        sumcheck_total_bytes,
+        total_bytes: full_tower_entry_peak.max(round_peak),
+        local_total_bytes: local_tower_entry_peak.max(local_round_peak),
+    }
+}
+
 fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     occupied_rows_override: Option<usize>,
 ) -> (usize, usize, usize, usize) {
     let cs = &composed_cs.zkvm_v1_css;
-    let num_prod_towers = composed_cs.num_reads() + composed_cs.num_writes();
-    let num_logup_towers = if composed_cs.is_with_lk_table() {
-        cs.lk_table_expressions.len()
-    } else {
-        cs.lk_expressions.len()
-    };
-    let num_vars = input
-        .log2_num_instances()
-        .saturating_add(composed_cs.rotation_vars().unwrap_or(0))
-        .saturating_sub(1);
     let elem_size = std::mem::size_of::<BB31Ext>();
     let has_logup_numerator = composed_cs.is_with_lk_table();
 
@@ -464,12 +773,75 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         .map(|mle| mle.evaluations_len())
         .or(occupied_rows_override)
         .unwrap_or_else(|| input.num_instances() << composed_cs.rotation_vars().unwrap_or(0));
-    let build_est = estimate_build_tower_memory(
-        num_prod_towers,
-        num_logup_towers,
-        num_vars,
-        num_vars,
-        occupied_rows,
+    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+    let num_lk_numerators = cs.lk_table_expressions.len();
+    let num_lk_denominators = if num_lk_numerators > 0 {
+        cs.lk_table_expressions.len()
+    } else {
+        cs.lk_expressions.len()
+    };
+    let prod_group_vars = [
+        virtual_group_num_vars(num_reads, occupied_rows, NUM_FANIN),
+        virtual_group_num_vars(num_writes, occupied_rows, NUM_FANIN),
+    ];
+    let logup_group_vars = [
+        virtual_group_num_vars(num_lk_numerators, occupied_rows, NUM_FANIN_LOGUP),
+        virtual_group_num_vars(num_lk_denominators, occupied_rows, NUM_FANIN_LOGUP),
+    ];
+    let prod_group_lens = [num_reads, num_writes];
+    let prod_groups = prod_group_vars
+        .into_iter()
+        .zip(prod_group_lens)
+        .filter_map(|(num_vars, group_len)| {
+            num_vars.map(|num_vars| VirtualTowerGroup {
+                num_vars,
+                occupied_len: virtual_group_occupied_len(group_len, occupied_rows, NUM_FANIN),
+            })
+        })
+        .collect::<Vec<_>>();
+    let logup_group_lens = [num_lk_numerators, num_lk_denominators];
+    let logup_group = logup_group_vars
+        .into_iter()
+        .zip(logup_group_lens)
+        .filter_map(|(num_vars, group_len)| {
+            num_vars.map(|num_vars| VirtualTowerGroup {
+                num_vars,
+                occupied_len: virtual_group_occupied_len(group_len, occupied_rows, NUM_FANIN_LOGUP),
+            })
+        })
+        .reduce(|acc, group| VirtualTowerGroup {
+            num_vars: acc.num_vars.max(group.num_vars),
+            occupied_len: acc.occupied_len.max(group.occupied_len),
+        });
+    let num_prod_towers = prod_groups.len();
+    let num_logup_towers = usize::from(logup_group.is_some());
+    let prod_num_vars = prod_groups
+        .iter()
+        .map(|group| group.num_vars)
+        .max()
+        .unwrap_or(0);
+    let logup_num_vars = logup_group.map(|group| group.num_vars).unwrap_or(0);
+    let virtual_occupied_len = prod_groups
+        .iter()
+        .map(|group| group.occupied_len)
+        .chain(logup_group.map(|group| group.occupied_len))
+        .max()
+        .unwrap_or(occupied_rows);
+    let old_virtual_occupied_len = [
+        virtual_group_occupied_len(num_reads, occupied_rows, NUM_FANIN),
+        virtual_group_occupied_len(num_writes, occupied_rows, NUM_FANIN),
+        virtual_group_occupied_len(num_lk_numerators, occupied_rows, NUM_FANIN_LOGUP),
+        virtual_group_occupied_len(num_lk_denominators, occupied_rows, NUM_FANIN_LOGUP),
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(occupied_rows);
+    debug_assert_eq!(virtual_occupied_len, old_virtual_occupied_len);
+    let interleaved_input_bytes = estimate_virtual_interleaved_tower_metadata_bytes(composed_cs);
+    let build_est = estimate_precise_build_tower_memory(
+        &prod_groups,
+        logup_group,
         elem_size,
         has_logup_numerator,
     );
@@ -479,46 +851,47 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         .and_then(|circuit| circuit.layers.first())
         .is_some_and(|layer| layer.name == "ShardRamCircuit_main");
     let shard_ram_tower_batch_overhead = is_shard_ram.then_some(10 * 1024 * 1024).unwrap_or(0);
-    let build_bytes = build_est.total_bytes + shard_ram_tower_batch_overhead;
-    let prove_est = estimate_prove_tower_memory(
-        num_prod_towers,
-        num_logup_towers,
-        num_vars,
-        num_vars,
-        occupied_rows,
-        NUM_FANIN,
+    let build_bytes =
+        build_est.total_bytes + interleaved_input_bytes + shard_ram_tower_batch_overhead;
+    let prove_est = estimate_precise_prove_tower_memory(
+        &prod_groups,
+        logup_group,
         elem_size,
         has_logup_numerator,
     );
     if get_mem_tracking_mode() {
         let to_mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
         tracing::debug!(
-            "[mem estimate][tower_components] prod_towers={}, logup_towers={}, num_vars={}, occupied_rows={}, build_total={:.2}MB, build_prod={:.2}MB, build_logup={:.2}MB, build_aux={:.2}MB, prove_total={:.2}MB, prove_local_total={:.2}MB, prove_prod_live={:.2}MB, prove_logup_live={:.2}MB, prove_borrowed={:.2}MB, prove_eq={:.2}MB, prove_sumcheck={:.2}MB",
+            "[mem estimate][tower_components] prod_towers={}, logup_towers={}, prod_vars={}, logup_vars={}, occupied_rows={}, virtual_occupied_len={}, build_total={:.2}MB, build_prod={:.2}MB, build_logup={:.2}MB, build_aux={:.2}MB, virtual_metadata={:.2}MB, prove_total={:.2}MB, prove_local_total={:.2}MB, prove_prod_live={:.2}MB, prove_logup_live={:.2}MB, prove_borrowed={:.2}MB, prove_eq={:.2}MB, prove_sumcheck={:.2}MB",
             num_prod_towers,
             num_logup_towers,
-            num_vars,
+            prod_num_vars,
+            logup_num_vars,
             occupied_rows,
+            virtual_occupied_len,
             to_mb(build_bytes),
             to_mb(build_est.prod_tower_buffer_bytes),
             to_mb(build_est.logup_tower_buffer_bytes),
             to_mb(build_est.aux_buffer_bytes),
+            to_mb(interleaved_input_bytes),
             to_mb(prove_est.total_bytes),
             to_mb(prove_est.local_total_bytes),
             to_mb(prove_est.prod_tower_buffer_bytes),
             to_mb(prove_est.logup_tower_buffer_bytes),
             to_mb(prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes),
             to_mb(prove_est.eq_mle_buffer_bytes),
-            to_mb(prove_est.sumcheck_estimate.total_bytes),
+            to_mb(prove_est.sumcheck_total_bytes),
         );
     }
 
-    let tower_input_live_bytes =
+    let base_tower_input_live_bytes =
         prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
+    let tower_input_live_bytes = base_tower_input_live_bytes + interleaved_input_bytes;
     let borrowed_input_bytes =
         prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes;
     let prove_local_bytes = prove_est
         .local_total_bytes
-        .saturating_sub(tower_input_live_bytes.saturating_sub(borrowed_input_bytes));
+        .saturating_sub(base_tower_input_live_bytes.saturating_sub(borrowed_input_bytes));
 
     (
         build_bytes,
@@ -526,6 +899,34 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         tower_input_live_bytes,
         borrowed_input_bytes,
     )
+}
+
+fn estimate_virtual_interleaved_tower_metadata_bytes<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+) -> usize {
+    let cs = &composed_cs.zkvm_v1_css;
+    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+    let num_lk_numerators = cs.lk_table_expressions.len();
+    let num_lk_denominators = if num_lk_numerators > 0 {
+        cs.lk_table_expressions.len()
+    } else {
+        cs.lk_expressions.len()
+    };
+
+    let group_metadata_bytes = |group_len: usize| {
+        if group_len == 0 {
+            0
+        } else {
+            group_len
+                * (std::mem::size_of::<*const std::ffi::c_void>() + std::mem::size_of::<u32>())
+        }
+    };
+
+    group_metadata_bytes(num_reads)
+        + group_metadata_bytes(num_writes)
+        + group_metadata_bytes(num_lk_numerators)
+        + group_metadata_bytes(num_lk_denominators)
 }
 
 pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>(

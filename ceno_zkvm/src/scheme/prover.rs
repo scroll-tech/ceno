@@ -152,9 +152,15 @@ where
             )
         })?;
     exit_span!(span);
-    drop(records);
 
-    assert_eq!(rt_tower.len(), num_var_with_rotation);
+    assert!(
+        rt_tower.len() >= num_var_with_rotation,
+        "tower challenge point length {} is shorter than main point length {}",
+        rt_tower.len(),
+        num_var_with_rotation,
+    );
+    let rt_main = rt_tower[rt_tower.len() - num_var_with_rotation..].to_vec();
+    drop(records);
 
     let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
     let ecc_proof = info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
@@ -165,7 +171,7 @@ where
     let span = entered_span!("prove_rotation", profiling_2 = true);
     let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
         crate::scheme::gpu::prove_rotation_impl::<E, PCS>(
-            cs, input, &rt_tower, challenges, transcript,
+            cs, input, &rt_main, challenges, transcript,
         )
     })?;
     exit_span!(span);
@@ -180,6 +186,7 @@ where
             r_out_evals,
             w_out_evals,
             lk_out_evals,
+            main_out_evals: Vec::new(),
             main_sumcheck_proofs: None,
             gkr_iop_proof: None,
             rotation_proof: rotation.clone().map(|r| r.proof),
@@ -194,7 +201,8 @@ where
             witness_trace_idx: task.witness_trace_idx,
             num_witin: task.num_witin,
             structural_rmm,
-            rt_tower,
+            rt_tower: rt_main,
+            main_out_evals: Vec::new(),
             rotation,
             ecc_proof,
             challenges: *challenges,
@@ -818,10 +826,13 @@ impl<
         exit_span!(span);
         drop(records);
 
-        assert_eq!(
-            rt_tower.len(), // num var length should equal to max_num_instance
+        assert!(
+            rt_tower.len() >= num_var_with_rotation,
+            "tower challenge point length {} is shorter than main point length {}",
+            rt_tower.len(),
             num_var_with_rotation,
         );
+        let rt_main = rt_tower[rt_tower.len() - num_var_with_rotation..].to_vec();
 
         let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
         let ecc_proof = info_span!("[ceno] prove_ec_sum_quark")
@@ -831,7 +842,7 @@ impl<
         let span = entered_span!("prove_rotation", profiling_2 = true);
         let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
             self.device
-                .prove_rotation(cs, input, &rt_tower, challenges, transcript)
+                .prove_rotation(cs, input, &rt_main, challenges, transcript)
         })?;
         exit_span!(span);
 
@@ -868,6 +879,7 @@ impl<
                 r_out_evals,
                 w_out_evals,
                 lk_out_evals,
+                main_out_evals: Vec::new(),
                 main_sumcheck_proofs: None,
                 gkr_iop_proof: None,
                 rotation_proof: rotation.clone().map(|r| r.proof),
@@ -882,7 +894,8 @@ impl<
                 witness_trace_idx: task.witness_trace_idx,
                 num_witin: task.num_witin,
                 structural_rmm,
-                rt_tower,
+                rt_tower: rt_main,
+                main_out_evals: Vec::new(),
                 rotation,
                 ecc_proof,
                 challenges: *challenges,
