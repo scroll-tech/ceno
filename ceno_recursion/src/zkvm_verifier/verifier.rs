@@ -29,7 +29,10 @@ use crate::{
         SepticExtensionVariable, SepticPointVariable, SumcheckLayerProofVariable,
     },
 };
-use ceno_zkvm::structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey};
+use ceno_zkvm::{
+    scheme::constants::MAX_NUM_VARIABLES,
+    structs::{ComposedConstrainSystem, VerifyingKey, ZKVMVerifyingKey},
+};
 use ff_ext::BabyBearExt4;
 
 use crate::transcript::{challenger_add_forked_index, clone_challenger_state};
@@ -612,6 +615,28 @@ pub fn verify_chip_proof_pre_main<C: Config>(
     let w_counts_per_instance: Usize<C::N> = Usize::from(w_len);
     let lk_counts_per_instance: Usize<C::N> = Usize::from(lk_len);
     let num_batched: Usize<C::N> = Usize::from(num_batched);
+
+    // Bound the untrusted instance-count hints before they feed
+    // `pow_2(log2_num_instances)` and the `next_pow2 - sum` offset, so a crafted
+    // proof cannot overflow the field. Valid proofs are always within
+    // `2^MAX_NUM_VARIABLES`.
+    builder.assert_less_than_slow_small_rhs(
+        chip_proof.log2_num_instances.get_var(),
+        RVar::from(MAX_NUM_VARIABLES + 1),
+    );
+    let max_instances_plus_one: Var<C::N> = builder.eval(C::N::from_canonical_usize(
+        (1usize << MAX_NUM_VARIABLES) + 1,
+    ));
+    builder.assert_less_than_slow_bit_decomp(
+        chip_proof.sum_num_instances.get_var(),
+        max_instances_plus_one,
+    );
+    builder
+        .range(0, chip_proof.num_instances.len())
+        .for_each(|idx_vec, builder| {
+            let n = builder.get(&chip_proof.num_instances, idx_vec[0]);
+            builder.assert_less_than_slow_bit_decomp(n, max_instances_plus_one);
+        });
 
     let log2_num_instances = chip_proof.log2_num_instances.clone();
     if composed_cs.has_ecc_ops() {
