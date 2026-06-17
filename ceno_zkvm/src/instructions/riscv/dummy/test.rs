@@ -18,10 +18,12 @@ fn test_large_ecall_dummy_keccak() {
     let mut cb = CircuitBuilder::new(&mut cs);
     let config = KeccakDummy::construct_circuit(&mut cb, &ProgramParams::default()).unwrap();
 
-    let (step, program) = ceno_emul::test_utils::keccak_step();
+    let (step, program, syscall_witnesses) = ceno_emul::test_utils::keccak_step();
+    let mut shard_ctx = ShardContext::default();
+    shard_ctx.syscall_witnesses = std::sync::Arc::new(syscall_witnesses);
     let (raw_witin, lkm) = KeccakDummy::assign_instances_from_steps(
         &config,
-        &mut ShardContext::default(),
+        &mut shard_ctx,
         cb.cs.num_witin as usize,
         cb.cs.num_structural_witin as usize,
         &[step],

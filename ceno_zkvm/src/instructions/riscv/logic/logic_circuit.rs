@@ -8,8 +8,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_logic_u8_ops,
         riscv::{constants::UInt8, r_insn::RInstructionConfig},
     },
     structs::ProgramParams,
@@ -30,6 +32,8 @@ pub struct LogicInstruction<E, I>(PhantomData<(E, I)>);
 impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
     type InstructionConfig = LogicConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -72,16 +76,34 @@ impl<E: ExtensionField, I: LogicOp> Instruction<E> for LogicInstruction<E, I> {
 
         config.assign_instance(instance, shard_ctx, lk_multiplicity, step)
     }
+
+    impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
+        emit_logic_u8_ops::<I::OpsTable>(
+            sink,
+            step.rs1().unwrap().value as u64,
+            step.rs2().unwrap().value as u64,
+            4,
+        );
+    });
+
+    impl_collect_shardram!(r_insn);
+
+    impl_gpu_assign!(dispatch::GpuWitgenKind::LogicR(match I::INST_KIND {
+        InsnKind::AND => 0,
+        InsnKind::OR => 1,
+        InsnKind::XOR => 2,
+        kind => unreachable!("unsupported logic GPU kind: {kind:?}"),
+    }));
 }
 
 /// This config implements R-Instructions that represent registers values as 4 * u8.
 /// Non-generic code shared by several circuits.
 #[derive(Debug)]
 pub struct LogicConfig<E: ExtensionField> {
-    r_insn: RInstructionConfig<E>,
+    pub(crate) r_insn: RInstructionConfig<E>,
 
-    rs1_read: UInt8<E>,
-    rs2_read: UInt8<E>,
+    pub(crate) rs1_read: UInt8<E>,
+    pub(crate) rs2_read: UInt8<E>,
     pub(crate) rd_written: UInt8<E>,
 }
 

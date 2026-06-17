@@ -19,10 +19,11 @@ cudarc = { workspace = true, optional = true }
 either.workspace = true
 ff_ext.workspace = true
 gkr_iop = { path = "../gkr_iop" }
-mpcs.workspace = true
+mpcs = { workspace = true, features = ["whir"] }
 multilinear_extensions.workspace = true
 once_cell.workspace = true
 p3.workspace = true
+poseidon.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -75,7 +76,13 @@ glob = "0.3"
 
 [features]
 bigint-rug = ["sp1-curves/bigint-rug"]
-default = ["forbid_overflow", "nightly-features", "u16limb_circuit", "parallel", "bigint-rug"]
+default = [
+  "forbid_overflow",
+  "nightly-features",
+  "u16limb_circuit",
+  "parallel",
+  "bigint-rug",
+]
 flamegraph = ["pprof2/flamegraph", "pprof2/criterion"]
 forbid_overflow = []
 goldilocks = ["forbid_overflow", "nightly-features", "parallel", "bigint-rug"]
@@ -91,7 +98,12 @@ nightly-features = [
   "transcript/nightly-features",
   "witness/nightly-features",
 ]
-parallel = ["whir/parallel", "p3/parallel", "multilinear_extensions/parallel", "mpcs/parallel"]
+parallel = [
+  "whir/parallel",
+  "p3/parallel",
+  "multilinear_extensions/parallel",
+  "mpcs/parallel",
+]
 sanity-check = ["mpcs/sanity-check"]
 u16limb_circuit = ["ceno_emul/u16limb_circuit"]
 

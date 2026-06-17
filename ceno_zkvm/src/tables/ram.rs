@@ -1,11 +1,11 @@
 use ceno_emul::{Addr, VM_REG_COUNT, WORD_SIZE};
 use ff_ext::ExtensionField;
 use gkr_iop::error::CircuitBuilderError;
-use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
+use multilinear_extensions::{Expression, Instance, StructuralWitIn, StructuralWitInType, ToExpr};
 use ram_circuit::{DynVolatileRamCircuit, NonVolatileRamCircuit};
 
 use crate::{
-    instructions::riscv::constants::UINT_LIMBS,
+    instructions::riscv::constants::{HEAP_LENGTH_IDX, HINT_LENGTH_IDX, UINT_LIMBS},
     structs::{ProgramParams, RAMType},
 };
 
@@ -89,6 +89,10 @@ impl DynVolatileRamTable for HeapTable {
             params.platform.heap.end
         );
         addr
+    }
+
+    fn dynamic_length_instance() -> Option<Instance> {
+        Some(Instance(HEAP_LENGTH_IDX))
     }
 }
 
@@ -195,6 +199,10 @@ impl DynVolatileRamTable for HintsTable {
 
     fn name() -> &'static str {
         "HintsTable"
+    }
+
+    fn dynamic_length_instance() -> Option<Instance> {
+        Some(Instance(HINT_LENGTH_IDX))
     }
 }
 pub type HintsInitCircuit<E> =

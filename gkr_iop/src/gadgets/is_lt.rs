@@ -12,7 +12,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct AssertLtConfig(InnerLtConfig);
+pub struct AssertLtConfig(pub InnerLtConfig);
 
 impl AssertLtConfig {
     pub fn construct_circuit<

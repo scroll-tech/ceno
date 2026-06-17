@@ -5,6 +5,7 @@ use crate::{
 };
 use either::Either;
 use ff_ext::ExtensionField;
+use itertools::Itertools;
 use multilinear_extensions::{Expression, impl_expr_from_unsigned, mle::ArcMultilinearExtension};
 use std::marker::PhantomData;
 use strum_macros::EnumIter;
@@ -41,15 +42,12 @@ pub trait ProtocolBuilder<E: ExtensionField>: Sized {
         params: Self::Params,
     ) -> Result<Self, CircuitBuilderError>;
 
-    fn finalize(&mut self, cb: &mut CircuitBuilder<E>) -> (OutEvalGroups, Chip<E>);
+    fn finalize(&mut self, name: String, cb: &mut CircuitBuilder<E>) -> Chip<E>;
 
     fn n_committed(&self) -> usize {
         todo!()
     }
     fn n_fixed(&self) -> usize {
-        todo!()
-    }
-    fn n_challenges(&self) -> usize {
         todo!()
     }
     fn n_evaluations(&self) -> usize {
@@ -80,6 +78,21 @@ pub trait ProtocolWitnessGenerator<E: ExtensionField> {
 pub struct ProtocolProver<E: ExtensionField, Trans: Transcript<E>, PCS>(
     PhantomData<(E, Trans, PCS)>,
 );
+
+pub fn default_out_eval_groups<E: ExtensionField>(cb: &CircuitBuilder<E>) -> OutEvalGroups {
+    let r_len = cb.cs.r_expressions.len() + cb.cs.r_table_expressions.len();
+    let w_len = cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len();
+    let lk_len = cb.cs.lk_expressions.len() + cb.cs.lk_table_expressions.len() * 2;
+    let zero_len =
+        cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
+    [
+        (0..r_len).collect_vec(),
+        (r_len..r_len + w_len).collect_vec(),
+        (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
+        (0..zero_len).collect_vec(),
+    ]
+}
 
 // TODO: the following trait consists of `commit_phase1`, `commit_phase2`,
 // `gkr_phase` and `opening_phase`.

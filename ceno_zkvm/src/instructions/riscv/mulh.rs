@@ -4,7 +4,7 @@ use ceno_emul::InsnKind;
 #[cfg(not(feature = "u16limb_circuit"))]
 mod mulh_circuit;
 #[cfg(feature = "u16limb_circuit")]
-mod mulh_circuit_v2;
+pub(crate) mod mulh_circuit_v2;
 
 #[cfg(not(feature = "u16limb_circuit"))]
 use mulh_circuit::MulhInstructionBase;

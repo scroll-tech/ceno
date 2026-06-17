@@ -2,7 +2,7 @@
 use core::ptr::{read_volatile, write_volatile};
 
 extern crate ceno_rt;
-const OUTPUT_ADDRESS: u32 = 0x3800_0000;
+const OUTPUT_ADDRESS: u32 = 0x1800_0000;
 
 #[inline(never)]
 fn main() {

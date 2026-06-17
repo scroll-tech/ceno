@@ -113,19 +113,41 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         pub_io_evals: &[Either<E::BaseField, E>],
         challenges: &[E],
     ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        Self::layer_witness_filtered(layer, layer_wits, pub_io_evals, challenges, None)
+    }
+
+    fn layer_witness_filtered<'a>(
+        layer: &Layer<E>,
+        layer_wits: &[Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
+        pub_io_evals: &[Either<E::BaseField, E>],
+        challenges: &[E],
+        output_mask: Option<&[bool]>,
+    ) -> Vec<Arc<<CpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let span = entered_span!("witness_infer", profiling_2 = true);
         let out_evals: Vec<_> = layer
             .out_sel_and_eval_exprs
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(iter::repeat(sel_type), out_eval.iter()))
             .collect();
+        if let Some(mask) = output_mask {
+            assert_eq!(
+                mask.len(),
+                out_evals.len(),
+                "output_mask len {} != out_evals len {} for layer {}",
+                mask.len(),
+                out_evals.len(),
+                layer.name
+            );
+        }
         let res = layer
             .exprs_with_selector_out_eval_monomial_form
             .par_iter()
             .zip_eq(layer.expr_names.par_iter())
-            .zip_eq(out_evals.par_iter())
-            .map(|((expr, expr_name), (_, out_eval))| {
+            .zip_eq(out_evals.par_iter().enumerate())
+            .map(|((expr, expr_name), (idx, (_, out_eval)))| {
+                let should_materialize = output_mask.is_none_or(|mask| mask[idx]);
                 if cfg!(debug_assertions)
+                    && should_materialize
                     && let EvalExpression::Zero = out_eval
                 {
                     assert!(
@@ -137,10 +159,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     );
                 };
                 match out_eval {
-                    EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
+                    EvalExpression::Linear(_, _, _) | EvalExpression::Single(_)
+                        if should_materialize =>
+                    {
                         wit_infer_by_monomial_expr(expr, layer_wits, pub_io_evals, challenges)
                     }
-                    EvalExpression::Zero => MultilinearExtension::default().into(),
+                    EvalExpression::Linear(_, _, _)
+                    | EvalExpression::Single(_)
+                    | EvalExpression::Zero => MultilinearExtension::default().into(),
                     EvalExpression::Partition(_, _) => unimplemented!(),
                 }
             })

@@ -106,6 +106,10 @@ struct Args {
     // max cycle per shard
     #[arg(long, default_value = "536870912")] // 536870912 = 2^29
     max_cycle_per_shard: u64,
+
+    /// Restrict proving to a single shard id for debugging.
+    #[arg(long)]
+    shard_id: Option<u64>,
 }
 
 fn main() {
@@ -221,6 +225,7 @@ fn main() {
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
     let public_io_digest = public_io_words_to_digest_words(&public_io);
+    let target_shard_id = args.shard_id.map(|v| v as usize);
     let multi_prover = MultiProver::new(
         args.prover_id as usize,
         args.num_provers as usize,
@@ -240,7 +245,7 @@ fn main() {
             public_io_digest,
             max_steps,
             Checkpoint::Complete,
-            None,
+            target_shard_id,
         );
 
     let zkvm_proofs = result

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 540" font-family="sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2a2a2a"/>
+    </marker>
+    <marker id="arrBoundary" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b03030"/>
+    </marker>
+    <marker id="arrEc" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e6091"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="380" y="22" text-anchor="middle" font-size="15" font-weight="bold" fill="#333">Segmentation: sharded proving of a long VM trace</text>
+
+  <!-- Long execution trace bar -->
+  <rect x="40" y="48" width="680" height="30" fill="#f5f5f5" stroke="#999" stroke-width="1"/>
+  <text x="380" y="68" text-anchor="middle" font-size="12" fill="#333">VM execution trace (cycle 0  →  cycle T)</text>
+
+  <!-- Cycle cut markers -->
+  <line x1="220" y1="42" x2="220" y2="82" stroke="#b03030" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <line x1="400" y1="42" x2="400" y2="82" stroke="#b03030" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <line x1="580" y1="42" x2="580" y2="82" stroke="#b03030" stroke-width="1.5" stroke-dasharray="4,2"/>
+  <text x="220" y="39" text-anchor="middle" font-size="10" fill="#b03030" font-style="italic">cut</text>
+  <text x="400" y="39" text-anchor="middle" font-size="10" fill="#b03030" font-style="italic">cut</text>
+  <text x="580" y="39" text-anchor="middle" font-size="10" fill="#b03030" font-style="italic">cut</text>
+
+  <!-- Arrows from trace segments down to shard boxes -->
+  <line x1="130" y1="78" x2="130" y2="138" stroke="#2a2a2a" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="310" y1="78" x2="310" y2="138" stroke="#2a2a2a" stroke-width="1.2" marker-end="url(#arr)"/>
+  <line x1="490" y1="78" x2="490" y2="138" stroke="#2a2a2a" stroke-width="1.2" marker-end="url(#arr)"/>
+
+  <!-- Shard 1 -->
+  <rect x="50" y="138" width="160" height="170" rx="6" fill="#eef5ff" stroke="#333" stroke-width="1.5"/>
+  <text x="130" y="158" text-anchor="middle" font-size="13" font-weight="bold">Shard 1</text>
+  <line x1="80" y1="167" x2="180" y2="167" stroke="#bbb" stroke-width="1"/>
+  <text x="130" y="186" text-anchor="middle" font-size="11" fill="#2a2a2a">init: pc = p₁, cyc = c₁</text>
+  <text x="130" y="210" text-anchor="middle" font-size="11" fill="#555" font-style="italic">(multi-chip proof</text>
+  <text x="130" y="226" text-anchor="middle" font-size="11" fill="#555" font-style="italic">+ shard RAM chip)</text>
+  <text x="130" y="253" text-anchor="middle" font-size="11" fill="#2a2a2a">end: pc = p₂, cyc = c₂</text>
+  <line x1="80" y1="262" x2="180" y2="262" stroke="#bbb" stroke-width="1"/>
+  <text x="130" y="282" text-anchor="middle" font-size="10" fill="#333">within-shard: ∏R₁ = ∏W₁</text>
+  <text x="130" y="298" text-anchor="middle" font-size="11" fill="#1e6091">outputs Σ₁ (EC sum)</text>
+
+  <!-- Shard 2 -->
+  <rect x="230" y="138" width="160" height="170" rx="6" fill="#eef5ff" stroke="#333" stroke-width="1.5"/>
+  <text x="310" y="158" text-anchor="middle" font-size="13" font-weight="bold">Shard 2</text>
+  <line x1="260" y1="167" x2="360" y2="167" stroke="#bbb" stroke-width="1"/>
+  <text x="310" y="186" text-anchor="middle" font-size="11" fill="#2a2a2a">init: pc = p₂, cyc = c₂</text>
+  <text x="310" y="210" text-anchor="middle" font-size="11" fill="#555" font-style="italic">(multi-chip proof</text>
+  <text x="310" y="226" text-anchor="middle" font-size="11" fill="#555" font-style="italic">+ shard RAM chip)</text>
+  <text x="310" y="253" text-anchor="middle" font-size="11" fill="#2a2a2a">end: pc = p₃, cyc = c₃</text>
+  <line x1="260" y1="262" x2="360" y2="262" stroke="#bbb" stroke-width="1"/>
+  <text x="310" y="282" text-anchor="middle" font-size="10" fill="#333">within-shard: ∏R₂ = ∏W₂</text>
+  <text x="310" y="298" text-anchor="middle" font-size="11" fill="#1e6091">outputs Σ₂ (EC sum)</text>
+
+  <!-- Shard 3 -->
+  <rect x="410" y="138" width="160" height="170" rx="6" fill="#eef5ff" stroke="#333" stroke-width="1.5"/>
+  <text x="490" y="158" text-anchor="middle" font-size="13" font-weight="bold">Shard 3</text>
+  <line x1="440" y1="167" x2="540" y2="167" stroke="#bbb" stroke-width="1"/>
+  <text x="490" y="186" text-anchor="middle" font-size="11" fill="#2a2a2a">init: pc = p₃, cyc = c₃</text>
+  <text x="490" y="210" text-anchor="middle" font-size="11" fill="#555" font-style="italic">(multi-chip proof</text>
+  <text x="490" y="226" text-anchor="middle" font-size="11" fill="#555" font-style="italic">+ shard RAM chip)</text>
+  <text x="490" y="253" text-anchor="middle" font-size="11" fill="#2a2a2a">end: pc = p₄, cyc = c₄</text>
+  <line x1="440" y1="262" x2="540" y2="262" stroke="#bbb" stroke-width="1"/>
+  <text x="490" y="282" text-anchor="middle" font-size="10" fill="#333">within-shard: ∏R₃ = ∏W₃</text>
+  <text x="490" y="298" text-anchor="middle" font-size="11" fill="#1e6091">outputs Σ₃ (EC sum)</text>
+
+  <!-- Ellipsis -->
+  <text x="605" y="228" font-size="20" fill="#999">…</text>
+
+  <!-- Boundary handoff arrows (red, between shards) -->
+  <line x1="210" y1="220" x2="230" y2="220" stroke="#b03030" stroke-width="1.5" marker-end="url(#arrBoundary)"/>
+  <text x="220" y="213" text-anchor="middle" font-size="9" fill="#b03030" font-style="italic">p₂, c₂</text>
+  <line x1="390" y1="220" x2="410" y2="220" stroke="#b03030" stroke-width="1.5" marker-end="url(#arrBoundary)"/>
+  <text x="400" y="213" text-anchor="middle" font-size="9" fill="#b03030" font-style="italic">p₃, c₃</text>
+  <line x1="570" y1="220" x2="590" y2="220" stroke="#b03030" stroke-width="1.5" marker-end="url(#arrBoundary)"/>
+  <text x="580" y="213" text-anchor="middle" font-size="9" fill="#b03030" font-style="italic">p₄, c₄</text>
+
+  <!-- Boundary handoff caption -->
+  <text x="380" y="330" text-anchor="middle" font-size="11" font-style="italic" fill="#b03030">red arrow: verifier checks shardᵢ.end_pc = shardᵢ₊₁.init_pc (and similarly for cycle counter)</text>
+
+  <!-- Arrows from shards down to cross-shard EC reconciliation (blue, EC sums) -->
+  <line x1="130" y1="308" x2="130" y2="388" stroke="#1e6091" stroke-width="1.5" marker-end="url(#arrEc)"/>
+  <line x1="310" y1="308" x2="310" y2="388" stroke="#1e6091" stroke-width="1.5" marker-end="url(#arrEc)"/>
+  <line x1="490" y1="308" x2="490" y2="388" stroke="#1e6091" stroke-width="1.5" marker-end="url(#arrEc)"/>
+
+  <!-- Cross-shard EC reconciliation box -->
+  <rect x="40" y="388" width="680" height="125" rx="6" fill="#d8eac8" stroke="#1e6091" stroke-width="1.8"/>
+  <text x="380" y="412" text-anchor="middle" font-size="14" font-weight="bold">Cross-shard memory reconciliation (verifier-side)</text>
+  <text x="380" y="438" text-anchor="middle" font-size="13" font-style="italic" fill="#1e6091">Σ over shards of Σ_shard  =  𝒪   (point at infinity, direct EC addition by verifier)</text>
+  <text x="380" y="464" text-anchor="middle" font-size="11" fill="#333">each cross-shard record → EC point on short-Weierstrass curve over 𝔽_{q⁷}</text>
+  <text x="380" y="480" text-anchor="middle" font-size="11" fill="#333">x = Poseidon2(addr, ram_type, value, shard, global_clk);   y-sign encodes read vs write</text>
+  <text x="380" y="500" text-anchor="middle" font-size="10" fill="#666" font-style="italic">each shard's Σ_shard is itself proved correct by the EC-sum Quark PIOP inside that shard's proof</text>
+</svg>
