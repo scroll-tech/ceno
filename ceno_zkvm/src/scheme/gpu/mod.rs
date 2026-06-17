@@ -25,7 +25,7 @@ use ceno_gpu::{
     Buffer, CudaHal,
     bb31::{CudaHalBB31, GpuFieldType, GpuMatrix, GpuPolynomial, GpuPolynomialExt},
     common::{
-        CacheLevel, get_gpu_cache_level,
+        CacheLevel, get_gpu_cache_level, get_mem_tracking_mode,
         jagged::{
             JaggedSumcheckGpuCtx, batch_commit_gpu_grouped, eval_cols_at_point_gpu,
             jagged_batch_open_gpu, jagged_sumcheck_prove_gpu,
@@ -68,7 +68,6 @@ use rayon::{
 use std::{
     collections::BTreeMap,
     ffi::c_void,
-    io::Write,
     iter::{once, repeat_n},
     mem::MaybeUninit,
     sync::Arc,
@@ -282,6 +281,10 @@ fn pcs_resident_stats(pcs_data_basefold: &GpuBasefoldPcsData) -> PcsResidentStat
     }
 }
 
+pub(crate) fn should_log_gpu_memory() -> bool {
+    get_mem_tracking_mode()
+}
+
 pub fn log_gpu_pcs_baseline<E, PCS>(
     label: &str,
     pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
@@ -289,6 +292,9 @@ pub fn log_gpu_pcs_baseline<E, PCS>(
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
 {
+    if !should_log_gpu_memory() {
+        return;
+    }
     assert_eq!(
         std::any::TypeId::of::<E::BaseField>(),
         std::any::TypeId::of::<BB31Base>(),
@@ -319,6 +325,9 @@ pub fn log_gpu_proof_baseline<E, PCS>(
     E: ExtensionField,
     PCS: PolynomialCommitmentScheme<E>,
 {
+    if !should_log_gpu_memory() {
+        return;
+    }
     assert_eq!(
         std::any::TypeId::of::<E::BaseField>(),
         std::any::TypeId::of::<BB31Base>(),
@@ -383,6 +392,9 @@ pub fn log_gpu_proof_baseline<E, PCS>(
 }
 
 pub fn log_gpu_pool_usage(label: &str) {
+    if !should_log_gpu_memory() {
+        return;
+    }
     let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu pool logging");
     let pool = cuda_hal.inner.mem_pool();
     let used_bytes = pool.get_used_size().unwrap_or(0);
@@ -393,12 +405,13 @@ pub fn log_gpu_pool_usage(label: &str) {
         mb(used_bytes as usize),
         mb(reserved_bytes as usize),
     );
-    eprintln!("{message}");
-    let _ = std::io::stderr().flush();
     tracing::info!("{}", message);
 }
 
 pub fn log_gpu_device_state(label: &str) {
+    if !should_log_gpu_memory() {
+        return;
+    }
     let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu device logging");
     let pool = cuda_hal.inner.mem_pool();
     let used_bytes = pool.get_used_size().unwrap_or(0);
@@ -418,8 +431,6 @@ pub fn log_gpu_device_state(label: &str) {
         mb(booked_bytes as usize),
         mb(max_bytes as usize),
     );
-    eprintln!("{message}");
-    let _ = std::io::stderr().flush();
     tracing::info!("{}", message);
 }
 use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};

@@ -549,7 +549,7 @@ impl<
                 &circuit_trace_indices,
             );
             #[cfg(feature = "gpu")]
-            if using_gpu_backend {
+            if using_gpu_backend && crate::scheme::gpu::should_log_gpu_memory() {
                 if let Some(active_dpk) = self.get_device_proving_key(shard_ctx) {
                     let active_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
                         unsafe { std::mem::transmute(active_dpk.pcs_data.as_ref()) };
