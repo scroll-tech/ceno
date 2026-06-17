@@ -1,5 +1,5 @@
-use ceno_emul::{ByteAddr, Cycle, MemOp, StepRecord};
-use ff_ext::ExtensionField;
+use ceno_emul::{ByteAddr, Cycle};
+use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
     chip::Chip,
@@ -36,18 +36,17 @@ use sumcheck::{
     util::optimal_sumcheck_threads,
 };
 use transcript::{BasicTranscript, Transcript};
-use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding};
+use witness::{InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding, set_val};
 
 use crate::{
     chip_handler::MemoryExpr,
-    e2e::ShardContext,
     error::ZKVMError,
-    instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
         SelectorTypeLayout,
         utils::{Mask, MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance},
     },
     scheme::utils::gkr_witness,
+    structs::RAMType,
 };
 
 pub const ROUNDS: usize = 24;
@@ -104,6 +103,9 @@ pub const AND_LOOKUPS: usize = AND_LOOKUPS_PER_ROUND;
 pub const XOR_LOOKUPS: usize = XOR_LOOKUPS_PER_ROUND;
 pub const RANGE_LOOKUPS: usize = RANGE_LOOKUPS_PER_ROUND;
 pub const STRUCTURAL_WITIN: usize = 6;
+pub const KECCAK_STATE_TAG: u64 = 0x4b4543;
+pub const KECCAK_STATE_PHASE_INPUT: u64 = 0;
+pub const KECCAK_STATE_PHASE_OUTPUT: u64 = 1;
 
 #[derive(Clone, Debug)]
 pub struct KeccakParams;
@@ -153,6 +155,8 @@ pub struct KeccakLayer<WitT, EqT> {
 #[derive(Clone, Debug)]
 pub struct KeccakLayout<E: ExtensionField> {
     pub params: KeccakParams,
+    pub cycle: WitIn,
+    pub state_ptr: WitIn,
     pub layer_exprs: KeccakLayer<WitIn, StructuralWitIn>,
     pub selector_type_layout: SelectorTypeLayout<E>,
     pub input32_exprs: [MemoryExpr<E>; KECCAK_INPUT32_SIZE],
@@ -160,6 +164,23 @@ pub struct KeccakLayout<E: ExtensionField> {
     pub n_fixed: usize,
     pub n_committed: usize,
     pub n_structural_witin: usize,
+}
+
+pub fn keccak_state_record<E: ExtensionField>(
+    cycle: Expression<E>,
+    state_ptr: Expression<E>,
+    phase: u64,
+    state: impl IntoIterator<Item = Expression<E>>,
+) -> Vec<Expression<E>> {
+    [
+        E::BaseField::from_canonical_u64(KECCAK_STATE_TAG).expr(),
+        cycle,
+        state_ptr,
+        E::BaseField::from_canonical_u64(phase).expr(),
+    ]
+    .into_iter()
+    .chain(state)
+    .collect_vec()
 }
 
 const ROTATION_WITNESS_LEN: usize = 192;
@@ -210,6 +231,8 @@ fn split_mask_to_array<const N: usize>(value: u64, sizes: &[usize; N]) -> [u64; 
 
 impl<E: ExtensionField> KeccakLayout<E> {
     fn new(cb: &mut CircuitBuilder<E>, params: KeccakParams) -> Self {
+        let cycle = cb.create_witin(|| "keccak_cycle");
+        let state_ptr = cb.create_witin(|| "keccak_state_ptr");
         // allocate witnesses, fixed, and eqs
         let (
             wits,
@@ -246,6 +269,8 @@ impl<E: ExtensionField> KeccakLayout<E> {
             .collect_vec();
         Self {
             params,
+            cycle,
+            state_ptr,
             layer_exprs: KeccakLayer {
                 wits,
                 // fixed,
@@ -530,6 +555,33 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         layout.input32_exprs = keccak_input32.try_into().unwrap();
         layout.output32_exprs = keccak_output32.try_into().unwrap();
 
+        system.read_record(
+            || "keccak_state_in",
+            RAMType::Undefined,
+            keccak_state_record(
+                layout.cycle.expr(),
+                layout.state_ptr.expr(),
+                KECCAK_STATE_PHASE_INPUT,
+                layout
+                    .input32_exprs
+                    .iter()
+                    .flat_map(|word| word.iter().cloned()),
+            ),
+        )?;
+        system.write_record(
+            || "keccak_state_out",
+            RAMType::Undefined,
+            keccak_state_record(
+                layout.cycle.expr(),
+                layout.state_ptr.expr(),
+                KECCAK_STATE_PHASE_OUTPUT,
+                layout
+                    .output32_exprs
+                    .iter()
+                    .flat_map(|word| word.iter().cloned()),
+            ),
+        )?;
+
         // rotation constrain: rotation(keccak_input8).next() == keccak_output8
         izip!(keccak_input8, keccak_output8)
             .for_each(|(input, output)| system.rotate_and_assert_eq(input.expr(), output.expr()));
@@ -682,299 +734,303 @@ where
                     .take(num_instances),
             )
             .zip(&phase1.instances)
-            .for_each(|((wits, structural_wits), KeccakInstance { witin, .. })| {
-                let mut lk_multiplicity = lk_multiplicity.clone();
-                let state_32_iter = witin.instance.iter().map(|e| *e as u64);
-                let mut state64 = [[0u64; 5]; 5];
-                zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
-                    .map(|((x, y), (lo, hi))| {
-                        state64[x][y] = lo | (hi << 32);
-                    })
-                    .count();
+            .for_each(
+                |((wits, structural_wits), KeccakInstance { state, witin })| {
+                    let mut lk_multiplicity = lk_multiplicity.clone();
+                    let state_32_iter = witin.instance.iter().map(|e| *e as u64);
+                    let mut state64 = [[0u64; 5]; 5];
+                    zip_eq(iproduct!(0..5, 0..5), state_32_iter.tuples())
+                        .map(|((x, y), (lo, hi))| {
+                            state64[x][y] = lo | (hi << 32);
+                        })
+                        .count();
 
-                let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
-                let mut cyclic_group = bh.into_iter();
+                    let bh = BooleanHypercube::new(ROUNDS_CEIL_LOG2);
+                    let mut cyclic_group = bh.into_iter();
 
-                let Some(sel_first) = self.selector_type_layout.sel_first.as_ref() else {
-                    panic!("sel_first must be Some");
-                };
-                let (mut sel_first_iter, sel_first_structural_witin) = (
-                    sel_first.sparse_indices().iter(),
-                    sel_first.selector_expr().id(),
-                );
-
-                let Some(sel_last) = self.selector_type_layout.sel_last.as_ref() else {
-                    panic!("sel_last must be Some");
-                };
-                let (mut sel_last_iter, sel_last_structural_witin) = (
-                    sel_last.sparse_indices().iter(),
-                    sel_last.selector_expr().id(),
-                );
-
-                let (mut sel_all_iter, sel_all_structural_witin) = (
-                    self.selector_type_layout.sel_all.sparse_indices().iter(),
-                    self.selector_type_layout.sel_all.selector_expr().id(),
-                );
-
-                #[allow(clippy::needless_range_loop)]
-                for round in 0..ROUNDS {
-                    let round_index = cyclic_group.next().unwrap();
-                    let wits =
-                        &mut wits[round_index as usize * self.n_committed..][..self.n_committed];
-
-                    // set selector
-                    if let Some(index) = sel_first_iter.next() {
-                        structural_wits
-                            [index * self.n_structural_witin + sel_first_structural_witin] =
-                            E::BaseField::ONE;
-                    }
-                    if let Some(index) = sel_last_iter.next() {
-                        structural_wits
-                            [index * self.n_structural_witin + sel_last_structural_witin] =
-                            E::BaseField::ONE;
-                    }
-                    if let Some(index) = sel_all_iter.next() {
-                        structural_wits
-                            [index * self.n_structural_witin + sel_all_structural_witin] =
-                            E::BaseField::ONE;
-                    }
-
-                    let mut state8 = [[[0u64; 8]; 5]; 5];
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            state8[x][y] = split_mask_to_array(state64[x][y], &BYTE_SPLIT_SIZES);
-                        }
-                    }
-
-                    push_instance::<E, _>(
-                        wits,
-                        input8_witin[0].id.into(),
-                        state8.into_iter().flatten().flatten(),
+                    let Some(sel_first) = self.selector_type_layout.sel_first.as_ref() else {
+                        panic!("sel_first must be Some");
+                    };
+                    let (mut sel_first_iter, sel_first_structural_witin) = (
+                        sel_first.sparse_indices().iter(),
+                        sel_first.selector_expr().id(),
                     );
 
-                    let mut c_aux64 = [[0u64; 4]; 5];
-                    let mut c_aux8 = [[[0u64; 8]; 4]; 5];
+                    let Some(sel_last) = self.selector_type_layout.sel_last.as_ref() else {
+                        panic!("sel_last must be Some");
+                    };
+                    let (mut sel_last_iter, sel_last_structural_witin) = (
+                        sel_last.sparse_indices().iter(),
+                        sel_last.selector_expr().id(),
+                    );
 
-                    for i in 0..5 {
-                        for j in 1..5 {
-                            let prev64 = if j == 1 {
-                                state64[0][i]
-                            } else {
-                                c_aux64[i][j - 2]
-                            };
-                            c_aux64[i][j - 1] = state64[j][i] ^ prev64;
-                            for k in 0..8 {
-                                let prev8 = if j == 1 {
-                                    state8[0][i][k]
+                    let (mut sel_all_iter, sel_all_structural_witin) = (
+                        self.selector_type_layout.sel_all.sparse_indices().iter(),
+                        self.selector_type_layout.sel_all.selector_expr().id(),
+                    );
+
+                    #[allow(clippy::needless_range_loop)]
+                    for round in 0..ROUNDS {
+                        let round_index = cyclic_group.next().unwrap();
+                        let wits = &mut wits[round_index as usize * self.n_committed..]
+                            [..self.n_committed];
+                        wits[self.cycle.id as usize] =
+                            E::BaseField::from_canonical_u64(state.cur_ts);
+                        wits[self.state_ptr.id as usize] =
+                            E::BaseField::from_canonical_u64(state.state_ptr_address.0 as u64);
+
+                        // set selector
+                        if let Some(index) = sel_first_iter.next() {
+                            structural_wits
+                                [index * self.n_structural_witin + sel_first_structural_witin] =
+                                E::BaseField::ONE;
+                        }
+                        if let Some(index) = sel_last_iter.next() {
+                            structural_wits
+                                [index * self.n_structural_witin + sel_last_structural_witin] =
+                                E::BaseField::ONE;
+                        }
+                        if let Some(index) = sel_all_iter.next() {
+                            structural_wits
+                                [index * self.n_structural_witin + sel_all_structural_witin] =
+                                E::BaseField::ONE;
+                        }
+
+                        let mut state8 = [[[0u64; 8]; 5]; 5];
+                        for x in 0..5 {
+                            for y in 0..5 {
+                                state8[x][y] =
+                                    split_mask_to_array(state64[x][y], &BYTE_SPLIT_SIZES);
+                            }
+                        }
+
+                        push_instance::<E, _>(
+                            wits,
+                            input8_witin[0].id.into(),
+                            state8.into_iter().flatten().flatten(),
+                        );
+
+                        let mut c_aux64 = [[0u64; 4]; 5];
+                        let mut c_aux8 = [[[0u64; 8]; 4]; 5];
+
+                        for i in 0..5 {
+                            for j in 1..5 {
+                                let prev64 = if j == 1 {
+                                    state64[0][i]
                                 } else {
-                                    c_aux8[i][j - 2][k]
+                                    c_aux64[i][j - 2]
                                 };
-                                lk_multiplicity.lookup_xor_byte(prev8, state8[j][i][k]);
-                            }
-                            c_aux8[i][j - 1] =
-                                split_mask_to_array(c_aux64[i][j - 1], &BYTE_SPLIT_SIZES);
-                        }
-                    }
-
-                    let mut c64 = [0u64; 5];
-                    let mut c8 = [[0u64; 8]; 5];
-
-                    for x in 0..5 {
-                        c64[x] = c_aux64[x][3];
-                        c8[x] = split_mask_to_array(c64[x], &BYTE_SPLIT_SIZES);
-                    }
-
-                    let mut c_temp = [[0u64; 8]; 5];
-                    for i in 0..5 {
-                        let chunks = split_mask_to_array(c64[i], &C_TEMP_SPLIT_SIZES);
-                        for (chunk, size) in chunks.iter().zip(C_TEMP_SPLIT_SIZES.iter()) {
-                            lk_multiplicity.assert_const_range(*chunk, *size);
-                        }
-                        c_temp[i] = chunks;
-                    }
-
-                    let mut crot64 = [0u64; 5];
-                    let mut crot8 = [[0u64; 8]; 5];
-                    for i in 0..5 {
-                        crot64[i] = c64[i].rotate_left(1);
-                        crot8[i] = split_mask_to_array(crot64[i], &BYTE_SPLIT_SIZES);
-                    }
-
-                    let mut d64 = [0u64; 5];
-                    let mut d8 = [[0u64; 8]; 5];
-                    for x in 0..5 {
-                        d64[x] = c64[(x + 4) % 5] ^ c64[(x + 1) % 5].rotate_left(1);
-                        for k in 0..8 {
-                            lk_multiplicity.lookup_xor_byte(
-                                c_aux8[(x + 5 - 1) % 5][3][k],
-                                crot8[(x + 1) % 5][k],
-                            );
-                        }
-                        d8[x] = split_mask_to_array(d64[x], &BYTE_SPLIT_SIZES);
-                    }
-
-                    let mut theta_state64 = state64;
-                    let mut theta_state8 = [[[0u64; 8]; 5]; 5];
-                    let mut rotation_witness = Vec::with_capacity(ROTATION_WITNESS_LEN);
-
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            theta_state64[y][x] ^= d64[x];
-                            for k in 0..8 {
-                                lk_multiplicity.lookup_xor_byte(state8[y][x][k], d8[x][k])
-                            }
-                            theta_state8[y][x] =
-                                split_mask_to_array(theta_state64[y][x], &BYTE_SPLIT_SIZES);
-
-                            let (sizes, _) = rotation_split(ROTATION_CONSTANTS[y][x]);
-                            if ROTATION_CONSTANTS[y][x] != 0 {
-                                let rotation_chunks = MaskRepresentation::from_mask(Mask::new(
-                                    64,
-                                    theta_state64[y][x],
-                                ))
-                                .convert(&sizes)
-                                .values();
-                                for (chunk, size) in rotation_chunks.iter().zip(sizes.iter()) {
-                                    lk_multiplicity.assert_const_range(*chunk, *size);
+                                c_aux64[i][j - 1] = state64[j][i] ^ prev64;
+                                for k in 0..8 {
+                                    let prev8 = if j == 1 {
+                                        state8[0][i][k]
+                                    } else {
+                                        c_aux8[i][j - 2][k]
+                                    };
+                                    lk_multiplicity.lookup_xor_byte(prev8, state8[j][i][k]);
                                 }
-                                rotation_witness.extend(rotation_chunks);
+                                c_aux8[i][j - 1] =
+                                    split_mask_to_array(c_aux64[i][j - 1], &BYTE_SPLIT_SIZES);
                             }
                         }
-                    }
-                    assert_eq!(rotation_witness.len(), rotation_witness_witin.len());
 
-                    // Rho and Pi steps
-                    let mut rhopi_output64 = [[0u64; 5]; 5];
-                    let mut rhopi_output8 = [[[0u64; 8]; 5]; 5];
+                        let mut c64 = [0u64; 5];
+                        let mut c8 = [[0u64; 8]; 5];
 
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            rhopi_output64[(2 * x + 3 * y) % 5][y % 5] =
-                                theta_state64[y][x].rotate_left(ROTATION_CONSTANTS[y][x] as u32);
+                        for x in 0..5 {
+                            c64[x] = c_aux64[x][3];
+                            c8[x] = split_mask_to_array(c64[x], &BYTE_SPLIT_SIZES);
                         }
-                    }
 
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            rhopi_output8[x][y] =
-                                split_mask_to_array(rhopi_output64[x][y], &BYTE_SPLIT_SIZES);
+                        let mut c_temp = [[0u64; 8]; 5];
+                        for i in 0..5 {
+                            let chunks = split_mask_to_array(c64[i], &C_TEMP_SPLIT_SIZES);
+                            for (chunk, size) in chunks.iter().zip(C_TEMP_SPLIT_SIZES.iter()) {
+                                lk_multiplicity.assert_const_range(*chunk, *size);
+                            }
+                            c_temp[i] = chunks;
                         }
-                    }
 
-                    // Chi step
-                    let mut nonlinear64 = [[0u64; 5]; 5];
-                    let mut nonlinear8 = [[[0u64; 8]; 5]; 5];
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            nonlinear64[y][x] =
-                                !rhopi_output64[y][(x + 1) % 5] & rhopi_output64[y][(x + 2) % 5];
+                        let mut crot64 = [0u64; 5];
+                        let mut crot8 = [[0u64; 8]; 5];
+                        for i in 0..5 {
+                            crot64[i] = c64[i].rotate_left(1);
+                            crot8[i] = split_mask_to_array(crot64[i], &BYTE_SPLIT_SIZES);
+                        }
+
+                        let mut d64 = [0u64; 5];
+                        let mut d8 = [[0u64; 8]; 5];
+                        for x in 0..5 {
+                            d64[x] = c64[(x + 4) % 5] ^ c64[(x + 1) % 5].rotate_left(1);
                             for k in 0..8 {
-                                record_chi_byte_lookups(
-                                    &mut lk_multiplicity,
-                                    rhopi_output8[y][x][k],
-                                    rhopi_output8[y][(x + 1) % 5][k],
-                                    rhopi_output8[y][(x + 2) % 5][k],
+                                lk_multiplicity.lookup_xor_byte(
+                                    c_aux8[(x + 5 - 1) % 5][3][k],
+                                    crot8[(x + 1) % 5][k],
                                 );
                             }
-                            nonlinear8[y][x] =
-                                split_mask_to_array(nonlinear64[y][x], &BYTE_SPLIT_SIZES);
+                            d8[x] = split_mask_to_array(d64[x], &BYTE_SPLIT_SIZES);
                         }
-                    }
 
-                    let mut chi_output64 = [[0u64; 5]; 5];
-                    let mut chi_output8 = [[[0u64; 8]; 5]; 5];
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            chi_output64[y][x] = nonlinear64[y][x] ^ rhopi_output64[y][x];
-                            chi_output8[y][x] =
-                                split_mask_to_array(chi_output64[y][x], &BYTE_SPLIT_SIZES);
+                        let mut theta_state64 = state64;
+                        let mut theta_state8 = [[[0u64; 8]; 5]; 5];
+                        let mut rotation_witness = Vec::with_capacity(ROTATION_WITNESS_LEN);
+
+                        for x in 0..5 {
+                            for y in 0..5 {
+                                theta_state64[y][x] ^= d64[x];
+                                for k in 0..8 {
+                                    lk_multiplicity.lookup_xor_byte(state8[y][x][k], d8[x][k])
+                                }
+                                theta_state8[y][x] =
+                                    split_mask_to_array(theta_state64[y][x], &BYTE_SPLIT_SIZES);
+
+                                let (sizes, _) = rotation_split(ROTATION_CONSTANTS[y][x]);
+                                if ROTATION_CONSTANTS[y][x] != 0 {
+                                    let rotation_chunks = MaskRepresentation::from_mask(Mask::new(
+                                        64,
+                                        theta_state64[y][x],
+                                    ))
+                                    .convert(&sizes)
+                                    .values();
+                                    for (chunk, size) in rotation_chunks.iter().zip(sizes.iter()) {
+                                        lk_multiplicity.assert_const_range(*chunk, *size);
+                                    }
+                                    rotation_witness.extend(rotation_chunks);
+                                }
+                            }
                         }
-                    }
+                        assert_eq!(rotation_witness.len(), rotation_witness_witin.len());
 
-                    // Iota step
-                    let mut iota_output64 = chi_output64;
-                    let mut iota_output8 = [[[0u64; 8]; 5]; 5];
-                    // TODO figure out how to deal with RC, since it's not a constant in rotation
-                    iota_output64[0][0] ^= RC[round];
-                    let rc8 = split_mask_to_array(RC[round], &BYTE_SPLIT_SIZES);
+                        // Rho and Pi steps
+                        let mut rhopi_output64 = [[0u64; 5]; 5];
+                        let mut rhopi_output8 = [[[0u64; 8]; 5]; 5];
 
-                    for k in 0..8 {
-                        lk_multiplicity.lookup_xor_byte(chi_output8[0][0][k], rc8[k]);
-                    }
-
-                    for x in 0..5 {
-                        for y in 0..5 {
-                            iota_output8[x][y] =
-                                split_mask_to_array(iota_output64[x][y], &BYTE_SPLIT_SIZES);
+                        for x in 0..5 {
+                            for y in 0..5 {
+                                rhopi_output64[(2 * x + 3 * y) % 5][y % 5] = theta_state64[y][x]
+                                    .rotate_left(ROTATION_CONSTANTS[y][x] as u32);
+                            }
                         }
+
+                        for x in 0..5 {
+                            for y in 0..5 {
+                                rhopi_output8[x][y] =
+                                    split_mask_to_array(rhopi_output64[x][y], &BYTE_SPLIT_SIZES);
+                            }
+                        }
+
+                        // Chi step
+                        let mut nonlinear64 = [[0u64; 5]; 5];
+                        let mut nonlinear8 = [[[0u64; 8]; 5]; 5];
+                        for x in 0..5 {
+                            for y in 0..5 {
+                                nonlinear64[y][x] = !rhopi_output64[y][(x + 1) % 5]
+                                    & rhopi_output64[y][(x + 2) % 5];
+                                for k in 0..8 {
+                                    record_chi_byte_lookups(
+                                        &mut lk_multiplicity,
+                                        rhopi_output8[y][x][k],
+                                        rhopi_output8[y][(x + 1) % 5][k],
+                                        rhopi_output8[y][(x + 2) % 5][k],
+                                    );
+                                }
+                                nonlinear8[y][x] =
+                                    split_mask_to_array(nonlinear64[y][x], &BYTE_SPLIT_SIZES);
+                            }
+                        }
+
+                        let mut chi_output64 = [[0u64; 5]; 5];
+                        let mut chi_output8 = [[[0u64; 8]; 5]; 5];
+                        for x in 0..5 {
+                            for y in 0..5 {
+                                chi_output64[y][x] = nonlinear64[y][x] ^ rhopi_output64[y][x];
+                                chi_output8[y][x] =
+                                    split_mask_to_array(chi_output64[y][x], &BYTE_SPLIT_SIZES);
+                            }
+                        }
+
+                        // Iota step
+                        let mut iota_output64 = chi_output64;
+                        let mut iota_output8 = [[[0u64; 8]; 5]; 5];
+                        // TODO figure out how to deal with RC, since it's not a constant in rotation
+                        iota_output64[0][0] ^= RC[round];
+                        let rc8 = split_mask_to_array(RC[round], &BYTE_SPLIT_SIZES);
+
+                        for k in 0..8 {
+                            lk_multiplicity.lookup_xor_byte(chi_output8[0][0][k], rc8[k]);
+                        }
+
+                        for x in 0..5 {
+                            for y in 0..5 {
+                                iota_output8[x][y] =
+                                    split_mask_to_array(iota_output64[x][y], &BYTE_SPLIT_SIZES);
+                            }
+                        }
+
+                        // set witness
+                        push_instance::<E, _>(
+                            wits,
+                            c_aux_witin[0].id.into(),
+                            c_aux8.into_iter().flatten().flatten(),
+                        );
+                        push_instance::<E, _>(
+                            wits,
+                            c_temp_witin[0].id.into(),
+                            c_temp.into_iter().flatten(),
+                        );
+                        push_instance::<E, _>(
+                            wits,
+                            c_rot_witin[0].id.into(),
+                            crot8.into_iter().flatten(),
+                        );
+                        push_instance::<E, _>(wits, d_witin[0].id.into(), d8.into_iter().flatten());
+                        push_instance::<E, _>(
+                            wits,
+                            theta_output_witin[0].id.into(),
+                            theta_state8.into_iter().flatten().flatten(),
+                        );
+                        push_instance::<E, _>(
+                            wits,
+                            rotation_witness_witin[0].id.into(),
+                            rotation_witness.into_iter(),
+                        );
+                        push_instance::<E, _>(
+                            wits,
+                            rhopi_output_witin[0].id.into(),
+                            rhopi_output8.into_iter().flatten().flatten(),
+                        );
+                        push_instance::<E, _>(
+                            wits,
+                            nonlinear_witin[0].id.into(),
+                            nonlinear8.into_iter().flatten().flatten(),
+                        );
+                        push_instance::<E, _>(
+                            wits,
+                            chi_output_witin[0].id.into(),
+                            chi_output8[0][0].iter().copied(),
+                        );
+                        push_instance::<E, _>(
+                            wits,
+                            iota_output_witin[0].id.into(),
+                            iota_output8.into_iter().flatten().flatten(),
+                        );
+                        // TODO temporarily move RC to witness
+                        push_instance::<E, _>(
+                            wits,
+                            rc_witin[0].id.into(),
+                            (0..8).map(|i| (RC[round] >> (i << 3)) & 0xFF),
+                        );
+
+                        state64 = iota_output64;
                     }
-
-                    // set witness
-                    push_instance::<E, _>(
-                        wits,
-                        c_aux_witin[0].id.into(),
-                        c_aux8.into_iter().flatten().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        c_temp_witin[0].id.into(),
-                        c_temp.into_iter().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        c_rot_witin[0].id.into(),
-                        crot8.into_iter().flatten(),
-                    );
-                    push_instance::<E, _>(wits, d_witin[0].id.into(), d8.into_iter().flatten());
-                    push_instance::<E, _>(
-                        wits,
-                        theta_output_witin[0].id.into(),
-                        theta_state8.into_iter().flatten().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        rotation_witness_witin[0].id.into(),
-                        rotation_witness.into_iter(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        rhopi_output_witin[0].id.into(),
-                        rhopi_output8.into_iter().flatten().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        nonlinear_witin[0].id.into(),
-                        nonlinear8.into_iter().flatten().flatten(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        chi_output_witin[0].id.into(),
-                        chi_output8[0][0].iter().copied(),
-                    );
-                    push_instance::<E, _>(
-                        wits,
-                        iota_output_witin[0].id.into(),
-                        iota_output8.into_iter().flatten().flatten(),
-                    );
-                    // TODO temporarily move RC to witness
-                    push_instance::<E, _>(
-                        wits,
-                        rc_witin[0].id.into(),
-                        (0..8).map(|i| (RC[round] >> (i << 3)) & 0xFF),
-                    );
-
-                    state64 = iota_output64;
-                }
-            });
+                },
+            );
     }
 }
 
 /// this is for testing purpose
 pub struct TestKeccakLayout<E: ExtensionField> {
     layout: KeccakLayout<E>,
-    mem_rw: Vec<WriteMEM>,
-    vm_state: StateInOut<E>,
-    _state_ptr: WitIn,
 }
 
 pub fn setup_gkr_circuit<E: ExtensionField>()
@@ -982,36 +1038,11 @@ pub fn setup_gkr_circuit<E: ExtensionField>()
     let mut cs = ConstraintSystem::new(|| "lookup_keccak");
     let mut cb = CircuitBuilder::<E>::new(&mut cs);
 
-    // constrain vmstate
-    let vm_state = StateInOut::construct_circuit(&mut cb, false)?;
-
-    let state_ptr = cb.create_witin(|| "state_ptr");
-
     let mut layout = KeccakLayout::build_layer_logic(&mut cb, KeccakParams {})?;
-
-    let mem_rw = izip!(&layout.input32_exprs, &layout.output32_exprs)
-        .enumerate()
-        .map(|(i, (val_before, val_after))| {
-            WriteMEM::construct_circuit(
-                &mut cb,
-                // mem address := state_ptr + i
-                state_ptr.expr() + E::BaseField::from_canonical_u32(i as u32).expr(),
-                val_before.clone(),
-                val_after.clone(),
-                vm_state.ts,
-            )
-        })
-        .collect::<Result<Vec<WriteMEM>, _>>()?;
-
     let chip = layout.finalize("lookup_keccak".to_string(), &mut cb);
 
     Ok((
-        TestKeccakLayout {
-            layout,
-            vm_state,
-            _state_ptr: state_ptr,
-            mem_rw,
-        },
+        TestKeccakLayout { layout },
         chip.gkr_circuit(),
         cs.num_witin,
         cs.num_structural_witin,
@@ -1035,7 +1066,6 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
     verify: bool,
     test_outputs: bool,
 ) -> Result<GKRProof<E>, BackendError> {
-    let mut shard_ctx = ShardContext::default();
     let num_instances = states.len();
     let num_instances_rounds =
         next_pow2_instance_padding(num_instances) * ROUNDS.next_power_of_two();
@@ -1086,42 +1116,20 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
         InstancePaddingStrategy::Default,
     );
     let raw_witin_iter = phase1_witness.par_batch_iter_mut(num_instance_per_batch);
-    let shard_ctx_vec = shard_ctx.get_forked();
     raw_witin_iter
         .zip_eq(instances.par_chunks(num_instance_per_batch))
-        .zip(shard_ctx_vec)
-        .for_each(|((instances, steps), mut shard_ctx)| {
-            let mut lk_multiplicity = lk_multiplicity.clone();
+        .for_each(|(instances, steps)| {
             instances
                 .chunks_mut(num_witin as usize * ROUNDS.next_power_of_two())
                 .zip_eq(steps)
                 .for_each(|(instance_with_rotation, step)| {
                     // assign full rotation with same witness
                     for instance in instance_with_rotation.chunks_mut(num_witin as usize) {
-                        layout
-                            .vm_state
-                            .assign_instance(
-                                instance,
-                                &shard_ctx,
-                                &StepRecord::new_ecall_any(10, ByteAddr::from(0)),
-                            )
-                            .expect("assign vm_state error");
-                        layout.mem_rw.iter().zip_eq(step.witin.instance).for_each(
-                            |(mem_config, _input_32)| {
-                                mem_config
-                                    .assign_op(
-                                        instance,
-                                        &mut shard_ctx,
-                                        &mut lk_multiplicity,
-                                        10,
-                                        &MemOp {
-                                            previous_cycle: 0,
-                                            addr: ByteAddr::from(0).waddr(),
-                                            value: Default::default(),
-                                        },
-                                    )
-                                    .expect("assign error");
-                            },
+                        set_val!(instance, layout.layout.cycle, step.state.cur_ts);
+                        set_val!(
+                            instance,
+                            layout.layout.state_ptr,
+                            step.state.state_ptr_address.0 as u64
                         );
                     }
                 })

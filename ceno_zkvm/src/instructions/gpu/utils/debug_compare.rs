@@ -772,7 +772,7 @@ pub(crate) fn lookup_table_name(table_idx: usize) -> &'static str {
 /// Activated by CENO_GPU_DEBUG_COMPARE_WITGEN=1.
 #[cfg(feature = "gpu")]
 pub(crate) fn debug_compare_keccak<E: ExtensionField>(
-    config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
+    config: &crate::instructions::riscv::ecall::keccak::KeccakPermutationConfig<E>,
     shard_ctx: &ShardContext,
     num_witin: usize,
     num_structural_witin: usize,

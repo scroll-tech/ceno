@@ -3,7 +3,7 @@ use ceno_gpu::common::witgen::types::{GpuKeccakInstance, GpuKeccakWriteOp, Kecca
 use ff_ext::ExtensionField;
 use std::sync::Arc;
 
-use crate::instructions::riscv::ecall::keccak::EcallKeccakConfig;
+use crate::instructions::riscv::ecall::keccak::KeccakPermutationConfig;
 
 use ceno_emul::SyscallWitness;
 
@@ -37,84 +37,11 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-/// Extract column map from a constructed EcallKeccakConfig.
-///
-/// VM state columns are listed individually. Keccak math columns use
-/// a single base offset since they're allocated contiguously via transmute.
+/// Extract column map from a constructed KeccakPermutationConfig.
 pub fn extract_keccak_column_map<E: ExtensionField>(
-    config: &EcallKeccakConfig<E>,
+    config: &KeccakPermutationConfig<E>,
     num_witin: usize,
 ) -> KeccakColumnMap {
-    // StateInOut
-    let pc = config.vm_state.pc.id as u32;
-    let ts = config.vm_state.ts.id as u32;
-
-    // OpFixedRS<reg_ecall, read> - ecall_id
-    let ecall_prev_ts = config.ecall_id.prev_ts.id as u32;
-    let ecall_lt_diff = {
-        let diffs = &config.ecall_id.lt_cfg.0.diff;
-        assert_eq!(
-            diffs.len(),
-            2,
-            "Expected 2 AssertLt diff limbs for ecall_id"
-        );
-        [diffs[0].id as u32, diffs[1].id as u32]
-    };
-
-    // MemAddr - state_ptr address limbs
-    let addr_limbs = {
-        let limbs = config
-            .state_ptr
-            .1
-            .addr
-            .wits_in()
-            .expect("MemAddr should have WitIn limbs");
-        assert_eq!(limbs.len(), 2, "Expected 2 addr limbs");
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
-
-    // OpFixedRS<reg_arg0, write> - state_ptr register write
-    let sptr_prev_ts = config.state_ptr.0.prev_ts.id as u32;
-    let sptr_prev_val = {
-        let limbs = config
-            .state_ptr
-            .0
-            .prev_value
-            .as_ref()
-            .expect("state_ptr should have prev_value")
-            .wits_in()
-            .expect("prev_value should have WitIn limbs");
-        assert_eq!(limbs.len(), 2, "Expected 2 prev_value limbs");
-        [limbs[0].id as u32, limbs[1].id as u32]
-    };
-    let sptr_lt_diff = {
-        let diffs = &config.state_ptr.0.lt_cfg.0.diff;
-        assert_eq!(
-            diffs.len(),
-            2,
-            "Expected 2 AssertLt diff limbs for state_ptr"
-        );
-        [diffs[0].id as u32, diffs[1].id as u32]
-    };
-
-    // WriteMEM x50: prev_ts + lt_diff[2] each
-    let mut mem_prev_ts = [0u32; 50];
-    let mut mem_lt_diff_0 = [0u32; 50];
-    let mut mem_lt_diff_1 = [0u32; 50];
-    for (i, writer) in config.mem_rw.iter().enumerate() {
-        mem_prev_ts[i] = writer.prev_ts.id as u32;
-        let diffs = &writer.lt_cfg.0.diff;
-        assert_eq!(
-            diffs.len(),
-            2,
-            "Expected 2 AssertLt diff limbs for mem_rw[{}]",
-            i
-        );
-        mem_lt_diff_0[i] = diffs[0].id as u32;
-        mem_lt_diff_1[i] = diffs[1].id as u32;
-    }
-
-    // Keccak math columns base offset (contiguous block)
     let keccak_base_col = config.layout.layer_exprs.wits.input8[0].id as u32;
 
     // Verify contiguity of keccak math columns
@@ -135,17 +62,8 @@ pub fn extract_keccak_column_map<E: ExtensionField>(
     }
 
     KeccakColumnMap {
-        pc,
-        ts,
-        ecall_prev_ts,
-        ecall_lt_diff,
-        addr_limbs,
-        sptr_prev_ts,
-        sptr_prev_val,
-        sptr_lt_diff,
-        mem_prev_ts,
-        mem_lt_diff_0,
-        mem_lt_diff_1,
+        cycle: config.layout.cycle.id as u32,
+        state_ptr: config.layout.state_ptr.id as u32,
         keccak_base_col,
         num_cols: num_witin as u32,
     }
@@ -205,7 +123,7 @@ pub fn pack_keccak_instances(
 /// (each logical instance spans 32 physical rows) and requires building
 /// structural witness on CPU with selector indices from the cyclic group.
 pub fn gpu_assign_keccak_instances<E: ExtensionField>(
-    config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
+    config: &crate::instructions::riscv::ecall::keccak::KeccakPermutationConfig<E>,
     shard_ctx: &mut ShardContext,
     num_witin: usize,
     num_structural_witin: usize,
@@ -276,7 +194,7 @@ pub fn gpu_assign_keccak_instances<E: ExtensionField>(
 }
 
 fn gpu_assign_keccak_inner<E: ExtensionField>(
-    config: &crate::instructions::riscv::ecall::keccak::EcallKeccakConfig<E>,
+    config: &crate::instructions::riscv::ecall::keccak::KeccakPermutationConfig<E>,
     shard_ctx: &mut ShardContext,
     num_witin: usize,
     num_structural_witin: usize,

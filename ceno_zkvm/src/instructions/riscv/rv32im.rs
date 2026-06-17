@@ -21,10 +21,10 @@ use crate::{
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
                 Fp2AddInstruction, Fp2MulInstruction, FpAddInstruction, FpMulInstruction,
-                KeccakInstruction, PubIoCommitInstruction, Secp256k1InvInstruction,
-                Secp256r1InvInstruction, ShaExtendInstruction, Uint256MulInstruction,
-                WeierstrassAddAssignInstruction, WeierstrassDecompressInstruction,
-                WeierstrassDoubleAssignInstruction,
+                KeccakMemoryControlInstruction, KeccakPermutationInstruction,
+                PubIoCommitInstruction, Secp256k1InvInstruction, Secp256r1InvInstruction,
+                ShaExtendInstruction, Uint256MulInstruction, WeierstrassAddAssignInstruction,
+                WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
@@ -140,7 +140,10 @@ pub struct Rv32imConfig<E: ExtensionField> {
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
     pub pubio_commit_config: <PubIoCommitInstruction<E> as Instruction<E>>::InstructionConfig,
     pub state_continuation_config: <GlobalState<E> as Instruction<E>>::InstructionConfig,
-    pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub keccak_memory_control_config:
+        <KeccakMemoryControlInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub keccak_permutation_config:
+        <KeccakPermutationInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sha_extend_config: <ShaExtendInstruction<E> as Instruction<E>>::InstructionConfig,
     pub bn254_add_config:
         <WeierstrassAddAssignInstruction<E, SwCurve<Bn254>> as Instruction<E>>::InstructionConfig,
@@ -371,21 +374,32 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         //
         // We estimate this effect by applying an extra scaling factor that models
         // tower-witness blowup proportional to the number of base columns.
-        let keccak_config = cs.register_opcode_circuit::<KeccakInstruction<E>>();
+        let keccak_memory_control_config =
+            cs.register_opcode_circuit::<KeccakMemoryControlInstruction<E>>();
+        let keccak_permutation_config =
+            cs.register_opcode_circuit::<KeccakPermutationInstruction<E>>();
         assert!(
             ecall_cells_map
                 .insert(
-                    <KeccakInstruction<E>>::name(),
-                    cs.get_cs(&<KeccakInstruction<E>>::name())
-                        .as_ref()
-                        .map(|cs| {
-                            (cs.zkvm_v1_css.num_witin as u64
-                                + cs.zkvm_v1_css.num_structural_witin as u64
-                                + cs.zkvm_v1_css.num_fixed as u64)
-                                * (1 << cs.rotation_vars().unwrap_or(0))
-                                * KECCAK_CELL_BLOWUP_FACTOR
-                        })
-                        .unwrap_or_default(),
+                    <KeccakPermutationInstruction<E>>::name(),
+                    [
+                        <KeccakMemoryControlInstruction<E>>::name(),
+                        <KeccakPermutationInstruction<E>>::name(),
+                    ]
+                    .into_iter()
+                    .map(|name| {
+                        cs.get_cs(&name)
+                            .as_ref()
+                            .map(|cs| {
+                                (cs.zkvm_v1_css.num_witin as u64
+                                    + cs.zkvm_v1_css.num_structural_witin as u64
+                                    + cs.zkvm_v1_css.num_fixed as u64)
+                                    * (1 << cs.rotation_vars().unwrap_or(0))
+                            })
+                            .unwrap_or_default()
+                    })
+                    .sum::<u64>()
+                        * KECCAK_CELL_BLOWUP_FACTOR,
                 )
                 .is_none()
         );
@@ -479,7 +493,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             halt_config,
             pubio_commit_config,
             state_continuation_config,
-            keccak_config,
+            keccak_memory_control_config,
+            keccak_permutation_config,
             sha_extend_config,
             bn254_add_config,
             bn254_double_config,
@@ -575,7 +590,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config);
         fixed.register_opcode_circuit::<PubIoCommitInstruction<E>>(cs, &self.pubio_commit_config);
         fixed.register_opcode_circuit::<GlobalState<E>>(cs, &self.state_continuation_config);
-        fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs, &self.keccak_config);
+        fixed.register_opcode_circuit::<KeccakMemoryControlInstruction<E>>(
+            cs,
+            &self.keccak_memory_control_config,
+        );
+        fixed.register_opcode_circuit::<KeccakPermutationInstruction<E>>(
+            cs,
+            &self.keccak_permutation_config,
+        );
         fixed.register_opcode_circuit::<ShaExtendInstruction<E>>(cs, &self.sha_extend_config);
         fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
             cs,
@@ -794,7 +816,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             state_continuation_config,
             STATE_CONTINUATION
         );
-        assign_ecall!(KeccakInstruction<E>, keccak_config, KeccakSpec::CODE);
+        assign_ecall!(
+            KeccakMemoryControlInstruction<E>,
+            keccak_memory_control_config,
+            KeccakSpec::CODE
+        );
+        assign_ecall!(
+            KeccakPermutationInstruction<E>,
+            keccak_permutation_config,
+            KeccakSpec::CODE
+        );
         assign_ecall!(
             WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>,
             bn254_add_config,
@@ -1087,7 +1118,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 .expect("unable to find name"),
             KeccakSpec::CODE => *self
                 .ecall_cells_map
-                .get(&KeccakInstruction::<E>::name())
+                .get(&KeccakPermutationInstruction::<E>::name())
                 .expect("unable to find name"),
             Bn254AddSpec::CODE => *self
                 .ecall_cells_map
