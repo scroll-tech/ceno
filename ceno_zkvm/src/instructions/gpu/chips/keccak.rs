@@ -3,7 +3,7 @@ use ceno_gpu::common::witgen::types::{GpuKeccakInstance, GpuKeccakWriteOp, Kecca
 use ff_ext::ExtensionField;
 use std::sync::Arc;
 
-use crate::instructions::riscv::ecall::keccak::KeccakPermutationConfig;
+use crate::instructions::riscv::ecall::keccak::KeccakCoreConfig;
 
 use ceno_emul::SyscallWitness;
 
@@ -37,9 +37,9 @@ use crate::{
     witness::LkMultiplicity,
 };
 
-/// Extract column map from a constructed KeccakPermutationConfig.
+/// Extract column map from a constructed KeccakCoreConfig.
 pub fn extract_keccak_column_map<E: ExtensionField>(
-    config: &KeccakPermutationConfig<E>,
+    config: &KeccakCoreConfig<E>,
     num_witin: usize,
 ) -> KeccakColumnMap {
     let keccak_base_col = config.layout.layer_exprs.wits.input8[0].id as u32;
@@ -123,7 +123,7 @@ pub fn pack_keccak_instances(
 /// (each logical instance spans 32 physical rows) and requires building
 /// structural witness on CPU with selector indices from the cyclic group.
 pub fn gpu_assign_keccak_instances<E: ExtensionField>(
-    config: &crate::instructions::riscv::ecall::keccak::KeccakPermutationConfig<E>,
+    config: &crate::instructions::riscv::ecall::keccak::KeccakCoreConfig<E>,
     shard_ctx: &mut ShardContext,
     num_witin: usize,
     num_structural_witin: usize,
@@ -194,7 +194,7 @@ pub fn gpu_assign_keccak_instances<E: ExtensionField>(
 }
 
 fn gpu_assign_keccak_inner<E: ExtensionField>(
-    config: &crate::instructions::riscv::ecall::keccak::KeccakPermutationConfig<E>,
+    config: &crate::instructions::riscv::ecall::keccak::KeccakCoreConfig<E>,
     shard_ctx: &mut ShardContext,
     num_witin: usize,
     num_structural_witin: usize,

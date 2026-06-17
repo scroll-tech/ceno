@@ -43,7 +43,7 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct KeccakMemoryControlConfig<E: ExtensionField> {
+pub struct KeccakEcallConfig<E: ExtensionField> {
     pub(crate) vm_state: StateInOut<E>,
     pub(crate) ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
     pub(crate) state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
@@ -53,17 +53,17 @@ pub struct KeccakMemoryControlConfig<E: ExtensionField> {
 }
 
 #[derive(Debug)]
-pub struct KeccakPermutationConfig<E: ExtensionField> {
+pub struct KeccakCoreConfig<E: ExtensionField> {
     pub layout: KeccakLayout<E>,
 }
 
 /// Syscall-facing Keccak chip: VM state, syscall decode, guest memory, and local state bus.
-pub struct KeccakMemoryControlInstruction<E>(PhantomData<E>);
+pub struct KeccakEcallInstruction<E>(PhantomData<E>);
 
 /// Pure Keccak-f chip. It reads/writes the Keccak-local state bus and has no guest memory ops.
-pub struct KeccakPermutationInstruction<E>(PhantomData<E>);
+pub struct KeccakCoreInstruction<E>(PhantomData<E>);
 
-pub type KeccakInstruction<E> = KeccakPermutationInstruction<E>;
+pub type KeccakInstruction<E> = KeccakCoreInstruction<E>;
 
 fn new_memory_expr<E: ExtensionField>(cb: &mut CircuitBuilder<E>, name: String) -> MemoryExpr<E> {
     array::from_fn(|i| cb.create_witin(|| format!("{name}_{i}")).expr())
@@ -78,14 +78,14 @@ fn assign_memory_expr<E: ExtensionField>(
     let limbs = value.as_u16_limbs();
     for (limb_expr, limb) in expr.iter().zip_eq(limbs.iter()) {
         let multilinear_extensions::Expression::WitIn(wit) = limb_expr else {
-            panic!("keccak memory-control state limbs must be witness columns");
+            panic!("keccak ecall state limbs must be witness columns");
         };
         instance[*wit as usize] = E::BaseField::from_canonical_u64(*limb as u64);
     }
 }
 
-impl<E: ExtensionField> Instruction<E> for KeccakMemoryControlInstruction<E> {
-    type InstructionConfig = KeccakMemoryControlConfig<E>;
+impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
+    type InstructionConfig = KeccakEcallConfig<E>;
     type InsnType = InsnKind;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
@@ -93,7 +93,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakMemoryControlInstruction<E> {
     }
 
     fn name() -> String {
-        "KeccakMemoryControl".to_string()
+        "KeccakEcall".to_string()
     }
 
     fn construct_circuit(
@@ -171,7 +171,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakMemoryControlInstruction<E> {
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        Ok(KeccakMemoryControlConfig {
+        Ok(KeccakEcallConfig {
             vm_state,
             ecall_id,
             state_ptr: (state_ptr, state_ptr_value),
@@ -306,8 +306,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakMemoryControlInstruction<E> {
     }
 }
 
-impl<E: ExtensionField> Instruction<E> for KeccakPermutationInstruction<E> {
-    type InstructionConfig = KeccakPermutationConfig<E>;
+impl<E: ExtensionField> Instruction<E> for KeccakCoreInstruction<E> {
+    type InstructionConfig = KeccakCoreConfig<E>;
     type InsnType = InsnKind;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
@@ -315,7 +315,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakPermutationInstruction<E> {
     }
 
     fn name() -> String {
-        "KeccakPermutation".to_string()
+        "KeccakCore".to_string()
     }
 
     fn construct_circuit(
@@ -332,7 +332,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakPermutationInstruction<E> {
         let mut layout =
             <KeccakLayout<E> as ProtocolBuilder<E>>::build_layer_logic(cb, KeccakParams {})?;
         let chip = layout.finalize(Self::name(), cb);
-        Ok((KeccakPermutationConfig { layout }, chip.gkr_circuit()))
+        Ok((KeccakCoreConfig { layout }, chip.gkr_circuit()))
     }
 
     fn generate_fixed_traces(
@@ -492,36 +492,32 @@ mod tests {
     }
 
     #[test]
-    fn keccak_split_accounting_keeps_memory_out_of_permutation() {
-        let (mem_reads, mem_writes, mem_lks, _) =
-            build_counts::<KeccakMemoryControlInstruction<E>>();
-        let (perm_reads, perm_writes, _, max_perm_selector_groups) =
-            build_counts::<KeccakPermutationInstruction<E>>();
+    fn keccak_split_accounting_keeps_memory_out_of_core() {
+        let (ecall_reads, ecall_writes, ecall_lks, _) = build_counts::<KeccakEcallInstruction<E>>();
+        let (core_reads, core_writes, _, max_core_selector_groups) =
+            build_counts::<KeccakCoreInstruction<E>>();
 
+        assert_eq!(core_reads, 1, "core should only read the input state bus");
         assert_eq!(
-            perm_reads, 1,
-            "permutation should only read the input state bus"
-        );
-        assert_eq!(
-            perm_writes, 1,
-            "permutation should only write the output state bus"
+            core_writes, 1,
+            "core should only write the output state bus"
         );
         assert!(
-            max_perm_selector_groups < 1024,
-            "permutation sumcheck groups grew to {max_perm_selector_groups}"
+            max_core_selector_groups < 1024,
+            "core sumcheck groups grew to {max_core_selector_groups}"
         );
 
         assert!(
-            mem_reads >= KECCAK_INPUT32_SIZE + 3,
-            "memory-control should own guest memory/register reads"
+            ecall_reads >= KECCAK_INPUT32_SIZE + 3,
+            "ecall should own guest memory/register reads"
         );
         assert!(
-            mem_writes >= KECCAK_INPUT32_SIZE + 3,
-            "memory-control should own guest memory/register writes"
+            ecall_writes >= KECCAK_INPUT32_SIZE + 3,
+            "ecall should own guest memory/register writes"
         );
         assert!(
-            mem_lks >= KECCAK_INPUT32_SIZE + 2,
-            "memory-control should own timestamp/register LT lookups"
+            ecall_lks >= KECCAK_INPUT32_SIZE + 2,
+            "ecall should own timestamp/register LT lookups"
         );
     }
 
@@ -531,29 +527,29 @@ mod tests {
         let steps = vec![step];
         let step_indices = vec![0];
 
-        let mut mem_cs = ConstraintSystem::<E>::new(|| "keccak_memory_control");
+        let mut mem_cs = ConstraintSystem::<E>::new(|| "keccak_ecall");
         let mut mem_cb = CircuitBuilder::new(&mut mem_cs);
-        let (mem_config, _) = KeccakMemoryControlInstruction::<E>::build_gkr_iop_circuit(
+        let (mem_config, _) = KeccakEcallInstruction::<E>::build_gkr_iop_circuit(
             &mut mem_cb,
             &ProgramParams::default(),
         )
-        .expect("build memory-control circuit");
+        .expect("build ecall circuit");
         let mem_num_witin = mem_cb.cs.num_witin as usize;
         let mem_num_structural_witin = mem_cb.cs.num_structural_witin as usize;
 
-        let mut perm_cs = ConstraintSystem::<E>::new(|| "keccak_permutation");
+        let mut perm_cs = ConstraintSystem::<E>::new(|| "keccak_core");
         let mut perm_cb = CircuitBuilder::new(&mut perm_cs);
-        let (perm_config, _) = KeccakPermutationInstruction::<E>::build_gkr_iop_circuit(
+        let (perm_config, _) = KeccakCoreInstruction::<E>::build_gkr_iop_circuit(
             &mut perm_cb,
             &ProgramParams::default(),
         )
-        .expect("build permutation circuit");
+        .expect("build core circuit");
         let perm_num_witin = perm_cb.cs.num_witin as usize;
         let perm_num_structural_witin = perm_cb.cs.num_structural_witin as usize;
 
         let mut mem_shard_ctx = ShardContext::default();
         mem_shard_ctx.syscall_witnesses = std::sync::Arc::new(syscall_witnesses.clone());
-        let (mem_rmms, _) = KeccakMemoryControlInstruction::<E>::assign_instances(
+        let (mem_rmms, _) = KeccakEcallInstruction::<E>::assign_instances(
             &mem_config,
             &mut mem_shard_ctx,
             mem_num_witin,
@@ -561,11 +557,11 @@ mod tests {
             &steps,
             &step_indices,
         )
-        .expect("assign memory-control witness");
+        .expect("assign ecall witness");
 
         let mut perm_shard_ctx = ShardContext::default();
         perm_shard_ctx.syscall_witnesses = std::sync::Arc::new(syscall_witnesses);
-        let (perm_rmms, _) = KeccakPermutationInstruction::<E>::assign_instances(
+        let (perm_rmms, _) = KeccakCoreInstruction::<E>::assign_instances(
             &perm_config,
             &mut perm_shard_ctx,
             perm_num_witin,
@@ -573,7 +569,7 @@ mod tests {
             &steps,
             &step_indices,
         )
-        .expect("assign permutation witness");
+        .expect("assign core witness");
 
         let mem_wit_row = selected_row(mem_rmms[0].values(), mem_num_witin, 0);
         let mem_structural_row =
@@ -605,25 +601,25 @@ mod tests {
             .w_expressions_namespace_map
             .iter()
             .position(|name| name.contains("keccak_state_in"))
-            .expect("memory-control input bus write");
+            .expect("ecall input bus write");
         let mem_out_read = mem_cb
             .cs
             .r_expressions_namespace_map
             .iter()
             .position(|name| name.contains("keccak_state_out"))
-            .expect("memory-control output bus read");
+            .expect("ecall output bus read");
         let perm_in_read = perm_cb
             .cs
             .r_expressions_namespace_map
             .iter()
             .position(|name| name.contains("keccak_state_in"))
-            .expect("permutation input bus read");
+            .expect("core input bus read");
         let perm_out_write = perm_cb
             .cs
             .w_expressions_namespace_map
             .iter()
             .position(|name| name.contains("keccak_state_out"))
-            .expect("permutation output bus write");
+            .expect("core output bus write");
 
         assert_eq!(
             eval_expr(
