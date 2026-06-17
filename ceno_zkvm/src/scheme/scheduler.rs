@@ -10,13 +10,11 @@
 //! This approach eliminates long-tail latency by prioritizing large tasks and
 //! maximizes GPU utilization through backfilling with smaller tasks.
 
-#[cfg(feature = "gpu")]
-use crate::structs::GpuReplayPlan;
 use crate::{
     error::ZKVMError,
     scheme::{
         ZKVMChipProof,
-        hal::{MainSumcheckEvals, ProofInput},
+        hal::{MainConstraintJob, MainSumcheckEvals, ProofInput},
     },
     structs::ProvingKey,
 };
@@ -27,8 +25,6 @@ use p3::field::FieldAlgebra;
 use std::sync::OnceLock;
 use transcript::Transcript;
 static CHIP_PROVING_MODE: OnceLock<ChipProvingMode> = OnceLock::new();
-#[cfg(feature = "gpu")]
-static LARGE_GPU_TASK_BOOKING_MARGIN_MB: OnceLock<u64> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChipProvingMode {
@@ -43,21 +39,6 @@ pub fn get_chip_proving_mode() -> ChipProvingMode {
             _ => ChipProvingMode::Concurrent,
         }
     })
-}
-
-#[cfg(feature = "gpu")]
-pub fn large_gpu_task_booking_margin_bytes() -> u64 {
-    *LARGE_GPU_TASK_BOOKING_MARGIN_MB.get_or_init(|| {
-        // Large replay-heavy chips such as Keccak and ShardRam can transiently
-        // need materially more schedulable headroom under concurrent proving
-        // than their chip-local estimate suggests. Keep a conservative default
-        // booking margin so production runs stay stable on 4090-class cards,
-        // while still allowing operators to override it explicitly.
-        std::env::var("CENO_GPU_LARGE_TASK_BOOKING_MARGIN_MB")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(3072)
-    }) << 20
 }
 
 #[cfg(feature = "gpu")]
@@ -87,9 +68,9 @@ pub struct ChipTask<'a, PB: ProverBackend> {
     pub challenges: [PB::E; 2],
     /// Deferred witness extraction: trace index in pcs_data (None if num_witin == 0)
     pub witness_trace_idx: Option<usize>,
-    /// Replay witness directly from shard-resident raw GPU data when available.
+    /// Actual witness trace rows used for cache-none extraction estimates.
     #[cfg(feature = "gpu")]
-    pub gpu_replay_plan: Option<GpuReplayPlan<PB::E>>,
+    pub witness_trace_rows: Option<usize>,
     /// Expected number of witness polynomials for this circuit
     pub num_witin: usize,
     /// CPU-side structural witness RowMajorMatrix, transported to GPU on-demand
@@ -97,32 +78,34 @@ pub struct ChipTask<'a, PB: ProverBackend> {
 }
 
 /// Result from a completed chip proof task
-pub struct ChipTaskResult<E: ExtensionField> {
+pub struct ChipTaskResult<'a, PB: ProverBackend> {
     /// Task ID for ordering
     pub task_id: usize,
     /// Circuit index for proof collection
     pub circuit_idx: usize,
     /// The generated proof
-    pub proof: ZKVMChipProof<E>,
+    pub proof: ZKVMChipProof<PB::E>,
     /// Prover-only opening evaluations split by witness/fixed/pi domains.
-    pub opening_evals: MainSumcheckEvals<E>,
+    pub opening_evals: MainSumcheckEvals<PB::E>,
     /// Opening point for this proof
-    pub input_opening_point: Point<E>,
+    pub input_opening_point: Point<PB::E>,
+    /// Deferred main-constraint proving job.
+    pub main_constraint_job: Option<MainConstraintJob<'a, PB>>,
     /// Whether this circuit has witness or fixed polynomials
     pub has_witness_or_fixed: bool,
 }
 
 /// Message sent from worker to scheduler on task completion
 #[cfg(feature = "gpu")]
-struct CompletionMessage<E: ExtensionField> {
+struct CompletionMessage<'a, PB: ProverBackend> {
     /// The result of the proof
-    result: Result<ChipTaskResult<E>, ZKVMError>,
+    result: Result<ChipTaskResult<'a, PB>, ZKVMError>,
     /// Memory that was reserved for this task (to release)
     memory_reserved: u64,
     /// Task ID for ordering
     task_id: usize,
     /// Sampled value from the forked transcript (for gather phase)
-    forked_sample: E,
+    forked_sample: PB::E,
 }
 
 /// Memory-aware parallel chip proof scheduler
@@ -149,12 +132,12 @@ impl ChipScheduler {
         tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
         execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError> + Send + Sync,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError> + Send + Sync,
     {
         #[cfg(feature = "gpu")]
         {
@@ -185,12 +168,12 @@ impl ChipScheduler {
         tasks: Vec<ChipTask<'a, PB>>,
         parent_transcript: &T,
         execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError>,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError>,
     {
         if tasks.is_empty() {
             return Ok((vec![], vec![]));
@@ -250,12 +233,12 @@ impl ChipScheduler {
         mut tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
         execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError> + Send + Sync,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError> + Send + Sync,
     {
         if tasks.is_empty() {
             return Ok((vec![], vec![]));
@@ -308,15 +291,15 @@ impl ChipScheduler {
         //    Worker -> Scheduler: CompletionMessage (includes sampled value)
         let (task_tx, task_rx) = mpsc::channel::<ChipTask<'a, PB>>();
         let task_rx = Arc::new(Mutex::new(task_rx));
-        let (done_tx, done_rx) = mpsc::channel::<CompletionMessage<PB::E>>();
+        let (done_tx, done_rx) = mpsc::channel::<CompletionMessage<'a, PB>>();
 
         // 3. State tracking
         let mut tasks_inflight = 0usize;
-        let mut results: Vec<ChipTaskResult<PB::E>> = Vec::with_capacity(total_tasks);
+        let mut results: Vec<ChipTaskResult<'a, PB>> = Vec::with_capacity(total_tasks);
         let mut samples: Vec<(usize, PB::E)> = Vec::with_capacity(total_tasks);
 
         // Helper to handle a completion message
-        let mut handle_completion = |msg: CompletionMessage<PB::E>,
+        let mut handle_completion = |msg: CompletionMessage<'a, PB>,
                                      mem_pool: &ceno_gpu::common::mem_pool::CudaMemPool,
                                      tasks_inflight: &mut usize,
                                      label: &str|
@@ -515,10 +498,31 @@ impl ChipScheduler {
                             task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
                         );
                     }
+                    let max_size = mem_pool.get_max_size();
+                    let booked_total = mem_pool.get_booked_total();
+                    let available = max_size.saturating_sub(booked_total);
+                    let pending_summary = pending
+                        .iter()
+                        .map(|task| {
+                            format!(
+                                "id={} circuit={} estimated={:.2}MB booked={:.2}MB",
+                                task.task_id,
+                                task.circuit_name,
+                                task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                                task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
                     return Err(ZKVMError::BackendError(BackendError::CircuitError(
-                        "Deadlock: Remaining tasks are too big for the memory pool!"
-                            .to_string()
-                            .into_boxed_str(),
+                        format!(
+                            "Deadlock: Remaining tasks are too big for the memory pool: available={:.2}MB, max={:.2}MB, booked={:.2}MB, pending=[{}]",
+                            available as f64 / (1024.0 * 1024.0),
+                            max_size as f64 / (1024.0 * 1024.0),
+                            booked_total as f64 / (1024.0 * 1024.0),
+                            pending_summary,
+                        )
+                        .into_boxed_str(),
                     )));
                 }
 

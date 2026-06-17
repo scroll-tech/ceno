@@ -8,12 +8,9 @@ use crate::{
         ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
         TableCircuit,
     },
+    witness::LkMultiplicity,
 };
 use ceno_emul::{Addr, CENO_PLATFORM, Platform, RegIdx, StepIndex, StepRecord, WordAddr};
-#[cfg(feature = "gpu")]
-use ceno_gpu::common::buffer::BufferImpl;
-#[cfg(feature = "gpu")]
-use ceno_gpu::common::witgen::types::GpuKeccakInstance;
 use ff_ext::{ExtensionField, PoseidonField};
 use gkr_iop::{
     circuit_builder::ShardOMCInitType, gkr::GKRCircuit, tables::LookupTable,
@@ -22,6 +19,8 @@ use gkr_iop::{
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::Instance;
+use p3::field::FieldAlgebra;
+use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 use rayon::{
     iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
     prelude::ParallelSlice,
@@ -352,99 +351,6 @@ pub struct ChipInput<E: ExtensionField> {
     pub name: String,
     pub witness_rmms: RMMCollections<E::BaseField>,
     pub num_instances: [usize; 2],
-    // Built after the initial chip witness assignment succeeds. It is not used
-    // by assign_opcode_circuit itself; later prove/open stages use it to
-    // regenerate transient witness buffers from shard-resident raw data.
-    pub gpu_replay_plan: Option<GpuReplayPlan<E>>,
-}
-
-#[cfg(feature = "gpu")]
-#[derive(Clone)]
-pub struct GpuReplayPlan<E: ExtensionField> {
-    pub shard_id: usize,
-    pub trace_idx: Option<usize>,
-    pub kind: crate::instructions::gpu::dispatch::GpuWitgenKind,
-    // Per-chip payload: each replay plan owns only its step-index slice plus
-    // small shape/config metadata. Shared shard state stays resident in the
-    // shard-global GPU caches and is rehydrated on worker threads on demand.
-    pub step_indices: Arc<[StepIndex]>,
-    // Standard opcode replay can reuse a pre-uploaded device index buffer to
-    // avoid rebuilding and H2D-uploading step indices on every replay.
-    pub step_indices_device: Option<Arc<ceno_gpu::common::buffer::BufferImpl<'static, u32>>>,
-    // Actual committed/opened witness row height after per-chip padding. This
-    // is not always equal to `step_indices.len()`: rotation-heavy chips like
-    // Keccak expand each logical instance into multiple witness rows.
-    pub trace_height: usize,
-    pub num_witin: usize,
-    pub num_structural_witin: usize,
-    pub shard_offset: u64,
-    pub fetch_base_pc: u32,
-    pub fetch_num_slots: usize,
-    // Keccak replay needs a compact packed-input slice because its kernel does
-    // not consume plain step indices directly. Standard opcode chips leave this
-    // empty and rebuild from resident StepRecord + shard metadata on device.
-    pub keccak_instances: Option<Arc<[GpuKeccakInstance]>>,
-    // Shared-circuit replay keeps a compact owned view of the per-chunk
-    // `GpuShardRamRecord` buffer so ShardRam witness can be rebuilt on demand
-    // without keeping its eager witness/device backing resident.
-    pub shard_ram_records: Option<Arc<BufferImpl<'static, u32>>>,
-    pub shard_ram_num_records: usize,
-    pub shard_ram_num_local_writes: usize,
-    config_ptr: usize,
-    replay_witness_fn:
-        fn(usize, &GpuReplayPlan<E>) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>,
-}
-
-#[cfg(not(feature = "gpu"))]
-#[derive(Clone)]
-pub struct GpuReplayPlan<E: ExtensionField>(std::marker::PhantomData<E>);
-
-#[cfg(feature = "gpu")]
-impl<E: ExtensionField> GpuReplayPlan<E> {
-    pub fn new(
-        shard_id: usize,
-        kind: crate::instructions::gpu::dispatch::GpuWitgenKind,
-        step_indices: Arc<[StepIndex]>,
-        trace_height: usize,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_offset: u64,
-        fetch_base_pc: u32,
-        fetch_num_slots: usize,
-        keccak_instances: Option<Arc<[GpuKeccakInstance]>>,
-        shard_ram_records: Option<Arc<BufferImpl<'static, u32>>>,
-        shard_ram_num_records: usize,
-        shard_ram_num_local_writes: usize,
-        config_ptr: usize,
-        replay_witness_fn: fn(
-            usize,
-            &GpuReplayPlan<E>,
-        ) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError>,
-    ) -> Self {
-        Self {
-            shard_id,
-            trace_idx: None,
-            kind,
-            step_indices,
-            step_indices_device: None,
-            trace_height,
-            num_witin,
-            num_structural_witin,
-            shard_offset,
-            fetch_base_pc,
-            fetch_num_slots,
-            keccak_instances,
-            shard_ram_records,
-            shard_ram_num_records,
-            shard_ram_num_local_writes,
-            config_ptr,
-            replay_witness_fn,
-        }
-    }
-
-    pub fn replay_witness(&self) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
-        (self.replay_witness_fn)(self.config_ptr, self)
-    }
 }
 
 impl<E: ExtensionField> ChipInput<E> {
@@ -457,7 +363,6 @@ impl<E: ExtensionField> ChipInput<E> {
             name,
             witness_rmms,
             num_instances,
-            gpu_replay_plan: None,
         }
     }
 
@@ -525,39 +430,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             structural_instances
         };
         let num_instances = [num_instances, 0];
-        #[cfg(feature = "gpu")]
-        let mut input = ChipInput::new(OC::name(), witness, num_instances);
-        #[cfg(not(feature = "gpu"))]
         let input = ChipInput::new(OC::name(), witness, num_instances);
-        #[cfg(feature = "gpu")]
-        if cs.zkvm_v1_css.num_witin > 0
-            && crate::instructions::gpu::config::is_gpu_witgen_enabled()
-            && !crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit(
-            )
-            && (input.witness_rmms[0].has_device_backing()
-                || (num_instances[0] > 0
-                    && input.witness_rmms[0].num_instances() == 0
-                    && crate::instructions::gpu::config::should_materialize_witness_on_gpu()))
-        {
-            // The initial witness assignment already happened above. Building
-            // the replay plan here only records how to reconstruct this chip's
-            // witness later from shard-resident raw data; it is not used during
-            // this first assign pass.
-            input.gpu_replay_plan = OC::build_gpu_replay_plan(
-                config,
-                shard_ctx,
-                cs.zkvm_v1_css.num_witin as usize,
-                cs.zkvm_v1_css.num_structural_witin as usize,
-                shard_steps,
-                indices,
-            );
-            assert_eq!(
-                input.witness_rmms[0].num_instances(),
-                0,
-                "{}: cache-none GPU replay path must not keep an eager witness RMM after initial assign",
-                OC::name()
-            );
-        }
         assert!(self.witnesses.insert(OC::name(), vec![input]).is_none());
         assert!(
             self.lk_mlts
@@ -601,13 +474,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         config: &TC::TableConfig,
         input: &TC::WitnessInput<'_>,
     ) -> Result<(), ZKVMError> {
-        assert!(self.combined_lk_mlt.is_some());
         let cs = cs.get_cs(&TC::name()).unwrap();
+        let empty_mlt: Vec<FxHashMap<u64, usize>> = Vec::new();
+        // Scope the immutable borrow of `self.combined_lk_mlt` so the
+        // `self.witnesses.insert` mutable borrow below is legal.
         let witness = TC::assign_instances(
             config,
             cs.zkvm_v1_css.num_witin as usize,
             cs.zkvm_v1_css.num_structural_witin as usize,
-            self.combined_lk_mlt.as_ref().unwrap(),
+            self.combined_lk_mlt.as_ref().unwrap_or(&empty_mlt),
             input,
         )?;
         let witness_instances = witness[0].num_instances();
@@ -623,6 +498,55 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let num_instances = std::cmp::max(witness_instances, structural_instances);
         let input = ChipInput::new(TC::name(), witness, [num_instances, 0]);
         assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
+
+        Ok(())
+    }
+
+    /// Like [`Self::assign_table_circuit`], but for a table circuit that itself
+    /// *performs* lookups (e.g. a non-zero-init RAM table that range-checks its
+    /// prover-witnessed init limbs, #999). The circuit's lookup multiplicity is
+    /// folded into `lk_mlts` so that `finalize_lk_multiplicities` includes it in
+    /// `combined_lk_mlt` and the range-table `mlt` columns balance the logup.
+    ///
+    /// MUST run *before* [`Self::finalize_lk_multiplicities`] (same ordering
+    /// requirement as [`Self::assign_shared_circuit`]).
+    pub fn assign_table_circuit_with_lk<TC: TableCircuit<E>>(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        config: &TC::TableConfig,
+        input: &TC::WitnessInput<'_>,
+    ) -> Result<(), ZKVMError> {
+        assert!(
+            self.combined_lk_mlt.is_none(),
+            "assign_table_circuit_with_lk must run before finalize_lk_multiplicities"
+        );
+        let cs = cs.get_cs(&TC::name()).unwrap();
+        let mut lk_multiplicity = LkMultiplicity::default();
+        let witness = TC::assign_instances_with_lk_multiplicities(
+            config,
+            cs.zkvm_v1_css.num_witin as usize,
+            cs.zkvm_v1_css.num_structural_witin as usize,
+            &mut lk_multiplicity,
+            input,
+        )?;
+        let witness_instances = witness[0].num_instances();
+        let structural_instances = witness[1].num_instances();
+        if witness_instances > 0 && structural_instances > 0 {
+            assert_eq!(
+                witness_instances,
+                structural_instances,
+                "{}: mismatched num_instances between witness and structural RMMs",
+                TC::name()
+            );
+        }
+        let num_instances = std::cmp::max(witness_instances, structural_instances);
+        let input = ChipInput::new(TC::name(), witness, [num_instances, 0]);
+        assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
+        assert!(
+            self.lk_mlts
+                .insert(TC::name(), lk_multiplicity.into_finalize_result())
+                .is_none()
+        );
 
         Ok(())
     }
@@ -775,19 +699,25 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             }
         }
 
-        assert!(self.combined_lk_mlt.is_some());
+        assert!(self.combined_lk_mlt.is_none());
         let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
         let n_global = global_input.len();
+        // `ShardRamCircuit::assign_instances` ignores the `multiplicity`
+        // argument (its lookup contribution is derived externally above), so
+        // an empty slice is sufficient here and matches the pre-finalize
+        // ordering: `combined_lk_mlt` is intentionally `None` at this point.
+        let lk_multiplicity = LkMultiplicity::default();
         let circuit_inputs =
             info_span!("shard_ram_assign_instances", n = n_global).in_scope(|| {
                 global_input
                     .par_chunks(shard_ctx.max_num_cross_shard_accesses)
                     .map(|shard_accesses| {
-                        let witness = ShardRamCircuit::assign_instances(
+                        let mut lk_multiplicity = lk_multiplicity.clone();
+                        let witness = ShardRamCircuit::assign_instances_with_lk_multiplicities(
                             config,
                             cs.zkvm_v1_css.num_witin as usize,
                             cs.zkvm_v1_css.num_structural_witin as usize,
-                            self.combined_lk_mlt.as_ref().unwrap(),
+                            &mut lk_multiplicity,
                             shard_accesses,
                         )?;
                         let num_reads = shard_accesses
@@ -804,6 +734,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
                     })
                     .collect::<Result<Vec<_>, ZKVMError>>()
             })?;
+
+        assert!(
+            self.lk_mlts
+                .insert(
+                    ShardRamCircuit::<E>::name(),
+                    lk_multiplicity.into_finalize_result()
+                )
+                .is_none()
+        );
         // set num_read, num_write as separate instance
         assert!(
             self.witnesses
@@ -817,6 +756,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
     /// Full GPU pipeline for assign_shared_circuit: keep data on device, minimal CPU roundtrips.
     ///
     /// Returns Ok(true) if successful, Ok(false) if unavailable (no shared device buffers).
+    /// On success, inserts both `ChipInput` and `ShardRamCircuit`'s derived
+    /// lookup multiplicity (for the y6_lo byte / LTU queries) into
+    /// `self.witnesses` / `self.lk_mlts` so the subsequent
+    /// `finalize_lk_multiplicities` folds the contribution into
+    /// `combined_lk_mlt` — matching the CPU shortcut's invariant.
     #[cfg(feature = "gpu")]
     fn try_assign_shared_circuit_gpu(
         &mut self,
@@ -825,7 +769,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<bool, ZKVMError> {
-        assert!(self.combined_lk_mlt.is_some());
+        assert!(self.combined_lk_mlt.is_none());
         let cs_inner = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
         let num_witin = cs_inner.zkvm_v1_css.num_witin as usize;
         let num_structural_witin = cs_inner.zkvm_v1_css.num_structural_witin as usize;
@@ -838,10 +782,15 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             num_structural_witin,
             shard_ctx.max_num_cross_shard_accesses,
         )? {
-            Some(circuit_inputs) => {
+            Some((circuit_inputs, lk_mlt)) => {
                 assert!(
                     self.witnesses
                         .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
+                        .is_none()
+                );
+                assert!(
+                    self.lk_mlts
+                        .insert(ShardRamCircuit::<E>::name(), lk_mlt)
                         .is_none()
                 );
                 Ok(true)
@@ -1067,6 +1016,101 @@ pub struct ZKVMVerifyingKey<
     pub fixed_no_omc_init_commit: Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
     // circuit index -> circuit name
     // mainly used for debugging
+    #[serde(skip)]
     pub circuit_index_to_name: BTreeMap<usize, String>,
     pub mem_state_verifier: M,
+}
+
+/// Number of extension-field elements squeezed from the digest sponge.
+pub const VK_DIGEST_LEN: usize = 2;
+
+/// Convert bytes into base-field elements using ≤ 3-byte chunks.
+fn bytes_to_felts_safe<F: FieldAlgebra>(bytes: &[u8]) -> Vec<F> {
+    bytes
+        .chunks(3)
+        .map(|chunk| {
+            let mut arr = [0u8; 4];
+            arr[..chunk.len()].copy_from_slice(chunk);
+            F::from_canonical_u32(u32::from_le_bytes(arr))
+        })
+        .collect()
+}
+
+/// Hash the supplied VK preimage into `VK_DIGEST_LEN` extension elements.
+/// `circuits` must iterate in `BTreeMap` lex order on `name`.
+fn compute_vk_digest_inner<'a, E, PCS, M>(
+    vp: &PCS::VerifierParam,
+    entry_pc: u32,
+    fixed_commit: &Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    fixed_no_omc_init_commit: &Option<<PCS as PolynomialCommitmentScheme<E>>::Commitment>,
+    mem_state_verifier: &M,
+    circuits: impl IntoIterator<Item = (&'a String, &'a VerifyingKey<E>)>,
+) -> [E; VK_DIGEST_LEN]
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M: Serialize,
+{
+    let circuit_view: Vec<(&str, &ComposedConstrainSystem<E>)> = circuits
+        .into_iter()
+        .map(|(name, vk)| (name.as_str(), &vk.cs))
+        .collect();
+    let bytes = bincode::serialize(&(
+        vp,
+        entry_pc,
+        fixed_commit,
+        fixed_no_omc_init_commit,
+        mem_state_verifier,
+        &circuit_view,
+    ))
+    .expect("vk digest serialization is infallible for a valid VK");
+
+    let mut sponge = DefaultChallenger::<E::BaseField>::new_poseidon_default();
+    sponge.observe_slice(&bytes_to_felts_safe::<E::BaseField>(&bytes));
+    std::array::from_fn(|_| sponge.sample_ext_element())
+}
+
+impl<E, PCS, M> ZKVMVerifyingKey<E, PCS, M>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    M: Clone + Default + Serialize + DeserializeOwned,
+{
+    /// Poseidon-sponge digest of the verifying key's soundness-bound fields.
+    pub fn compute_digest(&self) -> [E; VK_DIGEST_LEN] {
+        compute_vk_digest_inner::<E, PCS, M>(
+            &self.vp,
+            self.entry_pc,
+            &self.fixed_commit,
+            &self.fixed_no_omc_init_commit,
+            &self.mem_state_verifier,
+            self.circuit_vks.iter(),
+        )
+    }
+}
+
+impl<E, PCS> ZKVMProvingKey<E, PCS>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+{
+    /// Prover-side mirror of [`ZKVMVerifyingKey::compute_digest`] for `M`.
+    pub fn compute_vk_digest<M>(&self) -> [E; VK_DIGEST_LEN]
+    where
+        M: Clone + Default + From<Platform> + Serialize,
+    {
+        let mem_state_verifier: M = self
+            .program_ctx
+            .as_ref()
+            .map(|ctx| M::from(ctx.platform.clone()))
+            .unwrap_or_default();
+        compute_vk_digest_inner::<E, PCS, M>(
+            &self.vp,
+            self.entry_pc,
+            &self.fixed_commit,
+            &self.fixed_no_omc_init_commit,
+            &mem_state_verifier,
+            self.circuit_pks.iter().map(|(n, pk)| (n, &pk.vk)),
+        )
+    }
 }

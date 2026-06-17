@@ -4,6 +4,7 @@ use gkr_iop::{
     chip::Chip,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
+    utils::lk_multiplicity::LkMultiplicity,
 };
 use itertools::Itertools;
 use multilinear_extensions::ToExpr;
@@ -95,11 +96,25 @@ pub trait TableCircuit<E: ExtensionField> {
         input: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField>;
 
+    fn assign_instances_with_lk_multiplicities(
+        _config: &Self::TableConfig,
+        _num_witin: usize,
+        _num_structural_witin: usize,
+        _lk_multiplicity: &mut LkMultiplicity,
+        _input: &Self::WitnessInput<'_>,
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        unimplemented!(
+            "assign_instances_with_lk_multiplicities is not implemented for this table circuit"
+        )
+    }
+
     fn assign_instances(
-        config: &Self::TableConfig,
-        num_witin: usize,
-        num_structural_witin: usize,
-        multiplicity: &[FxHashMap<u64, usize>],
-        input: &Self::WitnessInput<'_>,
-    ) -> Result<RMMCollections<E::BaseField>, ZKVMError>;
+        _config: &Self::TableConfig,
+        _num_witin: usize,
+        _num_structural_witin: usize,
+        _multiplicity: &[FxHashMap<u64, usize>],
+        _input: &Self::WitnessInput<'_>,
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        unimplemented!("assign_instances is not implemented for this table circuit")
+    }
 }

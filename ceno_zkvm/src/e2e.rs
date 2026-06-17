@@ -46,6 +46,7 @@ use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    io::Write,
     marker::PhantomData,
     ops::Range,
     sync::Arc,
@@ -54,24 +55,6 @@ use tiny_keccak::{Hasher, Keccak};
 use tracing::info_span;
 use transcript::BasicTranscript as Transcript;
 use witness::next_pow2_instance_padding;
-
-#[cfg(feature = "gpu")]
-fn log_gpu_mem_pool_after_shard(label: &str, shard_id: usize) {
-    use gkr_iop::gpu::gpu_prover::*;
-
-    info_span!("[ceno] log_gpu_mem_pool_after_shard").in_scope(|| {
-        let cuda_hal = get_cuda_hal().unwrap();
-        let mem_pool = cuda_hal.inner().mem_pool();
-        let used_bytes = mem_pool.get_used_size().unwrap_or(0);
-        let reserved_bytes = mem_pool.get_reserved_size().unwrap_or(0);
-        tracing::info!(
-            "[gpu shard end][{label}] shard_id={} used={:.2}MB reserved={:.2}MB",
-            shard_id,
-            used_bytes as f64 / (1024.0 * 1024.0),
-            reserved_bytes as f64 / (1024.0 * 1024.0),
-        );
-    });
-}
 
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
@@ -121,6 +104,7 @@ pub fn public_io_words_to_digest_words(words: &[u32]) -> [u32; 8] {
 )]
 pub enum PcsKind {
     #[default]
+    Jagged,
     Basefold,
     Whir,
 }
@@ -1502,9 +1486,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 )
             }).unwrap();
 
-            // Keep shard_steps cache alive across witgen and prove for this shard.
-            // It is released at shard-end after create_proof.
-
             info_span!("assign_dummy_circuits").in_scope(|| {
                 system_config
                     .dummy_config
@@ -1516,6 +1497,46 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &mut zkvm_witness,
                     )
             }).unwrap();
+
+            // Assign continuation circuits (LocalFinal + ShardRam) before
+            // `finalize_lk_multiplicities`: ShardRam's per-row y6_lo byte /
+            // LTU lookups must land in `combined_lk_mlt` so the U8 / LTU
+            // table `mlt` columns balance the logup grand product. LocalFinal
+            // does not consume `combined_lk_mlt`, so running it pre-finalize
+            // is safe — `assign_table_circuit` tolerates a not-yet-finalized
+            // multiplicity by passing an empty slice.
+            info_span!("assign_continuation").in_scope(|| {
+                system_config
+                    .mmu_config
+                    .assign_continuation_circuit(
+                        &system_config.zkvm_cs,
+                        &shard_ctx,
+                        &mut zkvm_witness,
+                        &pi,
+                        &emul_result.final_mem_state.reg,
+                        &emul_result.final_mem_state.mem,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.stack,
+                        &emul_result.final_mem_state.heap,
+                    )
+            }).unwrap();
+
+            // Assign the dynamic-init tables (heap + hints) before
+            // `finalize_lk_multiplicities`: `HintsInitCircuit` range-checks its
+            // prover-witnessed init limbs (#999) and folds the per-limb u16
+            // lookups into `combined_lk_mlt` via `assign_table_circuit_with_lk`.
+            info_span!("assign_dynamic_init_table").in_scope(|| {
+                system_config
+                    .mmu_config
+                    .assign_dynamic_init_table_circuit(
+                        &system_config.zkvm_cs,
+                        &mut zkvm_witness,
+                        &pi,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.heap,
+                    )
+            }).unwrap();
+
             info_span!("finalize_lk_multiplicities").in_scope(|| {
                 zkvm_witness.finalize_lk_multiplicities();
             });
@@ -1552,6 +1573,35 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &cpu_dispatch_ctx,
                         shard_steps,
                         &mut cpu_witness,
+                    )
+                    .unwrap();
+                // Mirror the main path so `combined_lk_mlt` comparison stays
+                // meaningful: continuation pushes ShardRamCircuit's per-row
+                // y6_lo lookups into `lk_mlts` before finalize, and the dynamic
+                // init tables push HintsInitCircuit's per-limb u16 range-check
+                // lookups (#999) before finalize.
+                system_config
+                    .mmu_config
+                    .assign_continuation_circuit(
+                        &system_config.zkvm_cs,
+                        &cpu_shard_ctx,
+                        &mut cpu_witness,
+                        &pi,
+                        &emul_result.final_mem_state.reg,
+                        &emul_result.final_mem_state.mem,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.stack,
+                        &emul_result.final_mem_state.heap,
+                    )
+                    .unwrap();
+                system_config
+                    .mmu_config
+                    .assign_dynamic_init_table_circuit(
+                        &system_config.zkvm_cs,
+                        &mut cpu_witness,
+                        &pi,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.heap,
                     )
                     .unwrap();
                 cpu_witness.finalize_lk_multiplicities();
@@ -1633,34 +1683,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                 }
             }).unwrap();
 
-            info_span!("assign_dynamic_init_table").in_scope(|| {
-                system_config
-                    .mmu_config
-                    .assign_dynamic_init_table_circuit(
-                        &system_config.zkvm_cs,
-                        &mut zkvm_witness,
-                        &pi,
-                        &emul_result.final_mem_state.hints,
-                        &emul_result.final_mem_state.heap,
-                    )
-            }).unwrap();
-
-            info_span!("assign_continuation").in_scope(|| {
-                system_config
-                    .mmu_config
-                    .assign_continuation_circuit(
-                        &system_config.zkvm_cs,
-                        &shard_ctx,
-                        &mut zkvm_witness,
-                        &pi,
-                        &emul_result.final_mem_state.reg,
-                        &emul_result.final_mem_state.mem,
-                        &emul_result.final_mem_state.hints,
-                        &emul_result.final_mem_state.stack,
-                        &emul_result.final_mem_state.heap,
-                    )
-            }).unwrap();
-
             info_span!("assign_program_table").in_scope(|| {
                 zkvm_witness
                     .assign_table_circuit::<ProgramTableCircuit<E>>(
@@ -1695,9 +1717,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     }
                 });
             }
-
-            // Keep per-shard GPU caches alive for prove-time reuse in this shard.
-            // They are explicitly released at shard-end after create_proof.
 
             Some((zkvm_witness, shard_ctx, pi, witgen_mem_baseline))
         })
@@ -2193,9 +2212,18 @@ fn create_proofs_streaming<
 
                         let transcript = Transcript::new(b"riscv");
                         let start = std::time::Instant::now();
-                        let zkvm_proof = prover
-                            .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                            .expect("create_proof failed");
+                        let zkvm_proof =
+                            match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+                                Ok(proof) => proof,
+                                Err(err) => {
+                                    eprintln!(
+                                        "create_proof failed for shard {}: {err:?}",
+                                        shard_ctx.shard_id
+                                    );
+                                    let _ = std::io::stderr().flush();
+                                    std::process::exit(1);
+                                }
+                            };
                         tracing::debug!(
                             "{}th shard proof created in {:?}",
                             shard_ctx.shard_id,
@@ -2203,9 +2231,7 @@ fn create_proofs_streaming<
                         );
                         #[cfg(feature = "gpu")]
                         if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                            log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                             crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                            log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
                         }
                         #[cfg(feature = "gpu")]
                         if let Some(baseline) = _witgen_mem_baseline {
@@ -2254,9 +2280,18 @@ fn create_proofs_streaming<
 
                     let transcript = Transcript::new(b"riscv");
                     let start = std::time::Instant::now();
-                    let zkvm_proof = prover
-                        .create_proof(&shard_ctx, zkvm_witness, pi, transcript)
-                        .expect("create_proof failed");
+                    let zkvm_proof =
+                        match prover.create_proof(&shard_ctx, zkvm_witness, pi, transcript) {
+                            Ok(proof) => proof,
+                            Err(err) => {
+                                eprintln!(
+                                    "create_proof failed for shard {}: {err:?}",
+                                    shard_ctx.shard_id
+                                );
+                                let _ = std::io::stderr().flush();
+                                std::process::exit(1);
+                            }
+                        };
                     tracing::debug!(
                         "{}th shard proof created in {:?}",
                         shard_ctx.shard_id,
@@ -2264,9 +2299,7 @@ fn create_proofs_streaming<
                     );
                     #[cfg(feature = "gpu")]
                     if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-                        log_gpu_mem_pool_after_shard("before_release", shard_ctx.shard_id);
                         crate::instructions::gpu::cache::release_all_shard_gpu_caches();
-                        log_gpu_mem_pool_after_shard("after_release", shard_ctx.shard_id);
                     }
                     #[cfg(feature = "gpu")]
                     if let Some(baseline) = _witgen_mem_baseline {

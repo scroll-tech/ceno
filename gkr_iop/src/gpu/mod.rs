@@ -30,6 +30,7 @@ pub mod gpu_prover {
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
             get_ceno_gpu_device_id, get_gpu_cache_level, get_mem_tracking_mode,
+            jagged::GpuJaggedPreprocessed,
             mem_pool::MemTracker,
             mle::{
                 build_mle_as_ceno, ordered_sparse_selector_gpu, rotation_next_base_mle_gpu,
@@ -222,7 +223,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                 let cpu_evaluations = poly.to_cpu_vec(stream.as_ref());
                 let cpu_evaluations_base: Vec<E::BaseField> =
                     unsafe { std::mem::transmute(cpu_evaluations) };
-                MultilinearExtension::from_evaluations_vec(
+                MultilinearExtension::from_evaluations_vec_compact(
                     self.mle.num_vars(),
                     cpu_evaluations_base,
                 )
@@ -230,7 +231,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
             GpuFieldType::Ext(poly) => {
                 let cpu_evaluations = poly.to_cpu_vec(stream.as_ref());
                 let cpu_evaluations_ext: Vec<E> = unsafe { std::mem::transmute(cpu_evaluations) };
-                MultilinearExtension::from_evaluations_ext_vec(
+                MultilinearExtension::from_evaluations_ext_vec_compact(
                     self.mle.num_vars(),
                     cpu_evaluations_ext,
                 )
@@ -357,19 +358,44 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
 
 pub type ArcMultilinearExtensionGpu<'a, E> = Arc<MultilinearExtensionGpu<'a, E>>;
 
+pub type GpuBasefoldPcsData = BasefoldCommitmentWithWitnessGpu<
+    BB31Base,
+    BufferImpl<'static, BB31Base>,
+    GpuDigestLayer,
+    GpuMatrix<'static>,
+    GpuPolynomial<'static>,
+>;
+
+#[derive(Clone, Debug)]
+pub struct GpuJaggedTraceLayout {
+    pub first_poly_idx: usize,
+    pub num_polys: usize,
+    pub num_vars: usize,
+}
+
+pub struct GpuJaggedPcsData {
+    pub inner: GpuBasefoldPcsData,
+    pub q_evals: Option<BufferImpl<'static, BB31Base>>,
+    pub q_host_evals: Option<Vec<BB31Base>>,
+    pub cumulative_heights: Vec<usize>,
+    pub poly_heights: Vec<usize>,
+    pub total_evaluations: usize,
+    pub reshape_log_height: usize,
+    pub trace_layouts: Vec<GpuJaggedTraceLayout>,
+}
+
+pub enum GpuPcsData {
+    Basefold(GpuBasefoldPcsData),
+    Jagged(GpuJaggedPcsData),
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
     type E = E;
     type Pcs = PCS;
     type MultilinearPoly<'a> = MultilinearExtensionGpu<'static, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
-    type PcsData = BasefoldCommitmentWithWitnessGpu<
-        E::BaseField,
-        BufferImpl<'static, E::BaseField>,
-        GpuDigestLayer,
-        GpuMatrix<'static>,
-        GpuPolynomial<'static>,
-    >;
+    type PcsData = GpuPcsData;
     #[cfg(not(feature = "gpu"))]
     type PcsData = <PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
@@ -506,13 +532,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+        // Match the CPU witness inference path: layer outputs are materialized over
+        // the occupied prefix of the layer witness domain, not the maximum length of
+        // any referenced structural/fixed MLE.
+        let output_len = all_witins_gpu_gl64
+            .first()
+            .map(|mle| mle.evaluations_len())
+            .unwrap_or(0);
+        let output_lengths =
+            std::iter::repeat_n(output_len, mle_indices_per_term.len()).collect_vec();
 
         // buffer for output witness from gpu
         let cuda_hal = get_cuda_hal().unwrap();
-        let mut next_witness_buf = (0..num_non_zero_expr)
-            .map(|_| {
+        let mut next_witness_buf = output_lengths
+            .iter()
+            .map(|&output_len| {
                 cuda_hal
-                    .alloc_ext_elems_on_device(1 << num_vars, false, stream.as_ref())
+                    .alloc_ext_elems_on_device(output_len, false, stream.as_ref())
                     .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
             })
             .collect::<Result<Vec<_>, _>>()

@@ -20,6 +20,7 @@ pub trait ProverDevice<PB>:
     TraceCommitter<PB>
     + TowerProver<PB>
     + MainSumcheckProver<PB>
+    + BatchedMainConstraintProver<PB>
     + OpeningProver<PB>
     + DeviceTransporter<PB>
     + ProtocolWitnessGeneratorProver<PB>
@@ -33,9 +34,26 @@ where
     fn get_pb(&self) -> &PB;
 }
 
+pub trait BatchedMainConstraintProver<PB: ProverBackend> {
+    fn prove_batched_main_constraints<'a>(
+        &self,
+        jobs: Vec<MainConstraintJob<'a, PB>>,
+        pcs_data: &PB::PcsData,
+        transcript: &mut impl Transcript<PB::E>,
+    ) -> BatchedMainConstraintResult<PB::E>;
+}
+
+pub type BatchedMainConstraintResult<E> = Result<
+    (
+        crate::scheme::MainConstraintProof<E>,
+        Vec<MainConstraintResult<E>>,
+    ),
+    ZKVMError,
+>;
+
 /// Prepare a chip task's input for proving.
 /// CPU: no-op (input already fully populated during task building).
-/// GPU: deferred witness extraction + structural witness transport.
+/// GPU: witness extraction + structural witness transport.
 pub trait ChipInputPreparer<PB: ProverBackend> {
     fn prepare_chip_input(
         &self,
@@ -52,6 +70,19 @@ pub struct ProofInput<'a, PB: ProverBackend> {
     pub pi: Vec<Either<<PB::E as ExtensionField>::BaseField, PB::E>>,
     pub num_instances: [usize; 2],
     pub has_ecc_ops: bool,
+}
+
+impl<'a, PB: ProverBackend> Clone for ProofInput<'a, PB> {
+    fn clone(&self) -> Self {
+        Self {
+            witness: self.witness.clone(),
+            structural_witness: self.structural_witness.clone(),
+            fixed: self.fixed.clone(),
+            pi: self.pi.clone(),
+            num_instances: self.num_instances,
+            has_ecc_ops: self.has_ecc_ops,
+        }
+    }
 }
 
 impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
@@ -86,7 +117,7 @@ pub trait TraceCommitter<PB: ProverBackend> {
         &self,
         traces: BTreeMap<usize, witness::RowMajorMatrix<<PB::E as ExtensionField>::BaseField>>,
     ) -> (
-        Vec<PB::MultilinearPoly<'a>>,
+        Vec<Arc<PB::MultilinearPoly<'a>>>,
         PB::PcsData,
         <PB::Pcs as PolynomialCommitmentScheme<PB::E>>::Commitment,
     );
@@ -94,7 +125,7 @@ pub trait TraceCommitter<PB: ProverBackend> {
     /// Return an iterator over witness polynomials so backends can decide how to source them
     fn extract_witness_mles<'a, 'b>(
         &self,
-        witness_mles: &'b mut Vec<PB::MultilinearPoly<'a>>,
+        witness_mles: &'b mut Vec<Arc<PB::MultilinearPoly<'a>>>,
         pcs_data: &'b PB::PcsData, // used by GPU backend
     ) -> Box<dyn Iterator<Item = Arc<PB::MultilinearPoly<'a>>> + 'b>;
 }
@@ -152,6 +183,26 @@ pub trait TowerProver<PB: ProverBackend> {
 pub struct MainSumcheckEvals<E: ExtensionField> {
     pub wits_in_evals: Vec<E>,
     pub fixed_in_evals: Vec<E>,
+}
+
+pub struct MainConstraintJob<'a, PB: ProverBackend> {
+    pub circuit_name: String,
+    pub circuit_idx: usize,
+    pub input: ProofInput<'static, PB>,
+    pub witness_trace_idx: Option<usize>,
+    pub num_witin: usize,
+    pub structural_rmm: Option<witness::RowMajorMatrix<<PB::E as ExtensionField>::BaseField>>,
+    pub rt_tower: Point<PB::E>,
+    pub rotation: Option<RotationProverOutput<PB::E>>,
+    pub ecc_proof: Option<EccQuarkProof<PB::E>>,
+    pub challenges: [PB::E; 2],
+    pub cs: &'a ComposedConstrainSystem<PB::E>,
+}
+
+pub struct MainConstraintResult<E: ExtensionField> {
+    pub circuit_idx: usize,
+    pub input_opening_point: Point<E>,
+    pub opening_evals: MainSumcheckEvals<E>,
 }
 
 #[derive(Clone)]
@@ -229,7 +280,7 @@ pub trait DeviceTransporter<PB: ProverBackend> {
 
     fn transport_mles<'a>(
         &self,
-        mles: &[MultilinearExtension<'a, PB::E>],
+        mles: Vec<MultilinearExtension<'a, PB::E>>,
     ) -> Vec<Arc<PB::MultilinearPoly<'a>>>;
 }
 

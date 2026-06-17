@@ -18,7 +18,6 @@ use ceno_gpu::{
 };
 use ff_ext::ExtensionField;
 use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
-use p3::field::FieldAlgebra;
 use rustc_hash::FxHashMap;
 use tracing::info_span;
 use witness::{DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix};
@@ -303,9 +302,48 @@ pub(crate) fn gpu_witness_to_rmm<E: ExtensionField>(
     num_rows: usize,
     num_cols: usize,
     padding: InstancePaddingStrategy,
-) -> RowMajorMatrix<E::BaseField> {
+) -> Result<RowMajorMatrix<E::BaseField>, ZKVMError> {
+    type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
+
+    let produced_rows = gpu_result.num_rows;
+    if produced_rows < num_rows {
+        return Err(ZKVMError::InvalidWitness(
+            format!("GPU witness rows ({produced_rows}) smaller than logical rows ({num_rows})")
+                .into(),
+        ));
+    }
+
+    let device_buffer = if produced_rows == num_rows || num_cols == 0 {
+        gpu_result.device_buffer
+    } else {
+        let hal = gkr_iop::gpu::get_cuda_hal().map_err(|e| {
+            ZKVMError::InvalidWitness(format!("failed to get CUDA HAL: {e:?}").into())
+        })?;
+        let mut compact = hal
+            .alloc_elems_on_device(num_rows * num_cols, false, None)
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(
+                    format!("GPU compact witness allocation failed: {e:?}").into(),
+                )
+            })?;
+        let elem_size = std::mem::size_of::<BB>();
+        let copy_bytes = num_rows * elem_size;
+        for col in 0..num_cols {
+            let src_start = col * produced_rows * elem_size;
+            let dst_start = col * num_rows * elem_size;
+            let src = gpu_result
+                .device_buffer
+                .as_slice_range(src_start..src_start + copy_bytes);
+            let mut dst = compact.as_mut_slice_range(dst_start..dst_start + copy_bytes);
+            hal.inner.dtod_copy_sync(&src, &mut dst).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU compact witness copy failed: {e:?}").into())
+            })?;
+        }
+        compact
+    };
+
     let mut rmm = RowMajorMatrix::<E::BaseField>::new(num_rows, num_cols, padding);
     // Keep the original col-major witness buffer as the source of truth for GPU commit.
-    rmm.set_device_backing(gpu_result.device_buffer, DeviceMatrixLayout::ColMajor);
-    rmm
+    rmm.set_device_backing(device_buffer, DeviceMatrixLayout::ColMajor);
+    Ok(rmm)
 }

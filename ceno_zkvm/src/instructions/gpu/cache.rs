@@ -7,29 +7,13 @@ use ceno_emul::{StepRecord, WordAddr};
 use ceno_gpu::{
     Buffer, CudaHal, CudaSlice,
     bb31::{CudaHalBB31, ShardDeviceBuffers},
-    common::witgen::types::{GpuShardRamRecord, GpuShardScalars},
+    common::witgen::types::GpuShardScalars,
 };
 use rayon::prelude::*;
-use std::{
-    cell::RefCell,
-    sync::{Arc, Mutex, OnceLock},
-};
+use std::cell::RefCell;
 use tracing::info_span;
 
 use crate::{e2e::ShardContext, error::ZKVMError};
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct GpuReplayCacheStats {
-    pub shard_steps_bytes: usize,
-    pub shard_meta_bytes: usize,
-    pub shared_side_effect_bytes: usize,
-}
-
-impl GpuReplayCacheStats {
-    pub fn total_bytes(self) -> usize {
-        self.shard_steps_bytes + self.shard_meta_bytes + self.shared_side_effect_bytes
-    }
-}
 
 /// Compatibility session handle for shard-scoped GPU cache lifetime.
 ///
@@ -105,33 +89,12 @@ impl PartialOrd for PackedNextAccessEntry {
 }
 
 /// Cached shard_steps device buffer with metadata for logging.
-#[derive(Clone)]
 struct ShardStepsCache {
     host_ptr: usize,
     byte_len: usize,
     shard_id: usize,
     n_steps: usize,
-    device_buf: Arc<CudaSlice<u8>>,
-}
-
-#[derive(Clone)]
-struct GlobalReplaySession {
-    shard_steps: ShardStepsCache,
-    device_bufs: ShardDeviceBuffers,
-}
-
-fn global_replay_session() -> &'static Mutex<Option<Arc<GlobalReplaySession>>> {
-    // Compatibility bridge for prove-time replay on worker threads.
-    //
-    // Witgen originally cached shard raw buffers in thread-local storage, but
-    // replay may execute on a different worker thread. This global exposes one
-    // shard's resident raw GPU session cross-thread so replay can borrow the
-    // same device allocations instead of re-uploading raw shard data.
-    //
-    // TLS and this global clone only Rust handles / pointers to the same GPU
-    // allocations; they do not intentionally create duplicate VRAM copies.
-    static GLOBAL: OnceLock<Mutex<Option<Arc<GlobalReplaySession>>>> = OnceLock::new();
-    GLOBAL.get_or_init(|| Mutex::new(None))
+    device_buf: CudaSlice<u8>,
 }
 
 // Thread-local cache for shard_steps device buffer. Invalidated when shard changes.
@@ -156,14 +119,6 @@ pub(crate) fn upload_shard_steps_cached(
                 return Ok(()); // cache hit
             }
         }
-        if let Some(global) = global_replay_session().lock().unwrap().as_ref() {
-            let g = &global.shard_steps;
-            if g.host_ptr == ptr && g.byte_len == byte_len && g.shard_id == shard_id {
-                // Rehydrate TLS from the shard-global replay session.
-                *cache = Some(g.clone());
-                return Ok(());
-            }
-        }
         // Cache miss: upload
         let mb = byte_len as f64 / (1024.0 * 1024.0);
         tracing::info!(
@@ -174,9 +129,9 @@ pub(crate) fn upload_shard_steps_cached(
         );
         let bytes: &[u8] =
             unsafe { std::slice::from_raw_parts(shard_steps.as_ptr() as *const u8, byte_len) };
-        let device_buf = Arc::new(hal.inner.htod_copy_stream(None, bytes).map_err(|e| {
+        let device_buf = hal.inner.htod_copy_stream(None, bytes).map_err(|e| {
             ZKVMError::InvalidWitness(format!("shard_steps H2D failed: {e}").into())
-        })?);
+        })?;
         *cache = Some(ShardStepsCache {
             host_ptr: ptr,
             byte_len,
@@ -193,12 +148,8 @@ pub(crate) fn upload_shard_steps_cached(
 pub(crate) fn with_cached_shard_steps<R>(f: impl FnOnce(&CudaSlice<u8>) -> R) -> R {
     SHARD_STEPS_DEVICE.with(|cache| {
         let cache = cache.borrow();
-        if let Some(c) = cache.as_ref() {
-            return f(c.device_buf.as_ref());
-        }
-        let global = global_replay_session().lock().unwrap();
-        let session = global.as_ref().expect("shard_steps not uploaded");
-        f(session.shard_steps.device_buf.as_ref())
+        let c = cache.as_ref().expect("shard_steps not uploaded");
+        f(&c.device_buf)
     })
 }
 
@@ -218,53 +169,6 @@ pub fn invalidate_shard_steps_cache() {
         }
         *cache = None;
     });
-    // End-of-shard teardown for cross-thread replay visibility.
-    *global_replay_session().lock().unwrap() = None;
-}
-
-pub fn current_replay_cache_stats() -> GpuReplayCacheStats {
-    let shard_steps_bytes = SHARD_STEPS_DEVICE.with(|cache| {
-        cache
-            .borrow()
-            .as_ref()
-            .map(|c| c.device_buf.len())
-            .unwrap_or(0)
-    });
-    let (shard_meta_bytes, shared_side_effect_bytes) = SHARD_META_CACHE.with(|cache| {
-        let cache = cache.borrow();
-        let Some(c) = cache.as_ref() else {
-            return (0usize, 0usize);
-        };
-        let meta_bytes = c.device_bufs.scalars.len()
-            + c.device_bufs.next_access_packed.len()
-            + c.device_bufs.prev_shard_cycle_range.len() * std::mem::size_of::<u64>()
-            + c.device_bufs.prev_shard_heap_range.len() * std::mem::size_of::<u32>()
-            + c.device_bufs.prev_shard_hint_range.len() * std::mem::size_of::<u32>();
-        let shared_bytes = c
-            .shared_ec_buf
-            .as_ref()
-            .map(|buf| buf.len() * std::mem::size_of::<u32>())
-            .unwrap_or(0)
-            + c.shared_ec_count
-                .as_ref()
-                .map(|buf| buf.len() * std::mem::size_of::<u32>())
-                .unwrap_or(0)
-            + c.shared_addr_buf
-                .as_ref()
-                .map(|buf| buf.len() * std::mem::size_of::<u32>())
-                .unwrap_or(0)
-            + c.shared_addr_count
-                .as_ref()
-                .map(|buf| buf.len() * std::mem::size_of::<u32>())
-                .unwrap_or(0);
-        (meta_bytes, shared_bytes)
-    });
-
-    GpuReplayCacheStats {
-        shard_steps_bytes,
-        shard_meta_bytes,
-        shared_side_effect_bytes,
-    }
 }
 
 /// Cached shard metadata device buffers for GPU shard records.
@@ -308,8 +212,8 @@ fn is_force_flush_d2h() -> bool {
     false
 }
 
-/// CPU mirror of GPU-side compact shard RAM records, populated only when
-/// `CENO_GPU_DEBUG_COMPARE_WITGEN` is set (production has no consumer).
+// CPU mirror of GPU-side compact shard RAM records, populated only when
+// `CENO_GPU_DEBUG_COMPARE_WITGEN` is set (production has no consumer).
 thread_local! {
     static COMPACT_SHARD_RECORDS: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
 }
@@ -374,11 +278,7 @@ fn convert_compact_shard_records<E: ff_ext::ExtensionField>(
     Vec<crate::tables::ShardRamInput<E>>,
     Vec<crate::tables::ShardRamInput<E>>,
 ) {
-    use crate::{
-        scheme::septic_curve::{SepticExtension, SepticPoint},
-        tables::{ECPoint, ShardRamInput, ShardRamRecord},
-    };
-    use p3::field::FieldAlgebra;
+    use crate::tables::ShardRamInput;
 
     assert!(raw.len().is_multiple_of(GPU_SHARD_RAM_RECORD_SIZE));
     let count = raw.len() / GPU_SHARD_RAM_RECORD_SIZE;
@@ -503,23 +403,6 @@ pub(crate) fn ensure_shard_metadata_cached(
                 c.shard_id, shard_id,
             );
         }
-        if let Some(global) = global_replay_session().lock().unwrap().as_ref() {
-            if global.shard_steps.shard_id == shard_id {
-                *cache = Some(ShardMetadataCache {
-                    shard_id,
-                    // These cloned handles reuse the same underlying device
-                    // buffers/pointers; this does not allocate a second copy of
-                    // shard metadata in VRAM.
-                    device_bufs: global.device_bufs.clone(),
-                    shared_ec_buf: None,
-                    shared_ec_count: None,
-                    shared_addr_buf: None,
-                    shared_addr_count: None,
-                });
-                return Ok(());
-            }
-        }
-
         // Build sorted packed next-access entries from HashMap and H2D upload.
         let sorted = build_sorted_next_accesses(shard_ctx);
         let next_access_count = sorted.len() as u32;
@@ -687,12 +570,8 @@ pub(crate) fn ensure_shard_metadata_cached(
 pub(crate) fn with_cached_shard_meta<R>(f: impl FnOnce(&ShardDeviceBuffers) -> R) -> R {
     SHARD_META_CACHE.with(|cache| {
         let cache = cache.borrow();
-        if let Some(c) = cache.as_ref() {
-            return f(&c.device_bufs);
-        }
-        let global = global_replay_session().lock().unwrap();
-        let session = global.as_ref().expect("shard metadata not uploaded");
-        f(&session.device_bufs)
+        let c = cache.as_ref().expect("shard metadata not uploaded");
+        f(&c.device_bufs)
     })
 }
 
@@ -711,11 +590,7 @@ pub(crate) fn with_cached_gpu_ctx<R>(
             });
         }
 
-        let global = global_replay_session().lock().unwrap();
-        let session = global
-            .as_ref()
-            .expect("shard GPU replay session not uploaded");
-        f(&session.shard_steps.device_buf, &session.device_bufs)
+        panic!("shard GPU context not uploaded")
     })
 }
 
@@ -938,41 +813,6 @@ pub(crate) fn begin_gpu_shard_session(
 ) -> Result<GpuShardSession, ZKVMError> {
     upload_shard_steps_cached(hal, shard_steps, shard_ctx.shard_id)?;
     ensure_shard_metadata_cached(hal, shard_ctx, shard_steps.len())?;
-    SHARD_STEPS_DEVICE.with(|steps_cache| {
-        SHARD_META_CACHE.with(|meta_cache| {
-            let steps = steps_cache.borrow();
-            let meta = meta_cache.borrow();
-            let steps = steps.as_ref().expect("shard_steps not uploaded");
-            let meta = meta.as_ref().expect("shard metadata not uploaded");
-            let raw_only_meta = ShardDeviceBuffers {
-                scalars: meta.device_bufs.scalars.clone(),
-                next_access_packed: meta.device_bufs.next_access_packed.clone(),
-                prev_shard_cycle_range: meta.device_bufs.prev_shard_cycle_range.clone(),
-                prev_shard_heap_range: meta.device_bufs.prev_shard_heap_range.clone(),
-                prev_shard_hint_range: meta.device_bufs.prev_shard_hint_range.clone(),
-                gpu_ec_shard_id: None,
-                shared_ec_out_ptr: 0,
-                shared_ec_count_ptr: 0,
-                shared_addr_out_ptr: 0,
-                shared_addr_count_ptr: 0,
-                shared_ec_capacity: 0,
-                shared_addr_capacity: 0,
-            };
-            // Replay needs only shard-resident raw inputs. Keep step records and
-            // immutable shard metadata alive across the shard; do not retain
-            // transient witness/device-backing here.
-            *global_replay_session().lock().unwrap() = Some(Arc::new(GlobalReplaySession {
-                shard_steps: ShardStepsCache {
-                    host_ptr: steps.host_ptr,
-                    byte_len: steps.byte_len,
-                    shard_id: steps.shard_id,
-                    n_steps: steps.n_steps,
-                    device_buf: Arc::clone(&steps.device_buf),
-                },
-                device_bufs: raw_only_meta,
-            }));
-        });
-    });
     Ok(GpuShardSession {
         shard_id: shard_ctx.shard_id,
     })
@@ -982,9 +822,4 @@ pub(crate) fn begin_gpu_shard_session(
 pub fn release_all_shard_gpu_caches() {
     invalidate_shard_steps_cache();
     invalidate_shard_meta_cache();
-}
-
-/// End a shard session and free all shard-scoped GPU caches.
-pub fn end_gpu_shard_session(_session: GpuShardSession) {
-    release_all_shard_gpu_caches();
 }

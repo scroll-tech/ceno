@@ -12,7 +12,7 @@ use gkr_iop::{
 };
 use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
-use p3::{field::FieldAlgebra, matrix::Matrix};
+use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
@@ -329,26 +329,5 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             [raw_witin, raw_structural_witin],
             lk_multiplicity.into_finalize_result(),
         ))
-    }
-
-    #[cfg(feature = "gpu")]
-    fn build_gpu_replay_plan(
-        config: &Self::InstructionConfig,
-        shard_ctx: &ShardContext,
-        num_witin: usize,
-        num_structural_witin: usize,
-        shard_steps: &[StepRecord],
-        step_indices: &[StepIndex],
-    ) -> Option<crate::structs::GpuReplayPlan<E>> {
-        Some(
-            crate::instructions::gpu::chips::keccak::build_keccak_replay_plan(
-                config,
-                shard_ctx,
-                num_witin,
-                num_structural_witin,
-                shard_steps,
-                step_indices,
-            ),
-        )
     }
 }

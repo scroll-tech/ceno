@@ -68,10 +68,6 @@ pub(crate) fn is_gpu_witgen_enabled() -> bool {
     *ENABLED.get_or_init(|| {
         let val = std::env::var("CENO_GPU_ENABLE_WITGEN").ok();
         let enabled = matches!(val.as_deref(), Some("1"));
-        eprintln!(
-            "[GPU witgen] CENO_GPU_ENABLE_WITGEN={:?} → enabled={}",
-            val, enabled
-        );
         enabled
     })
 }
@@ -86,16 +82,6 @@ pub(crate) fn should_materialize_witness_on_gpu() -> bool {
     is_gpu_witgen_enabled()
 }
 
-/// Whether the initial opcode-assignment pass should eagerly materialize the
-/// witness RMM/device backing.
-///
-/// In cache-none + GPU-witgen mode we keep only replay metadata plus the
-/// shard-resident raw GPU state, and all witness materialization is deferred to
-/// commit / chip proof / opening replay.
-pub(crate) fn should_materialize_witness_on_initial_assign() -> bool {
-    should_materialize_witness_on_gpu() && should_retain_witness_device_backing_after_commit()
-}
-
 /// Whether replayable witness device backing should remain resident after commit.
 ///
 /// Policy:
@@ -105,6 +91,22 @@ pub(crate) fn should_materialize_witness_on_initial_assign() -> bool {
 ///   demand from shard-resident raw data during chip proof / PCS open
 pub(crate) fn should_retain_witness_device_backing_after_commit() -> bool {
     is_gpu_witgen_enabled() && !matches!(get_gpu_cache_level(), CacheLevel::None)
+}
+
+/// Optional cap for Jagged q' reshape height.
+///
+/// `CENO_GPU_JAGGED_RESHAPE_LOG_HEIGHT` defaults to 26 to preserve the previous
+/// behavior. Smaller values trade more q' columns for lower height-scaled
+/// Basefold Merkle/hasher buffers, which is important on 16GB-class GPUs.
+pub(crate) fn jagged_reshape_log_height_cap() -> usize {
+    use std::sync::OnceLock;
+    static CAP: OnceLock<usize> = OnceLock::new();
+    *CAP.get_or_init(|| {
+        std::env::var("CENO_GPU_JAGGED_RESHAPE_LOG_HEIGHT")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(26)
+    })
 }
 
 /// Set `CENO_GPU_DEBUG_COMPARE_WITGEN=1` to enable GPU vs CPU comparison; default disabled.
