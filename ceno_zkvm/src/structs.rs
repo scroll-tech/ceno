@@ -502,6 +502,55 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         Ok(())
     }
 
+    /// Like [`Self::assign_table_circuit`], but for a table circuit that itself
+    /// *performs* lookups (e.g. a non-zero-init RAM table that range-checks its
+    /// prover-witnessed init limbs, #999). The circuit's lookup multiplicity is
+    /// folded into `lk_mlts` so that `finalize_lk_multiplicities` includes it in
+    /// `combined_lk_mlt` and the range-table `mlt` columns balance the logup.
+    ///
+    /// MUST run *before* [`Self::finalize_lk_multiplicities`] (same ordering
+    /// requirement as [`Self::assign_shared_circuit`]).
+    pub fn assign_table_circuit_with_lk<TC: TableCircuit<E>>(
+        &mut self,
+        cs: &ZKVMConstraintSystem<E>,
+        config: &TC::TableConfig,
+        input: &TC::WitnessInput<'_>,
+    ) -> Result<(), ZKVMError> {
+        assert!(
+            self.combined_lk_mlt.is_none(),
+            "assign_table_circuit_with_lk must run before finalize_lk_multiplicities"
+        );
+        let cs = cs.get_cs(&TC::name()).unwrap();
+        let mut lk_multiplicity = LkMultiplicity::default();
+        let witness = TC::assign_instances_with_lk_multiplicities(
+            config,
+            cs.zkvm_v1_css.num_witin as usize,
+            cs.zkvm_v1_css.num_structural_witin as usize,
+            &mut lk_multiplicity,
+            input,
+        )?;
+        let witness_instances = witness[0].num_instances();
+        let structural_instances = witness[1].num_instances();
+        if witness_instances > 0 && structural_instances > 0 {
+            assert_eq!(
+                witness_instances,
+                structural_instances,
+                "{}: mismatched num_instances between witness and structural RMMs",
+                TC::name()
+            );
+        }
+        let num_instances = std::cmp::max(witness_instances, structural_instances);
+        let input = ChipInput::new(TC::name(), witness, [num_instances, 0]);
+        assert!(self.witnesses.insert(TC::name(), vec![input]).is_none());
+        assert!(
+            self.lk_mlts
+                .insert(TC::name(), lk_multiplicity.into_finalize_result())
+                .is_none()
+        );
+
+        Ok(())
+    }
+
     #[allow(clippy::type_complexity)]
     pub fn assign_shared_circuit(
         &mut self,

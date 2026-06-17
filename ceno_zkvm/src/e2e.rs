@@ -1521,6 +1521,22 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     )
             }).unwrap();
 
+            // Assign the dynamic-init tables (heap + hints) before
+            // `finalize_lk_multiplicities`: `HintsInitCircuit` range-checks its
+            // prover-witnessed init limbs (#999) and folds the per-limb u16
+            // lookups into `combined_lk_mlt` via `assign_table_circuit_with_lk`.
+            info_span!("assign_dynamic_init_table").in_scope(|| {
+                system_config
+                    .mmu_config
+                    .assign_dynamic_init_table_circuit(
+                        &system_config.zkvm_cs,
+                        &mut zkvm_witness,
+                        &pi,
+                        &emul_result.final_mem_state.hints,
+                        &emul_result.final_mem_state.heap,
+                    )
+            }).unwrap();
+
             info_span!("finalize_lk_multiplicities").in_scope(|| {
                 zkvm_witness.finalize_lk_multiplicities();
             });
@@ -1561,7 +1577,9 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     .unwrap();
                 // Mirror the main path so `combined_lk_mlt` comparison stays
                 // meaningful: continuation pushes ShardRamCircuit's per-row
-                // y6_lo lookups into `lk_mlts` before finalize.
+                // y6_lo lookups into `lk_mlts` before finalize, and the dynamic
+                // init tables push HintsInitCircuit's per-limb u16 range-check
+                // lookups (#999) before finalize.
                 system_config
                     .mmu_config
                     .assign_continuation_circuit(
@@ -1573,6 +1591,16 @@ pub fn generate_witness<'a, E: ExtensionField>(
                         &emul_result.final_mem_state.mem,
                         &emul_result.final_mem_state.hints,
                         &emul_result.final_mem_state.stack,
+                        &emul_result.final_mem_state.heap,
+                    )
+                    .unwrap();
+                system_config
+                    .mmu_config
+                    .assign_dynamic_init_table_circuit(
+                        &system_config.zkvm_cs,
+                        &mut cpu_witness,
+                        &pi,
+                        &emul_result.final_mem_state.hints,
                         &emul_result.final_mem_state.heap,
                     )
                     .unwrap();
@@ -1653,18 +1681,6 @@ pub fn generate_witness<'a, E: ExtensionField>(
                             &[],
                         )
                 }
-            }).unwrap();
-
-            info_span!("assign_dynamic_init_table").in_scope(|| {
-                system_config
-                    .mmu_config
-                    .assign_dynamic_init_table_circuit(
-                        &system_config.zkvm_cs,
-                        &mut zkvm_witness,
-                        &pi,
-                        &emul_result.final_mem_state.hints,
-                        &emul_result.final_mem_state.heap,
-                    )
             }).unwrap();
 
             info_span!("assign_program_table").in_scope(|| {
