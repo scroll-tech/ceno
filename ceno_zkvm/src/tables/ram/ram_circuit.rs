@@ -6,6 +6,7 @@ use crate::{
     scheme::PublicValues,
     structs::{ProgramParams, RAMType},
     tables::{RMMCollections, TableCircuit},
+    witness::LkMultiplicity,
 };
 use ceno_emul::{Addr, Cycle, GetAddr, WORD_SIZE, Word};
 use ff_ext::{ExtensionField, SmallField};
@@ -16,8 +17,9 @@ use gkr_iop::{
     selector::SelectorType,
 };
 use itertools::Itertools;
-use multilinear_extensions::{Expression, StructuralWitIn, StructuralWitInType, ToExpr};
-use std::{collections::HashMap, marker::PhantomData, ops::Range};
+use multilinear_extensions::{Expression, Instance, StructuralWitIn, StructuralWitInType, ToExpr};
+use rustc_hash::FxHashMap;
+use std::{marker::PhantomData, ops::Range};
 use witness::{InstancePaddingStrategy, RowMajorMatrix};
 
 #[derive(Clone, Debug)]
@@ -108,7 +110,7 @@ impl<
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
+        _multiplicity: &[FxHashMap<u64, usize>],
         final_v: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
@@ -180,6 +182,10 @@ pub trait DynVolatileRamTable {
     fn dynamic_addr(_params: &ProgramParams, _entry_index: usize, _pv: &PublicValues) -> Addr {
         unimplemented!()
     }
+
+    fn dynamic_length_instance() -> Option<Instance> {
+        None
+    }
 }
 
 pub trait DynVolatileRamTableConfigTrait<DVRAM>: Sized + Send + Sync {
@@ -194,6 +200,7 @@ pub trait DynVolatileRamTableConfigTrait<DVRAM>: Sized + Send + Sync {
         num_witin: usize,
         num_structural_witin: usize,
         data: &Self::WitnessInput<'_>,
+        lk_multiplicity: Option<&LkMultiplicity>,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError>;
 }
 
@@ -228,6 +235,61 @@ impl<
         Ok(cb.namespace(|| Self::name(), |cb| C::construct_circuit(cb, params))?)
     }
 
+    /// Generalizes the default [`TableCircuit::build_gkr_iop_circuit`] to also
+    /// wire "looking" lookups (`lk_expressions`). Non-zero-init tables range-check
+    /// their prover-witnessed init limbs (#999), which emits looking lookups in
+    /// addition to the RAM-bus table write. For zero-init tables the looking
+    /// lengths are 0, so this matches the default table wiring exactly.
+    fn build_gkr_iop_circuit(
+        cb: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
+    ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
+        let config = Self::construct_circuit(cb, param)?;
+        let r_len = cb.cs.r_expressions.len() + cb.cs.r_table_expressions.len();
+        let w_len = cb.cs.w_expressions.len() + cb.cs.w_table_expressions.len();
+        // logup lk table records include both `p` and `q`, hence `* 2`.
+        let lk_len = cb.cs.lk_expressions.len() + cb.cs.lk_table_expressions.len() * 2;
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
+        let selector = cb.create_placeholder_structural_witin(|| "selector");
+        let selector_type = SelectorType::Prefix(selector.expr());
+
+        // all groups share the same prefix selector
+        let (out_evals, mut chip) = (
+            [
+                // r_record
+                (0..r_len).collect_vec(),
+                // w_record
+                (r_len..r_len + w_len).collect_vec(),
+                // lk_record
+                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
+                // zero_record
+                (0..zero_len).collect_vec(),
+            ],
+            Chip::new_from_cb(cb),
+        );
+
+        // register selector to legacy constrain system
+        if r_len > 0 {
+            cb.cs.r_selector = Some(selector_type.clone());
+        }
+        if w_len > 0 {
+            cb.cs.w_selector = Some(selector_type.clone());
+        }
+        if lk_len > 0 {
+            cb.cs.lk_selector = Some(selector_type.clone());
+        }
+        if zero_len > 0 {
+            cb.cs.zero_selector = Some(selector_type.clone());
+        }
+
+        let layer = Layer::from_circuit_builder(cb, Self::name(), out_evals);
+        chip.add_layer(layer);
+
+        Ok((config, Some(chip.gkr_circuit())))
+    }
+
     fn generate_fixed_traces(
         _config: &Self::TableConfig,
         _num_fixed: usize,
@@ -240,7 +302,7 @@ impl<
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
+        _multiplicity: &[FxHashMap<u64, usize>],
         data: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding
@@ -250,6 +312,29 @@ impl<
                 num_witin,
                 num_structural_witin,
                 data,
+                None,
+            )?,
+        )
+    }
+
+    /// Used for non-zero-init tables (e.g. `HintsTable`) whose init range-check
+    /// lookups must be folded into `combined_lk_mlt`. The shared `LkMultiplicity`
+    /// records the per-limb u16 checks emitted by `construct_circuit` (#999).
+    fn assign_instances_with_lk_multiplicities(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        num_structural_witin: usize,
+        lk_multiplicity: &mut LkMultiplicity,
+        data: &Self::WitnessInput<'_>,
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        // assume returned table is well-formed include padding
+        Ok(
+            <C as DynVolatileRamTableConfigTrait<DVRAM>>::assign_instances(
+                config,
+                num_witin,
+                num_structural_witin,
+                data,
+                Some(&*lk_multiplicity),
             )?,
         )
     }
@@ -302,13 +387,13 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
                 // zero_record
                 vec![],
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
         // register selector to legacy constrain system
         cb.cs.r_selector = Some(selector_type.clone());
 
-        let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Self::name(), out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))
@@ -326,7 +411,7 @@ impl<E: ExtensionField, const V_LIMBS: usize> TableCircuit<E> for LocalFinalRamC
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
+        _multiplicity: &[FxHashMap<u64, usize>],
         (shard_ctx, final_mem): &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         // assume returned table is well-formed include padding

@@ -7,8 +7,7 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use generic_array::{GenericArray, typenum::Unsigned};
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -53,7 +52,7 @@ pub struct EcallWeierstrassAddAssignConfig<E: ExtensionField, EC: EllipticCurve>
     mem_rw: Vec<WriteMEM>,
 }
 
-/// WeierstrassAddAssignInstruction can handle any instruction and produce its side-effects.
+/// WeierstrassAddAssignInstruction can handle any instruction and produce its lk and shardram data.
 pub struct WeierstrassAddAssignInstruction<E, EC>(PhantomData<(E, EC)>);
 
 impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
@@ -173,15 +172,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                 .collect::<Result<Vec<WriteMEM>, _>>()?,
         );
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(
-            cb,
-            "weierstrass_add".to_string(),
-            layout.n_challenges,
-            out_evals,
-        );
-        chip.add_layer(layer);
+        let chip = layout.finalize("weierstrass_add".to_string(), cb);
 
         let circuit = chip.gkr_circuit();
 
@@ -274,7 +265,8 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                     .zip_eq(indices.iter().copied())
                     .map(|(instance, idx)| {
                         let step = &steps[idx];
-                        let ops = &step.syscall().expect("syscall step");
+                        let sw = shard_ctx.syscall_witnesses.clone();
+                        let ops = &step.syscall(&sw).expect("syscall step");
 
                         // vm_state
                         config
@@ -341,7 +333,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
             .map(|&idx| {
                 let step = &steps[idx];
                 let (instance, _prev_ts): (Vec<u32>, Vec<Cycle>) = step
-                    .syscall()
+                    .syscall(&shard_ctx.syscall_witnesses)
                     .unwrap()
                     .mem_ops
                     .iter()

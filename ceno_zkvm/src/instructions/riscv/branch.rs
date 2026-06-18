@@ -4,7 +4,7 @@ use ceno_emul::InsnKind;
 #[cfg(not(feature = "u16limb_circuit"))]
 mod branch_circuit;
 #[cfg(feature = "u16limb_circuit")]
-mod branch_circuit_v2;
+pub(crate) mod branch_circuit_v2;
 #[cfg(test)]
 mod test;
 

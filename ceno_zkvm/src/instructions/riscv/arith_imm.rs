@@ -1,7 +1,7 @@
 #[cfg(not(feature = "u16limb_circuit"))]
 mod arith_imm_circuit;
 #[cfg(feature = "u16limb_circuit")]
-mod arith_imm_circuit_v2;
+pub(crate) mod arith_imm_circuit_v2;
 
 #[cfg(feature = "u16limb_circuit")]
 pub use crate::instructions::riscv::arith_imm::arith_imm_circuit_v2::AddiInstruction;

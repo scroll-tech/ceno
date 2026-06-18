@@ -1,4 +1,6 @@
 use ff_ext::ExtensionField;
+#[cfg(feature = "gpu")]
+use gkr_iop::error::BackendError;
 use gkr_iop::{
     cpu::{CpuBackend, CpuProver},
     hal::ProverBackend,
@@ -6,10 +8,9 @@ use gkr_iop::{
 use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 #[cfg(feature = "gpu")]
-use crate::scheme::gpu::estimate_chip_proof_memory;
+use crate::scheme::gpu::{estimate_chip_proof_memory, is_babybear_jagged_pcs};
 use crate::scheme::{
-    constants::SEPTIC_EXTENSION_DEGREE,
-    hal::MainSumcheckEvals,
+    hal::{MainConstraintJob, MainConstraintResult, MainSumcheckEvals},
     scheduler::{ChipScheduler, ChipTask, ChipTaskResult},
 };
 use either::Either;
@@ -26,8 +27,6 @@ use tracing::info_span;
 use transcript::{BasicTranscript, ForkableTranscript, Transcript};
 
 use super::{PublicValues, ZKVMChipProof, ZKVMProof, hal::ProverDevice};
-#[cfg(feature = "gpu")]
-use crate::structs::ProvingKey;
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
@@ -35,10 +34,174 @@ use crate::{
         hal::{DeviceProvingKey, ProofInput},
         utils::build_main_witness,
     },
-    structs::{TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
+    structs::{RV32imMemStateConfig, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
 };
 
-type CreateTableProof<E> = (ZKVMChipProof<E>, MainSumcheckEvals<E>, Point<E>);
+type CreateTableProof<'a, PB> = (
+    ZKVMChipProof<<PB as ProverBackend>::E>,
+    MainConstraintJob<'a, PB>,
+);
+
+#[cfg(feature = "gpu")]
+fn cast_gpu_chip_task<'a, E, PCS, PB>(
+    task: ChipTask<'a, PB>,
+) -> ChipTask<'a, gkr_iop::gpu::GpuBackend<E, PCS>>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+{
+    let task = std::mem::ManuallyDrop::new(task);
+    unsafe {
+        std::ptr::read(
+            (&*task as *const ChipTask<'a, PB>)
+                .cast::<ChipTask<'a, gkr_iop::gpu::GpuBackend<E, PCS>>>(),
+        )
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn cast_gpu_chip_result<'a, E, PCS, PB>(
+    result: ChipTaskResult<'a, gkr_iop::gpu::GpuBackend<E, PCS>>,
+) -> ChipTaskResult<'a, PB>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E>,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+{
+    let result = std::mem::ManuallyDrop::new(result);
+    unsafe {
+        std::ptr::read(
+            (&*result as *const ChipTaskResult<'a, gkr_iop::gpu::GpuBackend<E, PCS>>)
+                .cast::<ChipTaskResult<'a, PB>>(),
+        )
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn prepare_gpu_chip_input<E, PCS>(
+    task: &mut ChipTask<'_, gkr_iop::gpu::GpuBackend<E, PCS>>,
+    pcs_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData,
+) where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+{
+    let num_vars = task.input.log2_num_instances() + task.pk.get_cs().rotation_vars().unwrap_or(0);
+
+    if let Some(trace_idx) = task.witness_trace_idx {
+        task.input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
+            crate::scheme::gpu::extract_witness_mles_for_trace::<E, PCS>(
+                pcs_data,
+                trace_idx,
+                task.num_witin,
+                num_vars,
+            )
+        });
+    }
+
+    if let Some(rmm) = task.structural_rmm.as_ref() {
+        let num_structural_witin = task.pk.get_cs().zkvm_v1_css.num_structural_witin as usize;
+        task.input.structural_witness =
+            info_span!("[ceno] transport_structural_witness").in_scope(|| {
+                crate::scheme::gpu::transport_structural_witness_to_gpu::<E>(
+                    rmm,
+                    num_structural_witin,
+                    num_vars,
+                )
+            });
+    }
+}
+
+#[cfg(feature = "gpu")]
+fn create_gpu_chip_proof<'a, E, PCS>(
+    task: &mut ChipTask<'a, gkr_iop::gpu::GpuBackend<E, PCS>>,
+    transcript: &mut impl Transcript<E>,
+) -> Result<CreateTableProof<'a, gkr_iop::gpu::GpuBackend<E, PCS>>, ZKVMError>
+where
+    E: ExtensionField,
+    PCS: PolynomialCommitmentScheme<E> + 'static,
+{
+    let circuit_pk = task.pk;
+    let input = &task.input;
+    let challenges = &task.challenges;
+    let cs = circuit_pk.get_cs();
+    let log2_num_instances = input.log2_num_instances();
+    let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
+    let input_num_instances = input.num_instances;
+
+    let records = info_span!("[ceno] build_main_witness").in_scope(|| {
+        build_main_witness::<
+            E,
+            PCS,
+            gkr_iop::gpu::GpuBackend<E, PCS>,
+            gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>>,
+        >(
+            cs,
+            input,
+            challenges,
+            crate::scheme::utils::WitnessBuildStage::Tower,
+        )
+    });
+
+    let cuda_hal = gkr_iop::gpu::get_cuda_hal().expect("Failed to get CUDA HAL");
+    let span = entered_span!("prove_tower_relation", profiling_2 = true);
+    let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
+        info_span!("[ceno] prove_tower_relation").in_scope(|| {
+            crate::scheme::gpu::prove_tower_relation_impl::<E, PCS>(
+                cs, input, &records, challenges, transcript, &cuda_hal,
+            )
+        })?;
+    exit_span!(span);
+    drop(records);
+
+    assert_eq!(rt_tower.len(), num_var_with_rotation);
+
+    let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
+    let ecc_proof = info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
+        crate::scheme::gpu::prove_ec_sum_quark_impl::<E, PCS>(cs, input, transcript)
+    })?;
+    exit_span!(span);
+
+    let span = entered_span!("prove_rotation", profiling_2 = true);
+    let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
+        crate::scheme::gpu::prove_rotation_impl::<E, PCS>(
+            cs, input, &rt_tower, challenges, transcript,
+        )
+    })?;
+    exit_span!(span);
+
+    let mut main_input = input.clone();
+    main_input.witness.clear();
+    main_input.structural_witness.clear();
+    let structural_rmm = task.structural_rmm.take();
+
+    Ok((
+        ZKVMChipProof {
+            r_out_evals,
+            w_out_evals,
+            lk_out_evals,
+            main_sumcheck_proofs: None,
+            gkr_iop_proof: None,
+            rotation_proof: rotation.clone().map(|r| r.proof),
+            tower_proof,
+            ecc_proof: ecc_proof.clone(),
+            num_instances: input_num_instances,
+        },
+        MainConstraintJob {
+            circuit_name: task.circuit_name.clone(),
+            circuit_idx: task.circuit_idx,
+            input: main_input,
+            witness_trace_idx: task.witness_trace_idx,
+            num_witin: task.num_witin,
+            structural_rmm,
+            rt_tower,
+            rotation,
+            ecc_proof,
+            challenges: *challenges,
+            cs,
+        },
+    ))
+}
 
 pub type ZkVMCpuProver<E, PCS> =
     ZKVMProver<E, PCS, CpuBackend<E, PCS>, CpuProver<CpuBackend<E, PCS>>>;
@@ -137,6 +300,12 @@ impl<
         pi: PublicValues,
         mut transcript: impl ForkableTranscript<E> + 'static,
     ) -> Result<ZKVMProof<E, PCS>, ZKVMError> {
+        #[cfg(feature = "gpu")]
+        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
+            crate::instructions::gpu::cache::release_all_shard_gpu_caches();
+            crate::instructions::gpu::cache::assert_caches_released_before_prove();
+        }
+
         // Pre-extract fixed_mles before entering the tracing scope to avoid lifetime issues with std::thread::scope
         let fixed_mles_preload = self
             .get_device_proving_key(shard_ctx)
@@ -148,6 +317,11 @@ impl<
             shard_id = shard_ctx.shard_id
         )
         .in_scope(|| {
+            let digest_span = entered_span!("commit_to_vk_digest", profiling_1 = true);
+            let vk_digest = self.pk.compute_vk_digest::<RV32imMemStateConfig>();
+            transcript.append_field_element_exts(&vk_digest);
+            exit_span!(digest_span);
+
             let span = entered_span!("commit_to_pi", profiling_1 = true);
             // Include transcript-visible public values in canonical circuit order.
             // The order must match verifier and recursion verifier exactly.
@@ -173,19 +347,55 @@ impl<
 
             let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
             let mut wits_rmms = BTreeMap::new();
+            #[cfg(feature = "gpu")]
+            let mut gpu_witness_traces = BTreeMap::new();
 
             // Extract chip metadata before consuming witnesses.
             // We reuse this for both transcript appends and task construction.
             let name_and_instances = witnesses.get_witnesses_name_instance();
             let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
+            #[cfg(feature = "gpu")]
+            let mut witness_trace_rows = Vec::with_capacity(name_and_instances.len());
             // commit to opcode circuits first and then commit to table circuits, sorted by name
             for (i, chip_input) in witnesses.into_iter_sorted().enumerate() {
-                let [witness_rmm, structural_witness_rmm] = chip_input.witness_rmms;
+                let crate::structs::ChipInput {
+                    witness_rmms,
+                    ..
+                } = chip_input;
+                let [witness_rmm, structural_witness_rmm] = witness_rmms;
 
-                if witness_rmm.num_instances() > 0 {
+                #[cfg(feature = "gpu")]
+                let use_gpu_witness_commit =
+                    crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                        && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                            || is_babybear_jagged_pcs::<E, PCS>());
+                #[cfg(feature = "gpu")]
+                let trace_rows_for_estimate = if witness_rmm.num_instances() > 0 {
+                    Some(if is_babybear_jagged_pcs::<E, PCS>() {
+                        witness_rmm.occupied_physical_rows()
+                    } else {
+                        witness_rmm.height()
+                    })
+                } else {
+                    None
+                };
+
+                #[cfg(feature = "gpu")]
+                if use_gpu_witness_commit {
+                    if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
+                        gpu_witness_traces.insert(i, witness_rmm);
+                    }
+                } else if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
+                    wits_rmms.insert(i, witness_rmm);
+                }
+
+                #[cfg(not(feature = "gpu"))]
+                if witness_rmm.num_instances() > 0 && witness_rmm.width > 0 {
                     wits_rmms.insert(i, witness_rmm);
                 }
                 structural_rmms.push(structural_witness_rmm);
+                #[cfg(feature = "gpu")]
+                witness_trace_rows.push(trace_rows_for_estimate);
             }
 
             tracing::debug!(
@@ -199,12 +409,23 @@ impl<
 
             // Build trace index map: maps circuit enum index -> trace index in pcs_data.
             // BTreeMap iterates in key order, so trace indices match insertion order.
-            // GPU uses this for deferred witness extraction; CPU ignores it.
+            // GPU uses this for witness extraction; CPU ignores it.
             let circuit_trace_indices: Vec<Option<usize>> = {
                 let mut next_trace = 0usize;
                 (0..name_and_instances.len())
                     .map(|i| {
-                        if wits_rmms.contains_key(&i) {
+                        #[cfg(feature = "gpu")]
+                        let has_trace = if crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                            && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                                || is_babybear_jagged_pcs::<E, PCS>())
+                        {
+                            gpu_witness_traces.contains_key(&i)
+                        } else {
+                            wits_rmms.contains_key(&i)
+                        };
+                        #[cfg(not(feature = "gpu"))]
+                        let has_trace = wits_rmms.contains_key(&i);
+                        if has_trace {
                             let idx = next_trace;
                             next_trace += 1;
                             Some(idx)
@@ -215,14 +436,54 @@ impl<
                     .collect()
             };
 
+            #[cfg(feature = "gpu")]
+            let using_gpu_backend = std::any::TypeId::of::<PB>()
+                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>();
+            #[cfg(feature = "gpu")]
+            let use_gpu_witness_commit = crate::instructions::gpu::config::is_gpu_witgen_enabled()
+                && (!crate::instructions::gpu::config::should_retain_witness_device_backing_after_commit()
+                    || is_babybear_jagged_pcs::<E, PCS>())
+                && using_gpu_backend;
+            #[cfg(not(feature = "gpu"))]
+            let _use_gpu_witness_commit = false;
+
             // commit to witness traces in batch
-            let (witness_mles, witness_data, witin_commit) = info_span!("[ceno] commit_traces")
-                .in_scope(|| self.device.commit_traces(wits_rmms));
+            #[cfg_attr(not(feature = "gpu"), allow(unused_mut))]
+            let (witness_mles, witness_data, witin_commit): (
+                Vec<Arc<PB::MultilinearPoly<'_>>>,
+                PB::PcsData,
+                PCS::Commitment,
+            ) = {
+                #[cfg(feature = "gpu")]
+                if use_gpu_witness_commit {
+                    info_span!("[ceno] commit_traces").in_scope(|| {
+                        let gpu_device: &gkr_iop::gpu::GpuProver<gkr_iop::gpu::GpuBackend<E, PCS>> =
+                            unsafe { std::mem::transmute(&self.device) };
+                        let (gpu_witness_mles, gpu_witness_data, witin_commit) =
+                            crate::scheme::gpu::commit_gpu_witness_traces_cache_none::<E, PCS>(
+                                gpu_device,
+                                gpu_witness_traces,
+                            );
+                        drop(gpu_witness_mles);
+                        let witness_mles = Vec::new();
+                        let witness_data = unsafe { std::mem::transmute_copy(&gpu_witness_data) };
+                        std::mem::forget(gpu_witness_data);
+                        (witness_mles, witness_data, witin_commit)
+                    })
+                } else {
+                    info_span!("[ceno] commit_traces")
+                        .in_scope(|| self.device.commit_traces(wits_rmms))
+                }
+                #[cfg(not(feature = "gpu"))]
+                {
+                    info_span!("[ceno] commit_traces").in_scope(|| self.device.commit_traces(wits_rmms))
+                }
+            };
             PCS::write_commitment(&witin_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
             exit_span!(commit_to_traces_span);
 
             // Use pre-loaded fixed_mles (extracted before in_scope to avoid lifetime issues)
-            let fixed_mles = fixed_mles_preload;
+            let fixed_mles = fixed_mles_preload.clone();
 
             // squeeze two challenges from transcript
             let challenges = [
@@ -238,6 +499,8 @@ impl<
                 shard_ctx,
                 name_and_instances,
                 structural_rmms,
+                #[cfg(feature = "gpu")]
+                witness_trace_rows,
                 witness_mles,
                 &witness_data,
                 fixed_mles,
@@ -245,6 +508,65 @@ impl<
                 &pi,
                 &circuit_trace_indices,
             );
+            #[cfg(feature = "gpu")]
+            if using_gpu_backend {
+                if let Some(active_dpk) = self.get_device_proving_key(shard_ctx) {
+                    let active_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                        unsafe { std::mem::transmute(active_dpk.pcs_data.as_ref()) };
+                    crate::scheme::gpu::log_gpu_pcs_baseline::<E, PCS>(
+                        if shard_ctx.is_first_shard() {
+                            "fixed_active_first"
+                        } else {
+                            "fixed_active_non_first"
+                        },
+                        active_fixed_pcs,
+                    );
+                }
+                let inactive_dpk = if shard_ctx.is_first_shard() {
+                    self.device_non_first_shard_pk.as_ref()
+                } else {
+                    self.device_first_shard_pk.as_ref()
+                };
+                if let Some(inactive_dpk) = inactive_dpk {
+                    let inactive_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                        unsafe { std::mem::transmute(inactive_dpk.pcs_data.as_ref()) };
+                    crate::scheme::gpu::log_gpu_pcs_baseline::<E, PCS>(
+                        if shard_ctx.is_first_shard() {
+                            "fixed_inactive_non_first"
+                        } else {
+                            "fixed_inactive_first"
+                        },
+                        inactive_fixed_pcs,
+                    );
+                }
+                let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
+                    unsafe { std::mem::transmute(&witness_data) };
+                let gpu_fixed_mles: &[std::sync::Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>] =
+                    unsafe { std::mem::transmute(fixed_mles_preload.as_slice()) };
+                let task_structural_device_bytes = tasks
+                    .iter()
+                    .filter_map(|task| task.structural_rmm.as_ref())
+                    .filter(|rmm| rmm.has_device_backing())
+                    .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<E::BaseField>())
+                    .sum::<usize>();
+                let task_structural_device_count = tasks
+                    .iter()
+                    .filter_map(|task| task.structural_rmm.as_ref())
+                    .filter(|rmm| rmm.has_device_backing())
+                    .count();
+                let task_structural_device_mb =
+                    task_structural_device_bytes as f64 / (1024.0 * 1024.0);
+                tracing::info!(
+                    "[gpu baseline][before_scheduler] task_structural_device={:.2}MB ({})",
+                    task_structural_device_mb,
+                    task_structural_device_count,
+                );
+                crate::scheme::gpu::log_gpu_proof_baseline::<E, PCS>(
+                    "before_scheduler",
+                    gpu_witness_data,
+                    gpu_fixed_mles,
+                );
+            }
             exit_span!(build_tasks_span);
 
             // Phase 2: Execute chip proof tasks
@@ -258,7 +580,7 @@ impl<
 
             // Phase 3: Collect results
             let collect_results_span = entered_span!("collect_chip_results", profiling_1 = true);
-            let (chip_proofs, points, evaluations) = Self::collect_chip_results(results);
+            let (chip_proofs, main_constraint_jobs) = Self::collect_chip_results(results);
             exit_span!(collect_results_span);
             exit_span!(main_proofs_span);
 
@@ -266,6 +588,20 @@ impl<
             for sample in forked_samples {
                 transcript.append_field_element_ext(&sample);
             }
+
+            let main_constraints_span =
+                entered_span!("prove_batched_main_constraints", profiling_1 = true);
+            let (main_constraint_proof, main_constraint_results) =
+                info_span!("[ceno] prove_batched_main_constraints").in_scope(|| {
+                    self.device.prove_batched_main_constraints(
+                        main_constraint_jobs,
+                        &witness_data,
+                        &mut transcript,
+                    )
+                })?;
+            let (points, evaluations) =
+                Self::collect_main_constraint_results(main_constraint_results);
+            exit_span!(main_constraints_span);
 
             // batch opening pcs
             // generate static info from prover key for expected num variable
@@ -282,7 +618,13 @@ impl<
             });
             exit_span!(pcs_opening);
 
-            let vm_proof = ZKVMProof::new(pi, chip_proofs, witin_commit, mpcs_opening_proof);
+            let vm_proof = ZKVMProof::new(
+                pi,
+                chip_proofs,
+                main_constraint_proof,
+                witin_commit,
+                mpcs_opening_proof,
+            );
 
             Ok(vm_proof)
         })
@@ -291,7 +633,6 @@ impl<
     /// Phase 2: Execute all chip proof tasks via scheduler.
     ///
     /// Sequential mode (GPU + CPU): uses `self.create_chip_proof` via trait dispatch.
-    /// Concurrent mode (GPU only): uses standalone `create_chip_proof_gpu_impl`.
     ///
     /// Handles transcript forking and sampling internally via the scheduler.
     fn run_chip_proofs<'data, T: Transcript<E> + Clone>(
@@ -397,11 +738,11 @@ impl<
     /// into a single tower tree, and then feed these trees into tower prover.
     #[tracing::instrument(skip_all, name = "create_chip_proof", fields(table_name=%task.circuit_name, profiling_2
     ), level = "trace")]
-    pub fn create_chip_proof(
+    pub fn create_chip_proof<'a>(
         &self,
-        task: &ChipTask<'_, PB>,
+        task: &mut ChipTask<'a, PB>,
         transcript: &mut impl Transcript<E>,
-    ) -> Result<CreateTableProof<E>, ZKVMError> {
+    ) -> Result<CreateTableProof<'a, PB>, ZKVMError> {
         let circuit_pk = task.pk;
         let input = &task.input;
         let challenges = &task.challenges;
@@ -409,43 +750,22 @@ impl<
         let cs = circuit_pk.get_cs();
         let log2_num_instances = input.log2_num_instances();
         let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
-
-        // run ecc quark prover
-        let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
-            let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
-            let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
-            assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
-            let mut xs_ys = ec_point_exprs
-                .iter()
-                .map(|expr| match expr {
-                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                    _ => unreachable!("ec point's expression must be WitIn"),
-                })
-                .collect_vec();
-            let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
-            let xs = xs_ys;
-            let slopes = cs
-                .zkvm_v1_css
-                .ec_slope_exprs
-                .iter()
-                .map(|expr| match expr {
-                    Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                    _ => unreachable!("slope's expression must be WitIn"),
-                })
-                .collect_vec();
-            let ecc_proof = Some(info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
-                self.device
-                    .prove_ec_sum_quark(input.num_instances(), xs, ys, slopes, transcript)
-            })?);
-            exit_span!(span);
-            ecc_proof
-        } else {
-            None
-        };
+        let input_num_instances = input.num_instances;
+        #[cfg(not(feature = "gpu"))]
+        let input_has_ecc_ops = input.has_ecc_ops;
 
         // build main witness
-        let records = info_span!("[ceno] build_main_witness")
-            .in_scope(|| build_main_witness::<E, PCS, PB, PD>(cs, input, challenges));
+        let records = info_span!("[ceno] build_main_witness").in_scope(|| {
+            // ECC and rotation have dedicated witness/eval flows. For tower proving we only
+            // materialize the tower-facing GKR outputs here to avoid keeping unrelated output
+            // MLEs resident in VRAM during tower prove.
+            build_main_witness::<E, PCS, PB, PD>(
+                cs,
+                input,
+                challenges,
+                crate::scheme::utils::WitnessBuildStage::Tower,
+            )
+        });
 
         let span = entered_span!("prove_tower_relation", profiling_2 = true);
         // prove the product and logup sum relation between layers in tower
@@ -456,42 +776,78 @@ impl<
                     .prove_tower_relation(cs, input, &records, challenges, transcript)
             });
         exit_span!(span);
+        drop(records);
 
         assert_eq!(
             rt_tower.len(), // num var length should equal to max_num_instance
             num_var_with_rotation,
         );
 
-        // 1. prove the main constraints among witness polynomials
-        // 2. prove the relation between last layer in the tower and read/write/logup records
-        let span = entered_span!("prove_main_constraints", profiling_2 = true);
-        let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
-            info_span!("[ceno] prove_main_constraints").in_scope(|| {
-                self.device
-                    .prove_main_constraints(rt_tower, input, cs, challenges, transcript)
-            })?;
-        let MainSumcheckEvals {
-            wits_in_evals,
-            fixed_in_evals,
-        } = evals;
+        let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
+        let ecc_proof = info_span!("[ceno] prove_ec_sum_quark")
+            .in_scope(|| self.device.prove_ec_sum_quark(cs, input, transcript))?;
         exit_span!(span);
+
+        let span = entered_span!("prove_rotation", profiling_2 = true);
+        let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
+            self.device
+                .prove_rotation(cs, input, &rt_tower, challenges, transcript)
+        })?;
+        exit_span!(span);
+
+        #[cfg(feature = "gpu")]
+        let main_input = {
+            let mut input = input.clone();
+            if std::any::TypeId::of::<PB>()
+                == std::any::TypeId::of::<gkr_iop::gpu::GpuBackend<E, PCS>>()
+            {
+                input.witness.clear();
+                input.structural_witness.clear();
+            }
+            input
+        };
+        #[cfg(not(feature = "gpu"))]
+        let main_input = std::mem::replace(
+            &mut task.input,
+            ProofInput {
+                witness: Vec::new(),
+                structural_witness: Vec::new(),
+                fixed: Vec::new(),
+                pi: Vec::new(),
+                num_instances: input_num_instances,
+                has_ecc_ops: input_has_ecc_ops,
+            },
+        );
+        #[cfg(feature = "gpu")]
+        let structural_rmm = task.structural_rmm.take();
+        #[cfg(not(feature = "gpu"))]
+        let structural_rmm = None;
 
         Ok((
             ZKVMChipProof {
                 r_out_evals,
                 w_out_evals,
                 lk_out_evals,
-                main_sumcheck_proofs,
-                gkr_iop_proof,
+                main_sumcheck_proofs: None,
+                gkr_iop_proof: None,
+                rotation_proof: rotation.clone().map(|r| r.proof),
                 tower_proof,
+                ecc_proof: ecc_proof.clone(),
+                num_instances: input_num_instances,
+            },
+            MainConstraintJob {
+                circuit_name: task.circuit_name.clone(),
+                circuit_idx: task.circuit_idx,
+                input: main_input,
+                witness_trace_idx: task.witness_trace_idx,
+                num_witin: task.num_witin,
+                structural_rmm,
+                rt_tower,
+                rotation,
                 ecc_proof,
-                num_instances: input.num_instances,
+                challenges: *challenges,
+                cs,
             },
-            MainSumcheckEvals {
-                wits_in_evals,
-                fixed_in_evals,
-            },
-            input_opening_point,
         ))
     }
 
@@ -503,7 +859,8 @@ impl<
         shard_ctx: &ShardContext,
         name_and_instances: Vec<(String, [usize; 2])>,
         structural_rmms: Vec<witness::RowMajorMatrix<E::BaseField>>,
-        #[allow(unused_mut)] mut witness_mles: Vec<PB::MultilinearPoly<'data>>,
+        #[cfg(feature = "gpu")] witness_trace_rows: Vec<Option<usize>>,
+        #[allow(unused_mut)] mut witness_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
         witness_data: &PB::PcsData,
         mut fixed_mles: Vec<Arc<PB::MultilinearPoly<'data>>>,
         challenges: [E; 2],
@@ -553,10 +910,8 @@ impl<
 
             // GPU path: defer witness and structural witness extraction to task execution
             #[cfg(feature = "gpu")]
-            let (witness_mle, structural_witness, task_structural_rmm) = {
-                let _ = &structural_rmm; // suppress unused warning on structural_rmm binding
-                (vec![], vec![], Some(structural_rmm))
-            };
+            let (witness_mle, structural_witness, task_structural_rmm) =
+                { (vec![], vec![], Some(structural_rmm)) };
 
             // CPU path: eagerly extract witness and structural witness
             #[cfg(not(feature = "gpu"))]
@@ -578,7 +933,7 @@ impl<
                 let structural_witness = info_span!("[ceno] transport_structural_witness")
                     .in_scope(|| {
                         let structural_mles = structural_rmm.to_mles();
-                        self.device.transport_mles(&structural_mles)
+                        self.device.transport_mles(structural_mles)
                     });
                 (witness_mle, structural_witness, None)
             };
@@ -623,10 +978,24 @@ impl<
                 );
                 let gpu_input: &ProofInput<'_, gkr_iop::gpu::GpuBackend<E, PCS>> =
                     unsafe { std::mem::transmute(&input) };
-                estimate_chip_proof_memory::<E, PCS>(cs, gpu_input, &circuit_name)
+                let structural_cached_on_device = task_structural_rmm
+                    .as_ref()
+                    .is_some_and(|rmm| rmm.has_device_backing());
+                estimate_chip_proof_memory::<E, PCS>(
+                    cs,
+                    gpu_input,
+                    &circuit_name,
+                    witness_trace_rows[this_idx],
+                    structural_cached_on_device,
+                )
             };
             #[cfg(not(feature = "gpu"))]
             let estimated_memory = 0u64; // CPU path doesn't need memory tracking
+
+            #[cfg(feature = "gpu")]
+            let booked_memory = estimated_memory;
+            #[cfg(not(feature = "gpu"))]
+            let booked_memory = estimated_memory;
 
             // Look up trace index for deferred extraction (GPU uses this; CPU ignores it)
             let witness_trace_idx = if cs.num_witin() > 0 {
@@ -634,7 +1003,6 @@ impl<
             } else {
                 None
             };
-
             tasks.push(ChipTask {
                 task_id,
                 circuit_name: circuit_name.clone(),
@@ -642,9 +1010,12 @@ impl<
                 pk,
                 input,
                 estimated_memory_bytes: estimated_memory,
+                booked_memory_bytes: booked_memory,
                 has_witness_or_fixed: cs.num_witin() > 0 || cs.num_fixed() > 0,
                 challenges,
                 witness_trace_idx,
+                #[cfg(feature = "gpu")]
+                witness_trace_rows: witness_trace_rows[this_idx],
                 num_witin: cs.num_witin(),
                 structural_rmm: task_structural_rmm,
             });
@@ -658,16 +1029,14 @@ impl<
 
     /// Phase 3: Collect chip proof results into proof components.
     #[allow(clippy::type_complexity)]
-    fn collect_chip_results(
-        results: Vec<ChipTaskResult<E>>,
+    fn collect_chip_results<'a>(
+        results: Vec<ChipTaskResult<'a, PB>>,
     ) -> (
         BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
-        Vec<Point<E>>,
-        Vec<Vec<Vec<E>>>,
+        Vec<MainConstraintJob<'a, PB>>,
     ) {
         let mut chip_proofs = BTreeMap::new();
-        let mut points = Vec::new();
-        let mut evaluations = Vec::new();
+        let mut main_constraint_jobs = Vec::new();
 
         for result in results {
             tracing::trace!(
@@ -676,12 +1045,8 @@ impl<
                 result.task_id
             );
 
-            if result.has_witness_or_fixed {
-                points.push(result.input_opening_point);
-                evaluations.push(vec![
-                    result.opening_evals.wits_in_evals,
-                    result.opening_evals.fixed_in_evals,
-                ]);
+            if let Some(job) = result.main_constraint_job {
+                main_constraint_jobs.push(job);
             }
             chip_proofs
                 .entry(result.circuit_idx)
@@ -689,155 +1054,27 @@ impl<
                 .push(result.proof);
         }
 
-        (chip_proofs, points, evaluations)
-    }
-}
-
-/// GPU-specific standalone function for create_chip_proof that doesn't require &self.
-/// Uses the _impl functions directly, avoiding Send/Sync requirements on ZKVMProver.
-/// This enables parallel execution in the scheduler without capturing &self.
-#[cfg(feature = "gpu")]
-#[allow(clippy::too_many_arguments)]
-#[tracing::instrument(skip_all, name = "create_chip_proof_gpu_impl", fields(table_name=name, profiling_2), level = "trace")]
-pub fn create_chip_proof_gpu_impl<'a, E, PCS>(
-    name: &str,
-    circuit_pk: &ProvingKey<E>,
-    mut input: ProofInput<'a, gkr_iop::gpu::GpuBackend<E, PCS>>,
-    transcript: &mut impl Transcript<E>,
-    challenges: &[E; 2],
-    // Deferred extraction params:
-    pcs_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as gkr_iop::hal::ProverBackend>::PcsData,
-    witness_trace_idx: Option<usize>,
-    num_witin: usize,
-    structural_rmm: Option<witness::RowMajorMatrix<<E as ExtensionField>::BaseField>>,
-) -> Result<CreateTableProof<E>, ZKVMError>
-where
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E> + 'static,
-{
-    use crate::scheme::gpu::{
-        extract_witness_mles_for_trace, prove_ec_sum_quark_impl, prove_main_constraints_impl,
-        prove_tower_relation_impl, transport_structural_witness_to_gpu,
-    };
-    use gkr_iop::gpu::{GpuBackend, get_cuda_hal};
-
-    let cuda_hal = get_cuda_hal().expect("Failed to get CUDA HAL");
-    let _stream = cuda_hal
-        .inner
-        .get_pool_stream()
-        .expect("should acquire stream");
-    let _thread_stream_guard = gkr_iop::gpu::bind_thread_stream(_stream.clone());
-
-    // Deferred witness extraction: extract from committed pcs_data just-in-time
-    if let Some(trace_idx) = witness_trace_idx {
-        let num_vars =
-            input.log2_num_instances() + circuit_pk.get_cs().rotation_vars().unwrap_or(0);
-        input.witness = info_span!("[ceno] extract_witness_mles").in_scope(|| {
-            extract_witness_mles_for_trace::<E, PCS>(pcs_data, trace_idx, num_witin, num_vars)
-        });
+        (chip_proofs, main_constraint_jobs)
     }
 
-    let cs = circuit_pk.get_cs();
-    let log2_num_instances = input.log2_num_instances();
-    let num_var_with_rotation = log2_num_instances + cs.rotation_vars().unwrap_or(0);
-
-    // Deferred structural witness transport: CPU -> GPU just-in-time
-    if let Some(rmm) = structural_rmm {
-        let num_structural_witin = cs.zkvm_v1_css.num_structural_witin as usize;
-        input.structural_witness =
-            info_span!("[ceno] transport_structural_witness").in_scope(|| {
-                transport_structural_witness_to_gpu::<E>(
-                    rmm,
-                    num_structural_witin,
-                    num_var_with_rotation,
-                )
-            });
+    fn collect_main_constraint_results(
+        results: Vec<MainConstraintResult<E>>,
+    ) -> (Vec<Point<E>>, Vec<Vec<Vec<E>>>) {
+        let mut points = Vec::new();
+        let mut evaluations = Vec::new();
+        for result in results {
+            if !result.opening_evals.wits_in_evals.is_empty()
+                || !result.opening_evals.fixed_in_evals.is_empty()
+            {
+                points.push(result.input_opening_point);
+                evaluations.push(vec![
+                    result.opening_evals.wits_in_evals,
+                    result.opening_evals.fixed_in_evals,
+                ]);
+            }
+        }
+        (points, evaluations)
     }
-
-    // run ecc quark prover using _impl function
-    let ecc_proof = if !cs.zkvm_v1_css.ec_final_sum.is_empty() {
-        let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
-        let ec_point_exprs = &cs.zkvm_v1_css.ec_point_exprs;
-        assert_eq!(ec_point_exprs.len(), SEPTIC_EXTENSION_DEGREE * 2);
-        let mut xs_ys = ec_point_exprs
-            .iter()
-            .map(|expr| match expr {
-                Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                _ => unreachable!("ec point's expression must be WitIn"),
-            })
-            .collect_vec();
-        let ys = xs_ys.split_off(SEPTIC_EXTENSION_DEGREE);
-        let xs = xs_ys;
-        let slopes = cs
-            .zkvm_v1_css
-            .ec_slope_exprs
-            .iter()
-            .map(|expr| match expr {
-                Expression::WitIn(id) => input.witness[*id as usize].clone(),
-                _ => unreachable!("slope's expression must be WitIn"),
-            })
-            .collect_vec();
-        let ecc_proof = Some(info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
-            prove_ec_sum_quark_impl::<E, PCS>(input.num_instances(), xs, ys, slopes, transcript)
-        })?);
-        exit_span!(span);
-        ecc_proof
-    } else {
-        None
-    };
-
-    // build main witness
-    let records =
-        info_span!("[ceno] build_main_witness").in_scope(|| {
-            build_main_witness::<
-                E,
-                PCS,
-                GpuBackend<E, PCS>,
-                gkr_iop::gpu::GpuProver<GpuBackend<E, PCS>>,
-            >(cs, &input, challenges)
-        });
-
-    let span = entered_span!("prove_tower_relation", profiling_2 = true);
-    // prove the product and logup sum relation between layers in tower using _impl function
-    let (rt_tower, tower_proof, lk_out_evals, w_out_evals, r_out_evals) =
-        info_span!("[ceno] prove_tower_relation").in_scope(|| {
-            prove_tower_relation_impl::<E, PCS>(
-                cs, &input, &records, challenges, transcript, &cuda_hal,
-            )
-        });
-    exit_span!(span);
-
-    assert_eq!(rt_tower.len(), num_var_with_rotation,);
-
-    // prove main constraints using _impl function
-    let span = entered_span!("prove_main_constraints", profiling_2 = true);
-    let (input_opening_point, evals, main_sumcheck_proofs, gkr_iop_proof) =
-        info_span!("[ceno] prove_main_constraints").in_scope(|| {
-            prove_main_constraints_impl::<E, PCS>(rt_tower, &input, cs, challenges, transcript)
-        })?;
-    let MainSumcheckEvals {
-        wits_in_evals,
-        fixed_in_evals,
-    } = evals;
-    exit_span!(span);
-
-    Ok((
-        ZKVMChipProof {
-            r_out_evals,
-            w_out_evals,
-            lk_out_evals,
-            main_sumcheck_proofs,
-            gkr_iop_proof,
-            tower_proof,
-            ecc_proof,
-            num_instances: input.num_instances,
-        },
-        MainSumcheckEvals {
-            wits_in_evals,
-            fixed_in_evals,
-        },
-        input_opening_point,
-    ))
 }
 
 /// TowerProofs

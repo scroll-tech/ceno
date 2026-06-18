@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::repeat_n, marker::PhantomData};
+use std::{iter::repeat_n, marker::PhantomData};
 
 use crate::{
     Value,
@@ -40,6 +40,8 @@ use std::ops::Deref;
 use witness::{InstancePaddingStrategy, next_pow2_instance_padding, set_val};
 
 use crate::{instructions::riscv::constants::UInt, scheme::constants::SEPTIC_EXTENSION_DEGREE};
+
+pub(crate) const Y6_LO_TOP_BYTE_LT_BOUND: u64 = 60;
 
 /// A record for a read/write into the shard RAM
 #[derive(Debug, Clone)]
@@ -132,24 +134,31 @@ impl ShardRamRecord {
                 hasher.permute(input.clone())[0..SEPTIC_EXTENSION_DEGREE].into();
             if let Some(p) = SepticPoint::from_x(x) {
                 let y6 = (p.y.0)[SEPTIC_EXTENSION_DEGREE - 1].to_canonical_u64();
-                let is_y_in_2nd_half = y6 >= (prime / 2);
+                // Reject cases where y6 = 0 because then the y-sign
+                // binding in the circuit cannot distinguish read from write.
+                if y6 != 0 {
+                    // Strict `>`: `prime / 2 = (p-1)/2` belongs to the lower
+                    // half (read region `[1, (p-1)/2]`). Using `>=` would
+                    // misclassify it and produce `y6_lo = (p-1)/2` whose top
+                    // byte b3 = 60 fails `lookup_ltu_byte(b3, 60, 1)`.
+                    let is_y_in_2nd_half = y6 > (prime / 2);
 
-                // we negate y if needed
-                // to ensure read => y in [0, p/2) and write => y in [p/2, p)
-                let negate = match (self.is_to_write_set, is_y_in_2nd_half) {
-                    (true, false) => true, // write, y in [0, p/2)
-                    (false, true) => true, // read, y in [p/2, p)
-                    _ => false,
-                };
+                    // Enforce convention:
+                    //   is_to_write_set = 0 (read)  => y6 in [1, (p-1)/2]
+                    //   is_to_write_set = 1 (write) => y6 in [(p+1)/2, p-1]
+                    let negate = matches!(
+                        (self.is_to_write_set, is_y_in_2nd_half),
+                        (true, false) | (false, true)
+                    );
 
-                let point = if negate { -p } else { p };
+                    let point = if negate { -p } else { p };
 
-                return ECPoint { nonce, point };
-            } else {
-                // try again with different nonce
-                nonce += 1;
-                input[6] = E::BaseField::from_u32(nonce);
+                    return ECPoint { nonce, point };
+                }
             }
+            // try again with different nonce
+            nonce += 1;
+            input[6] = E::BaseField::from_u32(nonce);
         }
     }
 }
@@ -165,21 +174,24 @@ impl ShardRamRecord {
 /// 3. For a local memory write record which will be read in the future,
 ///    the shard ram circuit will insert a local read record and write it to the **global set**.
 pub struct ShardRamConfig<E: ExtensionField> {
-    addr: WitIn,
-    is_ram_register: WitIn,
-    value: UInt<E>,
-    shard: WitIn,
-    global_clk: WitIn,
-    local_clk: WitIn,
-    nonce: WitIn,
+    pub(crate) addr: WitIn,
+    pub(crate) is_ram_register: WitIn,
+    pub(crate) value: UInt<E>,
+    pub(crate) shard: WitIn,
+    pub(crate) global_clk: WitIn,
+    pub(crate) local_clk: WitIn,
+    pub(crate) nonce: WitIn,
     // if it's write to global set, then insert a local read record
     // s.t. local offline memory checking can cancel out
     // serves as propagating local write to global.
-    is_global_write: WitIn,
-    x: Vec<WitIn>,
-    y: Vec<WitIn>,
-    slope: Vec<WitIn>,
-    perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
+    pub(crate) is_global_write: WitIn,
+    pub(crate) x: Vec<WitIn>,
+    pub(crate) y: Vec<WitIn>,
+    pub(crate) slope: Vec<WitIn>,
+    // Byte limbs of `y6_lo`, the helper that binds `y[SEPTIC_EXTENSION_DEGREE - 1]`
+    // to `is_global_write` in `configure`.
+    pub(crate) y6_lo_bytes: [WitIn; 4],
+    pub(crate) perm_config: Poseidon2Config<E, 16, 7, 1, 4, 13>,
 }
 
 impl<E: ExtensionField> ShardRamConfig<E> {
@@ -272,12 +284,45 @@ impl<E: ExtensionField> ShardRamConfig<E> {
             cb.require_equal(|| "x = poseidon2's output", xi.expr(), hasher_output)?;
         }
 
-        // both (x, y) and (x, -y) are valid ec points
-        // if is_global_write = 1, then y should be in [0, p/2)
-        // if is_global_write = 0, then y should be in [p/2, p)
-
-        // TODO: enforce 0 <= y < p/2 if is_global_write = 1
-        //       enforce p/2 <= y < p if is_global_write = 0
+        // Bind the sign of y[SEPTIC_EXTENSION_DEGREE - 1] (call it y6) to
+        // is_global_write:
+        //   is_global_write = 0 (read)  => y6 in [1, (p-1)/2]
+        //   is_global_write = 1 (write) => y6 in [(p+1)/2, p-1]
+        // y6_lo is witnessed as four byte limbs with the top byte < 60.
+        // For BabyBear, (p-1)/2 = 60 * 2^24 exactly, so the byte bound
+        // gives y6_lo in [0, (p-1)/2). Branch equality:
+        //   read  : y6 = y6_lo + 1
+        //   write : y6 + y6_lo + 1 = 0 (mod p)
+        // y6 = 0 is the unique fixed point; `to_ec_point` rejects it.
+        assert_eq!(
+            <E::BaseField as SmallField>::MODULUS_U64,
+            0x7800_0001,
+            "y6_lo byte bound assumes BabyBear's (p-1)/2 = 60 * 2^24"
+        );
+        let y6_lo_bytes: [WitIn; 4] =
+            std::array::from_fn(|i| cb.create_witin(|| format!("y6_lo_b{i}")));
+        for (i, w) in y6_lo_bytes.iter().enumerate().take(3) {
+            cb.assert_byte(|| format!("y6_lo_b{i} byte"), w.expr())?;
+        }
+        // `lookup_ltu_byte(a, b, 1)` asserts `a, b` are bytes and `a < b`.
+        cb.lookup_ltu_byte(
+            y6_lo_bytes[3].expr(),
+            E::BaseField::from_u64(Y6_LO_TOP_BYTE_LT_BOUND).expr(),
+            Expression::ONE,
+        )?;
+        let y6_lo = y6_lo_bytes[0].expr()
+            + y6_lo_bytes[1].expr() * E::BaseField::from_u64(1 << 8).expr()
+            + y6_lo_bytes[2].expr() * E::BaseField::from_u64(1 << 16).expr()
+            + y6_lo_bytes[3].expr() * E::BaseField::from_u64(1 << 24).expr();
+        let y6 = y[SEPTIC_EXTENSION_DEGREE - 1].expr();
+        cb.condition_require_equal(
+            || "y6 binds to is_global_write",
+            is_global_write.expr(),
+            y6,
+            E::BaseField::from_u64(<E::BaseField as SmallField>::MODULUS_U64 - 1).expr()
+                - y6_lo.clone(),
+            y6_lo + Expression::ONE,
+        )?;
 
         Ok(ShardRamConfig {
             x,
@@ -291,6 +336,7 @@ impl<E: ExtensionField> ShardRamConfig<E> {
             local_clk,
             nonce,
             is_global_write,
+            y6_lo_bytes,
             perm_config,
         })
     }
@@ -310,11 +356,26 @@ pub struct ShardRamInput<E: ExtensionField> {
     pub ec_point: ECPoint<E>,
 }
 
+/// Decode `y6_lo` (the byte-decomposed helper bound to `is_global_write` in
+/// `ShardRamConfig::configure`) from a witnessed `y6` field element. Mirrors
+/// the prover-side derivation done inside the per-row witness assignment;
+/// `to_ec_point` guarantees `y6 != 0` and the half-of-field convention, so
+/// neither branch underflows.
+pub(crate) fn y6_lo_value<E: ExtensionField>(y6: E::BaseField, is_to_write_set: bool) -> u64 {
+    let prime = <E::BaseField as SmallField>::MODULUS_U64;
+    let y6_u64 = y6.to_canonical_u64();
+    if is_to_write_set {
+        prime - 1 - y6_u64
+    } else {
+        y6_u64 - 1
+    }
+}
+
 impl<E: ExtensionField> ShardRamCircuit<E> {
     fn assign_instance(
         config: &ShardRamConfig<E>,
         instance: &mut [E::BaseField],
-        _lk_multiplicity: &mut LkMultiplicity,
+        lk_multiplicity: &mut LkMultiplicity,
         input: &ShardRamInput<E>,
     ) -> Result<(), crate::error::ZKVMError> {
         // assign basic fields
@@ -348,6 +409,23 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
             .for_each(|(witin, fe)| {
                 instance[witin.id as usize] = *fe;
             });
+
+        // y6_lo byte limbs for the y-sign binding constraint in `configure`.
+        // `to_ec_point` guarantees y6 != 0 and the half-of-field convention,
+        // so the subtraction below never underflows.
+        let y6_lo_u64 = y6_lo_value::<E>(
+            point.y.0[SEPTIC_EXTENSION_DEGREE - 1],
+            record.is_to_write_set,
+        );
+        for i in 0..4 {
+            let b = (y6_lo_u64 >> (8 * i)) & 0xff;
+            set_val!(instance, config.y6_lo_bytes[i], b);
+        }
+        for i in 0..3 {
+            let b = (y6_lo_u64 >> (8 * i)) & 0xff;
+            lk_multiplicity.assert_const_range(b, 8);
+        }
+        lk_multiplicity.lookup_ltu_byte((y6_lo_u64 >> 24) & 0xff, Y6_LO_TOP_BYTE_LT_BOUND);
 
         let ram_type = E::BaseField::from_u32(record.ram_type as u32);
         let mut input = [E::BaseField::ZERO; 16];
@@ -418,6 +496,11 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         let selector_r = cb.create_placeholder_structural_witin(|| "selector_r");
         let selector_w = cb.create_placeholder_structural_witin(|| "selector_w");
         let selector_zero = cb.create_placeholder_structural_witin(|| "selector_zero");
+        let selector_ecc_x = cb.create_placeholder_structural_witin(|| "selector_ecc_x");
+        let selector_ecc_y = cb.create_placeholder_structural_witin(|| "selector_ecc_y");
+        let selector_ecc_s = cb.create_placeholder_structural_witin(|| "selector_ecc_s");
+        let selector_ecc_x3 = cb.create_placeholder_structural_witin(|| "selector_ecc_x3");
+        let selector_ecc_y3 = cb.create_placeholder_structural_witin(|| "selector_ecc_y3");
 
         let config = Self::construct_circuit(cb, param)?;
 
@@ -439,6 +522,13 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         cb.cs.w_selector = Some(selector_w);
         cb.cs.zero_selector = Some(selector_zero.clone());
         cb.cs.lk_selector = Some(selector_zero);
+        cb.cs.ec_bridge_selectors = Some([
+            SelectorType::Whole(selector_ecc_x.expr()),
+            SelectorType::Whole(selector_ecc_y.expr()),
+            SelectorType::Whole(selector_ecc_s.expr()),
+            SelectorType::Whole(selector_ecc_x3.expr()),
+            SelectorType::Whole(selector_ecc_y3.expr()),
+        ]);
 
         // all shared the same selector
         let (out_evals, mut chip) = (
@@ -452,10 +542,10 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
                 // zero_record
                 (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
-        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))
@@ -470,11 +560,11 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
     }
 
     /// steps format: local reads ++ local writes
-    fn assign_instances(
+    fn assign_instances_with_lk_multiplicities(
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        _multiplicity: &[HashMap<u64, usize>],
+        lk_multiplicity: &mut LkMultiplicity,
         steps: &Self::WitnessInput<'_>,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         if steps.is_empty() {
@@ -483,14 +573,37 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
                 witness::RowMajorMatrix::empty(),
             ]);
         }
+
+        #[cfg(feature = "gpu")]
+        {
+            if let Some(result) = Self::try_gpu_assign_instances(
+                config,
+                num_witin,
+                num_structural_witin,
+                lk_multiplicity,
+                steps,
+            )? {
+                return Ok(result);
+            }
+        }
         // FIXME selector is the only structural witness
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
 
-        assert_eq!(num_structural_witin, 3);
+        // ShardRam expects exactly these structural selectors:
+        // r, w, zero, ecc_x, ecc_y, ecc_s, ecc_x3, ecc_y3.
+        assert_eq!(
+            num_structural_witin, 8,
+            "ShardRam requires exactly 8 structural selectors (r,w,zero,ecc_x,ecc_y,ecc_s,ecc_x3,ecc_y3)"
+        );
         let selector_r_witin = WitIn { id: 0 };
         let selector_w_witin = WitIn { id: 1 };
         let selector_zero_witin = WitIn { id: 2 };
+        let selector_ecc_x_witin = WitIn { id: 3 };
+        let selector_ecc_y_witin = WitIn { id: 4 };
+        let selector_ecc_s_witin = WitIn { id: 5 };
+        let selector_ecc_x3_witin = WitIn { id: 6 };
+        let selector_ecc_y3_witin = WitIn { id: 7 };
 
         let nthreads = max_usable_threads();
 
@@ -515,7 +628,6 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         let n = next_pow2_instance_padding(steps.len());
         // compute the input for the binary tree for ec point summation
 
-        let lk_multiplicity = LkMultiplicity::default();
         // *2 because we need to store the internal nodes of binary tree for ec point summation
         let num_rows_padded = 2 * n;
 
@@ -539,6 +651,17 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
             );
             RowMajorMatrix::new(value, num_structural_witin)
         };
+        // ECC bridge selectors are `Whole`, so keep them active on all rows.
+        raw_structual_witin
+            .values
+            .par_chunks_mut(num_structural_witin)
+            .for_each(|row| {
+                set_val!(row, selector_ecc_x_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_y_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_s_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_x3_witin, E::BaseField::ONE);
+                set_val!(row, selector_ecc_y3_witin, E::BaseField::ONE);
+            });
         let raw_witin_iter = raw_witin.values[0..steps.len() * num_witin]
             .par_chunks_mut(num_instance_per_batch * num_witin);
         let raw_structual_witin_iter = raw_structual_witin.values
@@ -643,6 +766,44 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
     }
 }
 
+#[cfg(feature = "gpu")]
+impl<E: ExtensionField> ShardRamCircuit<E> {
+    fn try_gpu_assign_instances(
+        config: &ShardRamConfig<E>,
+        num_witin: usize,
+        num_structural_witin: usize,
+        lk_multiplicity: &mut LkMultiplicity,
+        steps: &[ShardRamInput<E>],
+    ) -> Result<Option<RMMCollections<E::BaseField>>, ZKVMError> {
+        crate::instructions::gpu::chips::shard_ram::try_gpu_assign_shard_ram(
+            config,
+            num_witin,
+            num_structural_witin,
+            lk_multiplicity,
+            steps,
+        )
+    }
+
+    #[cfg(feature = "gpu")]
+    pub fn try_gpu_assign_instances_from_device(
+        config: &ShardRamConfig<E>,
+        num_witin: usize,
+        num_structural_witin: usize,
+        device_records: &ceno_gpu::common::buffer::BufferImpl<'static, u32>,
+        num_records: usize,
+        num_local_writes: usize,
+    ) -> Result<Option<RMMCollections<E::BaseField>>, ZKVMError> {
+        crate::instructions::gpu::chips::shard_ram::try_gpu_assign_shard_ram_from_device(
+            config,
+            num_witin,
+            num_structural_witin,
+            device_records,
+            num_records,
+            num_local_writes,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use either::Either;
@@ -656,14 +817,17 @@ mod tests {
     use tracing_subscriber::{EnvFilter, Registry, layer::SubscriberExt, util::SubscriberInitExt};
     use transcript::BasicTranscript;
 
+    use super::ECPoint;
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         scheme::{
             PublicValues, constants::SEPTIC_EXTENSION_DEGREE, create_backend, create_prover,
-            hal::ProofInput, prover::ZKVMProver, septic_curve::SepticPoint, verifier::ZKVMVerifier,
+            hal::ProofInput, mock_prover::MockProver, prover::ZKVMProver,
+            septic_curve::SepticPoint,
         },
-        structs::{ComposedConstrainSystem, PointAndEval, ProgramParams, RAMType, ZKVMProvingKey},
+        structs::{ComposedConstrainSystem, ProgramParams, RAMType, ZKVMProvingKey},
         tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
+        witness::LkMultiplicity,
     };
     #[cfg(feature = "gpu")]
     use gkr_iop::{
@@ -766,11 +930,12 @@ mod tests {
         let public_value = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0; 8], shard_rw_sum);
 
         // assign witness
-        let witness = ShardRamCircuit::assign_instances(
+        let mut lk_multiplicity = LkMultiplicity::default();
+        let witness = ShardRamCircuit::assign_instances_with_lk_multiplicities(
             &config,
             cs.num_witin as usize,
             cs.num_structural_witin as usize,
-            &[],
+            &mut lk_multiplicity,
             &input,
         )
         .unwrap();
@@ -794,7 +959,6 @@ mod tests {
         let pd = create_prover(backend);
 
         let zkvm_pk = ZKVMProvingKey::new(pp, vp);
-        let zkvm_vk = zkvm_pk.get_vk_slow();
         let zkvm_prover = ZKVMProver::new(zkvm_pk.into(), pd);
         let mut transcript = BasicTranscript::new(b"global chip test");
 
@@ -840,37 +1004,118 @@ mod tests {
         };
         let mut rng = thread_rng();
         let challenges = [E::random(&mut rng), E::random(&mut rng)];
-        let task = crate::scheme::scheduler::ChipTask {
+        let mut task = crate::scheme::scheduler::ChipTask {
             task_id: 0,
             circuit_name: ShardRamCircuit::<E>::name(),
             circuit_idx: 0,
             pk: &pk,
             input: proof_input,
             estimated_memory_bytes: 0,
+            booked_memory_bytes: 0,
             has_witness_or_fixed: true,
             challenges,
             witness_trace_idx: None,
+            #[cfg(feature = "gpu")]
+            witness_trace_rows: None,
             num_witin: 0,
             structural_rmm: None,
         };
-        let (proof, _, point) = zkvm_prover
-            .create_chip_proof(&task, &mut transcript)
+        let (_proof, _main_job) = zkvm_prover
+            .create_chip_proof(&mut task, &mut transcript)
             .unwrap();
+    }
 
-        let mut transcript = BasicTranscript::new(b"global chip test");
-        let verifier = ZKVMVerifier::new(zkvm_vk);
-        let (vrf_point, _, _, _) = verifier
-            .verify_chip_proof(
-                "global",
-                &pk.vk,
-                &proof,
-                &public_value,
-                &mut transcript,
-                2,
-                &PointAndEval::default(),
-                &challenges,
+    /// Drive a single ShardRam row through the full `configure` +
+    /// `assign_instances` pipeline and validate with `MockProver`.
+    ///
+    /// * The honest witness satisfies every assert-zero and lookup
+    ///   constraint MockProver checks.
+    /// * Negating the EC point but reusing the original record causes
+    ///   `assign_instance` to derive `y6_lo` such that the algebraic
+    ///   branch equality still holds, but the top byte
+    ///   `b3 = (y6_lo >> 24) & 0xff` lands in `[60, 256)`. The query
+    ///   `(Ltu, b3, 60, 1)` is missing from the LTU table (which only
+    ///   carries `(Ltu, b3, 60, 0)` for `b3 >= 60`), so the
+    ///   `lookup_Ltu` constraint rejects the tampered row.
+    #[test]
+    fn test_shard_ram_y_sign_circuit_rejects_negation() {
+        let perm = <F as PoseidonField>::get_default_perm();
+
+        let mut cs = ConstraintSystem::new(|| "y_sign");
+        let mut cb = CircuitBuilder::<E>::new(&mut cs);
+        let (config, _gkr) =
+            ShardRamCircuit::<E>::build_gkr_iop_circuit(&mut cb, &ProgramParams::default())
+                .unwrap();
+        let num_witin = cb.cs.num_witin as usize;
+        let num_structural = cb.cs.num_structural_witin as usize;
+        // Pass a concrete challenge so `assert_with_expected_errors` routes
+        // through `run_with_challenge`; the no-challenge `run` path drops
+        // `structural_witin` and ShardRam relies on `selector_zero` to gate
+        // its lookup queries.
+        let mut rng = thread_rng();
+        let challenge = [E::random(&mut rng), E::random(&mut rng)];
+
+        for is_to_write_set in [true, false] {
+            let record = ShardRamRecord {
+                addr: 0x1000,
+                ram_type: RAMType::Memory,
+                value: 0x1234_5678,
+                shard: if is_to_write_set { 1 } else { 2 },
+                local_clk: if is_to_write_set { 7 } else { 0 },
+                global_clk: 13,
+                is_to_write_set,
+            };
+            let ec = record.to_ec_point::<E, Perm>(&perm);
+
+            // Honest row: every constraint MockProver checks must be
+            // satisfied.
+            let honest = [ShardRamInput {
+                name: "honest",
+                record: record.clone(),
+                ec_point: ec.clone(),
+            }];
+            let mut honest_lkm = LkMultiplicity::default();
+            let honest_witness = ShardRamCircuit::<E>::assign_instances_with_lk_multiplicities(
+                &config,
+                num_witin,
+                num_structural,
+                &mut honest_lkm,
+                &honest,
             )
-            .expect("verify global chip proof");
-        assert_eq!(vrf_point, point);
+            .unwrap();
+            MockProver::<E>::assert_satisfied_raw(&cb, honest_witness, &[], Some(challenge), None);
+
+            // Tampered row: negate the EC point. `assign_instance` re-derives
+            // `y6_lo` from the witnessed `y6`, keeping the branch equality
+            // intact, so only the `lookup_Ltu` byte bound catches the wrong
+            // sign.
+            let tampered = [ShardRamInput {
+                name: "tampered",
+                record,
+                ec_point: ECPoint {
+                    nonce: ec.nonce,
+                    point: -ec.point,
+                },
+            }];
+            let mut tampered_lkm = LkMultiplicity::default();
+            let [w, sw] = ShardRamCircuit::<E>::assign_instances_with_lk_multiplicities(
+                &config,
+                num_witin,
+                num_structural,
+                &mut tampered_lkm,
+                &tampered,
+            )
+            .unwrap();
+            MockProver::<E>::assert_with_expected_errors(
+                &cb,
+                &[],
+                &w.to_mles().into_iter().map(|v| v.into()).collect_vec(),
+                &sw.to_mles().into_iter().map(|v| v.into()).collect_vec(),
+                &[],
+                &["lookup_Ltu"],
+                Some(challenge),
+                None,
+            );
+        }
     }
 }

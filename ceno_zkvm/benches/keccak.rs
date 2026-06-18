@@ -8,7 +8,10 @@ use ceno_zkvm::{
     scheme::{create_backend, create_prover},
 };
 mod alloc;
-use ceno_zkvm::{e2e::MultiProver, scheme::verifier::ZKVMVerifier};
+use ceno_zkvm::{
+    e2e::MultiProver,
+    scheme::verifier::{RV32imMemStateConfig, ZKVMVerifier},
+};
 use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
@@ -66,10 +69,10 @@ fn keccak_prove(c: &mut Criterion) {
 
     println!("e2e proof {}", proof);
     let transcript = BasicTranscript::new(b"riscv");
-    let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
+    let verifier = ZKVMVerifier::<E, Pcs, RV32imMemStateConfig>::new(vk);
     assert!(
         verifier
-            .verify_proof_halt(proof, transcript, true)
+            .verify_full_trace_proofs_halt(vec![proof], vec![transcript], true)
             .expect("verify proof return with error"),
     );
     println!();

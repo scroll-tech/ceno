@@ -88,6 +88,12 @@ impl<E: ExtensionField> MmuConfig<E> {
         // fixed.register_table_circuit::<RBCircuit<E>>(cs, &self.ram_bus_circuit, &());
     }
 
+    /// Assigns the dynamic-init RAM tables (heap + hints). Must run *before*
+    /// `ZKVMWitnesses::finalize_lk_multiplicities`: `HintsInitCircuit` is
+    /// non-zero-init and range-checks its prover-witnessed init limbs (#999),
+    /// contributing per-limb u16 lookups that must land in `combined_lk_mlt`
+    /// via `assign_table_circuit_with_lk`. `HeapInitCircuit` is zero-init and
+    /// emits no lookups, so the plain `assign_table_circuit` path is fine.
     pub fn assign_dynamic_init_table_circuit(
         &self,
         cs: &ZKVMConstraintSystem<E>,
@@ -101,7 +107,7 @@ impl<E: ExtensionField> MmuConfig<E> {
             &self.heap_init_config,
             &(heap_final, pv, pv.heap_shard_len as usize),
         )?;
-        witness.assign_table_circuit::<HintsInitCircuit<E>>(
+        witness.assign_table_circuit_with_lk::<HintsInitCircuit<E>>(
             cs,
             &self.hints_init_config,
             &(hints_final, pv, pv.hint_shard_len as usize),
@@ -139,6 +145,16 @@ impl<E: ExtensionField> MmuConfig<E> {
         Ok(())
     }
 
+    /// Assign LocalFinalCircuit and ShardRamCircuit witnesses. Must run
+    /// *before* `ZKVMWitnesses::finalize_lk_multiplicities`:
+    /// - `ShardRamCircuit` accumulates its per-row y6_lo byte / LTU lookups
+    ///   into `lk_mlts` via `assign_shared_circuit` (which threads a shared
+    ///   `LkMultiplicity` through `assign_instances_with_lk_multiplicities`),
+    ///   so they land in `combined_lk_mlt` and balance the U8 / LTU table
+    ///   `mlt` columns.
+    /// - `LocalFinalCircuit` does not consume `combined_lk_mlt`; the regular
+    ///   `assign_table_circuit` entry tolerates a not-yet-finalized
+    ///   multiplicity by passing an empty slice.
     #[allow(clippy::too_many_arguments)]
     pub fn assign_continuation_circuit(
         &self,
@@ -177,16 +193,20 @@ impl<E: ExtensionField> MmuConfig<E> {
         .filter(|(_, _, record)| !record.is_empty())
         .collect_vec();
 
-        witness.assign_table_circuit::<LocalFinalCircuit<E>>(
-            cs,
-            &self.local_final_circuit,
-            &(shard_ctx, all_records.as_slice()),
-        )?;
-        witness.assign_shared_circuit(
-            cs,
-            &(shard_ctx, all_records.as_slice()),
-            &self.ram_bus_circuit,
-        )?;
+        tracing::info_span!("local_final_circuit").in_scope(|| {
+            witness.assign_table_circuit::<LocalFinalCircuit<E>>(
+                cs,
+                &self.local_final_circuit,
+                &(shard_ctx, all_records.as_slice()),
+            )
+        })?;
+        tracing::info_span!("shared_circuit").in_scope(|| {
+            witness.assign_shared_circuit(
+                cs,
+                &(shard_ctx, all_records.as_slice()),
+                &self.ram_bus_circuit,
+            )
+        })?;
         Ok(())
     }
 

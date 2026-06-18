@@ -7,8 +7,7 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use generic_array::typenum::Unsigned;
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -288,10 +287,7 @@ fn build_fp_op_circuit<E: ExtensionField, P: FpOpField + NumWords>(
             .collect::<Result<Vec<WriteMEM>, _>>()?,
     );
 
-    let (out_evals, mut chip) = layout.finalize(cb);
-    let layer =
-        Layer::from_circuit_builder(cb, layer_name.to_string(), layout.n_challenges, out_evals);
-    chip.add_layer(layer);
+    let chip = layout.finalize(layer_name.to_string(), cb);
 
     Ok((
         EcallFpOpConfig {
@@ -355,7 +351,8 @@ fn assign_fp_op_instances<E: ExtensionField, P: FpOpField + NumWords>(
                 .zip_eq(indices.iter().copied())
                 .map(|(instance, idx)| {
                     let step = &steps[idx];
-                    let ops = &step.syscall().expect("syscall step");
+                    let sw = shard_ctx.syscall_witnesses.clone();
+                    let ops = &step.syscall(&sw).expect("syscall step");
                     config
                         .vm_state
                         .assign_instance(instance, &shard_ctx, step)?;
@@ -416,7 +413,7 @@ fn assign_fp_op_instances<E: ExtensionField, P: FpOpField + NumWords>(
         .map(|&idx| {
             let step = &steps[idx];
             let values: Vec<u32> = step
-                .syscall()
+                .syscall(&shard_ctx.syscall_witnesses)
                 .unwrap()
                 .mem_ops
                 .iter()

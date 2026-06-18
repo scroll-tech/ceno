@@ -1,6 +1,6 @@
 use crate::structs::EccQuarkProof;
 use ff_ext::ExtensionField;
-use gkr_iop::gkr::GKRProof;
+use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::SumcheckLayerProof};
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -65,11 +65,22 @@ pub struct ZKVMChipProof<E: ExtensionField> {
 
     pub main_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
     pub gkr_iop_proof: Option<GKRProof<E>>,
+    // Rotation is proved at chip scope and consumed before layer verification.
+    pub rotation_proof: Option<SumcheckLayerProof<E>>,
 
     pub tower_proof: TowerProofs<E>,
     pub ecc_proof: Option<EccQuarkProof<E>>,
 
     pub num_instances: [usize; 2],
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(bound(
+    serialize = "E::BaseField: Serialize",
+    deserialize = "E::BaseField: DeserializeOwned"
+))]
+pub struct MainConstraintProof<E: ExtensionField> {
+    pub proof: SumcheckLayerProof<E>,
 }
 
 /// each field will be interpret to (constant) polynomial
@@ -197,6 +208,7 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub public_values: PublicValues,
     // each circuit may have multiple proof instances
     pub chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+    pub main_constraint_proof: MainConstraintProof<E>,
     pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub opening_proof: PCS::Proof,
 }
@@ -205,12 +217,14 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
         public_values: PublicValues,
         chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+        main_constraint_proof: MainConstraintProof<E>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         opening_proof: PCS::Proof,
     ) -> Self {
         Self {
             public_values,
             chip_proofs,
+            main_constraint_proof,
             witin_commit,
             opening_proof,
         }
@@ -252,6 +266,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // break down zkvm proof size
 
+        let overall_size = bincode::serialized_size(&self).expect("serialization error");
         // also provide by-circuit stats
         let mut by_circuitname_stats = HashMap::new();
         // opcode circuit mpcs size
@@ -259,6 +274,11 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             bincode::serialized_size(&self.witin_commit).expect("serialization error");
         let mpcs_opcode_opening =
             bincode::serialized_size(&self.opening_proof).expect("serialization error");
+        let mpcs_opening_breakdown = format_proof_size_breakdown(
+            "mpcs opening",
+            PCS::proof_size_breakdown(&self.opening_proof),
+            overall_size,
+        );
 
         // tower proof size
         let tower_proof = self
@@ -295,9 +315,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             .iter()
             .sum::<u64>();
 
-        // overall size
-        let overall_size = bincode::serialized_size(&self).expect("serialization error");
-
         // break down by circuit name
         let by_circuitname_stats = by_circuitname_stats
             .iter()
@@ -319,6 +336,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             "overall_size {:.2}mb. \n\
             mpcs commitment {:?}% \n\
             mpcs opening {:?}% \n\
+            mpcs opening break down: \n\
+            {} \n\
             tower proof {:?}% \n\
             main sumcheck proof {:?}% \n\
             by circuit_name break down: \n\
@@ -327,6 +346,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
             byte_to_mb(overall_size),
             (mpcs_opcode_commitment * 100).div(overall_size),
             (mpcs_opcode_opening * 100).div(overall_size),
+            mpcs_opening_breakdown,
             (tower_proof * 100).div(overall_size),
             (main_sumcheck * 100).div(overall_size),
             by_circuitname_stats,
@@ -336,6 +356,26 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
 
 fn byte_to_mb(byte_size: u64) -> f64 {
     byte_size as f64 / (1024.0 * 1024.0)
+}
+
+fn format_proof_size_breakdown(
+    prefix: &str,
+    breakdown: Vec<(String, u64)>,
+    overall_size: u64,
+) -> String {
+    breakdown
+        .into_iter()
+        .map(|(name, size)| {
+            format!(
+                "{}.{}: {:.2}mb({}%, {} bytes)",
+                prefix,
+                name,
+                byte_to_mb(size),
+                (size * 100).div(overall_size),
+                size
+            )
+        })
+        .join("\n")
 }
 
 #[cfg(not(feature = "gpu"))]

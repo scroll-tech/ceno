@@ -3,3 +3,5 @@ authors = ["Contributors"]
 language = "en"
 src = "src"
 title = "Ceno Docs"
+
+[output.html]

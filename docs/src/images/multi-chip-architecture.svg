@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 600" font-family="sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2a2a2a"/>
+    </marker>
+    <marker id="arrLookup" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a4fa0"/>
+    </marker>
+    <marker id="arrEc" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e6091"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="480" y="24" text-anchor="middle" font-size="15" font-weight="bold" fill="#333">Ceno multi-chip architecture (one shard)</text>
+
+  <!-- Chip A: Opcode -->
+  <rect x="20" y="50" width="180" height="195" rx="8" fill="#eef5ff" stroke="#333" stroke-width="1.5"/>
+  <text x="110" y="72" text-anchor="middle" font-size="14" font-weight="bold">Opcode chip</text>
+  <text x="110" y="93" text-anchor="middle" font-size="11" fill="#555">GKR circuit with</text>
+  <text x="110" y="108" text-anchor="middle" font-size="11" fill="#555">zerocheck + local rotation</text>
+  <text x="110" y="123" text-anchor="middle" font-size="11" fill="#555">+ grand-product + LogUp</text>
+  <line x1="35" y1="138" x2="185" y2="138" stroke="#bbb" stroke-width="1"/>
+  <text x="110" y="156" text-anchor="middle" font-size="10" font-style="italic" fill="#555">chip proof exposes:</text>
+  <text x="110" y="176" text-anchor="middle" font-size="11" fill="#2a2a2a">R = ∏ rlc(read)</text>
+  <text x="110" y="192" text-anchor="middle" font-size="11" fill="#2a2a2a">W = ∏ rlc(write)</text>
+  <text x="110" y="215" text-anchor="middle" font-size="11" fill="#8a4fa0">s = LogUp sum</text>
+
+  <!-- Chip B: RAM -->
+  <rect x="220" y="50" width="180" height="195" rx="8" fill="#eef5ff" stroke="#333" stroke-width="1.5"/>
+  <text x="310" y="72" text-anchor="middle" font-size="14" font-weight="bold">RAM chip</text>
+  <text x="310" y="93" text-anchor="middle" font-size="11" fill="#555">GKR circuit with</text>
+  <text x="310" y="108" text-anchor="middle" font-size="11" fill="#555">zerocheck + local rotation</text>
+  <text x="310" y="123" text-anchor="middle" font-size="11" fill="#555">+ grand-product + LogUp</text>
+  <line x1="235" y1="138" x2="385" y2="138" stroke="#bbb" stroke-width="1"/>
+  <text x="310" y="156" text-anchor="middle" font-size="10" font-style="italic" fill="#555">chip proof exposes:</text>
+  <text x="310" y="176" text-anchor="middle" font-size="11" fill="#2a2a2a">R = ∏ rlc(read)</text>
+  <text x="310" y="192" text-anchor="middle" font-size="11" fill="#2a2a2a">W = ∏ rlc(write)</text>
+  <text x="310" y="215" text-anchor="middle" font-size="11" fill="#8a4fa0">s = LogUp sum</text>
+
+  <!-- Chip C: Keccak -->
+  <rect x="420" y="50" width="180" height="195" rx="8" fill="#eef5ff" stroke="#333" stroke-width="1.5"/>
+  <text x="510" y="72" text-anchor="middle" font-size="14" font-weight="bold">Keccak chip</text>
+  <text x="510" y="93" text-anchor="middle" font-size="11" fill="#555">GKR circuit with</text>
+  <text x="510" y="108" text-anchor="middle" font-size="11" fill="#555">zerocheck + local rotation</text>
+  <text x="510" y="123" text-anchor="middle" font-size="11" fill="#555">+ grand-product + LogUp</text>
+  <line x1="435" y1="138" x2="585" y2="138" stroke="#bbb" stroke-width="1"/>
+  <text x="510" y="156" text-anchor="middle" font-size="10" font-style="italic" fill="#555">chip proof exposes:</text>
+  <text x="510" y="176" text-anchor="middle" font-size="11" fill="#2a2a2a">R = ∏ rlc(read)</text>
+  <text x="510" y="192" text-anchor="middle" font-size="11" fill="#2a2a2a">W = ∏ rlc(write)</text>
+  <text x="510" y="215" text-anchor="middle" font-size="11" fill="#8a4fa0">s = LogUp sum</text>
+
+  <!-- Chip D: Shard RAM chip (NEW, slightly different tint) -->
+  <rect x="620" y="50" width="200" height="195" rx="8" fill="#fff3e0" stroke="#333" stroke-width="1.5"/>
+  <text x="720" y="72" text-anchor="middle" font-size="14" font-weight="bold">Shard RAM chip</text>
+  <text x="720" y="93" text-anchor="middle" font-size="11" fill="#555">GKR circuit: for each cross-</text>
+  <text x="720" y="108" text-anchor="middle" font-size="11" fill="#555">shard record, emits an EC</text>
+  <text x="720" y="123" text-anchor="middle" font-size="11" fill="#555">point + compensating R/W</text>
+  <line x1="635" y1="138" x2="805" y2="138" stroke="#bbb" stroke-width="1"/>
+  <text x="720" y="156" text-anchor="middle" font-size="10" font-style="italic" fill="#555">chip proof exposes:</text>
+  <text x="720" y="176" text-anchor="middle" font-size="11" fill="#2a2a2a">R = ∏ rlc(read),  W = ∏ rlc(write)</text>
+  <text x="720" y="195" text-anchor="middle" font-size="11" fill="#8a4fa0">s = LogUp sum</text>
+  <text x="720" y="218" text-anchor="middle" font-size="11" fill="#1e6091" font-weight="bold">Σ_shard = ∑ EC points</text>
+
+  <!-- Ellipsis far right -->
+  <text x="840" y="148" font-size="20" fill="#999">…</text>
+
+  <!-- Solid black arrows: per-chip R, W → RAM reconciliation -->
+  <line x1="90" y1="245" x2="140" y2="390" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="290" y1="245" x2="200" y2="390" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="490" y1="245" x2="260" y2="390" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="690" y1="245" x2="320" y2="390" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Dashed purple arrows: per-chip LogUp sum → LogUp reconciliation -->
+  <line x1="130" y1="245" x2="560" y2="390" stroke="#8a4fa0" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrLookup)"/>
+  <line x1="330" y1="245" x2="640" y2="390" stroke="#8a4fa0" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrLookup)"/>
+  <line x1="530" y1="245" x2="720" y2="390" stroke="#8a4fa0" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrLookup)"/>
+  <line x1="730" y1="245" x2="800" y2="390" stroke="#8a4fa0" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrLookup)"/>
+
+  <!-- Blue arrow: Σ_shard → cross-shard EC-sum (outgoing, to segmentation diagram) -->
+  <line x1="820" y1="220" x2="900" y2="220" stroke="#1e6091" stroke-width="1.8" marker-end="url(#arrEc)"/>
+  <text x="905" y="215" font-size="10" fill="#1e6091">Σ_shard</text>
+  <text x="905" y="228" font-size="9" fill="#1e6091" font-style="italic">(to cross-shard</text>
+  <text x="905" y="239" font-size="9" fill="#1e6091" font-style="italic">EC-sum check,</text>
+  <text x="905" y="250" font-size="9" fill="#1e6091" font-style="italic">see Segmentation)</text>
+
+  <!-- Global RAM reconciliation box -->
+  <rect x="20" y="390" width="400" height="90" rx="6" fill="#d8eac8" stroke="#1e6091" stroke-width="1.8"/>
+  <text x="220" y="415" text-anchor="middle" font-size="14" font-weight="bold">Global RAM reconciliation</text>
+  <text x="220" y="438" text-anchor="middle" font-size="11" fill="#333">verifier-side check across all chips in shard</text>
+  <text x="220" y="465" text-anchor="middle" font-size="13" font-style="italic" fill="#1e6091">∏ R_chip  =  ∏ W_chip</text>
+
+  <!-- Global LogUp reconciliation box -->
+  <rect x="450" y="390" width="400" height="90" rx="6" fill="#d8eac8" stroke="#1e6091" stroke-width="1.8"/>
+  <text x="650" y="415" text-anchor="middle" font-size="14" font-weight="bold">Global LogUp reconciliation</text>
+  <text x="650" y="438" text-anchor="middle" font-size="11" fill="#333">verifier-side check across all chips in shard</text>
+  <text x="650" y="465" text-anchor="middle" font-size="13" font-style="italic" fill="#1e6091">Σ s_chip  =  0</text>
+
+  <!-- Note about shard RAM chip -->
+  <text x="480" y="505" text-anchor="middle" font-size="10" font-style="italic" fill="#666">Shard RAM chip's compensating R/W participate in the within-shard ∏ R = ∏ W balance;</text>
+  <text x="480" y="519" text-anchor="middle" font-size="10" font-style="italic" fill="#666">Σ_shard is proved by the EC-sum Quark PIOP inside this shard; verifier EC-adds across shards to check ∑ Σ_shard = 𝒪.</text>
+
+  <!-- Legend -->
+  <g transform="translate(40, 555)">
+    <line x1="0" y1="0" x2="30" y2="0" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="38" y="4" font-size="11" fill="#333">per-chip R, W (RAM grand products)</text>
+
+    <line x1="280" y1="0" x2="310" y2="0" stroke="#8a4fa0" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arrLookup)"/>
+    <text x="318" y="4" font-size="11" fill="#333">per-chip LogUp sum</text>
+
+    <line x1="500" y1="0" x2="530" y2="0" stroke="#1e6091" stroke-width="1.8" marker-end="url(#arrEc)"/>
+    <text x="538" y="4" font-size="11" fill="#333">shard's cross-shard EC sum</text>
+  </g>
+</svg>

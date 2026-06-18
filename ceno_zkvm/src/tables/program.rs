@@ -16,7 +16,8 @@ use multilinear_extensions::{Expression, Fixed, ToExpr, WitIn};
 
 use p3::field::PrimeCharacteristicRing;
 use rayon::iter::{IndexedParallelIterator, ParallelIterator};
-use std::{collections::HashMap, marker::PhantomData};
+use rustc_hash::FxHashMap;
+use std::marker::PhantomData;
 use witness::{
     InstancePaddingStrategy, RowMajorMatrix, next_pow2_instance_padding, set_fixed_val, set_val,
 };
@@ -260,7 +261,7 @@ impl<E: ExtensionField> TableCircuit<E> for ProgramTableCircuit<E> {
         config: &Self::TableConfig,
         num_witin: usize,
         num_structural_witin: usize,
-        multiplicity: &[HashMap<u64, usize>],
+        multiplicity: &[FxHashMap<u64, usize>],
         program: &Program,
     ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
         assert!(!program.instructions.is_empty());

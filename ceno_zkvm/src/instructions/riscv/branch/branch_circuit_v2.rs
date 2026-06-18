@@ -4,8 +4,10 @@ use crate::{
     e2e::ShardContext,
     error::ZKVMError,
     gadgets::{UIntLimbsLT, UIntLimbsLTConfig},
+    impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
+        gpu::utils::emit_uint_limbs_lt_ops,
         riscv::{
             RIVInstruction,
             b_insn::BInstructionConfig,
@@ -40,6 +42,8 @@ pub struct BranchConfig<E: ExtensionField> {
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I> {
     type InstructionConfig = BranchConfig<E>;
     type InsnType = InsnKind;
+
+    const GPU_LK_SHARDRAM: bool = true;
 
     fn inst_kinds() -> &'static [Self::InsnType] {
         &[I::INST_KIND]
@@ -204,4 +208,31 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
         }
         Ok(())
     }
+
+    impl_collect_lk_and_shardram!(b_insn, |sink, step, _config, _ctx| {
+        if !matches!(I::INST_KIND, InsnKind::BEQ | InsnKind::BNE) {
+            let rs1_value = Value::new_unchecked(step.rs1().unwrap().value);
+            let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
+            let rs1_limbs = rs1_value.as_u16_limbs();
+            let rs2_limbs = rs2_value.as_u16_limbs();
+            emit_uint_limbs_lt_ops(
+                sink,
+                matches!(I::INST_KIND, InsnKind::BLT | InsnKind::BGE),
+                rs1_limbs,
+                rs2_limbs,
+            );
+        }
+    });
+
+    impl_collect_shardram!(b_insn);
+
+    impl_gpu_assign!(match I::INST_KIND {
+        InsnKind::BEQ => Some(dispatch::GpuWitgenKind::BranchEq(1)),
+        InsnKind::BNE => Some(dispatch::GpuWitgenKind::BranchEq(0)),
+        InsnKind::BLT => Some(dispatch::GpuWitgenKind::BranchCmp(1)),
+        InsnKind::BGE => Some(dispatch::GpuWitgenKind::BranchCmp(1)),
+        InsnKind::BLTU => Some(dispatch::GpuWitgenKind::BranchCmp(0)),
+        InsnKind::BGEU => Some(dispatch::GpuWitgenKind::BranchCmp(0)),
+        _ => unreachable!(),
+    });
 }

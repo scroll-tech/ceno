@@ -33,11 +33,11 @@ mod r_insn;
 pub(crate) mod ecall_insn;
 
 #[cfg(feature = "u16limb_circuit")]
-mod auipc;
+pub(crate) mod auipc;
 mod im_insn;
 #[cfg(feature = "u16limb_circuit")]
-mod lui;
-mod memory;
+pub(crate) mod lui;
+pub(crate) mod memory;
 mod s_insn;
 #[cfg(test)]
 mod test;

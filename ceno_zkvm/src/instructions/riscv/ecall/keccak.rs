@@ -7,7 +7,7 @@ use ceno_emul::{
 use ff_ext::ExtensionField;
 use gkr_iop::{
     ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube, layer::Layer},
+    gkr::{GKRCircuit, booleanhypercube::BooleanHypercube},
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
@@ -45,13 +45,13 @@ use p3::field::PrimeCharacteristicRing;
 #[derive(Debug)]
 pub struct EcallKeccakConfig<E: ExtensionField> {
     pub layout: KeccakLayout<E>,
-    vm_state: StateInOut<E>,
-    ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    mem_rw: Vec<WriteMEM>,
+    pub(crate) vm_state: StateInOut<E>,
+    pub(crate) ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
+    pub(crate) state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    pub(crate) mem_rw: Vec<WriteMEM>,
 }
 
-/// KeccakInstruction can handle any instruction and produce its side-effects.
+/// KeccakInstruction can handle any instruction and produce its lk and shardram data.
 pub struct KeccakInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
@@ -130,10 +130,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             })
             .collect::<Result<Vec<WriteMEM>, _>>()?;
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(cb, Self::name(), layout.n_challenges, out_evals);
-        chip.add_layer(layer);
+        let chip = layout.finalize(Self::name(), cb);
 
         let circuit = chip.gkr_circuit();
 
@@ -176,6 +173,21 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
         steps: &[StepRecord],
         step_indices: &[StepIndex],
     ) -> Result<(RMMCollections<E::BaseField>, Multiplicity<u64>), ZKVMError> {
+        #[cfg(feature = "gpu")]
+        {
+            use crate::instructions::gpu::chips::keccak::gpu_assign_keccak_instances;
+            if let Some(result) = gpu_assign_keccak_instances::<E>(
+                config,
+                shard_ctx,
+                num_witin,
+                num_structural_witin,
+                steps,
+                step_indices,
+            )? {
+                return Ok(result);
+            }
+        }
+
         let mut lk_multiplicity = LkMultiplicity::default();
         if step_indices.is_empty() {
             return Ok((
@@ -219,7 +231,8 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
                     .zip_eq(indices.iter().copied())
                     .map(|(instance_with_rotation, idx)| {
                         let step = &steps[idx];
-                        let ops = &step.syscall().expect("syscall step");
+                        let sw = shard_ctx.syscall_witnesses.clone();
+                        let ops = &step.syscall(&sw).expect("syscall step");
 
                         let bh = BooleanHypercube::new(KECCAK_ROUNDS_CEIL_LOG2);
                         let mut cyclic_group = bh.into_iter();
@@ -283,7 +296,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .map(|&idx| -> KeccakInstance {
                 let step = &steps[idx];
                 let (instance, prev_ts): (Vec<u32>, Vec<Cycle>) = step
-                    .syscall()
+                    .syscall(&shard_ctx.syscall_witnesses)
                     .unwrap()
                     .mem_ops
                     .iter()
