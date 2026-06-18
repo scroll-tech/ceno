@@ -1067,7 +1067,7 @@ where
 
     let mut sponge = DefaultChallenger::<E::BaseField>::new_poseidon_default();
     sponge.observe_slice(&bytes_to_felts_safe::<E::BaseField>(&bytes));
-    std::array::from_fn(|_| sponge.sample_ext_element())
+    std::array::from_fn(|_| sponge.sample_algebra_element())
 }
 
 impl<E, PCS, M> ZKVMVerifyingKey<E, PCS, M>

@@ -138,8 +138,7 @@ impl RowMajorChip<F> for SymbolicExpressionTraceGenerator {
                                     expr_evals[node_idx].as_basis_coefficients_slice(),
                                 );
                             }
-                            Entry::Permutation { .. } => unreachable!(),
-                            Entry::Challenge | Entry::Exposed => unreachable!(),
+                            Entry::Challenge => unreachable!(),
                         },
                         SymbolicExpressionNode::IsFirstRow => {
                             record.args[..D_EF].copy_from_slice(
@@ -230,10 +229,7 @@ impl RowMajorChip<F> for SymbolicExpressionTraceGenerator {
                 for unused_var in &vk.unused_variables {
                     if matches!(
                         unused_var.entry,
-                        Entry::Permutation { .. }
-                            | Entry::Public
-                            | Entry::Challenge
-                            | Entry::Exposed
+                        Entry::Public | Entry::Challenge
                     ) {
                         continue;
                     }

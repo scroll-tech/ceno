@@ -640,7 +640,7 @@ impl<
         tasks: Vec<ChipTask<'data, PB>>,
         transcript: &T,
         witness_data: &PB::PcsData,
-    ) -> Result<(Vec<ChipTaskResult<E>>, Vec<E>), ZKVMError> {
+    ) -> Result<(Vec<ChipTaskResult<'data, PB>>, Vec<E>), ZKVMError> {
         let scheduler = ChipScheduler::new();
 
         #[cfg(feature = "gpu")]
@@ -718,15 +718,19 @@ impl<
             // Prepare: deferred extraction for GPU, no-op for CPU
             self.device.prepare_chip_input(&mut task, witness_data);
 
-            let (proof, opening_evals, input_opening_point) =
-                self.create_chip_proof(&task, transcript)?;
+            let (proof, main_constraint_job) =
+                self.create_chip_proof(&mut task, transcript)?;
 
             Ok(ChipTaskResult {
                 task_id: task.task_id,
                 circuit_idx: task.circuit_idx,
                 proof,
-                opening_evals,
-                input_opening_point,
+                opening_evals: MainSumcheckEvals {
+                    wits_in_evals: vec![],
+                    fixed_in_evals: vec![],
+                },
+                input_opening_point: vec![],
+                main_constraint_job: Some(main_constraint_job),
                 has_witness_or_fixed: task.has_witness_or_fixed,
             })
         })

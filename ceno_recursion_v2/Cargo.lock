@@ -587,6 +587,7 @@ dependencies = [
  "once_cell",
  "p3",
  "parse-size",
+ "poseidon",
  "prettytable-rs",
  "rand 0.8.5",
  "rayon",
@@ -1141,18 +1142,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
 
 [[package]]
-name = "enum_dispatch"
-version = "0.3.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa18ce2bc66555b3218614519ac839ddb759a7d6720732f979ef8d13be147ecd"
-dependencies = [
- "once_cell",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1209,7 +1198,7 @@ dependencies = [
 [[package]]
 name = "ff_ext"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "once_cell",
  "p3",
@@ -1344,6 +1333,7 @@ dependencies = [
  "p3-field",
  "rand 0.8.5",
  "rayon",
+ "rustc-hash",
  "serde",
  "smallvec",
  "strum",
@@ -1833,7 +1823,7 @@ dependencies = [
 [[package]]
 name = "mpcs"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "bincode",
  "clap",
@@ -1844,7 +1834,6 @@ dependencies = [
  "p3",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
- "rayon",
  "serde",
  "sumcheck",
  "tracing",
@@ -1857,7 +1846,7 @@ dependencies = [
 [[package]]
 name = "multilinear_extensions"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "either",
  "ff_ext",
@@ -2033,6 +2022,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "nvtx"
+version = "1.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ad2e855e8019f99e4b94ac33670eb4e4f570a2e044f3749a0b2c7f83b841e52c"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "object"
 version = "0.37.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2055,31 +2053,29 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openvm"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "bytemuck",
  "num-bigint",
  "openvm-custom-insn",
  "openvm-platform",
- "openvm-rv32im-guest",
+ "openvm-riscv-guest",
  "serde",
 ]
 
 [[package]]
 name = "openvm-circuit"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "abi_stable",
  "backtrace",
  "bytesize",
  "cfg-if",
  "dashmap",
- "derivative",
  "derive-new 0.6.0",
  "derive_more",
- "enum_dispatch",
  "eyre",
  "getset",
  "itertools 0.14.0",
@@ -2105,8 +2101,8 @@ dependencies = [
 
 [[package]]
 name = "openvm-circuit-derive"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "itertools 0.14.0",
  "proc-macro2",
@@ -2116,8 +2112,8 @@ dependencies = [
 
 [[package]]
 name = "openvm-circuit-primitives"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "derive-new 0.6.0",
  "itertools 0.14.0",
@@ -2125,18 +2121,20 @@ dependencies = [
  "num-traits",
  "openvm-circuit-primitives-derive",
  "openvm-cpu-backend",
- "openvm-cuda-builder 2.0.0-alpha (git+https://github.com/openvm-org/stark-backend.git?branch=develop-v2)",
+ "openvm-cuda-builder",
  "openvm-stark-backend",
  "rand 0.9.2",
+ "struct-reflection",
  "tracing",
 ]
 
 [[package]]
 name = "openvm-circuit-primitives-derive"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "itertools 0.14.0",
+ "proc-macro2",
  "quote",
  "syn 2.0.117",
 ]
@@ -2144,7 +2142,7 @@ dependencies = [
 [[package]]
 name = "openvm-codec-derive"
 version = "2.0.0-alpha"
-source = "git+https://github.com/hero78119/stark-backend.git?branch=develop-v2#1aa35f00ecbb45d75d383407872ef34fd0192b7b"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=develop-v2#27bb74b90bed66f738add281285b703dc47e129a"
 dependencies = [
  "proc-macro-crate 1.3.1",
  "proc-macro2",
@@ -2154,8 +2152,8 @@ dependencies = [
 
 [[package]]
 name = "openvm-continuations"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "cfg-if",
  "derive-new 0.6.0",
@@ -2172,7 +2170,6 @@ dependencies = [
  "openvm-stark-sdk",
  "openvm-verify-stark-host",
  "p3-air",
- "p3-bn254",
  "p3-field",
  "p3-matrix",
  "tracing",
@@ -2181,7 +2178,7 @@ dependencies = [
 [[package]]
 name = "openvm-cpu-backend"
 version = "2.0.0-alpha"
-source = "git+https://github.com/hero78119/stark-backend.git?branch=develop-v2#1aa35f00ecbb45d75d383407872ef34fd0192b7b"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=develop-v2#27bb74b90bed66f738add281285b703dc47e129a"
 dependencies = [
  "cfg-if",
  "derive-new 0.7.0",
@@ -2206,13 +2203,13 @@ dependencies = [
 [[package]]
 name = "openvm-cuda-backend"
 version = "2.0.0-alpha"
-source = "git+https://github.com/hero78119/stark-backend.git?branch=develop-v2#1aa35f00ecbb45d75d383407872ef34fd0192b7b"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=develop-v2#27bb74b90bed66f738add281285b703dc47e129a"
 dependencies = [
  "derive-new 0.7.0",
  "getset",
  "glob",
  "itertools 0.14.0",
- "openvm-cuda-builder 2.0.0-alpha (git+https://github.com/hero78119/stark-backend.git?branch=develop-v2)",
+ "openvm-cuda-builder",
  "openvm-cuda-common",
  "openvm-stark-backend",
  "openvm-stark-sdk",
@@ -2231,15 +2228,6 @@ dependencies = [
 [[package]]
 name = "openvm-cuda-builder"
 version = "2.0.0-alpha"
-source = "git+https://github.com/hero78119/stark-backend.git?branch=develop-v2#1aa35f00ecbb45d75d383407872ef34fd0192b7b"
-dependencies = [
- "cc",
- "glob",
-]
-
-[[package]]
-name = "openvm-cuda-builder"
-version = "2.0.0-alpha"
 source = "git+https://github.com/openvm-org/stark-backend.git?branch=develop-v2#47a0a7523b07d8664f1c0758510962d977a68ec5"
 dependencies = [
  "cc",
@@ -2249,13 +2237,13 @@ dependencies = [
 [[package]]
 name = "openvm-cuda-common"
 version = "2.0.0-alpha"
-source = "git+https://github.com/hero78119/stark-backend.git?branch=develop-v2#1aa35f00ecbb45d75d383407872ef34fd0192b7b"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=develop-v2#27bb74b90bed66f738add281285b703dc47e129a"
 dependencies = [
  "bytesize",
  "ctor",
  "lazy_static",
  "metrics 0.23.1",
- "openvm-cuda-builder 2.0.0-alpha (git+https://github.com/hero78119/stark-backend.git?branch=develop-v2)",
+ "openvm-cuda-builder",
  "thiserror 1.0.69",
  "tracing",
 ]
@@ -2263,7 +2251,7 @@ dependencies = [
 [[package]]
 name = "openvm-custom-insn"
 version = "0.1.0"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2272,8 +2260,8 @@ dependencies = [
 
 [[package]]
 name = "openvm-instructions"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "backtrace",
  "derive-new 0.6.0",
@@ -2289,8 +2277,8 @@ dependencies = [
 
 [[package]]
 name = "openvm-instructions-derive"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "quote",
  "syn 2.0.117",
@@ -2298,22 +2286,23 @@ dependencies = [
 
 [[package]]
 name = "openvm-platform"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "libm",
  "openvm-custom-insn",
- "openvm-rv32im-guest",
+ "openvm-riscv-guest",
 ]
 
 [[package]]
 name = "openvm-poseidon2-air"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "derivative",
  "lazy_static",
- "openvm-cuda-builder 2.0.0-alpha (git+https://github.com/openvm-org/stark-backend.git?branch=develop-v2)",
+ "openvm-circuit-primitives",
+ "openvm-cuda-builder",
  "openvm-stark-backend",
  "openvm-stark-sdk",
  "p3-poseidon2",
@@ -2325,11 +2314,10 @@ dependencies = [
 
 [[package]]
 name = "openvm-recursion-circuit"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "derive-new 0.6.0",
- "eyre",
  "itertools 0.14.0",
  "openvm-circuit",
  "openvm-circuit-primitives",
@@ -2351,27 +2339,26 @@ dependencies = [
 
 [[package]]
 name = "openvm-recursion-circuit-derive"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "quote",
  "syn 2.0.117",
 ]
 
 [[package]]
-name = "openvm-rv32im-guest"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+name = "openvm-riscv-guest"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "openvm-custom-insn",
- "p3-field",
  "strum_macros",
 ]
 
 [[package]]
 name = "openvm-stark-backend"
 version = "2.0.0-alpha"
-source = "git+https://github.com/hero78119/stark-backend.git?branch=develop-v2#1aa35f00ecbb45d75d383407872ef34fd0192b7b"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=develop-v2#27bb74b90bed66f738add281285b703dc47e129a"
 dependencies = [
  "cfg-if",
  "derivative",
@@ -2403,7 +2390,7 @@ dependencies = [
 [[package]]
 name = "openvm-stark-sdk"
 version = "2.0.0-alpha"
-source = "git+https://github.com/hero78119/stark-backend.git?branch=develop-v2#1aa35f00ecbb45d75d383407872ef34fd0192b7b"
+source = "git+https://github.com/openvm-org/stark-backend.git?branch=develop-v2#27bb74b90bed66f738add281285b703dc47e129a"
 dependencies = [
  "dashmap",
  "derive-new 0.7.0",
@@ -2413,13 +2400,11 @@ dependencies = [
  "metrics 0.23.1",
  "metrics-tracing-context",
  "metrics-util",
- "num-bigint",
+ "nvtx",
  "openvm-cpu-backend",
  "openvm-stark-backend",
  "p3-baby-bear",
- "p3-bn254",
  "p3-field",
- "p3-poseidon2",
  "rand 0.9.2",
  "serde",
  "serde_json",
@@ -2427,17 +2412,17 @@ dependencies = [
  "tracing",
  "tracing-forest",
  "tracing-subscriber",
- "zkhash",
 ]
 
 [[package]]
 name = "openvm-verify-stark-host"
-version = "2.0.0-alpha"
-source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.0.0-beta#9ddd546c306affb7753f8b42870b6b27a7cd3be7"
+version = "2.0.0-beta.2"
+source = "git+https://github.com/openvm-org/openvm.git?branch=develop-v2.1.0-rv64#53784108cf93718b7acd062c0b5a910a82f40156"
 dependencies = [
  "bitcode",
  "eyre",
  "openvm-circuit",
+ "openvm-circuit-primitives",
  "openvm-recursion-circuit-derive",
  "openvm-stark-backend",
  "openvm-stark-sdk",
@@ -2484,7 +2469,7 @@ dependencies = [
 [[package]]
 name = "p3"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "p3-air",
  "p3-baby-bear",
@@ -2508,9 +2493,9 @@ dependencies = [
 
 [[package]]
 name = "p3-air"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60414dc4fe4b8676bd4b6136b309185e6b3c006eb5564ef4cf5dfae6d9d47f32"
+checksum = "daee3082e2ca0db2ac876c43c9c8fd53204b0fcb95cfe7258d21f4a925ad82c4"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -2518,9 +2503,9 @@ dependencies = [
 
 [[package]]
 name = "p3-baby-bear"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f2fecd03416a20949dc7cd4b481c37d744c4d398467f94213c65279a0f00048"
+checksum = "3a1a49f4d9c8b8cbdab61e25d9de1b78b3c8347dd2fb88b11d990b3efa8cdd3a"
 dependencies = [
  "p3-challenger",
  "p3-field",
@@ -2532,26 +2517,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "p3-bn254"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c408855a82df5911b8e877acc2fd48f22534b80a4984783fa2a292acdf52e6a8"
-dependencies = [
- "num-bigint",
- "p3-field",
- "p3-poseidon2",
- "p3-symmetric",
- "p3-util",
- "paste",
- "rand 0.9.2",
- "serde",
-]
-
-[[package]]
 name = "p3-challenger"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8a66da8af6115b9e2df4363cd55efebf2c6d30de0af3e99dac56dd7b77aff24"
+checksum = "a7d2d45f5a51dc3f965e8d6da60a6c26c807e88657863d56da275eaa05ad36f1"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
@@ -2563,9 +2532,9 @@ dependencies = [
 
 [[package]]
 name = "p3-commit"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95104feb4b9895733f92204ec70ba8944dbab39c39b235c0a00adf1456149619"
+checksum = "bf6d7dcb58a8f21f0e1325dc7f7699ad749878ccbe7e286e61f9d46bde2bfa88"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2578,9 +2547,9 @@ dependencies = [
 
 [[package]]
 name = "p3-dft"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81b2f57569293b9964b1bae68d64e796bfbf3c271718268beb53a0fb761a5819"
+checksum = "beabb40bc8ac7f5f95870f271fb844c7e2e1ebb7f0761a8eebb2614b56c6b1c1"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -2593,9 +2562,9 @@ dependencies = [
 
 [[package]]
 name = "p3-field"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56aae7630ff6df83fb7421d5bd97df27620e5f0e29422b7e8f6a294d44cce297"
+checksum = "4819a3e4c1882431a63d4847ffa10d110017aee4cb9cf4319ca6dca191930969"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -2609,9 +2578,9 @@ dependencies = [
 
 [[package]]
 name = "p3-fri"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0e9a7053c439444f5c4be80ecc08b255a046bc5d23762abe8a4460ae0fca583"
+checksum = "13ca6a795cfc4180425fbf16dfdb4c9c2bfa85971dd55b5930d97b513e0835df"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2630,9 +2599,9 @@ dependencies = [
 
 [[package]]
 name = "p3-goldilocks"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85324dc45db4196ce0083971393124f5ed03741507f9165d5c923c97890b4838"
+checksum = "13c47d5c650bbeb25941b9a1fa9bfaf59b3cd202a438ea2c20892489af001399"
 dependencies = [
  "num-bigint",
  "p3-challenger",
@@ -2649,9 +2618,9 @@ dependencies = [
 
 [[package]]
 name = "p3-interpolation"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b0bb6a709b26cead74e7c605f4e51e793642870e54a7c280a05cd66b7914866"
+checksum = "f27a3696641a8f4ec990ff8c91862fb4f3b4ff29f589f78005d046023fe3550f"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -2661,9 +2630,9 @@ dependencies = [
 
 [[package]]
 name = "p3-matrix"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d916550e4261126457d4f139fc3156fc796b1cf2f2687bf1c9b269b1efa8ad42"
+checksum = "e6fde449bd2963d394284ec46db8c647e6a5602d90601117b76752072ab54168"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -2672,23 +2641,22 @@ dependencies = [
  "rand 0.9.2",
  "serde",
  "tracing",
- "transpose",
 ]
 
 [[package]]
 name = "p3-maybe-rayon"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0db6a290f867061aed54593d48f0dfd7ff2d0f706a603d03209fd0eac79518f3"
+checksum = "54afab3883d8a14676b492709d6c4e9fa535c36718b737db0817aacfaaaa11f6"
 dependencies = [
  "rayon",
 ]
 
 [[package]]
 name = "p3-mds"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "745a478473a5f3699f76b284378651eaa9d74e74f820b34ea563a4a72ab8a4a6"
+checksum = "3895055d735ac96d010747b3aaabd4c2645b9fd80226960550318db2e25afb75"
 dependencies = [
  "p3-dft",
  "p3-field",
@@ -2699,9 +2667,9 @@ dependencies = [
 
 [[package]]
 name = "p3-merkle-tree"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "615f09d1c83ca2ad0dd1f8fb4e496445f9c24a224bac81b98849973f444ee86c"
+checksum = "60e20f61ea816e94f83ed7b8134a5e98d0cad7bd6dff226bc1da17a5143c63cb"
 dependencies = [
  "itertools 0.14.0",
  "p3-commit",
@@ -2718,9 +2686,9 @@ dependencies = [
 
 [[package]]
 name = "p3-monty-31"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f124f989bc5697728a9e71d2094eda673c45a536c6a8b8ec87b7f3660393aad0"
+checksum = "c9fe0be661891af1f703ceaf57334fcbd540804988984dc2b500dd99740e7c81"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -2737,14 +2705,13 @@ dependencies = [
  "serde",
  "spin 0.10.0",
  "tracing",
- "transpose",
 ]
 
 [[package]]
 name = "p3-poseidon"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dc0930e45272609b239052346e2abe8965adaf22b8237eddb679d659af53f28"
+checksum = "548af7ff569975882bc411f653aba7d89a6d85813ca58ef922fd0b1ecb6b5866"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -2754,9 +2721,9 @@ dependencies = [
 
 [[package]]
 name = "p3-poseidon2"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b0c96988fd809e7a3086d8d683ddb93c965f8bb08b37c82e3617d12347bf77f"
+checksum = "2c6fc2368447576283f8b3849a36095017f25addf06eab9e33b0ce7f96b0b99d"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -2767,9 +2734,9 @@ dependencies = [
 
 [[package]]
 name = "p3-poseidon2-air"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a0c44c47992126b5eb4f5a33444d6059b883c1ea520f1d34590d46338314178"
+checksum = "a80481b023f74c0f8ded5058dab8054174e8060d82d400da7b67cf7f2f0a87bc"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -2782,9 +2749,9 @@ dependencies = [
 
 [[package]]
 name = "p3-symmetric"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dabf1c93a83305b291118dec6632357da69f3137d33fc1791225e38fcb615836"
+checksum = "a14456a42a7d9e65f13999706f1bca2832175935169b3a54286e18331cf1d82f"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -2793,11 +2760,12 @@ dependencies = [
 
 [[package]]
 name = "p3-util"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a92074eab13c8a30d23ad7bcf99b82787a04c843133a0cba39ca1cf39d434492"
+checksum = "911154accf66034b0eec4452956c088f92a200b37a8225c1caed74cfbd38cc8d"
 dependencies = [
  "serde",
+ "transpose",
 ]
 
 [[package]]
@@ -2949,7 +2917,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "ff_ext",
  "p3",
@@ -3563,7 +3531,7 @@ dependencies = [
 [[package]]
 name = "sp1-curves"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "cfg-if",
  "dashu",
@@ -3626,6 +3594,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
+name = "struct-reflection"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "701b671d1ad68e250e05718f95dae3014a17f4e69cbe51842531c30495ff3301"
+dependencies = [
+ "struct-reflection-derive",
+]
+
+[[package]]
+name = "struct-reflection-derive"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59ab74230a0592602e361bd63c645413fa8cbe4500d10274e849179e5c72548f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "strum"
 version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3669,7 +3657,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "sumcheck"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "either",
  "ff_ext",
@@ -3687,7 +3675,7 @@ dependencies = [
 [[package]]
 name = "sumcheck_macro"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "itertools 0.13.0",
  "p3",
@@ -3931,7 +3919,7 @@ dependencies = [
 [[package]]
 name = "transcript"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "ff_ext",
  "itertools 0.13.0",
@@ -4134,7 +4122,7 @@ dependencies = [
 [[package]]
 name = "whir"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "bincode",
  "clap",
@@ -4365,7 +4353,7 @@ dependencies = [
 [[package]]
 name = "witness"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#9c6e6b63024811a1b51f7e685bacda2567b539db"
+source = "git+https://github.com/scroll-tech/gkr-backend.git?branch=feat%2Fbump-p3#092da2bccc8b5ff73ac0bf69927bb72163908854"
 dependencies = [
  "ff_ext",
  "multilinear_extensions",

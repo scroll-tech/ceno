@@ -85,6 +85,7 @@ pub fn generate_proving_ctx(
             initial_acc_hash: [F::ZERO; DIGEST_SIZE],
             final_acc_hash: [F::ZERO; DIGEST_SIZE],
             depth: F::ZERO,
+            node_idx: F::ZERO,
         };
         child_pvs_vec.push(cols.child_pvs);
     }

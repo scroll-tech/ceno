@@ -109,11 +109,13 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
         let poseidon2_compress_inputs = vec![];
         let poseidon2_permute_inputs = vec![];
         let range_check_inputs = vec![];
+        let power_check_inputs = vec![];
 
         let mut external_data = VerifierExternalData {
             poseidon2_compress_inputs: &poseidon2_compress_inputs,
             poseidon2_permute_inputs: &poseidon2_permute_inputs,
             range_check_inputs: &range_check_inputs,
+            power_check_inputs: &power_check_inputs,
             required_heights: None,
             final_transcript_state: None,
         };

@@ -189,6 +189,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             CachedCommitBusMessage {
                 air_idx: AB::Expr::from_usize(CONSTRAINT_EVAL_AIR_ID),
                 cached_idx: AB::Expr::from_usize(CONSTRAINT_EVAL_CACHED_INDEX),
+                global_cached_idx: AB::Expr::ZERO,
                 cached_commit: expected_def_hook_commit.map(AB::Expr::from_u32),
             },
             local.is_present * not(local.has_verifier_pvs),
@@ -202,6 +203,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             initial_acc_hash,
             final_acc_hash,
             depth,
+            node_idx: _,
         } = builder.public_values().borrow();
 
         // constrain that pvs are passed through if there is one row
