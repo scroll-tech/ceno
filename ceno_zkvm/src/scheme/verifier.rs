@@ -24,8 +24,8 @@ use crate::{
         },
     },
     structs::{
-        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VerifyingKey,
-        ZKVMVerifyingKey,
+        ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VK_DIGEST_LEN,
+        VerifyingKey, ZKVMVerifyingKey,
     },
 };
 use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
@@ -74,6 +74,7 @@ pub struct ZKVMVerifier<
     M: Clone + Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     pub vk: ZKVMVerifyingKey<E, PCS, M>,
+    vk_digest: [E; VK_DIGEST_LEN],
 }
 
 pub(crate) struct PendingMainConstraintVerification<'a, E: ExtensionField> {
@@ -254,7 +255,8 @@ where
     M: Clone + Default + serde::Serialize + serde::de::DeserializeOwned,
 {
     pub fn new(vk: ZKVMVerifyingKey<E, PCS, M>) -> Self {
-        ZKVMVerifier { vk }
+        let vk_digest = vk.compute_digest();
+        ZKVMVerifier { vk, vk_digest }
     }
 
     pub fn into_inner(self) -> ZKVMVerifyingKey<E, PCS, M> {
@@ -368,7 +370,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         );
 
         let shard_id = vm_proof.public_values.shard_id as usize;
-        self.verify_proof_validity(shard_id, vm_proof, transcript)?;
+        self.verify_proof_validity(shard_id, vm_proof, transcript, &self.vk_digest)?;
         Ok(true)
     }
 
@@ -439,7 +441,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 )?;
 
                 // add to shard ec sum
-                let shard_ec = self.verify_proof_validity(shard_id, vm_proof, transcript)?;
+                let shard_ec = self.verify_proof_validity(shard_id, vm_proof, transcript, &self.vk_digest)?;
                 shard_ec_sum = shard_ec_sum + shard_ec;
 
                 Ok((
@@ -464,6 +466,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         shard_id: usize,
         vm_proof: ZKVMProof<E, PCS>,
         mut transcript: impl ForkableTranscript<E>,
+        vk_digest: &[E; VK_DIGEST_LEN],
     ) -> Result<SepticPoint<E::BaseField>, ZKVMError> {
         tracing::info!(
             "verifying shard proof: expected_shard_id={}, proof_shard_id={}, chip_groups={}",
@@ -491,8 +494,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             }
         }
 
-        let vk_digest = self.vk.compute_digest();
-        transcript.append_field_element_exts(&vk_digest);
+        transcript.append_field_element_exts(vk_digest);
 
         // Include transcript-visible public values in canonical circuit order.
         // This must match prover and recursion verifier exactly.
