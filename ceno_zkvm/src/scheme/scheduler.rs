@@ -195,22 +195,32 @@ impl ChipScheduler {
             let task_id = task.task_id;
             // Fork: clone parent + append task_id
             // (identical to ForkableTranscript::fork default impl)
-            let mut forked = parent_transcript.clone();
-            forked.append_field_element(&<PB::E as ExtensionField>::BaseField::from_canonical_u64(
-                task_id as u64,
-            ));
+            let mut forked =
+                tracing::info_span!("[ceno] scheduler_fork_transcript").in_scope(|| {
+                    let mut forked = parent_transcript.clone();
+                    forked.append_field_element(
+                        &<PB::E as ExtensionField>::BaseField::from_canonical_u64(task_id as u64),
+                    );
+                    forked
+                });
 
-            let result = execute_task(task, &mut forked)?;
+            let result = tracing::info_span!("[ceno] scheduler_execute_task")
+                .in_scope(|| execute_task(task, &mut forked))?;
             results.push(result);
 
             // Sample from forked transcript
-            samples.push((task_id, forked.sample_vec(1)[0]));
+            let sample = tracing::info_span!("[ceno] scheduler_sample_transcript")
+                .in_scope(|| forked.sample_vec(1)[0]);
+            samples.push((task_id, sample));
         }
 
         // Sort by task_id to restore original order
-        results.sort_by_key(|r| r.task_id);
-        samples.sort_by_key(|(id, _)| *id);
-        let forked_samples = samples.into_iter().map(|(_, s)| s).collect();
+        tracing::info_span!("[ceno] scheduler_sort_results").in_scope(|| {
+            results.sort_by_key(|r| r.task_id);
+            samples.sort_by_key(|(id, _)| *id);
+        });
+        let forked_samples = tracing::info_span!("[ceno] scheduler_collect_samples")
+            .in_scope(|| samples.into_iter().map(|(_, s)| s).collect());
 
         Ok((results, forked_samples))
     }

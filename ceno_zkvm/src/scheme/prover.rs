@@ -159,8 +159,9 @@ where
         rt_tower.len(),
         num_var_with_rotation,
     );
-    let rt_main = rt_tower[rt_tower.len() - num_var_with_rotation..].to_vec();
-    drop(records);
+    let rt_main = info_span!("[ceno] derive_rt_main")
+        .in_scope(|| rt_tower[rt_tower.len() - num_var_with_rotation..].to_vec());
+    info_span!("[ceno] drop_tower_records").in_scope(|| drop(records));
 
     let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
     let ecc_proof = info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
@@ -176,39 +177,46 @@ where
     })?;
     exit_span!(span);
 
-    let mut main_input = input.clone();
-    main_input.witness.clear();
-    main_input.structural_witness.clear();
-    let structural_rmm = task.structural_rmm.take();
+    let mut main_input = info_span!("[ceno] clone_main_input_for_job").in_scope(|| input.clone());
+    info_span!("[ceno] clear_main_input_for_job").in_scope(|| {
+        main_input.witness.clear();
+        main_input.structural_witness.clear();
+    });
+    let structural_rmm =
+        info_span!("[ceno] take_structural_rmm_for_job").in_scope(|| task.structural_rmm.take());
 
-    Ok((
-        ZKVMChipProof {
-            r_out_evals,
-            w_out_evals,
-            lk_out_evals,
-            main_out_evals: Vec::new(),
-            main_sumcheck_proofs: None,
-            gkr_iop_proof: None,
-            rotation_proof: rotation.clone().map(|r| r.proof),
-            tower_proof,
-            ecc_proof: ecc_proof.clone(),
-            num_instances: input_num_instances,
-        },
-        MainConstraintJob {
-            circuit_name: task.circuit_name.clone(),
-            circuit_idx: task.circuit_idx,
-            input: main_input,
-            witness_trace_idx: task.witness_trace_idx,
-            num_witin: task.num_witin,
-            structural_rmm,
-            rt_tower: rt_main,
-            main_out_evals: Vec::new(),
-            rotation,
-            ecc_proof,
-            challenges: *challenges,
-            cs,
-        },
-    ))
+    let proof_and_job = info_span!("[ceno] assemble_chip_proof_and_job").in_scope(|| {
+        (
+            ZKVMChipProof {
+                r_out_evals,
+                w_out_evals,
+                lk_out_evals,
+                main_out_evals: Vec::new(),
+                main_sumcheck_proofs: None,
+                gkr_iop_proof: None,
+                rotation_proof: rotation.clone().map(|r| r.proof),
+                tower_proof,
+                ecc_proof: ecc_proof.clone(),
+                num_instances: input_num_instances,
+            },
+            MainConstraintJob {
+                circuit_name: task.circuit_name.clone(),
+                circuit_idx: task.circuit_idx,
+                input: main_input,
+                witness_trace_idx: task.witness_trace_idx,
+                num_witin: task.num_witin,
+                structural_rmm,
+                rt_tower: rt_main,
+                main_out_evals: Vec::new(),
+                rotation,
+                ecc_proof,
+                challenges: *challenges,
+                cs,
+            },
+        )
+    });
+
+    Ok(proof_and_job)
 }
 
 pub type ZkVMCpuProver<E, PCS> =
@@ -535,19 +543,21 @@ impl<
 
             // Phase 1: Build all ChipTasks
             let build_tasks_span = entered_span!("build_chip_tasks", profiling_1 = true);
-            let tasks = self.build_chip_tasks(
-                shard_ctx,
-                name_and_instances,
-                structural_rmms,
-                #[cfg(feature = "gpu")]
-                witness_trace_rows,
-                witness_mles,
-                &witness_data,
-                fixed_mles,
-                challenges,
-                &pi,
-                &circuit_trace_indices,
-            );
+            let tasks = info_span!("[ceno] build_chip_tasks").in_scope(|| {
+                self.build_chip_tasks(
+                    shard_ctx,
+                    name_and_instances,
+                    structural_rmms,
+                    #[cfg(feature = "gpu")]
+                    witness_trace_rows,
+                    witness_mles,
+                    &witness_data,
+                    fixed_mles,
+                    challenges,
+                    &pi,
+                    &circuit_trace_indices,
+                )
+            });
             #[cfg(feature = "gpu")]
             if using_gpu_backend && crate::scheme::gpu::should_log_gpu_memory() {
                 if let Some(active_dpk) = self.get_device_proving_key(shard_ctx) {
@@ -614,19 +624,25 @@ impl<
             // Sequential (GPU + CPU): unified path via self.create_chip_proof.
             let execute_tasks_span = entered_span!("execute_chip_tasks", profiling_1 = true);
             let (results, forked_samples) =
-                self.run_chip_proofs(tasks, &transcript, &witness_data)?;
+                info_span!("[ceno] execute_chip_tasks").in_scope(|| {
+                    self.run_chip_proofs(tasks, &transcript, &witness_data)
+                })?;
             exit_span!(execute_tasks_span);
 
             // Phase 3: Collect results
             let collect_results_span = entered_span!("collect_chip_results", profiling_1 = true);
-            let (chip_proofs, main_constraint_jobs) = Self::collect_chip_results(results);
+            let (chip_proofs, main_constraint_jobs) =
+                info_span!("[ceno] collect_chip_results")
+                    .in_scope(|| Self::collect_chip_results(results));
             exit_span!(collect_results_span);
             exit_span!(main_proofs_span);
 
             // merge forked transcript samples into main transcript
-            for sample in forked_samples {
-                transcript.append_field_element_ext(&sample);
-            }
+            info_span!("[ceno] merge_forked_transcript_samples").in_scope(|| {
+                for sample in forked_samples {
+                    transcript.append_field_element_ext(&sample);
+                }
+            });
 
             let main_constraints_span =
                 entered_span!("prove_batched_main_constraints", profiling_1 = true);
@@ -706,9 +722,18 @@ impl<
                         task.circuit_idx as u64,
                     ));
 
-                    prepare_gpu_chip_input::<E, PCS>(&mut task, gpu_witness_data);
-                    let (proof, main_constraint_job) =
-                        create_gpu_chip_proof::<E, PCS>(&mut task, transcript)?;
+                    info_span!(
+                        "[ceno] gpu_prepare_chip_input",
+                        chip = %task.circuit_name,
+                        task_id = task.task_id,
+                    )
+                    .in_scope(|| prepare_gpu_chip_input::<E, PCS>(&mut task, gpu_witness_data));
+                    let (proof, main_constraint_job) = info_span!(
+                        "[ceno] create_gpu_chip_proof_total",
+                        chip = %task.circuit_name,
+                        task_id = task.task_id,
+                    )
+                    .in_scope(|| create_gpu_chip_proof::<E, PCS>(&mut task, transcript))?;
                     if ChipScheduler::is_concurrent_mode() {
                         cuda_hal
                             .inner
@@ -723,7 +748,12 @@ impl<
                                 ))
                             })?;
                     }
-                    let result = ChipTaskResult {
+                    let result = info_span!(
+                        "[ceno] assemble_gpu_chip_result",
+                        chip = %task.circuit_name,
+                        task_id = task.task_id,
+                    )
+                    .in_scope(|| ChipTaskResult {
                         task_id: task.task_id,
                         circuit_idx: task.circuit_idx,
                         proof,
@@ -734,7 +764,7 @@ impl<
                         input_opening_point: vec![],
                         main_constraint_job: Some(main_constraint_job),
                         has_witness_or_fixed: task.has_witness_or_fixed,
-                    };
+                    });
 
                     Ok(cast_gpu_chip_result::<E, PCS, PB>(result))
                 };
