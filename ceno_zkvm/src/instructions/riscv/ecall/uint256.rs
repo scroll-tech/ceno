@@ -13,7 +13,6 @@ use gkr_iop::{
 use itertools::{Itertools, chain, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
 use num_bigint::BigUint;
-use p3::matrix::Matrix;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,

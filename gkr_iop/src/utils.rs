@@ -72,10 +72,7 @@ pub fn rotation_selector<'a, E: ExtensionField>(
                 rotate_chunk[to] = eq_chunk[to];
             }
         });
-    MultilinearExtension::from_evaluation_vec_smart(
-        eq.len().ilog2() as usize,
-        rotated_mle_evals,
-    )
+    MultilinearExtension::from_evaluation_vec_smart(eq.len().ilog2() as usize, rotated_mle_evals)
 }
 
 /// sel(rx)

@@ -55,7 +55,6 @@ use multilinear_extensions::{
     virtual_polys::VirtualPolynomials,
 };
 
-
 use sumcheck::{
     frontload,
     structs::{IOPProof, IOPVerifierState, SumCheckSubClaim},

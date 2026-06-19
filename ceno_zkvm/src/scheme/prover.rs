@@ -16,7 +16,7 @@ use crate::scheme::{
 use either::Either;
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::{Expression, Instance};
+use multilinear_extensions::Instance;
 use p3::field::PrimeCharacteristicRing;
 use std::iter::Iterator;
 use sumcheck::{
@@ -718,8 +718,7 @@ impl<
             // Prepare: deferred extraction for GPU, no-op for CPU
             self.device.prepare_chip_input(&mut task, witness_data);
 
-            let (proof, main_constraint_job) =
-                self.create_chip_proof(&mut task, transcript)?;
+            let (proof, main_constraint_job) = self.create_chip_proof(&mut task, transcript)?;
 
             Ok(ChipTaskResult {
                 task_id: task.task_id,

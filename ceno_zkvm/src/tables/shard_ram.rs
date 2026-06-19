@@ -25,7 +25,7 @@ use itertools::{Itertools, chain};
 use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
 use p3::{
     field::{Field, PrimeCharacteristicRing as FieldAlgebra},
-    matrix::{Matrix, dense::RowMajorMatrix},
+    matrix::dense::RowMajorMatrix,
     symmetric::Permutation,
 };
 use rayon::{
