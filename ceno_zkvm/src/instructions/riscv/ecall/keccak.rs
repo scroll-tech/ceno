@@ -483,11 +483,11 @@ mod tests {
             .unwrap_right()
     }
 
-    fn selected_row<'a>(
-        values: &'a [<E as ExtensionField>::BaseField],
+    fn selected_row(
+        values: &[<E as ExtensionField>::BaseField],
         width: usize,
         row_index: usize,
-    ) -> &'a [<E as ExtensionField>::BaseField] {
+    ) -> &[<E as ExtensionField>::BaseField] {
         &values[row_index * width..][..width]
     }
 
