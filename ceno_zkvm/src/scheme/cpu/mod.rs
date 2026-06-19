@@ -16,6 +16,7 @@ use crate::{
             infer_tower_logup_witness, infer_tower_product_witness, interleaving_mles_to_mles,
             split_rotation_evals,
         },
+        verifier::eval_batched_main_frontload_terms,
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
@@ -50,7 +51,7 @@ use std::{
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage, IOPProverState},
-    util::{get_challenge_pows, optimal_sumcheck_threads},
+    util::{extrapolate_uni_poly, get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
@@ -1394,9 +1395,31 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             builder.to_virtual_polys_with_monomial_terms(&global_terms, &[], &[]),
             transcript,
         );
-        let claimed_sum = proof.proofs[0].evaluations[0] + proof.proofs[0].evaluations[1];
         let global_evals = prover_state.get_mle_flatten_final_evaluations();
         let global_rt = prover_state.collect_raw_challenges();
+        let mut final_claim = E::ZERO;
+        for chip in &chip_data {
+            let layer_evals = &global_evals[chip.mle_start..chip.mle_start + chip.num_mles];
+            let main_sumcheck_challenges = chain!(
+                jobs[0].challenges.iter().copied(),
+                alpha_pows[chip.alpha_start..chip.alpha_start + chip.layer.exprs.len()]
+                    .iter()
+                    .copied()
+            )
+            .collect_vec();
+            final_claim += eval_batched_main_frontload_terms(
+                layer_evals,
+                &chip.pi,
+                &main_sumcheck_challenges,
+                &global_rt,
+                chip.num_var_with_rotation,
+                chip.layer
+                    .main_sumcheck_expression_monomial_terms
+                    .as_ref()
+                    .unwrap(),
+            );
+        }
+        let claimed_sum = recover_sumcheck_claim_from_final(final_claim, &proof, &global_rt);
         transcript.append_field_element_exts(&global_evals);
         exit_span!(span);
 
@@ -1427,6 +1450,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             results,
         ))
     }
+}
+
+fn recover_sumcheck_claim_from_final<E: ExtensionField>(
+    final_claim: E,
+    proof: &IOPProof<E>,
+    challenges: &[E],
+) -> E {
+    proof
+        .proofs
+        .iter()
+        .zip(challenges)
+        .rev()
+        .fold(final_claim, |expected, (message, challenge)| {
+            let hidden_weight = extrapolate_uni_poly(
+                E::ONE,
+                &vec![E::ZERO; message.evaluations.len()],
+                *challenge,
+            );
+            let without_claim =
+                extrapolate_uni_poly(-message.evaluations[0], &message.evaluations, *challenge);
+            (expected - without_claim) * hidden_weight.inverse()
+        })
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBackend<E, PCS>>
