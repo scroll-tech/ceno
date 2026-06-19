@@ -30,7 +30,7 @@ use crate::{
 pub struct EcallPubioCommitConfig<E: ExtensionField> {
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    digest_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    digest_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, false>, MemAddr<E>),
     mem_rw: [WriteMEM; PUBIO_COMMIT_WORDS],
 }
 
@@ -66,7 +66,7 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
         )?;
 
         let digest_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
-        let digest_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let digest_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, false>::construct_circuit(
             cb,
             digest_ptr_value.uint_unaligned().register_expr(),
             vm_state.ts,
@@ -88,7 +88,7 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
             .map(|i| {
                 WriteMEM::construct_circuit(
                     cb,
-                    digest_ptr.prev_value.as_ref().unwrap().value()
+                    digest_ptr_value.expr_unaligned()
                         + E::BaseField::from_canonical_u32((i * WORD_SIZE) as u32).expr(),
                     layout.digest_words[i].clone(),
                     layout.digest_words[i].clone(),

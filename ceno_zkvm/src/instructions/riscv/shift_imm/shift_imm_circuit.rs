@@ -77,6 +77,11 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let rd_written = UInt::new(|| "rd_written", circuit_builder)?;
 
         let outflow = circuit_builder.create_witin(|| "outflow");
+        circuit_builder.assert_const_range(
+            || "outflow in u32",
+            outflow.expr(),
+            UINT_LIMBS * LIMB_BITS,
+        )?;
         let assert_lt_config = AssertLtConfig::construct_circuit(
             circuit_builder,
             || "outflow < imm",
@@ -169,6 +174,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         };
 
         set_val!(instance, config.outflow, outflow);
+        lk_multiplicity.assert_const_range(outflow, UInt::<E>::TOTAL_BITS);
         config
             .assert_lt_config
             .assign_instance(instance, lk_multiplicity, outflow, imm)?;

@@ -334,4 +334,64 @@ mod test {
 
         MockProver::assert_satisfied_raw(&cb, raw_witin, &[insn_code], None, Some(lkm));
     }
+
+    // Soundness regression (#1296): the byte-product identity must reject an
+    // `rd` that is not the true low product. The previous v2 circuit could
+    // absorb a wrong limb into its inverse-scaled carry over BabyBear.
+    #[cfg(feature = "u16limb_circuit")]
+    #[test]
+    fn test_opcode_mul_rejects_wrong_product() {
+        use super::mulh_circuit_v2::MulhInstructionBase;
+        type E = BabyBearExt4;
+        let rs1 = 0x1234_5678u32;
+        let rs2 = 0x9abc_def0u32;
+        // differs from the true product in the least-significant byte
+        let wrong = rs1.wrapping_mul(rs2) ^ 1;
+
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let config = cb
+            .namespace(
+                || "mul_wrong",
+                |cb| {
+                    Ok(MulhInstructionBase::<E, MulOp>::construct_circuit(
+                        cb,
+                        &ProgramParams::default(),
+                    ))
+                },
+            )
+            .unwrap()
+            .unwrap();
+        let insn_code = encode_rv32(InsnKind::MUL, 2, 3, 4, 0);
+        let ([raw_witin, _], lkm) = MulhInstructionBase::<E, MulOp>::assign_instances_from_steps(
+            &config,
+            &mut ShardContext::default(),
+            cb.cs.num_witin as usize,
+            cb.cs.num_structural_witin as usize,
+            &[StepRecord::new_r_instruction(
+                3,
+                MOCK_PC_START,
+                insn_code,
+                rs1,
+                rs2,
+                Change::new(0, wrong),
+                0,
+            )],
+        )
+        .unwrap();
+        MockProver::assert_with_expected_errors(
+            &cb,
+            &[],
+            &raw_witin
+                .to_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect::<Vec<_>>(),
+            &[],
+            &[insn_code],
+            &["mul_byte"],
+            None,
+            Some(lkm),
+        );
+    }
 }

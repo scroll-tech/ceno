@@ -49,7 +49,7 @@ pub struct EcallWeierstrassDoubleAssignConfig<
     pub layout: WeierstrassDoubleAssignLayout<E, EC>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    point_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    point_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, false>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
@@ -106,7 +106,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
 
         let point_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
 
-        let point_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let point_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, false>::construct_circuit(
             cb,
             point_ptr_value.uint_unaligned().register_expr(),
             vm_state.ts,
@@ -137,7 +137,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                 WriteMEM::construct_circuit(
                     cb,
                     // mem address := point_ptr + i
-                    point_ptr.prev_value.as_ref().unwrap().value()
+                    point_ptr_value.expr_unaligned()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )

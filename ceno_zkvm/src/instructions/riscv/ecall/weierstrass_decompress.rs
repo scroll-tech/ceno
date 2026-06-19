@@ -52,8 +52,8 @@ pub struct EcallWeierstrassDecompressConfig<E: ExtensionField, EC: EllipticCurve
     pub layout: WeierstrassDecompressLayout<E, EC>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    field_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    sign_bit: OpFixedRS<E, { Platform::reg_arg1() }, true>,
+    field_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, false>, MemAddr<E>),
+    sign_bit: OpFixedRS<E, { Platform::reg_arg1() }, false>,
     mem_rw: Vec<WriteMEM>,
 }
 
@@ -113,14 +113,14 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
         )?;
 
         let field_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
-        let field_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let field_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, false>::construct_circuit(
             cb,
             field_ptr_value.uint_unaligned().register_expr(),
             vm_state.ts,
         )?;
 
         let sign_bit_value = layout.layer_exprs.wits.sign_bit;
-        let sign_bit = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
+        let sign_bit = OpFixedRS::<_, { Platform::reg_arg1() }, false>::construct_circuit(
             cb,
             [sign_bit_value.expr(), Expression::ZERO],
             vm_state.ts,
@@ -140,7 +140,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
 
         let num_limbs = <EC::BaseField as NumLimbs>::Limbs::U32;
         assert_eq!(num_limbs, 32);
-        let field_ptr_expr = field_ptr.prev_value.as_ref().unwrap().value();
+        let field_ptr_expr = field_ptr_value.expr_unaligned();
         let mut mem_rw = layout
             .input32_exprs
             .iter()

@@ -46,7 +46,7 @@ pub struct EcallKeccakConfig<E: ExtensionField> {
     pub layout: KeccakLayout<E>,
     pub(crate) vm_state: StateInOut<E>,
     pub(crate) ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    pub(crate) state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    pub(crate) state_ptr: (OpFixedRS<E, { Platform::reg_arg0() }, false>, MemAddr<E>),
     pub(crate) mem_rw: Vec<WriteMEM>,
 }
 
@@ -91,7 +91,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
 
         let state_ptr_value = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
 
-        let state_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let state_ptr = OpFixedRS::<_, { Platform::reg_arg0() }, false>::construct_circuit(
             cb,
             state_ptr_value.uint_unaligned().register_expr(),
             vm_state.ts,
@@ -120,7 +120,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakInstruction<E> {
             .map(|(i, (val_before, val_after))| {
                 WriteMEM::construct_circuit(
                     cb,
-                    state_ptr.prev_value.as_ref().unwrap().value()
+                    state_ptr_value.expr_unaligned()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )

@@ -1,11 +1,28 @@
-/// refer constraints implementation from https://github.com/openvm-org/openvm/blob/main/extensions/rv32im/circuit/src/divrem/core.rs
+//! Byte-limb (u8) DIV / DIVU / REM / REMU circuit.
+//!
+//! The Euclidean identity `dividend = divisor * quotient + remainder` is
+//! enforced over byte limbs with carries that are *genuine non-negative
+//! magnitudes* (directly range-checked), exactly as in the byte multiply
+//! circuit. This is sound over a small prime field (BabyBear, `p ~ 2^31`)
+//! because every partial product `b[i]*c[j] <= 255^2` and column sum stays far
+//! below `p`, so the field equation is a faithful integer equation.
+//!
+//! Operands are sign- or zero-extended to 64 bits; the product `divisor *
+//! quotient` is computed to 64 bits and added to the (extended) remainder, and
+//! the result is compared to the (extended) dividend. The remainder bound
+//! `|remainder| < |divisor|` is enforced with a field-safe per-byte comparison
+//! (not a single 32-bit field subtraction, which would be unsound on BabyBear).
+//! Division-by-zero pins `remainder == dividend` (via the sound identity) and
+//! `quotient == 0xFFFF_FFFF`; signed overflow (`i32::MIN / -1`) pins
+//! `quotient == dividend`, `remainder == 0`.
+
 use ceno_emul::{InsnKind, StepRecord};
 use ff_ext::{ExtensionField, FieldInto};
-use p3::field::Field;
+use p3::field::{Field, FieldAlgebra};
 
 use super::{
     super::{
-        constants::{UINT_LIMBS, UInt},
+        constants::{UINT_BYTE_LIMBS, UInt8},
         r_insn::RInstructionConfig,
     },
     RIVInstruction,
@@ -14,42 +31,81 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
+    gadgets::SignedExtendConfig,
     impl_collect_lk_and_shardram, impl_collect_shardram, impl_gpu_assign,
     instructions::{
         Instruction,
-        gpu::utils::{LkOp, LkShardramSink, emit_u16_limbs},
-        riscv::constants::LIMB_BITS,
+        gpu::utils::{LkOp, LkShardramSink, emit_byte_decomposition_ops},
     },
     structs::ProgramParams,
-    uint::Value,
+    utils::split_to_u8,
     witness::{LkMultiplicity, set_val},
 };
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::FieldAlgebra;
 use std::{array, marker::PhantomData};
 
+/// Number of bytes in the (sign/zero-extended) 64-bit operands and product.
+const LONG_BYTES: usize = 2 * UINT_BYTE_LIMBS;
+/// Bits used to range-check each product byte-column carry. Honest carry is at
+/// most `~8 * 255^2 / 256 ~ 2040 < 2^16`, and the column sums stay far below the
+/// field modulus, so a 16-bit bound admits the honest witness while preventing
+/// any field wraparound that could create a second solution.
+const CARRY_BITS: usize = 16;
+const BYTE_MASK: u64 = 0xff;
+
 pub struct DivRemConfig<E: ExtensionField> {
-    pub(crate) dividend: UInt<E>, // rs1_read
-    pub(crate) divisor: UInt<E>,  // rs2_read
-    pub(crate) quotient: UInt<E>,
-    pub(crate) remainder: UInt<E>,
+    pub(crate) dividend: UInt8<E>, // rs1_read
+    pub(crate) divisor: UInt8<E>,  // rs2_read
+    pub(crate) quotient: UInt8<E>,
+    pub(crate) remainder: UInt8<E>,
     pub(crate) r_insn: RInstructionConfig<E>,
 
-    pub(crate) dividend_sign: WitIn,
-    pub(crate) divisor_sign: WitIn,
-    pub(crate) quotient_sign: WitIn,
-    pub(crate) remainder_zero: WitIn,
+    // Sign bits (signed opcodes only).
+    pub(crate) dividend_sign: Option<SignedExtendConfig<E>>,
+    pub(crate) divisor_sign: Option<SignedExtendConfig<E>>,
+    pub(crate) quotient_sign: Option<SignedExtendConfig<E>>,
+    pub(crate) remainder_sign: Option<SignedExtendConfig<E>>,
+
+    // `divisor * quotient` byte product and its column carries.
+    pub(crate) prod: [WitIn; LONG_BYTES],
+    pub(crate) prod_carry: [WitIn; LONG_BYTES],
+    // Carries of `prod + remainder == dividend` (64-bit, byte add).
+    pub(crate) add_carry: [WitIn; LONG_BYTES],
+
+    // Division-by-zero detection.
     pub(crate) divisor_zero: WitIn,
     pub(crate) divisor_sum_inv: WitIn,
+    // Whether remainder is non-zero (for the sign rule); signed opcodes only.
     pub(crate) remainder_sum_inv: WitIn,
-    pub(crate) remainder_inv: [WitIn; UINT_LIMBS],
-    pub(crate) sign_xor: WitIn,
-    pub(crate) remainder_prime: UInt<E>, // r'
-    pub(crate) lt_marker: [WitIn; UINT_LIMBS],
+    pub(crate) remainder_is_zero: Option<WitIn>,
+    // Signed overflow (i32::MIN / -1); signed opcodes only.
+    pub(crate) is_overflow: Option<WitIn>,
+
+    // Absolute values |divisor|, |remainder| and their negation carries.
+    pub(crate) abs_divisor: [WitIn; UINT_BYTE_LIMBS],
+    pub(crate) abs_divisor_carry: [WitIn; UINT_BYTE_LIMBS],
+    pub(crate) abs_remainder: [WitIn; UINT_BYTE_LIMBS],
+    pub(crate) abs_remainder_carry: [WitIn; UINT_BYTE_LIMBS],
+
+    // `|remainder| < |divisor|` per-byte comparison witnesses.
+    pub(crate) lt_marker: [WitIn; UINT_BYTE_LIMBS],
     pub(crate) lt_diff: WitIn,
+
+    phantom: PhantomData<E>,
 }
 
 pub struct ArithInstruction<E, I>(PhantomData<(E, I)>);
+
+/// `(signed, is_div)` for the opcode.
+const fn op_kind(kind: InsnKind) -> (bool, bool) {
+    match kind {
+        InsnKind::DIV => (true, true),
+        InsnKind::REM => (true, false),
+        InsnKind::DIVU => (false, true),
+        InsnKind::REMU => (false, false),
+        _ => panic!("unsupported instruction kind"),
+    }
+}
 
 impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E, I> {
     type InstructionConfig = DivRemConfig<E>;
@@ -69,30 +125,18 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         cb: &mut CircuitBuilder<E>,
         _params: &ProgramParams,
     ) -> Result<Self::InstructionConfig, ZKVMError> {
-        assert_eq!(UInt::<E>::TOTAL_BITS, u32::BITS as usize);
-        assert_eq!(UInt::<E>::LIMB_BITS, 16);
-        assert_eq!(UInt::<E>::NUM_LIMBS, 2);
+        let (signed, is_div) = op_kind(I::INST_KIND);
 
-        // 32-bit value from rs1
-        let dividend = UInt::new_unchecked(|| "dividend", cb)?;
-        // 32-bit value from rs2
-        let divisor = UInt::new_unchecked(|| "divisor", cb)?;
-        let quotient = UInt::new(|| "quotient", cb)?;
-        let remainder = UInt::new(|| "remainder", cb)?;
+        let dividend = UInt8::new(|| "dividend", cb)?;
+        let divisor = UInt8::new(|| "divisor", cb)?;
+        let quotient = UInt8::new(|| "quotient", cb)?;
+        let remainder = UInt8::new(|| "remainder", cb)?;
 
-        let dividend_expr = dividend.expr();
-        let divisor_expr = divisor.expr();
-        let quotient_expr = quotient.expr();
-        let remainder_expr = remainder.expr();
-
-        // TODO determine whether any optimizations are possible for getting
-        // just one of quotient or remainder
-        let rd_written_e = match I::INST_KIND {
-            InsnKind::DIVU | InsnKind::DIV => quotient.register_expr(),
-            InsnKind::REMU | InsnKind::REM => remainder.register_expr(),
-            _ => unreachable!("Unsupported instruction kind"),
+        let rd_written_e = if is_div {
+            quotient.register_expr()
+        } else {
+            remainder.register_expr()
         };
-
         let r_insn = RInstructionConfig::<E>::construct_circuit(
             cb,
             I::INST_KIND,
@@ -101,266 +145,249 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             rd_written_e,
         )?;
 
-        let dividend_sign = cb.create_bit(|| "dividend_sign".to_string())?;
-        let divisor_sign = cb.create_bit(|| "divisor_sign".to_string())?;
-        let dividend_ext: Expression<E> =
-            dividend_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
-        let divisor_ext: Expression<E> =
-            divisor_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
-        let carry_divide = E::BaseField::from_canonical_u32(1 << UInt::<E>::LIMB_BITS).inverse();
-        let mut carry_expr: [Expression<E>; UINT_LIMBS] =
-            array::from_fn(|_| E::BaseField::ZERO.expr());
+        // Sign bits of the most-significant byte for signed opcodes.
+        let (dividend_sign, divisor_sign, quotient_sign, remainder_sign) = if signed {
+            (
+                Some(SignedExtendConfig::construct_byte(
+                    cb,
+                    dividend.expr()[UINT_BYTE_LIMBS - 1].clone(),
+                )?),
+                Some(SignedExtendConfig::construct_byte(
+                    cb,
+                    divisor.expr()[UINT_BYTE_LIMBS - 1].clone(),
+                )?),
+                Some(SignedExtendConfig::construct_byte(
+                    cb,
+                    quotient.expr()[UINT_BYTE_LIMBS - 1].clone(),
+                )?),
+                Some(SignedExtendConfig::construct_byte(
+                    cb,
+                    remainder.expr()[UINT_BYTE_LIMBS - 1].clone(),
+                )?),
+            )
+        } else {
+            (None, None, None, None)
+        };
 
-        for i in 0..UINT_LIMBS {
-            let expected_limb = if i == 0 {
-                E::BaseField::ZERO.expr()
+        let sign_expr = |s: &Option<SignedExtendConfig<E>>| match s {
+            Some(c) => c.expr(),
+            None => Expression::ZERO,
+        };
+        let byte_mask: Expression<E> = BYTE_MASK.into();
+        let extend =
+            |reg: &[Expression<E>], sign: &Option<SignedExtendConfig<E>>| -> Vec<Expression<E>> {
+                (0..LONG_BYTES)
+                    .map(|i| {
+                        if i < UINT_BYTE_LIMBS {
+                            reg[i].clone()
+                        } else {
+                            sign_expr(sign) * byte_mask.clone()
+                        }
+                    })
+                    .collect()
+            };
+
+        let c_ext = extend(&divisor.expr(), &divisor_sign);
+        let q_ext = extend(&quotient.expr(), &quotient_sign);
+        let r_ext = extend(&remainder.expr(), &remainder_sign);
+        let b_ext = extend(&dividend.expr(), &dividend_sign);
+
+        // ---- product P = divisor * quotient (low 64 bits) ----
+        let prod: [WitIn; LONG_BYTES] = array::from_fn(|i| cb.create_witin(|| format!("prod_{i}")));
+        for (i, pair) in prod.chunks(2).enumerate() {
+            cb.assert_double_u8(|| format!("prod_{i}_u8"), pair[0].expr(), pair[1].expr())?;
+        }
+        let prod_carry: [WitIn; LONG_BYTES] =
+            array::from_fn(|i| cb.create_witin(|| format!("prod_carry_{i}")));
+        let base: Expression<E> = (1u64 << 8).into();
+        for i in 0..LONG_BYTES {
+            let mut m = Expression::ZERO;
+            for j in 0..=i {
+                if i - j < LONG_BYTES {
+                    m += c_ext[j].clone() * q_ext[i - j].clone();
+                }
+            }
+            let carry_in = if i > 0 {
+                prod_carry[i - 1].expr()
             } else {
-                carry_expr[i - 1].clone()
-            } + (0..=i).fold(remainder_expr[i].expr(), |ac, k| {
-                ac + (divisor_expr[k].clone() * quotient_expr[i - k].clone())
-            });
-            carry_expr[i] = carry_divide.expr() * (expected_limb - dividend_expr[i].clone());
-        }
-
-        for (i, carry) in carry_expr.iter().enumerate() {
+                Expression::ZERO
+            };
+            cb.require_zero(
+                || format!("prod_byte_{i}"),
+                m + carry_in - prod[i].expr() - prod_carry[i].expr() * base.clone(),
+            )?;
             cb.assert_const_range(
-                || format!("range_check_carry_{i}"),
-                carry.clone(),
-                // carry up to 16 + 2 = 18 bits
-                LIMB_BITS + 2,
+                || format!("prod_carry_{i}_range"),
+                prod_carry[i].expr(),
+                CARRY_BITS,
             )?;
         }
 
-        let quotient_sign = cb.create_bit(|| "quotient_sign".to_string())?;
-        let quotient_ext: Expression<E> =
-            quotient_sign.expr() * E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr();
-        let mut carry_ext: [Expression<E>; UINT_LIMBS] =
-            array::from_fn(|_| E::BaseField::ZERO.expr());
+        // ---- signed overflow detection (i32::MIN / -1) ----
+        let is_overflow = if signed {
+            let ov = cb.create_bit(|| "is_overflow")?;
+            // When overflow: dividend == 0x8000_0000 and divisor == 0xFFFF_FFFF.
+            let dividend_expr = dividend.expr();
+            let divisor_expr = divisor.expr();
+            let min_bytes = [0u64, 0, 0, 0x80];
+            for i in 0..UINT_BYTE_LIMBS {
+                cb.condition_require_zero(
+                    || format!("overflow_dividend_{i}"),
+                    ov.expr(),
+                    dividend_expr[i].clone() - Expression::from(min_bytes[i]),
+                )?;
+                cb.condition_require_zero(
+                    || format!("overflow_divisor_{i}"),
+                    ov.expr(),
+                    divisor_expr[i].clone() - byte_mask.clone(),
+                )?;
+            }
+            Some(ov)
+        } else {
+            None
+        };
+        let not_overflow = match &is_overflow {
+            Some(ov) => Expression::ONE - ov.expr(),
+            None => Expression::ONE,
+        };
 
-        let remainder_zero = cb.create_bit(|| "remainder_zero".to_string())?;
-        for j in 0..UINT_LIMBS {
-            let expected_limb =
-                if j == 0 {
-                    carry_expr[UINT_LIMBS - 1].clone()
-                } else {
-                    carry_ext[j - 1].clone()
-                } + ((j + 1)..UINT_LIMBS).fold(E::BaseField::ZERO.expr(), |acc, k| {
-                    acc + (divisor_expr[k].clone() * quotient_expr[UINT_LIMBS + j - k].clone())
-                }) + (0..(j + 1)).fold(E::BaseField::ZERO.expr(), |acc, k| {
-                    acc + (divisor_expr[k].clone() * quotient_ext.expr())
-                        + (quotient_expr[k].clone() * divisor_ext.expr())
-                }) + (E::BaseField::ONE.expr() - remainder_zero.expr()) * dividend_ext.clone();
-            carry_ext[j] = carry_divide.expr() * (expected_limb - dividend_ext.clone());
+        // ---- identity: prod + remainder == dividend (64-bit), unless overflow ----
+        let add_carry: [WitIn; LONG_BYTES] =
+            array::from_fn(|i| cb.create_witin(|| format!("add_carry_{i}")));
+        for i in 0..LONG_BYTES {
+            let carry_in = if i > 0 {
+                add_carry[i - 1].expr()
+            } else {
+                Expression::ZERO
+            };
+            // prod[i] + r_ext[i] + carry_in - b_ext[i] - add_carry[i] * 2^8 == 0
+            let add_expr = prod[i].expr() + r_ext[i].clone() + carry_in
+                - b_ext[i].clone()
+                - add_carry[i].expr() * base.clone();
+            cb.condition_require_zero(|| format!("add_byte_{i}"), not_overflow.clone(), add_expr)?;
+            // add carry is a single bit (sum of two bytes + carry < 2^9).
+            cb.assert_bit(|| format!("add_carry_{i}_bit"), add_carry[i].expr())?;
         }
 
-        for (i, carry_ext) in carry_ext.iter().enumerate() {
-            cb.assert_const_range(
-                || format!("range_check_carry_ext_{i}"),
-                carry_ext.clone(),
-                // carry up to 16 + 2 = 18 bits
-                LIMB_BITS + 2,
-            )?;
-        }
-
-        let divisor_zero = cb.create_bit(|| "divisor_zero".to_string())?;
-        cb.assert_bit(
-            || "divisor_remainder_not_both_zero",
-            divisor_zero.expr() + remainder_zero.expr(),
-        )?;
-
-        for (i, (divisor_expr, quotient_expr)) in
-            divisor_expr.iter().zip(quotient_expr.iter()).enumerate()
-        {
-            cb.condition_require_zero(
-                || format!("check_divisor_zero_{}", i),
-                divisor_zero.expr(),
-                divisor_expr.clone(),
-            )?;
-            cb.condition_require_zero(
-                || "check_quotient_on_divisor_zero".to_string(),
-                divisor_zero.expr(),
-                quotient_expr.clone()
-                    - E::BaseField::from_canonical_u32((1 << LIMB_BITS) - 1).expr(),
-            )?;
-        }
-        // divisor_sum is guaranteed to be non-zero if divisor is non-zero since we assume
-        // each limb of divisor to be within [0, 2^LIMB_BITS) already.
-        // To constrain that if divisor = 0 then divisor_zero = 1, we check that if divisor_zero = 0 then divisor_sum is non-zero using divisor_sum_inv.
-        let divisor_sum_inv = cb.create_witin(|| "divisor_sum_inv".to_string());
+        // ---- division-by-zero: divisor == 0 ----
+        let divisor_zero = cb.create_bit(|| "divisor_zero")?;
+        let divisor_expr = divisor.expr();
         let divisor_sum: Expression<E> = divisor_expr
             .iter()
-            .fold(E::BaseField::ZERO.expr(), |acc, d| acc + d.clone());
-        let divisor_not_zero: Expression<E> = E::BaseField::ONE.expr() - divisor_zero.expr();
+            .fold(Expression::ZERO, |acc, d| acc + d.clone());
+        // if divisor_zero then every divisor byte is zero
+        for (i, d) in divisor_expr.iter().enumerate() {
+            cb.condition_require_zero(
+                || format!("divisor_zero_byte_{i}"),
+                divisor_zero.expr(),
+                d.clone(),
+            )?;
+        }
+        // if not divisor_zero then divisor_sum is invertible (non-zero)
+        let divisor_sum_inv = cb.create_witin(|| "divisor_sum_inv");
         cb.condition_require_one(
-            || "check_divisor_sum_inv",
-            divisor_not_zero.clone(),
+            || "divisor_sum_inv",
+            Expression::ONE - divisor_zero.expr(),
             divisor_sum.clone() * divisor_sum_inv.expr(),
         )?;
-
-        for (i, remainder_expr) in remainder_expr.iter().enumerate() {
+        // when divisor is zero, quotient must be all ones (0xFFFF_FFFF = -1 / 2^32-1)
+        let quotient_expr = quotient.expr();
+        for (i, q) in quotient_expr.iter().enumerate() {
             cb.condition_require_zero(
-                || format!("check_divisor_zero_{}", i),
-                remainder_zero.expr(),
-                remainder_expr.clone(),
+                || format!("quotient_zero_div_{i}"),
+                divisor_zero.expr(),
+                q.clone() - byte_mask.clone(),
             )?;
         }
-        let remainder_sum_inv = cb.create_witin(|| "remainder_sum_inv".to_string());
+
+        // ---- signed overflow result pins: quotient == dividend, remainder == 0 ----
+        if let Some(ov) = &is_overflow {
+            let dividend_expr = dividend.expr();
+            let quotient_expr = quotient.expr();
+            let remainder_expr = remainder.expr();
+            for i in 0..UINT_BYTE_LIMBS {
+                cb.condition_require_zero(
+                    || format!("overflow_quotient_{i}"),
+                    ov.expr(),
+                    quotient_expr[i].clone() - dividend_expr[i].clone(),
+                )?;
+                cb.condition_require_zero(
+                    || format!("overflow_remainder_{i}"),
+                    ov.expr(),
+                    remainder_expr[i].clone(),
+                )?;
+            }
+        }
+
+        // ---- remainder sign rule: sign(remainder) == sign(dividend) when r != 0 ----
+        let remainder_expr = remainder.expr();
         let remainder_sum: Expression<E> = remainder_expr
             .iter()
-            .fold(E::BaseField::ZERO.expr(), |acc, r| acc + r.clone());
-        let divisor_remainder_not_zero: Expression<E> =
-            E::BaseField::ONE.expr() - divisor_zero.expr() - remainder_zero.expr();
-        cb.condition_require_one(
-            || "check_remainder_sum_inv",
-            divisor_remainder_not_zero,
-            remainder_sum.clone() * remainder_sum_inv.expr(),
+            .fold(Expression::ZERO, |acc, r| acc + r.clone());
+        let remainder_sum_inv = cb.create_witin(|| "remainder_sum_inv");
+        let remainder_is_zero = if signed {
+            // is_zero == 1 iff remainder == 0, via the standard inverse gadget:
+            //   is_zero * sum == 0   and   is_zero + sum * inv == 1
+            let is_zero = cb.create_witin(|| "remainder_is_zero");
+            cb.require_zero(
+                || "remainder_is_zero_mul",
+                is_zero.expr() * remainder_sum.clone(),
+            )?;
+            cb.require_zero(
+                || "remainder_is_zero_inv",
+                is_zero.expr() + remainder_sum.clone() * remainder_sum_inv.expr() - Expression::ONE,
+            )?;
+            // when remainder != 0, sign(remainder) must equal sign(dividend)
+            let r_sign = sign_expr(&remainder_sign);
+            let b_sign = sign_expr(&dividend_sign);
+            cb.require_zero(
+                || "remainder_sign_matches_dividend",
+                (Expression::ONE - is_zero.expr()) * (b_sign - r_sign),
+            )?;
+            Some(is_zero)
+        } else {
+            None
+        };
+
+        // ---- absolute values |divisor|, |remainder| ----
+        let (abs_divisor, abs_divisor_carry) =
+            constrain_abs(cb, "abs_divisor", &divisor.expr(), &divisor_sign, &base)?;
+        let (abs_remainder, abs_remainder_carry) = constrain_abs(
+            cb,
+            "abs_remainder",
+            &remainder.expr(),
+            &remainder_sign,
+            &base,
         )?;
 
-        // TODO: can directly define sign_xor as expr?
-        // Tried once, it will cause degree too high (although increases just one).
-        // So the current degree is already at the brink of maximal supported.
-        // The high degree mostly comes from the carry expressions.
-        let sign_xor = cb.create_witin(|| "sign_xor".to_string());
-        cb.require_equal(
-            || "sign_xor_zero",
-            dividend_sign.expr() + divisor_sign.expr()
-                - E::BaseField::from_canonical_u32(2).expr()
-                    * dividend_sign.expr()
-                    * divisor_sign.expr(),
-            sign_xor.expr(),
-        )?;
-
-        let quotient_sum: Expression<E> = quotient_expr
-            .iter()
-            .fold(E::BaseField::ZERO.expr(), |acc, q| acc + q.clone());
-        cb.condition_require_zero(
-            || "check_quotient_sign_eq_xor",
-            quotient_sum * divisor_not_zero.clone(),
-            quotient_sign.expr() - sign_xor.expr(),
-        )?;
-        cb.condition_require_zero(
-            || "check_quotient_sign_zero_when_not_eq_xor",
-            (quotient_sign.expr() - sign_xor.expr()) * divisor_not_zero.clone(),
-            quotient_sign.expr(),
-        )?;
-
-        let sign_mask = E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1));
-
-        let remainder_prime = UInt::<E>::new_unchecked(|| "remainder_prime", cb)?;
-        let remainder_prime_expr = remainder_prime.expr();
-        let mut carry_lt: [Expression<E>; UINT_LIMBS] =
-            array::from_fn(|_| E::BaseField::ZERO.expr());
-        let remainder_inv: [_; UINT_LIMBS] =
-            array::from_fn(|i| cb.create_witin(|| format!("remainder_inv_{i}")));
-
-        for i in 0..UINT_LIMBS {
-            // When the signs of remainer (i.e., dividend) and divisor are the same, r_prime = r.
-            cb.condition_require_zero(
-                || "r_rp_equal_when_xor_zero",
-                E::BaseField::ONE.expr() - sign_xor.expr(),
-                remainder_expr[i].clone() - remainder_prime_expr[i].clone(),
-            )?;
-
-            // When the signs of remainder and divisor are different, r_prime = -r. To constrain this, we
-            // first ensure each r[i] + r_prime[i] + carry[i - 1] is in {0, 2^LIMB_BITS}, and
-            // that when the sum is 0 then r_prime[i] = 0 as well. Passing both constraints
-            // implies that 0 <= r_prime[i] <= 2^LIMB_BITS, and in order to ensure r_prime[i] !=
-            // 2^LIMB_BITS we check that r_prime[i] - 2^LIMB_BITS has an inverse in F.
-            let last_carry = if i > 0 {
-                carry_lt[i - 1].clone()
-            } else {
-                E::BaseField::ZERO.expr()
-            };
-            carry_lt[i] =
-                (last_carry.clone() + remainder_expr[i].clone() + remainder_prime_expr[i].clone())
-                    * carry_divide.expr();
-            cb.condition_require_zero(
-                || "check_carry_lt",
-                sign_xor.expr(),
-                (carry_lt[i].clone() - last_carry.clone())
-                    * (carry_lt[i].clone() - E::BaseField::ONE.expr()),
-            )?;
-            cb.condition_require_zero(
-                || "check_remainder_prime_not_max",
-                sign_xor.expr(),
-                (remainder_prime_expr[i].clone()
-                    - E::BaseField::from_canonical_u32(1 << LIMB_BITS).expr())
-                    * remainder_inv[i].expr()
-                    - E::BaseField::ONE.expr(),
-            )?;
-            cb.condition_require_zero(
-                || "check_remainder_prime_zero",
-                sign_xor.expr() * (E::BaseField::ONE.expr() - carry_lt[i].clone()),
-                remainder_prime_expr[i].clone(),
-            )?;
-        }
-
-        let lt_marker: [_; UINT_LIMBS] = array::from_fn(|i| {
-            cb.create_bit(|| format!("lt_marker_{i}"))
-                .expect("create bit error")
-        });
-        let mut prefix_sum: Expression<E> = divisor_zero.expr() + remainder_zero.expr();
+        // ---- remainder bound: |remainder| < |divisor| (skipped when divisor == 0) ----
+        let lt_marker: [WitIn; UINT_BYTE_LIMBS] =
+            array::from_fn(|i| cb.create_bit(|| format!("lt_marker_{i}")).expect("bit"));
         let lt_diff = cb.create_witin(|| "lt_diff");
-
-        for i in (0..UINT_LIMBS).rev() {
-            let diff = remainder_prime_expr[i].clone()
-                * (E::BaseField::from_canonical_u8(2).expr() * divisor_sign.expr()
-                    - E::BaseField::ONE.expr())
-                + divisor_expr[i].clone()
-                    * (E::BaseField::ONE.expr()
-                        - E::BaseField::from_canonical_u8(2).expr() * divisor_sign.expr());
+        let mut prefix_sum = divisor_zero.expr();
+        for i in (0..UINT_BYTE_LIMBS).rev() {
+            // diff = |divisor|[i] - |remainder|[i]; positive at the most-significant
+            // differing byte means |remainder| < |divisor|.
+            let diff = abs_divisor[i].expr() - abs_remainder[i].expr();
             prefix_sum += lt_marker[i].expr();
             cb.require_zero(
-                || "prefix_sum_not_zero_or_diff_zero",
-                (E::BaseField::ONE.expr() - prefix_sum.clone()) * diff.clone(),
+                || format!("lt_prefix_{i}"),
+                (Expression::ONE - prefix_sum.clone()) * diff.clone(),
             )?;
             cb.condition_require_zero(
-                || "check_lt_diff_equal_diff".to_string(),
+                || format!("lt_diff_eq_{i}"),
                 lt_marker[i].expr(),
-                lt_diff.expr() - diff.clone(),
+                lt_diff.expr() - diff,
             )?;
         }
-
-        // - If r_prime != divisor, then prefix_sum = 1 so marker[i] must be 1 iff i is the first index
-        //   where diff != 0. Constrains that diff == lt_diff where lt_diff is non-zero.
-        // - If r_prime == divisor, then prefix_sum = 0. Here, prefix_sum cannot be 1 because all diff are
-        //   zero, making diff == lt_diff fails.
-        cb.require_one(|| "prefix_sum_one", prefix_sum.clone())?;
-
-        // When not special case (divisor = 0 or remainder = 0), ensure lt_diff
-        // is not zero by a range check
+        // exactly one marker set, unless divisor is zero
+        cb.require_one(|| "lt_prefix_one", prefix_sum)?;
+        // when divisor != 0, the selected diff must be in [1, 256): range-check diff-1 to 8 bits.
         cb.assert_dynamic_range(
-            || "lt_diff_nonzero",
-            (lt_diff.expr() - E::BaseField::ONE.expr())
-                * (E::BaseField::ONE.expr() - divisor_zero.expr() - remainder_zero.expr()),
-            E::BaseField::from_canonical_u32(16).expr(),
+            || "lt_diff_positive",
+            (lt_diff.expr() - Expression::ONE) * (Expression::ONE - divisor_zero.expr()),
+            E::BaseField::from_canonical_u32(8).expr(),
         )?;
-
-        match I::INST_KIND {
-            InsnKind::DIV | InsnKind::REM => {
-                cb.assert_dynamic_range(
-                    || "div_rem_range_check_dividend_last",
-                    E::BaseField::from_canonical_u32(2).expr()
-                        * (dividend_expr[UINT_LIMBS - 1].clone()
-                            - dividend_sign.expr() * sign_mask.expr()),
-                    E::BaseField::from_canonical_u32(16).expr(),
-                )?;
-                cb.assert_dynamic_range(
-                    || "div_rem_range_check_divisor_last",
-                    E::BaseField::from_canonical_u32(2).expr()
-                        * (divisor_expr[UINT_LIMBS - 1].clone()
-                            - divisor_sign.expr() * sign_mask.expr()),
-                    E::BaseField::from_canonical_u32(16).expr(),
-                )?;
-            }
-            InsnKind::DIVU | InsnKind::REMU => {
-                cb.require_zero(
-                    || "divu_remu_sign_equal_zero",
-                    dividend_sign.expr() + divisor_sign.expr(),
-                )?;
-            }
-            _ => unreachable!("Unsupported instruction kind"),
-        }
 
         Ok(DivRemConfig {
             dividend,
@@ -371,15 +398,22 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
             dividend_sign,
             divisor_sign,
             quotient_sign,
-            remainder_zero,
+            remainder_sign,
+            prod,
+            prod_carry,
+            add_carry,
             divisor_zero,
             divisor_sum_inv,
             remainder_sum_inv,
-            remainder_inv,
-            sign_xor,
-            remainder_prime,
+            remainder_is_zero,
+            is_overflow,
+            abs_divisor,
+            abs_divisor_carry,
+            abs_remainder,
+            abs_remainder_carry,
             lt_marker,
             lt_diff,
+            phantom: PhantomData,
         })
     }
 
@@ -398,389 +432,389 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ArithInstruction<E
         lkm: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        // dividend = quotient * divisor + remainder
+        let (signed, _is_div) = op_kind(I::INST_KIND);
         let dividend = step.rs1().unwrap().value;
-        let dividend_value = Value::new_unchecked(dividend);
-        let dividend_limbs = dividend_value.as_u16_limbs();
-        config.dividend.assign_limbs(instance, dividend_limbs);
-
         let divisor = step.rs2().unwrap().value;
-        let divisor_value = Value::new_unchecked(divisor);
-        let divisor_limbs = divisor_value.as_u16_limbs();
-        config.divisor.assign_limbs(instance, divisor_limbs);
 
-        // R-type instruction
+        let w = compute_divrem(signed, dividend, divisor);
+        let quotient = w.quotient;
+        let remainder = w.remainder;
+
+        // operand byte assignment + u8 range lookups
+        let dividend_bytes = split_to_u8::<u16>(dividend);
+        let divisor_bytes = split_to_u8::<u16>(divisor);
+        let quotient_bytes = split_to_u8::<u16>(quotient);
+        let remainder_bytes = split_to_u8::<u16>(remainder);
+        config.dividend.assign_limbs(instance, &dividend_bytes);
+        config.divisor.assign_limbs(instance, &divisor_bytes);
+        config.quotient.assign_limbs(instance, &quotient_bytes);
+        config.remainder.assign_limbs(instance, &remainder_bytes);
+        for bytes in [
+            &dividend_bytes,
+            &divisor_bytes,
+            &quotient_bytes,
+            &remainder_bytes,
+        ] {
+            for pair in bytes.chunks(2) {
+                lkm.assert_double_u8(pair[0] as u64, pair[1] as u64);
+            }
+        }
+
         config
             .r_insn
             .assign_instance(instance, shard_ctx, lkm, step)?;
 
-        let (signed, _div) = match I::INST_KIND {
-            InsnKind::DIV => (true, true),
-            InsnKind::REM => (true, false),
-            InsnKind::DIVU => (false, true),
-            InsnKind::REMU => (false, false),
-            _ => unreachable!("Unsupported instruction kind"),
-        };
+        // signs
+        for (cfg, val) in [
+            (&config.dividend_sign, dividend),
+            (&config.divisor_sign, divisor),
+            (&config.quotient_sign, quotient),
+            (&config.remainder_sign, remainder),
+        ] {
+            if let Some(s) = cfg {
+                s.assign_instance(instance, lkm, ((val >> 24) & 0xff) as u64)?;
+            }
+        }
 
-        let (quotient, remainder, dividend_sign, divisor_sign, quotient_sign, case) =
-            run_divrem(signed, &u32_to_limbs(&dividend), &u32_to_limbs(&divisor));
+        // product bytes + carries
+        for (i, (p, c)) in config.prod.iter().zip(config.prod_carry.iter()).enumerate() {
+            set_val!(instance, p, w.prod[i] as u64);
+            set_val!(instance, c, w.prod_carry[i] as u64);
+            lkm.assert_const_range(w.prod_carry[i] as u64, CARRY_BITS);
+        }
+        for pair in w.prod.chunks(2) {
+            lkm.assert_double_u8(pair[0] as u64, pair[1] as u64);
+        }
 
-        let quotient_val = Value::new(limbs_to_u32(&quotient), lkm);
-        let remainder_val = Value::new(limbs_to_u32(&remainder), lkm);
+        // add carries
+        for (i, ac) in config.add_carry.iter().enumerate() {
+            set_val!(instance, ac, w.add_carry[i] as u64);
+        }
 
-        config
-            .quotient
-            .assign_limbs(instance, quotient_val.as_u16_limbs());
-        config
-            .remainder
-            .assign_limbs(instance, remainder_val.as_u16_limbs());
-
-        set_val!(instance, config.dividend_sign, dividend_sign as u64);
-        set_val!(instance, config.divisor_sign, divisor_sign as u64);
-        set_val!(instance, config.quotient_sign, quotient_sign as u64);
+        // divisor zero
+        set_val!(instance, config.divisor_zero, w.divisor_zero as u64);
+        let divisor_sum_f = divisor_bytes.iter().fold(E::BaseField::ZERO, |acc, b| {
+            acc + E::BaseField::from_canonical_u16(*b)
+        });
         set_val!(
             instance,
-            config.divisor_zero,
-            (case == DivRemCoreSpecialCase::ZeroDivisor) as u64
+            config.divisor_sum_inv,
+            divisor_sum_f.try_inverse().unwrap_or(E::BaseField::ZERO)
         );
 
-        let carries = run_mul_carries(
-            signed,
-            &u32_to_limbs(&divisor),
-            &quotient,
-            &remainder,
-            quotient_sign,
-        );
-
-        for i in 0..UINT_LIMBS {
-            lkm.assert_dynamic_range(carries[i] as u64, LIMB_BITS as u64 + 2);
-            lkm.assert_dynamic_range(carries[i + UINT_LIMBS] as u64, LIMB_BITS as u64 + 2);
-        }
-
-        let sign_xor = dividend_sign ^ divisor_sign;
-        let remainder_prime = if sign_xor {
-            negate(&remainder)
-        } else {
-            remainder
-        };
-        let remainder_zero =
-            remainder.iter().all(|&v| v == 0) && case != DivRemCoreSpecialCase::ZeroDivisor;
-        set_val!(instance, config.remainder_zero, remainder_zero as u64);
-
-        if signed {
-            let dividend_sign_mask = if dividend_sign {
-                1 << (LIMB_BITS - 1)
-            } else {
-                0
-            };
-            let divisor_sign_mask = if divisor_sign {
-                1 << (LIMB_BITS - 1)
-            } else {
-                0
-            };
-            lkm.assert_dynamic_range(
-                (dividend_limbs[UINT_LIMBS - 1] as u64 - dividend_sign_mask) << 1,
-                16,
-            );
-            lkm.assert_dynamic_range(
-                (divisor_limbs[UINT_LIMBS - 1] as u64 - divisor_sign_mask) << 1,
-                16,
-            );
-        }
-
-        let divisor_sum_f = divisor_limbs.iter().fold(E::BaseField::ZERO, |acc, c| {
-            acc + E::BaseField::from_canonical_u16(*c)
+        let remainder_sum_f = remainder_bytes.iter().fold(E::BaseField::ZERO, |acc, b| {
+            acc + E::BaseField::from_canonical_u16(*b)
         });
-        let divisor_sum_inv_f = divisor_sum_f.try_inverse().unwrap_or(E::BaseField::ZERO);
-
-        let remainder_sum_f = remainder.iter().fold(E::BaseField::ZERO, |acc, r| {
-            acc + E::BaseField::from_canonical_u32(*r)
-        });
-        let remainder_sum_inv_f = remainder_sum_f.try_inverse().unwrap_or(E::BaseField::ZERO);
-
-        let (lt_diff_idx, lt_diff_val) = if case == DivRemCoreSpecialCase::None && !remainder_zero {
-            let idx = run_sltu_diff_idx(&u32_to_limbs(&divisor), &remainder_prime, divisor_sign);
-            let val = if divisor_sign {
-                remainder_prime[idx] - divisor_limbs[idx] as u32
-            } else {
-                divisor_limbs[idx] as u32 - remainder_prime[idx]
-            };
-            lkm.assert_dynamic_range(val as u64 - 1, 16);
-            (idx, val)
-        } else {
-            lkm.assert_dynamic_range(0, 16);
-            (UINT_LIMBS, 0)
-        };
-
-        let remainder_prime_f = remainder_prime.map(E::BaseField::from_canonical_u32);
-
-        set_val!(instance, config.divisor_sum_inv, divisor_sum_inv_f);
-        set_val!(instance, config.remainder_sum_inv, remainder_sum_inv_f);
-        for i in 0..UINT_LIMBS {
-            set_val!(
-                instance,
-                config.remainder_inv[i],
-                (remainder_prime_f[i] - E::BaseField::from_canonical_u32(1 << LIMB_BITS)).inverse()
-            );
-            set_val!(instance, config.lt_marker[i], (i == lt_diff_idx) as u64);
-        }
-        set_val!(instance, config.sign_xor, sign_xor as u64);
-        config.remainder_prime.assign_limbs(
+        set_val!(
             instance,
-            remainder_prime
-                .iter()
-                .map(|x| *x as u16)
-                .collect::<Vec<_>>()
-                .as_slice(),
+            config.remainder_sum_inv,
+            remainder_sum_f.try_inverse().unwrap_or(E::BaseField::ZERO)
         );
-        set_val!(instance, config.lt_diff, lt_diff_val as u64);
+        if let Some(is_zero) = &config.remainder_is_zero {
+            set_val!(instance, is_zero, (remainder == 0) as u64);
+        }
+
+        // overflow
+        if let Some(ov) = &config.is_overflow {
+            set_val!(instance, ov, w.is_overflow as u64);
+        }
+
+        // absolute values
+        assign_abs(
+            instance,
+            lkm,
+            &config.abs_divisor,
+            &config.abs_divisor_carry,
+            divisor,
+            w.divisor_neg,
+        );
+        assign_abs(
+            instance,
+            lkm,
+            &config.abs_remainder,
+            &config.abs_remainder_carry,
+            remainder,
+            w.remainder_neg,
+        );
+
+        // comparison markers / diff
+        let abs_divisor_bytes = split_to_u8::<u16>(w.abs_divisor);
+        let abs_remainder_bytes = split_to_u8::<u16>(w.abs_remainder);
+        let (lt_idx, lt_diff) = if w.divisor_zero {
+            (UINT_BYTE_LIMBS, 0u32)
+        } else {
+            let mut idx = UINT_BYTE_LIMBS;
+            let mut diff = 0u32;
+            for i in (0..UINT_BYTE_LIMBS).rev() {
+                if abs_divisor_bytes[i] != abs_remainder_bytes[i] {
+                    idx = i;
+                    diff = abs_divisor_bytes[i] as u32 - abs_remainder_bytes[i] as u32;
+                    break;
+                }
+            }
+            lkm.assert_const_range(diff as u64 - 1, 8);
+            (idx, diff)
+        };
+        if w.divisor_zero {
+            lkm.assert_const_range(0, 8);
+        }
+        for (i, m) in config.lt_marker.iter().enumerate() {
+            set_val!(instance, m, (i == lt_idx) as u64);
+        }
+        set_val!(instance, config.lt_diff, lt_diff as u64);
 
         Ok(())
     }
 
     impl_collect_lk_and_shardram!(r_insn, |sink, step, _config, _ctx| {
+        let (signed, _is_div) = op_kind(I::INST_KIND);
         let dividend = step.rs1().unwrap().value;
         let divisor = step.rs2().unwrap().value;
-        let dividend_value = Value::new_unchecked(dividend);
-        let divisor_value = Value::new_unchecked(divisor);
-        let dividend_limbs = dividend_value.as_u16_limbs();
-        let divisor_limbs = divisor_value.as_u16_limbs();
+        let w = compute_divrem(signed, dividend, divisor);
 
-        let signed = matches!(I::INST_KIND, InsnKind::DIV | InsnKind::REM);
-        let (quotient, remainder, dividend_sign, divisor_sign, quotient_sign, case) =
-            run_divrem(signed, &u32_to_limbs(&dividend), &u32_to_limbs(&divisor));
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(dividend));
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(divisor));
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(w.quotient));
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(w.remainder));
 
-        emit_u16_limbs(sink, limbs_to_u32(&quotient));
-        emit_u16_limbs(sink, limbs_to_u32(&remainder));
+        for (cfg_signed, val) in [
+            (signed, dividend),
+            (signed, divisor),
+            (signed, w.quotient),
+            (signed, w.remainder),
+        ] {
+            if cfg_signed {
+                let byte = (val >> 24) & 0xff;
+                let msb = byte >> 7;
+                sink.emit_lk(LkOp::DynamicRange {
+                    value: (2 * byte - (msb << 8)) as u64,
+                    bits: 8,
+                });
+            }
+        }
 
-        let carries = run_mul_carries(
-            signed,
-            &u32_to_limbs(&divisor),
-            &quotient,
-            &remainder,
-            quotient_sign,
-        );
-        for i in 0..UINT_LIMBS {
+        emit_byte_decomposition_ops(sink, &w.prod);
+        for c in &w.prod_carry {
             sink.emit_lk(LkOp::DynamicRange {
-                value: carries[i] as u64,
-                bits: (LIMB_BITS + 2) as u32,
-            });
-            sink.emit_lk(LkOp::DynamicRange {
-                value: carries[i + UINT_LIMBS] as u64,
-                bits: (LIMB_BITS + 2) as u32,
+                value: *c as u64,
+                bits: CARRY_BITS as u32,
             });
         }
 
-        let sign_xor = dividend_sign ^ divisor_sign;
-        let remainder_prime = if sign_xor {
-            negate(&remainder)
-        } else {
-            remainder
-        };
-        let remainder_zero =
-            remainder.iter().all(|&v| v == 0) && case != DivRemCoreSpecialCase::ZeroDivisor;
+        // abs negation byte range checks
+        emit_abs_lk(sink, divisor, w.divisor_neg);
+        emit_abs_lk(sink, w.remainder, w.remainder_neg);
 
-        if signed {
-            let dividend_sign_mask = if dividend_sign {
-                1 << (LIMB_BITS - 1)
-            } else {
-                0
-            };
-            let divisor_sign_mask = if divisor_sign {
-                1 << (LIMB_BITS - 1)
-            } else {
-                0
-            };
-            sink.emit_lk(LkOp::DynamicRange {
-                value: ((dividend_limbs[UINT_LIMBS - 1] as u64 - dividend_sign_mask) << 1),
-                bits: 16,
-            });
-            sink.emit_lk(LkOp::DynamicRange {
-                value: ((divisor_limbs[UINT_LIMBS - 1] as u64 - divisor_sign_mask) << 1),
-                bits: 16,
-            });
-        }
-
-        if case == DivRemCoreSpecialCase::None && !remainder_zero {
-            let idx = run_sltu_diff_idx(&u32_to_limbs(&divisor), &remainder_prime, divisor_sign);
-            let val = if divisor_sign {
-                remainder_prime[idx] - divisor_limbs[idx] as u32
-            } else {
-                divisor_limbs[idx] as u32 - remainder_prime[idx]
-            };
-            sink.emit_lk(LkOp::DynamicRange {
-                value: val as u64 - 1,
-                bits: 16,
-            });
+        if w.divisor_zero {
+            sink.emit_lk(LkOp::DynamicRange { value: 0, bits: 8 });
         } else {
-            sink.emit_lk(LkOp::DynamicRange { value: 0, bits: 16 });
+            let abs_divisor_bytes = split_to_u8::<u8>(w.abs_divisor);
+            let abs_remainder_bytes = split_to_u8::<u8>(w.abs_remainder);
+            let mut diff = 0u32;
+            for i in (0..UINT_BYTE_LIMBS).rev() {
+                if abs_divisor_bytes[i] != abs_remainder_bytes[i] {
+                    diff = abs_divisor_bytes[i] as u32 - abs_remainder_bytes[i] as u32;
+                    break;
+                }
+            }
+            sink.emit_lk(LkOp::DynamicRange {
+                value: diff as u64 - 1,
+                bits: 8,
+            });
         }
     });
 
     impl_collect_shardram!(r_insn);
 }
 
-#[derive(Debug, Eq, PartialEq)]
-#[repr(u8)]
-pub(super) enum DivRemCoreSpecialCase {
-    None,
-    ZeroDivisor,
-    SignedOverflow,
+/// Constrain `abs[i]` to be the byte limbs of `|value|`, where `value` is
+/// negative iff `sign == 1`. Returns the abs byte witnesses and the negation
+/// carry bits. For unsigned operands (`sign == None`) this just copies `value`.
+fn constrain_abs<E: ExtensionField>(
+    cb: &mut CircuitBuilder<E>,
+    name: &str,
+    value: &[Expression<E>],
+    sign: &Option<SignedExtendConfig<E>>,
+    base: &Expression<E>,
+) -> Result<([WitIn; UINT_BYTE_LIMBS], [WitIn; UINT_BYTE_LIMBS]), ZKVMError> {
+    let abs: [WitIn; UINT_BYTE_LIMBS] =
+        array::from_fn(|i| cb.create_witin(|| format!("{name}_{i}")));
+    for (i, pair) in abs.chunks(2).enumerate() {
+        cb.assert_double_u8(|| format!("{name}_u8_{i}"), pair[0].expr(), pair[1].expr())?;
+    }
+    let carry: [WitIn; UINT_BYTE_LIMBS] =
+        array::from_fn(|i| cb.create_witin(|| format!("{name}_carry_{i}")));
+
+    let neg = match sign {
+        Some(s) => s.expr(),
+        None => Expression::ZERO,
+    };
+    for i in 0..UINT_BYTE_LIMBS {
+        // when not negative: abs[i] == value[i]
+        cb.condition_require_zero(
+            || format!("{name}_copy_{i}"),
+            Expression::ONE - neg.clone(),
+            abs[i].expr() - value[i].clone(),
+        )?;
+        // when negative: value[i] + abs[i] + carry_in - carry[i]*2^8 == 0  (two's complement)
+        let carry_in = if i > 0 {
+            carry[i - 1].expr()
+        } else {
+            Expression::ZERO
+        };
+        cb.condition_require_zero(
+            || format!("{name}_neg_{i}"),
+            neg.clone(),
+            value[i].clone() + abs[i].expr() + carry_in - carry[i].expr() * base.clone(),
+        )?;
+        cb.assert_bit(|| format!("{name}_carry_bit_{i}"), carry[i].expr())?;
+    }
+    // when negative, the final carry-out is 1 (value + abs == 2^32, value != 0)
+    cb.condition_require_zero(
+        || format!("{name}_neg_final_carry"),
+        neg,
+        carry[UINT_BYTE_LIMBS - 1].expr() - Expression::ONE,
+    )?;
+    Ok((abs, carry))
 }
 
-// Returns (quotient, remainder, x_sign, y_sign, q_sign, case) where case = 0 for normal, 1
-// for zero divisor, and 2 for signed overflow
-pub(super) fn run_divrem(
-    signed: bool,
-    x: &[u32; UINT_LIMBS],
-    y: &[u32; UINT_LIMBS],
-) -> (
-    [u32; UINT_LIMBS],
-    [u32; UINT_LIMBS],
-    bool,
-    bool,
-    bool,
-    DivRemCoreSpecialCase,
+/// Assignment counterpart of [`constrain_abs`].
+fn assign_abs<F: ff_ext::SmallField>(
+    instance: &mut [F],
+    lkm: &mut LkMultiplicity,
+    abs_wit: &[WitIn; UINT_BYTE_LIMBS],
+    carry_wit: &[WitIn; UINT_BYTE_LIMBS],
+    value: u32,
+    neg: bool,
 ) {
-    let x_sign = signed && (x[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1);
-    let y_sign = signed && (y[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1);
-    let max_limb = (1 << LIMB_BITS) - 1;
-
-    let zero_divisor = y.iter().all(|val| *val == 0);
-    let overflow = x[UINT_LIMBS - 1] == 1 << (LIMB_BITS - 1)
-        && x[..(UINT_LIMBS - 1)].iter().all(|val| *val == 0)
-        && y.iter().all(|val| *val == max_limb)
-        && x_sign
-        && y_sign;
-
-    if zero_divisor {
-        return (
-            [max_limb; UINT_LIMBS],
-            *x,
-            x_sign,
-            y_sign,
-            signed,
-            DivRemCoreSpecialCase::ZeroDivisor,
-        );
-    } else if overflow {
-        return (
-            *x,
-            [0; UINT_LIMBS],
-            x_sign,
-            y_sign,
-            false,
-            DivRemCoreSpecialCase::SignedOverflow,
-        );
+    let abs_val = if neg { value.wrapping_neg() } else { value };
+    let abs_bytes = abs_val.to_le_bytes();
+    let value_bytes = value.to_le_bytes();
+    let mut carry_in = 0u32;
+    for i in 0..UINT_BYTE_LIMBS {
+        set_val!(instance, abs_wit[i], abs_bytes[i] as u64);
+        let carry_out = if neg {
+            let v = value_bytes[i] as u32 + abs_bytes[i] as u32 + carry_in;
+            v >> 8
+        } else {
+            0
+        };
+        set_val!(instance, carry_wit[i], carry_out as u64);
+        carry_in = carry_out;
     }
-
-    let x_abs = if x_sign { negate(x) } else { *x };
-    let y_abs = if y_sign { negate(y) } else { *y };
-
-    let x_big = limbs_to_u32(&x_abs);
-    let y_big = limbs_to_u32(&y_abs);
-    let q_big = x_big / y_big;
-    let r_big = x_big % y_big;
-
-    let q = if x_sign ^ y_sign {
-        negate(&u32_to_limbs(&q_big))
-    } else {
-        u32_to_limbs(&q_big)
-    };
-    let q_sign = signed && (q[UINT_LIMBS - 1] >> (LIMB_BITS - 1) == 1);
-
-    // In C |q * y| <= |x|, which means if x is negative then r <= 0 and vice versa.
-    let r = if x_sign {
-        negate(&u32_to_limbs(&r_big))
-    } else {
-        u32_to_limbs(&r_big)
-    };
-
-    (q, r, x_sign, y_sign, q_sign, DivRemCoreSpecialCase::None)
+    // byte range-check lookups for the abs limbs (mirrors `assert_double_u8`)
+    for pair in abs_bytes.chunks(2) {
+        lkm.assert_double_u8(pair[0] as u64, pair[1] as u64);
+    }
 }
 
-pub(super) fn run_sltu_diff_idx(x: &[u32; UINT_LIMBS], y: &[u32; UINT_LIMBS], cmp: bool) -> usize {
-    for i in (0..UINT_LIMBS).rev() {
-        if x[i] != y[i] {
-            assert!((x[i] < y[i]) == cmp);
-            return i;
+/// Emit the byte range-check lookups produced by [`constrain_abs`] /
+/// [`assign_abs`] (only the abs byte u8 checks; carries are bits).
+fn emit_abs_lk(sink: &mut impl LkShardramSink, value: u32, neg: bool) {
+    let abs_val = if neg { value.wrapping_neg() } else { value };
+    emit_byte_decomposition_ops(sink, &abs_val.to_le_bytes());
+}
+
+struct DivRemWitness {
+    quotient: u32,
+    remainder: u32,
+    prod: [u8; LONG_BYTES],
+    prod_carry: [u32; LONG_BYTES],
+    add_carry: [u32; LONG_BYTES],
+    divisor_zero: bool,
+    is_overflow: bool,
+    divisor_neg: bool,
+    remainder_neg: bool,
+    abs_divisor: u32,
+    abs_remainder: u32,
+}
+
+fn compute_divrem(signed: bool, dividend: u32, divisor: u32) -> DivRemWitness {
+    let (quotient, remainder) = if divisor == 0 {
+        (u32::MAX, dividend)
+    } else if signed {
+        let d = dividend as i32;
+        let v = divisor as i32;
+        (d.wrapping_div(v) as u32, d.wrapping_rem(v) as u32)
+    } else {
+        (dividend / divisor, dividend % divisor)
+    };
+
+    let divisor_zero = divisor == 0;
+    let is_overflow = signed && dividend == i32::MIN as u32 && divisor == u32::MAX;
+
+    let divisor_neg = signed && (divisor >> 31) == 1;
+    let dividend_neg = signed && (dividend >> 31) == 1;
+    let quotient_neg = signed && (quotient >> 31) == 1;
+    let remainder_neg = signed && (remainder >> 31) == 1;
+
+    // sign-extend operands to 8 bytes (i64 two's complement / zero extension)
+    let ext = |val: u32, neg: bool| -> [u8; LONG_BYTES] {
+        let mut bytes = [if neg { 0xff } else { 0u8 }; LONG_BYTES];
+        bytes[..UINT_BYTE_LIMBS].copy_from_slice(&val.to_le_bytes());
+        bytes
+    };
+    let c = ext(divisor, divisor_neg);
+    let q = ext(quotient, quotient_neg);
+    let r = ext(remainder, remainder_neg);
+
+    // product P = c * q (low 64 bits) with byte-column magnitude carries
+    let mut acc = [0u64; LONG_BYTES];
+    for (j, cj) in c.iter().enumerate() {
+        for (k, qk) in q.iter().enumerate() {
+            if j + k < LONG_BYTES {
+                acc[j + k] += (*cj as u64) * (*qk as u64);
+            }
         }
     }
-    assert!(!cmp);
-    UINT_LIMBS
-}
-
-// returns carries of d * q + r
-pub(super) fn run_mul_carries(
-    signed: bool,
-    d: &[u32; UINT_LIMBS],
-    q: &[u32; UINT_LIMBS],
-    r: &[u32; UINT_LIMBS],
-    q_sign: bool,
-) -> Vec<u32> {
-    let mut carry = vec![0u32; 2 * UINT_LIMBS];
-    for i in 0..UINT_LIMBS {
-        let mut val: u64 = r[i] as u64 + if i > 0 { carry[i - 1] } else { 0 } as u64;
-        for j in 0..=i {
-            val += d[j] as u64 * q[i - j] as u64;
-        }
-        carry[i] = (val >> LIMB_BITS) as u32;
+    let mut prod = [0u8; LONG_BYTES];
+    let mut prod_carry = [0u32; LONG_BYTES];
+    let mut carry_in = 0u64;
+    for i in 0..LONG_BYTES {
+        let v = acc[i] + carry_in;
+        prod[i] = (v & BYTE_MASK) as u8;
+        carry_in = v >> 8;
+        prod_carry[i] = carry_in as u32;
     }
 
-    let q_ext = if q_sign && signed {
-        (1 << LIMB_BITS) - 1
+    // add carries: prod + r_ext == b_ext (b = dividend sign-extended). The add
+    // identity is disabled on the overflow path, so leave its carries at 0 there
+    // (they only need to be valid bits).
+    let b = ext(dividend, dividend_neg);
+    let mut add_carry = [0u32; LONG_BYTES];
+    if !is_overflow {
+        let mut carry_in = 0u32;
+        for i in 0..LONG_BYTES {
+            let v = prod[i] as u32 + r[i] as u32 + carry_in;
+            // v == b[i] + add_carry[i] * 256
+            let co = (v.wrapping_sub(b[i] as u32)) >> 8;
+            add_carry[i] = co;
+            carry_in = co;
+        }
+    }
+
+    let abs_divisor = if divisor_neg {
+        divisor.wrapping_neg()
     } else {
-        0
+        divisor
     };
-    let d_ext =
-        (d[UINT_LIMBS - 1] >> (LIMB_BITS - 1)) * if signed { (1 << LIMB_BITS) - 1 } else { 0 };
-    let r_ext =
-        (r[UINT_LIMBS - 1] >> (LIMB_BITS - 1)) * if signed { (1 << LIMB_BITS) - 1 } else { 0 };
-    let mut d_prefix = 0;
-    let mut q_prefix = 0;
+    let abs_remainder = if remainder_neg {
+        remainder.wrapping_neg()
+    } else {
+        remainder
+    };
 
-    for i in 0..UINT_LIMBS {
-        d_prefix += d[i];
-        q_prefix += q[i];
-        let mut val: u64 = carry[UINT_LIMBS + i - 1] as u64
-            + (d_prefix as u64 * q_ext as u64)
-            + (q_prefix as u64 * d_ext as u64)
-            + r_ext as u64;
-        for j in (i + 1)..UINT_LIMBS {
-            val += d[j] as u64 * q[UINT_LIMBS + i - j] as u64;
-        }
-        carry[UINT_LIMBS + i] = (val >> LIMB_BITS) as u32;
+    DivRemWitness {
+        quotient,
+        remainder,
+        prod,
+        prod_carry,
+        add_carry,
+        divisor_zero,
+        is_overflow,
+        divisor_neg,
+        remainder_neg,
+        abs_divisor,
+        abs_remainder,
     }
-    carry
-}
-
-fn limbs_to_u32(x: &[u32; UINT_LIMBS]) -> u32 {
-    let base = 1 << LIMB_BITS;
-    let mut res = 0;
-    for val in x.iter().rev() {
-        res *= base;
-        res += *val;
-    }
-    res
-}
-
-fn u32_to_limbs(x: &u32) -> [u32; UINT_LIMBS] {
-    let mut res = [0; UINT_LIMBS];
-    let mut x = *x;
-    let base = 1u32 << LIMB_BITS;
-    for limb in res.iter_mut() {
-        let (quot, rem) = (x / base, x % base);
-        *limb = rem;
-        x = quot;
-    }
-    debug_assert_eq!(x, 0u32);
-    res
-}
-
-fn negate(x: &[u32; UINT_LIMBS]) -> [u32; UINT_LIMBS] {
-    let mut carry = 1;
-    array::from_fn(|i| {
-        let val = (1 << LIMB_BITS) + carry - 1 - x[i];
-        carry = val >> LIMB_BITS;
-        val % (1 << LIMB_BITS)
-    })
 }

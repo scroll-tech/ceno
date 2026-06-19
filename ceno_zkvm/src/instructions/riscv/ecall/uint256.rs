@@ -57,8 +57,8 @@ pub struct EcallUint256MulConfig<E: ExtensionField> {
     pub layout: Uint256MulLayout<E>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    word_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    word_ptr_1: (OpFixedRS<E, { Platform::reg_arg1() }, true>, MemAddr<E>),
+    word_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, false>, MemAddr<E>),
+    word_ptr_1: (OpFixedRS<E, { Platform::reg_arg1() }, false>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
@@ -106,13 +106,13 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
         let word_ptr_value_0 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
         let word_ptr_value_1 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
 
-        let word_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let word_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, false>::construct_circuit(
             cb,
             word_ptr_value_0.uint_unaligned().register_expr(),
             vm_state.ts,
         )?;
 
-        let word_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
+        let word_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, false>::construct_circuit(
             cb,
             word_ptr_value_1.uint_unaligned().register_expr(),
             vm_state.ts,
@@ -140,7 +140,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
                 WriteMEM::construct_circuit(
                     cb,
                     // mem address := word_ptr_0 + i
-                    word_ptr_0.prev_value.as_ref().unwrap().value()
+                    word_ptr_value_0.expr_unaligned()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )
@@ -163,7 +163,7 @@ impl<E: ExtensionField> Instruction<E> for Uint256MulInstruction<E> {
                 WriteMEM::construct_circuit(
                     cb,
                     // mem address := word_ptr_1 + i
-                    word_ptr_1.prev_value.as_ref().unwrap().value()
+                    word_ptr_value_1.expr_unaligned()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )
@@ -411,7 +411,7 @@ pub struct EcallUint256InvConfig<E: ExtensionField, Spec: Uint256InvSpec> {
     pub layout: Uint256InvLayout<E, Spec>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    word_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
+    word_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, false>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
@@ -455,7 +455,7 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
 
         let word_ptr_value_0 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
 
-        let word_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let word_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, false>::construct_circuit(
             cb,
             word_ptr_value_0.uint_unaligned().register_expr(),
             vm_state.ts,
@@ -486,7 +486,7 @@ impl<E: ExtensionField, Spec: Uint256InvSpec> Instruction<E> for Uint256InvInstr
                 WriteMEM::construct_circuit(
                     cb,
                     // mem address := word_ptr_0 + i
-                    word_ptr_0.prev_value.as_ref().unwrap().value()
+                    word_ptr_value_0.expr_unaligned()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )

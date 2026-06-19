@@ -46,8 +46,8 @@ pub struct EcallWeierstrassAddAssignConfig<E: ExtensionField, EC: EllipticCurve>
     pub layout: WeierstrassAddAssignLayout<E, EC>,
     vm_state: StateInOut<E>,
     ecall_id: OpFixedRS<E, { Platform::reg_ecall() }, false>,
-    point_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, true>, MemAddr<E>),
-    point_ptr_1: (OpFixedRS<E, { Platform::reg_arg1() }, true>, MemAddr<E>),
+    point_ptr_0: (OpFixedRS<E, { Platform::reg_arg0() }, false>, MemAddr<E>),
+    point_ptr_1: (OpFixedRS<E, { Platform::reg_arg1() }, false>, MemAddr<E>),
     mem_rw: Vec<WriteMEM>,
 }
 
@@ -105,13 +105,13 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
         let point_ptr_value_0 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
         let point_ptr_value_1 = MemAddr::construct_with_max_bits(cb, 2, MEM_BITS)?;
 
-        let point_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, true>::construct_circuit(
+        let point_ptr_0 = OpFixedRS::<_, { Platform::reg_arg0() }, false>::construct_circuit(
             cb,
             point_ptr_value_0.uint_unaligned().register_expr(),
             vm_state.ts,
         )?;
 
-        let point_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
+        let point_ptr_1 = OpFixedRS::<_, { Platform::reg_arg1() }, false>::construct_circuit(
             cb,
             point_ptr_value_1.uint_unaligned().register_expr(),
             vm_state.ts,
@@ -142,7 +142,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                 WriteMEM::construct_circuit(
                     cb,
                     // mem address := point_ptr_0 + i
-                    point_ptr_0.prev_value.as_ref().unwrap().value()
+                    point_ptr_value_0.expr_unaligned()
                         + E::BaseField::from_canonical_u32(
                             ByteAddr::from((i * WORD_SIZE) as u32).0,
                         )
@@ -163,7 +163,7 @@ impl<E: ExtensionField, EC: EllipticCurve> Instruction<E>
                     WriteMEM::construct_circuit(
                         cb,
                         // mem address := point_ptr_1 + i
-                        point_ptr_1.prev_value.as_ref().unwrap().value()
+                        point_ptr_value_1.expr_unaligned()
                             + E::BaseField::from_canonical_u32(
                                 ByteAddr::from((i * WORD_SIZE) as u32).0,
                             )

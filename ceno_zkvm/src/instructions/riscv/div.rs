@@ -51,13 +51,12 @@ mod test {
     #[cfg(feature = "u16limb_circuit")]
     use super::div_circuit_v2::DivRemConfig;
     use crate::{
-        Value,
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         e2e::ShardContext,
         instructions::{
             Instruction,
             riscv::{
-                constants::UInt,
+                constants::UInt8,
                 div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             },
         },
@@ -69,6 +68,7 @@ mod test {
     use ff_ext::BabyBearExt4 as BE;
     use ff_ext::{ExtensionField, GoldilocksExt2 as GE};
     use itertools::Itertools;
+    use multilinear_extensions::Expression;
     use rand::RngCore;
 
     // unifies DIV/REM/DIVU/REMU interface for testing purposes
@@ -81,7 +81,7 @@ mod test {
         // conv to register necessary due to lack of native "as" trait
         fn as_u32(val: Self::NumType) -> u32;
         // designates output value of the circuit that is under scrutiny
-        fn output(config: Self::InstructionConfig) -> UInt<E>;
+        fn output(config: Self::InstructionConfig) -> Expression<E>;
         // the correct/expected value for given parameters
         fn correct(dividend: Self::NumType, divisor: Self::NumType) -> Self::NumType;
     }
@@ -91,8 +91,8 @@ mod test {
         fn as_u32(val: Self::NumType) -> u32 {
             val as u32
         }
-        fn output(config: DivRemConfig<E>) -> UInt<E> {
-            config.quotient
+        fn output(config: DivRemConfig<E>) -> Expression<E> {
+            config.quotient.value()
         }
         fn correct(dividend: i32, divisor: i32) -> i32 {
             if divisor == 0 {
@@ -108,8 +108,8 @@ mod test {
         fn as_u32(val: Self::NumType) -> u32 {
             val as u32
         }
-        fn output(config: DivRemConfig<E>) -> UInt<E> {
-            config.remainder
+        fn output(config: DivRemConfig<E>) -> Expression<E> {
+            config.remainder.value()
         }
         fn correct(dividend: i32, divisor: i32) -> i32 {
             if divisor == 0 {
@@ -125,8 +125,8 @@ mod test {
         fn as_u32(val: Self::NumType) -> u32 {
             val
         }
-        fn output(config: DivRemConfig<E>) -> UInt<E> {
-            config.quotient
+        fn output(config: DivRemConfig<E>) -> Expression<E> {
+            config.quotient.value()
         }
         fn correct(dividend: u32, divisor: u32) -> u32 {
             if divisor == 0 {
@@ -142,8 +142,8 @@ mod test {
         fn as_u32(val: Self::NumType) -> u32 {
             val
         }
-        fn output(config: DivRemConfig<E>) -> UInt<E> {
-            config.remainder
+        fn output(config: DivRemConfig<E>) -> Expression<E> {
+            config.remainder.value()
         }
         fn correct(dividend: u32, divisor: u32) -> u32 {
             if divisor == 0 {
@@ -196,14 +196,16 @@ mod test {
             )],
         )
         .unwrap();
-        let expected_rd_written = UInt::from_const_unchecked(
-            Value::new_unchecked(Insn::as_u32(exp_outcome))
-                .as_u16_limbs()
+        // build the expected register value as a field element via byte limbs,
+        // so it is reduced mod p (a bare `u32 -> field` would panic on BabyBear).
+        let expected_value = UInt8::<E>::from_const_unchecked(
+            Insn::as_u32(exp_outcome)
+                .to_le_bytes()
+                .map(|b| b as u64)
                 .to_vec(),
-        );
-
-        Insn::output(config)
-            .require_equal(|| "assert_outcome", &mut cb, &expected_rd_written)
+        )
+        .value();
+        cb.require_equal(|| "assert_outcome", Insn::output(config), expected_value)
             .unwrap();
 
         let expected_errors: &[_] = if is_ok { &[] } else { &[name] };
@@ -291,6 +293,18 @@ mod test {
     #[test]
     fn test_divrem_unsigned_unsatisfied() {
         verify::<GE, DivuG>("assert_outcome", 10, 2, 3, false);
+    }
+
+    // Soundness regression (#1296): on the REMU zero-divisor path the remainder
+    // must equal the dividend (per RISC-V). The previous v2 circuit could absorb
+    // an alternate remainder into its inverse-scaled carry chain over BabyBear.
+    #[cfg(feature = "u16limb_circuit")]
+    #[test]
+    fn test_divrem_remu_zero_divisor_binds_remainder() {
+        // REMU(12345, 0) == 12345; an alternate output is rejected.
+        verify::<BE, RemuB>("assert_outcome", 12345, 0, 6789, false);
+        // also check the signed REM zero-divisor binding
+        verify::<BE, RemB>("assert_outcome", -12345, 0, 6789, false);
     }
 
     #[test]

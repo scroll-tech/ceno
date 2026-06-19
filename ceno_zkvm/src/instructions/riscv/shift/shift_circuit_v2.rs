@@ -327,8 +327,12 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
         let (rd_written, rs1_read, rs2_read) = match I::INST_KIND {
             InsnKind::SLL | InsnKind::SRL | InsnKind::SRA => {
-                let rs1_read = UInt8::new_unchecked(|| "rs1_read", circuit_builder)?;
-                let rs2_read = UInt8::new_unchecked(|| "rs2_read", circuit_builder)?;
+                // Byte limbs must be range-checked: the shift gadget reasons
+                // directly over the byte decomposition, and the 16-bit register
+                // recombination alone does not uniquely determine the bytes
+                // (#1296 v2 soundness fix).
+                let rs1_read = UInt8::new(|| "rs1_read", circuit_builder)?;
+                let rs2_read = UInt8::new(|| "rs2_read", circuit_builder)?;
                 let rd_written = UInt8::new(|| "rd_written", circuit_builder)?;
                 (rd_written, rs1_read, rs2_read)
             }
@@ -373,11 +377,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
         let rs1_read = split_to_u8::<u16>(step.rs1().unwrap().value);
         // rd
         let rd_written = split_to_u8::<u16>(step.rd().unwrap().value.after);
-        for chunk in rd_written.chunks(2) {
-            if chunk.len() == 2 {
-                lk_multiplicity.assert_double_u8(chunk[0] as u64, chunk[1] as u64)
-            } else {
-                lk_multiplicity.assert_const_range(chunk[0] as u64, 8);
+        for bytes in [&rs1_read, &rs2_read, &rd_written] {
+            for chunk in bytes.chunks(2) {
+                if chunk.len() == 2 {
+                    lk_multiplicity.assert_double_u8(chunk[0] as u64, chunk[1] as u64)
+                } else {
+                    lk_multiplicity.assert_const_range(chunk[0] as u64, 8);
+                }
             }
         }
 
@@ -400,6 +406,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftLogicalInstru
     }
 
     impl_collect_lk_and_shardram!(r_insn, |sink, step, config, _ctx| {
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(step.rs1().unwrap().value));
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(step.rs2().unwrap().value));
         let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
         emit_byte_decomposition_ops(sink, &rd_written);
         config.shift_base_config.emit_lk_and_shardram(
@@ -450,7 +458,9 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     ) -> Result<Self::InstructionConfig, crate::error::ZKVMError> {
         let (rd_written, rs1_read, imm) = match I::INST_KIND {
             InsnKind::SLLI | InsnKind::SRLI | InsnKind::SRAI => {
-                let rs1_read = UInt8::new_unchecked(|| "rs1_read", circuit_builder)?;
+                // Byte limbs must be range-checked (#1296 v2 soundness fix); see
+                // the R-type comment above.
+                let rs1_read = UInt8::new(|| "rs1_read", circuit_builder)?;
                 let imm = circuit_builder.create_witin(|| "imm");
                 let rd_written = UInt8::new(|| "rd_written", circuit_builder)?;
                 (rd_written, rs1_read, imm)
@@ -499,11 +509,13 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
         let rs1_read = split_to_u8::<u16>(step.rs1().unwrap().value);
         // rd
         let rd_written = split_to_u8::<u16>(step.rd().unwrap().value.after);
-        for chunk in rd_written.chunks(2) {
-            if chunk.len() == 2 {
-                lk_multiplicity.assert_double_u8(chunk[0] as u64, chunk[1] as u64)
-            } else {
-                lk_multiplicity.assert_const_range(chunk[0] as u64, 8);
+        for bytes in [&rs1_read, &rd_written] {
+            for chunk in bytes.chunks(2) {
+                if chunk.len() == 2 {
+                    lk_multiplicity.assert_double_u8(chunk[0] as u64, chunk[1] as u64)
+                } else {
+                    lk_multiplicity.assert_const_range(chunk[0] as u64, 8);
+                }
             }
         }
 
@@ -525,6 +537,7 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for ShiftImmInstructio
     }
 
     impl_collect_lk_and_shardram!(i_insn, |sink, step, config, _ctx| {
+        emit_byte_decomposition_ops(sink, &split_to_u8::<u8>(step.rs1().unwrap().value));
         let rd_written = split_to_u8::<u8>(step.rd().unwrap().value.after);
         emit_byte_decomposition_ops(sink, &rd_written);
         config.shift_base_config.emit_lk_and_shardram(
