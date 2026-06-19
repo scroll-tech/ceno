@@ -552,65 +552,6 @@ impl<
                 &pi,
                 &circuit_trace_indices,
             );
-            #[cfg(feature = "gpu")]
-            if using_gpu_backend && crate::scheme::gpu::should_log_gpu_memory() {
-                if let Some(active_dpk) = self.get_device_proving_key(shard_ctx) {
-                    let active_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
-                        unsafe { std::mem::transmute(active_dpk.pcs_data.as_ref()) };
-                    crate::scheme::gpu::log_gpu_pcs_baseline::<E, PCS>(
-                        if shard_ctx.is_first_shard() {
-                            "fixed_active_first"
-                        } else {
-                            "fixed_active_non_first"
-                        },
-                        active_fixed_pcs,
-                    );
-                }
-                let inactive_dpk = if shard_ctx.is_first_shard() {
-                    self.device_non_first_shard_pk.as_ref()
-                } else {
-                    self.device_first_shard_pk.as_ref()
-                };
-                if let Some(inactive_dpk) = inactive_dpk {
-                    let inactive_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
-                        unsafe { std::mem::transmute(inactive_dpk.pcs_data.as_ref()) };
-                    crate::scheme::gpu::log_gpu_pcs_baseline::<E, PCS>(
-                        if shard_ctx.is_first_shard() {
-                            "fixed_inactive_non_first"
-                        } else {
-                            "fixed_inactive_first"
-                        },
-                        inactive_fixed_pcs,
-                    );
-                }
-                let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
-                    unsafe { std::mem::transmute(&witness_data) };
-                let gpu_fixed_mles: &[std::sync::Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>] =
-                    unsafe { std::mem::transmute(fixed_mles_preload.as_slice()) };
-                let task_structural_device_bytes = tasks
-                    .iter()
-                    .filter_map(|task| task.structural_rmm.as_ref())
-                    .filter(|rmm| rmm.has_device_backing())
-                    .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<E::BaseField>())
-                    .sum::<usize>();
-                let task_structural_device_count = tasks
-                    .iter()
-                    .filter_map(|task| task.structural_rmm.as_ref())
-                    .filter(|rmm| rmm.has_device_backing())
-                    .count();
-                let task_structural_device_mb =
-                    task_structural_device_bytes as f64 / (1024.0 * 1024.0);
-                tracing::info!(
-                    "[gpu baseline][before_scheduler] task_structural_device={:.2}MB ({})",
-                    task_structural_device_mb,
-                    task_structural_device_count,
-                );
-                crate::scheme::gpu::log_gpu_proof_baseline::<E, PCS>(
-                    "before_scheduler",
-                    gpu_witness_data,
-                    gpu_fixed_mles,
-                );
-            }
             exit_span!(build_tasks_span);
 
             // Phase 2: Execute chip proof tasks

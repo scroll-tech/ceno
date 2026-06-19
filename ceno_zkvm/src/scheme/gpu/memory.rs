@@ -188,7 +188,6 @@ pub fn estimate_chip_proof_memory<E: ExtensionField, PCS: PolynomialCommitmentSc
         composed_cs,
         input,
         Some(occupied_rows),
-        Some(circuit_name),
     );
     let tower_input_non_borrowed_bytes =
         tower_input_live_bytes.saturating_sub(borrowed_tower_input_bytes);
@@ -838,7 +837,6 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
     composed_cs: &ComposedConstrainSystem<E>,
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     occupied_rows_override: Option<usize>,
-    circuit_name: Option<&str>,
 ) -> (usize, usize, usize, usize) {
     let cs = &composed_cs.zkvm_v1_css;
     let elem_size = std::mem::size_of::<BB31Ext>();
@@ -960,37 +958,6 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
             to_mb(prove_est.sumcheck_total_bytes),
         );
     }
-    if circuit_name.is_some_and(|name| name.contains("Keccak")) {
-        eprintln!(
-            "[mem estimate][tower_components][{}] reads={}, writes={}, lk_num={}, lk_den={}, prod_groups={:?}, logup_group={:?}, prod_towers={}, logup_towers={}, prod_vars={}, logup_vars={}, occupied_rows={}, virtual_occupied_len={}, build_total={:.2}MB, build_prod={:.2}MB, build_logup={:.2}MB, build_aux={:.2}MB, virtual_metadata={:.2}MB, prove_total={:.2}MB, prove_local_total={:.2}MB, prove_prod_live={:.2}MB, prove_logup_live={:.2}MB, prove_borrowed={:.2}MB, prove_eq={:.2}MB, prove_sumcheck={:.2}MB",
-            circuit_name.unwrap_or("unknown"),
-            num_reads,
-            num_writes,
-            num_lk_numerators,
-            num_lk_denominators,
-            prod_groups,
-            logup_group,
-            num_prod_towers,
-            num_logup_towers,
-            prod_num_vars,
-            logup_num_vars,
-            occupied_rows,
-            virtual_occupied_len,
-            to_mb(build_bytes),
-            to_mb(build_est.prod_tower_buffer_bytes),
-            to_mb(build_est.logup_tower_buffer_bytes),
-            to_mb(build_est.aux_buffer_bytes),
-            to_mb(interleaved_input_bytes),
-            to_mb(prove_est.total_bytes),
-            to_mb(prove_est.local_total_bytes),
-            to_mb(prove_est.prod_tower_buffer_bytes),
-            to_mb(prove_est.logup_tower_buffer_bytes),
-            to_mb(prove_est.prod_borrowed_input_bytes + prove_est.logup_borrowed_input_bytes),
-            to_mb(prove_est.eq_mle_buffer_bytes),
-            to_mb(prove_est.sumcheck_total_bytes),
-        );
-    }
-
     let base_tower_input_live_bytes =
         prove_est.prod_tower_buffer_bytes + prove_est.logup_tower_buffer_bytes;
     let tower_input_live_bytes = base_tower_input_live_bytes + interleaved_input_bytes;
@@ -1041,7 +1008,7 @@ pub(crate) fn estimate_tower_bytes<E: ExtensionField, PCS: PolynomialCommitmentS
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
 ) -> usize {
     let (build_bytes, prove_local_bytes, tower_input_live_bytes, borrowed_input_bytes) =
-        estimate_tower_stage_components(composed_cs, input, None, None);
+        estimate_tower_stage_components(composed_cs, input, None);
     let prove_bytes = tower_input_live_bytes
         .saturating_sub(borrowed_input_bytes)
         .saturating_add(prove_local_bytes);

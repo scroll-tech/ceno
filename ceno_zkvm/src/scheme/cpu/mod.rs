@@ -1394,7 +1394,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             builder.to_virtual_polys_with_monomial_terms(&global_terms, &[], &[]),
             transcript,
         );
-        let claimed_sum = prover_state.claimed_sum();
+        let claimed_sum = proof.proofs[0].evaluations[0] + proof.proofs[0].evaluations[1];
         let global_evals = prover_state.get_mle_flatten_final_evaluations();
         let global_rt = prover_state.collect_raw_challenges();
         transcript.append_field_element_exts(&global_evals);
