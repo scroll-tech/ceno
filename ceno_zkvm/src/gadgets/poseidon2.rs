@@ -192,7 +192,22 @@ where
     }
 
     fn internal_linear_layer(state: &mut [Expression<E>; STATE_WIDTH]) {
-        BabyBearInternalLayerParameters::generic_internal_linear_layer(state);
+        // Keep p3's current internal-layer semantics, but normalize circuit expressions
+        // before and after it so setup does not build exponentially nested trees.
+        for input in state.iter_mut() {
+            *input = input.get_monomial_form();
+        }
+
+        let part_sum: Expression<E> = state[1..].iter().cloned().sum();
+        let part_sum = part_sum.get_monomial_form();
+        let full_sum = (part_sum.clone() + state[0].clone()).get_monomial_form();
+
+        state[0] = (part_sum - state[0].clone()).get_monomial_form();
+        BabyBearInternalLayerParameters::internal_layer_mat_mul(state, full_sum);
+
+        for input in state.iter_mut() {
+            *input = input.get_monomial_form();
+        }
     }
 
     pub fn construct(
