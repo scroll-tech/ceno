@@ -5,11 +5,11 @@ use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkEngine, StarkProtocolConfig, TranscriptHistory,
-    prover::{CommittedTraceData, TraceCommitter},
+    prover::{AirProvingContext, CommittedTraceData, TraceCommitter},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
     batch_constraint::{
@@ -19,10 +19,7 @@ use crate::{
         },
         expr_eval::{
             ConstraintsFoldingAir, ConstraintsFoldingCols,
-            symbolic_expression::{
-                CachedSymbolicExpressionColumns, SingleMainSymbolicExpressionColumns,
-                SymbolicExpressionAir,
-            },
+            symbolic_expression::{SingleMainSymbolicExpressionColumns, SymbolicExpressionAir},
         },
         expression_claim::{ExpressionClaimAir, ExpressionClaimCols},
     },
@@ -184,13 +181,46 @@ impl BatchConstraintModule {
         };
     }
 
-    fn placeholder_air_widths(&self) -> [usize; 3] {
+    fn placeholder_common_widths(&self) -> [usize; 3] {
         [
-            CachedSymbolicExpressionColumns::<u8>::width()
-                + SingleMainSymbolicExpressionColumns::<u8>::width() * self.max_num_proofs,
+            SingleMainSymbolicExpressionColumns::<u8>::width() * self.max_num_proofs,
             ConstraintsFoldingCols::<u8>::width(),
             ExpressionClaimCols::<u8>::width(),
         ]
+    }
+
+    pub(crate) fn generate_placeholder_proving_ctxs<SC: StarkProtocolConfig<F = F>>(
+        &self,
+        cached_symbolic_expr_trace: CommittedTraceData<CpuBackend<SC>>,
+        required_heights: Option<&[usize]>,
+    ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
+        let widths = self.placeholder_common_widths();
+        let air_count = required_heights
+            .map(|heights| heights.len())
+            .unwrap_or(self.num_airs());
+        let cached_height = cached_symbolic_expr_trace.trace.height();
+
+        (0..air_count)
+            .map(|idx| {
+                let height = required_heights
+                    .and_then(|heights| heights.get(idx).copied())
+                    .unwrap_or_else(|| if idx == 0 { cached_height } else { 2 });
+                if height < 2 {
+                    return None;
+                }
+                let width = widths.get(idx).copied().unwrap_or(1).max(1);
+                let matrix = RowMajorMatrix::new(vec![F::ZERO; height * width], width);
+                Some(if idx == 0 {
+                    AirProvingContext {
+                        cached_mains: vec![cached_symbolic_expr_trace.clone()],
+                        common_main: matrix,
+                        public_values: vec![],
+                    }
+                } else {
+                    AirProvingContext::simple_no_pis(matrix)
+                })
+            })
+            .collect::<Option<Vec<_>>>()
     }
 }
 
@@ -251,7 +281,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         _ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<openvm_stark_backend::prover::AirProvingContext<CpuBackend<SC>>>> {
-        let widths = self.placeholder_air_widths();
+        let widths = self.placeholder_common_widths();
         let air_count = required_heights
             .map(|heights| heights.len())
             .unwrap_or(self.num_airs());

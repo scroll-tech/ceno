@@ -203,6 +203,7 @@ impl<'a> TraceModuleRef<'a> {
         child_vk: &RecursionVk,
         proofs: &[RecursionProof],
         preflights: &[Preflight],
+        child_vk_pcs_data: &CommittedTraceData<CpuBackend<SC>>,
         pow_checker_gen: &Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
         exp_bits_len_gen: &ExpBitsLenTraceGenerator,
         external_data: &VerifierExternalData<'_>,
@@ -239,9 +240,8 @@ impl<'a> TraceModuleRef<'a> {
                 exp_bits_len_gen,
                 required_heights,
             ),
-            TraceModuleRef::BatchConstraint(module) => {
-                module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
-            }
+            TraceModuleRef::BatchConstraint(module) => module
+                .generate_placeholder_proving_ctxs(child_vk_pcs_data.clone(), required_heights),
         }
     }
 }
@@ -431,10 +431,15 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             sponge.observe_ext(sample);
         }
 
-        // The trunk log now contains pre-fork ops (0..fork_offset) and merge
-        // ops (fork_offset..trunk_len). The merge phase adds D_EF samples per
-        // fork (from sample_ext on each fork) and D_EF observations per fork
-        // (from observe_ext on trunk).
+        // Phase 5: batch-constraint transcript replay on the trunk, after the
+        // fork merge and before PCS opening verification.
+        self.batch_constraint
+            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+
+        // The trunk log now contains pre-fork ops (0..fork_offset), merge ops
+        // (fork_offset..merge_end), and batch-constraint ops after that. The
+        // merge phase adds D_EF samples per fork (from sample_ext on each fork)
+        // and D_EF observations per fork (from observe_ext on trunk).
         let trunk_log = sponge.into_log();
 
         preflight.proof_shape.fork_start_tidx = fork_offset;
@@ -484,7 +489,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let ps_n = self.proof_shape.num_airs();
         let gkr_n = self.gkr.num_airs();
         let main_n = self.main_module.num_airs();
-        let module_air_counts = [t_n, ps_n, gkr_n, main_n];
+        let batch_n = self.batch_constraint.num_airs();
+        let module_air_counts = [t_n, ps_n, gkr_n, main_n, batch_n];
 
         let Some(heights) = required_heights else {
             return (vec![None; module_air_counts.len()], None, None);
@@ -535,7 +541,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
     >(
         &self,
         child_vk: &RecursionVk,
-        _child_vk_pcs_data: CommittedTraceData<CpuBackend<SC>>,
+        child_vk_pcs_data: CommittedTraceData<CpuBackend<SC>>,
         proofs: &[RecursionProof],
         external_data: &mut VerifierExternalData<'_>,
         initial_transcripts: Vec<TS>,
@@ -583,8 +589,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             TraceModuleRef::ProofShape(&self.proof_shape),
             TraceModuleRef::Tower(&self.gkr),
             TraceModuleRef::Main(&self.main_module),
-            // TODO(batch-constraint): re-enable once batch tracegen/preflight alignment is fixed.
-            // TraceModuleRef::BatchConstraint(&self.batch_constraint),
+            TraceModuleRef::BatchConstraint(&self.batch_constraint),
         ];
 
         let span = Span::current();
@@ -597,6 +602,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
                     child_vk,
                     proofs,
                     &preflights,
+                    &child_vk_pcs_data,
                     &power_checker_gen,
                     &exp_bits_len_gen,
                     external_data,
@@ -606,7 +612,12 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             .collect::<Vec<_>>();
 
         for (module, module_ctxs) in modules.into_iter().zip(ctxs_by_module.iter()) {
-            if module_ctxs.is_none() {}
+            if module_ctxs.is_none() {
+                tracing::debug!(
+                    module = module.name(),
+                    "module trace generation returned no contexts"
+                );
+            }
         }
 
         let ctxs_by_module: Vec<Vec<AirProvingContext<CpuBackend<SC>>>> =
@@ -650,8 +661,7 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
             .chain(self.proof_shape.airs())
             .chain(self.gkr.airs())
             .chain(self.main_module.airs())
-            // TODO(batch-constraint): re-chain batch AIRs after BatchConstraintModule is stable.
-            // .chain(self.batch_constraint.airs())
+            .chain(self.batch_constraint.airs())
             .chain([
                 Arc::new(power_checker_air) as AirRef<_>,
                 Arc::new(exp_bits_len_air) as AirRef<_>,
