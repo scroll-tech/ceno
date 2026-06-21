@@ -8,7 +8,7 @@ FIXTURE_DIR="${CENO_RECURSION_V2_FIXTURE_DIR:-$REPO_ROOT/ceno_recursion_v2/src/i
 PROOF_FILE="$FIXTURE_DIR/proof.bin"
 VK_FILE="$FIXTURE_DIR/vk.bin"
 FORCE_REGEN="${CENO_RECURSION_V2_FORCE_REGEN:-0}"
-MAX_CYCLE_PER_SHARD="${CENO_RECURSION_V2_MAX_CYCLE_PER_SHARD:-1600}"
+MAX_CYCLE_PER_SHARD="${CENO_RECURSION_V2_MAX_CYCLE_PER_SHARD:-16000}"
 HINTS="${CENO_RECURSION_V2_HINTS:-10}"
 PUBLIC_IO="${CENO_RECURSION_V2_PUBLIC_IO:-4191}"
 
@@ -29,6 +29,7 @@ else
     mkdir -p "$FIXTURE_DIR"
     cargo run --release --package ceno_zkvm --bin e2e -- \
         --platform=ceno \
+        --pcs=basefold \
         --max-cycle-per-shard="$MAX_CYCLE_PER_SHARD" \
         --hints="$HINTS" \
         --public-io="$PUBLIC_IO" \

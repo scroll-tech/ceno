@@ -66,8 +66,11 @@ mod prover_integration {
     }
 
     fn load_vk(path: &Path) -> Result<Option<ZkvmVk>> {
-        match bincode::deserialize(&std::fs::read(path)?) {
-            Ok(vk) => Ok(Some(vk)),
+        match bincode::deserialize::<ZkvmVk>(&std::fs::read(path)?) {
+            Ok(mut vk) => {
+                vk.rebuild_circuit_index();
+                Ok(Some(vk))
+            }
             Err(err) => {
                 println!("skipping recursion v2 test: incompatible vk.bin fixture: {err}");
                 Ok(None)
@@ -164,6 +167,48 @@ mod prover_integration {
         );
 
         println!("registered recursion v2 airs={}", air_names.len());
+        Ok(())
+    }
+
+    #[test]
+    fn dump_fixture_public_values() -> Result<()> {
+        let Some(proof_path) = fixture_path("proof.bin") else {
+            println!("no proof fixture");
+            return Ok(());
+        };
+        let Some(proofs) = load_proofs(&proof_path)? else {
+            return Ok(());
+        };
+        for (i, proof) in proofs.iter().enumerate() {
+            let pv = &proof.public_values;
+            println!("proof[{i}] public_values:");
+            println!("  exit_code={}", pv.exit_code);
+            println!("  init_pc={:#x}", pv.init_pc);
+            println!("  init_cycle={}", pv.init_cycle);
+            println!("  end_pc={:#x}", pv.end_pc);
+            println!("  end_cycle={}", pv.end_cycle);
+            println!("  shard_id={}", pv.shard_id);
+            println!("  heap_start_addr={:#x}", pv.heap_start_addr);
+            println!("  heap_shard_len={}", pv.heap_shard_len);
+            println!("  hint_start_addr={:#x}", pv.hint_start_addr);
+            println!("  hint_shard_len={}", pv.hint_shard_len);
+            println!("  public_io_digest={:?}", pv.public_io_digest);
+            println!("  shard_rw_sum={:?}", pv.shard_rw_sum);
+            println!("  chip_proofs keys={:?}", proof.chip_proofs.keys().collect::<Vec<_>>());
+        }
+        let Some(vk_path) = fixture_path("vk.bin") else {
+            println!("no vk fixture");
+            return Ok(());
+        };
+        let Some(vk) = load_vk(&vk_path)? else {
+            return Ok(());
+        };
+        println!("vk entry_pc={:#x}", vk.entry_pc);
+        println!("vk circuit_vks count={}", vk.circuit_vks.len());
+        println!("vk circuit_index_to_name count={}", vk.circuit_index_to_name.len());
+        for (name, cvk) in &vk.circuit_vks {
+            println!("  circuit_vk: {name}");
+        }
         Ok(())
     }
 
