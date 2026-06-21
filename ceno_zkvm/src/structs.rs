@@ -1076,6 +1076,17 @@ where
     PCS: PolynomialCommitmentScheme<E>,
     M: Clone + Default + Serialize + DeserializeOwned,
 {
+    /// Rebuild `circuit_index_to_name` from `circuit_vks` after deserialization.
+    /// The field is `#[serde(skip)]` so it deserializes as empty.
+    pub fn rebuild_circuit_index(&mut self) {
+        self.circuit_index_to_name = self
+            .circuit_vks
+            .keys()
+            .enumerate()
+            .map(|(i, name)| (i, name.clone()))
+            .collect();
+    }
+
     /// Poseidon-sponge digest of the verifying key's soundness-bound fields.
     pub fn compute_digest(&self) -> [E; VK_DIGEST_LEN] {
         compute_vk_digest_inner::<E, PCS, M>(

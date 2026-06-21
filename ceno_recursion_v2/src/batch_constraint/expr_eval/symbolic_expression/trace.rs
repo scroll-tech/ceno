@@ -227,10 +227,7 @@ impl RowMajorChip<F> for SymbolicExpressionTraceGenerator {
 
                 let mut node_idx = constraints.nodes.len();
                 for unused_var in &vk.unused_variables {
-                    if matches!(
-                        unused_var.entry,
-                        Entry::Public | Entry::Challenge
-                    ) {
+                    if matches!(unused_var.entry, Entry::Public | Entry::Challenge) {
                         continue;
                     }
                     let mut args = [F::ZERO; 2 * D_EF];

@@ -33,14 +33,18 @@ fn decompose_usize<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
     })
 }
 
-fn two_instance_heights_from_chip_instances(chip_instances: &[impl BorrowNumInstances]) -> (usize, usize) {
-    chip_instances.iter().fold((0usize, 0usize), |(h1, h2), instance| {
-        let num_instances = instance.borrow_num_instances();
-        (
-            h1 + num_instances.first().copied().unwrap_or(0),
-            h2 + num_instances.get(1).copied().unwrap_or(0),
-        )
-    })
+fn two_instance_heights_from_chip_instances(
+    chip_instances: &[impl BorrowNumInstances],
+) -> (usize, usize) {
+    chip_instances
+        .iter()
+        .fold((0usize, 0usize), |(h1, h2), instance| {
+            let num_instances = instance.borrow_num_instances();
+            (
+                h1 + num_instances.first().copied().unwrap_or(0),
+                h2 + num_instances.get(1).copied().unwrap_or(0),
+            )
+        })
 }
 
 trait BorrowNumInstances {
@@ -111,7 +115,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     .get(air_idx)
                     .map(|instances| two_instance_heights_from_chip_instances(instances))
                     .unwrap_or((0, 0));
-                 num_present += 1;
+                num_present += 1;
 
                 cols.proof_idx = F::from_usize(proof_idx);
                 cols.is_valid = F::ONE;

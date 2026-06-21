@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 
 use ceno_zkvm::scheme::ZKVMProof;
 use continuations_v2::SC;
@@ -9,7 +9,10 @@ use openvm_stark_backend::{
     StarkEngine,
     keygen::types::{MultiStarkProvingKey, MultiStarkVerifyingKey},
     proof::Proof,
-    prover::{CommittedTraceData, DeviceMultiStarkProvingKey, ProverBackend, ProvingContext},
+    prover::{
+        AirProvingContext, CommittedTraceData, DeviceMultiStarkProvingKey, MatrixDimensions,
+        ProverBackend, ProvingContext,
+    },
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
     Digest, EF, F, default_duplex_sponge_recorder,
@@ -183,18 +186,32 @@ where
         proofs: &[ZKVMProof<RecursionField, Basefold<RecursionField, BasefoldRSParams>>],
         child_vk_kind: ChildVkKind,
     ) -> Result<Proof<SC>> {
+        let tracegen_start = Instant::now();
         let ctx = self.generate_proving_ctx(proofs, child_vk_kind, ProofsType::Vm, None);
-        if tracing::enabled!(tracing::Level::DEBUG) {
-            // TODO enable trace height
-            //     trace_heights_tracing_info::<_, SC>(&ctx.per_trace, &self.circuit.airs());
+        tracing::info!(
+            elapsed_ms = tracegen_start.elapsed().as_secs_f64() * 1000.0,
+            num_traces = ctx.per_trace.len(),
+            "generated recursion proving context"
+        );
+        if tracing::enabled!(tracing::Level::INFO) {
+            trace_heights_tracing_info::<PB, SC>(&ctx.per_trace, &self.circuit.airs());
         }
 
         let engine = E::new(self.pk.params.clone());
         #[cfg(debug_assertions)]
         debug_constraints(&self.circuit, &ctx, &engine);
+        let prove_start = Instant::now();
         let proof = engine.prove(&self.d_pk, ctx)?;
-        #[cfg(debug_assertions)]
+        tracing::info!(
+            elapsed_ms = prove_start.elapsed().as_secs_f64() * 1000.0,
+            "proved recursion aggregation"
+        );
+        let verify_start = Instant::now();
         engine.verify(&self.vk, &proof)?;
+        tracing::info!(
+            elapsed_ms = verify_start.elapsed().as_secs_f64() * 1000.0,
+            "verified recursion aggregation proof"
+        );
         Ok(proof)
     }
 
@@ -272,10 +289,42 @@ where
         self.vk.clone()
     }
 
+    #[cfg(test)]
+    pub(crate) fn air_names(&self) -> Vec<String> {
+        <InnerCircuit<S> as Circuit<SC>>::airs(self.circuit.as_ref())
+            .iter()
+            .map(|air| air.name().to_string())
+            .collect()
+    }
+
     pub fn get_self_vk_pcs_data(&self) -> Option<CommittedTraceData<PB>>
     where
         CommittedTraceData<PB>: Clone,
     {
         self.self_vk_pcs_data.clone()
     }
+}
+
+fn trace_heights_tracing_info<PB: ProverBackend, SC: openvm_stark_backend::StarkProtocolConfig>(
+    ctxs: &[(usize, AirProvingContext<PB>)],
+    airs: &[openvm_stark_backend::AirRef<SC>],
+) {
+    let mut total_cells = 0usize;
+    let mut total_width = 0usize;
+    for ((air_id, ctx), air) in ctxs.iter().zip(airs) {
+        let height = ctx.common_main.height();
+        let width = ctx.common_main.width();
+        let cells = height * width;
+        tracing::info!(
+            air_id,
+            air_name = air.name(),
+            height,
+            width,
+            cells,
+            "recursion trace dimensions"
+        );
+        total_cells += cells;
+        total_width += width;
+    }
+    tracing::info!(total_cells, total_width, "recursion trace totals");
 }
