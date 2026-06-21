@@ -49,5 +49,5 @@ cd "$REPO_ROOT/ceno_recursion_v2"
 CENO_RECURSION_V2_FIXTURE_DIR="$FIXTURE_DIR" \
 RUST_MIN_STACK=33554432 \
 cargo test --release \
-    leaf_app_proof_round_trip_placeholder \
+    'continuation::tests::prover_integration' \
     -- --nocapture

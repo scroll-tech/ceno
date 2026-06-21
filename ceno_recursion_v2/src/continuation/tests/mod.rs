@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod prover_integration {
     use crate::{
-        continuation::prover::{ChildVkKind, InnerCpuProver},
+        continuation::prover::{AggProver, AggregationOptions},
         system::{AggregationSubCircuit, VerifierSubCircuit, utils::test_system_params_zero_pow},
     };
     use bincode;
@@ -78,64 +78,62 @@ mod prover_integration {
         }
     }
 
-    fn leaf_app_proof_round_trip_placeholder_with_count(proof_count: usize) -> Result<()> {
-        init_test_tracing();
-
+    fn load_fixtures() -> Result<Option<(Vec<ZkvmProof>, ZkvmVk)>> {
         let Some(proof_path) = fixture_path("proof.bin") else {
-            println!("skipping recursion v2 round trip: missing src/imported/proof.bin");
-            return Ok(());
+            println!("skipping recursion v2 test: missing proof.bin fixture");
+            return Ok(None);
         };
         let Some(vk_path) = fixture_path("vk.bin") else {
-            println!("skipping recursion v2 round trip: missing src/imported/vk.bin");
+            println!("skipping recursion v2 test: missing vk.bin fixture");
+            return Ok(None);
+        };
+        let Some(proofs) = load_proofs(&proof_path)? else {
+            return Ok(None);
+        };
+        let Some(vk) = load_vk(&vk_path)? else {
+            return Ok(None);
+        };
+        Ok(Some((proofs, vk)))
+    }
+
+    fn agg_prove_with_count(shard_count: usize) -> Result<()> {
+        init_test_tracing();
+
+        let Some((loaded_proofs, child_vk)) = load_fixtures()? else {
             return Ok(());
         };
+        let shard_proofs = select_proofs(&loaded_proofs, shard_count)?;
 
-        let Some(loaded_proofs) = load_proofs(&proof_path)? else {
-            return Ok(());
-        };
-        let zkvm_proofs = select_proofs(&loaded_proofs, proof_count)?;
-
-        let Some(child_vk) = load_vk(&vk_path)? else {
-            return Ok(());
-        };
-
-        const MAX_NUM_PROOFS: usize = 2;
-        let system_params = test_system_params_zero_pow(5, 16, 3);
-        let leaf_prover = InnerCpuProver::<MAX_NUM_PROOFS>::new::<Engine>(
-            Arc::new(child_vk),
-            system_params,
-            false,
-            None,
-        );
+        let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+        let prover = AggProver::<2, 2>::new(Arc::new(child_vk), options);
 
         let start = Instant::now();
-        let leaf_proof = leaf_prover.agg_prove_no_def::<Engine>(&zkvm_proofs, ChildVkKind::App)?;
+        let root_proof = prover.prove(&shard_proofs)?;
         let elapsed = start.elapsed();
-        let overall_size = bincode::serialized_size(&leaf_proof).expect("serialization error");
+        let proof_size =
+            bincode::serialized_size(&root_proof.inner_proof).expect("serialization error");
         println!(
-            "recursion v2 placeholder round trip: proofs={proof_count}, prove+verify={elapsed:?}, proof_size={:.2}mb",
-            byte_to_mb(overall_size)
+            "agg prover ({shard_count} shards): elapsed={elapsed:?}, proof_size={:.2}mb",
+            byte_to_mb(proof_size)
         );
         Ok(())
     }
 
     #[test]
-    fn leaf_app_proof_round_trip_placeholder() -> Result<()> {
-        leaf_app_proof_round_trip_placeholder_with_count(1)
+    fn agg_prover_single_shard() -> Result<()> {
+        agg_prove_with_count(1)
     }
 
     #[test]
-    fn leaf_app_proof_round_trip_placeholder_two_proofs() -> Result<()> {
-        leaf_app_proof_round_trip_placeholder_with_count(2)
+    fn agg_prover_two_shards() -> Result<()> {
+        agg_prove_with_count(2)
     }
+
+    // ---- AIR registration test ----
 
     #[test]
     fn leaf_app_batch_air_registration_placeholder() -> Result<()> {
-        let Some(vk_path) = fixture_path("vk.bin") else {
-            println!("skipping recursion v2 AIR registration: missing src/imported/vk.bin");
-            return Ok(());
-        };
-        let Some(child_vk) = load_vk(&vk_path)? else {
+        let Some((_, child_vk)) = load_fixtures()? else {
             return Ok(());
         };
         const MAX_NUM_PROOFS: usize = 2;
@@ -170,13 +168,11 @@ mod prover_integration {
         Ok(())
     }
 
+    // ---- Diagnostic test ----
+
     #[test]
     fn dump_fixture_public_values() -> Result<()> {
-        let Some(proof_path) = fixture_path("proof.bin") else {
-            println!("no proof fixture");
-            return Ok(());
-        };
-        let Some(proofs) = load_proofs(&proof_path)? else {
+        let Some((proofs, vk)) = load_fixtures()? else {
             return Ok(());
         };
         for (i, proof) in proofs.iter().enumerate() {
@@ -194,19 +190,18 @@ mod prover_integration {
             println!("  hint_shard_len={}", pv.hint_shard_len);
             println!("  public_io_digest={:?}", pv.public_io_digest);
             println!("  shard_rw_sum={:?}", pv.shard_rw_sum);
-            println!("  chip_proofs keys={:?}", proof.chip_proofs.keys().collect::<Vec<_>>());
+            println!(
+                "  chip_proofs keys={:?}",
+                proof.chip_proofs.keys().collect::<Vec<_>>()
+            );
         }
-        let Some(vk_path) = fixture_path("vk.bin") else {
-            println!("no vk fixture");
-            return Ok(());
-        };
-        let Some(vk) = load_vk(&vk_path)? else {
-            return Ok(());
-        };
         println!("vk entry_pc={:#x}", vk.entry_pc);
         println!("vk circuit_vks count={}", vk.circuit_vks.len());
-        println!("vk circuit_index_to_name count={}", vk.circuit_index_to_name.len());
-        for (name, cvk) in &vk.circuit_vks {
+        println!(
+            "vk circuit_index_to_name count={}",
+            vk.circuit_index_to_name.len()
+        );
+        for (name, _cvk) in &vk.circuit_vks {
             println!("  circuit_vk: {name}");
         }
         Ok(())
