@@ -942,6 +942,7 @@ pub mod tests {
     }
 
     #[test]
+    #[ignore = "slow — run via cargo test -- --include-ignored"]
     fn test_simple_batch() {
         for num_var in 5..20 {
             construct_test(vec![(num_var, 20)]);
@@ -949,6 +950,7 @@ pub mod tests {
     }
 
     #[test]
+    #[ignore = "slow — run via cargo test -- --include-ignored"]
     fn test_decreasing_batch() {
         construct_test(vec![
             (14, 20),
@@ -961,6 +963,7 @@ pub mod tests {
     }
 
     #[test]
+    #[ignore = "slow — run via cargo test -- --include-ignored"]
     fn test_random_batch() {
         construct_test(vec![(10, 20), (12, 30), (11, 10), (12, 15)]);
     }

@@ -1,8 +1,10 @@
-use crate::uint::UIntLimbs;
+use crate::{scheme::constants::SEPTIC_EXTENSION_DEGREE, uint::UIntLimbs};
 pub use ceno_emul::PC_STEP_SIZE;
 
 pub const ECALL_HALT_OPCODE: [usize; 2] = [0x00_00, 0x00_00];
 pub const EXIT_PC: usize = 0;
+
+/// scalar-based public value, id start from 0
 pub const EXIT_CODE_IDX: usize = 0; // exit code u32 occupied 2 limb, each with 16
 
 pub const INIT_PC_IDX: usize = EXIT_CODE_IDX + 2;
@@ -14,8 +16,10 @@ pub const HEAP_START_ADDR_IDX: usize = SHARD_ID_IDX + 1;
 pub const HEAP_LENGTH_IDX: usize = HEAP_START_ADDR_IDX + 1;
 pub const HINT_START_ADDR_IDX: usize = HEAP_LENGTH_IDX + 1;
 pub const HINT_LENGTH_IDX: usize = HINT_START_ADDR_IDX + 1;
-pub const PUBLIC_IO_IDX: usize = HINT_LENGTH_IDX + 1;
-pub const SHARD_RW_SUM_IDX: usize = PUBLIC_IO_IDX + 2;
+
+pub const SHARD_RW_SUM_IDX: usize = HINT_LENGTH_IDX + 1;
+pub const PUBIO_DIGEST_IDX: usize = SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE * 2;
+pub const PUBIO_DIGEST_U16_LIMBS: usize = 8 * UINT_LIMBS;
 
 pub const LIMB_BITS: usize = 16;
 pub const LIMB_MASK: u32 = 0xFFFF;

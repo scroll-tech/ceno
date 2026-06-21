@@ -3,8 +3,8 @@ use ceno_host::{CenoStdin, memory_from_file};
 use ceno_recursion::aggregation::CenoAggregationProver;
 use ceno_zkvm::{
     e2e::{
-        Checkpoint, FieldType, MultiProver, PcsKind, Preset, run_e2e_with_checkpoint,
-        setup_platform, setup_platform_debug,
+        Checkpoint, FieldType, MultiProver, PcsKind, Preset, public_io_words_to_digest_words,
+        run_e2e_with_checkpoint, setup_platform, setup_platform_debug,
     },
     scheme::{constants::MAX_NUM_VARIABLES, create_backend, create_prover},
 };
@@ -85,10 +85,6 @@ struct Args {
     #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
     public_io: Option<Vec<Word>>,
 
-    /// pub io size in byte
-    #[arg(long, default_value = "1k", value_parser = parse_size)]
-    public_io_size: u32,
-
     /// The security level to use.
     #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
     security_level: SecurityLevel,
@@ -110,6 +106,10 @@ struct Args {
     // max cycle per shard
     #[arg(long, default_value = "536870912")] // 536870912 = 2^29
     max_cycle_per_shard: u64,
+
+    /// Restrict proving to a single shard id for debugging.
+    #[arg(long)]
+    shard_id: Option<u64>,
 }
 
 fn main() {
@@ -174,32 +174,14 @@ fn main() {
             }
         })
         .unwrap_or_default();
-    assert!(
-        public_io.len() <= args.public_io_size as usize / WORD_SIZE,
-        "require pub io length {} < max public_io_size {}",
-        public_io.len(),
-        args.public_io_size as usize / WORD_SIZE
-    );
 
     tracing::info!("Loading ELF file: {}", args.elf.display());
     let elf_bytes = fs::read(&args.elf).expect("read elf file");
     let program = Program::load_elf(&elf_bytes, u32::MAX).unwrap();
     let platform = if cfg!(debug_assertions) {
-        setup_platform_debug(
-            args.platform,
-            &program,
-            args.stack_size,
-            args.heap_size,
-            args.public_io_size,
-        )
+        setup_platform_debug(args.platform, &program, args.stack_size, args.heap_size)
     } else {
-        setup_platform(
-            args.platform,
-            &program,
-            args.stack_size,
-            args.heap_size,
-            args.public_io_size,
-        )
+        setup_platform(args.platform, &program, args.stack_size, args.heap_size)
     };
     tracing::info!("Running on platform {:?} {}", args.platform, platform);
     tracing::info!(
@@ -242,6 +224,8 @@ fn main() {
         .unwrap_or_default();
 
     let max_steps = args.max_steps.unwrap_or(usize::MAX);
+    let public_io_digest = public_io_words_to_digest_words(&public_io);
+    let target_shard_id = args.shard_id.map(|v| v as usize);
     let multi_prover = MultiProver::new(
         args.prover_id as usize,
         args.num_provers as usize,
@@ -258,10 +242,10 @@ fn main() {
             platform,
             multi_prover,
             &hints,
-            &public_io,
+            public_io_digest,
             max_steps,
             Checkpoint::Complete,
-            None,
+            target_shard_id,
         );
 
     let zkvm_proofs = result

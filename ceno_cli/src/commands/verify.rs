@@ -7,7 +7,7 @@ use ceno_zkvm::{
 };
 use clap::Parser;
 use ff_ext::{BabyBearExt4, ExtensionField, GoldilocksExt2};
-use mpcs::{Basefold, BasefoldRSParams, PolynomialCommitmentScheme, Whir, WhirDefaultSpec};
+use mpcs::{Basefold, BasefoldRSParams, Jagged, PolynomialCommitmentScheme, Whir, WhirDefaultSpec};
 use serde::Serialize;
 use std::{fs::File, path::PathBuf};
 
@@ -32,6 +32,13 @@ pub struct VerifyCmd {
 impl VerifyCmd {
     pub fn run(self) -> anyhow::Result<()> {
         match (self.pcs, self.field) {
+            (PcsKind::Jagged, FieldType::Goldilocks) => run_inner::<
+                GoldilocksExt2,
+                Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>,
+            >(self),
+            (PcsKind::Jagged, FieldType::BabyBear) => {
+                run_inner::<BabyBearExt4, Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>>(self)
+            }
             (PcsKind::Basefold, FieldType::Goldilocks) => {
                 run_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>>(self)
             }

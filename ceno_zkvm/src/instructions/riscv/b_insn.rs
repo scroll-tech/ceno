@@ -7,7 +7,10 @@ use crate::{
     circuit_builder::CircuitBuilder,
     e2e::ShardContext,
     error::ZKVMError,
-    instructions::riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
+    instructions::{
+        gpu::utils::{LkOp, LkShardramSink},
+        riscv::insn_base::{ReadRS1, ReadRS2, StateInOut},
+    },
     tables::InsnRecord,
     witness::{LkMultiplicity, set_val},
 };
@@ -110,5 +113,29 @@ impl<E: ExtensionField> BInstructionConfig<E> {
         lk_multiplicity.fetch(step.pc().before.0);
 
         Ok(())
+    }
+
+    pub fn emit_shardram(
+        &self,
+        shard_ctx: &mut ShardContext,
+        lk_multiplicity: &mut LkMultiplicity,
+        step: &StepRecord,
+    ) {
+        lk_multiplicity.fetch(step.pc().before.0);
+        self.rs1.emit_shardram(shard_ctx, step);
+        self.rs2.emit_shardram(shard_ctx, step);
+    }
+
+    pub fn emit_lk_and_shardram(
+        &self,
+        sink: &mut impl LkShardramSink,
+        shard_ctx: &ShardContext,
+        step: &StepRecord,
+    ) {
+        sink.emit_lk(LkOp::Fetch {
+            pc: step.pc().before.0,
+        });
+        self.rs1.emit_lk_and_shardram(sink, shard_ctx, step);
+        self.rs2.emit_lk_and_shardram(sink, shard_ctx, step);
     }
 }

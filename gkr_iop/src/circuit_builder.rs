@@ -1,3 +1,4 @@
+use ff_ext::ExtensionField;
 use itertools::{Itertools, chain};
 use multilinear_extensions::{
     Expression, Fixed, Instance, StructuralWitIn, StructuralWitInType, ToExpr, WitIn, WitnessId,
@@ -6,11 +7,12 @@ use multilinear_extensions::{
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
-use ff_ext::ExtensionField;
-
 use crate::{
-    RAMType, error::CircuitBuilderError, gkr::layer::ROTATION_OPENING_COUNT,
-    selector::SelectorType, tables::LookupTable,
+    RAMType,
+    error::CircuitBuilderError,
+    gkr::layer::{ECC_BRIDGE_OPENING_COUNT, ROTATION_OPENING_COUNT},
+    selector::SelectorType,
+    tables::LookupTable,
 };
 use p3::field::FieldAlgebra;
 
@@ -88,6 +90,15 @@ pub struct SetTableExpression<E: ExtensionField> {
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub enum ShardOMCInitType {
+    None,
+    // only init once in first shard
+    InitOnce,
+    // init in multi-shards with continuation address range
+    InitDyn,
+}
+
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(bound = "E: ExtensionField + DeserializeOwned")]
 pub struct ConstraintSystem<E: ExtensionField> {
     pub ns: NameSpace,
@@ -102,11 +113,13 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub num_fixed: usize,
     pub fixed_namespace_map: Vec<String>,
 
-    pub instance_openings: Vec<Instance>,
+    // record which public input index is involving in constraint computation
+    pub instance: Vec<Instance>,
 
     pub ec_point_exprs: Vec<Expression<E>>,
     pub ec_slope_exprs: Vec<Expression<E>>,
     pub ec_final_sum: Vec<Expression<E>>,
+    pub ec_bridge_selectors: Option<[SelectorType<E>; ECC_BRIDGE_OPENING_COUNT]>,
 
     pub r_selector: Option<SelectorType<E>>,
     pub r_expressions: Vec<Expression<E>>,
@@ -127,9 +140,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub r_table_expressions_namespace_map: Vec<String>,
     pub w_table_expressions: Vec<SetTableExpression<E>>,
     pub w_table_expressions_namespace_map: Vec<String>,
-    // specify whether constrains system cover only init_w
-    // as it imply w/r set and final_w might happen ACROSS shards
-    pub with_omc_init_only: bool,
+    pub omc_init_type: ShardOMCInitType,
 
     pub lk_selector: Option<SelectorType<E>>,
     /// lookup expression
@@ -158,6 +169,7 @@ pub struct ConstraintSystem<E: ExtensionField> {
     pub chip_record_alpha: Expression<E>,
     pub chip_record_beta: Expression<E>,
 
+    #[serde(skip)]
     pub debug_map: HashMap<usize, Vec<Expression<E>>>,
 
     pub(crate) phantom: PhantomData<E>,
@@ -175,10 +187,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             num_fixed: 0,
             fixed_namespace_map: vec![],
             ns: NameSpace::new(root_name_fn),
-            instance_openings: vec![],
+            instance: vec![],
             ec_final_sum: vec![],
             ec_slope_exprs: vec![],
             ec_point_exprs: vec![],
+            ec_bridge_selectors: None,
             r_selector: None,
             r_expressions: vec![],
             r_expressions_namespace_map: vec![],
@@ -191,7 +204,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
             r_table_expressions_namespace_map: vec![],
             w_table_expressions: vec![],
             w_table_expressions_namespace_map: vec![],
-            with_omc_init_only: false,
+            omc_init_type: ShardOMCInitType::None,
             lk_selector: None,
             lk_expressions: vec![],
             lk_table_expressions: vec![],
@@ -259,25 +272,14 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         f
     }
 
-    pub fn query_instance(&self, idx: usize) -> Result<Instance, CircuitBuilderError> {
+    pub fn query_instance(&mut self, idx: usize) -> Result<Instance, CircuitBuilderError> {
         let i = Instance(idx);
-        Ok(i)
-    }
-
-    pub fn query_instance_for_openings(
-        &mut self,
-        idx: usize,
-    ) -> Result<Instance, CircuitBuilderError> {
-        let i = Instance(idx);
-
         assert!(
-            !self.instance_openings.contains(&i),
-            "query same pubio idx {idx} mle more than once",
+            !self.instance.contains(&i),
+            "query same pubio idx {idx} value more than once",
         );
-        self.instance_openings.push(i);
-
-        // return instance only count
-        Ok(Instance(self.instance_openings.len() - 1))
+        self.instance.push(i);
+        Ok(Instance(self.instance.len() - 1))
     }
 
     pub fn rlc_chip_record(&self, items: Vec<Expression<E>>) -> Expression<E> {
@@ -511,11 +513,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         name_fn: N,
         assert_zero_expr: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
-        assert!(
-            assert_zero_expr.degree() > 0,
-            "constant expression assert to zero ?"
-        );
-        if assert_zero_expr.degree() == 1 {
+        if assert_zero_expr.degree() <= 1 {
             self.assert_zero_expressions.push(assert_zero_expr);
             let path = self.ns.compute_path(name_fn().into());
             self.assert_zero_expressions_namespace_map.push(path);
@@ -548,7 +546,11 @@ impl<E: ExtensionField> ConstraintSystem<E> {
     }
 
     pub fn set_omc_init_only(&mut self) {
-        self.with_omc_init_only = true;
+        self.omc_init_type = ShardOMCInitType::InitOnce;
+    }
+
+    pub fn set_omc_init_dyn(&mut self) {
+        self.omc_init_type = ShardOMCInitType::InitDyn;
     }
 }
 
@@ -1353,6 +1355,10 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
 
     pub fn set_omc_init_only(&mut self) {
         self.cs.set_omc_init_only();
+    }
+
+    pub fn set_omc_init_dyn(&mut self) {
+        self.cs.set_omc_init_dyn();
     }
 }
 

@@ -21,7 +21,6 @@ use super::{Layer, LayerWitness, linear_layer::LayerClaims};
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct LayerProof<E: ExtensionField> {
-    pub rotation: Option<SumcheckLayerProof<E>>,
     pub main: SumcheckLayerProof<E>,
 }
 
@@ -33,6 +32,15 @@ pub struct LayerProof<E: ExtensionField> {
 pub struct SumcheckLayerProof<E: ExtensionField> {
     pub proof: IOPProof<E>,
     pub evals: Vec<E>,
+}
+
+/// Final multilinear evaluations are explicit prover messages, not transcript-derived values.
+/// Absorb them before any later Fiat-Shamir challenge is sampled.
+pub(crate) fn bind_prover_evals<E: ExtensionField>(
+    transcript: &mut impl Transcript<E>,
+    evals: &[E],
+) {
+    transcript.append_field_element_exts(evals);
 }
 
 pub trait SumcheckLayer<E: ExtensionField> {
@@ -105,6 +113,8 @@ impl<E: ExtensionField> SumcheckLayer<E> for Layer<E> {
             },
             transcript,
         );
+
+        bind_prover_evals(transcript, &evals);
 
         // Check the final evaluations.
         let got_claim =

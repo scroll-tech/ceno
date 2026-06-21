@@ -9,7 +9,10 @@ use multilinear_extensions::{Expression, Fixed, Instance};
 use openvm_native_circuit::EXT_DEG;
 use openvm_native_compiler::prelude::*;
 use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::challenger::{FeltChallenger, duplex::DuplexChallengerVariable};
+use openvm_native_recursion::{
+    challenger::{FeltChallenger, duplex::DuplexChallengerVariable},
+    vars::HintSlice,
+};
 use openvm_stark_backend::p3_field::{FieldAlgebra, FieldExtensionAlgebra};
 
 type E = BabyBearExt4;
@@ -64,8 +67,41 @@ pub fn challenger_multi_observe<C: Config>(
     challenger: &mut DuplexChallengerVariable<C>,
     arr: &Array<C, Felt<C::F>>,
 ) {
-    let next_input_ptr =
-        builder.poseidon2_multi_observe(&challenger.sponge_state, challenger.input_ptr, arr);
+    let next_input_ptr = builder.poseidon2_multi_observe(
+        &challenger.sponge_state,
+        challenger.input_ptr,
+        arr,
+        arr.len(),
+        None,
+    );
+    builder.assign(
+        &challenger.input_ptr,
+        challenger.io_empty_ptr + next_input_ptr.clone(),
+    );
+    builder.if_ne(next_input_ptr, Usize::from(0)).then_or_else(
+        |builder| {
+            builder.assign(&challenger.output_ptr, challenger.io_empty_ptr);
+        },
+        |builder| {
+            builder.assign(&challenger.output_ptr, challenger.io_full_ptr);
+        },
+    );
+}
+
+pub fn challenger_hint_observe<C: Config>(
+    builder: &mut Builder<C>,
+    challenger: &mut DuplexChallengerVariable<C>,
+    hint_slice: &HintSlice<C>,
+) {
+    let dummy_arr: Array<C, Felt<C::F>> = builder.dyn_array(0);
+    let felt_len: Usize<C::N> = builder.eval(hint_slice.length.clone() * Usize::from(C::EF::D));
+    let next_input_ptr = builder.poseidon2_multi_observe(
+        &challenger.sponge_state,
+        challenger.input_ptr,
+        &dummy_arr,
+        felt_len,
+        Some(hint_slice.id.get_var()),
+    );
     builder.assign(
         &challenger.input_ptr,
         challenger.io_empty_ptr + next_input_ptr.clone(),
@@ -96,18 +132,6 @@ pub fn is_smaller_than<C: Config>(
     let v = builder.cast_felt_to_var(res);
 
     RVar::from(v)
-}
-
-pub fn evaluate_at_point_degree_1<C: Config>(
-    builder: &mut Builder<C>,
-    evals: &Array<C, Ext<C::F, C::EF>>,
-    point: &Array<C, Ext<C::F, C::EF>>,
-) -> Ext<C::F, C::EF> {
-    let left = builder.get(evals, 0);
-    let right = builder.get(evals, 1);
-    let r = builder.get(point, 0);
-
-    builder.eval(r * (right - left) + left)
 }
 
 pub fn _fixed_dot_product<C: Config>(
@@ -324,24 +348,6 @@ pub fn eq_eval_with_index<C: Config>(
         let one: Ext<C::F, C::EF> = builder.constant(C::EF::ONE);
         let new_acc: Ext<C::F, C::EF> = builder.eval(acc * (xi_yi + xi_yi - v_x - v_y + one));
         builder.assign(&acc, new_acc);
-    });
-
-    acc
-}
-
-// Multiply all elements in a nested Array
-pub fn nested_product<C: Config>(
-    builder: &mut Builder<C>,
-    arr: &Array<C, Array<C, Ext<C::F, C::EF>>>,
-) -> Ext<C::F, C::EF> {
-    let acc = builder.constant(C::EF::ONE);
-    iter_zip!(builder, arr).for_each(|ptr_vec, builder| {
-        let inner_arr = builder.iter_ptr_get(arr, ptr_vec[0]);
-
-        iter_zip!(builder, inner_arr).for_each(|ptr_vec, builder| {
-            let el = builder.iter_ptr_get(&inner_arr, ptr_vec[0]);
-            builder.assign(&acc, acc * el);
-        });
     });
 
     acc

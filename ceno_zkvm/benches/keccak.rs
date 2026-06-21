@@ -4,11 +4,14 @@ use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_zkvm::{
     self,
-    e2e::{Checkpoint, Preset, run_e2e_with_checkpoint, setup_platform},
+    e2e::{Checkpoint, KECCAK_EMPTY_WORDS, Preset, run_e2e_with_checkpoint, setup_platform},
     scheme::{create_backend, create_prover},
 };
 mod alloc;
-use ceno_zkvm::{e2e::MultiProver, scheme::verifier::ZKVMVerifier};
+use ceno_zkvm::{
+    e2e::MultiProver,
+    scheme::verifier::{RV32imMemStateConfig, ZKVMVerifier},
+};
 use criterion::*;
 use ff_ext::BabyBearExt4;
 use gkr_iop::cpu::default_backend_config;
@@ -32,9 +35,8 @@ type E = BabyBearExt4;
 fn setup() -> (Program, Platform) {
     let stack_size = 32768;
     let heap_size = 2097152;
-    let pub_io_size = 16;
     let program = Program::load_elf(ceno_examples::keccak_syscall, u32::MAX).unwrap();
-    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size, pub_io_size);
+    let platform = setup_platform(Preset::Ceno, &program, stack_size, heap_size);
     (program, platform)
 }
 
@@ -42,6 +44,7 @@ fn keccak_prove(c: &mut Criterion) {
     let (program, platform) = setup();
     let (max_num_variables, security_level) = default_backend_config();
     let backend = create_backend::<E, Pcs>(max_num_variables, security_level);
+    let public_io_digest = KECCAK_EMPTY_WORDS;
     // retrive 1 << 20th keccak element >> max_steps
     let mut hints = CenoStdin::default();
     let _ = hints.write(&vec![1, 2, 3]);
@@ -53,7 +56,7 @@ fn keccak_prove(c: &mut Criterion) {
         platform.clone(),
         MultiProver::default(),
         &Vec::from(&hints),
-        &[],
+        public_io_digest,
         max_steps,
         Checkpoint::Complete,
         None,
@@ -66,10 +69,10 @@ fn keccak_prove(c: &mut Criterion) {
 
     println!("e2e proof {}", proof);
     let transcript = BasicTranscript::new(b"riscv");
-    let verifier = ZKVMVerifier::<E, Pcs>::new(vk);
+    let verifier = ZKVMVerifier::<E, Pcs, RV32imMemStateConfig>::new(vk);
     assert!(
         verifier
-            .verify_proof_halt(proof, transcript, true)
+            .verify_full_trace_proofs_halt(vec![proof], vec![transcript], true)
             .expect("verify proof return with error"),
     );
     println!();
@@ -92,7 +95,7 @@ fn keccak_prove(c: &mut Criterion) {
                         platform.clone(),
                         MultiProver::default(),
                         &Vec::from(&hints),
-                        &[],
+                        public_io_digest,
                         max_steps,
                         Checkpoint::PrepE2EProving,
                         None,

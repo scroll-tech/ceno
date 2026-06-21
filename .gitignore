@@ -1,4 +1,5 @@
 target
+.tmp/
 .vscode
 .idea
 *.log
@@ -15,3 +16,7 @@ docs/book
 # ceno serialized files
 *.bin
 *.json
+*.srs
+
+# GPU CI runner secrets (never commit the PAT)
+ci/gpu-runner/runner.env

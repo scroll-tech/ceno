@@ -112,18 +112,18 @@ fn bench_add(c: &mut Criterion) {
                             fixed: vec![],
                             witness: polys,
                             structural_witness: vec![],
-                            public_input: vec![],
-                            pub_io_evals: vec![],
-                            num_instances: vec![num_instances],
+                            pi: vec![],
+                            num_instances: [num_instances, 0],
                             has_ecc_ops: false,
                         };
-                        let task = ChipTask {
+                        let mut task = ChipTask {
                             task_id: 0,
                             circuit_name: AddInstruction::<E>::name(),
                             circuit_idx: 0,
                             pk: circuit_pk,
                             input,
                             estimated_memory_bytes: 0,
+                            booked_memory_bytes: 0,
                             has_witness_or_fixed: true,
                             challenges,
                             witness_trace_idx: None,
@@ -131,7 +131,7 @@ fn bench_add(c: &mut Criterion) {
                             structural_rmm: None,
                         };
                         let _ = prover
-                            .create_chip_proof(&task, &mut transcript)
+                            .create_chip_proof(&mut task, &mut transcript)
                             .expect("create_proof failed");
                         let elapsed = instant.elapsed();
                         println!(

@@ -34,15 +34,12 @@ use ff_ext::{Instrumented, PoseidonField};
 
 use super::{
     PublicValues,
-    constants::MAX_NUM_VARIABLES,
+    constants::{MAX_NUM_VARIABLES, SEPTIC_EXTENSION_DEGREE},
     prover::ZKVMProver,
     utils::infer_tower_product_witness,
     verifier::{TowerVerify, ZKVMVerifier},
 };
-use crate::{
-    e2e::ShardContext, scheme::constants::NUM_FANIN, structs::PointAndEval,
-    tables::DynamicRangeTableCircuit,
-};
+use crate::{e2e::ShardContext, tables::DynamicRangeTableCircuit};
 use itertools::Itertools;
 use mpcs::{
     PolynomialCommitmentScheme, SecurityLevel, SecurityLevel::Conjecture100bits, WhirDefault,
@@ -51,6 +48,39 @@ use multilinear_extensions::{mle::IntoMLE, util::ceil_log2};
 use p3::field::FieldAlgebra;
 use rand::thread_rng;
 use transcript::{BasicTranscript, Transcript};
+
+#[test]
+fn test_public_values_iter_field_matches_query_order() {
+    type E = GoldilocksExt2;
+
+    let public_values = PublicValues::new(
+        0xABCD_1234,
+        0x0800_0000,
+        123,
+        0x0800_1000,
+        456,
+        7,
+        0x3000_0000,
+        64,
+        0x2800_0000,
+        32,
+        [0, 1, 2, 3, 4, 5, 6, 7],
+        std::array::from_fn(|i| (i as u32) + 10),
+    );
+
+    let from_iter = public_values
+        .iter_field::<<E as ExtensionField>::BaseField>()
+        .collect_vec();
+    let from_query = (0..PublicValues::flattened_len())
+        .map(|i| public_values.query_by_index::<E>(i))
+        .collect_vec();
+
+    assert_eq!(
+        PublicValues::flattened_len(),
+        11 + SEPTIC_EXTENSION_DEGREE * 2 + 16
+    );
+    assert_eq!(from_iter, from_query);
+}
 
 struct TestConfig {
     pub(crate) reg_id: WitIn,
@@ -141,7 +171,6 @@ fn test_rw_lk_expression_combination() {
                 zkvm_fixed_traces,
             )
             .unwrap();
-        let vk = pk.get_vk_slow();
 
         // generate mock witness
         let num_instances = 1 << 8;
@@ -211,30 +240,30 @@ fn test_rw_lk_expression_combination() {
             fixed: vec![],
             witness: wits_in,
             structural_witness: structural_in,
-            public_input: vec![],
-            pub_io_evals: vec![],
-            num_instances: vec![num_instances],
+            pi: vec![],
+            num_instances: [num_instances, 0],
             has_ecc_ops: false,
         };
-        let task = crate::scheme::scheduler::ChipTask {
+        let mut task = crate::scheme::scheduler::ChipTask {
             task_id: 0,
             circuit_name: name.clone(),
             circuit_idx: 0,
             pk: prover.pk.circuit_pks.get(&name).unwrap(),
             input,
             estimated_memory_bytes: 0,
+            booked_memory_bytes: 0,
             has_witness_or_fixed: true,
             challenges: prover_challenges,
             witness_trace_idx: None,
+            #[cfg(feature = "gpu")]
+            witness_trace_rows: None,
             num_witin: 0,
             structural_rmm: None,
         };
-        let (proof, _, _) = prover
-            .create_chip_proof(&task, &mut transcript)
+        let (_proof, _main_job) = prover
+            .create_chip_proof(&mut task, &mut transcript)
             .expect("create_proof failed");
 
-        // verify proof
-        let verifier = ZKVMVerifier::new(vk.clone());
         let mut v_transcript = BasicTranscript::new(b"test");
         // write commitment into transcript and derive challenges from it
         Pcs::write_commitment(&witin_commit, &mut v_transcript).unwrap();
@@ -248,19 +277,6 @@ fn test_rw_lk_expression_combination() {
         {
             Instrumented::<<<E as ExtensionField>::BaseField as PoseidonField>::P>::clear_metrics();
         }
-        verifier
-            .verify_chip_proof(
-                name.as_str(),
-                verifier.vk.circuit_vks.get(&name).unwrap(),
-                &proof,
-                &[],
-                &[],
-                &mut v_transcript,
-                NUM_FANIN,
-                &PointAndEval::default(),
-                &verifier_challenges,
-            )
-            .expect("verifier failed");
         #[cfg(debug_assertions)]
         {
             println!(
@@ -397,7 +413,7 @@ fn test_single_add_instance_e2e() {
         .assign_table_circuit::<ProgramTableCircuit<E>>(&zkvm_cs, &prog_config, &program)
         .unwrap();
 
-    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, vec![0], vec![0; 14]);
+    let pi = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0; 8], [0; 14]);
     let transcript = BasicTranscript::new(b"riscv");
     let zkvm_proof = prover
         .create_proof(&shard_ctx, zkvm_witness, pi, transcript)

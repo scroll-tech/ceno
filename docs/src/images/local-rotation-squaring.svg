@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 340" font-family="sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2a2a2a"/>
+    </marker>
+    <marker id="arrBlue" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e6091"/>
+    </marker>
+  </defs>
+
+  <!-- column headers -->
+  <text x="260" y="30" text-anchor="middle" font-weight="bold" font-size="15">f  (round input)</text>
+  <text x="460" y="30" text-anchor="middle" font-weight="bold" font-size="15">h  (squared)</text>
+
+  <!-- row 0: round r = (1, 0) -->
+  <text x="20" y="85" font-size="14">round r =</text>
+  <text x="110" y="85" font-size="15" font-family="monospace">(1, 0)</text>
+  <rect x="220" y="60" width="80" height="40" rx="4" fill="#eef5ff" stroke="#333"/>
+  <text x="260" y="87" text-anchor="middle" font-size="16">f</text>
+  <rect x="420" y="60" width="80" height="40" rx="4" fill="#fff2e6" stroke="#333"/>
+  <text x="460" y="87" text-anchor="middle" font-size="16">h</text>
+  <line x1="302" y1="80" x2="418" y2="80" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="360" y="73" text-anchor="middle" font-size="13">( &#183; )&#178;</text>
+
+  <!-- row 1: round r = (0, 1) = g(1,0) -->
+  <text x="20" y="165" font-size="14">round r =</text>
+  <text x="110" y="165" font-size="15" font-family="monospace">(0, 1)</text>
+  <rect x="220" y="140" width="80" height="40" rx="4" fill="#eef5ff" stroke="#333"/>
+  <text x="260" y="167" text-anchor="middle" font-size="16">f</text>
+  <rect x="420" y="140" width="80" height="40" rx="4" fill="#fff2e6" stroke="#333"/>
+  <text x="460" y="167" text-anchor="middle" font-size="16">h</text>
+  <line x1="302" y1="160" x2="418" y2="160" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="360" y="153" text-anchor="middle" font-size="13">( &#183; )&#178;</text>
+
+  <!-- row 2: round r = (1, 1) = g^2(1,0) -->
+  <text x="20" y="245" font-size="14">round r =</text>
+  <text x="110" y="245" font-size="15" font-family="monospace">(1, 1)</text>
+  <rect x="220" y="220" width="80" height="40" rx="4" fill="#eef5ff" stroke="#333"/>
+  <text x="260" y="247" text-anchor="middle" font-size="16">f</text>
+  <rect x="420" y="220" width="80" height="40" rx="4" fill="#fff2e6" stroke="#333"/>
+  <text x="460" y="247" text-anchor="middle" font-size="16">h</text>
+  <line x1="302" y1="240" x2="418" y2="240" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="360" y="233" text-anchor="middle" font-size="13">( &#183; )&#178;</text>
+
+  <!-- transition arrows: diagonal from h of row k to f of row k+1 -->
+  <line x1="460" y1="100" x2="262" y2="140" stroke="#1e6091" stroke-width="1.7" stroke-dasharray="5,3" marker-end="url(#arrBlue)"/>
+  <line x1="460" y1="180" x2="262" y2="220" stroke="#1e6091" stroke-width="1.7" stroke-dasharray="5,3" marker-end="url(#arrBlue)"/>
+
+  <!-- legend -->
+  <g transform="translate(540, 80)">
+    <text x="0" y="0" font-size="13" font-weight="bold">Legend</text>
+    <line x1="0" y1="20" x2="40" y2="20" stroke="#2a2a2a" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="48" y="24" font-size="12">h = f&#178; (local)</text>
+    <line x1="0" y1="48" x2="40" y2="48" stroke="#1e6091" stroke-width="1.7" stroke-dasharray="5,3" marker-end="url(#arrBlue)"/>
+    <text x="48" y="52" font-size="12">h&#7527; = f&#7527;&#8330;&#8321; (transition)</text>
+  </g>
+
+  <!-- footer: g-orbit cycle -->
+  <text x="360" y="310" text-anchor="middle" font-size="13" font-style="italic">
+    g-orbit under p&#8322;(X) = X&#178; + X + 1:&#160;&#160;(1, 0) &#8594; (0, 1) &#8594; (1, 1) &#8594; (1, 0) &#8230;
+  </text>
+</svg>

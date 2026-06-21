@@ -21,9 +21,10 @@ use crate::{
             div::{DivInstruction, DivuInstruction, RemInstruction, RemuInstruction},
             ecall::{
                 Fp2AddInstruction, Fp2MulInstruction, FpAddInstruction, FpMulInstruction,
-                KeccakInstruction, Secp256k1InvInstruction, Secp256r1InvInstruction,
-                ShaExtendInstruction, Uint256MulInstruction, WeierstrassAddAssignInstruction,
-                WeierstrassDecompressInstruction, WeierstrassDoubleAssignInstruction,
+                KeccakInstruction, PubIoCommitInstruction, Secp256k1InvInstruction,
+                Secp256r1InvInstruction, ShaExtendInstruction, Uint256MulInstruction,
+                WeierstrassAddAssignInstruction, WeierstrassDecompressInstruction,
+                WeierstrassDoubleAssignInstruction,
             },
             logic::{AndInstruction, OrInstruction, XorInstruction},
             logic_imm::{AndiInstruction, OriInstruction, XoriInstruction},
@@ -35,6 +36,7 @@ use crate::{
         },
     },
     scheme::constants::DYNAMIC_RANGE_MAX_BITS,
+    state::GlobalState,
     structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, DoubleU8TableCircuit, DynamicRangeTableCircuit, LtuTableCircuit,
@@ -45,10 +47,10 @@ use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
     Bn254FpMulSpec,
     InsnKind::{self, *},
-    KeccakSpec, LogPcCycleSpec, Platform, Secp256k1AddSpec, Secp256k1DecompressSpec,
-    Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec, Secp256r1DoubleSpec,
-    Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepCellExtractor, StepIndex, StepRecord,
-    SyscallSpec, Uint256MulSpec, Word,
+    KeccakSpec, LogPcCycleSpec, Platform, PubIoCommitSpec, STATE_CONTINUATION, Secp256k1AddSpec,
+    Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec,
+    Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepCellExtractor, StepIndex,
+    StepRecord, SyscallSpec, Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
@@ -69,10 +71,12 @@ use std::{
     collections::{BTreeMap, HashMap},
 };
 use strum::{EnumCount, IntoEnumIterator};
+use tracing::info_span;
 
 pub mod mmu;
 
 const ECALL_HALT: u32 = Platform::ecall_halt();
+const ECALL_PUB_IO_COMMIT: u32 = PubIoCommitSpec::CODE;
 
 pub struct Rv32imConfig<E: ExtensionField> {
     // ALU Opcodes.
@@ -134,6 +138,8 @@ pub struct Rv32imConfig<E: ExtensionField> {
 
     // Ecall Opcodes
     pub halt_config: <HaltInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub pubio_commit_config: <PubIoCommitInstruction<E> as Instruction<E>>::InstructionConfig,
+    pub state_continuation_config: <GlobalState<E> as Instruction<E>>::InstructionConfig,
     pub keccak_config: <KeccakInstruction<E> as Instruction<E>>::InstructionConfig,
     pub sha_extend_config: <ShaExtendInstruction<E> as Instruction<E>>::InstructionConfig,
     pub bn254_add_config:
@@ -355,6 +361,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             }};
         }
         let halt_config = register_ecall_circuit!(HaltInstruction<E>, ecall_cells_map);
+        let pubio_commit_config =
+            register_ecall_circuit!(PubIoCommitInstruction<E>, ecall_cells_map);
+        let state_continuation_config = register_ecall_circuit!(GlobalState<E>, ecall_cells_map);
 
         // Keccak precompile is a known hotspot for peak memory.
         // Its heavy read/write/LK activity inflates tower-witness usage, causing
@@ -468,6 +477,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             lb_config,
             // ecall opcodes
             halt_config,
+            pubio_commit_config,
+            state_continuation_config,
             keccak_config,
             sha_extend_config,
             bn254_add_config,
@@ -562,6 +573,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // system
         fixed.register_opcode_circuit::<HaltInstruction<E>>(cs, &self.halt_config);
+        fixed.register_opcode_circuit::<PubIoCommitInstruction<E>>(cs, &self.pubio_commit_config);
+        fixed.register_opcode_circuit::<GlobalState<E>>(cs, &self.state_continuation_config);
         fixed.register_opcode_circuit::<KeccakInstruction<E>>(cs, &self.keccak_config);
         fixed.register_opcode_circuit::<ShaExtendInstruction<E>>(cs, &self.sha_extend_config);
         fixed.register_opcode_circuit::<WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>>(
@@ -650,6 +663,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         }
 
         log_ecall!("HALT", ECALL_HALT);
+        log_ecall!("PUB_IO_COMMIT", ECALL_PUB_IO_COMMIT);
+        log_ecall!("STATE_CONTINUATION", STATE_CONTINUATION);
         log_ecall!("KECCAK", KeccakSpec::CODE);
         log_ecall!("bn254_add_records", Bn254AddSpec::CODE);
         log_ecall!("bn254_double_records", Bn254DoubleSpec::CODE);
@@ -681,13 +696,17 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 let records = instrunction_dispatch_ctx
                     .records_for_kinds::<E, $instruction>()
                     .unwrap_or(&[]);
-                witness.assign_opcode_circuit::<$instruction>(
-                    cs,
-                    shard_ctx,
-                    &self.$config,
-                    shard_steps,
-                    records,
-                )?;
+                let n = records.len();
+                info_span!("assign_chip", chip = %<$instruction>::name(), n)
+                    .in_scope(|| {
+                        witness.assign_opcode_circuit::<$instruction>(
+                            cs,
+                            shard_ctx,
+                            &self.$config,
+                            shard_steps,
+                            records,
+                        )
+                    })?;
             }};
         }
 
@@ -696,13 +715,17 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 let records = instrunction_dispatch_ctx
                     .records_for_ecall_code($code)
                     .unwrap_or(&[]);
-                witness.assign_opcode_circuit::<$instruction>(
-                    cs,
-                    shard_ctx,
-                    &self.$config,
-                    shard_steps,
-                    records,
-                )?;
+                let n = records.len();
+                info_span!("assign_chip", chip = %<$instruction>::name(), n)
+                    .in_scope(|| {
+                        witness.assign_opcode_circuit::<$instruction>(
+                            cs,
+                            shard_ctx,
+                            &self.$config,
+                            shard_steps,
+                            records,
+                        )
+                    })?;
             }};
         }
 
@@ -761,6 +784,16 @@ impl<E: ExtensionField> Rv32imConfig<E> {
 
         // ecall / halt
         assign_ecall!(HaltInstruction<E>, halt_config, ECALL_HALT);
+        assign_ecall!(
+            PubIoCommitInstruction<E>,
+            pubio_commit_config,
+            ECALL_PUB_IO_COMMIT
+        );
+        assign_ecall!(
+            GlobalState<E>,
+            state_continuation_config,
+            STATE_CONTINUATION
+        );
         assign_ecall!(KeccakInstruction<E>, keccak_config, KeccakSpec::CODE);
         assign_ecall!(
             WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>,
@@ -846,22 +879,20 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         cs: &ZKVMConstraintSystem<E>,
         witness: &mut ZKVMWitnesses<E>,
     ) -> Result<(), ZKVMError> {
-        witness.assign_table_circuit::<DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>>(
-            cs,
-            &self.dynamic_range_config,
-            &(),
-        )?;
-        witness.assign_table_circuit::<DoubleU8TableCircuit<E>>(
-            cs,
-            &self.double_u8_range_config,
-            &(),
-        )?;
-        witness.assign_table_circuit::<AndTableCircuit<E>>(cs, &self.and_table_config, &())?;
-        witness.assign_table_circuit::<OrTableCircuit<E>>(cs, &self.or_table_config, &())?;
-        witness.assign_table_circuit::<XorTableCircuit<E>>(cs, &self.xor_table_config, &())?;
-        witness.assign_table_circuit::<LtuTableCircuit<E>>(cs, &self.ltu_config, &())?;
+        macro_rules! assign_table {
+            ($table:ty, $config:expr) => {
+                info_span!("assign_table", table = %<$table>::name())
+                    .in_scope(|| witness.assign_table_circuit::<$table>(cs, $config, &()))?;
+            };
+        }
+        assign_table!(DynamicRangeTableCircuit<E, DYNAMIC_RANGE_MAX_BITS>, &self.dynamic_range_config);
+        assign_table!(DoubleU8TableCircuit<E>, &self.double_u8_range_config);
+        assign_table!(AndTableCircuit<E>, &self.and_table_config);
+        assign_table!(OrTableCircuit<E>, &self.or_table_config);
+        assign_table!(XorTableCircuit<E>, &self.xor_table_config);
+        assign_table!(LtuTableCircuit<E>, &self.ltu_config);
         #[cfg(not(feature = "u16limb_circuit"))]
-        witness.assign_table_circuit::<PowTableCircuit<E>>(cs, &self.pow_config, &())?;
+        assign_table!(PowTableCircuit<E>, &self.pow_config);
 
         Ok(())
     }
@@ -1016,13 +1047,17 @@ impl<E: ExtensionField> DummyExtraConfig<E> {
         let phantom_log_pc_cycle_records = instrunction_dispatch_ctx
             .records_for_ecall_code(LogPcCycleSpec::CODE)
             .unwrap_or(&[]);
-        witness.assign_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
-            cs,
-            shard_ctx,
-            &self.phantom_log_pc_cycle,
-            shard_steps,
-            phantom_log_pc_cycle_records,
-        )?;
+        let n = phantom_log_pc_cycle_records.len();
+        info_span!("assign_chip", chip = %LargeEcallDummy::<E, LogPcCycleSpec>::name(), n)
+            .in_scope(|| {
+                witness.assign_opcode_circuit::<LargeEcallDummy<E, LogPcCycleSpec>>(
+                    cs,
+                    shard_ctx,
+                    &self.phantom_log_pc_cycle,
+                    shard_steps,
+                    phantom_log_pc_cycle_records,
+                )
+            })?;
         Ok(())
     }
 }
@@ -1041,6 +1076,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             ECALL_HALT => *self
                 .ecall_cells_map
                 .get(&HaltInstruction::<E>::name())
+                .expect("unable to find name"),
+            ECALL_PUB_IO_COMMIT => *self
+                .ecall_cells_map
+                .get(&PubIoCommitInstruction::<E>::name())
+                .expect("unable to find name"),
+            STATE_CONTINUATION => *self
+                .ecall_cells_map
+                .get(&GlobalState::<E>::name())
                 .expect("unable to find name"),
             KeccakSpec::CODE => *self
                 .ecall_cells_map

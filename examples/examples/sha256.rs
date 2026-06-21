@@ -9,13 +9,7 @@ fn main() {
     let input: Vec<u8> = ceno_rt::read();
 
     let h = Sha256::digest(&input);
-    let h: [u8; 32] = h.into();
-    let h: [u32; 8] = core::array::from_fn(|i| {
-        let chunk = &h[4 * i..][..4];
-        u32::from_be_bytes(chunk.try_into().unwrap())
-    });
-
+    let h_bytes: [u8; 32] = h.into();
     // Output the final hash values one by one
-    ceno_rt::commit(&h);
-    // debug_print!("{:x}", h[0]);
+    ceno_rt::commit(&h_bytes);
 }

@@ -96,9 +96,7 @@ impl<C: Config> NonLeafVerifierVariables<C> {
             let proof = builder.get(proofs, i);
             assert_required_air_for_agg_vm_present(builder, &proof);
             let proof_vm_pvs = self.verify_internal_or_leaf_verifier_proof(builder, &proof);
-
             assert_single_segment_vm_exit_successfully(builder, &proof);
-
             builder.if_eq(i, RVar::zero()).then_or_else(
                 |builder| {
                     builder.assign(&pvs.app_commit, proof_vm_pvs.vm_verifier_pvs.app_commit);
@@ -130,7 +128,7 @@ impl<C: Config> NonLeafVerifierVariables<C> {
             //         let expected_last_shard_id = Usize::uninit(builder);
             //         builder.assign(&expected_last_shard_id, pv.len() - Usize::from(1));
 
-            //         let shard_id_fs = builder.get(&shard_raw_pi, SHARD_ID_IDX);
+            //         let shard_id_fs = builder.get(&shard_pi, SHARD_ID_IDX);
             //         let shard_id_f = builder.get(&shard_id_fs, 0);
             //         let shard_id = Usize::Var(builder.cast_felt_to_var(shard_id_f));
             //         builder.assert_usize_eq(expected_last_shard_id, shard_id);

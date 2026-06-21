@@ -22,7 +22,8 @@ use std::{collections::BTreeMap, fmt, sync::Arc};
 /// - Any of `rs1 / rs2 / rd` **may be `x0`**. The trace handles this like any register, including the value that was _supposed_ to be stored. The circuits must handle this case: either **store `0` or skip `x0` operations**.
 ///
 /// - Any pair of `rs1 / rs2 / rd` **may be the same**. Then, one op will point to the other op in the same instruction but a different subcycle. The circuits may follow the operations **without special handling** of repeated registers.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(C)]
 pub struct StepRecord {
     cycle: Cycle,
     pc: Change<ByteAddr>,
@@ -30,14 +31,45 @@ pub struct StepRecord {
     pub hint_maxtouch_addr: Change<ByteAddr>,
     pub insn: Instruction,
 
-    rs1: Option<ReadOp>,
-    rs2: Option<ReadOp>,
+    has_rs1: bool,
+    has_rs2: bool,
+    has_rd: bool,
+    has_memory_op: bool,
 
-    rd: Option<WriteOp>,
+    rs1: ReadOp,
+    rs2: ReadOp,
+    rd: WriteOp,
+    memory_op: WriteOp,
 
-    memory_op: Option<WriteOp>,
+    /// Index into the separate syscall witness storage.
+    /// `u32::MAX` means no syscall for this step.
+    syscall_index: u32,
+}
 
-    syscall: Option<SyscallWitness>,
+impl StepRecord {
+    /// Sentinel value indicating no syscall is associated with this step.
+    pub const NO_SYSCALL: u32 = u32::MAX;
+}
+
+impl Default for StepRecord {
+    fn default() -> Self {
+        Self {
+            cycle: 0,
+            pc: Default::default(),
+            heap_maxtouch_addr: Default::default(),
+            hint_maxtouch_addr: Default::default(),
+            insn: Default::default(),
+            has_rs1: false,
+            has_rs2: false,
+            has_rd: false,
+            has_memory_op: false,
+            rs1: Default::default(),
+            rs2: Default::default(),
+            rd: Default::default(),
+            memory_op: Default::default(),
+            syscall_index: StepRecord::NO_SYSCALL,
+        }
+    }
 }
 
 pub type StepIndex = usize;
@@ -152,7 +184,8 @@ pub trait Tracer {
     ) -> Option<(WordAddr, WordAddr)>;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
+#[repr(C)]
 pub struct MemOp<T> {
     /// Virtual Memory Address.
     /// For registers, get it from `Platform::register_vma(idx)`.
@@ -194,7 +227,7 @@ impl LatestAccesses {
         Self {
             store: DenseAddrSpace::new(
                 WordAddr::from(0u32),
-                ByteAddr::from(platform.heap.end).waddr(),
+                ByteAddr::from(platform.stack.end).waddr(),
             ),
             len: 0,
             #[cfg(any(test, debug_assertions))]
@@ -605,27 +638,41 @@ impl StepRecord {
         heap_maxtouch_addr: Change<ByteAddr>,
         hint_maxtouch_addr: Change<ByteAddr>,
     ) -> StepRecord {
+        let has_rs1 = rs1_read.is_some();
+        let has_rs2 = rs2_read.is_some();
+        let has_rd = rd.is_some();
+        let has_memory_op = memory_op.is_some();
         StepRecord {
             cycle,
             pc,
-            rs1: rs1_read.map(|rs1| ReadOp {
-                addr: Platform::register_vma(insn.rs1).into(),
-                value: rs1,
-                previous_cycle,
-            }),
-            rs2: rs2_read.map(|rs2| ReadOp {
-                addr: Platform::register_vma(insn.rs2).into(),
-                value: rs2,
-                previous_cycle,
-            }),
-            rd: rd.map(|rd| WriteOp {
-                addr: Platform::register_vma(insn.rd_internal() as RegIdx).into(),
-                value: rd,
-                previous_cycle,
-            }),
+            has_rs1,
+            has_rs2,
+            has_rd,
+            has_memory_op,
+            rs1: rs1_read
+                .map(|rs1| ReadOp {
+                    addr: Platform::register_vma(insn.rs1).into(),
+                    value: rs1,
+                    previous_cycle,
+                })
+                .unwrap_or_default(),
+            rs2: rs2_read
+                .map(|rs2| ReadOp {
+                    addr: Platform::register_vma(insn.rs2).into(),
+                    value: rs2,
+                    previous_cycle,
+                })
+                .unwrap_or_default(),
+            rd: rd
+                .map(|rd| WriteOp {
+                    addr: Platform::register_vma(insn.rd_internal() as RegIdx).into(),
+                    value: rd,
+                    previous_cycle,
+                })
+                .unwrap_or_default(),
             insn,
-            memory_op,
-            syscall: None,
+            memory_op: memory_op.unwrap_or_default(),
+            syscall_index: StepRecord::NO_SYSCALL,
             heap_maxtouch_addr,
             hint_maxtouch_addr,
         }
@@ -645,19 +692,23 @@ impl StepRecord {
     }
 
     pub fn rs1(&self) -> Option<ReadOp> {
-        self.rs1.clone()
+        if self.has_rs1 { Some(self.rs1) } else { None }
     }
 
     pub fn rs2(&self) -> Option<ReadOp> {
-        self.rs2.clone()
+        if self.has_rs2 { Some(self.rs2) } else { None }
     }
 
     pub fn rd(&self) -> Option<WriteOp> {
-        self.rd.clone()
+        if self.has_rd { Some(self.rd) } else { None }
     }
 
     pub fn memory_op(&self) -> Option<WriteOp> {
-        self.memory_op.clone()
+        if self.has_memory_op {
+            Some(self.memory_op)
+        } else {
+            None
+        }
     }
 
     #[inline(always)]
@@ -665,8 +716,19 @@ impl StepRecord {
         self.pc.before == self.pc.after
     }
 
-    pub fn syscall(&self) -> Option<&SyscallWitness> {
-        self.syscall.as_ref()
+    /// Returns true if this step has a syscall witness.
+    pub fn has_syscall(&self) -> bool {
+        self.syscall_index != Self::NO_SYSCALL
+    }
+
+    /// Look up the syscall witness from a separate store.
+    /// The store is typically obtained from `FullTracer::syscall_witnesses()`.
+    pub fn syscall<'a>(&self, store: &'a [SyscallWitness]) -> Option<&'a SyscallWitness> {
+        if self.syscall_index == Self::NO_SYSCALL {
+            None
+        } else {
+            Some(&store[self.syscall_index as usize])
+        }
     }
 }
 
@@ -683,6 +745,9 @@ pub struct FullTracer {
     len: usize,
     pending_index: usize,
     pending_cycle: Cycle,
+
+    /// Syscall witnesses stored separately (StepRecord references by index).
+    syscall_witnesses: Vec<SyscallWitness>,
 
     // record each section max access address
     // (start_addr -> (start_addr, end_addr, min_access_addr, max_access_addr))
@@ -724,6 +789,7 @@ impl FullTracer {
             len: 0,
             pending_index: 0,
             pending_cycle: Self::SUBCYCLES_PER_INSN,
+            syscall_witnesses: Vec::new(),
             mmio_min_max_access: Some(mmio_max_access),
             platform: platform.clone(),
             latest_accesses: LatestAccesses::new(platform),
@@ -760,11 +826,24 @@ impl FullTracer {
     pub fn reset_step_buffer(&mut self) {
         self.len = 0;
         self.pending_index = 0;
+        self.syscall_witnesses.clear();
         self.reset_pending_slot();
     }
 
     pub fn recorded_steps(&self) -> &[StepRecord] {
         &self.records[..self.len]
+    }
+
+    /// Returns the syscall witness store. Pass this to `StepRecord::syscall()`.
+    #[inline(always)]
+    pub fn syscall_witnesses(&self) -> &[SyscallWitness] {
+        &self.syscall_witnesses
+    }
+
+    /// Take ownership of syscall witnesses, leaving an empty Vec for the next shard.
+    /// Avoids the `to_vec()` clone when wrapping in `Arc`.
+    pub fn take_syscall_witnesses(&mut self) -> Vec<SyscallWitness> {
+        std::mem::take(&mut self.syscall_witnesses)
     }
 
     #[inline(always)]
@@ -822,41 +901,41 @@ impl FullTracer {
     #[inline(always)]
     pub fn load_register(&mut self, idx: RegIdx, value: Word) {
         let addr = Platform::register_vma(idx).into();
-        match (
-            self.records[self.pending_index].rs1.as_ref(),
-            self.records[self.pending_index].rs2.as_ref(),
-        ) {
-            (None, None) => {
-                self.records[self.pending_index].rs1 = Some(ReadOp {
-                    addr,
-                    value,
-                    previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS1),
-                });
-            }
-            (Some(_), None) => {
-                self.records[self.pending_index].rs2 = Some(ReadOp {
-                    addr,
-                    value,
-                    previous_cycle: self.track_access(addr, Self::SUBCYCLE_RS2),
-                });
-            }
-            _ => unimplemented!("Only two register reads are supported"),
+        if !self.records[self.pending_index].has_rs1 {
+            let previous_cycle = self.track_access(addr, Self::SUBCYCLE_RS1);
+            self.records[self.pending_index].rs1 = ReadOp {
+                addr,
+                value,
+                previous_cycle,
+            };
+            self.records[self.pending_index].has_rs1 = true;
+        } else if !self.records[self.pending_index].has_rs2 {
+            let previous_cycle = self.track_access(addr, Self::SUBCYCLE_RS2);
+            self.records[self.pending_index].rs2 = ReadOp {
+                addr,
+                value,
+                previous_cycle,
+            };
+            self.records[self.pending_index].has_rs2 = true;
+        } else {
+            unimplemented!("Only two register reads are supported");
         }
     }
 
     #[inline(always)]
     pub fn store_register(&mut self, idx: RegIdx, value: Change<Word>) {
-        if self.records[self.pending_index].rd.is_some() {
+        if self.records[self.pending_index].has_rd {
             unimplemented!("Only one register write is supported");
         }
 
         let addr = Platform::register_vma(idx).into();
         let previous_cycle = self.track_access(addr, Self::SUBCYCLE_RD);
-        self.records[self.pending_index].rd = Some(WriteOp {
+        self.records[self.pending_index].rd = WriteOp {
             addr,
             value,
             previous_cycle,
-        });
+        };
+        self.records[self.pending_index].has_rd = true;
     }
 
     #[inline(always)]
@@ -866,7 +945,7 @@ impl FullTracer {
 
     #[inline(always)]
     pub fn store_memory(&mut self, addr: WordAddr, value: Change<Word>) {
-        if self.records[self.pending_index].memory_op.is_some() {
+        if self.records[self.pending_index].has_memory_op {
             unimplemented!("Only one memory access is supported");
         }
 
@@ -899,19 +978,26 @@ impl FullTracer {
             }
         }
 
-        self.records[self.pending_index].memory_op = Some(WriteOp {
+        let previous_cycle = self.track_access(addr, Self::SUBCYCLE_MEM);
+        self.records[self.pending_index].memory_op = WriteOp {
             addr,
             value,
-            previous_cycle: self.track_access(addr, Self::SUBCYCLE_MEM),
-        });
+            previous_cycle,
+        };
+        self.records[self.pending_index].has_memory_op = true;
     }
 
     #[inline(always)]
     pub fn track_syscall(&mut self, effects: SyscallEffects) {
         let witness = effects.finalize(self);
         let record = &mut self.records[self.pending_index];
-        assert!(record.syscall.is_none(), "Only one syscall per step");
-        record.syscall = Some(witness);
+        assert!(
+            record.syscall_index == StepRecord::NO_SYSCALL,
+            "Only one syscall per step"
+        );
+        let idx = self.syscall_witnesses.len();
+        self.syscall_witnesses.push(witness);
+        record.syscall_index = idx as u32;
     }
 
     #[inline(always)]
@@ -1371,6 +1457,7 @@ impl Tracer for FullTracer {
 }
 
 #[derive(Copy, Clone, Default, PartialEq, Eq)]
+#[repr(C)]
 pub struct Change<T> {
     pub before: T,
     pub after: T,
@@ -1385,5 +1472,94 @@ impl<T> Change<T> {
 impl<T: fmt::Debug> fmt::Debug for Change<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?} -> {:?}", self.before, self.after)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_step_record_is_copy_and_compact() {
+        // Verify StepRecord is Copy (this compiles only if Copy is implemented)
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<StepRecord>();
+
+        // Verify repr(C) compactness — should be well under 128 bytes
+        let size = std::mem::size_of::<StepRecord>();
+        eprintln!("StepRecord size: {} bytes", size);
+        assert!(
+            size <= 144,
+            "StepRecord should be compact for GPU transfer: got {} bytes",
+            size
+        );
+    }
+
+    #[test]
+    fn test_supporting_types_are_copy() {
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<ReadOp>();
+        assert_copy::<WriteOp>();
+        assert_copy::<Change<Word>>();
+        assert_copy::<Change<ByteAddr>>();
+    }
+
+    /// Verify exact byte offsets of StepRecord fields for CUDA struct alignment.
+    /// If this test fails, the CUDA step_record.cuh header must be updated to match.
+    #[test]
+    fn test_step_record_layout_for_gpu() {
+        use std::mem;
+
+        macro_rules! offset_of {
+            ($type:ty, $field:ident) => {{
+                let val = <$type>::default();
+                let base = &val as *const _ as usize;
+                let field = &val.$field as *const _ as usize;
+                field - base
+            }};
+        }
+
+        // Sub-type sizes
+        assert_eq!(mem::size_of::<Instruction>(), 12, "Instruction size");
+        assert_eq!(mem::size_of::<ReadOp>(), 16, "ReadOp size");
+        assert_eq!(mem::size_of::<WriteOp>(), 24, "WriteOp size");
+        assert_eq!(
+            mem::size_of::<Change<ByteAddr>>(),
+            8,
+            "Change<ByteAddr> size"
+        );
+
+        // StepRecord field offsets — these must match step_record.cuh
+        assert_eq!(offset_of!(StepRecord, cycle), 0);
+        assert_eq!(offset_of!(StepRecord, pc), 8);
+        assert_eq!(offset_of!(StepRecord, heap_maxtouch_addr), 16);
+        assert_eq!(offset_of!(StepRecord, hint_maxtouch_addr), 24);
+        assert_eq!(offset_of!(StepRecord, insn), 32);
+        assert_eq!(offset_of!(StepRecord, has_rs1), 44);
+        assert_eq!(offset_of!(StepRecord, has_rs2), 45);
+        assert_eq!(offset_of!(StepRecord, has_rd), 46);
+        assert_eq!(offset_of!(StepRecord, has_memory_op), 47);
+        assert_eq!(offset_of!(StepRecord, rs1), 48);
+        assert_eq!(offset_of!(StepRecord, rs2), 64);
+        assert_eq!(offset_of!(StepRecord, rd), 80);
+        assert_eq!(offset_of!(StepRecord, memory_op), 104);
+        assert_eq!(offset_of!(StepRecord, syscall_index), 128);
+
+        // Total size
+        assert_eq!(mem::size_of::<StepRecord>(), 136, "StepRecord total size");
+        assert_eq!(mem::align_of::<StepRecord>(), 8, "StepRecord alignment");
+
+        // InsnKind must be repr(u8) for CUDA compatibility
+        assert_eq!(
+            mem::size_of::<InsnKind>(),
+            1,
+            "InsnKind must be 1 byte (repr(u8))"
+        );
+
+        eprintln!(
+            "StepRecord layout verified: {} bytes, {} align",
+            mem::size_of::<StepRecord>(),
+            mem::align_of::<StepRecord>()
+        );
     }
 }

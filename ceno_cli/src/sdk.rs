@@ -148,13 +148,20 @@ where
     pub fn generate_base_proof(
         &self,
         hints: CenoStdin,
-        pub_io: CenoStdin,
+        public_io_digest: [u32; 8],
         max_steps: usize,
         shard_id: Option<usize>,
     ) -> Vec<ZKVMProof<E, PCS>> {
         if let Some(zkvm_prover) = self.zkvm_prover.as_ref() {
-            let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(&hints), &Vec::from(&pub_io));
-            run_e2e_proof::<E, PCS, PB, PD>(zkvm_prover, &init_full_mem, max_steps, false, shard_id)
+            let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(&hints));
+            run_e2e_proof::<E, PCS, PB, PD>(
+                zkvm_prover,
+                &init_full_mem,
+                public_io_digest,
+                max_steps,
+                false,
+                shard_id,
+            )
         } else {
             panic!("ZKVMProver is not initialized")
         }

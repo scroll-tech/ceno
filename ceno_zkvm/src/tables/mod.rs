@@ -4,10 +4,11 @@ use gkr_iop::{
     chip::Chip,
     gkr::{GKRCircuit, layer::Layer},
     selector::SelectorType,
+    utils::lk_multiplicity::LkMultiplicity,
 };
 use itertools::Itertools;
 use multilinear_extensions::ToExpr;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use witness::RowMajorMatrix;
 
 mod shard_ram;
@@ -48,6 +49,8 @@ pub trait TableCircuit<E: ExtensionField> {
         let r_table_len = cb.cs.r_table_expressions.len();
         let w_table_len = cb.cs.w_table_expressions.len();
         let lk_table_len = cb.cs.lk_table_expressions.len() * 2;
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
 
         let selector = cb.create_placeholder_structural_witin(|| "selector");
         let selector_type = SelectorType::Prefix(selector.expr());
@@ -62,9 +65,9 @@ pub trait TableCircuit<E: ExtensionField> {
                 // lk_record
                 (r_table_len + w_table_len..r_table_len + w_table_len + lk_table_len).collect_vec(),
                 // zero_record
-                vec![],
+                (0..zero_len).collect_vec(),
             ],
-            Chip::new_from_cb(cb, 0),
+            Chip::new_from_cb(cb),
         );
 
         // register selector to legacy constrain system
@@ -77,8 +80,11 @@ pub trait TableCircuit<E: ExtensionField> {
         if lk_table_len > 0 {
             cb.cs.lk_selector = Some(selector_type.clone());
         }
+        if zero_len > 0 {
+            cb.cs.zero_selector = Some(selector_type.clone());
+        }
 
-        let layer = Layer::from_circuit_builder(cb, Self::name(), 0, out_evals);
+        let layer = Layer::from_circuit_builder(cb, Self::name(), out_evals);
         chip.add_layer(layer);
 
         Ok((config, Some(chip.gkr_circuit())))
@@ -90,11 +96,25 @@ pub trait TableCircuit<E: ExtensionField> {
         input: &Self::FixedInput,
     ) -> RowMajorMatrix<E::BaseField>;
 
+    fn assign_instances_with_lk_multiplicities(
+        _config: &Self::TableConfig,
+        _num_witin: usize,
+        _num_structural_witin: usize,
+        _lk_multiplicity: &mut LkMultiplicity,
+        _input: &Self::WitnessInput<'_>,
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        unimplemented!(
+            "assign_instances_with_lk_multiplicities is not implemented for this table circuit"
+        )
+    }
+
     fn assign_instances(
-        config: &Self::TableConfig,
-        num_witin: usize,
-        num_structural_witin: usize,
-        multiplicity: &[HashMap<u64, usize>],
-        input: &Self::WitnessInput<'_>,
-    ) -> Result<RMMCollections<E::BaseField>, ZKVMError>;
+        _config: &Self::TableConfig,
+        _num_witin: usize,
+        _num_structural_witin: usize,
+        _multiplicity: &[FxHashMap<u64, usize>],
+        _input: &Self::WitnessInput<'_>,
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        unimplemented!("assign_instances is not implemented for this table circuit")
+    }
 }

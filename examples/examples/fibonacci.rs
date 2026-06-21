@@ -12,6 +12,6 @@ fn main() {
         a = b;
         b = c;
     }
-    // Constrain with public io
-    ceno_rt::commit(&b);
+    // Constrain with public io digest.
+    ceno_rt::commit(&b.to_le_bytes());
 }

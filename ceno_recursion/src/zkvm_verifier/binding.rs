@@ -2,8 +2,11 @@ use std::collections::{BTreeMap, HashMap};
 
 use crate::{
     arithmetics::{ceil_log2, next_pow2_instance_padding},
-    basefold_verifier::basefold::{
-        BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
+    basefold_verifier::{
+        basefold::{
+            BasefoldCommitment, BasefoldCommitmentVariable, BasefoldProof, BasefoldProofVariable,
+        },
+        utils::read_hint_slice,
     },
     tower_verifier::binding::{
         IOPProverMessage, IOPProverMessageVec, IOPProverMessageVecVariable, PointVariable,
@@ -24,10 +27,14 @@ use openvm_native_compiler::{
     prelude::*,
 };
 use openvm_native_compiler_derive::iter_zip;
-use openvm_native_recursion::hints::{Hintable, VecAutoHintable};
+use openvm_native_recursion::{
+    hints::{Hintable, VecAutoHintable},
+    vars::HintSlice,
+};
 use openvm_stark_backend::p3_field::{FieldAlgebra, extension::BinomialExtensionField};
 use openvm_stark_sdk::p3_baby_bear::BabyBear;
 use p3::field::FieldExtensionAlgebra;
+use std::cmp::max;
 use sumcheck::structs::IOPProof;
 
 pub type F = BabyBear;
@@ -65,10 +72,9 @@ pub fn decompose_prefixed_layer_bits(n: usize) -> (Vec<usize>, Vec<Vec<F>>) {
 #[derive(DslVariable, Clone)]
 pub struct ZKVMProofInputVariable<C: Config> {
     pub shard_id: Usize<C::N>,
-    pub raw_pi: Array<C, Array<C, Felt<C::F>>>,
-    pub raw_pi_num_variables: Array<C, Var<C::N>>,
-    pub pi_evals: Array<C, Ext<C::F, C::EF>>,
+    pub pi: Array<C, Felt<C::F>>,
     pub chip_proofs: Array<C, ZKVMChipProofInputVariable<C>>,
+    pub main_constraint_proof: SumcheckLayerProofVariable<C>,
     pub max_num_var: Var<C::N>,
     pub max_width: Var<C::N>,
     pub witin_commit: BasefoldCommitmentVariable<C>,
@@ -89,10 +95,9 @@ pub struct TowerProofInputVariable<C: Config> {
 
 pub(crate) struct ZKVMProofInput {
     pub shard_id: usize,
-    pub raw_pi: Vec<Vec<F>>,
-    // Evaluation of raw_pi.
-    pub pi_evals: Vec<E>,
+    pub pi: Vec<F>,
     pub chip_proofs: BTreeMap<usize, ZKVMChipProofInput>,
+    pub main_constraint_proof: SumcheckLayerProofInput,
     pub witin_commit: BasefoldCommitment,
     pub opening_proof: BasefoldProof,
 }
@@ -103,6 +108,8 @@ impl ZKVMProofInput {
         zkvm_proof: ZKVMProof<E, RecPcs>,
         vk: &ZKVMVerifyingKey<E, RecPcs>,
     ) -> Self {
+        let pi = zkvm_proof.public_values.iter_field::<F>().collect_vec();
+
         let mut chip_witin_num_vars: HashMap<usize, (usize, usize)> = HashMap::new(); // (chip_id, (num_witin, num_fixed))
         let mut chip_indices = zkvm_proof
             .chip_proofs
@@ -130,8 +137,7 @@ impl ZKVMProofInput {
 
         ZKVMProofInput {
             shard_id,
-            raw_pi: zkvm_proof.raw_pi,
-            pi_evals: zkvm_proof.pi_evals,
+            pi,
             chip_proofs: zkvm_proof
                 .chip_proofs
                 .into_iter()
@@ -139,12 +145,38 @@ impl ZKVMProofInput {
                     let (num_witin, num_fixed) = *chip_witin_num_vars
                         .get(&chip_idx)
                         .expect("num_witin data should exist");
-                    (
-                        chip_idx,
-                        ZKVMChipProofInput::from((chip_idx, proof, num_witin, num_fixed)),
-                    )
+                    let composed_cs = vk
+                        .circuit_vks
+                        .values()
+                        .nth(chip_idx)
+                        .expect("chip vk should exist")
+                        .get_cs();
+                    (chip_idx, {
+                        let sum_num_instances = proof.num_instances.iter().sum::<usize>();
+                        let mut num_vars = ceil_log2(next_pow2_instance_padding(sum_num_instances))
+                            + composed_cs.rotation_vars().unwrap_or(0);
+                        if composed_cs.has_ecc_ops() {
+                            num_vars += 1;
+                        }
+                        ZKVMChipProofInput::from((chip_idx, proof, num_vars, num_witin, num_fixed))
+                    })
                 })
                 .collect::<BTreeMap<usize, ZKVMChipProofInput>>(),
+            main_constraint_proof: SumcheckLayerProofInput {
+                proof: IOPProverMessageVec::from(
+                    zkvm_proof
+                        .main_constraint_proof
+                        .proof
+                        .proof
+                        .proofs
+                        .iter()
+                        .map(|p| IOPProverMessage {
+                            evaluations: p.evaluations.clone(),
+                        })
+                        .collect::<Vec<IOPProverMessage>>(),
+                ),
+                evals: zkvm_proof.main_constraint_proof.proof.evals,
+            },
             witin_commit: zkvm_proof.witin_commit.into(),
             opening_proof: zkvm_proof.opening_proof.into(),
         }
@@ -156,12 +188,13 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
         let shard_id = Usize::Var(usize::read(builder));
-        let raw_pi = Vec::<Vec<F>>::read(builder);
-        let raw_pi_num_variables = Vec::<usize>::read(builder);
-        let pi_evals = Vec::<E>::read(builder);
+        let pi = Vec::<F>::read(builder);
         builder.cycle_tracker_start("read chip proofs");
         let chip_proofs = Vec::<ZKVMChipProofInput>::read(builder);
         builder.cycle_tracker_end("read chip proofs");
+        builder.cycle_tracker_start("read main constraint proof");
+        let main_constraint_proof = SumcheckLayerProofInput::read(builder);
+        builder.cycle_tracker_end("read main constraint proof");
         let max_num_var = usize::read(builder);
         let max_width = usize::read(builder);
         let witin_commit = BasefoldCommitment::read(builder);
@@ -174,10 +207,9 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
 
         ZKVMProofInputVariable {
             shard_id,
-            raw_pi,
-            raw_pi_num_variables,
-            pi_evals,
+            pi,
             chip_proofs,
+            main_constraint_proof,
             max_num_var,
             max_width,
             witin_commit,
@@ -189,11 +221,6 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
 
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        let raw_pi_num_variables: Vec<usize> = self
-            .raw_pi
-            .iter()
-            .map(|v| ceil_log2(v.len().next_power_of_two()))
-            .collect();
         let witin_num_vars = self
             .chip_proofs
             .values()
@@ -203,19 +230,19 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let witin_max_widths = self
             .chip_proofs
             .values()
-            .map(|proof| proof.wits_in_evals.len().max(1))
+            .map(|proof| proof.num_witin.max(1))
             .collect::<Vec<_>>();
         let fixed_num_vars = self
             .chip_proofs
             .values()
-            .filter(|proof| !proof.fixed_in_evals.is_empty())
+            .filter(|proof| proof.num_fixed > 0)
             .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
             .values()
-            .filter(|proof| !proof.fixed_in_evals.is_empty())
-            .map(|proof| proof.fixed_in_evals.len())
+            .filter(|proof| proof.num_fixed > 0)
+            .map(|proof| proof.num_fixed)
             .collect::<Vec<_>>();
         let max_num_var = witin_num_vars
             .iter()
@@ -247,13 +274,12 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let fixed_perm = get_perm(fixed_num_vars);
 
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.shard_id));
-        stream.extend(self.raw_pi.write());
-        stream.extend(raw_pi_num_variables.write());
-        stream.extend(self.pi_evals.write());
+        stream.extend(self.pi.write());
         stream.extend(vec![vec![F::from_canonical_usize(self.chip_proofs.len())]]);
         for proof in self.chip_proofs.values() {
             stream.extend(proof.write());
         }
+        stream.extend(self.main_constraint_proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&max_num_var));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&max_width));
         stream.extend(self.witin_commit.write());
@@ -368,9 +394,9 @@ pub struct ZKVMChipProofInput {
     pub r_out_evals_len: usize,
     pub w_out_evals_len: usize,
     pub lk_out_evals_len: usize,
-    pub r_out_evals: Vec<Vec<E>>,
-    pub w_out_evals: Vec<Vec<E>>,
-    pub lk_out_evals: Vec<Vec<E>>,
+    pub r_out_evals: Vec<E>,
+    pub w_out_evals: Vec<E>,
+    pub lk_out_evals: Vec<E>,
 
     pub tower_proof: TowerProofInput,
 
@@ -382,20 +408,21 @@ pub struct ZKVMChipProofInput {
     pub has_gkr_proof: usize,
     pub gkr_iop_proof: GKRProofInput,
 
+    // chip-level rotation proof
+    pub has_rotation_proof: usize,
+    pub rotation_proof: SumcheckLayerProofInput,
+
     // ecc proof
     pub has_ecc_proof: usize,
     pub ecc_proof: EccQuarkProofInput,
 
-    pub num_instances: Vec<usize>,
-
-    pub wits_in_evals: Vec<E>,
-    pub fixed_in_evals: Vec<E>,
+    pub num_instances: [usize; 2],
 }
 
 impl VecAutoHintable for ZKVMChipProofInput {}
 
-impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
-    fn from(d: (usize, ZKVMChipProof<E>, usize, usize)) -> Self {
+impl From<(usize, ZKVMChipProof<E>, usize, usize, usize)> for ZKVMChipProofInput {
+    fn from(d: (usize, ZKVMChipProof<E>, usize, usize, usize)) -> Self {
         let idx = d.0;
         let p = d.1;
 
@@ -410,20 +437,20 @@ impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
                 .collect::<Vec<usize>>();
             vars[0]
         } else {
-            0
+            d.2
         };
 
         Self {
             idx,
             num_vars,
-            num_witin: d.2,
-            num_fixed: d.3,
+            num_witin: d.3,
+            num_fixed: d.4,
             r_out_evals_len: p.r_out_evals.len(),
             w_out_evals_len: p.w_out_evals.len(),
             lk_out_evals_len: p.lk_out_evals.len(),
-            r_out_evals: p.r_out_evals,
-            w_out_evals: p.w_out_evals,
-            lk_out_evals: p.lk_out_evals,
+            r_out_evals: p.r_out_evals.into_iter().flatten().collect(),
+            w_out_evals: p.w_out_evals.into_iter().flatten().collect(),
+            lk_out_evals: p.lk_out_evals.into_iter().flatten().collect(),
             tower_proof: p.tower_proof.into(),
             has_main_sumcheck_proofs: if p.main_sumcheck_proofs.is_some() {
                 1
@@ -447,6 +474,24 @@ impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
             } else {
                 GKRProofInput::default()
             },
+            has_rotation_proof: if p.rotation_proof.is_some() { 1 } else { 0 },
+            rotation_proof: if let Some(rotation) = p.rotation_proof {
+                SumcheckLayerProofInput {
+                    proof: IOPProverMessageVec::from(
+                        rotation
+                            .proof
+                            .proofs
+                            .iter()
+                            .map(|p| IOPProverMessage {
+                                evaluations: p.evaluations.clone(),
+                            })
+                            .collect::<Vec<IOPProverMessage>>(),
+                    ),
+                    evals: rotation.evals,
+                }
+            } else {
+                SumcheckLayerProofInput::default()
+            },
             has_ecc_proof: if p.ecc_proof.is_some() { 1 } else { 0 },
             ecc_proof: if p.ecc_proof.is_some() {
                 p.ecc_proof.unwrap().into()
@@ -454,8 +499,6 @@ impl From<(usize, ZKVMChipProof<E>, usize, usize)> for ZKVMChipProofInput {
                 EccQuarkProofInput::dummy()
             },
             num_instances: p.num_instances,
-            wits_in_evals: p.wits_in_evals,
-            fixed_in_evals: p.fixed_in_evals,
         }
     }
 }
@@ -473,23 +516,21 @@ pub struct ZKVMChipProofInputVariable<C: Config> {
     pub w_out_evals_len: Usize<C::N>,
     pub lk_out_evals_len: Usize<C::N>,
 
-    pub r_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    pub w_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
-    pub lk_out_evals: Array<C, Array<C, Ext<C::F, C::EF>>>,
+    pub rw_out_evals: HintSlice<C>,
+    pub lk_out_evals: HintSlice<C>,
 
     pub has_main_sumcheck_proofs: Usize<C::N>,
     pub main_sumcheck_proofs: IOPProverMessageVecVariable<C>,
     pub has_gkr_iop_proof: Usize<C::N>,
     pub gkr_iop_proof: GKRProofVariable<C>,
+    pub has_rotation_proof: Usize<C::N>,
+    pub rotation_proof: SumcheckLayerProofVariable<C>,
     pub tower_proof: TowerProofInputVariable<C>,
     pub has_ecc_proof: Usize<C::N>,
     pub ecc_proof: EccQuarkProofVariable<C>,
     pub num_instances: Array<C, Var<C::N>>,
     pub n_inst_0_bit_decomps: Array<C, Felt<C::F>>,
     pub n_inst_1_bit_decomps: Array<C, Felt<C::F>>,
-
-    pub fixed_in_evals: Array<C, Ext<C::F, C::EF>>,
-    pub wits_in_evals: Array<C, Ext<C::F, C::EF>>,
 }
 impl Hintable<InnerConfig> for ZKVMChipProofInput {
     type HintVariable = ZKVMChipProofInputVariable<InnerConfig>;
@@ -507,9 +548,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let lk_out_evals_len = Usize::Var(usize::read(builder));
 
         builder.cycle_tracker_start("read omc out evals");
-        let r_out_evals = Vec::<Vec<E>>::read(builder);
-        let w_out_evals = Vec::<Vec<E>>::read(builder);
-        let lk_out_evals = Vec::<Vec<E>>::read(builder);
+        let rw_out_evals = read_hint_slice(builder);
+        let lk_out_evals = read_hint_slice(builder);
         builder.cycle_tracker_end("read omc out evals");
 
         builder.cycle_tracker_start("read tower proofs");
@@ -521,17 +561,14 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         builder.cycle_tracker_end("read main sumcheck proofs");
         let has_gkr_iop_proof = Usize::Var(usize::read(builder));
         let gkr_iop_proof = GKRProofInput::read(builder);
+        let has_rotation_proof = Usize::Var(usize::read(builder));
+        let rotation_proof = SumcheckLayerProofInput::read(builder);
         let has_ecc_proof = Usize::Var(usize::read(builder));
         let ecc_proof = EccQuarkProofInput::read(builder);
 
         let num_instances = Vec::<usize>::read(builder);
         let n_inst_0_bit_decomps = Vec::<F>::read(builder);
         let n_inst_1_bit_decomps = Vec::<F>::read(builder);
-
-        builder.cycle_tracker_start("read wit/fixed evals");
-        let fixed_in_evals = Vec::<E>::read(builder);
-        let wits_in_evals = Vec::<E>::read(builder);
-        builder.cycle_tracker_end("read wit/fixed evals");
 
         ZKVMChipProofInputVariable {
             idx,
@@ -542,21 +579,20 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
             r_out_evals_len,
             w_out_evals_len,
             lk_out_evals_len,
-            r_out_evals,
-            w_out_evals,
+            rw_out_evals,
             lk_out_evals,
             has_main_sumcheck_proofs,
             main_sumcheck_proofs,
             has_gkr_iop_proof,
             gkr_iop_proof,
+            has_rotation_proof,
+            rotation_proof,
             tower_proof,
             has_ecc_proof,
             ecc_proof,
             num_instances,
             n_inst_0_bit_decomps,
             n_inst_1_bit_decomps,
-            fixed_in_evals,
-            wits_in_evals,
         }
     }
 
@@ -577,9 +613,9 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         let log2_num_instances = ceil_log2(next_pow2_instance);
         stream.extend(<usize as Hintable<InnerConfig>>::write(&log2_num_instances));
 
-        let r_out_evals_len = self.r_out_evals.len();
-        let w_out_evals_len = self.w_out_evals.len();
-        let lk_out_evals_len = self.lk_out_evals.len();
+        let r_out_evals_len = self.r_out_evals_len;
+        let w_out_evals_len = self.w_out_evals_len;
+        let lk_out_evals_len = self.lk_out_evals_len;
         tracing::debug!(
             "circuit {} r_len: {}, w: {}, lk: {}, n_prods: {}, n_logups: {}, n_layers: {}, n_prod_evals: {}, n_logup_evals: {}",
             self.idx,
@@ -601,8 +637,8 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&w_out_evals_len));
         stream.extend(<usize as Hintable<InnerConfig>>::write(&lk_out_evals_len));
 
-        stream.extend(self.r_out_evals.write());
-        stream.extend(self.w_out_evals.write());
+        let rw_out_evals = [self.r_out_evals.clone(), self.w_out_evals.clone()].concat();
+        stream.extend(rw_out_evals.write());
         stream.extend(self.lk_out_evals.write());
 
         stream.extend(self.tower_proof.write());
@@ -612,28 +648,23 @@ impl Hintable<InnerConfig> for ZKVMChipProofInput {
         stream.extend(self.main_sumcheck_proofs.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_gkr_proof));
         stream.extend(self.gkr_iop_proof.write());
+        stream.extend(<usize as Hintable<InnerConfig>>::write(
+            &self.has_rotation_proof,
+        ));
+        stream.extend(self.rotation_proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_ecc_proof));
         stream.extend(self.ecc_proof.write());
 
-        stream.extend(<Vec<usize> as Hintable<InnerConfig>>::write(
-            &self.num_instances,
-        ));
+        stream.extend(self.num_instances.to_vec().write());
 
         let n_inst_0 = self.num_instances[0];
         let n_inst_0_bit_decomps = decompose_minus_one_bits(n_inst_0);
 
-        let n_inst_1 = if self.num_instances.len() > 1 {
-            self.num_instances[1]
-        } else {
-            1usize
-        };
+        let n_inst_1 = max(self.num_instances[1], 1);
         let n_inst_1_bit_decomps = decompose_minus_one_bits(n_inst_1);
 
         stream.extend(n_inst_0_bit_decomps.write());
         stream.extend(n_inst_1_bit_decomps.write());
-
-        stream.extend(self.fixed_in_evals.write());
-        stream.extend(self.wits_in_evals.write());
 
         stream
     }
@@ -675,32 +706,12 @@ impl Hintable<InnerConfig> for SumcheckLayerProofInput {
     }
 }
 pub struct LayerProofInput {
-    pub has_rotation: usize,
-    pub rotation: SumcheckLayerProofInput,
     pub main: SumcheckLayerProofInput,
 }
 
 impl From<LayerProof<E>> for LayerProofInput {
     fn from(p: LayerProof<E>) -> Self {
         Self {
-            has_rotation: if p.rotation.is_some() { 1 } else { 0 },
-            rotation: if p.rotation.is_some() {
-                let r = p.rotation.unwrap();
-                SumcheckLayerProofInput {
-                    proof: IOPProverMessageVec::from(
-                        r.proof
-                            .proofs
-                            .iter()
-                            .map(|p| IOPProverMessage {
-                                evaluations: p.evaluations.clone(),
-                            })
-                            .collect::<Vec<IOPProverMessage>>(),
-                    ),
-                    evals: r.evals,
-                }
-            } else {
-                SumcheckLayerProofInput::default()
-            },
             main: SumcheckLayerProofInput {
                 proof: IOPProverMessageVec::from(
                     p.main
@@ -720,8 +731,6 @@ impl From<LayerProof<E>> for LayerProofInput {
 
 #[derive(DslVariable, Clone)]
 pub struct LayerProofVariable<C: Config> {
-    pub has_rotation: Usize<C::N>,
-    pub rotation: SumcheckLayerProofVariable<C>,
     pub main: SumcheckLayerProofVariable<C>,
 }
 impl VecAutoHintable for LayerProofInput {}
@@ -729,20 +738,12 @@ impl Hintable<InnerConfig> for LayerProofInput {
     type HintVariable = LayerProofVariable<InnerConfig>;
 
     fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        let has_rotation = Usize::Var(usize::read(builder));
-        let rotation = SumcheckLayerProofInput::read(builder);
         let main = SumcheckLayerProofInput::read(builder);
 
-        Self::HintVariable {
-            has_rotation,
-            rotation,
-            main,
-        }
+        Self::HintVariable { main }
     }
     fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
         let mut stream = Vec::new();
-        stream.extend(<usize as Hintable<InnerConfig>>::write(&self.has_rotation));
-        stream.extend(self.rotation.write());
         stream.extend(self.main.write());
         stream
     }

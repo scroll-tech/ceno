@@ -18,13 +18,13 @@ use ceno_emul::FullTracer as Tracer;
 use multilinear_extensions::{ToExpr, WitIn};
 
 #[derive(Debug)]
-pub struct OpFixedRS<E: ExtensionField, const REG_ID: usize, const RW: bool> {
+pub struct OpFixedRS<E: ExtensionField, const REG_ID: u8, const RW: bool> {
     pub prev_ts: WitIn,
     pub prev_value: Option<UInt<E>>,
     pub lt_cfg: AssertLtConfig,
 }
 
-impl<E: ExtensionField, const REG_ID: usize, const RW: bool> OpFixedRS<E, REG_ID, RW> {
+impl<E: ExtensionField, const REG_ID: u8, const RW: bool> OpFixedRS<E, REG_ID, RW> {
     pub fn construct_circuit(
         circuit_builder: &mut CircuitBuilder<E>,
         rd_written: RegisterExpr<E>,
