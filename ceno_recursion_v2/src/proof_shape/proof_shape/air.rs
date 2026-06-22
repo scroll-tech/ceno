@@ -24,7 +24,6 @@ use crate::{
         NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
         TranscriptBusMessage,
     },
-    circuit::inner::vm_pvs::VmPvs,
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
         AirMetadata,
@@ -35,7 +34,7 @@ use crate::{
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     tower::tower_transcript_len,
-    utils::TranscriptLabel,
+    utils::{TranscriptLabel, label_field_len, transcript_receive_label},
 };
 
 #[repr(C)]
@@ -51,11 +50,14 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     ///
     /// Has a special use on summary row (when `is_last`).
     pub log_height: F,
+    /// Number of tower layers for this chip proof when `is_present`.
+    pub tower_layers: F,
     /// Whether this AIR needs rotation openings.
     pub need_rot: F,
 
     // First possible transcript index of the current AIR.
     pub starting_tidx: F,
+    pub fork_start_tidx: F,
 
     // Columns that may be read from the transcript.
     pub is_present: F,
@@ -157,6 +159,7 @@ where
         let local: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*local)[..const_width].borrow();
         let next: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*next)[..const_width].borrow();
         let n = local.log_height.into();
+        let n_logup = local.tower_layers.into();
 
         self.idx_encoder.eval(builder, localv.idx_flags);
 
@@ -240,7 +243,7 @@ where
             // transcript span model.
             tower_tidx_bump += is_current_air
                 * per_air_tower_span::<AB>(
-                    n.clone(),
+                    n_logup.clone(),
                     air_data.num_read_count,
                     air_data.num_write_count,
                     air_data.num_logup_count,
@@ -327,13 +330,6 @@ where
 
         let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
 
-        // The first AIR starts immediately after the fixed trunk transcript prefix.
-        builder.when(is_first_idx.clone()).assert_eq(
-            local.starting_tidx,
-            AB::Expr::from_usize(TranscriptLabel::Riscv.field_len() + VmPvs::<u8>::width())
-                + AB::Expr::from_usize(2 * D_EF),
-        );
-
         self.starting_tidx_bus.receive(
             builder,
             local.proof_idx,
@@ -403,8 +399,29 @@ where
         // Receive fork transcript words after the fork label prefix.
         let fork_tidx_base = TranscriptLabel::Fork.field_len();
         let fork_id = local.num_present - AB::F::ONE;
+        let fork_enabled = local.is_present * local.is_valid;
+        transcript_receive_label(
+            &self.transcript_bus,
+            builder,
+            local.proof_idx,
+            local.fork_start_tidx,
+            TranscriptLabel::Fork.as_bytes(),
+            fork_enabled.clone(),
+        );
+        let fork_global_base = local.fork_start_tidx.into()
+            + AB::Expr::from_usize(label_field_len(TranscriptLabel::Fork.as_bytes()));
         // observe lookup alpha/beta
         for i in 0..D_EF {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: fork_global_base.clone() + AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_alpha[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                fork_enabled.clone(),
+            );
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
@@ -414,7 +431,17 @@ where
                     value: local.lookup_challenge_alpha[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_present * local.is_valid,
+                fork_enabled.clone(),
+            );
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: fork_global_base.clone() + AB::Expr::from_usize(D_EF + i),
+                    value: local.lookup_challenge_beta[i].into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                fork_enabled.clone(),
             );
             self.forked_transcript_bus.receive(
                 builder,
@@ -425,9 +452,19 @@ where
                     value: local.lookup_challenge_beta[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_present * local.is_valid,
+                fork_enabled.clone(),
             );
         }
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: fork_global_base.clone() + AB::Expr::from_usize(2 * D_EF),
+                value: fork_id.clone(),
+                is_sample: AB::Expr::ZERO,
+            },
+            fork_enabled.clone(),
+        );
         self.forked_transcript_bus.receive(
             builder,
             local.proof_idx,
@@ -437,9 +474,19 @@ where
                 value: fork_id.clone(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_present * local.is_valid,
+            fork_enabled.clone(),
         );
-        // Fork transcript metadata order is fixed: num_present, air_idx, then log_height.
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: fork_global_base.clone() + AB::Expr::from_usize(2 * D_EF + 1),
+                value: air_idx.clone(),
+                is_sample: AB::Expr::ZERO,
+            },
+            fork_enabled.clone(),
+        );
+        // Fork transcript metadata order is fixed: fork_id, air_idx, height_1, height_2.
         self.forked_transcript_bus.receive(
             builder,
             local.proof_idx,
@@ -449,7 +496,17 @@ where
                 value: air_idx.clone(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_present * local.is_valid,
+            fork_enabled.clone(),
+        );
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: fork_global_base.clone() + AB::Expr::from_usize(2 * D_EF + 2),
+                value: local.height_1.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            fork_enabled.clone(),
         );
         self.forked_transcript_bus.receive(
             builder,
@@ -457,17 +514,38 @@ where
             ForkedTranscriptBusMessage {
                 fork_id: fork_id.clone().into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 2),
-                value: local.log_height.into(),
+                value: local.height_1.into(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_present * local.is_valid,
+            fork_enabled.clone(),
+        );
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: fork_global_base.clone() + AB::Expr::from_usize(2 * D_EF + 3),
+                value: local.height_2.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            fork_enabled.clone(),
+        );
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: fork_id.clone().into(),
+                tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3),
+                value: local.height_2.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            fork_enabled.clone(),
         );
 
         // Skip the full per-air tower transcript span (out-evals, alpha/beta,
         // and all GKR/sumcheck layer transcript activity) before binding the
         // post-fork sampled challenges.
         let forked_challenge_1_tidx =
-            AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3) + tower_tidx_bump;
+            AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 4) + tower_tidx_bump;
         // Challenge 2 starts after challenge 1 plus the product_sum label span.
         let forked_challenge_2_tidx =
             forked_challenge_1_tidx.clone() + AB::Expr::from_usize(tower_transcript_len::BETA_LEN);
@@ -559,7 +637,7 @@ where
             AirShapeBusMessage {
                 sort_idx: local.sorted_idx.into(),
                 property_idx: AirShapeProperty::NumLk.to_field(),
-                value: num_logup_count,
+                value: num_logup_count.clone(),
             },
             local.is_present * n.clone(),
         );
@@ -689,15 +767,20 @@ where
             local.is_last,
         );
 
+        let fork_tower_tidx = local.fork_start_tidx.into()
+            + AB::Expr::from_usize(TranscriptLabel::Fork.field_len() + 2 * D_EF + 4);
         self.tower_module_bus.send(
             builder,
             local.proof_idx,
             TowerModuleMessage {
-                idx: air_idx.clone(),
-                tidx: local.starting_tidx.into(),
-                n_logup: n,
+                idx: local.sorted_idx.into(),
+                tidx: fork_tower_tidx,
+                n_logup: local.tower_layers.into(),
+                num_read_count: num_read_count.clone(),
+                num_write_count: num_write_count.clone(),
+                num_logup_count: num_logup_count.clone(),
             },
-            local.is_last,
+            local.is_present * local.is_valid,
         );
 
         // Send n_max value to expression claim air
@@ -740,7 +823,7 @@ fn per_air_tower_span<AB: AirBuilder>(
     num_logup_count: usize,
 ) -> AB::Expr {
     use tower_transcript_len::{
-        ALPHA_BETA_LEN, ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
+        ALPHA_BETA_LEN, ALPHA_LEN, MERGE_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
     };
 
     // Derivation notes (matches tower transcript replay order used by verifier):
@@ -758,11 +841,12 @@ fn per_air_tower_span<AB: AirBuilder>(
     let gkr_span = if out_eval_words == 0 {
         AB::Expr::ZERO
     } else {
-        let gkr_inner = n_logup.clone() * AB::Expr::from_usize(ROUND_LEN / 2)
-            + AB::Expr::from_usize(
-                ALPHA_LEN + SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN - ROUND_LEN / 2,
-            );
-        n_logup * gkr_inner - AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN)
+        let post_sumcheck_len = AB::Expr::from_usize(out_eval_words * D_EF + MERGE_LEN);
+        n_logup.clone() * (AB::Expr::from_usize(SUMCHECK_INIT_LEN) + post_sumcheck_len)
+            + n_logup.clone()
+                * (n_logup.clone() + AB::Expr::ONE)
+                * AB::Expr::from_usize(ROUND_LEN / 2)
+            + (n_logup - AB::Expr::ONE) * AB::Expr::from_usize(ALPHA_LEN)
     };
 
     out_eval_span + AB::Expr::from_usize(ALPHA_BETA_LEN) + gkr_span

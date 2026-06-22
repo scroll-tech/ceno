@@ -115,6 +115,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     .get(air_idx)
                     .map(|instances| two_instance_heights_from_chip_instances(instances))
                     .unwrap_or((0, 0));
+                let tower_layers = proof
+                    .chip_proofs
+                    .get(air_idx)
+                    .and_then(|instances| instances.first())
+                    .map(|instance| instance.tower_proof.proofs.len())
+                    .unwrap_or(0);
                 num_present += 1;
 
                 cols.proof_idx = F::from_usize(proof_idx);
@@ -123,8 +129,10 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_last = F::ZERO;
                 cols.sorted_idx = F::from_usize(sorted_idx);
                 cols.log_height = F::from_usize(log_height);
+                cols.tower_layers = F::from_usize(tower_layers);
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[*air_idx]);
+                cols.fork_start_tidx = F::from_usize(preflight.fork_global_offset(num_present - 1));
                 cols.is_present = F::ONE;
                 cols.height_1 = F::from_usize(height_1);
                 cols.height_2 = F::from_usize(height_2);
@@ -171,8 +179,10 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_last = F::ZERO;
                 cols.sorted_idx = F::from_usize(sorted_idx);
                 cols.log_height = F::ZERO;
+                cols.tower_layers = F::ZERO;
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[air_idx]);
+                cols.fork_start_tidx = F::ZERO;
                 cols.is_present = F::ZERO;
                 cols.height_1 = F::ZERO;
                 cols.height_2 = F::ZERO;
@@ -211,8 +221,10 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.is_last = F::ONE;
             cols.sorted_idx = F::ZERO;
             cols.log_height = F::from_usize(preflight.proof_shape.n_logup);
+            cols.tower_layers = F::from_usize(preflight.proof_shape.n_logup);
             cols.need_rot = F::ZERO;
             cols.starting_tidx = F::from_usize(preflight.proof_shape.post_tidx);
+            cols.fork_start_tidx = F::ZERO;
             cols.is_present = F::ZERO;
             cols.height_1 = F::ZERO;
             cols.height_2 = F::ZERO;

@@ -54,9 +54,9 @@ use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
-    p3_maybe_rayon::prelude::*, prover::AirProvingContext,
+    p3_maybe_rayon::prelude::*, poly_common::interpolate_cubic_at_0123, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use recursion_circuit::primitives::exp_bits_len::ExpBitsLenTraceGenerator;
@@ -130,34 +130,22 @@ pub mod tower_transcript_len {
     /// Merge: label "merge" (2) + sample mu (D_EF)
     pub const MERGE_LEN: usize = LABEL_MERGE + D_EF;
 
-    /// Post-sumcheck tidx span: claim observation slots (4*D_EF) + MERGE_LEN.
-    /// This is the tidx gap from `tidx_after_sumcheck` to `tidx_end`.
-    pub const POST_SUMCHECK_LEN: usize = 4 * D_EF + MERGE_LEN;
-
-    /// Gap between consecutive sumcheck blocks across GKR layers:
-    /// post-sumcheck of previous layer + pre-sumcheck of next layer.
-    pub const LAYER_GAP_LEN: usize = POST_SUMCHECK_LEN + ALPHA_LEN + SUMCHECK_INIT_LEN;
-
-    /// Tidx span of layer `layer_idx` (includes claim slots + transcript ops).
-    /// Layer 0 (root): POST_SUMCHECK_LEN (no lambda sample — uses alpha_logup).
-    /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + j*ROUND_LEN + POST_SUMCHECK_LEN.
-    pub const fn layer_span(layer_idx: usize) -> usize {
-        if layer_idx == 0 {
-            POST_SUMCHECK_LEN
-        } else {
-            ALPHA_LEN + SUMCHECK_INIT_LEN + layer_idx * ROUND_LEN + POST_SUMCHECK_LEN
-        }
+    /// Tidx span used by active claim observations after sumcheck.
+    pub const fn claim_span(
+        num_read_count: usize,
+        num_write_count: usize,
+        num_logup_count: usize,
+    ) -> usize {
+        (2 * num_read_count + 2 * num_write_count + 4 * num_logup_count) * D_EF
     }
 
-    /// Cumulative tidx span for layers 0..layer_idx (exclusive).
-    pub const fn layers_cumulative(layer_idx: usize) -> usize {
-        let mut total = 0;
-        let mut i = 0;
-        while i < layer_idx {
-            total += layer_span(i);
-            i += 1;
-        }
-        total
+    /// Tidx gap from `tidx_after_sumcheck` to `tidx_end`.
+    pub const fn post_sumcheck_len(
+        num_read_count: usize,
+        num_write_count: usize,
+        num_logup_count: usize,
+    ) -> usize {
+        claim_span(num_read_count, num_write_count, num_logup_count) + MERGE_LEN
     }
 
     /// Offset from the start of layer `layer_idx` to `tidx_after_sumcheck`
@@ -165,11 +153,43 @@ pub mod tower_transcript_len {
     /// Layer 0: 0.
     /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + j*ROUND_LEN.
     pub const fn claim_offset_in_layer(layer_idx: usize) -> usize {
+        let lambda_len = if layer_idx == 0 { 0 } else { ALPHA_LEN };
+        lambda_len + SUMCHECK_INIT_LEN + (layer_idx + 1) * ROUND_LEN
+    }
+
+    pub const fn sumcheck_round_offset_in_layer(layer_idx: usize) -> usize {
         if layer_idx == 0 {
-            0
+            SUMCHECK_INIT_LEN
         } else {
-            ALPHA_LEN + SUMCHECK_INIT_LEN + layer_idx * ROUND_LEN
+            ALPHA_LEN + SUMCHECK_INIT_LEN
         }
+    }
+
+    /// Tidx span of layer `layer_idx` (includes claim slots + transcript ops).
+    pub const fn layer_span(
+        layer_idx: usize,
+        num_read_count: usize,
+        num_write_count: usize,
+        num_logup_count: usize,
+    ) -> usize {
+        claim_offset_in_layer(layer_idx)
+            + post_sumcheck_len(num_read_count, num_write_count, num_logup_count)
+    }
+
+    /// Cumulative tidx span for layers 0..layer_idx (exclusive).
+    pub const fn layers_cumulative(
+        layer_idx: usize,
+        num_read_count: usize,
+        num_write_count: usize,
+        num_logup_count: usize,
+    ) -> usize {
+        let mut total = 0;
+        let mut i = 0;
+        while i < layer_idx {
+            total += layer_span(i, num_read_count, num_write_count, num_logup_count);
+            i += 1;
+        }
+        total
     }
 }
 
@@ -461,16 +481,22 @@ fn build_chip_records(
         layer_claims: Vec::with_capacity(layer_count),
         lambdas: vec![EF::ZERO; layer_count],
         eq_at_r_primes: vec![EF::ZERO; layer_count],
-        read_counts: vec![1; layer_count],
-        write_counts: vec![1; layer_count],
-        logup_counts: vec![1; layer_count],
+        read_counts: vec![0; layer_count],
+        write_counts: vec![0; layer_count],
+        logup_counts: vec![0; layer_count],
         read_claims: vec![EF::ZERO; layer_count],
         read_prime_claims: vec![EF::ZERO; layer_count],
         write_claims: vec![EF::ZERO; layer_count],
         write_prime_claims: vec![EF::ZERO; layer_count],
         logup_claims: vec![EF::ZERO; layer_count],
         logup_prime_claims: vec![EF::ZERO; layer_count],
+        beta_logup: schedule.beta,
         sumcheck_claims: vec![EF::ZERO; layer_count],
+        sumcheck_claim_outs: Vec::new(),
+        sumcheck_eq_outs: Vec::new(),
+        root_read_prime_claim: EF::ZERO,
+        root_write_prime_claim: EF::ZERO,
+        root_logup_prime_claim: EF::ZERO,
     };
 
     for layer_idx in 0..layer_count {
@@ -494,9 +520,9 @@ fn build_chip_records(
         //     read_len == write_len,
         //     "read/write prod spec count mismatch at layer {layer_idx}: read={read_len}, write={write_len}"
         // );
-        layer_record.read_counts[layer_idx] = read_len.max(1);
-        layer_record.write_counts[layer_idx] = write_len.max(1);
-        layer_record.logup_counts[layer_idx] = logup_len.max(1);
+        layer_record.read_counts[layer_idx] = read_len;
+        layer_record.write_counts[layer_idx] = write_len;
+        layer_record.logup_counts[layer_idx] = logup_len;
     }
 
     for layer_idx in 0..layer_count {
@@ -505,39 +531,29 @@ fn build_chip_records(
             .push(convert_logup_claim(chip_proof, layer_idx));
     }
 
-    let input_layer_claim = layer_record
-        .layer_claims
-        .last()
-        .map(|claim| claim[0])
-        .unwrap_or(EF::ZERO);
-
+    let num_sumcheck_layers = layer_count;
     let mut sumcheck_record = TowerSumcheckRecord {
         proof_idx,
         idx,
         is_first_air_idx,
-        // First sumcheck transcript row starts at layer_tidx(1) + ALPHA_LEN + SUMCHECK_INIT_LEN.
-        tidx: tidx
-            + tower_transcript_len::ALPHA_BETA_LEN
-            + tower_transcript_len::POST_SUMCHECK_LEN
-            + tower_transcript_len::ALPHA_LEN
-            + tower_transcript_len::SUMCHECK_INIT_LEN,
+        tidx: 0,
+        sumcheck_tidxs: (0..num_sumcheck_layers)
+            .map(|layer_idx| {
+                layer_record.layer_tidx(layer_idx)
+                    + tower_transcript_len::sumcheck_round_offset_in_layer(layer_idx)
+            })
+            .collect(),
+        beta: schedule.beta,
         evals: Vec::new(),
         ris: Vec::new(),
-        claims: vec![EF::ZERO; layer_count.saturating_sub(1)],
+        claims: vec![EF::ZERO; layer_count],
     };
 
-    // The sumcheck trace processes num_sumcheck_layers = layer_count - 1 layers.
-    // Layer k (0-indexed) has layer_rounds(k) = k+1 sumcheck rounds.
-    // Total rounds = num_sumcheck_layers*(num_sumcheck_layers+1)/2.
-    // record_gkr_transcript produces ris/evals for ALL layer_count layers,
-    // but the last layer is not processed by the sumcheck AIR (it corresponds
-    // to the final input layer claim, not a sumcheck). Truncate to
-    // total_rounds.
-    let num_sumcheck_layers = layer_count.saturating_sub(1);
+    // The tower proof carries one sumcheck for every GKR layer, including
+    // layer 0. Layer k has k + 1 sumcheck rounds.
     let total_sumcheck_rounds = num_sumcheck_layers * (num_sumcheck_layers + 1) / 2;
 
     for (k, round_msgs) in chip_proof.tower_proof.proofs.iter().enumerate() {
-        // Only include sumcheck evals for the first num_sumcheck_layers layers
         if k >= num_sumcheck_layers {
             break;
         }
@@ -553,19 +569,12 @@ fn build_chip_records(
         .and_then(|evals| evals.get(2))
         .copied()
         .unwrap_or(EF::ZERO);
+    layer_record.root_read_prime_claim = q0_claim;
+    layer_record.root_write_prime_claim = q0_claim;
+    layer_record.root_logup_prime_claim = q0_claim;
 
     let layer_output_lambda = schedule.lambdas.last().copied().unwrap_or(EF::ZERO);
     let layer_output_mu = schedule.mus.last().copied().unwrap_or(EF::ZERO);
-    let input_record = TowerInputRecord {
-        proof_idx,
-        idx,
-        tidx,
-        n_logup: layer_count,
-        alpha_logup: schedule.alpha_logup,
-        input_layer_claim,
-        layer_output_lambda,
-        layer_output_mu,
-    };
     // Truncate ris to match the sumcheck trace's expected total_rounds.
     sumcheck_record.ris = schedule.ris[..total_sumcheck_rounds.min(schedule.ris.len())].to_vec();
     if !replay.layers.is_empty() && total_sumcheck_rounds > 0 {
@@ -583,13 +592,11 @@ fn build_chip_records(
                 schedule.lambdas.get(layer_idx).copied().unwrap_or(EF::ZERO);
             mus_record[layer_idx] = schedule.mus.get(layer_idx).copied().unwrap_or(EF::ZERO);
         }
-        if layer_idx + 1 < layer_count {
-            if layer_idx < sumcheck_record.claims.len() {
-                sumcheck_record.claims[layer_idx] = data.claim_in;
-            }
-            if layer_idx < layer_record.sumcheck_claims.len() {
-                layer_record.sumcheck_claims[layer_idx] = data.claim_in;
-            }
+        if layer_idx < sumcheck_record.claims.len() {
+            sumcheck_record.claims[layer_idx] = data.claim_in;
+        }
+        if layer_idx < layer_record.sumcheck_claims.len() {
+            layer_record.sumcheck_claims[layer_idx] = data.claim_in;
         }
     }
 
@@ -619,28 +626,79 @@ fn build_chip_records(
         }
     }
 
-    // Sync sumcheck claims with accumulated values so that the sumcheck trace
-    // uses the same claim_in that TowerLayerAir sends on the sumcheck_input_bus.
-    // TowerLayerAir layer j (j >= 1) sends: sumcheck_claim_in = read[j-1] + write[j-1] + logup[j-1]
-    // Sumcheck internal layer k uses: claims[k], where k = j - 1.
-    for k in 0..layer_count.saturating_sub(1) {
-        let folded = layer_record.read_claims[k]
-            + layer_record.write_claims[k]
-            + layer_record.logup_claims[k];
+    // The layer AIR enforces that each non-root sumcheck claim is the folded
+    // claim emitted by the previous layer.
+    for k in 1..layer_count {
+        let prev_layer = k - 1;
+        let folded = layer_record.read_claims[prev_layer]
+            + layer_record.write_claims[prev_layer]
+            + layer_record.logup_claims[prev_layer];
         sumcheck_record.claims[k] = folded;
         layer_record.sumcheck_claims[k] = folded;
     }
 
     // Compute eq_at_r_primes from ris and mus so that TowerLayerAir's eq values
     // match the sumcheck trace's eq_out on the sumcheck_output_bus.
-    // Sumcheck internal layer k (0-indexed) → TowerLayerAir layer k+1.
-    let num_sumcheck_layers = layer_count.saturating_sub(1);
     for k in 0..num_sumcheck_layers {
-        let eq = TowerSumcheckRecord::compute_eq_for_layer(k, &mus_record, &sumcheck_record.ris);
-        if k + 1 < layer_record.eq_at_r_primes.len() {
-            layer_record.eq_at_r_primes[k + 1] = eq;
+        let eq = TowerSumcheckRecord::compute_eq_for_layer(
+            k,
+            schedule.beta,
+            &mus_record,
+            &sumcheck_record.ris,
+        );
+        if k < layer_record.eq_at_r_primes.len() {
+            layer_record.eq_at_r_primes[k] = eq;
         }
     }
+
+    layer_record.sumcheck_claim_outs.clear();
+    layer_record.sumcheck_eq_outs.clear();
+    let mut global_round_idx = 0usize;
+    for layer_idx in 0..num_sumcheck_layers {
+        let mut claim = sumcheck_record.claims[layer_idx];
+        let mut eq = EF::ONE;
+        for round_in_layer in 0..TowerSumcheckRecord::layer_rounds(layer_idx) {
+            let challenge = sumcheck_record.ris[global_round_idx];
+            let evals = sumcheck_record.evals[global_round_idx];
+            let prev_challenge = TowerSumcheckRecord::prev_challenge(
+                layer_idx,
+                round_in_layer,
+                schedule.beta,
+                &mus_record,
+                &sumcheck_record.ris,
+            );
+            let ev0 = claim - evals[0];
+            let evals_full = [ev0, evals[0], evals[1], evals[2]];
+            claim = interpolate_cubic_at_0123(&evals_full, challenge);
+            eq *= prev_challenge * challenge + (EF::ONE - prev_challenge) * (EF::ONE - challenge);
+            global_round_idx += 1;
+        }
+        layer_record.sumcheck_claim_outs.push(claim);
+        layer_record.sumcheck_eq_outs.push(eq);
+    }
+
+    let input_layer_claim = layer_count
+        .checked_sub(1)
+        .map(|last_layer| {
+            layer_record.read_claims[last_layer]
+                + layer_record.write_claims[last_layer]
+                + layer_record.logup_claims[last_layer]
+        })
+        .unwrap_or(EF::ZERO);
+    let input_record = TowerInputRecord {
+        proof_idx,
+        idx,
+        tidx,
+        n_logup: layer_count,
+        num_read_count: read_count,
+        num_write_count: write_count,
+        num_logup_count: logup_count,
+        alpha_logup: schedule.alpha_logup,
+        beta_logup: schedule.beta,
+        input_layer_claim,
+        layer_output_lambda,
+        layer_output_mu,
+    };
 
     Ok((
         input_record,
@@ -753,11 +811,6 @@ pub(crate) fn build_gkr_blob(
 
     for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
         let mut has_chip = false;
-        let mut first_chip_alpha = EF::ZERO;
-        let mut first_chip_q0 = EF::ZERO;
-        let mut last_input_layer_claim = EF::ZERO;
-        let mut last_layer_output_lambda = EF::ZERO;
-        let mut last_layer_output_mu = EF::ZERO;
 
         let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
             .proof_shape
@@ -827,17 +880,8 @@ pub(crate) fn build_gkr_blob(
                 global_tidx,
             )?;
 
-            // Capture first chip's alpha and q0 for the proof-level record
-            if entry_idx == 0 {
-                first_chip_alpha = chip_input_record.alpha_logup;
-                first_chip_q0 = q0_claim;
-            }
-            // Always update to latest chip for combined values
-            last_input_layer_claim = chip_input_record.input_layer_claim;
-            last_layer_output_lambda = chip_input_record.layer_output_lambda;
-            last_layer_output_mu = chip_input_record.layer_output_mu;
-
-            // Per-chip records (not input_records)
+            input_records.push(chip_input_record);
+            proof_q0_claims.push(q0_claim);
             layer_records.push(layer_record);
             tower_records.push(tower_record);
             sumcheck_records.push(sumcheck_record);
@@ -845,20 +889,13 @@ pub(crate) fn build_gkr_blob(
             q0_claims.push(q0_claim);
         }
 
-        // ONE input record per proof (matching ProofIdxSubAir constraint)
-        input_records.push(TowerInputRecord {
-            proof_idx,
-            idx: 0,
-            tidx: preflight.proof_shape.post_tidx,
-            n_logup: preflight.proof_shape.n_logup,
-            alpha_logup: first_chip_alpha,
-            input_layer_claim: last_input_layer_claim,
-            layer_output_lambda: last_layer_output_lambda,
-            layer_output_mu: last_layer_output_mu,
-        });
-        proof_q0_claims.push(first_chip_q0);
-
         if !has_chip {
+            input_records.push(TowerInputRecord {
+                proof_idx,
+                idx: 0,
+                ..Default::default()
+            });
+            proof_q0_claims.push(EF::ZERO);
             layer_records.push(TowerLayerRecord {
                 idx: 0,
                 proof_idx,
@@ -935,6 +972,7 @@ where
     // This keeps preflight transcript history aligned with TowerLayer/Sumcheck/
     // ProdClaim/LogupClaim transcript bus interactions.
     let read_count = chip_proof.r_out_evals.len();
+    let write_count = chip_proof.w_out_evals.len();
     let layer_count = chip_proof
         .tower_proof
         .logup_specs_eval
@@ -984,13 +1022,42 @@ where
             }
         }
 
+        for rounds in chip_proof
+            .tower_proof
+            .prod_specs_eval
+            .iter()
+            .take(read_count)
+        {
+            let values = rounds.get(layer_idx).map(Vec::as_slice).unwrap_or(&[]);
+            for i in 0..2 {
+                ts.observe_ext(values.get(i).copied().unwrap_or(EF::ZERO));
+            }
+        }
+        for rounds in chip_proof
+            .tower_proof
+            .prod_specs_eval
+            .iter()
+            .skip(read_count)
+            .take(write_count)
+        {
+            let values = rounds.get(layer_idx).map(Vec::as_slice).unwrap_or(&[]);
+            for i in 0..2 {
+                ts.observe_ext(values.get(i).copied().unwrap_or(EF::ZERO));
+            }
+        }
+        for rounds in &chip_proof.tower_proof.logup_specs_eval {
+            let values = rounds.get(layer_idx).map(Vec::as_slice).unwrap_or(&[]);
+            for i in 0..4 {
+                ts.observe_ext(values.get(i).copied().unwrap_or(EF::ZERO));
+            }
+        }
+
         // Mirror native: sample_and_append_vec(b"merge", log2_num_fanin)
         transcript_observe_label(ts, b"merge");
         let mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         mus.push(mu);
     }
 
-    let _ = read_count;
     TowerTranscriptSchedule {
         alpha_logup,
         beta,

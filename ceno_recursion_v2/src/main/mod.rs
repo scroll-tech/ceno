@@ -77,47 +77,71 @@ impl MainModule {
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
             let mut chip_pf_iter = preflight.main.chips.iter();
             let mut saw_chip = false;
-            for (&chip_idx, chip_instances) in &proof.chip_proofs {
-                for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
-                    saw_chip = true;
-                    let pf_entry = chip_pf_iter
-                        .next()
-                        .ok_or_else(|| eyre!(
-                            "missing main preflight entry for chip {chip_idx} instance {instance_idx}"
-                        ))?;
-                    if pf_entry.chip_idx != chip_idx || pf_entry.instance_idx != instance_idx {
-                        bail!(
-                            "main preflight chip mismatch: expected ({}, {}), got ({}, {})",
-                            chip_idx,
-                            instance_idx,
-                            pf_entry.chip_idx,
-                            pf_entry.instance_idx
-                        );
-                    }
-                    let claim = input_layer_claim(chip_proof);
-                    // Access the fork log directly using fork_idx and fork-local tidx.
-                    let fork_log = preflight.fork_log(pf_entry.fork_idx);
-                    let mut ts = ReadOnlyTranscript::new(fork_log, pf_entry.tidx);
-                    record_main_transcript(&mut ts, chip_idx, chip_proof);
+            let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
+                .proof_shape
+                .sorted_trace_vdata
+                .iter()
+                .enumerate()
+                .map(|(sorted_idx, (chip_idx, _))| (*chip_idx, sorted_idx))
+                .collect();
+            let mut chip_entries = proof
+                .chip_proofs
+                .iter()
+                .flat_map(|(&chip_idx, chip_instances)| {
+                    chip_instances
+                        .iter()
+                        .enumerate()
+                        .map(move |(instance_idx, chip_proof)| (chip_idx, instance_idx, chip_proof))
+                })
+                .collect::<Vec<_>>();
+            chip_entries.sort_by_key(|(chip_idx, instance_idx, _)| {
+                (
+                    sorted_idx_by_chip
+                        .get(chip_idx)
+                        .copied()
+                        .unwrap_or(usize::MAX),
+                    *instance_idx,
+                )
+            });
 
-                    // Compute global tidx for trace column values.
-                    let global_tidx =
-                        preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
-                    let main_record = MainRecord {
-                        proof_idx,
-                        idx: chip_idx,
-                        tidx: global_tidx,
-                        claim,
-                    };
-                    let sumcheck_record = build_sumcheck_record_from_chip(
-                        proof_idx,
+            for (chip_idx, instance_idx, chip_proof) in chip_entries {
+                saw_chip = true;
+                let pf_entry = chip_pf_iter.next().ok_or_else(|| {
+                    eyre!(
+                        "missing main preflight entry for chip {chip_idx} instance {instance_idx}"
+                    )
+                })?;
+                if pf_entry.chip_idx != chip_idx || pf_entry.instance_idx != instance_idx {
+                    bail!(
+                        "main preflight chip mismatch: expected ({}, {}), got ({}, {})",
                         chip_idx,
-                        claim,
-                        chip_proof,
-                        global_tidx,
+                        instance_idx,
+                        pf_entry.chip_idx,
+                        pf_entry.instance_idx
                     );
-                    paired.push((main_record, sumcheck_record));
                 }
+                let claim = input_layer_claim(chip_proof);
+                // Access the fork log directly using fork_idx and fork-local tidx.
+                let fork_log = preflight.fork_log(pf_entry.fork_idx);
+                let mut ts = ReadOnlyTranscript::new(fork_log, pf_entry.tidx);
+                record_main_transcript(&mut ts, chip_idx, chip_proof);
+
+                // Compute global tidx for trace column values.
+                let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
+                let main_record = MainRecord {
+                    proof_idx,
+                    idx: chip_idx,
+                    tidx: global_tidx,
+                    claim,
+                };
+                let sumcheck_record = build_sumcheck_record_from_chip(
+                    proof_idx,
+                    chip_idx,
+                    claim,
+                    chip_proof,
+                    global_tidx,
+                );
+                paired.push((main_record, sumcheck_record));
             }
 
             if !saw_chip {

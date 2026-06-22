@@ -46,6 +46,16 @@ pub fn generate_proving_ctx(
             .as_ref()
             .map(|commitment| commitment.commit.clone()),
     );
+    let fixed_commit_log2_max_codeword_size = child_vk
+        .fixed_commit
+        .as_ref()
+        .map(|commitment| F::from_u64(commitment.log2_max_codeword_size as u64))
+        .unwrap_or(F::ZERO);
+    let fixed_no_omc_init_commit_log2_max_codeword_size = child_vk
+        .fixed_no_omc_init_commit
+        .as_ref()
+        .map(|commitment| F::from_u64(commitment.log2_max_codeword_size as u64))
+        .unwrap_or(F::ZERO);
 
     for (row_idx, row) in trace.chunks_exact_mut(width).enumerate() {
         let (base_row, def_row) = row.split_at_mut(VmPvsCols::<u8>::width());
@@ -64,6 +74,11 @@ pub fn generate_proving_ctx(
                 F::from_usize(preflight.vm_pvs.lookup_challenge_alpha_lookup_count);
             cols.lookup_challenge_beta_lookup_count =
                 F::from_usize(preflight.vm_pvs.lookup_challenge_beta_lookup_count);
+            cols.fixed_commit_log2_max_codeword_size = fixed_commit_log2_max_codeword_size;
+            cols.fixed_no_omc_init_commit_log2_max_codeword_size =
+                fixed_no_omc_init_commit_log2_max_codeword_size;
+            cols.witness_commit_log2_max_codeword_size =
+                F::from_u64(proof.witin_commit.log2_max_codeword_size as u64);
             cols.child_pvs = build_vm_pvs(fixed_commit, fixed_no_omc_init_commit, proof);
         }
 

@@ -118,6 +118,7 @@ impl TranscriptModule {
             let is_sample = log.samples()[tidx];
             cols.is_sample = F::from_bool(is_sample);
             cols.tidx = F::from_usize(tidx + tidx_offset);
+            cols.local_tidx = F::from_usize(tidx);
             cols.mask[0] = F::ONE;
             cols.prev_state = prev_poseidon_state;
 
@@ -234,7 +235,8 @@ impl TranscriptModule {
             );
             offset = trunk_end;
 
-            // Fill fork rows with fork-local tidx offsets.
+            // Fill fork rows with global transcript offsets for TranscriptBus.
+            // ForkedTranscriptBus uses the separate local_tidx column.
             for (fi, fork_log) in preflight.fork_transcripts.iter().enumerate() {
                 let fork_rows = info.fork_rows[fi];
                 let fork_end = offset + fork_rows;
@@ -251,7 +253,7 @@ impl TranscriptModule {
                     false, // is_proof_start
                     true,  // is_fork_start
                     [F::ZERO; POSEIDON2_WIDTH],
-                    0,
+                    preflight.fork_global_offset(fi),
                     &mut poseidon2_perm_inputs,
                 );
                 offset = fork_end;

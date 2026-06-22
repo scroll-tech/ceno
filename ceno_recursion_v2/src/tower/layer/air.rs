@@ -25,12 +25,13 @@ use crate::{
             TowerSumcheckOutputMessage,
         },
     },
+    utils::{label_field_len, transcript_receive_label},
 };
 
 use recursion_circuit::{
-    bus::TranscriptBus,
+    bus::{TranscriptBus, TranscriptBusMessage},
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
-    utils::{assert_zeros, ext_field_add, ext_field_multiply},
+    utils::ext_field_add,
 };
 
 #[repr(C)]
@@ -59,6 +60,8 @@ pub struct TowerLayerCols<T> {
     pub lambda_prime: [T; D_EF],
     /// Reduction point
     pub mu: [T; D_EF],
+    /// Initial point sampled before the tower layer loop.
+    pub beta_logup: [T; D_EF],
 
     pub sumcheck_claim_in: [T; D_EF],
 
@@ -71,6 +74,7 @@ pub struct TowerLayerCols<T> {
     pub num_read_count: T,
     pub num_write_count: T,
     pub num_logup_count: T,
+    pub sumcheck_claim_out: [T; D_EF],
 
     /// Received from TowerLayerSumcheckAir
     pub eq_at_r_prime: [T; D_EF],
@@ -184,15 +188,6 @@ where
         );
 
         ///////////////////////////////////////////////////////////////////////
-        // Root Layer Constraints
-        ///////////////////////////////////////////////////////////////////////
-
-        assert_zeros(
-            &mut builder.when(local.is_first),
-            local.sumcheck_claim_in.map(Into::into),
-        );
-
-        ///////////////////////////////////////////////////////////////////////
         // Inter-Layer Constraints
         ///////////////////////////////////////////////////////////////////////
 
@@ -206,14 +201,26 @@ where
 
         // Transcript index increment
         use crate::tower::tower_transcript_len::{
-            ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
+            ALPHA_LEN, MERGE_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
         };
+        let non_root_layer = AB::Expr::ONE - local.is_first;
+        let sumcheck_init_tidx =
+            local.tidx + non_root_layer.clone() * AB::Expr::from_usize(ALPHA_LEN);
         let tidx_after_sumcheck = local.tidx
-            // Sample lambda label+sample on non-root layer
-            + (AB::Expr::ONE - local.is_first)
-                * AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN)
-            + local.layer_idx * AB::Expr::from_usize(ROUND_LEN);
-        let tidx_end = tidx_after_sumcheck.clone() + AB::Expr::from_usize(POST_SUMCHECK_LEN);
+            + non_root_layer.clone() * AB::Expr::from_usize(ALPHA_LEN)
+            + AB::Expr::from_usize(SUMCHECK_INIT_LEN)
+            + (local.layer_idx + AB::Expr::ONE) * AB::Expr::from_usize(ROUND_LEN);
+        let read_count: AB::Expr = local.num_read_count.into();
+        let write_count: AB::Expr = local.num_write_count.into();
+        let logup_count: AB::Expr = local.num_logup_count.into();
+        let read_claim_span = read_count.clone() * AB::Expr::from_usize(2 * D_EF);
+        let write_claim_span = write_count.clone() * AB::Expr::from_usize(2 * D_EF);
+        let logup_claim_span = logup_count.clone() * AB::Expr::from_usize(4 * D_EF);
+        let read_claim_tidx = tidx_after_sumcheck.clone();
+        let write_claim_tidx = read_claim_tidx.clone() + read_claim_span;
+        let logup_claim_tidx = write_claim_tidx.clone() + write_claim_span;
+        let merge_label_tidx = logup_claim_tidx.clone() + logup_claim_span;
+        let tidx_end = merge_label_tidx.clone() + AB::Expr::from_usize(MERGE_LEN);
         builder
             .when(is_transition.clone())
             .assert_eq(next.tidx, tidx_end.clone());
@@ -257,19 +264,19 @@ where
             lookup_enable.clone(),
         );
 
-        let tidx_for_claims = tidx_after_sumcheck.clone();
         self.prod_read_claim_input_bus.send(
             builder,
             local.proof_idx,
             TowerProdLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: tidx_for_claims.clone(),
+                tidx: read_claim_tidx,
                 lambda: local.lambda.map(Into::into),
                 lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
+                root_prime_claim: local.read_claim_prime.map(Into::into),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * read_count.clone(),
         );
         // TODO separate lambda, lambda_prime for prod-write the relation should be local.lambda^(num_read)
         self.prod_write_claim_input_bus.send(
@@ -278,12 +285,13 @@ where
             TowerProdLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: tidx_for_claims.clone(),
+                tidx: write_claim_tidx,
                 lambda: local.lambda.map(Into::into),
                 lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
+                root_prime_claim: local.write_claim_prime.map(Into::into),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * write_count.clone(),
         );
         // TODO separate lambda, lambda_prime for logup the relation should be local.lambda^(num_read + num_write)
         self.logup_claim_input_bus.send(
@@ -292,12 +300,13 @@ where
             TowerLogupLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: tidx_for_claims.clone(),
+                tidx: logup_claim_tidx,
                 lambda: local.lambda.map(Into::into),
                 lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
+                root_prime_claim: local.logup_claim_prime.map(Into::into),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * logup_count.clone(),
         );
         self.prod_read_claim_bus.receive(
             builder,
@@ -309,7 +318,7 @@ where
                 lambda_prime_claim: local.read_claim_prime.map(Into::into),
                 num_prod_count: local.num_read_count.into(),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * read_count,
         );
         self.prod_write_claim_bus.receive(
             builder,
@@ -321,7 +330,7 @@ where
                 lambda_prime_claim: local.write_claim_prime.map(Into::into),
                 num_prod_count: local.num_write_count.into(),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * write_count,
         );
         self.logup_claim_bus.receive(
             builder,
@@ -333,7 +342,7 @@ where
                 lambda_prime_claim: local.logup_claim_prime.map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
-            is_not_dummy.clone(),
+            is_not_dummy.clone() * logup_count,
         );
 
         let root_layer_mask = local.is_first * is_not_dummy.clone();
@@ -348,7 +357,7 @@ where
             local.w0_claim,
         );
         assert_array_eq(
-            &mut builder.when(root_layer_mask),
+            &mut builder.when(root_layer_mask.clone()),
             local.logup_claim_prime,
             local.q0_claim,
         );
@@ -361,11 +370,12 @@ where
             TowerLayerInputMessage {
                 idx: local.idx.into(),
                 tidx: local.tidx.into(),
+                beta_logup: local.beta_logup.map(Into::into),
                 r0_claim: local.r0_claim.map(Into::into),
                 w0_claim: local.w0_claim.map(Into::into),
                 q0_claim: local.q0_claim.map(Into::into),
             },
-            local.is_first_air_idx * is_not_dummy.clone(),
+            local.is_first * is_not_dummy.clone(),
         );
         // 2. TowerLayerOutputBus
         // 2a. Send GKR input layer claims back
@@ -392,18 +402,13 @@ where
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 is_last_layer: is_last.clone(),
-                tidx: local.tidx + AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN),
+                tidx: sumcheck_init_tidx.clone() + AB::Expr::from_usize(SUMCHECK_INIT_LEN),
                 claim: local.sumcheck_claim_in.map(Into::into),
             },
-            is_non_root_layer.clone() * is_not_dummy.clone(),
+            local.is_enabled * is_not_dummy.clone(),
         );
         // 3. TowerSumcheckOutputBus
         // 3a. Receive sumcheck results
-        let prime_fold = ext_field_add::<AB::Expr>(local.read_claim_prime, local.write_claim_prime);
-        let sumcheck_claim_out = ext_field_multiply::<AB::Expr>(
-            ext_field_add::<AB::Expr>(prime_fold, local.logup_claim_prime),
-            local.eq_at_r_prime,
-        );
         self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
@@ -411,20 +416,32 @@ where
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: tidx_after_sumcheck.clone(),
-                claim_out: sumcheck_claim_out.map(Into::into),
+                claim_out: local.sumcheck_claim_out.map(Into::into),
                 eq_at_r_prime: local.eq_at_r_prime.map(Into::into),
             },
-            is_non_root_layer.clone() * is_not_dummy.clone(),
+            local.is_enabled * is_not_dummy.clone(),
         );
         // 4. TowerSumcheckChallengeBus
-        // 4a. Send challenge mu
+        // 4a. Send the root sumcheck's initial point.
         self.sumcheck_challenge_bus.send(
             builder,
             local.proof_idx,
             TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
+                layer_idx: AB::Expr::ZERO,
                 sumcheck_round: AB::Expr::ZERO,
+                challenge: local.beta_logup.map(Into::into),
+            },
+            root_layer_mask,
+        );
+        // 4b. Send merge challenge to the final round slot of the next layer.
+        self.sumcheck_challenge_bus.send(
+            builder,
+            local.proof_idx,
+            TowerSumcheckChallengeMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx + AB::Expr::ONE,
+                sumcheck_round: local.layer_idx + AB::Expr::ONE,
                 challenge: local.mu.map(Into::into),
             },
             is_transition.clone() * is_not_dummy.clone(),
@@ -440,20 +457,78 @@ where
         // in last layer: for send back to GKR input layer
         // 1a. Sample `lambda` — only on non-root layers.
         //     Root layer uses alpha_logup (set in trace), not a transcript sample.
-        self.transcript_bus.sample_ext(
+        let combine_label = b"combine subset evals";
+        transcript_receive_label(
+            &self.transcript_bus,
             builder,
             local.proof_idx,
             local.tidx,
+            combine_label,
+            is_non_root_layer.clone() * is_not_dummy.clone(),
+        );
+        self.transcript_bus.sample_ext(
+            builder,
+            local.proof_idx,
+            local.tidx + AB::Expr::from_usize(label_field_len(combine_label)),
             local.lambda,
             is_non_root_layer.clone() * is_not_dummy.clone(),
         );
-        // 1b. Observe layer claims
-        let tidx = tidx_after_sumcheck;
+        let init_enabled = local.is_enabled * is_not_dummy.clone();
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: sumcheck_init_tidx.clone(),
+                value: local.layer_idx + AB::Expr::ONE,
+                is_sample: AB::Expr::ZERO,
+            },
+            init_enabled.clone(),
+        );
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: sumcheck_init_tidx.clone() + AB::Expr::ONE,
+                value: AB::Expr::ZERO,
+                is_sample: AB::Expr::ZERO,
+            },
+            init_enabled.clone(),
+        );
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: sumcheck_init_tidx.clone() + AB::Expr::TWO,
+                value: AB::Expr::from_u32(3),
+                is_sample: AB::Expr::ZERO,
+            },
+            init_enabled.clone(),
+        );
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: sumcheck_init_tidx + AB::Expr::from_u32(3),
+                value: AB::Expr::ZERO,
+                is_sample: AB::Expr::ZERO,
+            },
+            init_enabled,
+        );
+        // 1b. Observe layer claims in the claim AIRs, then sample the merge challenge.
+        let merge_label = b"merge";
+        transcript_receive_label(
+            &self.transcript_bus,
+            builder,
+            local.proof_idx,
+            merge_label_tidx.clone(),
+            merge_label,
+            local.is_enabled * is_not_dummy.clone(),
+        );
         // 1c. Sample `mu`
         self.transcript_bus.sample_ext(
             builder,
             local.proof_idx,
-            tidx,
+            merge_label_tidx + AB::Expr::from_usize(label_field_len(merge_label)),
             local.mu,
             local.is_enabled * is_not_dummy.clone(),
         );

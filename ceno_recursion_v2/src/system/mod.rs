@@ -351,6 +351,28 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     {
         let mut preflight = Preflight::default();
 
+        // The pre-verifier stage has already run VmPvs preflight and passes
+        // this subcircuit the advanced transcript. Rehydrate the sampled
+        // lookup challenges into this module's fresh Preflight so proof-shape
+        // rows look up the same values VmPvsAir publishes.
+        let initial_log = sponge.clone().into_log();
+        let values = initial_log.values();
+        let samples = initial_log.samples();
+        debug_assert_eq!(values.len(), samples.len());
+        if values.len() >= 2 * D_EF {
+            let alpha_start = values.len() - 2 * D_EF;
+            let beta_start = values.len() - D_EF;
+            debug_assert!(samples[alpha_start..].iter().all(|is_sample| *is_sample));
+            preflight.vm_pvs.lookup_challenge_alpha =
+                EF::from_basis_coefficients_slice(&values[alpha_start..beta_start])
+                    .unwrap_or(EF::ZERO);
+            preflight.vm_pvs.lookup_challenge_beta =
+                EF::from_basis_coefficients_slice(&values[beta_start..]).unwrap_or(EF::ZERO);
+            let present_air_count = proof.chip_proofs.len();
+            preflight.vm_pvs.lookup_challenge_alpha_lookup_count = present_air_count;
+            preflight.vm_pvs.lookup_challenge_beta_lookup_count = present_air_count;
+        }
+
         // Phase 1: Trunk operations.
         // Proof-shape metadata and alpha/beta sampling after pre-verifier transcript observes.
         self.proof_shape
@@ -367,7 +389,23 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let fork_offset = sponge.len();
 
         // Phase 2: Fork — fresh transcript per chip proof instance.
-        let chip_proof_list = Self::build_chip_proof_list(proof);
+        let mut chip_proof_list = Self::build_chip_proof_list(proof);
+        let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
+            .proof_shape
+            .sorted_trace_vdata
+            .iter()
+            .enumerate()
+            .map(|(sorted_idx, (chip_idx, _))| (*chip_idx, sorted_idx))
+            .collect();
+        chip_proof_list.sort_by_key(|(chip_idx, instance_idx, _)| {
+            (
+                sorted_idx_by_chip
+                    .get(chip_idx)
+                    .copied()
+                    .unwrap_or(usize::MAX),
+                *instance_idx,
+            )
+        });
         // `TS::from(poseidon2_perm())` is the generic equivalent of
         // `default_duplex_sponge_recorder()` used by the inner prover.
         let mut fork_sponges: Vec<TS> = (0..chip_proof_list.len())

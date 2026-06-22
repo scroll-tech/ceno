@@ -10,9 +10,12 @@ use p3_field::{Field, PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::tower::bus::{
-    TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
-    TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
+use crate::{
+    tower::bus::{
+        TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
+        TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
+    },
+    utils::{label_field_len, transcript_receive_label},
 };
 use recursion_circuit::{
     bus::{TranscriptBus, XiRandomnessBus, XiRandomnessMessage},
@@ -252,7 +255,7 @@ where
         // Sumcheck round flag end
         builder
             .when(is_last_round.clone())
-            .assert_eq(local.round, local.layer_idx - AB::Expr::ONE);
+            .assert_eq(local.round, local.layer_idx);
 
         ///////////////////////////////////////////////////////////////////////
         // Round Constraints
@@ -337,7 +340,7 @@ where
             local.proof_idx,
             TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
-                layer_idx: local.layer_idx - AB::Expr::ONE,
+                layer_idx: local.layer_idx.into(),
                 sumcheck_round: local.round.into(),
                 challenge: local.prev_challenge.map(Into::into),
             },
@@ -349,8 +352,8 @@ where
             local.proof_idx,
             TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
-                sumcheck_round: local.round.into() + AB::Expr::ONE,
+                layer_idx: local.layer_idx + AB::Expr::ONE,
+                sumcheck_round: local.round.into(),
                 challenge: local.challenge.map(Into::into),
             },
             local.is_enabled * (AB::Expr::ONE - local.is_last_layer) * is_not_dummy.clone(),
@@ -374,10 +377,19 @@ where
             tidx += AB::Expr::from_usize(D_EF);
         }
         // 1b. Sample challenge `ri`
+        let round_label = b"Internal round";
+        transcript_receive_label(
+            &self.transcript_bus,
+            builder,
+            local.proof_idx,
+            tidx.clone(),
+            round_label,
+            local.is_enabled * is_not_dummy.clone(),
+        );
         self.transcript_bus.sample_ext(
             builder,
             local.proof_idx,
-            tidx,
+            tidx + AB::Expr::from_usize(label_field_len(round_label)),
             local.challenge,
             local.is_enabled * is_not_dummy.clone(),
         );

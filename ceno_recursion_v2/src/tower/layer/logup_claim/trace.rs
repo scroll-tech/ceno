@@ -76,6 +76,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                     cols.is_enabled = F::ONE;
                     cols.is_first_layer = F::from_bool(record.is_first_air_idx);
                     cols.is_first = F::ONE; // single row = first of its (degenerate) layer
+                    cols.is_root_layer = F::ONE;
                     cols.is_dummy = F::ONE;
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
@@ -87,6 +88,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                     lambda_prime_one[0] = F::ONE;
                     cols.lambda_prime = lambda_prime_one;
                     cols.mu = [F::ZERO; D_EF];
+                    cols.root_prime_claim = [F::ZERO; D_EF];
                     cols.p_xi_0 = [F::ZERO; D_EF];
                     cols.p_xi_1 = [F::ZERO; D_EF];
                     cols.q_xi_0 = [F::ZERO; D_EF];
@@ -111,7 +113,8 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                         .get(layer_idx)
                         .map(|rows| rows.as_slice())
                         .unwrap_or(&[]);
-                    let total_rows = record.logup_count_at(layer_idx).max(1);
+                    let actual_rows = record.logup_count_at(layer_idx);
+                    let total_rows = actual_rows.max(1);
                     debug_assert!(
                         total_rows == logup_rows.len().max(1),
                         "unexpected logup count mismatch at layer {layer_idx}"
@@ -127,7 +130,16 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                         .try_into()
                         .unwrap();
                     let mu_basis: [F; D_EF] = mu.as_basis_coefficients_slice().try_into().unwrap();
-                    let layer_tidx = record.claim_tidx(layer_idx);
+                    let root_prime_claim = if layer_idx == 0 {
+                        record.root_logup_prime_claim
+                    } else {
+                        record.logup_claim_at(layer_idx).1
+                    };
+                    let root_prime_basis: [F; D_EF] = root_prime_claim
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    let layer_tidx = record.logup_claim_tidx(layer_idx);
 
                     let mut pow_lambda = EF::ONE;
                     let mut pow_lambda_prime = EF::ONE;
@@ -181,6 +193,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                         cols.is_first_layer =
                             F::from_bool(is_first_row_of_record && record.is_first_air_idx);
                         cols.is_first = F::from_bool(is_first_row_of_layer);
+                        cols.is_root_layer = F::from_bool(layer_idx == 0);
                         cols.proof_idx = F::from_usize(record.proof_idx);
                         cols.idx = F::from_usize(record.idx);
                         cols.layer_idx = F::from_usize(layer_idx);
@@ -189,6 +202,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                         cols.lambda = lambda_basis;
                         cols.lambda_prime = lambda_prime_basis;
                         cols.mu = mu_basis;
+                        cols.root_prime_claim = root_prime_basis;
                         cols.p_xi_0 = p_xi_0.as_basis_coefficients_slice().try_into().unwrap();
                         cols.p_xi_1 = p_xi_1.as_basis_coefficients_slice().try_into().unwrap();
                         cols.q_xi_0 = q_xi_0.as_basis_coefficients_slice().try_into().unwrap();
@@ -210,7 +224,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                             .as_basis_coefficients_slice()
                             .try_into()
                             .unwrap();
-                        cols.num_logup_count = F::from_usize(total_rows);
+                        cols.num_logup_count = F::from_usize(actual_rows);
 
                         acc_sum += contribution;
                         acc_p_cross += p_cross_contribution;

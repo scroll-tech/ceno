@@ -27,6 +27,7 @@ pub struct TowerProdSumCheckClaimCols<T> {
     pub idx: T,
     pub is_first_layer: T,
     pub is_first: T,
+    pub is_root_layer: T,
     pub is_dummy: T,
 
     pub layer_idx: T,
@@ -36,6 +37,7 @@ pub struct TowerProdSumCheckClaimCols<T> {
     pub lambda: [T; D_EF],
     pub lambda_prime: [T; D_EF],
     pub mu: [T; D_EF],
+    pub root_prime_claim: [T; D_EF],
     pub p_xi_0: [T; D_EF],
     pub p_xi_1: [T; D_EF],
     pub p_xi: [T; D_EF],
@@ -91,6 +93,10 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_first_layer);
+        builder.assert_bool(local.is_root_layer);
+        builder
+            .when(local.is_root_layer)
+            .assert_zero(local.layer_idx);
 
         ///////////////////////////////////////////////////////////////////////
         // Structural constraints (replaces NestedForLoopSubAir<2>)
@@ -240,7 +246,12 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
             ext_field_multiply::<AB::Expr>(pow_lambda_prime.clone(), prime_product);
         let acc_sum_prime_with_cur =
             ext_field_add::<AB::Expr>(local.acc_sum_prime, prime_contribution);
-        let acc_sum_prime_export = acc_sum_prime_with_cur.clone();
+        let is_root_layer: AB::Expr = local.is_root_layer.into();
+        let is_non_root_layer = AB::Expr::ONE - is_root_layer.clone();
+        let acc_sum_prime_export = core::array::from_fn(|i| {
+            local.root_prime_claim[i].into() * is_root_layer.clone()
+                + acc_sum_prime_with_cur[i].clone() * is_non_root_layer.clone()
+        });
 
         assert_array_eq(
             &mut builder.when(is_within_layer.clone()),
@@ -269,6 +280,7 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
             pow_lambda_prime_next,
         );
 
+        let num_prod_count: AB::Expr = local.num_prod_count.into();
         recv_challenge(
             &self.prod_claim_input_bus,
             builder,
@@ -280,8 +292,9 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
                 lambda,
                 lambda_prime: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
+                root_prime_claim: local.root_prime_claim.map(Into::into),
             },
-            local.is_first.into(),
+            local.is_first * is_not_dummy.clone() * num_prod_count.clone(),
         );
 
         send_claim(
@@ -295,7 +308,7 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
                 lambda_prime_claim: acc_sum_prime_export.map(Into::into),
                 num_prod_count: local.num_prod_count.into(),
             },
-            is_layer_end,
+            is_layer_end * is_not_dummy.clone() * num_prod_count,
         );
 
         let mut tidx = local.tidx.into();

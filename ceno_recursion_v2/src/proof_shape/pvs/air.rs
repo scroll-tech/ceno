@@ -90,12 +90,12 @@ where
             .assert_one(next.is_first_in_air);
 
         let is_same_air = local.is_valid * next.is_valid * not(next.is_first_in_air);
-        // TODO fix first tidx to be TranscriptLabel::Riscv.field_len()
-        // TODO fix comment as well
-        // first tidx happened here
         builder
             .when(local.is_valid * local.is_first_in_proof * local.is_first_in_air)
-            .assert_zero(local.tidx);
+            .assert_eq(
+                local.tidx,
+                AB::Expr::from_usize(TranscriptLabel::Riscv.field_len()),
+            );
 
         // self.num_pvs_bus.receive(
         //     builder,

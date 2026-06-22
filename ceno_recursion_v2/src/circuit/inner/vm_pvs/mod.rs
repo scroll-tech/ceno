@@ -77,9 +77,9 @@ pub fn run_preflight<TS>(
 
     let alpha_ext = ts.sample_ext();
     let beta_ext = ts.sample_ext();
-    eprintln!("vm_pvs alpha {} beta {}", alpha_ext, beta_ext);
     preflight.vm_pvs.lookup_challenge_alpha = alpha_ext;
     preflight.vm_pvs.lookup_challenge_beta = beta_ext;
-    preflight.vm_pvs.lookup_challenge_alpha_lookup_count = 0;
-    preflight.vm_pvs.lookup_challenge_beta_lookup_count = 0;
+    let present_air_count = proof.chip_proofs.len();
+    preflight.vm_pvs.lookup_challenge_alpha_lookup_count = present_air_count;
+    preflight.vm_pvs.lookup_challenge_beta_lookup_count = present_air_count;
 }

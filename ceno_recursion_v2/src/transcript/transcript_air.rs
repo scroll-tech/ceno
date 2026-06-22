@@ -47,6 +47,7 @@ pub struct ForkedTranscriptCols<T> {
     pub is_proof_start: T,
 
     pub tidx: T,
+    pub local_tidx: T,
     /// Indicator for sample/observe.
     pub is_sample: T,
     /// 0/1 indicators for positions being absorbed/squeezed.
@@ -65,12 +66,12 @@ pub struct ForkedTranscriptCols<T> {
 
 impl<T: Copy> ForkedTranscriptCols<T> {
     pub const fn width() -> usize {
-        // proof_idx, is_proof_start, tidx, is_sample = 4
+        // proof_idx, is_proof_start, tidx, local_tidx, is_sample = 5
         // mask = CHUNK
         // prev_state = POSEIDON2_WIDTH
         // post_state = POSEIDON2_WIDTH
         // is_fork_start, fork_id = 2
-        4 + CHUNK + 2 * POSEIDON2_WIDTH + 2
+        5 + CHUNK + 2 * POSEIDON2_WIDTH + 2
     }
 }
 
@@ -157,15 +158,21 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
 
         // When is_proof_start: tidx = 0, sponge state = 0 (trunk start)
         builder.when(local.is_proof_start).assert_zero(local.tidx);
+        builder
+            .when(local.is_proof_start)
+            .assert_zero(local.local_tidx);
         builder.when(local.is_proof_start).assert_one(is_valid);
         builder
             .when(local.is_proof_start)
             .assert_zero(local.fork_id);
         builder.assert_bool(local.is_sample);
 
-        // When is_fork_start: fork chain begins (tidx is NOT zero; it's the
-        // fork's global tidx offset). Only constrain validity.
+        // When is_fork_start: fork chain begins. `tidx` is global; `local_tidx`
+        // is fork-local for the forked transcript bus.
         builder.when(local.is_fork_start).assert_one(is_valid);
+        builder
+            .when(local.is_fork_start)
+            .assert_zero(local.local_tidx);
 
         // Initial state for proof start (trunk): all-zero sponge
         for i in 0..CHUNK {
@@ -212,6 +219,9 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         builder
             .when(local_next_same_chain.clone())
             .assert_eq(next.tidx, local.tidx + count.clone());
+        builder
+            .when(local_next_same_chain.clone())
+            .assert_eq(next.local_tidx, local.local_tidx + count.clone());
 
         // If local.is_sample == next.is_sample within the same chain,
         // there must be exactly CHUNK operations.
@@ -263,7 +273,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(i),
+                    tidx: local.local_tidx + AB::Expr::from_usize(i),
                     value: local.prev_state[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
@@ -274,7 +284,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(D_EF + i),
+                    tidx: local.local_tidx + AB::Expr::from_usize(D_EF + i),
                     value: local.prev_state[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
@@ -285,7 +295,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(2 * D_EF + i),
+                    tidx: local.local_tidx + AB::Expr::from_usize(2 * D_EF + i),
                     value: local.prev_state[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
@@ -296,7 +306,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(3 * D_EF + i),
+                    tidx: local.local_tidx + AB::Expr::from_usize(3 * D_EF + i),
                     value: local.prev_state[i].into(),
                     is_sample: AB::Expr::ONE,
                 },

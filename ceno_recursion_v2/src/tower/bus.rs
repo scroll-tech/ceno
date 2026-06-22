@@ -18,6 +18,7 @@ define_typed_per_proof_permutation_bus!(TowerXiSamplerBus, TowerXiSamplerMessage
 pub struct TowerLayerInputMessage<T> {
     pub idx: T,
     pub tidx: T,
+    pub beta_logup: [T; D_EF],
     pub r0_claim: [T; D_EF],
     pub w0_claim: [T; D_EF],
     pub q0_claim: [T; D_EF],
@@ -48,6 +49,7 @@ pub struct TowerProdLayerChallengeMessage<T> {
     pub lambda: [T; D_EF],
     pub lambda_prime: [T; D_EF],
     pub mu: [T; D_EF],
+    pub root_prime_claim: [T; D_EF],
 }
 
 define_typed_per_proof_permutation_bus!(TowerProdReadClaimInputBus, TowerProdLayerChallengeMessage);
@@ -78,6 +80,7 @@ pub struct TowerLogupLayerChallengeMessage<T> {
     pub lambda: [T; D_EF],
     pub lambda_prime: [T; D_EF],
     pub mu: [T; D_EF],
+    pub root_prime_claim: [T; D_EF],
 }
 
 define_typed_per_proof_permutation_bus!(TowerLogupClaimInputBus, TowerLogupLayerChallengeMessage);

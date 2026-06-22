@@ -2,9 +2,11 @@ use core::borrow::Borrow;
 
 use crate::{
     bus::{MainBus, MainMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus},
+    subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     tower::bus::{
         TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus, TowerLayerOutputMessage,
     },
+    utils::{label_field_len, transcript_receive_label},
 };
 use openvm_circuit_primitives::{
     SubAir,
@@ -18,10 +20,7 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
-use recursion_circuit::{
-    subairs::proof_idx::{ProofIdxIoCols, ProofIdxSubAir},
-    utils::assert_zeros,
-};
+use recursion_circuit::utils::assert_zeros;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 #[repr(C)]
@@ -32,8 +31,13 @@ pub struct TowerInputCols<T> {
 
     pub proof_idx: T,
     pub idx: T,
+    pub is_first_idx: T,
+    pub is_first: T,
 
     pub n_logup: T,
+    pub num_read_count: T,
+    pub num_write_count: T,
+    pub num_logup_count: T,
 
     /// Flag indicating whether there are any interactions
     /// n_logup = 0 <=> total_interactions = 0
@@ -49,6 +53,7 @@ pub struct TowerInputCols<T> {
     pub q0_claim: [T; D_EF],
 
     pub alpha_logup: [T; D_EF],
+    pub beta_logup: [T; D_EF],
 
     pub input_layer_claim: [T; D_EF],
     pub layer_output_lambda: [T; D_EF],
@@ -88,21 +93,20 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         // Proof Index Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        // This subair has the following constraints:
-        // 1. Boolean enabled flag
-        // 2. Disabled rows are followed by disabled rows
-        // 3. Proof index increments by exactly one between enabled rows
-        ProofIdxSubAir.eval(
+        type LoopSubAir = NestedForLoopSubAir<2>;
+        LoopSubAir {}.eval(
             builder,
             (
-                ProofIdxIoCols {
+                NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    proof_idx: local.proof_idx,
+                    counter: [local.proof_idx, local.idx],
+                    is_first: [local.is_first_idx, local.is_first],
                 }
                 .map_into(),
-                ProofIdxIoCols {
+                NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    proof_idx: next.proof_idx,
+                    counter: [next.proof_idx, next.idx],
+                    is_first: [next.is_first_idx, next.is_first],
                 }
                 .map_into(),
             ),
@@ -152,20 +156,22 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
 
         // Add PoW (if any) and alpha label+sample, beta label+sample
         use crate::tower::tower_transcript_len::{
-            ALPHA_BETA_LEN, ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
+            ALPHA_BETA_LEN, ALPHA_LEN, MERGE_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
         };
         let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN);
         // Add GKR layers + Sumcheck.
-        // Total GKR span: n*(10n+25) - 13 for n>0.
-        // layers_cumulative(n) = 10n² + 25n - 13.
-        let gkr_inner = num_layers.clone() * AB::Expr::from_usize(ROUND_LEN / 2)
-            + AB::Expr::from_usize(
-                ALPHA_LEN + SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN - ROUND_LEN / 2,
-            );
-        let tidx_after_gkr_layers = tidx_after_alpha_beta.clone()
-            + has_interactions.clone()
-                * (num_layers.clone() * gkr_inner
-                    - AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN));
+        let claim_span = (local.num_read_count.into() * AB::Expr::from_usize(2 * D_EF))
+            + (local.num_write_count.into() * AB::Expr::from_usize(2 * D_EF))
+            + (local.num_logup_count.into() * AB::Expr::from_usize(4 * D_EF));
+        let post_sumcheck_len = claim_span + AB::Expr::from_usize(MERGE_LEN);
+        let gkr_span = num_layers.clone()
+            * (AB::Expr::from_usize(SUMCHECK_INIT_LEN) + post_sumcheck_len)
+            + num_layers.clone()
+                * (num_layers.clone() + AB::Expr::ONE)
+                * AB::Expr::from_usize(ROUND_LEN / 2)
+            + (num_layers.clone() - AB::Expr::ONE) * AB::Expr::from_usize(ALPHA_LEN);
+        let tidx_after_gkr_layers =
+            tidx_after_alpha_beta.clone() + has_interactions.clone() * gkr_span;
         // 1. TowerLayerInputBus
         // 1a. Send input to TowerLayerAir
         self.layer_input_bus.send(
@@ -174,6 +180,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             TowerLayerInputMessage {
                 idx: local.idx.into(),
                 tidx: tidx_after_alpha_beta.clone() * has_interactions.clone(),
+                beta_logup: local.beta_logup.map(Into::into),
                 r0_claim: local.r0_claim.map(Into::into),
                 w0_claim: local.w0_claim.map(Into::into),
                 q0_claim: local.q0_claim.map(Into::into),
@@ -208,17 +215,47 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 idx: local.idx.into(),
                 tidx: local.tidx.into(),
                 n_logup: local.n_logup.into(),
+                num_read_count: local.num_read_count.into(),
+                num_write_count: local.num_write_count.into(),
+                num_logup_count: local.num_logup_count.into(),
             },
             local.is_enabled,
         );
 
         // 2. TranscriptBus
-        // 2a. Sample alpha_logup challenge
-        self.transcript_bus.sample_ext(
+        // 2a. Observe native labels and sample alpha/beta challenges.
+        let alpha_label = b"combine subset evals";
+        transcript_receive_label(
+            &self.transcript_bus,
             builder,
             local.proof_idx,
             local.tidx,
+            alpha_label,
+            local.is_enabled,
+        );
+        let beta_label_tidx =
+            local.tidx + AB::Expr::from_usize(label_field_len(alpha_label) + D_EF);
+        self.transcript_bus.sample_ext(
+            builder,
+            local.proof_idx,
+            local.tidx + AB::Expr::from_usize(label_field_len(alpha_label)),
             local.alpha_logup.map(Into::into),
+            local.is_enabled,
+        );
+        let beta_label = b"product_sum";
+        transcript_receive_label(
+            &self.transcript_bus,
+            builder,
+            local.proof_idx,
+            beta_label_tidx.clone(),
+            beta_label,
+            local.is_enabled,
+        );
+        self.transcript_bus.sample_ext(
+            builder,
+            local.proof_idx,
+            beta_label_tidx + AB::Expr::from_usize(label_field_len(beta_label)),
+            local.beta_logup.map(Into::into),
             local.is_enabled,
         );
         self.main_bus.send(

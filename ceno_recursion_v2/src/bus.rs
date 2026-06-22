@@ -60,6 +60,9 @@ pub struct TowerModuleMessage<T> {
     pub idx: T,
     pub tidx: T,
     pub n_logup: T,
+    pub num_read_count: T,
+    pub num_write_count: T,
+    pub num_logup_count: T,
 }
 
 define_typed_per_proof_permutation_bus!(TowerModuleBus, TowerModuleMessage);

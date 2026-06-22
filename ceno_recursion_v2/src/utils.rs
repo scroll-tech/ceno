@@ -9,6 +9,7 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{
 use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_symmetric::Permutation;
+use recursion_circuit::bus::{TranscriptBus, TranscriptBusMessage};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TranscriptLabel {
@@ -45,9 +46,51 @@ pub fn transcript_observe_label<TS>(transcript: &mut TS, label: &[u8])
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
-    let label_f = <BabyBearExt4 as CenoExtensionField>::BaseField::bytes_to_field_elements(label);
-    for elem in label_f {
+    for elem in label_field_values(label) {
         transcript.observe(elem);
+    }
+}
+
+pub fn label_field_values<FA>(label: &[u8]) -> Vec<FA>
+where
+    FA: PrimeCharacteristicRing,
+{
+    label
+        .chunks(4)
+        .map(|chunk| {
+            let mut bytes = [0u8; 4];
+            bytes[..chunk.len()].copy_from_slice(chunk);
+            FA::from_u32(u32::from_le_bytes(bytes))
+        })
+        .collect()
+}
+
+pub fn transcript_receive_label<AB>(
+    transcript_bus: &TranscriptBus,
+    builder: &mut AB,
+    proof_idx: AB::Var,
+    tidx: impl Into<AB::Expr>,
+    label: &[u8],
+    is_enabled: impl Into<AB::Expr>,
+) where
+    AB: openvm_stark_backend::interaction::InteractionBuilder,
+{
+    let tidx = tidx.into();
+    let is_enabled = is_enabled.into();
+    for (i, value) in label_field_values::<AB::Expr>(label)
+        .into_iter()
+        .enumerate()
+    {
+        transcript_bus.receive(
+            builder,
+            proof_idx,
+            TranscriptBusMessage {
+                tidx: tidx.clone() + AB::Expr::from_usize(i),
+                value,
+                is_sample: AB::Expr::ZERO,
+            },
+            is_enabled.clone(),
+        );
     }
 }
 

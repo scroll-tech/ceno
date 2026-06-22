@@ -27,7 +27,13 @@ pub struct TowerLayerRecord {
     pub write_prime_claims: Vec<EF>,
     pub logup_claims: Vec<EF>,
     pub logup_prime_claims: Vec<EF>,
+    pub beta_logup: EF,
     pub sumcheck_claims: Vec<EF>,
+    pub sumcheck_claim_outs: Vec<EF>,
+    pub sumcheck_eq_outs: Vec<EF>,
+    pub root_read_prime_claim: EF,
+    pub root_write_prime_claim: EF,
+    pub root_logup_prime_claim: EF,
 }
 
 impl TowerLayerRecord {
@@ -111,27 +117,56 @@ impl TowerLayerRecord {
 
     #[inline]
     pub(crate) fn layer_tidx(&self, layer_idx: usize) -> usize {
-        self.tidx + tower_transcript_len::layers_cumulative(layer_idx)
+        let mut span = 0;
+        for i in 0..layer_idx {
+            span += self.layer_span_at(i);
+        }
+        self.tidx + span
     }
 
     #[inline]
     pub(crate) fn read_count_at(&self, layer_idx: usize) -> usize {
-        self.read_counts.get(layer_idx).copied().unwrap_or(1)
+        self.read_counts.get(layer_idx).copied().unwrap_or(0)
     }
 
     #[inline]
     pub(crate) fn write_count_at(&self, layer_idx: usize) -> usize {
-        self.write_counts.get(layer_idx).copied().unwrap_or(1)
+        self.write_counts.get(layer_idx).copied().unwrap_or(0)
     }
 
     #[inline]
     pub(crate) fn logup_count_at(&self, layer_idx: usize) -> usize {
-        self.logup_counts.get(layer_idx).copied().unwrap_or(1)
+        self.logup_counts.get(layer_idx).copied().unwrap_or(0)
+    }
+
+    #[inline]
+    pub(crate) fn layer_span_at(&self, layer_idx: usize) -> usize {
+        tower_transcript_len::layer_span(
+            layer_idx,
+            self.read_count_at(layer_idx),
+            self.write_count_at(layer_idx),
+            self.logup_count_at(layer_idx),
+        )
     }
 
     #[inline]
     pub(crate) fn claim_tidx(&self, layer_idx: usize) -> usize {
         self.layer_tidx(layer_idx) + tower_transcript_len::claim_offset_in_layer(layer_idx)
+    }
+
+    #[inline]
+    pub(crate) fn read_claim_tidx(&self, layer_idx: usize) -> usize {
+        self.claim_tidx(layer_idx)
+    }
+
+    #[inline]
+    pub(crate) fn write_claim_tidx(&self, layer_idx: usize) -> usize {
+        self.read_claim_tidx(layer_idx) + 2 * D_EF * self.read_count_at(layer_idx)
+    }
+
+    #[inline]
+    pub(crate) fn logup_claim_tidx(&self, layer_idx: usize) -> usize {
+        self.write_claim_tidx(layer_idx) + 2 * D_EF * self.write_count_at(layer_idx)
     }
 }
 
@@ -207,6 +242,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     lambda_prime_one[0] = F::ONE;
                     cols.lambda_prime = lambda_prime_one;
                     cols.mu = [F::ZERO; D_EF];
+                    cols.beta_logup = [F::ZERO; D_EF];
                     cols.sumcheck_claim_in = [F::ZERO; D_EF];
                     cols.read_claim = [F::ZERO; D_EF];
                     cols.read_claim_prime = [F::ZERO; D_EF];
@@ -217,6 +253,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.num_read_count = F::ZERO;
                     cols.num_write_count = F::ZERO;
                     cols.num_logup_count = F::ZERO;
+                    cols.sumcheck_claim_out = [F::ZERO; D_EF];
                     cols.eq_at_r_prime = [F::ZERO; D_EF];
                     cols.r0_claim.copy_from_slice(q0_basis);
                     cols.w0_claim.copy_from_slice(q0_basis);
@@ -251,11 +288,21 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                         .unwrap();
                     let mu = mus_for_proof.get(layer_idx).copied().unwrap_or(EF::ZERO);
                     cols.mu = mu.as_basis_coefficients_slice().try_into().unwrap();
-                    let sumcheck_claim = if layer_idx == 0 {
+                    cols.beta_logup = record
+                        .beta_logup
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    let fallback_sumcheck_claim = if layer_idx == 0 {
                         EF::ZERO
                     } else {
                         prev_folded_claim.unwrap_or(EF::ZERO)
                     };
+                    let sumcheck_claim = record
+                        .sumcheck_claims
+                        .get(layer_idx)
+                        .copied()
+                        .unwrap_or(fallback_sumcheck_claim);
                     cols.sumcheck_claim_in = sumcheck_claim
                         .as_basis_coefficients_slice()
                         .try_into()
@@ -272,11 +319,22 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
-                    cols.num_read_count = F::from_usize(record.read_count_at(layer_idx).max(1));
-                    cols.num_write_count = F::from_usize(record.write_count_at(layer_idx).max(1));
-                    cols.num_logup_count = F::from_usize(record.logup_count_at(layer_idx).max(1));
+                    cols.num_read_count = F::from_usize(record.read_count_at(layer_idx));
+                    cols.num_write_count = F::from_usize(record.write_count_at(layer_idx));
+                    cols.num_logup_count = F::from_usize(record.logup_count_at(layer_idx));
+                    cols.sumcheck_claim_out = record
+                        .sumcheck_claim_outs
+                        .get(layer_idx)
+                        .copied()
+                        .unwrap_or(EF::ZERO)
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
                     cols.eq_at_r_prime = record
-                        .eq_at(layer_idx)
+                        .sumcheck_eq_outs
+                        .get(layer_idx)
+                        .copied()
+                        .unwrap_or_else(|| record.eq_at(layer_idx))
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();

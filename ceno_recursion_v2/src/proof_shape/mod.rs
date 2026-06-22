@@ -7,7 +7,7 @@ use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
     p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -127,8 +127,21 @@ impl ProofShapeModule {
         // TODO remove l_skip
         preflight.proof_shape.l_skip = 0;
 
+        let num_airs = child_vk.circuit_vks.len();
+        let mut num_present_at_air = vec![0usize; num_airs];
+        let mut present_count = 0usize;
+        for (air_idx, _) in &preflight.proof_shape.sorted_trace_vdata {
+            present_count += 1;
+            num_present_at_air[*air_idx] = present_count;
+        }
+        for (air_idx, num_present) in num_present_at_air.iter_mut().enumerate() {
+            if !proof.chip_proofs.contains_key(&air_idx) {
+                *num_present = present_count;
+            }
+        }
+
         let mut current_tidx = transcript_start_tidx;
-        let mut starting_tidx = vec![0usize; child_vk.circuit_vks.len()];
+        let mut starting_tidx = vec![0usize; num_airs];
         let n_max = preflight
             .proof_shape
             .sorted_trace_vdata
@@ -137,21 +150,13 @@ impl ProofShapeModule {
             .max()
             .unwrap_or(0);
 
-        for air_idx in 0..child_vk.circuit_vks.len() {
-            let metadata = &self.per_air[air_idx];
+        for air_idx in 0..num_airs {
             let is_present = proof.chip_proofs.contains_key(&air_idx);
             starting_tidx[air_idx] = current_tidx;
 
-            if !metadata.is_required {
-                current_tidx += 1;
-            }
-
+            current_tidx += num_present_at_air[air_idx] * 2 * D_EF;
             if is_present {
-                current_tidx += 1;
-
-                if metadata.num_public_values != 0 {
-                    current_tidx += metadata.num_public_values;
-                }
+                current_tidx += 2 * D_EF;
             }
         }
 

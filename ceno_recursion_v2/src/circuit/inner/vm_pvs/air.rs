@@ -1,10 +1,13 @@
 use std::{borrow::Borrow, sync::Arc};
 
 use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
-use ceno_zkvm::instructions::riscv::constants::{
-    END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, EXIT_PC, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
-    HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBIO_DIGEST_IDX,
-    SHARD_ID_IDX, SHARD_RW_SUM_IDX,
+use ceno_zkvm::{
+    instructions::riscv::constants::{
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, EXIT_PC, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
+        HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBIO_DIGEST_IDX,
+        SHARD_ID_IDX, SHARD_RW_SUM_IDX,
+    },
+    scheme::PublicValues,
 };
 use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
@@ -21,7 +24,11 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage},
-    circuit::inner::{bus::PvsAirConsistencyBus, vm_pvs::VmPvs},
+    circuit::inner::{
+        bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
+        vm_pvs::VmPvs,
+    },
+    utils::TranscriptLabel,
 };
 
 #[repr(C)]
@@ -35,6 +42,9 @@ pub struct VmPvsCols<F> {
     pub lookup_challenge_beta: [F; D_EF],
     pub lookup_challenge_alpha_lookup_count: F,
     pub lookup_challenge_beta_lookup_count: F,
+    pub fixed_commit_log2_max_codeword_size: F,
+    pub fixed_no_omc_init_commit_log2_max_codeword_size: F,
+    pub witness_commit_log2_max_codeword_size: F,
     pub child_pvs: VmPvs<F>,
 }
 
@@ -45,6 +55,8 @@ pub struct VmPvsAir {
     pub lookup_challenge_bus: LookupChallengeBus,
     pub pvs_air_consistency_bus: PvsAirConsistencyBus,
     pub deferral_enabled: bool,
+    pub has_fixed_commit: bool,
+    pub has_fixed_no_omc_init_commit: bool,
     pub instance_public_value_indices: Arc<Vec<Vec<usize>>>,
 }
 
@@ -189,41 +201,60 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         // );
 
         // Commitments are observed after transcript-visible public values in preflight.
-        let start_tidx_after_public_value = VmPvs::<u8>::width() - 3 * DIGEST_SIZE;
-        for (didx, value) in local.child_pvs.fixed_commit.iter().enumerate() {
+        let mut commit_tidx = TranscriptLabel::Riscv.field_len() + PublicValues::flattened_len();
+        if self.has_fixed_commit {
+            receive_commitment(
+                self,
+                builder,
+                local.proof_idx,
+                commit_tidx,
+                local.child_pvs.fixed_commit,
+                local.fixed_commit_log2_max_codeword_size,
+                local.is_valid,
+            );
+            commit_tidx += DIGEST_SIZE + 1;
+        }
+        if self.has_fixed_no_omc_init_commit {
+            receive_commitment(
+                self,
+                builder,
+                local.proof_idx,
+                commit_tidx,
+                local.child_pvs.fixed_no_omc_init_commit,
+                local.fixed_no_omc_init_commit_log2_max_codeword_size,
+                local.is_valid,
+            );
+            commit_tidx += DIGEST_SIZE + 1;
+        }
+        receive_commitment(
+            self,
+            builder,
+            local.proof_idx,
+            commit_tidx,
+            local.child_pvs.witness_commit,
+            local.witness_commit_log2_max_codeword_size,
+            local.is_valid,
+        );
+        commit_tidx += DIGEST_SIZE + 1;
+
+        for i in 0..D_EF {
             self.transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(start_tidx_after_public_value + didx),
-                    value: (*value).into(),
-                    is_sample: AB::Expr::ZERO,
+                    tidx: AB::Expr::from_usize(commit_tidx + i),
+                    value: local.lookup_challenge_alpha[i].into(),
+                    is_sample: AB::Expr::ONE,
                 },
                 local.is_valid,
             );
-        }
-        for (didx, value) in local.child_pvs.fixed_no_omc_init_commit.iter().enumerate() {
             self.transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(start_tidx_after_public_value + DIGEST_SIZE + didx),
-                    value: (*value).into(),
-                    is_sample: AB::Expr::ZERO,
-                },
-                local.is_valid,
-            );
-        }
-        for (didx, value) in local.child_pvs.witness_commit.iter().enumerate() {
-            self.transcript_bus.receive(
-                builder,
-                local.proof_idx,
-                TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(
-                        start_tidx_after_public_value + 2 * DIGEST_SIZE + didx,
-                    ),
-                    value: (*value).into(),
-                    is_sample: AB::Expr::ZERO,
+                    tidx: AB::Expr::from_usize(commit_tidx + D_EF + i),
+                    value: local.lookup_challenge_beta[i].into(),
+                    is_sample: AB::Expr::ONE,
                 },
                 local.is_valid,
             );
@@ -253,15 +284,15 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         }
 
         // We look up proof metadata from VerifierPvsAir here to ensure consistency on each row.
-        // self.pvs_air_consistency_bus.lookup_key(
-        //     builder,
-        //     local.proof_idx,
-        //     PvsAirConsistencyMessage {
-        //         deferral_flag,
-        //         has_verifier_pvs: local.has_verifier_pvs.into(),
-        //     },
-        //     local.is_valid,
-        // );
+        self.pvs_air_consistency_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PvsAirConsistencyMessage {
+                deferral_flag,
+                has_verifier_pvs: local.has_verifier_pvs.into(),
+            },
+            local.is_valid,
+        );
 
         // Finally, constrain that this AIR's output public values are consistent with child_pvs.
         let &VmPvs::<_> {
@@ -381,6 +412,41 @@ where
         idx if idx == PUBIO_DIGEST_IDX + 1 => local.child_pvs.public_io[1].into(),
         _ => AB::Expr::ZERO,
     }
+}
+
+fn receive_commitment<AB>(
+    air: &VmPvsAir,
+    builder: &mut AB,
+    proof_idx: AB::Var,
+    start_tidx: usize,
+    commit: [AB::Var; DIGEST_SIZE],
+    log2_max_codeword_size: AB::Var,
+    mult: AB::Var,
+) where
+    AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues,
+{
+    for (didx, value) in commit.into_iter().enumerate() {
+        air.transcript_bus.receive(
+            builder,
+            proof_idx,
+            TranscriptBusMessage {
+                tidx: AB::Expr::from_usize(start_tidx + didx),
+                value: value.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            mult,
+        );
+    }
+    air.transcript_bus.receive(
+        builder,
+        proof_idx,
+        TranscriptBusMessage {
+            tidx: AB::Expr::from_usize(start_tidx + DIGEST_SIZE),
+            value: log2_max_codeword_size.into(),
+            is_sample: AB::Expr::ZERO,
+        },
+        mult,
+    );
 }
 
 impl VmPvsAir {

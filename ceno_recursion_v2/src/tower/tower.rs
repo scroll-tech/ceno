@@ -76,7 +76,13 @@ impl PrecomputedTranscript {
         for k in 0..num_layers {
             let n_ris = k + 1;
             for i in 0..n_ris {
-                challenges.push_back(schedule.ris[ri_offset + i]);
+                challenges.push_back(
+                    schedule
+                        .ris
+                        .get(ri_offset + i)
+                        .copied()
+                        .unwrap_or(RecursionField::ZERO),
+                );
             }
             ri_offset += n_ris;
             challenges.push_back(schedule.mus[k]);
