@@ -106,6 +106,7 @@ pub enum RAMType {
     GlobalState = 0,
     Register,
     Memory,
+    Custom,
     Undefined,
 }
 
