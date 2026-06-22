@@ -18,7 +18,7 @@ use gkr_iop::{
 };
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::Instance;
+use multilinear_extensions::{Expression, Instance, ToExpr};
 use p3::field::FieldAlgebra;
 use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 use rayon::{
@@ -109,6 +109,18 @@ pub type ChallengeId = u16;
 pub type ROMType = LookupTable;
 
 pub type RAMType = gkr_iop::RAMType;
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u16)]
+pub enum CustomRWTag {
+    KeccakState = 0,
+}
+
+impl CustomRWTag {
+    pub fn expr<E: ExtensionField>(self) -> Expression<E> {
+        E::BaseField::from_canonical_u16(self as u16).expr()
+    }
+}
 
 pub type PointAndEval<F> = multilinear_extensions::mle::PointAndEval<F>;
 

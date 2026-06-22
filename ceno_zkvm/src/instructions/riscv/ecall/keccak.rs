@@ -135,7 +135,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
 
         cb.write_record(
             || "keccak_state_in",
-            RAMType::Undefined,
+            RAMType::Custom,
             keccak_state_record(
                 vm_state.ts.expr(),
                 state_ptr_value.expr_unaligned(),
@@ -145,7 +145,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
         )?;
         cb.read_record(
             || "keccak_state_out",
-            RAMType::Undefined,
+            RAMType::Custom,
             keccak_state_record(
                 vm_state.ts.expr(),
                 state_ptr_value.expr_unaligned(),
