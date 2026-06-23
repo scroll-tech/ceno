@@ -27,8 +27,6 @@ use ceno_emul::{
     StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
     WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
-#[cfg(feature = "gpu")]
-use ceno_gpu::CudaHal;
 use clap::ValueEnum;
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};

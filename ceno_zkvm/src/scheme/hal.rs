@@ -155,6 +155,7 @@ pub trait TowerProver<PB: ProverBackend> {
         cs: &ComposedConstrainSystem<PB::E>,
         input: &ProofInput<'a, PB>,
         records: &'c [Arc<PB::MultilinearPoly<'b>>],
+        challenges: &[PB::E; 2],
     ) -> (
         Vec<Vec<Vec<PB::E>>>,
         Vec<TowerProverSpec<'c, PB>>,
@@ -193,6 +194,7 @@ pub struct MainConstraintJob<'a, PB: ProverBackend> {
     pub num_witin: usize,
     pub structural_rmm: Option<witness::RowMajorMatrix<<PB::E as ExtensionField>::BaseField>>,
     pub rt_tower: Point<PB::E>,
+    pub main_out_evals: Vec<PB::E>,
     pub rotation: Option<RotationProverOutput<PB::E>>,
     pub ecc_proof: Option<EccQuarkProof<PB::E>>,
     pub challenges: [PB::E; 2],

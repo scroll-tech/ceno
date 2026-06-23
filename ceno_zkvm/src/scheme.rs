@@ -63,6 +63,8 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub r_out_evals: Vec<Vec<E>>,
     pub w_out_evals: Vec<Vec<E>>,
     pub lk_out_evals: Vec<Vec<E>>,
+    // Main-GKR seed evaluations at the instance-domain tower prefix point.
+    pub main_out_evals: Vec<E>,
 
     pub main_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
     pub gkr_iop_proof: Option<GKRProof<E>>,
@@ -81,6 +83,7 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct MainConstraintProof<E: ExtensionField> {
+    pub claimed_sum: E,
     pub proof: SumcheckLayerProof<E>,
 }
 
