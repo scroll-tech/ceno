@@ -17,6 +17,7 @@ use crate::{
             extract_ecc_quark_witness_inputs, first_layer_output_group_stage_masks,
             first_layer_selector_contexts, split_rotation_evals,
         },
+        verifier::eval_batched_main_frontload_terms,
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
@@ -24,7 +25,7 @@ use ceno_gpu::{
     Buffer, CudaHal,
     bb31::{CudaHalBB31, GpuFieldType, GpuMatrix, GpuPolynomial, GpuPolynomialExt},
     common::{
-        CacheLevel, get_gpu_cache_level,
+        CacheLevel, get_gpu_cache_level, get_mem_tracking_mode,
         jagged::{
             JaggedSumcheckGpuCtx, batch_commit_gpu_grouped, eval_cols_at_point_gpu,
             jagged_batch_open_gpu, jagged_sumcheck_prove_gpu,
@@ -66,7 +67,7 @@ use rayon::{
 };
 use std::{
     collections::BTreeMap,
-    io::Write,
+    ffi::c_void,
     iter::{once, repeat_n},
     mem::MaybeUninit,
     sync::Arc,
@@ -75,7 +76,7 @@ use std::{
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage},
-    util::{get_challenge_pows, optimal_sumcheck_threads},
+    util::{extrapolate_uni_poly, get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::{BasicTranscript, Transcript};
 use witness::{InstancePaddingStrategy, next_pow2_instance_padding};
@@ -185,25 +186,6 @@ use util::{
 
 pub struct GpuTowerProver;
 
-#[derive(Debug, Default, Clone, Copy)]
-struct PcsResidentStats {
-    digest_tree_bytes: usize,
-    codeword_leaves_bytes: usize,
-    trace_gpu_bytes: usize,
-    rmms_device_bytes: usize,
-    rmms_device_count: usize,
-    total_rmms: usize,
-}
-
-fn rmm_device_backing_bytes<T>(rmm: &witness::RowMajorMatrix<T>) -> usize
-where
-    T: FieldAlgebra + Default + Sync + Clone + Send + Copy + 'static,
-{
-    rmm.device_backing_ref::<BufferImpl<'static, T>>()
-        .map(|device_buffer| device_buffer.len() * std::mem::size_of::<T>())
-        .unwrap_or(0)
-}
-
 fn rmm_col_major_device_rows<T>(rmm: &witness::RowMajorMatrix<T>) -> Option<usize>
 where
     T: FieldAlgebra + Default + Sync + Clone + Send + Copy + 'static,
@@ -231,155 +213,14 @@ where
     }
 }
 
-fn pcs_resident_stats(pcs_data_basefold: &GpuBasefoldPcsData) -> PcsResidentStats {
-    let digest_tree_bytes =
-        pcs_data_basefold.codeword.digest_buf.len() * std::mem::size_of::<BB31Base>();
-    let codeword_leaves_bytes = pcs_data_basefold
-        .codeword
-        .leaves
-        .as_ref()
-        .map(|leaves| {
-            leaves
-                .iter()
-                .map(|leaf| leaf.values().len() * std::mem::size_of::<BB31Base>())
-                .sum::<usize>()
-        })
-        .unwrap_or(0);
-    let trace_gpu_bytes = pcs_data_basefold
-        .trace
-        .as_ref()
-        .map(|traces| {
-            traces
-                .iter()
-                .flatten()
-                .map(|poly| poly.evaluations().len() * std::mem::size_of::<BB31Base>())
-                .sum::<usize>()
-        })
-        .unwrap_or(0);
-    let (rmms_device_bytes, rmms_device_count, total_rmms) = pcs_data_basefold
-        .rmms
-        .as_ref()
-        .map(|rmms| {
-            (
-                rmms.iter()
-                    .filter(|rmm| rmm.has_device_backing())
-                    .map(rmm_device_backing_bytes)
-                    .sum::<usize>(),
-                rmms.iter().filter(|rmm| rmm.has_device_backing()).count(),
-                rmms.len(),
-            )
-        })
-        .unwrap_or((0, 0, 0));
-    PcsResidentStats {
-        digest_tree_bytes,
-        codeword_leaves_bytes,
-        trace_gpu_bytes,
-        rmms_device_bytes,
-        rmms_device_count,
-        total_rmms,
-    }
-}
-
-pub fn log_gpu_pcs_baseline<E, PCS>(
-    label: &str,
-    pcs_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
-) where
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E>,
-{
-    assert_eq!(
-        std::any::TypeId::of::<E::BaseField>(),
-        std::any::TypeId::of::<BB31Base>(),
-        "GPU PCS baseline logging only supports BabyBear base field",
-    );
-    let pcs_data_basefold = match pcs_data {
-        GpuPcsData::Basefold(data) => data,
-        GpuPcsData::Jagged(data) => &data.inner,
-    };
-    let pcs = pcs_resident_stats(pcs_data_basefold);
-    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
-    tracing::info!(
-        "[gpu pcs baseline][{label}] digest_tree={:.2}MB leaves={:.2}MB trace_gpu={:.2}MB rmms_device={:.2}MB ({}/{})",
-        mb(pcs.digest_tree_bytes),
-        mb(pcs.codeword_leaves_bytes),
-        mb(pcs.trace_gpu_bytes),
-        mb(pcs.rmms_device_bytes),
-        pcs.rmms_device_count,
-        pcs.total_rmms,
-    );
-}
-
-pub fn log_gpu_proof_baseline<E, PCS>(
-    label: &str,
-    witness_data: &<GpuBackend<E, PCS> as ProverBackend>::PcsData,
-    fixed_mles: &[Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>],
-) where
-    E: ExtensionField,
-    PCS: PolynomialCommitmentScheme<E>,
-{
-    assert_eq!(
-        std::any::TypeId::of::<E::BaseField>(),
-        std::any::TypeId::of::<BB31Base>(),
-        "GPU baseline logging only supports BabyBear base field",
-    );
-    let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu baseline logging");
-    let pool = cuda_hal.inner.mem_pool();
-    let used_bytes = pool.get_used_size().unwrap_or(0);
-    let reserved_bytes = pool.get_reserved_size().unwrap_or(0);
-    let (cuda_free_bytes, cuda_total_bytes) = get_cuda_mem_info().unwrap_or((0usize, 0usize));
-    let cuda_used_bytes = cuda_total_bytes.saturating_sub(cuda_free_bytes);
-
-    let pcs_data_basefold = match witness_data {
-        GpuPcsData::Basefold(data) => data,
-        GpuPcsData::Jagged(data) => &data.inner,
-    };
-
-    let pcs = pcs_resident_stats(pcs_data_basefold);
-    let fixed_mle_bytes = fixed_mles
-        .iter()
-        .map(|mle| match &mle.mle {
-            gkr_iop::gpu::gpu_prover::GpuFieldType::Base(poly) => {
-                poly.evaluations().len() * std::mem::size_of::<BB31Base>()
-            }
-            gkr_iop::gpu::gpu_prover::GpuFieldType::Ext(poly) => {
-                poly.evaluations().len() * std::mem::size_of::<BB31Ext>()
-            }
-            gkr_iop::gpu::gpu_prover::GpuFieldType::Unreachable => 0,
-        })
-        .sum::<usize>();
-    let accounted_bytes = pcs.digest_tree_bytes
-        + pcs.codeword_leaves_bytes
-        + pcs.trace_gpu_bytes
-        + pcs.rmms_device_bytes
-        + fixed_mle_bytes;
-    let unaccounted_bytes = (used_bytes as usize).saturating_sub(accounted_bytes);
-    let mb = |bytes: usize| bytes as f64 / (1024.0 * 1024.0);
-    tracing::info!(
-        "[gpu device][{label}] cuda_used={:.2}MB cuda_free={:.2}MB cuda_total={:.2}MB | pool_used={:.2}MB pool_reserved={:.2}MB pool_booked={:.2}MB pool_max={:.2}MB",
-        mb(cuda_used_bytes),
-        mb(cuda_free_bytes),
-        mb(cuda_total_bytes),
-        mb(used_bytes as usize),
-        mb(reserved_bytes as usize),
-        mb(pool.get_booked_total() as usize),
-        mb(pool.get_max_size() as usize),
-    );
-    tracing::info!(
-        "[gpu baseline][{label}] pool: used={:.2}MB reserved={:.2}MB | pcs: digest_tree={:.2}MB leaves={:.2}MB trace_gpu={:.2}MB rmms_device={:.2}MB ({}/{}) | fixed_mles={:.2}MB | unaccounted={:.2}MB",
-        mb(used_bytes as usize),
-        mb(reserved_bytes as usize),
-        mb(pcs.digest_tree_bytes),
-        mb(pcs.codeword_leaves_bytes),
-        mb(pcs.trace_gpu_bytes),
-        mb(pcs.rmms_device_bytes),
-        pcs.rmms_device_count,
-        pcs.total_rmms,
-        mb(fixed_mle_bytes),
-        mb(unaccounted_bytes),
-    );
+pub(crate) fn should_log_gpu_memory() -> bool {
+    get_mem_tracking_mode()
 }
 
 pub fn log_gpu_pool_usage(label: &str) {
+    if !should_log_gpu_memory() {
+        return;
+    }
     let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu pool logging");
     let pool = cuda_hal.inner.mem_pool();
     let used_bytes = pool.get_used_size().unwrap_or(0);
@@ -390,12 +231,13 @@ pub fn log_gpu_pool_usage(label: &str) {
         mb(used_bytes as usize),
         mb(reserved_bytes as usize),
     );
-    eprintln!("{message}");
-    let _ = std::io::stderr().flush();
     tracing::info!("{}", message);
 }
 
 pub fn log_gpu_device_state(label: &str) {
+    if !should_log_gpu_memory() {
+        return;
+    }
     let cuda_hal = get_cuda_hal().expect("cuda hal must exist for gpu device logging");
     let pool = cuda_hal.inner.mem_pool();
     let used_bytes = pool.get_used_size().unwrap_or(0);
@@ -415,8 +257,6 @@ pub fn log_gpu_device_state(label: &str) {
         mb(booked_bytes as usize),
         mb(max_bytes as usize),
     );
-    eprintln!("{message}");
-    let _ = std::io::stderr().flush();
     tracing::info!("{}", message);
 }
 use crate::scheme::{constants::NUM_FANIN, septic_curve::SepticPoint};
@@ -445,6 +285,12 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
         zkvm_v1_css: cs, ..
     } = composed_cs;
     let r_set_len = cs.r_expressions.len() + cs.r_table_expressions.len();
+    let w_set_len = cs.w_expressions.len() + cs.w_table_expressions.len();
+    let lk_set_len = if !cs.lk_table_expressions.is_empty() {
+        cs.lk_table_expressions.len()
+    } else {
+        cs.lk_expressions.len()
+    };
 
     let (point, proof, lk_out_evals, w_out_evals, r_out_evals) = {
         // build_tower_witness_gpu builds compact GPU specs directly.
@@ -460,8 +306,11 @@ pub fn prove_tower_relation_impl<E: ExtensionField, PCS: PolynomialCommitmentSch
         // GPU optimization: Extract out_evals from GPU-built towers before consuming them
         // This is the true optimization - using GPU tower results instead of CPU inference
         let span = entered_span!("extract_out_evals_from_gpu_towers", profiling_2 = true);
+        let grouped_towers = prod_gpu.len()
+            == usize::from(r_set_len > 0) + usize::from(w_set_len > 0)
+            && logup_gpu.len() == usize::from(lk_set_len > 0);
         let (r_out_evals, w_out_evals, lk_out_evals) =
-            extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len);
+            extract_out_evals_from_gpu_towers(&prod_gpu, &logup_gpu, r_set_len, grouped_towers);
         exit_span!(span);
 
         // bind read/write/lookup out evals into transcript before deriving tower challenges
@@ -510,6 +359,7 @@ pub(crate) fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     prod_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built product towers
     logup_gpu: &[ceno_gpu::GpuProverSpec], // GPU-built logup towers
     r_set_len: usize,
+    grouped_towers: bool,
 ) -> (Vec<Vec<E>>, Vec<Vec<E>>, Vec<Vec<E>>) {
     let stream = gkr_iop::gpu::get_thread_stream();
     // Extract product out_evals from GPU towers
@@ -527,8 +377,15 @@ pub(crate) fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
             "Product tower first layer should have 2 MLEs"
         );
 
-        // Split into r_out_evals and w_out_evals based on r_set_len
-        if i < r_set_len {
+        let is_read_spec = if grouped_towers {
+            // Interleaved tower grouping emits at most two product specs:
+            // read group first, then write group. `r_set_len` is the number of
+            // original read expressions, not the number of grouped specs.
+            r_set_len > 0 && i == 0
+        } else {
+            i < r_set_len
+        };
+        if is_read_spec {
             r_out_evals.push(first_layer_evals);
         } else {
             w_out_evals.push(first_layer_evals);
@@ -553,6 +410,16 @@ pub(crate) fn extract_out_evals_from_gpu_towers<E: ff_ext::ExtensionField>(
     }
 
     (r_out_evals, w_out_evals, lk_out_evals)
+}
+
+fn ext_elem_bytes(value: BB31Ext) -> Vec<u8> {
+    unsafe {
+        std::slice::from_raw_parts(
+            (&value as *const BB31Ext).cast::<u8>(),
+            std::mem::size_of::<BB31Ext>(),
+        )
+        .to_vec()
+    }
 }
 
 /// Standalone function for prove_rotation that doesn't require &self.
@@ -2258,7 +2125,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
-    input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
+    _input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
     records: &[ArcMultilinearExtensionGpu<'_, E>],
     challenges: &[E; 2],
     cuda_hal: &CudaHalBB31,
@@ -2271,14 +2138,10 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
 > {
     let stream = gkr_iop::gpu::get_thread_stream();
     use crate::scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP};
-    use ceno_gpu::bb31::GpuPolynomialExt;
-    use p3::field::FieldAlgebra;
 
     let ComposedConstrainSystem {
         zkvm_v1_css: cs, ..
     } = composed_cs;
-    let _num_instances_with_rotation =
-        input.num_instances() << composed_cs.rotation_vars().unwrap_or(0);
     let chip_record_alpha: BB31Ext = unsafe { std::mem::transmute_copy(&challenges[0]) };
 
     // SAFETY: The `records` slice is borrowed for the duration of this function call.
@@ -2310,141 +2173,196 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
         &records[offset..][..cs.lk_expressions.len()]
     };
 
-    // prod: split last layer once, then build compact tower layers.
-    let prod_last_layers = r_set_wit
-        .iter()
-        .chain(w_set_wit.iter())
-        .map(|wit| match wit.inner() {
-            gkr_iop::gpu::GpuFieldType::Ext(poly) => cuda_hal
-                .tower
-                .masked_mle_view_chunks(&*cuda_hal, poly, NUM_FANIN, BB31Ext::ONE, stream.as_ref())
-                .map_err(|e| format!("Failed to split compact prod tower input: {e}")),
-            _ => return Err("tower witness expects extension-field record MLEs".to_string()),
-        })
-        .collect::<Result<Vec<_>, String>>()?;
+    let active_rows = records
+        .first()
+        .map(|record| record.mle.evaluations_len())
+        .unwrap_or(1);
+    let active_row_vars = ceil_log2(next_pow2_instance_padding(active_rows));
+
+    let interleave_group_to_chunks = |group: &[ArcMultilinearExtensionGpu<'static, E>],
+                                      num_limbs: usize,
+                                      default: BB31Ext,
+                                      name: &str|
+     -> Result<
+        Vec<ceno_gpu::GpuVirtualInterleavedExt<'static>>,
+        String,
+    > {
+        if group.is_empty() {
+            return Ok(vec![]);
+        }
+        if !num_limbs.is_power_of_two() {
+            return Err(format!(
+                "{name} num_limbs must be power of two, got {num_limbs}"
+            ));
+        }
+
+        let mut polys: Vec<&'static GpuPolynomialExt<'static>> = Vec::with_capacity(group.len());
+        for wit in group {
+            match wit.inner() {
+                gkr_iop::gpu::GpuFieldType::Ext(poly) => {
+                    let poly_static: &'static GpuPolynomialExt<'static> =
+                        unsafe { std::mem::transmute(poly) };
+                    polys.push(poly_static);
+                }
+                _ => {
+                    return Err(format!(
+                        "{name} tower witness expects extension-field record MLEs"
+                    ));
+                }
+            }
+        }
+
+        let padded_active_rows = next_pow2_instance_padding(active_rows);
+        if !polys.iter().all(|poly| {
+            poly.evaluations().len() <= padded_active_rows
+                && poly.evaluations().len() == polys[0].evaluations().len()
+        }) {
+            return Err(format!(
+                "{name} interleaving inputs must have equal compact length within padded active rows"
+            ));
+        }
+
+        let padded_ops = group.len().next_power_of_two();
+        let op_bits = ceil_log2(padded_ops);
+        let limb_bits = ceil_log2(num_limbs);
+        let chunk_num_vars = op_bits + active_row_vars.saturating_sub(limb_bits);
+        let compact_rows = polys[0].evaluations().len();
+        let per_limb_rows = (padded_active_rows / num_limbs).max(1);
+        let input_ptrs_host: Vec<*const c_void> = polys
+            .iter()
+            .map(|poly| poly.evaluations().device_ptr())
+            .collect();
+        let input_lens_host: Vec<u32> = polys
+            .iter()
+            .map(|poly| poly.evaluations().len() as u32)
+            .collect();
+        let input_ptrs = cuda_hal
+            .alloc_ptrs_from_host(&input_ptrs_host, stream.as_ref())
+            .map_err(|e| format!("Failed to allocate {name} virtual input ptrs: {e:?}"))?;
+        let input_lens = cuda_hal
+            .alloc_u32_from_host(&input_lens_host, stream.as_ref())
+            .map_err(|e| format!("Failed to allocate {name} virtual input lens: {e:?}"))?;
+
+        (0..num_limbs)
+            .map(|limb_idx| {
+                let row_offset = per_limb_rows * limb_idx;
+                let mut valid_rows = active_rows
+                    .saturating_sub(row_offset)
+                    .min(compact_rows.saturating_sub(row_offset))
+                    .min(per_limb_rows);
+                let mut real_ops = group.len();
+                let mut leaf_padded_ops = padded_ops;
+                if valid_rows == 0 {
+                    valid_rows = 1;
+                    real_ops = 0;
+                    leaf_padded_ops = 1;
+                }
+                Ok(ceno_gpu::GpuVirtualInterleavedExt {
+                    input_ptrs: input_ptrs.clone(),
+                    input_lens: input_lens.clone(),
+                    real_ops: real_ops as u32,
+                    padded_ops: leaf_padded_ops as u32,
+                    row_offset: row_offset as u32,
+                    valid_rows: valid_rows as u32,
+                    compact_rows: compact_rows as u32,
+                    num_vars: chunk_num_vars,
+                    default: ext_elem_bytes(default),
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()
+    };
+
+    // prod: group all read specs into one interleaved tower and all write specs into one.
+    let mut prod_last_layers = Vec::new();
+    if !r_set_wit.is_empty() {
+        prod_last_layers.push(interleave_group_to_chunks(
+            r_set_wit,
+            NUM_FANIN,
+            BB31Ext::ONE,
+            "read",
+        )?);
+    }
+    if !w_set_wit.is_empty() {
+        prod_last_layers.push(interleave_group_to_chunks(
+            w_set_wit,
+            NUM_FANIN,
+            BB31Ext::ONE,
+            "write",
+        )?);
+    }
     if !prod_last_layers.is_empty() {
         let first_layer = &prod_last_layers[0];
         assert_eq!(first_layer.len(), 2, "prod last_layer must have 2 MLEs");
     }
 
-    // logup: split last layer once, then build compact tower layers.
-    let lk_numerator_last_layer = lk_n_wit
-        .iter()
-        .map(|wit| match wit.inner() {
-            gkr_iop::gpu::GpuFieldType::Ext(poly) => cuda_hal
-                .tower
-                .masked_mle_view_chunks(
-                    &*cuda_hal,
-                    poly,
-                    NUM_FANIN_LOGUP,
-                    chip_record_alpha,
-                    stream.as_ref(),
-                )
-                .map_err(|e| format!("Failed to split compact logup numerator: {e}")),
-            _ => Err("tower witness expects extension-field logup numerator MLEs".to_string()),
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let lk_denominator_last_layer = lk_d_wit
-        .iter()
-        .map(|wit| match wit.inner() {
-            gkr_iop::gpu::GpuFieldType::Ext(poly) => cuda_hal
-                .tower
-                .masked_mle_view_chunks(
-                    &*cuda_hal,
-                    poly,
-                    NUM_FANIN_LOGUP,
-                    chip_record_alpha,
-                    stream.as_ref(),
-                )
-                .map_err(|e| format!("Failed to split compact logup denominator: {e}")),
-            _ => Err("tower witness expects extension-field logup denominator MLEs".to_string()),
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    let logup_last_layers = if !lk_numerator_last_layer.is_empty() {
-        // Case when we have both numerator and denominator
-        // Combine [p1, p2] from numerator and [q1, q2] from denominator
-        lk_numerator_last_layer
-            .into_iter()
-            .zip(lk_denominator_last_layer)
-            .map(|(lk_n_chunks, lk_d_chunks)| {
-                let mut last_layer = lk_n_chunks;
-                last_layer.extend(lk_d_chunks);
-                Ok(last_layer)
-            })
-            .collect::<Result<Vec<_>, String>>()?
-    } else if lk_denominator_last_layer.is_empty() {
-        vec![]
+    // logup: group all lookup numerator specs and denominator specs into one interleaved tower.
+    let lk_numerator_last_layer = if !lk_n_wit.is_empty() {
+        Some(interleave_group_to_chunks(
+            lk_n_wit,
+            NUM_FANIN_LOGUP,
+            chip_record_alpha,
+            "lookup numerator",
+        )?)
     } else {
-        // Case when numerator is empty: share one scalar compact polynomial.
-        // Its tail default is also ONE, so all logical numerator entries read as ONE
-        // without materializing per-chunk denominator-sized buffers.
-        let nv = lk_denominator_last_layer[0][0].num_vars();
-        let ones_poly = GpuPolynomialExt::new_with_scalar_len(
-            &cuda_hal.inner,
-            nv,
-            1,
-            BB31Ext::ONE,
-            stream.as_ref(),
-        )
-        .map_err(|e| format!("Failed to create compact shared ones numerator: {e:?}"))?;
-        let ones_poly: GpuPolynomialExt<'static> = unsafe { std::mem::transmute(ones_poly) };
-        let one_len_bytes = ones_poly.buf.len() * std::mem::size_of::<BB31Ext>();
-
-        lk_denominator_last_layer
-            .into_iter()
-            .map(|lk_d_chunks| {
-                let p1_gpu = GpuPolynomialExt::new_with_tail_default(
-                    ones_poly.buf.owned_subrange(0..one_len_bytes),
-                    nv,
-                    BB31Ext::ONE,
-                );
-                let p2_gpu = GpuPolynomialExt::new_with_tail_default(
-                    ones_poly.buf.owned_subrange(0..one_len_bytes),
-                    nv,
-                    BB31Ext::ONE,
-                );
-                let mut last_layer = vec![p1_gpu, p2_gpu];
-                last_layer.extend(lk_d_chunks);
-                Ok(last_layer)
-            })
-            .collect::<Result<Vec<_>, String>>()?
+        None
+    };
+    let lk_denominator_last_layer = if !lk_d_wit.is_empty() {
+        Some(interleave_group_to_chunks(
+            lk_d_wit,
+            NUM_FANIN_LOGUP,
+            chip_record_alpha,
+            "lookup denominator",
+        )?)
+    } else {
+        None
+    };
+    let logup_last_layers = match (lk_numerator_last_layer, lk_denominator_last_layer) {
+        (Some(mut lk_n_chunks), Some(lk_d_chunks)) => {
+            lk_n_chunks.extend(lk_d_chunks);
+            vec![lk_n_chunks]
+        }
+        (None, None) => vec![],
+        (None, Some(lk_d_chunks)) => {
+            // Default-only virtual numerator; no dense scalar buffer is needed.
+            let nv = lk_d_chunks[0].num_vars;
+            let default_numerator = ceno_gpu::GpuVirtualInterleavedExt {
+                input_ptrs: lk_d_chunks[0].input_ptrs.clone(),
+                input_lens: lk_d_chunks[0].input_lens.clone(),
+                real_ops: 0,
+                padded_ops: 1,
+                row_offset: 0,
+                valid_rows: 1,
+                compact_rows: 1,
+                num_vars: nv,
+                default: ext_elem_bytes(BB31Ext::ONE),
+            };
+            let mut last_layer = vec![default_numerator.clone(), default_numerator];
+            last_layer.extend(lk_d_chunks);
+            vec![last_layer]
+        }
+        (Some(_), None) => unreachable!("lookup numerator without denominator"),
     };
     if !logup_last_layers.is_empty() {
         let first_layer = &logup_last_layers[0];
         assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
     }
 
-    // Build product GpuProverSpecs
     let mut prod_gpu_specs = Vec::new();
-    if !prod_last_layers.is_empty() {
-        let first_layer = &prod_last_layers[0];
-        assert_eq!(first_layer.len(), 2, "prod last_layer must have 2 MLEs");
-        let num_vars = first_layer[0].num_vars();
-        let num_towers = prod_last_layers.len();
-
-        let span_prod = entered_span!(
-            "build_prod_tower",
-            prod_layers = prod_last_layers.len(),
-            profiling_3 = true
-        );
-        let last_layers_refs: Vec<&[GpuPolynomialExt<'_>]> =
-            prod_last_layers.iter().map(|v| v.as_slice()).collect();
+    for prod_last_layer in &prod_last_layers {
+        assert_eq!(prod_last_layer.len(), 2, "prod last_layer must have 2 MLEs");
+        let num_vars = prod_last_layer[0].num_vars;
+        let span_prod = entered_span!("build_prod_tower", prod_layers = 1usize, profiling_3 = true);
+        let last_layers_refs = [prod_last_layer.as_slice()];
         let gpu_specs = {
-            cuda_hal.tower.build_prod_tower_from_gpu_polys_batch(
+            cuda_hal.tower.build_prod_tower_from_virtual_ext_batch(
                 cuda_hal,
                 &last_layers_refs,
                 num_vars,
-                num_towers,
+                1,
                 stream.as_ref(),
             )
         }
-        .map_err(|e| format!("build_prod_tower_from_gpu_polys_batch failed: {:?}", e))?;
-        let gpu_specs = unsafe {
-            std::mem::transmute::<
-                Vec<ceno_gpu::GpuProverSpec<'_>>,
-                Vec<ceno_gpu::GpuProverSpec<'static>>,
-            >(gpu_specs)
-        };
+        .map_err(|e| format!("build_prod_tower_from_virtual_ext_batch failed: {:?}", e))?;
         prod_gpu_specs.extend(gpu_specs);
         exit_span!(span_prod);
     }
@@ -2454,7 +2372,7 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
     if !logup_last_layers.is_empty() {
         let first_layer = &logup_last_layers[0];
         assert_eq!(first_layer.len(), 4, "logup last_layer must have 4 MLEs");
-        let num_vars = first_layer[0].num_vars();
+        let num_vars = first_layer[0].num_vars;
         let num_towers = logup_last_layers.len();
 
         let span_logup = entered_span!(
@@ -2462,24 +2380,18 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
             logup_layers = logup_last_layers.len(),
             profiling_3 = true
         );
-        let last_layers_refs: Vec<&[GpuPolynomialExt<'_>]> =
+        let last_layers_refs: Vec<&[ceno_gpu::GpuVirtualInterleavedExt<'static>]> =
             logup_last_layers.iter().map(|v| v.as_slice()).collect();
         let gpu_specs = cuda_hal
             .tower
-            .build_logup_tower_from_gpu_polys_batch(
+            .build_logup_tower_from_virtual_ext_batch(
                 cuda_hal,
                 &last_layers_refs,
                 num_vars,
                 num_towers,
                 stream.as_ref(),
             )
-            .map_err(|e| format!("build_logup_tower_from_gpu_polys_batch failed: {:?}", e))?;
-        let gpu_specs = unsafe {
-            std::mem::transmute::<
-                Vec<ceno_gpu::GpuProverSpec<'_>>,
-                Vec<ceno_gpu::GpuProverSpec<'static>>,
-            >(gpu_specs)
-        };
+            .map_err(|e| format!("build_logup_tower_from_virtual_ext_batch failed: {:?}", e))?;
         logup_gpu_specs.extend(gpu_specs);
         exit_span!(span_logup);
     }
@@ -2501,6 +2413,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<GpuBacke
         _composed_cs: &ComposedConstrainSystem<E>,
         _input: &ProofInput<'a, GpuBackend<E, PCS>>,
         _records: &'c [ArcMultilinearExtensionGpu<'b, E>],
+        _challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
         Vec<TowerProverSpec<'c, GpuBackend<E, PCS>>>,
@@ -2645,6 +2558,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         if jobs.is_empty() {
             return Ok((
                 MainConstraintProof {
+                    claimed_sum: E::ZERO,
                     proof: gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof {
                         proof: IOPProof { proofs: vec![] },
                         evals: vec![],
@@ -2720,6 +2634,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
             let mut out_evals =
                 vec![PointAndEval::new(job.rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
+            for (out_eval, eval) in out_evals.iter_mut().zip(job.main_out_evals.iter()) {
+                out_eval.eval = *eval;
+            }
 
             if let Some(rotation) = job.rotation.as_ref() {
                 let Some([left_group_idx, right_group_idx, point_group_idx]) =
@@ -3063,6 +2980,34 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 challenges_gpu.iter().map(|c| c.elements).collect(),
             )
         };
+        let mut final_claim = E::ZERO;
+        for chip in &chip_data {
+            let layer_evals = &global_evals[chip.mle_start..chip.mle_start + chip.num_mles];
+            let main_sumcheck_challenges = chain!(
+                jobs[0].challenges.iter().copied(),
+                alpha_pows[chip.alpha_start..chip.alpha_start + chip.layer.exprs.len()]
+                    .iter()
+                    .copied()
+            )
+            .collect_vec();
+            let pi = chip
+                .pi
+                .iter()
+                .map(|value| value.map_either(E::from, |value| value).into_inner())
+                .collect_vec();
+            final_claim += eval_batched_main_frontload_terms(
+                layer_evals,
+                &pi,
+                &main_sumcheck_challenges,
+                &global_rt,
+                chip.num_var_with_rotation,
+                chip.layer
+                    .main_sumcheck_expression_monomial_terms
+                    .as_ref()
+                    .unwrap(),
+            );
+        }
+        let claimed_sum = recover_sumcheck_claim_from_final(final_claim, &proof, &global_rt);
 
         transcript.append_field_element_exts(&global_evals);
 
@@ -3085,6 +3030,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         Ok((
             MainConstraintProof {
+                claimed_sum,
                 proof: gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof {
                     proof,
                     evals: global_evals,
@@ -3100,6 +3046,28 @@ fn frontload_input_opening_point<E: ExtensionField>(
     num_var_with_rotation: usize,
 ) -> Point<E> {
     global_rt[..num_var_with_rotation].to_vec()
+}
+
+fn recover_sumcheck_claim_from_final<E: ExtensionField>(
+    final_claim: E,
+    proof: &IOPProof<E>,
+    challenges: &[E],
+) -> E {
+    proof
+        .proofs
+        .iter()
+        .zip(challenges)
+        .rev()
+        .fold(final_claim, |expected, (message, challenge)| {
+            let hidden_weight = extrapolate_uni_poly(
+                E::ONE,
+                &vec![E::ZERO; message.evaluations.len()],
+                *challenge,
+            );
+            let without_claim =
+                extrapolate_uni_poly(-message.evaluations[0], &message.evaluations, *challenge);
+            (expected - without_claim) * hidden_weight.inverse()
+        })
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
