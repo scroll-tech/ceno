@@ -70,11 +70,9 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
 
     let mut x = [0u32; 7];
     let mut y = [0u32; 7];
-    let mut slope = [0u32; 7];
     for i in 0..7 {
         x[i] = config.x[i].id as u32;
         y[i] = config.y[i].id as u32;
-        slope[i] = config.slope[i].id as u32;
     }
 
     // Poseidon2 columns: p3_cols are contiguous, followed by post_linear_layer_cols
@@ -114,7 +112,7 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
         is_global_write,
         x,
         y,
-        slope,
+        slope: [0; 7],
         poseidon2_base_col,
         num_poseidon2_cols,
         num_p3_cols,
@@ -126,22 +124,6 @@ pub fn extract_shard_ram_ec_tree_column_map<E: ExtensionField>(
     config: &ShardRamEcTreeConfig<E>,
     num_witin: usize,
 ) -> ShardRamColumnMap {
-    let addr = config.addr.id as u32;
-    let is_ram_register = config.is_ram_register.id as u32;
-
-    let value_limbs = config
-        .value
-        .wits_in()
-        .expect("value should have WitIn limbs");
-    assert_eq!(value_limbs.len(), 2, "Expected 2 value limbs");
-    let value = [value_limbs[0].id as u32, value_limbs[1].id as u32];
-
-    let shard = config.shard.id as u32;
-    let global_clk = config.global_clk.id as u32;
-    let local_clk = config.local_clk.id as u32;
-    let nonce = config.nonce.id as u32;
-    let is_global_write = config.is_global_write.id as u32;
-
     let mut x = [0u32; 7];
     let mut y = [0u32; 7];
     let mut slope = [0u32; 7];
@@ -152,14 +134,14 @@ pub fn extract_shard_ram_ec_tree_column_map<E: ExtensionField>(
     }
 
     ShardRamColumnMap {
-        addr,
-        is_ram_register,
-        value,
-        shard,
-        global_clk,
-        local_clk,
-        nonce,
-        is_global_write,
+        addr: 0,
+        is_ram_register: 0,
+        value: [0; 2],
+        shard: 0,
+        global_clk: 0,
+        local_clk: 0,
+        nonce: 0,
+        is_global_write: 0,
         x,
         y,
         slope,

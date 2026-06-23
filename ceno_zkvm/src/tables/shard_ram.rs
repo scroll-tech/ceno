@@ -43,30 +43,12 @@ use crate::{instructions::riscv::constants::UInt, scheme::constants::SEPTIC_EXTE
 
 pub(crate) const Y6_LO_TOP_BYTE_LT_BOUND: u64 = 60;
 
-fn shard_ram_ec_point_record<E: ExtensionField>(
-    is_global_write: Expression<E>,
-    ram_type: Expression<E>,
-    addr: Expression<E>,
-    value: impl IntoIterator<Item = Expression<E>>,
-    shard: Expression<E>,
-    global_clk: Expression<E>,
-    local_clk: Expression<E>,
-    nonce: Expression<E>,
-    x: &[WitIn],
-    y: &[WitIn],
-) -> Vec<Expression<E>> {
-    [
-        CustomRWTag::ShardRamEcPoint.expr::<E>(),
-        is_global_write,
-        ram_type,
-        addr,
-    ]
-    .into_iter()
-    .chain(value)
-    .chain([shard, global_clk, local_clk, nonce])
-    .chain(x.iter().map(|w| w.expr()))
-    .chain(y.iter().map(|w| w.expr()))
-    .collect()
+fn shard_ram_ec_point_record<E: ExtensionField>(x: &[WitIn], y: &[WitIn]) -> Vec<Expression<E>> {
+    [CustomRWTag::ShardRamEcPoint.expr::<E>()]
+        .into_iter()
+        .chain(x.iter().map(|w| w.expr()))
+        .chain(y.iter().map(|w| w.expr()))
+        .collect()
 }
 
 /// A record for a read/write into the shard RAM
@@ -213,7 +195,6 @@ pub struct ShardRamConfig<E: ExtensionField> {
     pub(crate) is_global_write: WitIn,
     pub(crate) x: Vec<WitIn>,
     pub(crate) y: Vec<WitIn>,
-    pub(crate) slope: Vec<WitIn>,
     // Byte limbs of `y6_lo`, the helper that binds `y[SEPTIC_EXTENSION_DEGREE - 1]`
     // to `is_global_write` in `configure`.
     pub(crate) y6_lo_bytes: [WitIn; 4],
@@ -228,9 +209,6 @@ impl<E: ExtensionField> ShardRamConfig<E> {
             .collect();
         let y: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
             .map(|i| cb.create_witin(|| format!("y{}", i)))
-            .collect();
-        let slope: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
-            .map(|i| cb.create_witin(|| format!("slope{}", i)))
             .collect();
         let addr = cb.create_witin(|| "addr");
         let is_ram_register = cb.create_witin(|| "is_ram_register");
@@ -292,18 +270,7 @@ impl<E: ExtensionField> ShardRamConfig<E> {
             cb.rlc_chip_record(record),
         )?;
 
-        let ec_point_record = shard_ram_ec_point_record(
-            is_global_write.expr(),
-            ram_type,
-            addr.expr(),
-            value.memory_expr(),
-            shard.expr(),
-            global_clk.expr(),
-            local_clk.expr(),
-            nonce.expr(),
-            &x,
-            &y,
-        );
+        let ec_point_record = shard_ram_ec_point_record(&x, &y);
         cb.read_record(
             || "shard_ram_ec_point_in",
             RAMType::Custom,
@@ -367,7 +334,6 @@ impl<E: ExtensionField> ShardRamConfig<E> {
         Ok(ShardRamConfig {
             x,
             y,
-            slope,
             addr,
             is_ram_register,
             value,
@@ -383,14 +349,6 @@ impl<E: ExtensionField> ShardRamConfig<E> {
 }
 
 pub struct ShardRamEcTreeConfig<E: ExtensionField> {
-    pub(crate) addr: WitIn,
-    pub(crate) is_ram_register: WitIn,
-    pub(crate) value: UInt<E>,
-    pub(crate) shard: WitIn,
-    pub(crate) global_clk: WitIn,
-    pub(crate) local_clk: WitIn,
-    pub(crate) nonce: WitIn,
-    pub(crate) is_global_write: WitIn,
     pub(crate) x: Vec<WitIn>,
     pub(crate) y: Vec<WitIn>,
     pub(crate) slope: Vec<WitIn>,
@@ -399,14 +357,6 @@ pub struct ShardRamEcTreeConfig<E: ExtensionField> {
 
 impl<E: ExtensionField> ShardRamEcTreeConfig<E> {
     pub fn configure(cb: &mut CircuitBuilder<E>) -> Result<Self, CircuitBuilderError> {
-        let addr = cb.create_witin(|| "addr");
-        let is_ram_register = cb.create_witin(|| "is_ram_register");
-        let value = UInt::new_unchecked(|| "value", cb)?;
-        let shard = cb.create_witin(|| "shard");
-        let global_clk = cb.create_witin(|| "global_clk");
-        let local_clk = cb.create_witin(|| "local_clk");
-        let nonce = cb.create_witin(|| "nonce");
-        let is_global_write = cb.create_witin(|| "is_global_write");
         let x: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
             .map(|i| cb.create_witin(|| format!("x{i}")))
             .collect();
@@ -417,22 +367,7 @@ impl<E: ExtensionField> ShardRamEcTreeConfig<E> {
             .map(|i| cb.create_witin(|| format!("slope{i}")))
             .collect();
 
-        let is_ram_reg: Expression<E> = is_ram_register.expr();
-        let reg: Expression<E> = RAMType::Register.into();
-        let mem: Expression<E> = RAMType::Memory.into();
-        let ram_type = is_ram_reg.clone() * reg + (1 - is_ram_reg) * mem;
-        let ec_point_record = shard_ram_ec_point_record(
-            is_global_write.expr(),
-            ram_type,
-            addr.expr(),
-            value.memory_expr(),
-            shard.expr(),
-            global_clk.expr(),
-            local_clk.expr(),
-            nonce.expr(),
-            &x,
-            &y,
-        );
+        let ec_point_record = shard_ram_ec_point_record(&x, &y);
         cb.read_record(
             || "shard_ram_ec_point_in",
             RAMType::Custom,
@@ -453,14 +388,6 @@ impl<E: ExtensionField> ShardRamEcTreeConfig<E> {
         );
 
         Ok(Self {
-            addr,
-            is_ram_register,
-            value,
-            shard,
-            global_clk,
-            local_clk,
-            nonce,
-            is_global_write,
             x,
             y,
             slope,
@@ -573,10 +500,10 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
         input[2 + k + 1] = E::BaseField::from_canonical_u64(record.global_clk);
         input[2 + k + 2] = E::BaseField::from_canonical_u32(*nonce);
 
-        config
-            .perm_config
-            // TODO: remove hardcoded constant 28
-            .assign_instance(&mut instance[28 + UINT_LIMBS..], input);
+        config.perm_config.assign_instance(
+            &mut instance[config.perm_config.p3_cols[0].id as usize..],
+            input,
+        );
 
         Ok(())
     }
@@ -811,25 +738,6 @@ impl<E: ExtensionField> ShardRamEcTreeCircuit<E> {
         instance: &mut [E::BaseField],
         input: &ShardRamInput<E>,
     ) {
-        let record = &input.record;
-        let is_ram_register = match record.ram_type {
-            RAMType::Register => 1,
-            RAMType::Memory => 0,
-            _ => unreachable!(),
-        };
-        set_val!(instance, config.addr, record.addr as u64);
-        set_val!(instance, config.is_ram_register, is_ram_register as u64);
-        let value = Value::new_unchecked(record.value);
-        config.value.assign_limbs(instance, value.as_u16_limbs());
-        set_val!(instance, config.shard, record.shard);
-        set_val!(instance, config.global_clk, record.global_clk);
-        set_val!(instance, config.local_clk, record.local_clk);
-        set_val!(instance, config.nonce, input.ec_point.nonce as u64);
-        set_val!(
-            instance,
-            config.is_global_write,
-            record.is_to_write_set as u64
-        );
         config
             .x
             .iter()
@@ -1259,6 +1167,24 @@ mod tests {
         }
     }
 
+    fn assert_record_rows_match(
+        left: &Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
+        left_rows: std::ops::Range<usize>,
+        right: &Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>,
+        right_rows: std::ops::Range<usize>,
+        label: &str,
+    ) {
+        assert_eq!(left_rows.len(), right_rows.len(), "{label} row count");
+        let left_evals = left.get_ext_field_vec();
+        let right_evals = right.get_ext_field_vec();
+        for (left_row, right_row) in left_rows.zip(right_rows) {
+            assert_eq!(
+                left_evals[left_row], right_evals[right_row],
+                "{label}: left row {left_row}, right row {right_row}"
+            );
+        }
+    }
+
     #[test]
     fn test_shard_ram_split_selectors_and_tower_padding() {
         let read_count = 2;
@@ -1405,7 +1331,7 @@ mod tests {
             build_main_witness::<E, Pcs, CpuBackend<E, Pcs>, CpuProver<CpuBackend<E, Pcs>>>(
                 &ec_tree_composed,
                 &ec_tree_proof_input,
-                &[E::ONE, E::from_canonical_u32(11)],
+                &[E::ONE, E::from_canonical_u32(7)],
                 WitnessBuildStage::Tower,
             );
         let ec_tree_r_len = ec_tree_composed.zkvm_v1_css.r_expressions.len()
@@ -1421,6 +1347,25 @@ mod tests {
             &ec_tree_records,
             ec_tree_r_len..ec_tree_r_len + ec_tree_w_len,
             (0..write_count).chain(write_count + read_count..ec_tree_witness[0].height()),
+        );
+
+        let leaf_custom_read = &leaf_records[leaf_r_len - 1];
+        let leaf_custom_write = &leaf_records[leaf_r_len + leaf_w_len - 1];
+        let ec_tree_custom_read = &ec_tree_records[ec_tree_r_len - 1];
+        let ec_tree_custom_write = &ec_tree_records[ec_tree_r_len + ec_tree_w_len - 1];
+        assert_record_rows_match(
+            leaf_custom_read,
+            0..read_count,
+            ec_tree_custom_write,
+            write_count..write_count + read_count,
+            "leaf read vs ec-tree write",
+        );
+        assert_record_rows_match(
+            leaf_custom_write,
+            read_count..read_count + write_count,
+            ec_tree_custom_read,
+            0..write_count,
+            "leaf write vs ec-tree read",
         );
     }
 
