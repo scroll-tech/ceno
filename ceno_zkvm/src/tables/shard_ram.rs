@@ -8,7 +8,7 @@ use crate::{
     gadgets::Poseidon2Config,
     instructions::riscv::constants::UINT_LIMBS,
     scheme::septic_curve::{SepticExtension, SepticPoint},
-    structs::{ProgramParams, RAMType},
+    structs::{CustomRWTag, ProgramParams, RAMType},
     tables::{RMMCollections, TableCircuit},
     witness::LkMultiplicity,
 };
@@ -30,8 +30,8 @@ use p3::{
 };
 use rayon::{
     iter::{
-        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefMutIterator, ParallelExtend,
-        ParallelIterator,
+        IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
+        IntoParallelRefMutIterator, ParallelExtend, ParallelIterator,
     },
     prelude::ParallelSliceMut,
     slice::ParallelSlice,
@@ -42,6 +42,32 @@ use witness::{InstancePaddingStrategy, next_pow2_instance_padding, set_val};
 use crate::{instructions::riscv::constants::UInt, scheme::constants::SEPTIC_EXTENSION_DEGREE};
 
 pub(crate) const Y6_LO_TOP_BYTE_LT_BOUND: u64 = 60;
+
+fn shard_ram_ec_point_record<E: ExtensionField>(
+    is_global_write: Expression<E>,
+    ram_type: Expression<E>,
+    addr: Expression<E>,
+    value: impl IntoIterator<Item = Expression<E>>,
+    shard: Expression<E>,
+    global_clk: Expression<E>,
+    local_clk: Expression<E>,
+    nonce: Expression<E>,
+    x: &[WitIn],
+    y: &[WitIn],
+) -> Vec<Expression<E>> {
+    [
+        CustomRWTag::ShardRamEcPoint.expr::<E>(),
+        is_global_write,
+        ram_type,
+        addr,
+    ]
+    .into_iter()
+    .chain(value)
+    .chain([shard, global_clk, local_clk, nonce])
+    .chain(x.iter().map(|w| w.expr()))
+    .chain(y.iter().map(|w| w.expr()))
+    .collect()
+}
 
 /// A record for a read/write into the shard RAM
 #[derive(Debug, Clone)]
@@ -261,19 +287,33 @@ impl<E: ExtensionField> ShardRamConfig<E> {
         )?;
         cb.write_rlc_record(
             || "w_record",
-            ram_type,
+            ram_type.clone(),
             record.clone(),
             cb.rlc_chip_record(record),
         )?;
 
-        // enforces final_sum = \sum_i (x_i, y_i) using ecc quark protocol
-        let final_sum = cb.query_global_rw_sum()?;
-        cb.ec_sum(
-            x.iter().map(|xi| xi.expr()).collect::<Vec<_>>(),
-            y.iter().map(|yi| yi.expr()).collect::<Vec<_>>(),
-            slope.iter().map(|si| si.expr()).collect::<Vec<_>>(),
-            final_sum.into_iter().map(|x| x.expr()).collect::<Vec<_>>(),
+        let ec_point_record = shard_ram_ec_point_record(
+            is_global_write.expr(),
+            ram_type,
+            addr.expr(),
+            value.memory_expr(),
+            shard.expr(),
+            global_clk.expr(),
+            local_clk.expr(),
+            nonce.expr(),
+            &x,
+            &y,
         );
+        cb.read_record(
+            || "shard_ram_ec_point_in",
+            RAMType::Custom,
+            ec_point_record.clone(),
+        )?;
+        cb.write_record(
+            || "shard_ram_ec_point_out",
+            RAMType::Custom,
+            ec_point_record,
+        )?;
 
         // enforces x = poseidon2([addr, ram_type, value[0], value[1], shard, global_clk, nonce, 0, ..., 0])
         for (input_expr, hasher_input) in input.into_iter().zip_eq(perm_config.inputs().into_iter())
@@ -342,6 +382,93 @@ impl<E: ExtensionField> ShardRamConfig<E> {
     }
 }
 
+pub struct ShardRamEcTreeConfig<E: ExtensionField> {
+    pub(crate) addr: WitIn,
+    pub(crate) is_ram_register: WitIn,
+    pub(crate) value: UInt<E>,
+    pub(crate) shard: WitIn,
+    pub(crate) global_clk: WitIn,
+    pub(crate) local_clk: WitIn,
+    pub(crate) nonce: WitIn,
+    pub(crate) is_global_write: WitIn,
+    pub(crate) x: Vec<WitIn>,
+    pub(crate) y: Vec<WitIn>,
+    pub(crate) slope: Vec<WitIn>,
+    _marker: PhantomData<E>,
+}
+
+impl<E: ExtensionField> ShardRamEcTreeConfig<E> {
+    pub fn configure(cb: &mut CircuitBuilder<E>) -> Result<Self, CircuitBuilderError> {
+        let addr = cb.create_witin(|| "addr");
+        let is_ram_register = cb.create_witin(|| "is_ram_register");
+        let value = UInt::new_unchecked(|| "value", cb)?;
+        let shard = cb.create_witin(|| "shard");
+        let global_clk = cb.create_witin(|| "global_clk");
+        let local_clk = cb.create_witin(|| "local_clk");
+        let nonce = cb.create_witin(|| "nonce");
+        let is_global_write = cb.create_witin(|| "is_global_write");
+        let x: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
+            .map(|i| cb.create_witin(|| format!("x{i}")))
+            .collect();
+        let y: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
+            .map(|i| cb.create_witin(|| format!("y{i}")))
+            .collect();
+        let slope: Vec<WitIn> = (0..SEPTIC_EXTENSION_DEGREE)
+            .map(|i| cb.create_witin(|| format!("slope{i}")))
+            .collect();
+
+        let is_ram_reg: Expression<E> = is_ram_register.expr();
+        let reg: Expression<E> = RAMType::Register.into();
+        let mem: Expression<E> = RAMType::Memory.into();
+        let ram_type = is_ram_reg.clone() * reg + (1 - is_ram_reg) * mem;
+        let ec_point_record = shard_ram_ec_point_record(
+            is_global_write.expr(),
+            ram_type,
+            addr.expr(),
+            value.memory_expr(),
+            shard.expr(),
+            global_clk.expr(),
+            local_clk.expr(),
+            nonce.expr(),
+            &x,
+            &y,
+        );
+        cb.read_record(
+            || "shard_ram_ec_point_in",
+            RAMType::Custom,
+            ec_point_record.clone(),
+        )?;
+        cb.write_record(
+            || "shard_ram_ec_point_out",
+            RAMType::Custom,
+            ec_point_record,
+        )?;
+
+        let final_sum = cb.query_global_rw_sum()?;
+        cb.ec_sum(
+            x.iter().map(|xi| xi.expr()).collect::<Vec<_>>(),
+            y.iter().map(|yi| yi.expr()).collect::<Vec<_>>(),
+            slope.iter().map(|si| si.expr()).collect::<Vec<_>>(),
+            final_sum.into_iter().map(|x| x.expr()).collect::<Vec<_>>(),
+        );
+
+        Ok(Self {
+            addr,
+            is_ram_register,
+            value,
+            shard,
+            global_clk,
+            local_clk,
+            nonce,
+            is_global_write,
+            x,
+            y,
+            slope,
+            _marker: PhantomData,
+        })
+    }
+}
+
 /// This chip is used to manage read/write into a global set
 /// shared among multiple shards
 #[derive(Default)]
@@ -354,6 +481,11 @@ pub struct ShardRamInput<E: ExtensionField> {
     pub name: &'static str,
     pub record: ShardRamRecord,
     pub ec_point: ECPoint<E>,
+}
+
+#[derive(Default)]
+pub struct ShardRamEcTreeCircuit<E> {
+    _marker: PhantomData<E>,
 }
 
 /// Decode `y6_lo` (the byte-decomposed helper bound to `is_global_write` in
@@ -496,11 +628,6 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         let selector_r = cb.create_placeholder_structural_witin(|| "selector_r");
         let selector_w = cb.create_placeholder_structural_witin(|| "selector_w");
         let selector_zero = cb.create_placeholder_structural_witin(|| "selector_zero");
-        let selector_ecc_x = cb.create_placeholder_structural_witin(|| "selector_ecc_x");
-        let selector_ecc_y = cb.create_placeholder_structural_witin(|| "selector_ecc_y");
-        let selector_ecc_s = cb.create_placeholder_structural_witin(|| "selector_ecc_s");
-        let selector_ecc_x3 = cb.create_placeholder_structural_witin(|| "selector_ecc_x3");
-        let selector_ecc_y3 = cb.create_placeholder_structural_witin(|| "selector_ecc_y3");
 
         let config = Self::construct_circuit(cb, param)?;
 
@@ -522,14 +649,6 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         cb.cs.w_selector = Some(selector_w);
         cb.cs.zero_selector = Some(selector_zero.clone());
         cb.cs.lk_selector = Some(selector_zero);
-        cb.cs.ec_bridge_selectors = Some([
-            SelectorType::Whole(selector_ecc_x.expr()),
-            SelectorType::Whole(selector_ecc_y.expr()),
-            SelectorType::Whole(selector_ecc_s.expr()),
-            SelectorType::Whole(selector_ecc_x3.expr()),
-            SelectorType::Whole(selector_ecc_y3.expr()),
-        ]);
-
         // all shared the same selector
         let (out_evals, mut chip) = (
             [
@@ -575,7 +694,7 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         }
 
         #[cfg(feature = "gpu")]
-        {
+        if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
             if let Some(result) = Self::try_gpu_assign_instances(
                 config,
                 num_witin,
@@ -590,20 +709,13 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         // this is workaround, as call `construct_circuit` will not initialized selector
         // we can remove this one all opcode unittest migrate to call `build_gkr_iop_circuit`
 
-        // ShardRam expects exactly these structural selectors:
-        // r, w, zero, ecc_x, ecc_y, ecc_s, ecc_x3, ecc_y3.
         assert_eq!(
-            num_structural_witin, 8,
-            "ShardRam requires exactly 8 structural selectors (r,w,zero,ecc_x,ecc_y,ecc_s,ecc_x3,ecc_y3)"
+            num_structural_witin, 3,
+            "ShardRam leaf requires r, w, and zero structural selectors"
         );
         let selector_r_witin = WitIn { id: 0 };
         let selector_w_witin = WitIn { id: 1 };
         let selector_zero_witin = WitIn { id: 2 };
-        let selector_ecc_x_witin = WitIn { id: 3 };
-        let selector_ecc_y_witin = WitIn { id: 4 };
-        let selector_ecc_s_witin = WitIn { id: 5 };
-        let selector_ecc_x3_witin = WitIn { id: 6 };
-        let selector_ecc_y3_witin = WitIn { id: 7 };
 
         let nthreads = max_usable_threads();
 
@@ -626,10 +738,7 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
         .max(1);
 
         let n = next_pow2_instance_padding(steps.len());
-        // compute the input for the binary tree for ec point summation
-
-        // *2 because we need to store the internal nodes of binary tree for ec point summation
-        let num_rows_padded = 2 * n;
+        let num_rows_padded = n;
 
         let mut raw_witin = {
             let matrix_size = num_rows_padded * num_witin;
@@ -651,17 +760,6 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
             );
             RowMajorMatrix::new(value, num_structural_witin)
         };
-        // ECC bridge selectors are `Whole`, so keep them active on all rows.
-        raw_structual_witin
-            .values
-            .par_chunks_mut(num_structural_witin)
-            .for_each(|row| {
-                set_val!(row, selector_ecc_x_witin, E::BaseField::ONE);
-                set_val!(row, selector_ecc_y_witin, E::BaseField::ONE);
-                set_val!(row, selector_ecc_s_witin, E::BaseField::ONE);
-                set_val!(row, selector_ecc_x3_witin, E::BaseField::ONE);
-                set_val!(row, selector_ecc_y3_witin, E::BaseField::ONE);
-            });
         let raw_witin_iter = raw_witin.values[0..steps.len() * num_witin]
             .par_chunks_mut(num_instance_per_batch * num_witin);
         let raw_structual_witin_iter = raw_structual_witin.values
@@ -694,6 +792,224 @@ impl<E: ExtensionField> TableCircuit<E> for ShardRamCircuit<E> {
                     .collect::<Vec<_>>()
             })
             .collect::<Result<(), ZKVMError>>()?;
+
+        let raw_witin = witness::RowMajorMatrix::new_by_inner_matrix(
+            raw_witin,
+            InstancePaddingStrategy::Default,
+        );
+        let raw_structual_witin = witness::RowMajorMatrix::new_by_inner_matrix(
+            raw_structual_witin,
+            InstancePaddingStrategy::Default,
+        );
+        Ok([raw_witin, raw_structual_witin])
+    }
+}
+
+impl<E: ExtensionField> ShardRamEcTreeCircuit<E> {
+    fn assign_leaf_instance(
+        config: &ShardRamEcTreeConfig<E>,
+        instance: &mut [E::BaseField],
+        input: &ShardRamInput<E>,
+    ) {
+        let record = &input.record;
+        let is_ram_register = match record.ram_type {
+            RAMType::Register => 1,
+            RAMType::Memory => 0,
+            _ => unreachable!(),
+        };
+        set_val!(instance, config.addr, record.addr as u64);
+        set_val!(instance, config.is_ram_register, is_ram_register as u64);
+        let value = Value::new_unchecked(record.value);
+        config.value.assign_limbs(instance, value.as_u16_limbs());
+        set_val!(instance, config.shard, record.shard);
+        set_val!(instance, config.global_clk, record.global_clk);
+        set_val!(instance, config.local_clk, record.local_clk);
+        set_val!(instance, config.nonce, input.ec_point.nonce as u64);
+        set_val!(
+            instance,
+            config.is_global_write,
+            record.is_to_write_set as u64
+        );
+        config
+            .x
+            .iter()
+            .chain(config.y.iter())
+            .zip_eq(
+                input
+                    .ec_point
+                    .point
+                    .x
+                    .deref()
+                    .iter()
+                    .chain(input.ec_point.point.y.deref().iter()),
+            )
+            .for_each(|(witin, fe)| {
+                set_val!(instance, *witin, *fe);
+            });
+    }
+
+    pub fn extract_ec_sum(
+        config: &ShardRamEcTreeConfig<E>,
+        rmm: &witness::RowMajorMatrix<<E as ExtensionField>::BaseField>,
+    ) -> SepticPoint<<E as ExtensionField>::BaseField> {
+        assert!(rmm.height() >= 2);
+        let instance = &rmm[rmm.height() - 2];
+
+        let xy = config
+            .x
+            .iter()
+            .chain(config.y.iter())
+            .map(|witin| instance[witin.id as usize])
+            .collect_vec();
+
+        let x: SepticExtension<E::BaseField> = xy[0..SEPTIC_EXTENSION_DEGREE].into();
+        let y: SepticExtension<E::BaseField> = xy[SEPTIC_EXTENSION_DEGREE..].into();
+
+        SepticPoint::from_affine(x, y)
+    }
+}
+
+impl<E: ExtensionField> TableCircuit<E> for ShardRamEcTreeCircuit<E> {
+    type TableConfig = ShardRamEcTreeConfig<E>;
+    type FixedInput = ();
+    type WitnessInput<'a> = [ShardRamInput<E>];
+
+    fn name() -> String {
+        "ShardRamEcTreeCircuit".to_string()
+    }
+
+    fn construct_circuit(
+        cb: &mut CircuitBuilder<E>,
+        _param: &ProgramParams,
+    ) -> Result<Self::TableConfig, ZKVMError> {
+        Ok(ShardRamEcTreeConfig::configure(cb)?)
+    }
+
+    fn build_gkr_iop_circuit(
+        cb: &mut CircuitBuilder<E>,
+        param: &ProgramParams,
+    ) -> Result<(Self::TableConfig, Option<GKRCircuit<E>>), ZKVMError> {
+        let selector_r = cb.create_placeholder_structural_witin(|| "selector_r");
+        let selector_w = cb.create_placeholder_structural_witin(|| "selector_w");
+        let selector_ecc_x = cb.create_placeholder_structural_witin(|| "selector_ecc_x");
+        let selector_ecc_y = cb.create_placeholder_structural_witin(|| "selector_ecc_y");
+        let selector_ecc_s = cb.create_placeholder_structural_witin(|| "selector_ecc_s");
+        let selector_ecc_x3 = cb.create_placeholder_structural_witin(|| "selector_ecc_x3");
+        let selector_ecc_y3 = cb.create_placeholder_structural_witin(|| "selector_ecc_y3");
+
+        let config = Self::construct_circuit(cb, param)?;
+
+        let w_len = cb.cs.w_expressions.len();
+        let r_len = cb.cs.r_expressions.len();
+        let lk_len = cb.cs.lk_expressions.len();
+        let zero_len =
+            cb.cs.assert_zero_expressions.len() + cb.cs.assert_zero_sumcheck_expressions.len();
+
+        cb.cs.r_selector = Some(SelectorType::Prefix(selector_r.expr()));
+        cb.cs.w_selector = Some(SelectorType::Prefix(selector_w.expr()));
+        cb.cs.ec_bridge_selectors = Some([
+            SelectorType::Whole(selector_ecc_x.expr()),
+            SelectorType::Whole(selector_ecc_y.expr()),
+            SelectorType::Whole(selector_ecc_s.expr()),
+            SelectorType::Whole(selector_ecc_x3.expr()),
+            SelectorType::Whole(selector_ecc_y3.expr()),
+        ]);
+
+        let (out_evals, mut chip) = (
+            [
+                (0..r_len).collect_vec(),
+                (r_len..r_len + w_len).collect_vec(),
+                (r_len + w_len..r_len + w_len + lk_len).collect_vec(),
+                (0..zero_len).collect_vec(),
+            ],
+            Chip::new_from_cb(cb),
+        );
+
+        let layer = Layer::from_circuit_builder(cb, format!("{}_main", Self::name()), out_evals);
+        chip.add_layer(layer);
+
+        Ok((config, Some(chip.gkr_circuit())))
+    }
+
+    fn generate_fixed_traces(
+        _config: &Self::TableConfig,
+        _num_fixed: usize,
+        _input: &Self::FixedInput,
+    ) -> witness::RowMajorMatrix<<E as ExtensionField>::BaseField> {
+        unimplemented!()
+    }
+
+    fn assign_instances_with_lk_multiplicities(
+        config: &Self::TableConfig,
+        num_witin: usize,
+        num_structural_witin: usize,
+        _lk_multiplicity: &mut LkMultiplicity,
+        steps: &Self::WitnessInput<'_>,
+    ) -> Result<RMMCollections<E::BaseField>, ZKVMError> {
+        if steps.is_empty() {
+            return Ok([
+                witness::RowMajorMatrix::empty(),
+                witness::RowMajorMatrix::empty(),
+            ]);
+        }
+
+        assert_eq!(
+            num_structural_witin, 7,
+            "ShardRam EC tree requires r, w, and 5 EC bridge selectors"
+        );
+        let selector_r_witin = WitIn { id: 0 };
+        let selector_w_witin = WitIn { id: 1 };
+
+        let n = next_pow2_instance_padding(steps.len());
+        let num_rows_padded = 2 * n;
+
+        let mut raw_witin = {
+            let matrix_size = num_rows_padded * num_witin;
+            let mut value = Vec::with_capacity(matrix_size);
+            value.par_extend(
+                (0..matrix_size)
+                    .into_par_iter()
+                    .map(|_| E::BaseField::default()),
+            );
+            RowMajorMatrix::new(value, num_witin)
+        };
+        let mut raw_structual_witin = {
+            let matrix_size = num_rows_padded * num_structural_witin;
+            let mut value = Vec::with_capacity(matrix_size);
+            value.par_extend(
+                (0..matrix_size)
+                    .into_par_iter()
+                    .map(|_| E::BaseField::default()),
+            );
+            RowMajorMatrix::new(value, num_structural_witin)
+        };
+
+        raw_structual_witin
+            .values
+            .par_chunks_mut(num_structural_witin)
+            .for_each(|row| {
+                row[2..7].fill(E::BaseField::ONE);
+            });
+
+        let num_custom_reads = steps
+            .iter()
+            .take_while(|step| !step.record.is_to_write_set)
+            .count();
+        raw_structual_witin.values[0..steps.len() * num_structural_witin]
+            .par_chunks_mut(num_structural_witin)
+            .enumerate()
+            .for_each(|(row_idx, row)| {
+                if row_idx < num_custom_reads {
+                    set_val!(row, selector_r_witin, E::BaseField::ONE);
+                } else {
+                    set_val!(row, selector_w_witin, E::BaseField::ONE);
+                }
+            });
+
+        raw_witin.values[0..steps.len() * num_witin]
+            .par_chunks_mut(num_witin)
+            .zip_eq(steps.par_iter())
+            .for_each(|(instance, step)| Self::assign_leaf_instance(config, instance, step));
 
         // allocate num_rows_padded size, fill points on first half
         let mut cur_layer_points_buffer: Vec<_> = (0..num_rows_padded)
@@ -808,9 +1124,13 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
 mod tests {
     use either::Either;
     use ff_ext::{BabyBearExt4, FromUniformBytes, PoseidonField};
+    use gkr_iop::cpu::{CpuBackend, CpuProver};
     use itertools::Itertools;
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
-    use p3::babybear::BabyBear;
+    use p3::{
+        babybear::BabyBear,
+        field::{FieldAlgebra, PrimeField32},
+    };
     use rand::thread_rng;
     use std::sync::Arc;
     use tracing_forest::{ForestLayer, util::LevelFilter};
@@ -821,25 +1141,288 @@ mod tests {
     use crate::{
         circuit_builder::{CircuitBuilder, ConstraintSystem},
         scheme::{
-            PublicValues, constants::SEPTIC_EXTENSION_DEGREE, create_backend, create_prover,
-            hal::ProofInput, mock_prover::MockProver, prover::ZKVMProver,
+            PublicValues,
+            constants::SEPTIC_EXTENSION_DEGREE,
+            create_backend, create_prover,
+            hal::ProofInput,
+            mock_prover::MockProver,
+            prover::ZKVMProver,
             septic_curve::SepticPoint,
+            utils::{WitnessBuildStage, build_main_witness, first_layer_selector_contexts},
         },
         structs::{ComposedConstrainSystem, ProgramParams, RAMType, ZKVMProvingKey},
-        tables::{ShardRamCircuit, ShardRamInput, ShardRamRecord, TableCircuit},
+        tables::{
+            RMMCollections, ShardRamCircuit, ShardRamEcTreeCircuit, ShardRamInput, ShardRamRecord,
+            TableCircuit,
+        },
         witness::LkMultiplicity,
     };
     #[cfg(feature = "gpu")]
-    use gkr_iop::{
-        gpu::{MultilinearExtensionGpu, get_cuda_hal},
-        hal::MultilinearPolynomial,
-    };
-    use p3::field::PrimeField32;
+    use gkr_iop::gpu::{MultilinearExtensionGpu, get_cuda_hal};
 
     type E = BabyBearExt4;
     type F = BabyBear;
     type Perm = <F as PoseidonField>::P;
     type Pcs = BasefoldDefault<E>;
+
+    fn shard_ram_test_inputs(read_count: usize, write_count: usize) -> Vec<ShardRamInput<E>> {
+        let perm = <F as PoseidonField>::get_default_perm();
+        let reads = (0..read_count).map(|i| ShardRamRecord {
+            addr: (0x1000 + i * 4) as u32,
+            ram_type: RAMType::Memory,
+            value: (0x2000 + i) as u32,
+            shard: 1,
+            local_clk: i as u64 + 1,
+            global_clk: i as u64 + 10,
+            is_to_write_set: true,
+        });
+        let writes = (0..write_count).map(|i| ShardRamRecord {
+            addr: (0x2000 + i * 4) as u32,
+            ram_type: RAMType::Memory,
+            value: (0x3000 + i) as u32,
+            shard: 2,
+            local_clk: 0,
+            global_clk: i as u64 + 20,
+            is_to_write_set: false,
+        });
+
+        reads
+            .chain(writes)
+            .map(|record| {
+                let ec_point = record.to_ec_point::<E, Perm>(&perm);
+                ShardRamInput {
+                    name: "selector_test",
+                    record,
+                    ec_point,
+                }
+            })
+            .collect_vec()
+    }
+
+    fn assert_selector_column(
+        witness: &witness::RowMajorMatrix<F>,
+        col: usize,
+        ones: std::ops::Range<usize>,
+    ) {
+        for row in 0..witness.height() {
+            let expected = if ones.contains(&row) { F::ONE } else { F::ZERO };
+            assert_eq!(witness[row][col], expected, "selector col {col} row {row}");
+        }
+    }
+
+    fn assert_column_is_binary(witness: &witness::RowMajorMatrix<F>, col: usize) {
+        for row in 0..witness.height() {
+            let value = witness[row][col];
+            assert!(
+                value == F::ZERO || value == F::ONE,
+                "selector col {col} row {row} is not binary: {value}"
+            );
+        }
+    }
+
+    fn proof_input_for_witness<'a>(
+        cs: &ConstraintSystem<E>,
+        witness: &'a RMMCollections<F>,
+        num_instances: [usize; 2],
+        has_ecc_ops: bool,
+        public_value: &PublicValues,
+    ) -> ProofInput<'a, CpuBackend<E, Pcs>> {
+        let witness_mles = witness[0].to_mles().into_iter().map(Arc::new).collect_vec();
+        let structural_mles = witness[1].to_mles().into_iter().map(Arc::new).collect_vec();
+        let pub_io_evals = cs
+            .instance
+            .iter()
+            .map(|instance| Either::Right(E::from(public_value.query_by_index::<E>(instance.0))))
+            .collect_vec();
+
+        ProofInput {
+            witness: witness_mles,
+            structural_witness: structural_mles,
+            fixed: vec![],
+            pi: pub_io_evals,
+            num_instances,
+            has_ecc_ops,
+        }
+    }
+
+    fn assert_inactive_rows_are_one(
+        records: &[Arc<multilinear_extensions::mle::MultilinearExtension<'_, E>>],
+        range: std::ops::Range<usize>,
+        inactive_rows: impl IntoIterator<Item = usize>,
+    ) {
+        let inactive_rows = inactive_rows.into_iter().collect_vec();
+        for record_idx in range {
+            let evals = records[record_idx].get_ext_field_vec();
+            for &row in &inactive_rows {
+                assert_eq!(evals[row], E::ONE, "record {record_idx} row {row}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_shard_ram_split_selectors_and_tower_padding() {
+        let read_count = 2;
+        let write_count = 3;
+        let input = shard_ram_test_inputs(read_count, write_count);
+        let ec_tree_input = input
+            .iter()
+            .filter(|access| !access.record.is_to_write_set)
+            .chain(input.iter().filter(|access| access.record.is_to_write_set))
+            .cloned()
+            .collect_vec();
+
+        let global_ec_sum: SepticPoint<F> = input
+            .iter()
+            .map(|record| record.ec_point.point.clone())
+            .sum();
+        let mut shard_rw_sum = [0u32; SEPTIC_EXTENSION_DEGREE * 2];
+        for (i, fe) in global_ec_sum
+            .x
+            .iter()
+            .chain(global_ec_sum.y.iter())
+            .enumerate()
+        {
+            shard_rw_sum[i] = fe.as_canonical_u32();
+        }
+        let public_value = PublicValues::new(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, [0; 8], shard_rw_sum);
+
+        let mut leaf_cs = ConstraintSystem::new(|| "shard ram selector leaf");
+        let mut leaf_cb = CircuitBuilder::new(&mut leaf_cs);
+        let (leaf_config, leaf_gkr_circuit) =
+            ShardRamCircuit::<E>::build_gkr_iop_circuit(&mut leaf_cb, &ProgramParams::default())
+                .unwrap();
+        let leaf_witness = ShardRamCircuit::<E>::assign_instances_with_lk_multiplicities(
+            &leaf_config,
+            leaf_cs.num_witin as usize,
+            leaf_cs.num_structural_witin as usize,
+            &mut LkMultiplicity::default(),
+            &input,
+        )
+        .unwrap();
+
+        assert_selector_column(&leaf_witness[1], 0, 0..read_count);
+        assert_selector_column(&leaf_witness[1], 1, read_count..read_count + write_count);
+        assert_selector_column(&leaf_witness[1], 2, 0..read_count + write_count);
+        for col in 0..leaf_witness[1].width() {
+            assert_column_is_binary(&leaf_witness[1], col);
+        }
+
+        let leaf_composed = ComposedConstrainSystem {
+            zkvm_v1_css: leaf_cs,
+            gkr_circuit: leaf_gkr_circuit,
+        };
+        let leaf_gkr = leaf_composed.gkr_circuit.as_ref().unwrap();
+        let leaf_selector_ctxs =
+            first_layer_selector_contexts(&leaf_composed, leaf_gkr, [read_count, write_count], 3);
+        assert_eq!(leaf_selector_ctxs[0].offset, 0);
+        assert_eq!(leaf_selector_ctxs[0].num_instances, read_count);
+        assert_eq!(leaf_selector_ctxs[1].offset, read_count);
+        assert_eq!(leaf_selector_ctxs[1].num_instances, write_count);
+
+        let leaf_proof_input = proof_input_for_witness(
+            &leaf_composed.zkvm_v1_css,
+            &leaf_witness,
+            [read_count, write_count],
+            false,
+            &public_value,
+        );
+        let leaf_records =
+            build_main_witness::<E, Pcs, CpuBackend<E, Pcs>, CpuProver<CpuBackend<E, Pcs>>>(
+                &leaf_composed,
+                &leaf_proof_input,
+                &[E::ONE, E::from_canonical_u32(7)],
+                WitnessBuildStage::Tower,
+            );
+        let leaf_r_len = leaf_composed.zkvm_v1_css.r_expressions.len()
+            + leaf_composed.zkvm_v1_css.r_table_expressions.len();
+        let leaf_w_len = leaf_composed.zkvm_v1_css.w_expressions.len()
+            + leaf_composed.zkvm_v1_css.w_table_expressions.len();
+        assert_inactive_rows_are_one(
+            &leaf_records,
+            0..leaf_r_len,
+            read_count..leaf_witness[0].height(),
+        );
+        assert_inactive_rows_are_one(
+            &leaf_records,
+            leaf_r_len..leaf_r_len + leaf_w_len,
+            (0..read_count).chain(read_count + write_count..leaf_witness[0].height()),
+        );
+
+        let mut ec_tree_cs = ConstraintSystem::new(|| "shard ram selector ec tree");
+        let mut ec_tree_cb = CircuitBuilder::new(&mut ec_tree_cs);
+        let (ec_tree_config, ec_tree_gkr_circuit) =
+            ShardRamEcTreeCircuit::<E>::build_gkr_iop_circuit(
+                &mut ec_tree_cb,
+                &ProgramParams::default(),
+            )
+            .unwrap();
+        let ec_tree_witness = ShardRamEcTreeCircuit::<E>::assign_instances_with_lk_multiplicities(
+            &ec_tree_config,
+            ec_tree_cs.num_witin as usize,
+            ec_tree_cs.num_structural_witin as usize,
+            &mut LkMultiplicity::default(),
+            &ec_tree_input,
+        )
+        .unwrap();
+
+        assert_selector_column(&ec_tree_witness[1], 0, 0..write_count);
+        assert_selector_column(
+            &ec_tree_witness[1],
+            1,
+            write_count..write_count + read_count,
+        );
+        for col in 0..ec_tree_witness[1].width() {
+            assert_column_is_binary(&ec_tree_witness[1], col);
+        }
+        for col in 2..ec_tree_witness[1].width() {
+            assert_selector_column(&ec_tree_witness[1], col, 0..ec_tree_witness[1].height());
+        }
+
+        let ec_tree_composed = ComposedConstrainSystem {
+            zkvm_v1_css: ec_tree_cs,
+            gkr_circuit: ec_tree_gkr_circuit,
+        };
+        let ec_tree_gkr = ec_tree_composed.gkr_circuit.as_ref().unwrap();
+        let ec_tree_selector_ctxs = first_layer_selector_contexts(
+            &ec_tree_composed,
+            ec_tree_gkr,
+            [write_count, read_count],
+            4,
+        );
+        assert_eq!(ec_tree_selector_ctxs[0].offset, 0);
+        assert_eq!(ec_tree_selector_ctxs[0].num_instances, write_count);
+        assert_eq!(ec_tree_selector_ctxs[1].offset, write_count);
+        assert_eq!(ec_tree_selector_ctxs[1].num_instances, read_count);
+
+        let ec_tree_proof_input = proof_input_for_witness(
+            &ec_tree_composed.zkvm_v1_css,
+            &ec_tree_witness,
+            [write_count, read_count],
+            true,
+            &public_value,
+        );
+        let ec_tree_records =
+            build_main_witness::<E, Pcs, CpuBackend<E, Pcs>, CpuProver<CpuBackend<E, Pcs>>>(
+                &ec_tree_composed,
+                &ec_tree_proof_input,
+                &[E::ONE, E::from_canonical_u32(11)],
+                WitnessBuildStage::Tower,
+            );
+        let ec_tree_r_len = ec_tree_composed.zkvm_v1_css.r_expressions.len()
+            + ec_tree_composed.zkvm_v1_css.r_table_expressions.len();
+        let ec_tree_w_len = ec_tree_composed.zkvm_v1_css.w_expressions.len()
+            + ec_tree_composed.zkvm_v1_css.w_table_expressions.len();
+        assert_inactive_rows_are_one(
+            &ec_tree_records,
+            0..ec_tree_r_len,
+            write_count..ec_tree_witness[0].height(),
+        );
+        assert_inactive_rows_are_one(
+            &ec_tree_records,
+            ec_tree_r_len..ec_tree_r_len + ec_tree_w_len,
+            (0..write_count).chain(write_count + read_count..ec_tree_witness[0].height()),
+        );
+    }
 
     #[test]
     fn test_shard_ram_circuit() {
@@ -940,10 +1523,39 @@ mod tests {
         )
         .unwrap();
 
-        // api extract ec sum from rmm witness
+        let mut ec_tree_cs = ConstraintSystem::new(|| "global ec tree chip test");
+        let mut ec_tree_cb = CircuitBuilder::new(&mut ec_tree_cs);
+        let (ec_tree_config, _ec_tree_gkr_circuit) = ShardRamEcTreeCircuit::build_gkr_iop_circuit(
+            &mut ec_tree_cb,
+            &ProgramParams::default(),
+        )
+        .unwrap();
+        let ec_tree_input = input
+            .iter()
+            .filter(|access| !access.record.is_to_write_set)
+            .chain(input.iter().filter(|access| access.record.is_to_write_set))
+            .cloned()
+            .collect_vec();
+        let ec_tree_witness = ShardRamEcTreeCircuit::assign_instances_with_lk_multiplicities(
+            &ec_tree_config,
+            ec_tree_cb.cs.num_witin as usize,
+            ec_tree_cb.cs.num_structural_witin as usize,
+            &mut LkMultiplicity::default(),
+            &ec_tree_input,
+        )
+        .unwrap();
+
+        // EC accumulation lives in the split EC tree chip.
         assert_eq!(
             global_ec_sum,
-            ShardRamCircuit::extract_ec_sum(&config, &witness[0])
+            ShardRamEcTreeCircuit::extract_ec_sum(&ec_tree_config, &ec_tree_witness[0])
+        );
+        MockProver::<E>::assert_satisfied_raw(
+            &ec_tree_cb,
+            ec_tree_witness.clone(),
+            &[],
+            Some([E::random(&mut thread_rng()), E::random(&mut thread_rng())]),
+            None,
         );
 
         let composed_cs = ComposedConstrainSystem {
@@ -1000,7 +1612,7 @@ mod tests {
             fixed: vec![],
             pi: pub_io_evals,
             num_instances: [n_global_writes as usize, n_global_reads as usize],
-            has_ecc_ops: true,
+            has_ecc_ops: false,
         };
         let mut rng = thread_rng();
         let challenges = [E::random(&mut rng), E::random(&mut rng)];

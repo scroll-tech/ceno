@@ -5,8 +5,8 @@ use crate::{
     instructions::Instruction,
     scheme::septic_curve::SepticPoint,
     tables::{
-        ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
-        TableCircuit,
+        ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamEcTreeCircuit,
+        ShardRamInput, ShardRamRecord, TableCircuit,
     },
     witness::LkMultiplicity,
 };
@@ -114,6 +114,7 @@ pub type RAMType = gkr_iop::RAMType;
 #[repr(u16)]
 pub enum CustomRWTag {
     KeccakState = 0,
+    ShardRamEcPoint = 1,
 }
 
 impl CustomRWTag {
@@ -572,6 +573,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
         ),
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
+        ec_tree_config: &<ShardRamEcTreeCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
         use tracing::info_span;
 
@@ -579,7 +581,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         // Only when GPU witgen is enabled (otherwise witgen must not touch GPU).
         #[cfg(feature = "gpu")]
         if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-            let gpu_result = self.try_assign_shared_circuit_gpu(cs, shard_ctx, final_mem, config);
+            let gpu_result = self.try_assign_shared_circuit_gpu(
+                cs,
+                shard_ctx,
+                final_mem,
+                config,
+                ec_tree_config,
+            );
             match gpu_result {
                 Ok(true) => return Ok(()),
                 Ok(false) => {} /* GPU pipeline unavailable (no shared buffers), fall through to CPU */
@@ -712,39 +720,67 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         }
 
         assert!(self.combined_lk_mlt.is_none());
-        let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let shard_ram_cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let ec_tree_cs = cs
+            .get_cs(&ShardRamEcTreeCircuit::<E>::name())
+            .expect("ShardRamEcTreeCircuit must be registered");
         let n_global = global_input.len();
         // `ShardRamCircuit::assign_instances` ignores the `multiplicity`
         // argument (its lookup contribution is derived externally above), so
         // an empty slice is sufficient here and matches the pre-finalize
         // ordering: `combined_lk_mlt` is intentionally `None` at this point.
         let lk_multiplicity = LkMultiplicity::default();
-        let circuit_inputs =
+        let (circuit_inputs, ec_tree_circuit_inputs) =
             info_span!("shard_ram_assign_instances", n = n_global).in_scope(|| {
                 global_input
                     .par_chunks(shard_ctx.max_num_cross_shard_accesses)
                     .map(|shard_accesses| {
                         let mut lk_multiplicity = lk_multiplicity.clone();
-                        let witness = ShardRamCircuit::assign_instances_with_lk_multiplicities(
-                            config,
-                            cs.zkvm_v1_css.num_witin as usize,
-                            cs.zkvm_v1_css.num_structural_witin as usize,
-                            &mut lk_multiplicity,
-                            shard_accesses,
-                        )?;
                         let num_reads = shard_accesses
                             .par_iter()
                             .filter(|access| access.record.is_to_write_set)
                             .count();
                         let num_writes = shard_accesses.len() - num_reads;
+                        let witness = ShardRamCircuit::assign_instances_with_lk_multiplicities(
+                            config,
+                            shard_ram_cs.zkvm_v1_css.num_witin as usize,
+                            shard_ram_cs.zkvm_v1_css.num_structural_witin as usize,
+                            &mut lk_multiplicity,
+                            shard_accesses,
+                        )?;
+                        let ec_tree_witness =
+                            ShardRamEcTreeCircuit::assign_instances_with_lk_multiplicities(
+                                ec_tree_config,
+                                ec_tree_cs.zkvm_v1_css.num_witin as usize,
+                                ec_tree_cs.zkvm_v1_css.num_structural_witin as usize,
+                                &mut LkMultiplicity::default(),
+                                &shard_accesses
+                                    .iter()
+                                    .filter(|access| !access.record.is_to_write_set)
+                                    .chain(
+                                        shard_accesses
+                                            .iter()
+                                            .filter(|access| access.record.is_to_write_set),
+                                    )
+                                    .cloned()
+                                    .collect_vec(),
+                            )?;
 
-                        Ok(ChipInput::new(
-                            ShardRamCircuit::<E>::name(),
-                            witness,
-                            [num_reads, num_writes],
+                        Ok((
+                            ChipInput::new(
+                                ShardRamCircuit::<E>::name(),
+                                witness,
+                                [num_reads, num_writes],
+                            ),
+                            ChipInput::new(
+                                ShardRamEcTreeCircuit::<E>::name(),
+                                ec_tree_witness,
+                                [num_writes, num_reads],
+                            ),
                         ))
                     })
                     .collect::<Result<Vec<_>, ZKVMError>>()
+                    .map(|pairs| pairs.into_iter().unzip::<_, _, Vec<_>, Vec<_>>())
             })?;
 
         assert!(
@@ -759,6 +795,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(
             self.witnesses
                 .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
+                .is_none()
+        );
+        assert!(
+            self.witnesses
+                .insert(ShardRamEcTreeCircuit::<E>::name(), ec_tree_circuit_inputs)
                 .is_none()
         );
 
@@ -780,24 +821,34 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         shard_ctx: &ShardContext,
         final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
+        ec_tree_config: &<ShardRamEcTreeCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<bool, ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
-        let cs_inner = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
-        let num_witin = cs_inner.zkvm_v1_css.num_witin as usize;
-        let num_structural_witin = cs_inner.zkvm_v1_css.num_structural_witin as usize;
+        let shard_ram_cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let ec_tree_cs = cs
+            .get_cs(&ShardRamEcTreeCircuit::<E>::name())
+            .expect("ShardRamEcTreeCircuit must be registered");
 
         match crate::instructions::gpu::chips::shard_ram::try_gpu_assign_shared_circuit::<E>(
             shard_ctx,
             final_mem,
             config,
-            num_witin,
-            num_structural_witin,
+            ec_tree_config,
+            shard_ram_cs.zkvm_v1_css.num_witin as usize,
+            shard_ram_cs.zkvm_v1_css.num_structural_witin as usize,
+            ec_tree_cs.zkvm_v1_css.num_witin as usize,
+            ec_tree_cs.zkvm_v1_css.num_structural_witin as usize,
             shard_ctx.max_num_cross_shard_accesses,
         )? {
-            Some((circuit_inputs, lk_mlt)) => {
+            Some((circuit_inputs, ec_tree_circuit_inputs, lk_mlt)) => {
                 assert!(
                     self.witnesses
                         .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
+                        .is_none()
+                );
+                assert!(
+                    self.witnesses
+                        .insert(ShardRamEcTreeCircuit::<E>::name(), ec_tree_circuit_inputs)
                         .is_none()
                 );
                 assert!(
