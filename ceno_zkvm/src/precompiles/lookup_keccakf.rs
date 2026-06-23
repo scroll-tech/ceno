@@ -46,7 +46,7 @@ use crate::{
         utils::{Mask, MaskRepresentation, not8_expr, set_slice_felts_from_u64 as push_instance},
     },
     scheme::utils::gkr_witness,
-    structs::RAMType,
+    structs::{CustomRWTag, RAMType},
 };
 
 pub const ROUNDS: usize = 24;
@@ -103,7 +103,6 @@ pub const AND_LOOKUPS: usize = AND_LOOKUPS_PER_ROUND;
 pub const XOR_LOOKUPS: usize = XOR_LOOKUPS_PER_ROUND;
 pub const RANGE_LOOKUPS: usize = RANGE_LOOKUPS_PER_ROUND;
 pub const STRUCTURAL_WITIN: usize = 6;
-pub const KECCAK_STATE_TAG: u64 = 0x4b4543;
 pub const KECCAK_STATE_PHASE_INPUT: u64 = 0;
 pub const KECCAK_STATE_PHASE_OUTPUT: u64 = 1;
 
@@ -173,7 +172,7 @@ pub fn keccak_state_record<E: ExtensionField>(
     state: impl IntoIterator<Item = Expression<E>>,
 ) -> Vec<Expression<E>> {
     [
-        E::BaseField::from_canonical_u64(KECCAK_STATE_TAG).expr(),
+        CustomRWTag::KeccakState.expr::<E>(),
         cycle,
         state_ptr,
         E::BaseField::from_canonical_u64(phase).expr(),
@@ -557,7 +556,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
 
         system.read_record(
             || "keccak_state_in",
-            RAMType::Undefined,
+            RAMType::Custom,
             keccak_state_record(
                 layout.cycle.expr(),
                 layout.state_ptr.expr(),
@@ -570,7 +569,7 @@ impl<E: ExtensionField> ProtocolBuilder<E> for KeccakLayout<E> {
         )?;
         system.write_record(
             || "keccak_state_out",
-            RAMType::Undefined,
+            RAMType::Custom,
             keccak_state_record(
                 layout.cycle.expr(),
                 layout.state_ptr.expr(),
