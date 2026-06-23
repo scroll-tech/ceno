@@ -34,7 +34,7 @@ use crate::{
         hal::{DeviceProvingKey, ProofInput},
         utils::build_main_witness,
     },
-    structs::{RV32imMemStateConfig, TowerProofs, ZKVMProvingKey, ZKVMWitnesses},
+    structs::{RV32imMemStateConfig, TowerProofs, VK_DIGEST_LEN, ZKVMProvingKey, ZKVMWitnesses},
 };
 
 type CreateTableProof<'a, PB> = (
@@ -152,9 +152,15 @@ where
             )
         })?;
     exit_span!(span);
-    drop(records);
 
-    assert_eq!(rt_tower.len(), num_var_with_rotation);
+    assert!(
+        rt_tower.len() >= num_var_with_rotation,
+        "tower challenge point length {} is shorter than main point length {}",
+        rt_tower.len(),
+        num_var_with_rotation,
+    );
+    let rt_main = rt_tower[rt_tower.len() - num_var_with_rotation..].to_vec();
+    drop(records);
 
     let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
     let ecc_proof = info_span!("[ceno] prove_ec_sum_quark").in_scope(|| {
@@ -165,7 +171,7 @@ where
     let span = entered_span!("prove_rotation", profiling_2 = true);
     let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
         crate::scheme::gpu::prove_rotation_impl::<E, PCS>(
-            cs, input, &rt_tower, challenges, transcript,
+            cs, input, &rt_main, challenges, transcript,
         )
     })?;
     exit_span!(span);
@@ -180,6 +186,7 @@ where
             r_out_evals,
             w_out_evals,
             lk_out_evals,
+            main_out_evals: Vec::new(),
             main_sumcheck_proofs: None,
             gkr_iop_proof: None,
             rotation_proof: rotation.clone().map(|r| r.proof),
@@ -194,7 +201,8 @@ where
             witness_trace_idx: task.witness_trace_idx,
             num_witin: task.num_witin,
             structural_rmm,
-            rt_tower,
+            rt_tower: rt_main,
+            main_out_evals: Vec::new(),
             rotation,
             ecc_proof,
             challenges: *challenges,
@@ -209,6 +217,7 @@ pub type ZkVMCpuProver<E, PCS> =
 pub struct ZKVMProver<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>, PB: ProverBackend, PD>
 {
     pub pk: Arc<ZKVMProvingKey<E, PCS>>,
+    vk_digest: [E; VK_DIGEST_LEN],
     device: PD,
     // device_pk might be none if there is no fixed commitment
     device_first_shard_pk: Option<DeviceProvingKey<'static, PB>>,
@@ -224,6 +233,7 @@ impl<
 > ZKVMProver<E, PCS, PB, PD>
 {
     pub fn new_with_single_shard(pk: ZKVMProvingKey<E, PCS>, device: PD) -> Self {
+        let vk_digest = pk.compute_vk_digest::<RV32imMemStateConfig>();
         let pk = Arc::new(pk);
         let device_first_shard_pk = if pk.as_ref().has_fixed_commitment() {
             Some(device.transport_proving_key(true, pk.clone()))
@@ -233,6 +243,7 @@ impl<
 
         ZKVMProver {
             pk,
+            vk_digest,
             device,
             device_first_shard_pk,
             device_non_first_shard_pk: None,
@@ -241,6 +252,7 @@ impl<
     }
 
     pub fn new(pk: Arc<ZKVMProvingKey<E, PCS>>, device: PD) -> Self {
+        let vk_digest = pk.compute_vk_digest::<RV32imMemStateConfig>();
         let (device_first_shard_pk, device_non_first_shard_pk) =
             if pk.as_ref().has_fixed_commitment() {
                 (
@@ -253,6 +265,7 @@ impl<
 
         ZKVMProver {
             pk,
+            vk_digest,
             device,
             device_first_shard_pk,
             device_non_first_shard_pk,
@@ -318,8 +331,7 @@ impl<
         )
         .in_scope(|| {
             let digest_span = entered_span!("commit_to_vk_digest", profiling_1 = true);
-            let vk_digest = self.pk.compute_vk_digest::<RV32imMemStateConfig>();
-            transcript.append_field_element_exts(&vk_digest);
+            transcript.append_field_element_exts(&self.vk_digest);
             exit_span!(digest_span);
 
             let span = entered_span!("commit_to_pi", profiling_1 = true);
@@ -557,65 +569,6 @@ impl<
                 &pi,
                 &circuit_trace_indices,
             );
-            #[cfg(feature = "gpu")]
-            if using_gpu_backend {
-                if let Some(active_dpk) = self.get_device_proving_key(shard_ctx) {
-                    let active_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
-                        unsafe { std::mem::transmute(active_dpk.pcs_data.as_ref()) };
-                    crate::scheme::gpu::log_gpu_pcs_baseline::<E, PCS>(
-                        if shard_ctx.is_first_shard() {
-                            "fixed_active_first"
-                        } else {
-                            "fixed_active_non_first"
-                        },
-                        active_fixed_pcs,
-                    );
-                }
-                let inactive_dpk = if shard_ctx.is_first_shard() {
-                    self.device_non_first_shard_pk.as_ref()
-                } else {
-                    self.device_first_shard_pk.as_ref()
-                };
-                if let Some(inactive_dpk) = inactive_dpk {
-                    let inactive_fixed_pcs: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
-                        unsafe { std::mem::transmute(inactive_dpk.pcs_data.as_ref()) };
-                    crate::scheme::gpu::log_gpu_pcs_baseline::<E, PCS>(
-                        if shard_ctx.is_first_shard() {
-                            "fixed_inactive_non_first"
-                        } else {
-                            "fixed_inactive_first"
-                        },
-                        inactive_fixed_pcs,
-                    );
-                }
-                let gpu_witness_data: &<gkr_iop::gpu::GpuBackend<E, PCS> as ProverBackend>::PcsData =
-                    unsafe { std::mem::transmute(&witness_data) };
-                let gpu_fixed_mles: &[std::sync::Arc<gkr_iop::gpu::MultilinearExtensionGpu<'static, E>>] =
-                    unsafe { std::mem::transmute(fixed_mles_preload.as_slice()) };
-                let task_structural_device_bytes = tasks
-                    .iter()
-                    .filter_map(|task| task.structural_rmm.as_ref())
-                    .filter(|rmm| rmm.has_device_backing())
-                    .map(|rmm| rmm.height() * rmm.width() * std::mem::size_of::<E::BaseField>())
-                    .sum::<usize>();
-                let task_structural_device_count = tasks
-                    .iter()
-                    .filter_map(|task| task.structural_rmm.as_ref())
-                    .filter(|rmm| rmm.has_device_backing())
-                    .count();
-                let task_structural_device_mb =
-                    task_structural_device_bytes as f64 / (1024.0 * 1024.0);
-                tracing::info!(
-                    "[gpu baseline][before_scheduler] task_structural_device={:.2}MB ({})",
-                    task_structural_device_mb,
-                    task_structural_device_count,
-                );
-                crate::scheme::gpu::log_gpu_proof_baseline::<E, PCS>(
-                    "before_scheduler",
-                    gpu_witness_data,
-                    gpu_fixed_mles,
-                );
-            }
             exit_span!(build_tasks_span);
 
             // Phase 2: Execute chip proof tasks
@@ -835,10 +788,13 @@ impl<
         exit_span!(span);
         drop(records);
 
-        assert_eq!(
-            rt_tower.len(), // num var length should equal to max_num_instance
+        assert!(
+            rt_tower.len() >= num_var_with_rotation,
+            "tower challenge point length {} is shorter than main point length {}",
+            rt_tower.len(),
             num_var_with_rotation,
         );
+        let rt_main = rt_tower[rt_tower.len() - num_var_with_rotation..].to_vec();
 
         let span = entered_span!("run_ecc_final_sum", profiling_2 = true);
         let ecc_proof = info_span!("[ceno] prove_ec_sum_quark")
@@ -848,7 +804,7 @@ impl<
         let span = entered_span!("prove_rotation", profiling_2 = true);
         let rotation = info_span!("[ceno] prove_rotation").in_scope(|| {
             self.device
-                .prove_rotation(cs, input, &rt_tower, challenges, transcript)
+                .prove_rotation(cs, input, &rt_main, challenges, transcript)
         })?;
         exit_span!(span);
 
@@ -885,6 +841,7 @@ impl<
                 r_out_evals,
                 w_out_evals,
                 lk_out_evals,
+                main_out_evals: Vec::new(),
                 main_sumcheck_proofs: None,
                 gkr_iop_proof: None,
                 rotation_proof: rotation.clone().map(|r| r.proof),
@@ -899,7 +856,8 @@ impl<
                 witness_trace_idx: task.witness_trace_idx,
                 num_witin: task.num_witin,
                 structural_rmm,
-                rt_tower,
+                rt_tower: rt_main,
+                main_out_evals: Vec::new(),
                 rotation,
                 ecc_proof,
                 challenges: *challenges,

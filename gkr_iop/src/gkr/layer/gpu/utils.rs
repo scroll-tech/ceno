@@ -147,6 +147,7 @@ pub fn build_eq_x_r_with_sel_gpu<E: ExtensionField>(
         let mut eq_buf = match eq.mle {
             GpuFieldType::Base(_) => panic!("should be ext field"),
             GpuFieldType::Ext(mle) => mle,
+            GpuFieldType::VirtualExt(_) => panic!("should be dense ext field"),
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         };
         let indices_u32 = indices.iter().map(|x| *x as u32).collect_vec();
@@ -305,6 +306,7 @@ pub fn build_rotation_selector_gpu<E: ExtensionField, PCS: PolynomialCommitmentS
     let eq_buf_owned = match eq.mle {
         GpuFieldType::Base(_) => panic!("should be ext field"),
         GpuFieldType::Ext(mle) => mle.buf,
+        GpuFieldType::VirtualExt(_) => panic!("should be dense ext field"),
         GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
     };
 

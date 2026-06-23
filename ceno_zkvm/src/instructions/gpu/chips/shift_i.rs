@@ -154,10 +154,13 @@ mod tests {
                 &col_map,
                 &gpu_records,
                 &indices_u32,
+                n,
+                None,
                 shard_offset,
                 0,
                 0,
                 0,
+                false,
                 None,
                 None,
             )
