@@ -786,7 +786,6 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     config: &ShardRamConfig<E>,
     num_witin: usize,
     num_structural_witin: usize,
-    _max_chunk: usize,
 ) -> Result<
     Option<(
         Vec<crate::structs::ChipInput<E>>,

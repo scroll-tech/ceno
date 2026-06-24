@@ -788,7 +788,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             config,
             num_witin,
             num_structural_witin,
-            shard_ctx.max_num_cross_shard_accesses,
         )? {
             Some((circuit_inputs, lk_mlt)) => {
                 assert!(
