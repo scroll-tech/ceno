@@ -786,7 +786,6 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     config: &ShardRamConfig<E>,
     num_witin: usize,
     num_structural_witin: usize,
-    max_chunk: usize,
 ) -> Result<
     Option<(
         Vec<crate::structs::ChipInput<E>>,
@@ -1020,48 +1019,32 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         },
     )?;
 
-    // 7. GPU assign_instances from device buffer (chunked by max_cross_shard)
-
+    // 7. GPU assign_instances from device buffer. The proof format stores one
+    // chip proof per circuit, so shard RAM must stay in one witness entry.
     let circuit_inputs =
         info_span!("shard_ram_assign_from_device", n = total_records).in_scope(|| {
-            let mut inputs = Vec::new();
-            let mut records_offset = 0usize;
-            let mut writes_remaining = num_writes;
-
-            while records_offset < total_records {
-                let chunk_size = max_chunk.min(total_records - records_offset);
-                let chunk_writes = writes_remaining.min(chunk_size);
-                writes_remaining = writes_remaining.saturating_sub(chunk_size);
-
-                let chunk_byte_start = records_offset * record_u32s * 4;
-                let chunk_byte_end = (records_offset + chunk_size) * record_u32s * 4;
-                let chunk_buf: ceno_gpu::common::buffer::BufferImpl<'static, u32> =
-                    partitioned_buf.owned_subrange(chunk_byte_start..chunk_byte_end);
-
-                let witness = ShardRamCircuit::<E>::try_gpu_assign_instances_from_device(
-                    config,
-                    num_witin,
-                    num_structural_witin,
-                    &chunk_buf,
-                    chunk_size,
-                    chunk_writes,
-                )?;
-
-                let witness = witness.ok_or_else(|| {
-                    ZKVMError::InvalidWitness("GPU shard_ram from_device returned None".into())
-                })?;
-
-                let num_reads = chunk_size - chunk_writes;
-                let input = ChipInput::new(
-                    ShardRamCircuit::<E>::name(),
-                    witness,
-                    [chunk_writes, num_reads],
-                );
-                inputs.push(input);
-
-                records_offset += chunk_size;
+            if total_records == 0 {
+                return Ok::<Vec<ChipInput<E>>, ZKVMError>(vec![]);
             }
-            Ok::<_, ZKVMError>(inputs)
+
+            let witness = ShardRamCircuit::<E>::try_gpu_assign_instances_from_device(
+                config,
+                num_witin,
+                num_structural_witin,
+                &partitioned_buf,
+                total_records,
+                num_writes,
+            )?;
+
+            let witness = witness.ok_or_else(|| {
+                ZKVMError::InvalidWitness("GPU shard_ram from_device returned None".into())
+            })?;
+
+            Ok::<_, ZKVMError>(vec![ChipInput::new(
+                ShardRamCircuit::<E>::name(),
+                witness,
+                [num_writes, total_records - num_writes],
+            )])
         })?;
 
     tracing::info!(

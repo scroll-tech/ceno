@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::{self, Debug},
-    iter,
     ops::Div,
     sync::Arc,
 };
@@ -212,8 +211,8 @@ impl PublicValues {
 ))]
 pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub public_values: PublicValues,
-    // each circuit may have multiple proof instances
-    pub chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+    // each circuit has exactly one proof entry
+    pub chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
     pub main_constraint_proof: MainConstraintProof<E>,
     pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub opening_proof: PCS::Proof,
@@ -222,7 +221,7 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
         public_values: PublicValues,
-        chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+        chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
         main_constraint_proof: MainConstraintProof<E>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         opening_proof: PCS::Proof,
@@ -249,13 +248,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         let halt_instance_count = self
             .chip_proofs
             .get(&halt_circuit_index)
-            .map_or(0, |proofs| {
-                proofs
-                    .iter()
-                    .flat_map(|proof| &proof.num_instances)
-                    .copied()
-                    .sum()
-            });
+            .map_or(0, |proof| proof.num_instances.iter().copied().sum());
         if halt_instance_count > 0 {
             assert_eq!(
                 halt_instance_count, 1,
@@ -290,9 +283,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let tower_proof = self
             .chip_proofs
             .iter()
-            .flat_map(|(circuit_index, proofs)| {
-                iter::repeat_n(circuit_index, proofs.len()).zip(proofs)
-            })
             .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.tower_proof);
                 size.inspect(|size| {
@@ -307,9 +297,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let main_sumcheck = self
             .chip_proofs
             .iter()
-            .flat_map(|(circuit_index, proofs)| {
-                iter::repeat_n(circuit_index, proofs.len()).zip(proofs)
-            })
             .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
                 size.inspect(|size| {
