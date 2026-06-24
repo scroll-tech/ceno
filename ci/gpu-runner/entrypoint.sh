@@ -10,7 +10,8 @@
 #
 # Required env:
 #   GITHUB_PAT   - classic PAT with `repo` scope, or fine-grained token with
-#                  "Administration: read/write" on the repo.
+#                  "Administration: read/write" on the repo. Used only to mint a
+#                  runner registration token, then removed from the job env.
 #   REPO_URL     - e.g. https://github.com/scroll-tech/ceno
 # Optional env:
 #   RUNNER_NAME  - defaults to gpu-<short-hostname>
@@ -40,6 +41,9 @@ if [[ -z "${REG_TOKEN}" || "${REG_TOKEN}" == "null" ]]; then
     echo "[entrypoint] ERROR: could not obtain registration token (check PAT scope/REPO_URL)" >&2
     exit 1
 fi
+
+# Do not pass the long-lived PAT into the Actions runner or any job steps.
+unset GITHUB_PAT
 
 cleanup() {
     echo "[entrypoint] de-registering runner ..."
