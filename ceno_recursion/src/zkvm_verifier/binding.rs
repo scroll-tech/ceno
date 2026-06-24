@@ -73,7 +73,7 @@ pub fn decompose_prefixed_layer_bits(n: usize) -> (Vec<usize>, Vec<Vec<F>>) {
 pub struct ZKVMProofInputVariable<C: Config> {
     pub shard_id: Usize<C::N>,
     pub pi: Array<C, Felt<C::F>>,
-    pub chip_proofs: Array<C, Array<C, ZKVMChipProofInputVariable<C>>>,
+    pub chip_proofs: Array<C, ZKVMChipProofInputVariable<C>>,
     pub main_constraint_proof: SumcheckLayerProofVariable<C>,
     pub max_num_var: Var<C::N>,
     pub max_width: Var<C::N>,
@@ -96,7 +96,7 @@ pub struct TowerProofInputVariable<C: Config> {
 pub(crate) struct ZKVMProofInput {
     pub shard_id: usize,
     pub pi: Vec<F>,
-    pub chip_proofs: BTreeMap<usize, ZKVMChipProofs>,
+    pub chip_proofs: BTreeMap<usize, ZKVMChipProofInput>,
     pub main_constraint_proof: SumcheckLayerProofInput,
     pub witin_commit: BasefoldCommitment,
     pub opening_proof: BasefoldProof,
@@ -141,7 +141,7 @@ impl ZKVMProofInput {
             chip_proofs: zkvm_proof
                 .chip_proofs
                 .into_iter()
-                .map(|(chip_idx, proofs)| {
+                .map(|(chip_idx, proof)| {
                     let (num_witin, num_fixed) = *chip_witin_num_vars
                         .get(&chip_idx)
                         .expect("num_witin data should exist");
@@ -151,27 +151,17 @@ impl ZKVMProofInput {
                         .nth(chip_idx)
                         .expect("chip vk should exist")
                         .get_cs();
-                    (
-                        chip_idx,
-                        proofs
-                            .into_iter()
-                            .map(|proof| {
-                                let sum_num_instances = proof.num_instances.iter().sum::<usize>();
-                                let mut num_vars =
-                                    ceil_log2(next_pow2_instance_padding(sum_num_instances))
-                                        + composed_cs.rotation_vars().unwrap_or(0);
-                                if composed_cs.has_ecc_ops() {
-                                    num_vars += 1;
-                                }
-                                ZKVMChipProofInput::from((
-                                    chip_idx, proof, num_vars, num_witin, num_fixed,
-                                ))
-                            })
-                            .collect::<Vec<ZKVMChipProofInput>>()
-                            .into(),
-                    )
+                    (chip_idx, {
+                        let sum_num_instances = proof.num_instances.iter().sum::<usize>();
+                        let mut num_vars = ceil_log2(next_pow2_instance_padding(sum_num_instances))
+                            + composed_cs.rotation_vars().unwrap_or(0);
+                        if composed_cs.has_ecc_ops() {
+                            num_vars += 1;
+                        }
+                        ZKVMChipProofInput::from((chip_idx, proof, num_vars, num_witin, num_fixed))
+                    })
                 })
-                .collect::<BTreeMap<usize, ZKVMChipProofs>>(),
+                .collect::<BTreeMap<usize, ZKVMChipProofInput>>(),
             main_constraint_proof: SumcheckLayerProofInput {
                 proof: IOPProverMessageVec::from(
                     zkvm_proof
@@ -200,7 +190,7 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let shard_id = Usize::Var(usize::read(builder));
         let pi = Vec::<F>::read(builder);
         builder.cycle_tracker_start("read chip proofs");
-        let chip_proofs = Vec::<ZKVMChipProofs>::read(builder);
+        let chip_proofs = Vec::<ZKVMChipProofInput>::read(builder);
         builder.cycle_tracker_end("read chip proofs");
         builder.cycle_tracker_start("read main constraint proof");
         let main_constraint_proof = SumcheckLayerProofInput::read(builder);
@@ -233,28 +223,24 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         let mut stream = Vec::new();
         let witin_num_vars = self
             .chip_proofs
-            .iter()
-            .flat_map(|(_, proofs)| proofs.iter())
+            .values()
             .filter(|proof| proof.num_witin > 0)
             .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let witin_max_widths = self
             .chip_proofs
-            .iter()
-            .flat_map(|(_, proofs)| proofs.iter())
+            .values()
             .map(|proof| proof.num_witin.max(1))
             .collect::<Vec<_>>();
         let fixed_num_vars = self
             .chip_proofs
-            .iter()
-            .flat_map(|(_, proofs)| proofs.iter())
+            .values()
             .filter(|proof| proof.num_fixed > 0)
             .map(|proof| proof.num_vars)
             .collect::<Vec<_>>();
         let fixed_max_widths = self
             .chip_proofs
-            .iter()
-            .flat_map(|(_, proofs)| proofs.iter())
+            .values()
             .filter(|proof| proof.num_fixed > 0)
             .map(|proof| proof.num_fixed)
             .collect::<Vec<_>>();
@@ -290,8 +276,8 @@ impl Hintable<InnerConfig> for ZKVMProofInput {
         stream.extend(<usize as Hintable<InnerConfig>>::write(&self.shard_id));
         stream.extend(self.pi.write());
         stream.extend(vec![vec![F::from_canonical_usize(self.chip_proofs.len())]]);
-        for proofs in self.chip_proofs.values() {
-            stream.extend(proofs.write());
+        for proof in self.chip_proofs.values() {
+            stream.extend(proof.write());
         }
         stream.extend(self.main_constraint_proof.write());
         stream.extend(<usize as Hintable<InnerConfig>>::write(&max_num_var));
@@ -434,35 +420,6 @@ pub struct ZKVMChipProofInput {
 }
 
 impl VecAutoHintable for ZKVMChipProofInput {}
-
-/// wrapper struct to allow us implement VecAutoHintable
-pub struct ZKVMChipProofs(Vec<ZKVMChipProofInput>);
-
-impl From<Vec<ZKVMChipProofInput>> for ZKVMChipProofs {
-    fn from(v: Vec<ZKVMChipProofInput>) -> Self {
-        Self(v)
-    }
-}
-
-impl VecAutoHintable for ZKVMChipProofs {}
-
-impl ZKVMChipProofs {
-    pub fn iter(&self) -> std::slice::Iter<'_, ZKVMChipProofInput> {
-        self.0.iter()
-    }
-}
-
-impl Hintable<InnerConfig> for ZKVMChipProofs {
-    type HintVariable = Array<InnerConfig, ZKVMChipProofInputVariable<InnerConfig>>;
-
-    fn read(builder: &mut Builder<InnerConfig>) -> Self::HintVariable {
-        Vec::<ZKVMChipProofInput>::read(builder)
-    }
-
-    fn write(&self) -> Vec<Vec<<InnerConfig as Config>::N>> {
-        self.0.write()
-    }
-}
 
 impl From<(usize, ZKVMChipProof<E>, usize, usize, usize)> for ZKVMChipProofInput {
     fn from(d: (usize, ZKVMChipProof<E>, usize, usize, usize)) -> Self {

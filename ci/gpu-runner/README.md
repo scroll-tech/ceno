@@ -104,7 +104,8 @@ prover (`--features gpu`) on this runner. It's opt-in (GPU time is scarce):
 
 - **Manually** — Actions tab → *GPU Integration* → *Run workflow*. Optionally
   set the `example` input (default `keccak_syscall`).
-- **On a PR** — add the `gpu-ci` label to the PR.
+- **On a PR** — add the `gpu-ci` label to a branch in this repository. Fork PRs
+  are skipped because they must not execute code on self-hosted runners.
 - **On push to master** — records the proving-time baseline (see below).
 
 It loads `secrets.CENO_GPU_DEPLOY_KEY` into ssh-agent, clones the private
@@ -173,9 +174,14 @@ The watchdog checks every minute and restarts on stop or GPU-unreachable.
   This keeps recompiles fast even though each job runs in a fresh container.
   Because of this, **GPU jobs can drop the `actions/cache` step for `target/`** —
   the host volume is bigger (no ~10 GB cache limit) and faster (no network
-  restore) than GitHub's cache backend for a workspace this size. The single
-  ephemeral runner serves one job at a time, so there's no concurrent writer on
-  the shared target dir. (To reset: `docker volume rm ceno-gpu-runner-target`.)
+  restore) than GitHub's cache backend for a workspace this size. PR jobs
+  override `CARGO_TARGET_DIR` to the ephemeral workspace target so they do not
+  share the trusted persistent target dir. The single ephemeral runner serves
+  one job at a time, so there's no concurrent writer on the shared target dir.
+  (To reset: `docker volume rm ceno-gpu-runner-target`.)
+- **Fork PRs**: any workflow that targets this runner must guard PR jobs with
+  `github.event.pull_request.head.repo.full_name == github.repository`, or use a
+  GitHub-hosted runner for fork code.
 - **Alternative to cron**: `--restart unless-stopped` in `start-runner.sh`
   restarts on crash instantly, but won't catch a hung container or a GPU that
   silently went away — that's why the watchdog also probes `nvidia-smi`.
