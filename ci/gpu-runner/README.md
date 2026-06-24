@@ -5,8 +5,9 @@ Docker image and kept alive by a cron watchdog.
 
 - **Ephemeral**: the runner exits cleanly after each job, so no state leaks
   between CI runs. The watchdog immediately brings up a fresh one.
-- **Self-healing tokens**: the container mints a fresh registration token from
-  the GitHub API on every start, so restarts never fail on an expired token.
+- **Self-healing tokens**: the host mints a fresh registration token from the
+  GitHub API on every start, so restarts never fail on an expired token. The
+  long-lived PAT is never passed into the runner container.
 - **Cron watchdog**: restarts the container if it stops *or* if the GPU becomes
   unreachable inside it (your stated failure mode).
 
@@ -153,15 +154,18 @@ The watchdog checks every minute and restarts on stop or GPU-unreachable.
 | file                  | purpose                                                        |
 |-----------------------|----------------------------------------------------------------|
 | `Dockerfile`          | CUDA-devel image + actions runner + Rust toolchain + git-lfs   |
-| `entrypoint.sh`       | mint token → configure ephemeral runner → run → de-register    |
-| `start-runner.sh`     | (re)launch the container with `--gpus all`; idempotent         |
+| `entrypoint.sh`       | configure ephemeral runner → run → de-register                 |
+| `start-runner.sh`     | mint token → launch container with `--gpus all`; idempotent    |
 | `watchdog.sh`         | cron health check + restart                                    |
-| `runner.env.example`  | template for `runner.env` (PAT + repo URL; gitignored)         |
+| `runner.env.example`  | host-only template for `runner.env` (PAT + repo URL; gitignored) |
 
 ## Notes & gotchas
 
 - **PAT scope**: repo-level runner needs `repo` (classic) or fine-grained
-  "Administration: Read and write" on this repo.
+  "Administration: Read and write" on this repo. `start-runner.sh` uses the PAT
+  on the host only to mint a short-lived runner registration token, then starts
+  the container with that short-lived token mounted from `/run/runner-registration-token`.
+  The long-lived PAT is never present in the container environment.
 - **Warm builds across ephemeral restarts**: two named volumes persist between
   containers — `ceno-gpu-runner-cargo` (the cargo registry, so deps aren't
   re-downloaded) and `ceno-gpu-runner-target` (mounted at `/cache/target`, with
