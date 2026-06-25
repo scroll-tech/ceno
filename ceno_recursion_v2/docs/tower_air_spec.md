@@ -4,6 +4,149 @@ This document captures the current behavior of each GKR-related AIR that lives i
 can reason about constraints or plan refactors without diving back into Rust. Update the relevant section whenever an
 AIR’s columns, constraints, or interactions change.
 
+## Ground Truth: Layer Reduction Math
+
+This section is the semantic source of truth for the tower layer reduction. The AIR-specific sections below describe how
+the trace and buses realize these identities; protocol changes must preserve this math.
+
+Let layer `i` be the current parent layer and layer `i + 1` the child layer. For binary fan-in, a child point is written
+as `(b, t)` with `t in {0, 1}`. The sumcheck proves the value at a parent point `r` by summing over Boolean `b` with the
+multilinear equality polynomial `eq(r, b)`.
+
+For a product spec `j`:
+
+```text
+Prod_j^i(b) = Prod_j^{i+1}(b, 0) * Prod_j^{i+1}(b, 1)
+
+Prod_j^i(r) =
+    sum_b eq(r, b) * Prod_j^{i+1}(b, 0) * Prod_j^{i+1}(b, 1)
+```
+
+For a LogUp spec `k`, with numerator `P_k` and denominator `Q_k`, the relation is fraction addition:
+
+```text
+P_k^i(b) / Q_k^i(b) =
+    P_k^{i+1}(b, 0) / Q_k^{i+1}(b, 0)
+  + P_k^{i+1}(b, 1) / Q_k^{i+1}(b, 1)
+```
+
+Equivalently:
+
+```text
+P_k^i(b) =
+    P_k^{i+1}(b, 0) * Q_k^{i+1}(b, 1)
+  + P_k^{i+1}(b, 1) * Q_k^{i+1}(b, 0)
+
+Q_k^i(b) =
+    Q_k^{i+1}(b, 0) * Q_k^{i+1}(b, 1)
+```
+
+Product specs include both read and write specs. LogUp specs contribute two batched polynomials, `P_k` and `Q_k`. A
+single transcript-derived batching challenge `alpha` is used for all specs. If there are `n_prod` product specs, the
+flattened batching order is:
+
+```text
+Prod_0, ..., Prod_{n_prod-1}, P_0, Q_0, P_1, Q_1, ...
+```
+
+so the weights are consecutive powers of `alpha`. The batched parent claim is:
+
+```text
+C_i(r) =
+    sum_j alpha^j              * Prod_j^i(r)
+  + sum_k alpha^{n_prod + 2k}     * P_k^i(r)
+  + sum_k alpha^{n_prod + 2k + 1} * Q_k^i(r)
+```
+
+Here `alpha^0 = 1`, matching `get_challenge_pows`.
+
+Substituting the layer relations gives the sumcheck target:
+
+```text
+C_i(r) = sum_b eq(r, b) * T_i(b)
+
+T_i(b) =
+    sum_j alpha^j * Prod_j^{i+1}(b, 0) * Prod_j^{i+1}(b, 1)
+
+  + sum_k alpha^{n_prod + 2k} * (
+        P_k^{i+1}(b, 0) * Q_k^{i+1}(b, 1)
+      + P_k^{i+1}(b, 1) * Q_k^{i+1}(b, 0)
+    )
+
+  + sum_k alpha^{n_prod + 2k + 1} * (
+        Q_k^{i+1}(b, 0) * Q_k^{i+1}(b, 1)
+    )
+```
+
+If the sumcheck samples point `rho`, its final claim is:
+
+```text
+claim_out = eq(r, rho) * T_i(rho)
+```
+
+where `eq(r, rho)` is accumulated round-by-round as:
+
+```text
+eq_next = eq_cur * (xi * rho_i + (1 - xi) * (1 - rho_i))
+```
+
+Verifier view for layer `i`:
+
+1. Verify the sumcheck proof for the claim `C_i(r)`. The proof returns the point `rho` and a final evaluation. The child
+   layer claims at that point are:
+
+   ```text
+   Prod_j^{i+1}(rho, 0), Prod_j^{i+1}(rho, 1)
+
+   P_k^{i+1}(rho, 0), P_k^{i+1}(rho, 1),
+   Q_k^{i+1}(rho, 0), Q_k^{i+1}(rho, 1)
+   ```
+
+   From those claims, compute:
+
+   ```text
+   T_i(rho) =
+       sum_j alpha^j * Prod_j^{i+1}(rho, 0) * Prod_j^{i+1}(rho, 1)
+
+     + sum_k alpha^{n_prod + 2k} * (
+           P_k^{i+1}(rho, 0) * Q_k^{i+1}(rho, 1)
+         + P_k^{i+1}(rho, 1) * Q_k^{i+1}(rho, 0)
+       )
+
+     + sum_k alpha^{n_prod + 2k + 1} * (
+           Q_k^{i+1}(rho, 0) * Q_k^{i+1}(rho, 1)
+       )
+   ```
+
+   The sumcheck final evaluation must equal `eq(r, rho) * T_i(rho)`.
+
+2. If layer `i + 1` is not terminal, derive the next layer's expected sum after sampling `mu` and a fresh batching
+   challenge `alpha_next`:
+
+   ```text
+   r_next = (rho, mu)
+
+   C_{i+1}(r_next) =
+       sum_j alpha_next^j * Prod_j^{i+1}(r_next)
+     + sum_k alpha_next^{n_prod + 2k}     * P_k^{i+1}(r_next)
+     + sum_k alpha_next^{n_prod + 2k + 1} * Q_k^{i+1}(r_next)
+   ```
+
+   Each carried claim is the multilinear interpolation at `mu`:
+
+   ```text
+   Prod_j^{i+1}(r_next) =
+       (1 - mu) * Prod_j^{i+1}(rho, 0)
+     + mu       * Prod_j^{i+1}(rho, 1)
+   ```
+
+   with the same interpolation for each LogUp `P_k` and `Q_k`. Specs that have no remaining reduction round do not
+   contribute to the next expected sum.
+
+Both LogUp cross terms in `T_i` are part of the semantic statement. If an implementation splits or reuses accumulators,
+the final sumcheck target must still include the `P0 * Q1 + P1 * Q0` numerator-cross contribution and the `Q0 * Q1`
+denominator-cross contribution with their corresponding powers of `alpha`.
+
 ## TowerInputAir (`src/tower/input/air.rs`)
 
 ### Columns
@@ -176,9 +319,8 @@ AIR’s columns, constraints, or interactions change.
     - Transcript data `p_xi_0`, `p_xi_1`, `q_xi_0`, `q_xi_1`, interpolated `p_xi`, `q_xi`.
     - Challenges `lambda`, `lambda_prime`, `mu`.
     - Running powers `pow_lambda`, `pow_lambda_prime`.
-    - Accumulators: `acc_sum` for the standard `(p_xi + lambda * q_xi)` contribution, `acc_p_cross`, `acc_q_cross` for
-      the
-      log-up initialization terms that previously lived in their own AIR.
+    - Accumulators: `acc_sum` for the standard `(p_xi + lambda * q_xi)` contribution, plus `acc_p_cross` and
+      `acc_q_cross` for the LogUp numerator-cross and denominator-cross terms in the layer relation.
 
 ### Constraints
 
@@ -196,29 +338,8 @@ AIR’s columns, constraints, or interactions change.
 
 - Receives the layer challenge message with both `lambda` and `lambda_prime` on the first row.
 - Final row sends `TowerLogupClaimMessage { lambda_claim = acc_sum, lambda_prime_claim = acc_q_cross }` plus
-  `num_logup_count`. (The `acc_p_cross` value remains internal because only the denominator-style accumulator is needed
-  upstream at the moment.)
-
-## TowerLogUpSumCheckClaimAir (`src/tower/layer/logup_claim/air.rs`)
-
-### Columns & Loops
-
-- Shares the `(proof_idx, idx, layer_idx)` nested-loop structure and reuses `index_id` to count accumulator rows.
-- Columns mirror the product AIR plus the denominator evaluations: `is_enabled`, the loop counters/flags,
-  `(p_xi_0, p_xi_1, q_xi_0, q_xi_1)`, interpolated `(p_xi, q_xi)`, `lambda`, `mu`, `pow_lambda`, `acc_sum`,
-  `index_id`, and `num_logup_count`.
-
-### Constraints
-
-- Recomputes both `p_xi` and `q_xi` in every row.
-- Uses the existing log-up contribution `acc_sum_next = acc_sum + (lambda * q_xi) * pow_lambda`.
-- `index_id` obeys the same initialization/increment/final-row checks against `num_logup_count` as the product AIR.
-- Only the final accumulator row per `(proof_idx, idx, layer_idx)` may drive `TowerLogupClaimBus`.
-
-### Interactions
-
-- Layer metadata is consumed on the row flagged by `is_first_layer`.
-- Folded logup claim is emitted exactly once per triple when the accumulator row counter reaches `num_logup_count`.
+  `num_logup_count`. `acc_p_cross` remains in-trace in the current message shape, but the ground-truth layer relation
+  still requires the numerator-cross contribution to be accounted for when forming the final sumcheck target.
 
 ## TowerLayerSumcheckAir (`src/tower/sumcheck/air.rs`)
 
