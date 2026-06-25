@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   skip_check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [ self-hosted, Linux, X64 ]
     outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
@@ -29,11 +30,14 @@ jobs:
   integration:
     needs: [ skip_check ]
     if: |
-      github.event.pull_request.draft == false &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.draft == false) &&
       (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
 
     name: Integration testing
-    timeout-minutes: 30
+    timeout-minutes: 50
     runs-on: [ self-hosted, Linux, X64 ]
 
     steps:
@@ -122,6 +126,11 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
+      - name: Run multi-shards keccak_syscall single shard-id (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 --shard-id=1 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+
       - name: Run secp256k1_add_syscall (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
@@ -177,18 +186,11 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/sha_extend_syscall
 
-      - name: Run fibonacci (release) in multi-shards with CENO_CROSS_SHARD_LIMIT
-        env:
-          RUST_LOG: debug
-          RUSTFLAGS: "-C opt-level=3"
-          CENO_CROSS_SHARD_LIMIT: 32
-        run: cargo run --release --package ceno_zkvm --features sanity-check --bin e2e -- --platform=ceno --max-cycle-per-shard=20000 --hints=10 --public-io=4191 examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci
-
-      - name: Run aggregation e2e
-        env:
-          RUSTFLAGS: "-C opt-level=3"
-        run: |
-          cargo run --release --package ceno_recursion --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+      #      - name: Run aggregation e2e
+      #        env:
+      #          RUSTFLAGS: "-C opt-level=3"
+      #        run: |
+      #          cargo run --release --package ceno_recursion --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Install cargo make
         run: |

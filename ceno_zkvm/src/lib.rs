@@ -8,7 +8,7 @@ pub mod instructions;
 pub mod scheme;
 pub mod tables;
 pub use utils::u64vec;
-mod chip_handler;
+pub mod chip_handler;
 pub mod circuit_builder;
 pub mod e2e;
 pub mod gadgets;
@@ -18,7 +18,7 @@ pub mod state;
 pub mod stats;
 pub mod structs;
 mod uint;
-mod utils;
+pub mod utils;
 #[cfg(all(feature = "jemalloc", unix, not(test)))]
 pub use utils::print_allocated_bytes;
 mod witness;

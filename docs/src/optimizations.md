@@ -1,0 +1,5 @@
+# Optimizations
+
+## Distributed Sumcheck
+
+TODO

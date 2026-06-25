@@ -20,6 +20,7 @@ use crate::{
     scheme::PublicValues,
     structs::ProgramParams,
     tables::ram::ram_circuit::DynVolatileRamTableConfigTrait,
+    witness::LkMultiplicity,
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{Expression, Fixed, StructuralWitIn, ToExpr, WitIn};
@@ -182,6 +183,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
         num_witin: usize,
         num_structural_witin: usize,
         (final_mem, _pv, _num_instances): &(&[MemFinalRecord], &PublicValues, usize),
+        lk_multiplicity: Option<&LkMultiplicity>,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         if final_mem.is_empty() {
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
@@ -226,10 +228,15 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
                             // Assign value directly.
                             set_val!(row, init_v[0], rec.init_value as u64);
                         } else {
-                            // Assign value limbs.
+                            // Assign value limbs, recording the per-limb u16
+                            // range-check looked up in `construct_circuit` (#999).
+                            let mut row_lkm = lk_multiplicity.cloned();
                             init_v.iter().enumerate().for_each(|(l, limb)| {
                                 let val = (rec.init_value >> (l * LIMB_BITS)) & LIMB_MASK;
                                 set_val!(row, limb, val as u64);
+                                if let Some(m) = row_lkm.as_mut() {
+                                    m.assert_ux::<LIMB_BITS>(val as u64);
+                                }
                             });
                         }
                     }
@@ -285,6 +292,7 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
         num_witin: usize,
         num_structural_witin: usize,
         (final_mem, pv, num_instances): &(&[MemFinalRecord], &PublicValues, usize),
+        lk_multiplicity: Option<&LkMultiplicity>,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         // got some duplicated code segment to simplify parallel assignment flow
         let start_addr = DVRAM::dynamic_addr(&config.params, 0, pv);
@@ -324,15 +332,22 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableInitCo
                             rec.addr, expected_addr,
                         );
                     }
-                    if let Some(rec) = rec_opt {
+                    if i < *num_instances
+                        && let Some(rec) = rec_opt
+                    {
                         if init_v.len() == 1 {
                             // Assign value directly.
                             set_val!(row, init_v[0], rec.init_value as u64);
                         } else {
-                            // Assign value limbs.
+                            // Assign value limbs, recording the per-limb u16
+                            // range-check looked up in `construct_circuit` (#999).
+                            let mut row_lkm = lk_multiplicity.cloned();
                             init_v.iter().enumerate().for_each(|(l, limb)| {
                                 let val = (rec.init_value >> (l * LIMB_BITS)) & LIMB_MASK;
                                 set_val!(row, limb, val as u64);
+                                if let Some(m) = row_lkm.as_mut() {
+                                    m.assert_ux::<LIMB_BITS>(val as u64);
+                                }
                             });
                         }
                     }
@@ -384,7 +399,9 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         cb: &mut CircuitBuilder<E>,
         params: &ProgramParams,
     ) -> Result<Self, CircuitBuilderError> {
-        if !DVRAM::DYNAMIC_OFFSET {
+        if DVRAM::dynamic_length_instance().is_some() {
+            cb.set_omc_init_dyn();
+        } else if !DVRAM::DYNAMIC_OFFSET {
             cb.set_omc_init_only();
         }
 
@@ -393,9 +410,27 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         let (init_expr, init_v) = if DVRAM::ZERO_INIT {
             (vec![Expression::ZERO; DVRAM::V_LIMBS], None)
         } else {
+            // Non-zero-init tables (e.g. `HintsTable`) take their initial content
+            // from prover-supplied witnesses. Without a range check a malicious
+            // prover could choose non-canonical limbs (>= 2^LIMB_BITS): the load
+            // path reads memory via `UInt::new_unchecked`, so a non-canonical word
+            // would propagate to a register completely unconstrained (#999). Bind
+            // every limb to `LIMB_BITS` so the reconstructed word is a canonical
+            // u32. This assumes the value is laid out as `LIMB_BITS`-wide limbs,
+            // matching the witness-assignment limb path below.
+            assert!(
+                DVRAM::V_LIMBS > 1,
+                "non-zero-init RAM table must use a multi-limb (LIMB_BITS) layout for the init range check"
+            );
             let init_v = (0..DVRAM::V_LIMBS)
                 .map(|i| cb.create_witin(|| format!("init_v_limb_{i}")))
                 .collect::<Vec<WitIn>>();
+            for (i, limb) in init_v.iter().enumerate() {
+                cb.assert_ux::<_, _, LIMB_BITS>(
+                    || format!("init_v_limb_{i}_in_u{LIMB_BITS}"),
+                    limb.expr(),
+                )?;
+            }
             (init_v.iter().map(|v| v.expr()).collect_vec(), Some(init_v))
         };
 
@@ -430,16 +465,29 @@ impl<DVRAM: DynVolatileRamTable + Send + Sync + Clone> DynVolatileRamTableConfig
         num_witin: usize,
         num_structural_witin: usize,
         data: &(&[MemFinalRecord], &PublicValues, usize),
+        lk_multiplicity: Option<&LkMultiplicity>,
     ) -> Result<[RowMajorMatrix<F>; 2], CircuitBuilderError> {
         let (final_mem, _, _) = &data;
         if final_mem.is_empty() {
             return Ok([RowMajorMatrix::empty(), RowMajorMatrix::empty()]);
         }
         assert_eq!(num_structural_witin, 2);
-        if DVRAM::DYNAMIC_OFFSET {
-            Self::assign_instances_dynamic(config, num_witin, num_structural_witin, data)
+        if DVRAM::dynamic_length_instance().is_some() || DVRAM::DYNAMIC_OFFSET {
+            Self::assign_instances_dynamic(
+                config,
+                num_witin,
+                num_structural_witin,
+                data,
+                lk_multiplicity,
+            )
         } else {
-            Self::assign_instances(config, num_witin, num_structural_witin, data)
+            Self::assign_instances(
+                config,
+                num_witin,
+                num_structural_witin,
+                data,
+                lk_multiplicity,
+            )
         }
     }
 }
@@ -677,5 +725,121 @@ mod tests {
         .collect::<Vec<_>>();
 
         assert_eq!(addr_padded_view.get_base_field_vec(), expected)
+    }
+
+    /// Soundness regression for #999: a malicious prover must not be able to put
+    /// a non-canonical (>= 2^LIMB_BITS) limb into a `HintsTable` init word.
+    ///
+    /// * The honest witness (canonical limbs) satisfies every range lookup.
+    /// * Forcing any single init limb to `2^LIMB_BITS` makes the corresponding
+    ///   `init_v_limb_{i}_in_u16` lookup query fall outside the u16 range table,
+    ///   so `MockProver` rejects the tampered witness. Without the fix this row
+    ///   would verify and the load path (`UInt::new_unchecked`) would forward the
+    ///   non-canonical word to a register unconstrained.
+    #[test]
+    fn test_hint_init_rejects_non_canonical_limb() {
+        use crate::{
+            instructions::riscv::constants::{LIMB_BITS, UINT_LIMBS},
+            scheme::mock_prover::MockProver,
+        };
+        use ff_ext::FromUniformBytes;
+        use rand::thread_rng;
+
+        let mut cs = ConstraintSystem::<E>::new(|| "riscv");
+        let mut cb = CircuitBuilder::new(&mut cs);
+        let (config, _) =
+            HintsInitCircuit::build_gkr_iop_circuit(&mut cb, &ProgramParams::default()).unwrap();
+        let num_witin = cb.cs.num_witin as usize;
+        let num_structural = cb.cs.num_structural_witin as usize;
+
+        let def_params = ProgramParams::default();
+        let empty_mlt = LkMultiplicity::default().into_finalize_result();
+        let pv = PublicValues {
+            hint_start_addr: CENO_PLATFORM.hints.start,
+            ..Default::default()
+        };
+
+        // Four canonical hint words (power of two => the real rows fill the table
+        // without padding). Both 16-bit limbs of every `init_value` are < 2^16.
+        let n = 4usize;
+        let records = (0..n)
+            .map(|i| MemFinalRecord {
+                ram_type: RAMType::Memory,
+                addr: HintsTable::dynamic_addr(&def_params, i, &pv),
+                cycle: 0,
+                value: 0xabcd_0000 + i as u32,
+                init_value: 0xabcd_0000 + i as u32,
+            })
+            .collect_vec();
+        let input = (&records[..], &pv, n);
+
+        // Concrete challenge so MockProver routes through `run_with_challenge`,
+        // which keeps the structural witnesses; the prefix `selector` gates the
+        // per-row range lookups.
+        let mut rng = thread_rng();
+        let challenge = [E::random(&mut rng), E::random(&mut rng)];
+
+        // Honest witness: all per-limb u16 range lookups are satisfied.
+        let [mut honest_w, mut honest_sw] = HintsInitCircuit::<E>::assign_instances(
+            &config,
+            num_witin,
+            num_structural,
+            &empty_mlt.0,
+            &input,
+        )
+        .unwrap();
+        honest_w.padding_by_strategy();
+        honest_sw.padding_by_strategy();
+        MockProver::<E>::assert_satisfied(
+            &cb,
+            &honest_w
+                .to_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            &honest_sw
+                .to_mles()
+                .into_iter()
+                .map(|v| v.into())
+                .collect_vec(),
+            &[],
+            Some(challenge),
+            None,
+        );
+
+        // Tamper each limb in turn: only the #999 range check can reject it.
+        for bad_limb in 0..UINT_LIMBS {
+            let col = cb
+                .cs
+                .witin_namespace_map
+                .iter()
+                .position(|name| name.contains(&format!("init_v_limb_{bad_limb}")))
+                .unwrap_or_else(|| panic!("missing init_v_limb_{bad_limb} column"));
+
+            let [mut bad_w, mut bad_sw] = HintsInitCircuit::<E>::assign_instances(
+                &config,
+                num_witin,
+                num_structural,
+                &empty_mlt.0,
+                &input,
+            )
+            .unwrap();
+            // Corrupt the first (real) instance row to a non-canonical limb.
+            bad_w.iter_mut().next().unwrap()[col] = F::from_canonical_u64(1 << LIMB_BITS);
+            bad_w.padding_by_strategy();
+            bad_sw.padding_by_strategy();
+
+            let expected = format!("init_v_limb_{bad_limb}_in_u{LIMB_BITS}");
+            MockProver::<E>::assert_with_expected_errors(
+                &cb,
+                &[],
+                &bad_w.to_mles().into_iter().map(|v| v.into()).collect_vec(),
+                &bad_sw.to_mles().into_iter().map(|v| v.into()).collect_vec(),
+                &[],
+                &[expected.as_str()],
+                Some(challenge),
+                None,
+            );
+        }
     }
 }

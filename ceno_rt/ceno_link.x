@@ -21,11 +21,10 @@ SECTIONS
     *(.rodata .rodata.*);
   } > ROM
 
-
   .stack (NOLOAD) : ALIGN(4)
   {
     *(.stack .stack.*)
-  } > STACK_PUBIO
+  } > STACK
 
   /* Define a section for runtime-populated EEPROM-like HINTS data */
   .hints (NOLOAD) : ALIGN(4)
@@ -55,4 +54,5 @@ SECTIONS
     . = ALIGN(0x8000000);
     _sheap = .;
   } > RAM
+
 }

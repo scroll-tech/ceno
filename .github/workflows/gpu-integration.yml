@@ -1,0 +1,164 @@
+name: GPU Integration
+
+# Runs example proving end-to-end on the GPU prover (`--features gpu`) on the
+# self-hosted GPU runner (see ci/gpu-runner/). Triggered manually via the Actions
+# tab, or on a PR that carries the `gpu-ci` label (kept opt-in because GPU runner
+# time is scarce). On push to master it records the keccak proving-time baseline
+# to gh-pages via github-action-benchmark; PRs compare against it and fail on a
+# >10% regression.
+on:
+  workflow_dispatch:
+    inputs:
+      example:
+        description: "Example target to prove on GPU"
+        default: keccak_syscall
+        type: string
+  pull_request:
+    types: [ labeled, synchronize, opened, reopened, ready_for_review ]
+  push:
+    branches:
+      - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  gpu-integration:
+    # Manual dispatch and master pushes run; PRs only run for non-draft, same-repo
+    # branches labeled `gpu-ci`. Fork PRs must not execute on self-hosted runners.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.draft == false &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       contains(github.event.pull_request.labels.*.name, 'gpu-ci'))
+
+    name: GPU integration testing
+    timeout-minutes: 60
+    runs-on: [ self-hosted, Linux, X64, gpu ]
+
+    # contents: write  -> github-action-benchmark pushes history to gh-pages (on master)
+    # pull-requests: write -> it comments on a PR when a regression is detected
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      # Load the read-only deploy key for the private GPU backend into ssh-agent
+      # so the clone below can authenticate. No key is stored on the runner image.
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.CENO_GPU_DEPLOY_KEY }}
+
+      - uses: actions/checkout@v4
+
+      - name: Isolate PR cargo target
+        if: github.event_name == 'pull_request'
+        run: echo "CARGO_TARGET_DIR=${GITHUB_WORKSPACE}/target" >> "$GITHUB_ENV"
+
+      # The real GPU backend lives in the private ceno-gpu repo. Cargo.toml ships
+      # with the [patch] that redirects `ceno_gpu` to ../ceno-gpu/cuda_hal
+      # COMMENTED OUT (it's a local-dev affordance), so by default cargo would
+      # build the public, API-incompatible ceno-gpu-mock. Clone the backend next
+      # to the checkout, then activate the patch.
+      # --recurse-submodules: cuda_hal depends on the `sppark` submodule (public),
+      # whose crate lives at ceno-gpu/sppark/rust; without it cargo fails to find
+      # sppark/rust/Cargo.toml.
+      - name: Clone private ceno-gpu backend
+        run: git clone --recurse-submodules git@github.com:scroll-tech/ceno-gpu.git ../ceno-gpu
+
+      - name: Activate private ceno-gpu patch
+        run: |
+          sed -i \
+            -e 's|^#\(\[patch\."https://github\.com/scroll-tech/ceno-gpu-mock\.git"\]\)|\1|' \
+            -e 's|^#\(ceno_gpu = { path = "\.\./ceno-gpu/cuda_hal"\)|\1|' \
+            Cargo.toml
+          echo "---- ceno-gpu [patch] block after edit ----"
+          grep -nA1 'patch\."https://github.com/scroll-tech/ceno-gpu-mock.git"' Cargo.toml || true
+          # Fail fast if the patch is still commented — otherwise cargo silently
+          # builds the incompatible mock (the failure mode this guards against).
+          if grep -qE '^[[:space:]]*#[[:space:]]*ceno_gpu = \{ path = "\.\./ceno-gpu/cuda_hal"' Cargo.toml; then
+            echo "::error::ceno-gpu patch still commented; refusing to build against ceno-gpu-mock"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install m4
+        run: sudo apt-get install -y m4
+
+      # No actions/cache here: trusted GPU runs persist target/ on a host volume
+      # via CARGO_TARGET_DIR (see ci/gpu-runner/README.md), which is bigger and
+      # faster than GitHub's cache backend for a workspace this size. PR runs
+      # override CARGO_TARGET_DIR to the ephemeral workspace target above.
+
+      # Release-only on purpose: unlike the CPU integration job we do NOT also
+      # run debug-mode steps. Building both profiles compiles the whole workspace
+      # — including the expensive CUDA cuda_hal crate — twice, doubling GPU build
+      # time for little extra coverage.
+      - name: Build e2e (gpu)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: cargo build --release --package ceno_zkvm --features gpu --bin e2e
+
+      # Prove single-shard (functional test) and extract the proving time. The
+      # metric is the `ZKVM_create_proof` span (pure proof generation, excluding
+      # emulation/witgen) emitted by `--profiling 1` as a tracing-forest root:
+      # "ZKVM_create_proof [ <dur> | <pct> / 100.00% ]". Independent of compilation.
+      - name: Prove ${{ inputs.example || 'keccak_syscall' }} on GPU + record proving time
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+        run: |
+          set -o pipefail
+          EXAMPLE="${{ inputs.example || 'keccak_syscall' }}"
+          cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
+            --platform=ceno --profiling 1 \
+            "examples/target/riscv32im-ceno-zkvm-elf/release/examples/$EXAMPLE" 2>&1 | tee e2e_out.txt
+          # `|| true` so a no-match doesn't trip set -e before our clear error.
+          line="$(grep -F 'ZKVM_create_proof [' e2e_out.txt | head -1 || true)"
+          if [ -z "$line" ]; then echo "::error::ZKVM_create_proof span not found (did the proof run with --profiling 1?)"; exit 1; fi
+          secs="$(echo "$line" \
+            | sed -E 's/.*ZKVM_create_proof \[ *([0-9.]+)(ns|µs|us|ms|m|s).*/\1 \2/' \
+            | awk '{u=$2;v=$1; if(u=="ns")v/=1e9; else if(u=="µs"||u=="us")v/=1e6; else if(u=="ms")v/=1e3; else if(u=="m")v*=60; printf "%.3f", v}')"
+          echo "proving time: ${secs}s (from: $line)"
+          printf '[{"name":"%s proving time","unit":"s","value":%s}]\n' "$EXAMPLE" "$secs" > bench.json
+          cat bench.json
+
+      # RUST_LOG=info: the e2e binary defaults to DEBUG when RUST_LOG is unset
+      # (see ceno_zkvm/src/bin/e2e.rs), which floods the CI log.
+      - name: Run multi-shards ${{ inputs.example || 'keccak_syscall' }} on GPU (release)
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+          RUST_LOG: info
+        run: |
+          cargo run --release --package ceno_zkvm --features gpu --bin e2e -- \
+            --platform=ceno \
+            --max-cycle-per-shard=1600 \
+            examples/target/riscv32im-ceno-zkvm-elf/release/examples/${{ inputs.example || 'keccak_syscall' }}
+
+      # The benchmark action does `git switch gh-pages` in this working tree, which
+      # fails while the "Activate patch" step's edits to Cargo.toml/Cargo.lock are
+      # uncommitted. All proving steps are done, so restore the manifest to clean
+      # the tree (bench.json is untracked and survives the switch).
+      - name: Restore Cargo manifest before benchmark step
+        run: git checkout -- Cargo.toml Cargo.lock
+
+      # Store history on gh-pages (master push only) and fail the job if proving
+      # time is >10% slower than the latest recorded baseline.
+      # Pinned to v1.20.7: it's the last release on the node20 runtime. v1.21.0+
+      # require node24, which the runner image (actions runner v2.321.0) doesn't
+      # support yet — bump RUNNER_VERSION to a node24-capable runner to unpin.
+      - name: Guard proving-time regression (>10%)
+        uses: benchmark-action/github-action-benchmark@v1.20.7
+        with:
+          name: GPU proving time
+          tool: customSmallerIsBetter
+          output-file-path: bench.json
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          alert-threshold: "110%"
+          fail-on-alert: true
+          comment-on-alert: true
+          auto-push: ${{ github.event_name == 'push' }}
+          save-data-file: ${{ github.event_name == 'push' }}

@@ -14,10 +14,10 @@ use p3::field::{Field, FieldAlgebra};
 use witness::set_val;
 
 pub struct MemWordUtil<E: ExtensionField, const N_ZEROS: usize> {
-    prev_limb_bytes: Vec<WitIn>,
-    rs2_limb_bytes: Vec<WitIn>,
+    pub(crate) prev_limb_bytes: Vec<WitIn>,
+    pub(crate) rs2_limb_bytes: Vec<WitIn>,
 
-    expected_limb: Option<WitIn>,
+    pub(crate) expected_limb: Option<WitIn>,
     expect_limbs_expr: [Expression<E>; 2],
 }
 
@@ -138,7 +138,7 @@ impl<E: ExtensionField, const N_ZEROS: usize> MemWordUtil<E, N_ZEROS> {
         step: &StepRecord,
         shift: u32,
     ) -> Result<(), ZKVMError> {
-        let memory_op = step.memory_op().clone().unwrap();
+        let memory_op = step.memory_op().unwrap();
         let prev_value = Value::new_unchecked(memory_op.value.before);
         let rs2_value = Value::new_unchecked(step.rs2().unwrap().value);
 

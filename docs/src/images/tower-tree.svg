@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 470" font-family="'Helvetica Neue', Arial, sans-serif">
+  <defs>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#e74c3c"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="820" height="470" fill="#fafafa" rx="8"/>
+
+  <!-- Title -->
+  <text x="330" y="30" font-size="16" font-weight="bold" fill="#2c3e50">Tower Tree (Height = 3)</text>
+
+  <!-- Layer labels on the left -->
+  <text x="18" y="88" font-size="12" fill="#7f8c8d" font-style="italic">Layer 1</text>
+  <text x="18" y="108" font-size="10" fill="#95a5a6">s₁ = 1</text>
+  <text x="18" y="198" font-size="12" fill="#7f8c8d" font-style="italic">Layer 2</text>
+  <text x="18" y="218" font-size="10" fill="#95a5a6">s₂ = 2</text>
+  <text x="18" y="318" font-size="12" fill="#7f8c8d" font-style="italic">Layer 3</text>
+  <text x="18" y="338" font-size="10" fill="#95a5a6">(inputs)</text>
+
+  <!-- Edges: Layer 3 -> Layer 2 -->
+  <line x1="195" y1="300" x2="245" y2="210" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="255" y1="300" x2="245" y2="210" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="315" y1="300" x2="355" y2="210" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="375" y1="300" x2="355" y2="210" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="435" y1="300" x2="465" y2="210" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="495" y1="300" x2="465" y2="210" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="555" y1="300" x2="575" y2="210" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="615" y1="300" x2="575" y2="210" stroke="#bdc3c7" stroke-width="1.5"/>
+
+  <!-- Edges: Layer 2 -> Layer 1 -->
+  <line x1="245" y1="180" x2="300" y2="100" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="355" y1="180" x2="300" y2="100" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="465" y1="180" x2="510" y2="100" stroke="#bdc3c7" stroke-width="1.5"/>
+  <line x1="575" y1="180" x2="510" y2="100" stroke="#bdc3c7" stroke-width="1.5"/>
+
+  <!-- Layer 1: 2 nodes (output) -->
+  <circle cx="300" cy="90" r="22" fill="#e67e22" stroke="#d35400" stroke-width="2"/>
+  <text x="300" y="86" text-anchor="middle" font-size="9" fill="white">×</text>
+  <text x="300" y="99" text-anchor="middle" font-size="7" fill="white">b₀</text>
+
+  <circle cx="510" cy="90" r="22" fill="#e67e22" stroke="#d35400" stroke-width="2"/>
+  <text x="510" y="86" text-anchor="middle" font-size="9" fill="white">×</text>
+  <text x="510" y="99" text-anchor="middle" font-size="7" fill="white">b₁</text>
+
+  <!-- Output label -->
+  <text x="405" y="56" text-anchor="middle" font-size="10" fill="#2c3e50">output: (b₀, b₁) = (a₀···a₃, a₄···a₇)</text>
+
+  <!-- Layer 2: 4 nodes -->
+  <circle cx="245" cy="200" r="22" fill="#f39c12" stroke="#e67e22" stroke-width="2"/>
+  <text x="245" y="196" text-anchor="middle" font-size="9" fill="white">×</text>
+  <text x="245" y="209" text-anchor="middle" font-size="7" fill="white">a₀·a₁</text>
+
+  <circle cx="355" cy="200" r="22" fill="#f39c12" stroke="#e67e22" stroke-width="2"/>
+  <text x="355" y="196" text-anchor="middle" font-size="9" fill="white">×</text>
+  <text x="355" y="209" text-anchor="middle" font-size="7" fill="white">a₂·a₃</text>
+
+  <circle cx="465" cy="200" r="22" fill="#f39c12" stroke="#e67e22" stroke-width="2"/>
+  <text x="465" y="196" text-anchor="middle" font-size="9" fill="white">×</text>
+  <text x="465" y="209" text-anchor="middle" font-size="7" fill="white">a₄·a₅</text>
+
+  <circle cx="575" cy="200" r="22" fill="#f39c12" stroke="#e67e22" stroke-width="2"/>
+  <text x="575" y="196" text-anchor="middle" font-size="9" fill="white">×</text>
+  <text x="575" y="209" text-anchor="middle" font-size="7" fill="white">a₆·a₇</text>
+
+  <!-- Layer 3: 8 input nodes -->
+  <rect x="175" y="300" width="40" height="28" rx="6" fill="#3498db" stroke="#2980b9" stroke-width="1.5"/>
+  <text x="195" y="318" text-anchor="middle" font-size="11" fill="white">a₀</text>
+
+  <rect x="235" y="300" width="40" height="28" rx="6" fill="#3498db" stroke="#2980b9" stroke-width="1.5"/>
+  <text x="255" y="318" text-anchor="middle" font-size="11" fill="white">a₁</text>
+
+  <rect x="295" y="300" width="40" height="28" rx="6" fill="#3498db" stroke="#2980b9" stroke-width="1.5"/>
+  <text x="315" y="318" text-anchor="middle" font-size="11" fill="white">a₂</text>
+
+  <rect x="355" y="300" width="40" height="28" rx="6" fill="#3498db" stroke="#2980b9" stroke-width="1.5"/>
+  <text x="375" y="318" text-anchor="middle" font-size="11" fill="white">a₃</text>
+
+  <rect x="415" y="300" width="40" height="28" rx="6" fill="#3498db" stroke="#2980b9" stroke-width="1.5"/>
+  <text x="435" y="318" text-anchor="middle" font-size="11" fill="white">a₄</text>
+
+  <rect x="475" y="300" width="40" height="28" rx="6" fill="#3498db" stroke="#2980b9" stroke-width="1.5"/>
+  <text x="495" y="318" text-anchor="middle" font-size="11" fill="white">a₅</text>
+
+  <rect x="535" y="300" width="40" height="28" rx="6" fill="#3498db" stroke="#2980b9" stroke-width="1.5"/>
+  <text x="555" y="318" text-anchor="middle" font-size="11" fill="white">a₆</text>
+
+  <rect x="595" y="300" width="40" height="28" rx="6" fill="#3498db" stroke="#2980b9" stroke-width="1.5"/>
+  <text x="615" y="318" text-anchor="middle" font-size="11" fill="white">a₇</text>
+
+  <!-- GKR protocol arrows on the right -->
+  <text x="700" y="60" font-size="13" font-weight="bold" fill="#2c3e50">GKR Flow</text>
+
+  <!-- Arrow: layer 1 sumcheck -->
+  <line x1="710" y1="90" x2="710" y2="180" stroke="#e74c3c" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="720" y="140" font-size="9" fill="#e74c3c">layer 1 sumcheck</text>
+
+  <!-- Arrow: layer 2 sumcheck -->
+  <line x1="710" y1="200" x2="710" y2="290" stroke="#e74c3c" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="720" y="250" font-size="9" fill="#e74c3c">layer 2 sumcheck</text>
+
+  <!-- GKR claim labels -->
+  <text x="660" y="90" font-size="9" fill="#7f8c8d" text-anchor="end">claim: Ṽ₁(w)</text>
+  <text x="660" y="200" font-size="9" fill="#7f8c8d" text-anchor="end">claim: Ṽ₂(w')</text>
+
+  <!-- Emphasized final reduction: verify a(z) = v -->
+  <rect x="140" y="348" width="530" height="30" rx="6" fill="#27ae60" fill-opacity="0.12" stroke="#27ae60" stroke-width="2" stroke-dasharray="6,3"/>
+  <text x="405" y="368" text-anchor="middle" font-size="12" font-weight="bold" fill="#27ae60">reduces to verifying a single opening:  a(z) = v    where a(x) has 3 variables</text>
+
+  <!-- Arrow from layer 3 nodes down to the green box -->
+  <line x1="660" y1="300" x2="660" y2="348" stroke="#27ae60" stroke-width="2"/>
+  <polygon points="656,345 660,354 664,345" fill="#27ae60"/>
+  <text x="660" y="314" font-size="9" fill="#27ae60" text-anchor="end">claim: a(z) = v</text>
+
+  <!-- Gate label legend -->
+  <text x="195" y="405" font-size="10" fill="#7f8c8d">Each gate computes: V(p) = Ṽ(p,0) · Ṽ(p,1) — product of its two children</text>
+
+  <!-- Sumcheck equation box -->
+  <rect x="110" y="418" width="600" height="38" rx="4" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="1"/>
+  <text x="410" y="434" text-anchor="middle" font-size="11" font-weight="bold" fill="#2c3e50">Sumcheck reduction at each layer:</text>
+  <text x="410" y="450" text-anchor="middle" font-size="11" fill="#2c3e50">Ṽᵢ(w) = Σ_b  eq(w, b) · Ṽᵢ₊₁(b, 0) · Ṽᵢ₊₁(b, 1)    (degree 3 → 4 field elements / round)</text>
+</svg>

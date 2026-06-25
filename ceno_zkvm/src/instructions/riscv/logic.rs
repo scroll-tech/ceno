@@ -1,4 +1,4 @@
-mod logic_circuit;
+pub(crate) mod logic_circuit;
 use gkr_iop::tables::ops::{AndTable, OrTable, XorTable};
 use logic_circuit::{LogicInstruction, LogicOp};
 

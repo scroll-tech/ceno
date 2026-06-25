@@ -14,7 +14,7 @@ use crate::{
     error::ZKVMError,
     scheme::{
         ZKVMChipProof,
-        hal::{MainSumcheckEvals, ProofInput},
+        hal::{MainConstraintJob, MainSumcheckEvals, ProofInput},
     },
     structs::ProvingKey,
 };
@@ -59,12 +59,17 @@ pub struct ChipTask<'a, PB: ProverBackend> {
     pub input: ProofInput<'static, PB>,
     /// Estimated GPU memory requirement in bytes
     pub estimated_memory_bytes: u64,
+    /// Scheduler-only booked GPU memory in bytes (may include extra concurrency margin)
+    pub booked_memory_bytes: u64,
     /// Whether this circuit has witness or fixed polynomials
     pub has_witness_or_fixed: bool,
     /// Challenges for this proof
     pub challenges: [PB::E; 2],
     /// Deferred witness extraction: trace index in pcs_data (None if num_witin == 0)
     pub witness_trace_idx: Option<usize>,
+    /// Actual witness trace rows used for cache-none extraction estimates.
+    #[cfg(feature = "gpu")]
+    pub witness_trace_rows: Option<usize>,
     /// Expected number of witness polynomials for this circuit
     pub num_witin: usize,
     /// CPU-side structural witness RowMajorMatrix, transported to GPU on-demand
@@ -72,32 +77,34 @@ pub struct ChipTask<'a, PB: ProverBackend> {
 }
 
 /// Result from a completed chip proof task
-pub struct ChipTaskResult<E: ExtensionField> {
+pub struct ChipTaskResult<'a, PB: ProverBackend> {
     /// Task ID for ordering
     pub task_id: usize,
     /// Circuit index for proof collection
     pub circuit_idx: usize,
     /// The generated proof
-    pub proof: ZKVMChipProof<E>,
+    pub proof: ZKVMChipProof<PB::E>,
     /// Prover-only opening evaluations split by witness/fixed/pi domains.
-    pub opening_evals: MainSumcheckEvals<E>,
+    pub opening_evals: MainSumcheckEvals<PB::E>,
     /// Opening point for this proof
-    pub input_opening_point: Point<E>,
+    pub input_opening_point: Point<PB::E>,
+    /// Deferred main-constraint proving job.
+    pub main_constraint_job: Option<MainConstraintJob<'a, PB>>,
     /// Whether this circuit has witness or fixed polynomials
     pub has_witness_or_fixed: bool,
 }
 
 /// Message sent from worker to scheduler on task completion
 #[cfg(feature = "gpu")]
-struct CompletionMessage<E: ExtensionField> {
+struct CompletionMessage<'a, PB: ProverBackend> {
     /// The result of the proof
-    result: Result<ChipTaskResult<E>, ZKVMError>,
+    result: Result<ChipTaskResult<'a, PB>, ZKVMError>,
     /// Memory that was reserved for this task (to release)
     memory_reserved: u64,
     /// Task ID for ordering
     task_id: usize,
     /// Sampled value from the forked transcript (for gather phase)
-    forked_sample: E,
+    forked_sample: PB::E,
 }
 
 /// Memory-aware parallel chip proof scheduler
@@ -124,12 +131,12 @@ impl ChipScheduler {
         tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
         execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError> + Send + Sync,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError> + Send + Sync,
     {
         #[cfg(feature = "gpu")]
         {
@@ -160,12 +167,12 @@ impl ChipScheduler {
         tasks: Vec<ChipTask<'a, PB>>,
         parent_transcript: &T,
         execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError>,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError>,
     {
         if tasks.is_empty() {
             return Ok((vec![], vec![]));
@@ -220,12 +227,12 @@ impl ChipScheduler {
         mut tasks: Vec<ChipTask<'a, PB>>,
         transcript: &T,
         execute_task: F,
-    ) -> Result<(Vec<ChipTaskResult<PB::E>>, Vec<PB::E>), ZKVMError>
+    ) -> Result<(Vec<ChipTaskResult<'a, PB>>, Vec<PB::E>), ZKVMError>
     where
         PB: ProverBackend + 'static,
         PB::E: Send + 'static,
         T: Transcript<PB::E> + Clone,
-        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<PB::E>, ZKVMError> + Send + Sync,
+        F: Fn(ChipTask<'a, PB>, &mut T) -> Result<ChipTaskResult<'a, PB>, ZKVMError> + Send + Sync,
     {
         if tasks.is_empty() {
             return Ok((vec![], vec![]));
@@ -275,15 +282,15 @@ impl ChipScheduler {
         //    Worker -> Scheduler: CompletionMessage (includes sampled value)
         let (task_tx, task_rx) = mpsc::channel::<ChipTask<'a, PB>>();
         let task_rx = Arc::new(Mutex::new(task_rx));
-        let (done_tx, done_rx) = mpsc::channel::<CompletionMessage<PB::E>>();
+        let (done_tx, done_rx) = mpsc::channel::<CompletionMessage<'a, PB>>();
 
         // 3. State tracking
         let mut tasks_inflight = 0usize;
-        let mut results: Vec<ChipTaskResult<PB::E>> = Vec::with_capacity(total_tasks);
+        let mut results: Vec<ChipTaskResult<'a, PB>> = Vec::with_capacity(total_tasks);
         let mut samples: Vec<(usize, PB::E)> = Vec::with_capacity(total_tasks);
 
         // Helper to handle a completion message
-        let mut handle_completion = |msg: CompletionMessage<PB::E>,
+        let mut handle_completion = |msg: CompletionMessage<'a, PB>,
                                      mem_pool: &ceno_gpu::common::mem_pool::CudaMemPool,
                                      tasks_inflight: &mut usize,
                                      label: &str|
@@ -297,6 +304,11 @@ impl ChipScheduler {
                 mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                 *tasks_inflight
             );
+            crate::scheme::gpu::log_gpu_device_state(&format!(
+                "task_done{}:{}",
+                label.replace(' ', ""),
+                msg.task_id
+            ));
             samples.push((msg.task_id, msg.forked_sample));
             match msg.result {
                 Ok(r) => {
@@ -331,7 +343,19 @@ impl ChipScheduler {
                             }
                         };
                         let memory = task.estimated_memory_bytes;
+                        let booked_memory = task.booked_memory_bytes;
                         let task_id = task.task_id;
+                        let circuit_name = task.circuit_name.clone();
+                        tracing::info!(
+                            "[scheduler] worker starting task {} ({}), estimated={:.2}MB",
+                            task_id,
+                            circuit_name,
+                            memory as f64 / (1024.0 * 1024.0)
+                        );
+                        crate::scheme::gpu::log_gpu_device_state(&format!(
+                            "task_start:{}:{}",
+                            task_id, circuit_name
+                        ));
 
                         // Catch panics so a single worker crash doesn't deadlock
                         // the scheduler (which would block forever on done_rx.recv()
@@ -352,11 +376,15 @@ impl ChipScheduler {
                             Ok((r, s)) => (r, s),
                             Err(panic_info) => {
                                 let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                                    format!("Worker panicked on task {task_id}: {s}")
+                                    format!(
+                                        "Worker panicked on task {task_id} ({circuit_name}): {s}"
+                                    )
                                 } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                                    format!("Worker panicked on task {task_id}: {s}")
+                                    format!(
+                                        "Worker panicked on task {task_id} ({circuit_name}): {s}"
+                                    )
                                 } else {
-                                    format!("Worker panicked on task {task_id}")
+                                    format!("Worker panicked on task {task_id} ({circuit_name})")
                                 };
                                 tracing::error!("{}", msg);
                                 (
@@ -370,7 +398,7 @@ impl ChipScheduler {
 
                         let _ = tx.send(CompletionMessage {
                             result,
-                            memory_reserved: memory,
+                            memory_reserved: booked_memory,
                             task_id,
                             forked_sample,
                         });
@@ -397,18 +425,24 @@ impl ChipScheduler {
                 if tasks_inflight < stream_pool_size
                     && let Some(vec_idx) = pending.iter().position(|task| {
                         mem_pool
-                            .try_book_capacity(task.estimated_memory_bytes)
+                            .try_book_capacity(task.booked_memory_bytes)
                             .is_some()
                     })
                 {
                     let task = pending.remove(vec_idx);
-                    let booked_mem = task.estimated_memory_bytes;
+                    let booked_mem = task.booked_memory_bytes;
                     tracing::info!(
-                        "[scheduler] Launching circuit={}, estimated_mem={:.2}MB, pool_booked={:.2}MB",
+                        "[scheduler] Launching task_id={}, circuit={}, estimated_mem={:.2}MB, booked_mem={:.2}MB, pool_booked={:.2}MB",
+                        task.task_id,
                         task.circuit_name,
+                        task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
                         booked_mem as f64 / (1024.0 * 1024.0),
                         mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0)
                     );
+                    crate::scheme::gpu::log_gpu_device_state(&format!(
+                        "launch:{}:{}",
+                        task.task_id, task.circuit_name
+                    ));
                     tasks_inflight += 1;
                     if task_tx.send(task).is_err() {
                         mem_pool.unbook_capacity(booked_mem);
@@ -425,6 +459,14 @@ impl ChipScheduler {
 
                 // No task launched: either nothing fits (so wait) or we are deadlocked.
                 if tasks_inflight == 0 {
+                    // Not a deadlock — the non-blocking try_recv above may have
+                    // drained the final completion in the same iteration that
+                    // the outer `while` condition still held. With `pending`
+                    // empty and `tasks_inflight` now 0 we're simply done; let
+                    // the outer condition re-check and exit cleanly.
+                    if pending.is_empty() {
+                        continue;
+                    }
                     tracing::error!(
                         "Deadlock: {} remaining tasks are too big for the memory pool \
                          (pool_booked={:.2}MB):",
@@ -433,17 +475,39 @@ impl ChipScheduler {
                     );
                     for (i, task) in pending.iter().enumerate() {
                         tracing::error!(
-                            "  task[{}]: id={}, circuit={}, estimated_mem={:.2}MB",
+                            "  task[{}]: id={}, circuit={}, estimated_mem={:.2}MB, booked_mem={:.2}MB",
                             i,
                             task.task_id,
                             task.circuit_name,
                             task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                            task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
                         );
                     }
+                    let max_size = mem_pool.get_max_size();
+                    let booked_total = mem_pool.get_booked_total();
+                    let available = max_size.saturating_sub(booked_total);
+                    let pending_summary = pending
+                        .iter()
+                        .map(|task| {
+                            format!(
+                                "id={} circuit={} estimated={:.2}MB booked={:.2}MB",
+                                task.task_id,
+                                task.circuit_name,
+                                task.estimated_memory_bytes as f64 / (1024.0 * 1024.0),
+                                task.booked_memory_bytes as f64 / (1024.0 * 1024.0),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("; ");
                     return Err(ZKVMError::BackendError(BackendError::CircuitError(
-                        "Deadlock: Remaining tasks are too big for the memory pool!"
-                            .to_string()
-                            .into_boxed_str(),
+                        format!(
+                            "Deadlock: Remaining tasks are too big for the memory pool: available={:.2}MB, max={:.2}MB, booked={:.2}MB, pending=[{}]",
+                            available as f64 / (1024.0 * 1024.0),
+                            max_size as f64 / (1024.0 * 1024.0),
+                            booked_total as f64 / (1024.0 * 1024.0),
+                            pending_summary,
+                        )
+                        .into_boxed_str(),
                     )));
                 }
 
@@ -452,6 +516,7 @@ impl ChipScheduler {
                     mem_pool.get_booked_total() as f64 / (1024.0 * 1024.0),
                     tasks_inflight
                 );
+                crate::scheme::gpu::log_gpu_device_state("pool_full_wait");
 
                 // Second call site blocks instead of busy-waiting when the pool is full; this
                 // waits for the next completion to free memory before trying to launch again.
@@ -481,6 +546,8 @@ impl ChipScheduler {
             Ok(())
         });
 
+        let scope_result = scope_result;
+        mem_pool.reset_booking();
         scope_result?;
 
         // 6. Sort by task_id to restore original order

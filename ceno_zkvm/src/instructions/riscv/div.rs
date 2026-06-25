@@ -3,7 +3,7 @@ use ceno_emul::InsnKind;
 #[cfg(not(feature = "u16limb_circuit"))]
 mod div_circuit;
 #[cfg(feature = "u16limb_circuit")]
-mod div_circuit_v2;
+pub(crate) mod div_circuit_v2;
 
 use super::RIVInstruction;
 

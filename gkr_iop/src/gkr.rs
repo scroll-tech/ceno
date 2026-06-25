@@ -25,7 +25,6 @@ pub struct GKRCircuit<E: ExtensionField> {
     pub layers: Vec<Layer<E>>,
     pub final_out_evals: Vec<usize>,
 
-    pub n_challenges: usize,
     pub n_evaluations: usize,
 }
 
@@ -84,7 +83,6 @@ impl<E: ExtensionField> GKRCircuit<E> {
         let mut running_evals = out_evals.to_vec();
         // running evals is a global referable within chip
         running_evals.resize(self.n_evaluations, PointAndEval::default());
-        let mut challenges = challenges.to_vec();
         let span = entered_span!("layer_proof", profiling_2 = true);
         let (sumcheck_proofs, rt): (Vec<_>, Vec<_>) = izip!(&self.layers, circuit_wit.layers)
             .enumerate()
@@ -97,7 +95,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                     layer_wit,
                     &mut running_evals,
                     pub_io_evals,
-                    &mut challenges,
+                    challenges,
                     transcript,
                     selector_ctxs,
                 );
@@ -132,7 +130,6 @@ impl<E: ExtensionField> GKRCircuit<E> {
     {
         let GKRProof(sumcheck_proofs) = gkr_proof;
 
-        let mut challenges = challenges.to_vec();
         let mut evaluations = out_evals.to_vec();
         evaluations.resize(self.n_evaluations, PointAndEval::default());
         let rt = izip!(&self.layers, sumcheck_proofs).enumerate().try_fold(
@@ -144,7 +141,7 @@ impl<E: ExtensionField> GKRCircuit<E> {
                     layer_proof,
                     &mut evaluations,
                     pub_io_evals,
-                    &mut challenges,
+                    challenges,
                     transcript,
                     selector_ctxs,
                 )?;

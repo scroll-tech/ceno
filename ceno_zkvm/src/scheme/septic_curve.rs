@@ -1171,4 +1171,311 @@ mod tests {
         assert!(j4.is_on_curve());
         assert_eq!(j4.into_affine(), p4);
     }
+
+    /// GPU vs CPU EC point computation test.
+    /// Launches the `test_septic_ec_point` CUDA kernel with known inputs,
+    /// then compares GPU outputs against CPU `ShardRamRecord::to_ec_point()`.
+    #[test]
+    #[cfg(feature = "gpu")]
+    fn test_gpu_ec_point_matches_cpu() {
+        use crate::tables::{ECPoint, ShardRamRecord};
+        use ceno_gpu::bb31::{
+            CudaHalBB31,
+            test_impl::{TestEcInput, run_gpu_ec_test},
+        };
+        use ff_ext::{PoseidonField, SmallField};
+        use gkr_iop::RAMType;
+
+        let hal = CudaHalBB31::new(0).unwrap();
+        let perm = F::get_default_perm();
+
+        // Test cases: various write/read, register/memory, edge cases
+        let test_inputs = vec![
+            TestEcInput {
+                addr: 5,
+                ram_type: 1,
+                value: 0x12345678,
+                is_write: 1,
+                shard: 1,
+                global_clk: 100,
+            },
+            TestEcInput {
+                addr: 5,
+                ram_type: 1,
+                value: 0x12345678,
+                is_write: 0,
+                shard: 0,
+                global_clk: 50,
+            },
+            TestEcInput {
+                addr: 0x80000,
+                ram_type: 2,
+                value: 0xDEADBEEF,
+                is_write: 1,
+                shard: 2,
+                global_clk: 200,
+            },
+            TestEcInput {
+                addr: 0x80000,
+                ram_type: 2,
+                value: 0xDEADBEEF,
+                is_write: 0,
+                shard: 1,
+                global_clk: 150,
+            },
+            TestEcInput {
+                addr: 0,
+                ram_type: 1,
+                value: 0,
+                is_write: 1,
+                shard: 0,
+                global_clk: 1,
+            },
+            TestEcInput {
+                addr: 31,
+                ram_type: 1,
+                value: 0xFFFFFFFF,
+                is_write: 0,
+                shard: 3,
+                global_clk: 999,
+            },
+            TestEcInput {
+                addr: 0x40000000,
+                ram_type: 2,
+                value: 42,
+                is_write: 1,
+                shard: 5,
+                global_clk: 500000,
+            },
+            TestEcInput {
+                addr: 10,
+                ram_type: 1,
+                value: 1,
+                is_write: 0,
+                shard: 100,
+                global_clk: 1000000,
+            },
+        ];
+
+        let gpu_results = run_gpu_ec_test(&hal, &test_inputs);
+
+        let mut mismatches = 0;
+        for (i, (input, gpu_rec)) in test_inputs.iter().zip(gpu_results.iter()).enumerate() {
+            // Build CPU ShardRamRecord and compute EC point.
+            // GPU kernel treats slot.addr as word address and converts to byte address
+            // via `<< 2` for Memory type; Register type uses reg_id directly.
+            let addr = if input.ram_type == 2 {
+                input.addr << 2
+            } else {
+                input.addr
+            };
+            let cpu_record = ShardRamRecord {
+                addr,
+                ram_type: if input.ram_type == 1 {
+                    RAMType::Register
+                } else {
+                    RAMType::Memory
+                },
+                value: input.value,
+                shard: input.shard,
+                local_clk: if input.is_write != 0 {
+                    input.global_clk
+                } else {
+                    0
+                },
+                global_clk: input.global_clk,
+                is_to_write_set: input.is_write != 0,
+            };
+            let cpu_ec: ECPoint<ff_ext::BabyBearExt4> = cpu_record.to_ec_point(&perm);
+
+            let mut has_diff = false;
+
+            if gpu_rec.nonce != cpu_ec.nonce {
+                eprintln!("[{i}] nonce: gpu={} cpu={}", gpu_rec.nonce, cpu_ec.nonce);
+                has_diff = true;
+            }
+
+            for j in 0..7 {
+                let gpu_x = gpu_rec.point_x[j];
+                let cpu_x = cpu_ec.point.x.0[j].to_canonical_u64() as u32;
+                if gpu_x != cpu_x {
+                    eprintln!("[{i}] x[{j}]: gpu={gpu_x} cpu={cpu_x}");
+                    has_diff = true;
+                }
+                let gpu_y = gpu_rec.point_y[j];
+                let cpu_y = cpu_ec.point.y.0[j].to_canonical_u64() as u32;
+                if gpu_y != cpu_y {
+                    eprintln!("[{i}] y[{j}]: gpu={gpu_y} cpu={cpu_y}");
+                    has_diff = true;
+                }
+            }
+
+            if has_diff {
+                eprintln!(
+                    "MISMATCH [{i}]: addr={} ram_type={} value={:#x} is_write={} shard={} clk={}",
+                    input.addr,
+                    input.ram_type,
+                    input.value,
+                    input.is_write,
+                    input.shard,
+                    input.global_clk
+                );
+                mismatches += 1;
+            }
+        }
+
+        assert_eq!(
+            mismatches,
+            0,
+            "{mismatches}/{} test cases had GPU/CPU EC point mismatches",
+            test_inputs.len()
+        );
+        eprintln!(
+            "All {} GPU EC point test cases match CPU!",
+            test_inputs.len()
+        );
+    }
+
+    /// Verify GPU Poseidon2 permutation matches CPU on the exact sponge packing
+    /// used by to_ec_point(). This isolates Montgomery encoding correctness.
+    #[test]
+    #[cfg(feature = "gpu")]
+    fn test_gpu_poseidon2_sponge_matches_cpu() {
+        use ceno_gpu::bb31::{
+            CudaHalBB31,
+            test_impl::{SPONGE_WIDTH, run_gpu_poseidon2_sponge},
+        };
+        use ff_ext::{PoseidonField, SmallField};
+        use p3::{field::FieldAlgebra, symmetric::Permutation};
+
+        let hal = CudaHalBB31::new(0).unwrap();
+        let perm = F::get_default_perm();
+
+        // Build sponge inputs matching to_ec_point packing:
+        // [addr, ram_type, value_lo16, value_hi16, shard, global_clk, nonce, 0..0]
+        let test_cases: Vec<[u32; SPONGE_WIDTH]> = vec![
+            // Case 1: typical write record
+            {
+                let mut s = [0u32; SPONGE_WIDTH];
+                s[0] = 5; // addr
+                s[1] = 1; // ram_type (Register)
+                s[2] = 0x5678; // value lo16
+                s[3] = 0x1234; // value hi16
+                s[4] = 1; // shard
+                s[5] = 100; // global_clk
+                s[6] = 0; // nonce
+                s
+            },
+            // Case 2: memory read, different values
+            {
+                let mut s = [0u32; SPONGE_WIDTH];
+                s[0] = 0x80000;
+                s[1] = 2; // Memory
+                s[2] = 0xBEEF;
+                s[3] = 0xDEAD;
+                s[4] = 2;
+                s[5] = 200;
+                s[6] = 3; // nonce=3
+                s
+            },
+            // Case 3: all zeros (edge case)
+            [0u32; SPONGE_WIDTH],
+        ];
+
+        let count = test_cases.len();
+        let flat_input: Vec<u32> = test_cases.iter().flat_map(|s| s.iter().copied()).collect();
+        let gpu_output = run_gpu_poseidon2_sponge(&hal, &flat_input, count);
+
+        let mut mismatches = 0;
+        for (i, input) in test_cases.iter().enumerate() {
+            // CPU Poseidon2
+            let cpu_input: Vec<F> = input.iter().map(|&v| F::from_canonical_u32(v)).collect();
+            let cpu_output = perm.permute(cpu_input);
+
+            for j in 0..SPONGE_WIDTH {
+                let gpu_v = gpu_output[i * SPONGE_WIDTH + j];
+                let cpu_v = cpu_output[j].to_canonical_u64() as u32;
+                if gpu_v != cpu_v {
+                    eprintln!("[case {i}] sponge[{j}]: gpu={gpu_v} cpu={cpu_v}");
+                    mismatches += 1;
+                }
+            }
+        }
+
+        assert_eq!(
+            mismatches, 0,
+            "{mismatches} Poseidon2 output elements differ between GPU and CPU"
+        );
+        eprintln!("All {} Poseidon2 sponge test cases match!", count);
+    }
+
+    /// Verify GPU septic_point_from_x matches CPU SepticPoint::from_x.
+    /// Tests the full GF(p^7) sqrt (Cipolla) + curve equation.
+    #[test]
+    #[cfg(feature = "gpu")]
+    fn test_gpu_septic_from_x_matches_cpu() {
+        use ceno_gpu::bb31::{CudaHalBB31, test_impl::run_gpu_septic_from_x};
+        use ff_ext::SmallField;
+        use p3::field::FieldAlgebra;
+
+        let hal = CudaHalBB31::new(0).unwrap();
+
+        // Generate test x-coordinates by hashing known inputs
+        // (ensures we get a mix of points-exist and points-don't-exist cases)
+        let test_xs: Vec<[u32; 7]> = vec![
+            // x from Poseidon2([5,1,0x5678,0x1234,1,100,0, 0..]) — known to have a point
+            [
+                1594766074, 868528894, 1733778006, 1242721508, 1690833816, 1437202757, 1753525271,
+            ],
+            // Simple: x = [1,0,0,0,0,0,0]
+            [1, 0, 0, 0, 0, 0, 0],
+            // x = [0,0,0,0,0,0,0] (zero)
+            [0, 0, 0, 0, 0, 0, 0],
+            // x = [42, 17, 999, 0, 0, 0, 0]
+            [42, 17, 999, 0, 0, 0, 0],
+            // Random-ish values
+            [
+                1000000007, 123456789, 987654321, 111111111, 222222222, 333333333, 444444444,
+            ],
+        ];
+
+        let count = test_xs.len();
+        let flat_x: Vec<u32> = test_xs.iter().flat_map(|x| x.iter().copied()).collect();
+        let (gpu_y, gpu_flags) = run_gpu_septic_from_x(&hal, &flat_x, count);
+
+        let mut mismatches = 0;
+        for (i, x_arr) in test_xs.iter().enumerate() {
+            // CPU: SepticPoint::from_x
+            let x = SepticExtension(x_arr.map(|v| F::from_canonical_u32(v)));
+            let cpu_result = SepticPoint::<F>::from_x(x);
+
+            let gpu_found = gpu_flags[i] != 0;
+            let cpu_found = cpu_result.is_some();
+
+            if gpu_found != cpu_found {
+                eprintln!("[{i}] from_x existence: gpu={gpu_found} cpu={cpu_found}");
+                mismatches += 1;
+                continue;
+            }
+
+            if let Some(cpu_pt) = cpu_result {
+                // Compare y coordinates (GPU returns canonical, before any negation)
+                for j in 0..7 {
+                    let gpu_v = gpu_y[i * 7 + j];
+                    let cpu_v = cpu_pt.y.0[j].to_canonical_u64() as u32;
+                    // from_x returns the "natural" sqrt; they should match exactly
+                    if gpu_v != cpu_v {
+                        eprintln!("[{i}] y[{j}]: gpu={gpu_v} cpu={cpu_v}");
+                        mismatches += 1;
+                    }
+                }
+            }
+        }
+
+        assert_eq!(
+            mismatches, 0,
+            "{mismatches} septic_from_x results differ between GPU and CPU"
+        );
+        eprintln!("All {} septic_from_x test cases match!", count);
+    }
 }

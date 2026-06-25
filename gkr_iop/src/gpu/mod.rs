@@ -30,6 +30,7 @@ pub mod gpu_prover {
             basefold::utils::convert_ceno_to_gpu_basefold_commitment,
             buffer::BufferImpl,
             get_ceno_gpu_device_id, get_gpu_cache_level, get_mem_tracking_mode,
+            jagged::GpuJaggedPreprocessed,
             mem_pool::MemTracker,
             mle::{
                 build_mle_as_ceno, ordered_sparse_selector_gpu, rotation_next_base_mle_gpu,
@@ -151,6 +152,9 @@ impl<'a, E: ExtensionField> Clone for MultilinearExtensionGpu<'a, E> {
                 // Since GpuPolynomialExt may not support Clone, we panic for now
                 panic!("Clone not supported for GpuPolynomialExt variant")
             }
+            GpuFieldType::VirtualExt(_) => {
+                panic!("Clone not supported for virtual extension MLE variant")
+            }
             GpuFieldType::Unreachable => Self::default(),
         }
     }
@@ -195,6 +199,9 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu
                 let res: Vec<E> = unsafe { std::mem::transmute(vec![poly.bh_signature()]) };
                 res[0]
             }
+            GpuFieldType::VirtualExt(_) => {
+                panic!("virtual extension MLE cannot be materialized through GKR bh_signature")
+            }
             GpuFieldType::Unreachable => unreachable!(),
         }
     }
@@ -210,6 +217,9 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         match &self.mle {
             GpuFieldType::Base(_) => panic!("not supported yet"),
             GpuFieldType::Ext(poly) => poly.as_view_chunk(num_fanin),
+            GpuFieldType::VirtualExt(_) => {
+                panic!("virtual extension MLE cannot be split through GKR chunking")
+            }
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         }
     }
@@ -222,7 +232,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                 let cpu_evaluations = poly.to_cpu_vec(stream.as_ref());
                 let cpu_evaluations_base: Vec<E::BaseField> =
                     unsafe { std::mem::transmute(cpu_evaluations) };
-                MultilinearExtension::from_evaluations_vec(
+                MultilinearExtension::from_evaluations_vec_compact(
                     self.mle.num_vars(),
                     cpu_evaluations_base,
                 )
@@ -230,10 +240,13 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
             GpuFieldType::Ext(poly) => {
                 let cpu_evaluations = poly.to_cpu_vec(stream.as_ref());
                 let cpu_evaluations_ext: Vec<E> = unsafe { std::mem::transmute(cpu_evaluations) };
-                MultilinearExtension::from_evaluations_ext_vec(
+                MultilinearExtension::from_evaluations_ext_vec_compact(
                     self.mle.num_vars(),
                     cpu_evaluations_ext,
                 )
+            }
+            GpuFieldType::VirtualExt(_) => {
+                panic!("virtual extension MLE cannot be copied to CPU through GKR")
             }
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         }
@@ -245,7 +258,10 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
     }
 
     /// Create GPU version from CPU version of MultilinearExtension
-    pub fn from_ceno(cuda_hal: &CudaHalBB31, mle: &MultilinearExtension<'a, E>) -> Self {
+    pub fn from_ceno(
+        cuda_hal: &CudaHalBB31,
+        mle: &MultilinearExtension<'a, E>,
+    ) -> MultilinearExtensionGpu<'static, E> {
         let stream = get_thread_stream();
         // check type of mle
         match mle.evaluations {
@@ -259,7 +275,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                     stream.as_ref(),
                 )
                 .unwrap();
-                Self {
+                MultilinearExtensionGpu {
                     mle: GpuFieldType::Base(mle_gpu),
                     _phantom: PhantomData,
                 }
@@ -274,7 +290,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                     stream.as_ref(),
                 )
                 .unwrap();
-                Self {
+                MultilinearExtensionGpu {
                     mle: GpuFieldType::Ext(mle_gpu),
                     _phantom: PhantomData,
                 }
@@ -309,6 +325,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         match &self.mle {
             GpuFieldType::Base(poly) => poly,
             GpuFieldType::Ext(_) => panic!("poly in ext field"),
+            GpuFieldType::VirtualExt(_) => panic!("poly in virtual ext field"),
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         }
     }
@@ -318,6 +335,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         match &self.mle {
             GpuFieldType::Base(_) => panic!("poly in base field"),
             GpuFieldType::Ext(poly) => poly,
+            GpuFieldType::VirtualExt(_) => panic!("poly in virtual ext field"),
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         }
     }
@@ -354,19 +372,44 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> GpuBackend<E, PCS> {
 
 pub type ArcMultilinearExtensionGpu<'a, E> = Arc<MultilinearExtensionGpu<'a, E>>;
 
+pub type GpuBasefoldPcsData = BasefoldCommitmentWithWitnessGpu<
+    BB31Base,
+    BufferImpl<'static, BB31Base>,
+    GpuDigestLayer,
+    GpuMatrix<'static>,
+    GpuPolynomial<'static>,
+>;
+
+#[derive(Clone, Debug)]
+pub struct GpuJaggedTraceLayout {
+    pub first_poly_idx: usize,
+    pub num_polys: usize,
+    pub num_vars: usize,
+}
+
+pub struct GpuJaggedPcsData {
+    pub inner: GpuBasefoldPcsData,
+    pub q_evals: Option<BufferImpl<'static, BB31Base>>,
+    pub q_host_evals: Option<Vec<BB31Base>>,
+    pub cumulative_heights: Vec<usize>,
+    pub poly_heights: Vec<usize>,
+    pub total_evaluations: usize,
+    pub reshape_log_height: usize,
+    pub trace_layouts: Vec<GpuJaggedTraceLayout>,
+}
+
+pub enum GpuPcsData {
+    Basefold(GpuBasefoldPcsData),
+    Jagged(GpuJaggedPcsData),
+}
+
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ProverBackend for GpuBackend<E, PCS> {
     type E = E;
     type Pcs = PCS;
-    type MultilinearPoly<'a> = MultilinearExtensionGpu<'a, E>;
+    type MultilinearPoly<'a> = MultilinearExtensionGpu<'static, E>;
     type Matrix = RowMajorMatrix<E::BaseField>;
     #[cfg(feature = "gpu")]
-    type PcsData = BasefoldCommitmentWithWitnessGpu<
-        E::BaseField,
-        BufferImpl<'static, E::BaseField>,
-        GpuDigestLayer,
-        GpuMatrix<'static>,
-        GpuPolynomial<'static>,
-    >;
+    type PcsData = GpuPcsData;
     #[cfg(not(feature = "gpu"))]
     type PcsData = <PCS as PolynomialCommitmentScheme<E>>::CommitmentWithWitness;
 
@@ -406,6 +449,16 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         pub_io_evals: &[Either<E::BaseField, E>],
         challenges: &[E],
     ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
+        Self::layer_witness_filtered(layer, layer_wits, pub_io_evals, challenges, None)
+    }
+
+    fn layer_witness_filtered<'a>(
+        layer: &Layer<E>,
+        layer_wits: &[Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>],
+        pub_io_evals: &[Either<E::BaseField, E>],
+        challenges: &[E],
+        output_mask: Option<&[bool]>,
+    ) -> Vec<Arc<<GpuBackend<E, PCS> as ProverBackend>::MultilinearPoly<'a>>> {
         let stream = get_thread_stream();
         let span = entered_span!("preprocess", profiling_2 = true);
         if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB31Base>() {
@@ -417,21 +470,33 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .iter()
             .flat_map(|(sel_type, out_eval)| izip!(std::iter::repeat(sel_type), out_eval.iter()))
             .collect();
+        if let Some(mask) = output_mask {
+            assert_eq!(
+                mask.len(),
+                out_evals.len(),
+                "output_mask len {} != out_evals len {} for layer {}",
+                mask.len(),
+                out_evals.len(),
+                layer.name
+            );
+        }
 
         // pre-process and flatten indices into friendly GPU format
-        let (num_non_zero_expr, term_coefficients, mle_indices_per_term, mle_size_info) = layer
+        let (selected_indices, term_coefficients, mle_indices_per_term, mle_size_info) = layer
             .exprs_with_selector_out_eval_monomial_form
             .iter()
-            .zip_eq(out_evals.iter())
-            .filter(|(_, (_, out_eval))| {
+            .zip_eq(out_evals.iter().enumerate())
+            .filter(|(_, (idx, (_, out_eval)))| {
+                let should_materialize = output_mask.is_none_or(|mask| mask[*idx]);
                 match out_eval {
-                    // only take linear/single to process
-                    EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => true,
+                    EvalExpression::Linear(_, _, _) | EvalExpression::Single(_) => {
+                        should_materialize
+                    }
                     EvalExpression::Partition(..) => unimplemented!("Partition"),
                     EvalExpression::Zero => false,
                 }
             })
-            .map(|(expr, _)| {
+            .map(|(expr, (idx, _))| {
                 let (coeffs, indices, size_info) = extract_mle_relationships_from_monomial_terms(
                     expr,
                     &layer_wits.iter().map(|mle| mle.as_ref()).collect_vec(),
@@ -439,35 +504,40 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     challenges,
                 );
                 let coeffs_gl64: Vec<BB31Ext> = unsafe { std::mem::transmute(coeffs) };
-                (coeffs_gl64, indices, size_info)
+                (idx, coeffs_gl64, indices, size_info)
             })
             .fold(
-                (0, Vec::new(), Vec::new(), Vec::new()),
-                |(mut num_non_zero_expr, mut coeff_acc, mut indices_acc, mut size_acc),
-                 (coeffs, indices, size_info)| {
-                    num_non_zero_expr += 1;
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+                |(mut selected, mut coeff_acc, mut indices_acc, mut size_acc),
+                 (idx, coeffs, indices, size_info)| {
+                    selected.push(idx);
                     coeff_acc.push(coeffs);
                     indices_acc.push(indices);
                     size_acc.push(size_info);
-                    (num_non_zero_expr, coeff_acc, indices_acc, size_acc)
+                    (selected, coeff_acc, indices_acc, size_acc)
                 },
             );
+        let num_non_zero_expr = selected_indices.len();
 
-        assert!(
+        let num_vars = if num_non_zero_expr == 0 {
+            0
+        } else {
+            assert!(
+                mle_size_info
+                    .iter()
+                    .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| {
+                        assert_eq!(a, b);
+                        *a > 0 && *b > 0
+                    }))
+                    .all_equal()
+            );
             mle_size_info
                 .iter()
-                .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| {
-                    assert_eq!(a, b);
-                    *a > 0 && *b > 0
-                }))
-                .all_equal()
-        );
-        let num_vars = mle_size_info
-            .iter()
-            .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| *a > 0 && *b > 0))
-            .take(1)
-            .collect_vec()[0]
-            .0;
+                .flat_map(|mle_size_info| mle_size_info.iter().filter(|(a, b)| *a > 0 && *b > 0))
+                .take(1)
+                .collect_vec()[0]
+                .0
+        };
         exit_span!(span);
 
         let span = entered_span!("witness_infer", profiling_2 = true);
@@ -476,13 +546,23 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let all_witins_gpu_gl64: Vec<&MultilinearExtensionGpu<BB31Ext>> =
             unsafe { std::mem::transmute(all_witins_gpu) };
         let all_witins_gpu_type_gl64 = all_witins_gpu_gl64.iter().map(|mle| &mle.mle).collect_vec();
+        // Match the CPU witness inference path: layer outputs are materialized over
+        // the occupied prefix of the layer witness domain, not the maximum length of
+        // any referenced structural/fixed MLE.
+        let output_len = all_witins_gpu_gl64
+            .first()
+            .map(|mle| mle.evaluations_len())
+            .unwrap_or(0);
+        let output_lengths =
+            std::iter::repeat_n(output_len, mle_indices_per_term.len()).collect_vec();
 
         // buffer for output witness from gpu
         let cuda_hal = get_cuda_hal().unwrap();
-        let mut next_witness_buf = (0..num_non_zero_expr)
-            .map(|_| {
+        let mut next_witness_buf = output_lengths
+            .iter()
+            .map(|&output_len| {
                 cuda_hal
-                    .alloc_ext_elems_on_device(1 << num_vars, false, stream.as_ref())
+                    .alloc_ext_elems_on_device(output_len, false, stream.as_ref())
                     .map_err(|e| format!("Failed to allocate prod GPU buffer: {:?}", e))
             })
             .collect::<Result<Vec<_>, _>>()
@@ -503,15 +583,20 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // recover it back and interleaving with default gpu
         let mut next_iter = next_witness_buf.into_iter();
+        let mut selected_iter = selected_indices.into_iter().peekable();
 
         out_evals
             .into_iter()
-            .map(|(_, out_eval)| {
-                if matches!(
+            .enumerate()
+            .map(|(idx, (_, out_eval))| {
+                let should_materialize = matches!(
                     out_eval,
                     EvalExpression::Linear(..) | EvalExpression::Single(_)
-                ) {
-                    // take next element from next_witness_buf
+                ) && selected_iter
+                    .peek()
+                    .is_some_and(|selected_idx| *selected_idx == idx);
+                if should_materialize {
+                    selected_iter.next();
                     MultilinearExtensionGpu::from_ceno_gpu_ext(GpuPolynomialExt::new(
                         next_iter
                             .next()

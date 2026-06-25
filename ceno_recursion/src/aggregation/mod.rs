@@ -2,8 +2,12 @@ use crate::zkvm_verifier::{
     binding::{E, F, ZKVMProofInput, ZKVMProofInputVariable},
     verifier::verify_zkvm_proof,
 };
+use ceno_emul::WORD_SIZE;
 use ceno_zkvm::{
-    instructions::riscv::constants::{END_PC_IDX, EXIT_CODE_IDX, INIT_PC_IDX},
+    instructions::riscv::constants::{
+        END_PC_IDX, EXIT_CODE_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX, HINT_LENGTH_IDX,
+        HINT_START_ADDR_IDX, INIT_PC_IDX,
+    },
     scheme::ZKVMProof,
     structs::ZKVMVerifyingKey,
 };
@@ -56,7 +60,7 @@ use openvm_stark_sdk::{
     openvm_stark_backend::keygen::types::MultiStarkVerifyingKey,
     p3_bn254_fr::Bn254Fr,
 };
-use p3::field::FieldAlgebra;
+use p3::field::{FieldAlgebra, PrimeField32};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Borrow, sync::Arc, time::Instant};
 pub type RecPcs = Basefold<E, BasefoldRSParams>;
@@ -387,6 +391,49 @@ pub struct CenoLeafVmVerifierConfig {
 }
 
 impl CenoLeafVmVerifierConfig {
+    fn assert_felt_lt<C: Config<F = F>>(
+        builder: &mut Builder<C>,
+        lhs: Felt<C::F>,
+        rhs: Felt<C::F>,
+        max_bits: u32,
+    ) {
+        Self::check_felt_lt(builder, lhs, rhs, max_bits, true)
+    }
+
+    fn assert_felt_ge<C: Config<F = F>>(
+        builder: &mut Builder<C>,
+        lhs: Felt<C::F>,
+        rhs: Felt<C::F>,
+        max_bits: u32,
+    ) {
+        Self::check_felt_lt(builder, lhs, rhs, max_bits, false)
+    }
+
+    fn assert_felt_range<C: Config<F = F>>(
+        builder: &mut Builder<C>,
+        value: Felt<C::F>,
+        start: Felt<C::F>,
+        end: Felt<C::F>,
+        max_bits: u32,
+    ) {
+        Self::assert_felt_ge(builder, value, start, max_bits);
+        Self::assert_felt_lt(builder, value, end, max_bits);
+    }
+
+    fn check_felt_lt<C: Config<F = F>>(
+        builder: &mut Builder<C>,
+        lhs: Felt<C::F>,
+        rhs: Felt<C::F>,
+        max_bits: u32,
+        is_lt: bool,
+    ) {
+        let range: Felt<_> = builder.constant(C::F::from_canonical_u64(1u64 << max_bits));
+        let zero = builder.constant(F::ZERO);
+        let diff = builder.eval(lhs - rhs + if is_lt { range } else { zero });
+        let diff = builder.cast_felt_to_var(diff);
+        builder.range_check_var(diff, max_bits as usize);
+    }
+
     pub fn build_program(&self) -> Program<F> {
         let mut builder = Builder::<C>::default();
 
@@ -435,6 +482,97 @@ impl CenoLeafVmVerifierConfig {
                 builder.assign(&stark_pvs.memory.final_root[i], F::ZERO);
                 builder.assign(&stark_pvs.public_values_commit[i], F::ZERO);
             }
+
+            assert!(
+                2 * self.vk.mem_state_verifier.heap.end < F::ORDER_U32,
+                "2 * {:x} >= {}",
+                self.vk.mem_state_verifier.heap.end,
+                F::ORDER_U32
+            );
+            assert!(
+                2 * self.vk.mem_state_verifier.hints.end < F::ORDER_U32,
+                "2 * {:x} >= {}",
+                self.vk.mem_state_verifier.hints.end,
+                F::ORDER_U32
+            );
+            fn bits_needed(x: u32) -> u32 {
+                if x == 0 { 1 } else { 32 - x.leading_zeros() }
+            }
+            let heap_max_bits = bits_needed(
+                self.vk.mem_state_verifier.heap.end - self.vk.mem_state_verifier.heap.start,
+            );
+            let hint_max_bits = bits_needed(
+                self.vk.mem_state_verifier.hints.end - self.vk.mem_state_verifier.hints.start,
+            );
+            let heap_min_start_addr = {
+                let v = builder.eval(Usize::from(self.vk.mem_state_verifier.heap.start as usize));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+            let heap_max_end_addr = {
+                let v = builder.eval(Usize::from(self.vk.mem_state_verifier.heap.end as usize));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+            let heap_max_addr_diff = {
+                let v = builder.eval(Usize::from(
+                    (self.vk.mem_state_verifier.heap.end - self.vk.mem_state_verifier.heap.start)
+                        as usize,
+                ));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+            let hint_min_start_addr = {
+                let v = builder.eval(Usize::from(self.vk.mem_state_verifier.hints.start as usize));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+            let hint_max_end_addr = {
+                let v = builder.eval(Usize::from(self.vk.mem_state_verifier.hints.end as usize));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+            let hint_max_addr_diff = {
+                let v = builder.eval(Usize::from(
+                    (self.vk.mem_state_verifier.hints.end - self.vk.mem_state_verifier.hints.start)
+                        as usize,
+                ));
+                builder.unsafe_cast_var_to_felt(v)
+            };
+
+            let heap_start_addr = builder.get(pv, HEAP_START_ADDR_IDX);
+            let heap_length_words = builder.get(pv, HEAP_LENGTH_IDX);
+            let word_size = builder.constant::<Felt<_>>(F::from_canonical_usize(WORD_SIZE));
+            let heap_length = builder.eval(heap_length_words * word_size);
+            let heap_end_addr = builder.eval(heap_start_addr + heap_length);
+            let hint_start_addr = builder.get(pv, HINT_START_ADDR_IDX);
+            let hint_length_words = builder.get(pv, HINT_LENGTH_IDX);
+            let hint_length = builder.eval(hint_length_words * word_size);
+            let hint_end_addr = builder.eval(hint_start_addr + hint_length);
+
+            Self::assert_felt_range(
+                &mut builder,
+                heap_start_addr,
+                heap_min_start_addr,
+                heap_max_end_addr,
+                heap_max_bits,
+            );
+            Self::assert_felt_lt(
+                &mut builder,
+                heap_end_addr,
+                heap_max_end_addr,
+                heap_max_bits,
+            );
+            Self::assert_felt_lt(&mut builder, heap_length, heap_max_addr_diff, heap_max_bits);
+            Self::assert_felt_range(
+                &mut builder,
+                hint_start_addr,
+                hint_min_start_addr,
+                hint_max_end_addr,
+                hint_max_bits,
+            );
+            Self::assert_felt_lt(
+                &mut builder,
+                hint_end_addr,
+                hint_max_end_addr,
+                hint_max_bits,
+            );
+            Self::assert_felt_lt(&mut builder, hint_length, hint_max_addr_diff, hint_max_bits);
 
             // TODO: assign shard_ec_sum to stark_pvs.shard_ec_sum
 

@@ -5,13 +5,11 @@ use ceno_emul::{
 };
 use ff_ext::{ExtensionField, FieldInto};
 use gkr_iop::{
-    ProtocolBuilder, ProtocolWitnessGenerator,
-    gkr::{GKRCircuit, layer::Layer},
+    ProtocolBuilder, ProtocolWitnessGenerator, gkr::GKRCircuit,
     utils::lk_multiplicity::Multiplicity,
 };
 use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, WitIn, util::max_usable_threads};
-use p3::matrix::Matrix;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
@@ -47,7 +45,7 @@ pub struct EcallShaExtendConfig<E: ExtensionField> {
     mem_rw: Vec<WriteMEM>,
 }
 
-/// ShaExtendInstruction can handle any instruction and produce its side-effects.
+/// ShaExtendInstruction can handle any instruction and produce its lk and shardram data.
 pub struct ShaExtendInstruction<E>(PhantomData<E>);
 
 impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
@@ -130,10 +128,7 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
             vm_state.ts,
         )?);
 
-        let (out_evals, mut chip) = layout.finalize(cb);
-
-        let layer = Layer::from_circuit_builder(cb, Self::name(), layout.n_challenges, out_evals);
-        chip.add_layer(layer);
+        let chip = layout.finalize(Self::name(), cb);
 
         let circuit = chip.gkr_circuit();
 
@@ -218,7 +213,8 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
                     .zip_eq(indices.iter().copied())
                     .map(|(instance, idx)| {
                         let step = &steps[idx];
-                        let ops = step.syscall().expect("syscall step");
+                        let sw = shard_ctx.syscall_witnesses.clone();
+                        let ops = step.syscall(&sw).expect("syscall step");
 
                         // vm_state
                         config
@@ -285,7 +281,8 @@ impl<E: ExtensionField> Instruction<E> for ShaExtendInstruction<E> {
             .iter()
             .map(|&idx| -> ShaExtendInstance {
                 let step = &steps[idx];
-                let ops = step.syscall().expect("syscall step");
+                let sw = shard_ctx.syscall_witnesses.clone();
+                let ops = step.syscall(&sw).expect("syscall step");
                 let w_i_minus_2 = ops.mem_ops[0].value.before;
                 let w_i_minus_7 = ops.mem_ops[1].value.before;
                 let w_i_minus_15 = ops.mem_ops[2].value.before;

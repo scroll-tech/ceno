@@ -99,7 +99,8 @@ impl<E: ExtensionField, S: SyscallSpec> Instruction<E> for LargeEcallDummy<E, S>
         lk_multiplicity: &mut LkMultiplicity,
         step: &StepRecord,
     ) -> Result<(), ZKVMError> {
-        let ops = &step.syscall().expect("syscall step");
+        let sw = shard_ctx.syscall_witnesses.clone();
+        let ops = &step.syscall(&sw).expect("syscall step");
 
         // Assign instruction.
         config
