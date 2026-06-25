@@ -174,8 +174,8 @@ impl<
             let commit_to_traces_span = entered_span!("batch commit to traces", profiling_1 = true);
             let mut wits_rmms = BTreeMap::new();
 
-            // Extract chip metadata before consuming witnesses.
-            // We reuse this for both transcript appends and task construction.
+            // Extract chip metadata before consuming witnesses; task closures bind it
+            // into their per-chip forked transcripts.
             let name_and_instances = witnesses.get_witnesses_name_instance();
             let mut structural_rmms = Vec::with_capacity(name_and_instances.len());
             // commit to opcode circuits first and then commit to table circuits, sorted by name
