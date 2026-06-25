@@ -319,8 +319,9 @@ denominator-cross contribution with their corresponding powers of `alpha`.
     - Transcript data `p_xi_0`, `p_xi_1`, `q_xi_0`, `q_xi_1`, interpolated `p_xi`, `q_xi`.
     - Challenges `lambda`, `lambda_prime`, `mu`.
     - Running powers `pow_lambda`, `pow_lambda_prime`.
-    - Accumulators: `acc_sum` for the standard `(p_xi + lambda * q_xi)` contribution, plus `acc_p_cross` and
-      `acc_q_cross` for the LogUp numerator-cross and denominator-cross terms in the layer relation.
+    - Accumulators: `acc_sum` for the standard `(p_xi + lambda * q_xi)` contribution, `acc_p_cross`, `acc_q_cross` for
+      the
+      log-up initialization terms that previously lived in their own AIR.
 
 ### Constraints
 
@@ -338,8 +339,29 @@ denominator-cross contribution with their corresponding powers of `alpha`.
 
 - Receives the layer challenge message with both `lambda` and `lambda_prime` on the first row.
 - Final row sends `TowerLogupClaimMessage { lambda_claim = acc_sum, lambda_prime_claim = acc_q_cross }` plus
-  `num_logup_count`. `acc_p_cross` remains in-trace in the current message shape, but the ground-truth layer relation
-  still requires the numerator-cross contribution to be accounted for when forming the final sumcheck target.
+  `num_logup_count`. (The `acc_p_cross` value remains internal because only the denominator-style accumulator is needed
+  upstream at the moment.)
+
+## TowerLogUpSumCheckClaimAir (`src/tower/layer/logup_claim/air.rs`)
+
+### Columns & Loops
+
+- Shares the `(proof_idx, idx, layer_idx)` nested-loop structure and reuses `index_id` to count accumulator rows.
+- Columns mirror the product AIR plus the denominator evaluations: `is_enabled`, the loop counters/flags,
+  `(p_xi_0, p_xi_1, q_xi_0, q_xi_1)`, interpolated `(p_xi, q_xi)`, `lambda`, `mu`, `pow_lambda`, `acc_sum`,
+  `index_id`, and `num_logup_count`.
+
+### Constraints
+
+- Recomputes both `p_xi` and `q_xi` in every row.
+- Uses the existing log-up contribution `acc_sum_next = acc_sum + (lambda * q_xi) * pow_lambda`.
+- `index_id` obeys the same initialization/increment/final-row checks against `num_logup_count` as the product AIR.
+- Only the final accumulator row per `(proof_idx, idx, layer_idx)` may drive `TowerLogupClaimBus`.
+
+### Interactions
+
+- Layer metadata is consumed on the row flagged by `is_first_layer`.
+- Folded logup claim is emitted exactly once per triple when the accumulator row counter reaches `num_logup_count`.
 
 ## TowerLayerSumcheckAir (`src/tower/sumcheck/air.rs`)
 
