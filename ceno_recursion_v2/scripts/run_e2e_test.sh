@@ -11,6 +11,7 @@ FORCE_REGEN="${CENO_RECURSION_V2_FORCE_REGEN:-0}"
 MAX_CYCLE_PER_SHARD="${CENO_RECURSION_V2_MAX_CYCLE_PER_SHARD:-16000}"
 HINTS="${CENO_RECURSION_V2_HINTS:-10}"
 PUBLIC_IO="${CENO_RECURSION_V2_PUBLIC_IO:-4191}"
+BUS_FAILURE_GROUPER="$REPO_ROOT/ceno_recursion_v2/scripts/group_bus_failures.py"
 
 # --- Step 1: ensure fixtures exist ---
 
@@ -46,8 +47,28 @@ fi
 echo ""
 echo "[test] running recursion v2 e2e tests ..."
 cd "$REPO_ROOT/ceno_recursion_v2"
-CENO_RECURSION_V2_FIXTURE_DIR="$FIXTURE_DIR" \
-RUST_MIN_STACK=33554432 \
-cargo test --release \
-    'continuation::tests::prover_integration' \
-    -- --nocapture
+
+TEST_LOG="${CENO_RECURSION_V2_TEST_LOG:-}"
+REMOVE_TEST_LOG=0
+if [[ -z "$TEST_LOG" ]]; then
+    TEST_LOG="$(mktemp "${TMPDIR:-/tmp}/ceno-recursion-v2-e2e.XXXXXX")"
+    REMOVE_TEST_LOG=1
+fi
+
+if CENO_RECURSION_V2_FIXTURE_DIR="$FIXTURE_DIR" \
+    RUST_MIN_STACK=33554432 \
+    cargo test \
+        'continuation::tests::prover_integration::agg_prover_single_shard' \
+        -- --nocapture 2>&1 | tee "$TEST_LOG"; then
+    if [[ "$REMOVE_TEST_LOG" == "1" ]]; then
+        rm -f "$TEST_LOG"
+    fi
+else
+    status=$?
+    echo ""
+    echo "[test] bus balance failure summary:"
+    python3 "$BUS_FAILURE_GROUPER" "$TEST_LOG" || true
+    echo ""
+    echo "[test] full failing log: $TEST_LOG"
+    exit "$status"
+fi
