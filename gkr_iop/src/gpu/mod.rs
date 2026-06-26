@@ -152,6 +152,9 @@ impl<'a, E: ExtensionField> Clone for MultilinearExtensionGpu<'a, E> {
                 // Since GpuPolynomialExt may not support Clone, we panic for now
                 panic!("Clone not supported for GpuPolynomialExt variant")
             }
+            GpuFieldType::VirtualExt(_) => {
+                panic!("Clone not supported for virtual extension MLE variant")
+            }
             GpuFieldType::Unreachable => Self::default(),
         }
     }
@@ -196,6 +199,9 @@ impl<'a, E: ExtensionField> MultilinearPolynomial<E> for MultilinearExtensionGpu
                 let res: Vec<E> = unsafe { std::mem::transmute(vec![poly.bh_signature()]) };
                 res[0]
             }
+            GpuFieldType::VirtualExt(_) => {
+                panic!("virtual extension MLE cannot be materialized through GKR bh_signature")
+            }
             GpuFieldType::Unreachable => unreachable!(),
         }
     }
@@ -211,6 +217,9 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         match &self.mle {
             GpuFieldType::Base(_) => panic!("not supported yet"),
             GpuFieldType::Ext(poly) => poly.as_view_chunk(num_fanin),
+            GpuFieldType::VirtualExt(_) => {
+                panic!("virtual extension MLE cannot be split through GKR chunking")
+            }
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         }
     }
@@ -235,6 +244,9 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
                     self.mle.num_vars(),
                     cpu_evaluations_ext,
                 )
+            }
+            GpuFieldType::VirtualExt(_) => {
+                panic!("virtual extension MLE cannot be copied to CPU through GKR")
             }
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         }
@@ -313,6 +325,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         match &self.mle {
             GpuFieldType::Base(poly) => poly,
             GpuFieldType::Ext(_) => panic!("poly in ext field"),
+            GpuFieldType::VirtualExt(_) => panic!("poly in virtual ext field"),
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         }
     }
@@ -322,6 +335,7 @@ impl<'a, E: ExtensionField> MultilinearExtensionGpu<'a, E> {
         match &self.mle {
             GpuFieldType::Base(_) => panic!("poly in base field"),
             GpuFieldType::Ext(poly) => poly,
+            GpuFieldType::VirtualExt(_) => panic!("poly in virtual ext field"),
             GpuFieldType::Unreachable => panic!("Unreachable GpuFieldType"),
         }
     }

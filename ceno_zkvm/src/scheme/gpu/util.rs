@@ -62,6 +62,9 @@ fn read_base_value_from_gpu<'a, E: ExtensionField>(
         GpuFieldType::Ext(_) => Err(hal_to_backend_error(
             "expected base-field polynomial for final-sum extraction",
         )),
+        GpuFieldType::VirtualExt(_) => Err(hal_to_backend_error(
+            "virtual extension polynomial cannot be used for final-sum extraction",
+        )),
         GpuFieldType::Unreachable => {
             Err(hal_to_backend_error("unreachable GPU polynomial variant"))
         }
@@ -98,6 +101,11 @@ pub fn batch_mles_take_half<'a, E: ExtensionField>(
                 GpuFieldType::Ext(_) => {
                     return Err(hal_to_backend_error(
                         "expected base-field polynomial for EC witness splitting",
+                    ));
+                }
+                GpuFieldType::VirtualExt(_) => {
+                    return Err(hal_to_backend_error(
+                        "virtual extension polynomial cannot be split as EC witness",
                     ));
                 }
                 GpuFieldType::Unreachable => {

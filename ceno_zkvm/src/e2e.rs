@@ -27,8 +27,6 @@ use ceno_emul::{
     StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
     WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
 };
-#[cfg(feature = "gpu")]
-use ceno_gpu::CudaHal;
 use clap::ValueEnum;
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};
@@ -59,7 +57,6 @@ use witness::next_pow2_instance_padding;
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
-pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
 /// Keccak-256 digest of the empty string (""), in big-endian byte form.
 pub const KECCAK_EMPTY: [u8; 32] = [
     0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7, 0x03, 0xc0,
@@ -221,7 +218,6 @@ pub struct ShardContext<'a> {
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     pub cur_shard_cycle_range: std::ops::Range<usize>,
     pub expected_inst_per_shard: usize,
-    pub max_num_cross_shard_accesses: usize,
     // shard 0: [v[0], v[1]), shard 1: [v[1], v[2]), shard 2: [v[2], v[3])
     pub prev_shard_cycle_range: Vec<Cycle>,
     pub prev_shard_heap_range: Vec<Addr>,
@@ -237,9 +233,6 @@ pub struct ShardContext<'a> {
 impl<'a> Default for ShardContext<'a> {
     fn default() -> Self {
         let max_threads = max_usable_threads();
-        let max_num_cross_shard_accesses = std::env::var("CENO_CROSS_SHARD_LIMIT")
-            .map(|v| v.parse().unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT))
-            .unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT);
 
         Self {
             shard_id: 0,
@@ -259,7 +252,6 @@ impl<'a> Default for ShardContext<'a> {
             ),
             cur_shard_cycle_range: FullTracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
             expected_inst_per_shard: usize::MAX,
-            max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
             prev_shard_hint_range: vec![],
@@ -304,7 +296,6 @@ impl<'a> ShardContext<'a> {
             ),
             cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
             expected_inst_per_shard: self.expected_inst_per_shard,
-            max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
             prev_shard_heap_range: self.prev_shard_heap_range.clone(),
             prev_shard_hint_range: self.prev_shard_hint_range.clone(),
@@ -339,7 +330,6 @@ impl<'a> ShardContext<'a> {
                     write_records_tbs: Either::Right(write),
                     cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
                     expected_inst_per_shard: self.expected_inst_per_shard,
-                    max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
                     prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
                     prev_shard_heap_range: self.prev_shard_heap_range.clone(),
                     prev_shard_hint_range: self.prev_shard_hint_range.clone(),
