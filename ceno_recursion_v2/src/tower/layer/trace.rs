@@ -111,28 +111,87 @@ impl TowerLayerRecord {
 
     #[inline]
     pub(crate) fn layer_tidx(&self, layer_idx: usize) -> usize {
-        self.tidx + tower_transcript_len::layers_cumulative(layer_idx)
+        let mut tidx = self.tidx;
+        for idx in 0..layer_idx {
+            tidx += self.layer_span(idx);
+        }
+        tidx
     }
 
     #[inline]
     pub(crate) fn read_count_at(&self, layer_idx: usize) -> usize {
-        self.read_counts.get(layer_idx).copied().unwrap_or(1)
+        self.read_counts.get(layer_idx).copied().unwrap_or(0)
     }
 
     #[inline]
     pub(crate) fn write_count_at(&self, layer_idx: usize) -> usize {
-        self.write_counts.get(layer_idx).copied().unwrap_or(1)
+        self.write_counts.get(layer_idx).copied().unwrap_or(0)
     }
 
     #[inline]
     pub(crate) fn logup_count_at(&self, layer_idx: usize) -> usize {
-        self.logup_counts.get(layer_idx).copied().unwrap_or(1)
+        self.logup_counts.get(layer_idx).copied().unwrap_or(0)
     }
 
     #[inline]
     pub(crate) fn claim_tidx(&self, layer_idx: usize) -> usize {
-        self.layer_tidx(layer_idx) + tower_transcript_len::claim_offset_in_layer(layer_idx)
+        self.layer_tidx(layer_idx) + self.claim_offset_in_layer(layer_idx)
     }
+
+    #[inline]
+    pub(crate) fn out_eval_span(&self, layer_idx: usize) -> usize {
+        let words = 2 * self.read_count_at(layer_idx)
+            + 2 * self.write_count_at(layer_idx)
+            + 4 * self.logup_count_at(layer_idx);
+        words * D_EF
+    }
+
+    #[inline]
+    pub(crate) fn claim_offset_in_layer(&self, layer_idx: usize) -> usize {
+        if layer_idx == 0 {
+            0
+        } else {
+            tower_transcript_len::SUMCHECK_INIT_LEN + layer_idx * tower_transcript_len::ROUND_LEN
+        }
+    }
+
+    #[inline]
+    pub(crate) fn lambda_tidx(&self, layer_idx: usize) -> usize {
+        if layer_idx == 0 {
+            self.layer_tidx(0) + self.out_eval_span(0) + tower_transcript_len::LABEL_COMBINE
+        } else {
+            self.mu_tidx(layer_idx) + D_EF + tower_transcript_len::LABEL_COMBINE
+        }
+    }
+
+    #[inline]
+    pub(crate) fn mu_tidx(&self, layer_idx: usize) -> usize {
+        if layer_idx == 0 {
+            self.lambda_tidx(0) + D_EF + tower_transcript_len::LABEL_PRODUCT_SUM
+        } else {
+            self.claim_tidx(layer_idx)
+                + self.out_eval_span(layer_idx)
+                + tower_transcript_len::LABEL_MERGE
+        }
+    }
+
+    #[inline]
+    pub(crate) fn layer_span(&self, layer_idx: usize) -> usize {
+        if layer_idx == 0 {
+            self.out_eval_span(0) + tower_transcript_len::ALPHA_BETA_LEN
+        } else {
+            tower_transcript_len::SUMCHECK_INIT_LEN
+                + layer_idx * tower_transcript_len::ROUND_LEN
+                + self.out_eval_span(layer_idx)
+                + tower_transcript_len::MERGE_LEN
+                + tower_transcript_len::ALPHA_LEN
+        }
+    }
+}
+
+#[inline]
+pub(crate) fn ext_pow(base: EF, exp: usize) -> EF {
+    (0..exp).fold(EF::ONE, |acc, _| acc * base)
 }
 
 pub struct TowerLayerTraceGenerator;
@@ -214,6 +273,13 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.write_claim_prime = [F::ZERO; D_EF];
                     cols.logup_claim = [F::ZERO; D_EF];
                     cols.logup_claim_prime = [F::ZERO; D_EF];
+                    cols.read_eval_claim = [F::ZERO; D_EF];
+                    cols.write_eval_claim = [F::ZERO; D_EF];
+                    cols.logup_eval_claim = [F::ZERO; D_EF];
+                    cols.read_lambda_end = lambda_prime_one;
+                    cols.read_lambda_prime_end = lambda_prime_one;
+                    cols.write_lambda_end = lambda_prime_one;
+                    cols.write_lambda_prime_end = lambda_prime_one;
                     cols.num_read_count = F::ZERO;
                     cols.num_write_count = F::ZERO;
                     cols.num_logup_count = F::ZERO;
@@ -272,9 +338,35 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
-                    cols.num_read_count = F::from_usize(record.read_count_at(layer_idx).max(1));
-                    cols.num_write_count = F::from_usize(record.write_count_at(layer_idx).max(1));
-                    cols.num_logup_count = F::from_usize(record.logup_count_at(layer_idx).max(1));
+                    let read_count = record.read_count_at(layer_idx);
+                    let write_count = record.write_count_at(layer_idx);
+                    let logup_count = record.logup_count_at(layer_idx);
+                    cols.num_read_count = F::from_usize(read_count);
+                    cols.num_write_count = F::from_usize(write_count);
+                    cols.num_logup_count = F::from_usize(logup_count);
+                    let lambda = record.lambda_at(layer_idx);
+                    let lambda_prime = record.lambda_prime_at(layer_idx);
+                    let read_lambda_end = ext_pow(lambda, read_count);
+                    let read_lambda_prime_end = ext_pow(lambda_prime, read_count);
+                    let write_lambda_end = read_lambda_end * ext_pow(lambda, write_count);
+                    let write_lambda_prime_end =
+                        read_lambda_prime_end * ext_pow(lambda_prime, write_count);
+                    cols.read_lambda_end = read_lambda_end
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    cols.read_lambda_prime_end = read_lambda_prime_end
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    cols.write_lambda_end = write_lambda_end
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    cols.write_lambda_prime_end = write_lambda_prime_end
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
                     cols.eq_at_r_prime = record
                         .eq_at(layer_idx)
                         .as_basis_coefficients_slice()
@@ -283,22 +375,49 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.r0_claim.copy_from_slice(q0_basis);
                     cols.w0_claim.copy_from_slice(q0_basis);
                     cols.q0_claim.copy_from_slice(q0_basis);
-                    if layer_idx == 0 {
-                        cols.read_claim_prime.copy_from_slice(&cols.r0_claim);
-                        cols.write_claim_prime.copy_from_slice(&cols.w0_claim);
-                        cols.logup_claim_prime.copy_from_slice(&cols.q0_claim);
+                    cols.read_claim_prime =
+                        read_prime.as_basis_coefficients_slice().try_into().unwrap();
+                    cols.write_claim_prime = write_prime
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    cols.logup_claim_prime = logup_prime
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    let read_eval = if layer_idx == 0 {
+                        EF::ZERO
                     } else {
-                        cols.read_claim_prime =
-                            read_prime.as_basis_coefficients_slice().try_into().unwrap();
-                        cols.write_claim_prime = write_prime
-                            .as_basis_coefficients_slice()
-                            .try_into()
-                            .unwrap();
-                        cols.logup_claim_prime = logup_prime
-                            .as_basis_coefficients_slice()
-                            .try_into()
-                            .unwrap();
-                    }
+                        record
+                            .read_prime_claims
+                            .get(layer_idx - 1)
+                            .copied()
+                            .unwrap_or(EF::ZERO)
+                    };
+                    let write_eval = if layer_idx == 0 {
+                        EF::ZERO
+                    } else {
+                        record
+                            .write_prime_claims
+                            .get(layer_idx - 1)
+                            .copied()
+                            .unwrap_or(EF::ZERO)
+                    };
+                    let logup_eval = if layer_idx == 0 {
+                        EF::ZERO
+                    } else {
+                        record
+                            .logup_prime_claims
+                            .get(layer_idx - 1)
+                            .copied()
+                            .unwrap_or(EF::ZERO)
+                    };
+                    cols.read_eval_claim =
+                        read_eval.as_basis_coefficients_slice().try_into().unwrap();
+                    cols.write_eval_claim =
+                        write_eval.as_basis_coefficients_slice().try_into().unwrap();
+                    cols.logup_eval_claim =
+                        logup_eval.as_basis_coefficients_slice().try_into().unwrap();
 
                     prev_folded_claim = Some(read_claim + write_claim + logup_claim);
                 }

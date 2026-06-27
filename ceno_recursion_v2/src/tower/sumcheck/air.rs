@@ -15,7 +15,7 @@ use crate::tower::bus::{
     TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
 };
 use recursion_circuit::{
-    bus::{TranscriptBus, XiRandomnessBus, XiRandomnessMessage},
+    bus::{TranscriptBus, XiRandomnessBus},
     utils::{
         assert_one_ext, ext_field_add, ext_field_multiply, ext_field_multiply_scalar,
         ext_field_one_minus, ext_field_subtract,
@@ -289,7 +289,9 @@ where
         );
 
         // Transcript index increment
-        use crate::tower::tower_transcript_len::ROUND_LEN;
+        use crate::tower::tower_transcript_len::{
+            LABEL_INTERNAL_ROUND, LABEL_INTERNAL_ROUND_VALUES, ROUND_LEN,
+        };
         builder.when(is_transition_round.clone()).assert_eq(
             next.tidx,
             local.tidx.into() + AB::Expr::from_usize(ROUND_LEN),
@@ -350,7 +352,7 @@ where
             TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                sumcheck_round: local.round.into() + AB::Expr::ONE,
+                sumcheck_round: local.round.into(),
                 challenge: local.challenge.map(Into::into),
             },
             local.is_enabled * (AB::Expr::ONE - local.is_last_layer) * is_not_dummy.clone(),
@@ -373,6 +375,16 @@ where
             );
             tidx += AB::Expr::from_usize(D_EF);
         }
+        for (i, value) in LABEL_INTERNAL_ROUND_VALUES.iter().enumerate() {
+            self.transcript_bus.observe(
+                builder,
+                local.proof_idx,
+                tidx.clone() + AB::Expr::from_usize(i),
+                AB::Expr::from_usize(*value),
+                local.is_enabled * is_not_dummy.clone(),
+            );
+        }
+        tidx += AB::Expr::from_usize(LABEL_INTERNAL_ROUND);
         // 1b. Sample challenge `ri`
         self.transcript_bus.sample_ext(
             builder,
@@ -382,17 +394,7 @@ where
             local.is_enabled * is_not_dummy.clone(),
         );
 
-        // 2. XiRandomnessBus
-        // 2a. Send last challenge
-        self.xi_randomness_bus.send(
-            builder,
-            local.proof_idx,
-            XiRandomnessMessage {
-                idx: local.round + AB::Expr::ONE,
-                xi: local.challenge.map(Into::into),
-            },
-            local.is_enabled * local.is_last_layer * is_not_dummy.clone(),
-        );
+        let _ = &self.xi_randomness_bus;
     }
 }
 

@@ -11,8 +11,7 @@ use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
-    bus::{AirShapeBus, AirShapeBusMessage},
-    proof_shape::bus::AirShapeProperty,
+    bus::AirShapeBus,
     tower::{
         TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage,
         bus::{
@@ -68,6 +67,13 @@ pub struct TowerLayerCols<T> {
     pub write_claim_prime: [T; D_EF],
     pub logup_claim: [T; D_EF],
     pub logup_claim_prime: [T; D_EF],
+    pub read_eval_claim: [T; D_EF],
+    pub write_eval_claim: [T; D_EF],
+    pub logup_eval_claim: [T; D_EF],
+    pub read_lambda_end: [T; D_EF],
+    pub read_lambda_prime_end: [T; D_EF],
+    pub write_lambda_end: [T; D_EF],
+    pub write_lambda_prime_end: [T; D_EF],
     pub num_read_count: T,
     pub num_write_count: T,
     pub num_logup_count: T,
@@ -203,17 +209,41 @@ where
             next.sumcheck_claim_in,
             folded_claim.clone(),
         );
+        assert_array_eq(
+            &mut builder.when(is_transition.clone()),
+            next.read_eval_claim,
+            local.read_claim_prime,
+        );
+        assert_array_eq(
+            &mut builder.when(is_transition.clone()),
+            next.write_eval_claim,
+            local.write_claim_prime,
+        );
+        assert_array_eq(
+            &mut builder.when(is_transition.clone()),
+            next.logup_eval_claim,
+            local.logup_claim_prime,
+        );
 
         // Transcript index increment
         use crate::tower::tower_transcript_len::{
-            ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
+            ALPHA_BETA_LEN, ALPHA_LEN, LABEL_COMBINE, LABEL_COMBINE_VALUES, LABEL_MERGE,
+            LABEL_MERGE_VALUES, LABEL_PRODUCT_SUM, LABEL_PRODUCT_SUM_VALUES, MERGE_LEN, ROUND_LEN,
+            SUMCHECK_INIT_LEN,
         };
-        let tidx_after_sumcheck = local.tidx
-            // Sample lambda label+sample on non-root layer
-            + (AB::Expr::ONE - local.is_first)
-                * AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN)
+        let out_eval_span = (local.num_read_count * AB::Expr::from_usize(2)
+            + local.num_write_count * AB::Expr::from_usize(2)
+            + local.num_logup_count * AB::Expr::from_usize(4))
+            * AB::Expr::from_usize(D_EF);
+        let non_root = AB::Expr::ONE - local.is_first;
+        let sumcheck_span = AB::Expr::from_usize(SUMCHECK_INIT_LEN)
             + local.layer_idx * AB::Expr::from_usize(ROUND_LEN);
-        let tidx_end = tidx_after_sumcheck.clone() + AB::Expr::from_usize(POST_SUMCHECK_LEN);
+        let tidx_after_sumcheck = local.tidx + non_root.clone() * sumcheck_span.clone();
+        let root_span = out_eval_span.clone() + AB::Expr::from_usize(ALPHA_BETA_LEN);
+        let non_root_span =
+            sumcheck_span + out_eval_span.clone() + AB::Expr::from_usize(MERGE_LEN + ALPHA_LEN);
+        let layer_span = local.is_first * root_span + non_root.clone() * non_root_span;
+        let tidx_end = local.tidx + layer_span;
         builder
             .when(is_transition.clone())
             .assert_eq(next.tidx, tidx_end.clone());
@@ -225,79 +255,64 @@ where
         let is_not_dummy = AB::Expr::ONE - local.is_dummy;
         let is_non_root_layer = local.is_enabled * (AB::Expr::ONE - local.is_first);
 
-        let lookup_enable = local.is_enabled * is_not_dummy.clone();
-        self.air_shape_bus.lookup_key(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.idx.into(),
-                property_idx: AirShapeProperty::NumRead.to_field(),
-                value: local.num_read_count.into(),
-            },
-            lookup_enable.clone(),
-        );
-        self.air_shape_bus.lookup_key(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.idx.into(),
-                property_idx: AirShapeProperty::NumWrite.to_field(),
-                value: local.num_write_count.into(),
-            },
-            lookup_enable.clone(),
-        );
-        self.air_shape_bus.lookup_key(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.idx.into(),
-                property_idx: AirShapeProperty::NumLk.to_field(),
-                value: local.num_logup_count.into(),
-            },
-            lookup_enable.clone(),
-        );
-
+        let active_non_dummy = local.is_enabled * is_not_dummy.clone();
         let tidx_for_claims = tidx_after_sumcheck.clone();
+        let prod_eval_span = AB::Expr::from_usize(2 * D_EF);
+        let read_tidx = tidx_for_claims.clone();
+        let write_tidx = read_tidx.clone() + local.num_read_count * prod_eval_span.clone();
+        let logup_tidx = write_tidx.clone() + local.num_write_count * prod_eval_span;
+        let read_claim_mult = active_non_dummy.clone() * local.num_read_count;
+        let write_claim_mult = active_non_dummy.clone() * local.num_write_count;
+        let logup_claim_mult = active_non_dummy.clone() * local.num_logup_count;
+        let lambda_one = {
+            let mut arr = core::array::from_fn(|_| AB::Expr::ZERO);
+            arr[0] = AB::Expr::ONE;
+            arr
+        };
         self.prod_read_claim_input_bus.send(
             builder,
             local.proof_idx,
             TowerProdLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: tidx_for_claims.clone(),
+                tidx: read_tidx,
                 lambda: local.lambda.map(Into::into),
                 lambda_prime: local.lambda_prime.map(Into::into),
+                lambda_start: lambda_one.clone(),
+                lambda_prime_start: lambda_one.clone(),
                 mu: local.mu.map(Into::into),
             },
-            is_not_dummy.clone(),
+            read_claim_mult.clone(),
         );
-        // TODO separate lambda, lambda_prime for prod-write the relation should be local.lambda^(num_read)
         self.prod_write_claim_input_bus.send(
             builder,
             local.proof_idx,
             TowerProdLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: tidx_for_claims.clone(),
+                tidx: write_tidx,
                 lambda: local.lambda.map(Into::into),
                 lambda_prime: local.lambda_prime.map(Into::into),
+                lambda_start: local.read_lambda_end.map(Into::into),
+                lambda_prime_start: local.read_lambda_prime_end.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            is_not_dummy.clone(),
+            write_claim_mult.clone(),
         );
-        // TODO separate lambda, lambda_prime for logup the relation should be local.lambda^(num_read + num_write)
         self.logup_claim_input_bus.send(
             builder,
             local.proof_idx,
             TowerLogupLayerChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: tidx_for_claims.clone(),
+                tidx: logup_tidx,
                 lambda: local.lambda.map(Into::into),
                 lambda_prime: local.lambda_prime.map(Into::into),
+                lambda_start: local.write_lambda_end.map(Into::into),
+                lambda_prime_start: local.write_lambda_prime_end.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            is_not_dummy.clone(),
+            logup_claim_mult.clone(),
         );
         self.prod_read_claim_bus.receive(
             builder,
@@ -307,9 +322,11 @@ where
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: local.read_claim.map(Into::into),
                 lambda_prime_claim: local.read_claim_prime.map(Into::into),
+                lambda_end: local.read_lambda_end.map(Into::into),
+                lambda_prime_end: local.read_lambda_prime_end.map(Into::into),
                 num_prod_count: local.num_read_count.into(),
             },
-            is_not_dummy.clone(),
+            read_claim_mult,
         );
         self.prod_write_claim_bus.receive(
             builder,
@@ -319,9 +336,11 @@ where
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: local.write_claim.map(Into::into),
                 lambda_prime_claim: local.write_claim_prime.map(Into::into),
+                lambda_end: local.write_lambda_end.map(Into::into),
+                lambda_prime_end: local.write_lambda_prime_end.map(Into::into),
                 num_prod_count: local.num_write_count.into(),
             },
-            is_not_dummy.clone(),
+            write_claim_mult,
         );
         self.logup_claim_bus.receive(
             builder,
@@ -333,24 +352,7 @@ where
                 lambda_prime_claim: local.logup_claim_prime.map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
-            is_not_dummy.clone(),
-        );
-
-        let root_layer_mask = local.is_first * is_not_dummy.clone();
-        assert_array_eq(
-            &mut builder.when(root_layer_mask.clone()),
-            local.read_claim_prime,
-            local.r0_claim,
-        );
-        assert_array_eq(
-            &mut builder.when(root_layer_mask.clone()),
-            local.write_claim_prime,
-            local.w0_claim,
-        );
-        assert_array_eq(
-            &mut builder.when(root_layer_mask),
-            local.logup_claim_prime,
-            local.q0_claim,
+            logup_claim_mult,
         );
 
         // 1. TowerLayerInputBus
@@ -365,7 +367,7 @@ where
                 w0_claim: local.w0_claim.map(Into::into),
                 q0_claim: local.q0_claim.map(Into::into),
             },
-            local.is_first_air_idx * is_not_dummy.clone(),
+            local.is_first * active_non_dummy.clone(),
         );
         // 2. TowerLayerOutputBus
         // 2a. Send GKR input layer claims back
@@ -380,7 +382,7 @@ where
                 lambda: local.lambda.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            is_last.clone() * is_not_dummy.clone(),
+            is_last.clone() * active_non_dummy.clone(),
         );
         // 3. TowerSumcheckInputBus
         // 3a. Send claim to sumcheck
@@ -392,7 +394,7 @@ where
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 is_last_layer: is_last.clone(),
-                tidx: local.tidx + AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN),
+                tidx: local.tidx + AB::Expr::from_usize(SUMCHECK_INIT_LEN),
                 claim: local.sumcheck_claim_in.map(Into::into),
             },
             is_non_root_layer.clone() * is_not_dummy.clone(),
@@ -424,10 +426,10 @@ where
             TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                sumcheck_round: AB::Expr::ZERO,
+                sumcheck_round: local.layer_idx.into(),
                 challenge: local.mu.map(Into::into),
             },
-            is_transition.clone() * is_not_dummy.clone(),
+            is_transition.clone() * active_non_dummy,
         );
 
         ///////////////////////////////////////////////////////////////////////
@@ -435,27 +437,115 @@ where
         ///////////////////////////////////////////////////////////////////////
 
         // 1. TranscriptBus
-        // sample lambda and mu
-        // in root & intermediate layer: for next.sumcheck_claim_in
-        // in last layer: for send back to GKR input layer
-        // 1a. Sample `lambda` — only on non-root layers.
-        //     Root layer uses alpha_logup (set in trace), not a transcript sample.
+        let root_lambda_label_tidx = local.tidx + out_eval_span.clone();
+        for (i, value) in LABEL_COMBINE_VALUES.iter().enumerate() {
+            self.transcript_bus.observe(
+                builder,
+                local.proof_idx,
+                root_lambda_label_tidx.clone() + AB::Expr::from_usize(i),
+                AB::Expr::from_usize(*value),
+                local.is_enabled * local.is_first * is_not_dummy.clone(),
+            );
+        }
+        let root_lambda_tidx = root_lambda_label_tidx.clone() + AB::Expr::from_usize(LABEL_COMBINE);
+
+        let non_root_init_tidx = local.tidx;
+        self.transcript_bus.observe(
+            builder,
+            local.proof_idx,
+            non_root_init_tidx,
+            local.layer_idx,
+            is_non_root_layer.clone() * is_not_dummy.clone(),
+        );
+        self.transcript_bus.observe(
+            builder,
+            local.proof_idx,
+            local.tidx + AB::Expr::ONE,
+            AB::Expr::ZERO,
+            is_non_root_layer.clone() * is_not_dummy.clone(),
+        );
+        self.transcript_bus.observe(
+            builder,
+            local.proof_idx,
+            local.tidx + AB::Expr::from_usize(2),
+            AB::Expr::from_usize(3),
+            is_non_root_layer.clone() * is_not_dummy.clone(),
+        );
+        self.transcript_bus.observe(
+            builder,
+            local.proof_idx,
+            local.tidx + AB::Expr::from_usize(3),
+            AB::Expr::ZERO,
+            is_non_root_layer.clone() * is_not_dummy.clone(),
+        );
+
+        let root_mu_label_tidx = root_lambda_tidx.clone() + AB::Expr::from_usize(D_EF);
+        for (i, value) in LABEL_PRODUCT_SUM_VALUES.iter().enumerate() {
+            self.transcript_bus.observe(
+                builder,
+                local.proof_idx,
+                root_mu_label_tidx.clone() + AB::Expr::from_usize(i),
+                AB::Expr::from_usize(*value),
+                local.is_enabled * local.is_first * is_not_dummy.clone(),
+            );
+        }
+        let root_mu_tidx = root_mu_label_tidx + AB::Expr::from_usize(LABEL_PRODUCT_SUM);
+
+        let non_root_mu_label_tidx = tidx_after_sumcheck.clone() + out_eval_span;
+        for (i, value) in LABEL_MERGE_VALUES.iter().enumerate() {
+            self.transcript_bus.observe(
+                builder,
+                local.proof_idx,
+                non_root_mu_label_tidx.clone() + AB::Expr::from_usize(i),
+                AB::Expr::from_usize(*value),
+                is_non_root_layer.clone() * is_not_dummy.clone(),
+            );
+        }
+        let non_root_mu_tidx = non_root_mu_label_tidx + AB::Expr::from_usize(LABEL_MERGE);
+
+        let non_root_lambda_label_tidx = non_root_mu_tidx.clone() + AB::Expr::from_usize(D_EF);
+        for (i, value) in LABEL_COMBINE_VALUES.iter().enumerate() {
+            self.transcript_bus.observe(
+                builder,
+                local.proof_idx,
+                non_root_lambda_label_tidx.clone() + AB::Expr::from_usize(i),
+                AB::Expr::from_usize(*value),
+                is_non_root_layer.clone() * is_not_dummy.clone(),
+            );
+        }
+        let non_root_lambda_tidx = non_root_lambda_label_tidx + AB::Expr::from_usize(LABEL_COMBINE);
+
+        // 1a. Sample `lambda`: root lambda_1 after root out-evals, later
+        // rows sample lambda_next after merge.
         self.transcript_bus.sample_ext(
             builder,
             local.proof_idx,
-            local.tidx,
+            root_lambda_tidx,
+            local.lambda,
+            local.is_enabled * local.is_first * is_not_dummy.clone(),
+        );
+        self.transcript_bus.sample_ext(
+            builder,
+            local.proof_idx,
+            non_root_lambda_tidx,
             local.lambda,
             is_non_root_layer.clone() * is_not_dummy.clone(),
         );
-        // 1b. Observe layer claims
-        let tidx = tidx_after_sumcheck;
-        // 1c. Sample `mu`
+        // 1b. Sample `mu`: root r_1 after product_sum; later rows after
+        // child-claim observations and merge label.
         self.transcript_bus.sample_ext(
             builder,
             local.proof_idx,
-            tidx,
+            root_mu_tidx,
             local.mu,
-            local.is_enabled * is_not_dummy.clone(),
+            local.is_enabled * local.is_first * is_not_dummy.clone(),
+        );
+        self.transcript_bus.sample_ext(
+            builder,
+            local.proof_idx,
+            non_root_mu_tidx,
+            local.mu,
+            is_non_root_layer * is_not_dummy,
         );
     }
 }

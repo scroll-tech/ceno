@@ -193,36 +193,32 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
             .when(local.is_enabled * next.is_enabled * next.is_first_layer)
             .assert_zero(next.index_id);
         builder
-            .when(is_within_layer.clone() * is_not_dummy.clone())
+            .when(is_within_layer.clone())
             .assert_eq(next.index_id, local.index_id + AB::Expr::ONE);
         builder
-            .when(is_layer_end.clone() * is_not_dummy.clone())
+            .when(is_layer_end.clone() * local.num_prod_count)
             .assert_eq(local.index_id + AB::Expr::ONE, local.num_prod_count);
 
         assert_zeros(
-            &mut builder.when(local.is_first * is_not_dummy.clone()),
+            &mut builder.when(local.is_first),
             local.acc_sum.map(Into::into),
         );
         assert_zeros(
-            &mut builder.when(local.is_first * is_not_dummy.clone()),
+            &mut builder.when(local.is_first),
             local.acc_sum_prime.map(Into::into),
         );
-        builder
-            .when(local.is_first * is_not_dummy.clone())
-            .assert_eq(local.pow_lambda[0], AB::Expr::ONE);
-        for limb in local.pow_lambda.iter().copied().skip(1) {
-            builder
-                .when(local.is_first * is_not_dummy.clone())
-                .assert_zero(limb);
-        }
-        builder
-            .when(local.is_first * is_not_dummy.clone())
-            .assert_eq(local.pow_lambda_prime[0], AB::Expr::ONE);
-        for limb in local.pow_lambda_prime.iter().copied().skip(1) {
-            builder
-                .when(local.is_first * is_not_dummy.clone())
-                .assert_zero(limb);
-        }
+        assert_zeros(
+            &mut builder.when(local.is_dummy),
+            local.p_xi_0.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(local.is_dummy),
+            local.p_xi_1.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(local.is_dummy),
+            local.p_xi.map(Into::into),
+        );
 
         let delta = ext_field_subtract::<AB::Expr>(local.p_xi_1, local.p_xi_0);
         let expected_p_xi =
@@ -255,6 +251,7 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
 
         let lambda = local.lambda.map(Into::into);
         let pow_lambda_next = ext_field_multiply::<AB::Expr>(pow_lambda, lambda.clone());
+        let lambda_end = pow_lambda_next.clone();
         assert_array_eq(
             &mut builder.when(is_within_layer.clone()),
             next.pow_lambda,
@@ -263,6 +260,7 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
         let lambda_prime = local.lambda_prime.map(Into::into);
         let pow_lambda_prime_next =
             ext_field_multiply::<AB::Expr>(pow_lambda_prime, lambda_prime.clone());
+        let lambda_prime_end = pow_lambda_prime_next.clone();
         assert_array_eq(
             &mut builder.when(is_within_layer.clone()),
             next.pow_lambda_prime,
@@ -279,9 +277,11 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
                 tidx: local.tidx.into(),
                 lambda,
                 lambda_prime: lambda_prime.clone(),
+                lambda_start: local.pow_lambda.map(Into::into),
+                lambda_prime_start: local.pow_lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            local.is_first.into(),
+            local.is_first * local.is_enabled * local.num_prod_count,
         );
 
         send_claim(
@@ -293,9 +293,11 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: acc_sum_export.map(Into::into),
                 lambda_prime_claim: acc_sum_prime_export.map(Into::into),
+                lambda_end: lambda_end.map(Into::into),
+                lambda_prime_end: lambda_prime_end.map(Into::into),
                 num_prod_count: local.num_prod_count.into(),
             },
-            is_layer_end,
+            is_layer_end * local.num_prod_count,
         );
 
         let mut tidx = local.tidx.into();

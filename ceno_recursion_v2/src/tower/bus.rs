@@ -47,6 +47,8 @@ pub struct TowerProdLayerChallengeMessage<T> {
     pub tidx: T,
     pub lambda: [T; D_EF],
     pub lambda_prime: [T; D_EF],
+    pub lambda_start: [T; D_EF],
+    pub lambda_prime_start: [T; D_EF],
     pub mu: [T; D_EF],
 }
 
@@ -63,6 +65,8 @@ pub struct TowerProdSumClaimMessage<T> {
     pub layer_idx: T,
     pub lambda_claim: [T; D_EF],
     pub lambda_prime_claim: [T; D_EF],
+    pub lambda_end: [T; D_EF],
+    pub lambda_prime_end: [T; D_EF],
     pub num_prod_count: T,
 }
 
@@ -77,6 +81,8 @@ pub struct TowerLogupLayerChallengeMessage<T> {
     pub tidx: T,
     pub lambda: [T; D_EF],
     pub lambda_prime: [T; D_EF],
+    pub lambda_start: [T; D_EF],
+    pub lambda_prime_start: [T; D_EF],
     pub mu: [T; D_EF],
 }
 

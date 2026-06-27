@@ -93,6 +93,8 @@ pub struct TowerPreflight {
 pub struct TowerChipTranscriptRange {
     pub chip_idx: usize,
     pub instance_idx: usize,
+    /// Number of tower layers represented by AIR rows.
+    pub num_layers: usize,
     /// Fork-local tidx (position within the fork's transcript log).
     pub tidx: usize,
     /// Index into `Preflight::fork_transcripts`.

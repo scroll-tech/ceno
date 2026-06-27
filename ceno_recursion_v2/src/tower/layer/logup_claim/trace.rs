@@ -7,7 +7,10 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use super::TowerLogupSumCheckClaimCols;
 use crate::{
-    tower::{TowerTowerEvalRecord, interpolate_pair, layer::trace::TowerLayerRecord},
+    tower::{
+        TowerTowerEvalRecord, interpolate_pair,
+        layer::trace::{TowerLayerRecord, ext_pow},
+    },
     tracegen::RowMajorChip,
 };
 
@@ -20,13 +23,10 @@ type LogupTraceCtx<'a> = (
 );
 
 fn logup_rows_for_record(record: &TowerLayerRecord) -> usize {
-    if record.layer_count() == 0 {
-        1
-    } else {
-        (0..record.layer_count())
-            .map(|layer_idx| record.logup_count_at(layer_idx).max(1))
-            .sum()
-    }
+    (0..record.layer_count())
+        .map(|layer_idx| record.logup_count_at(layer_idx))
+        .sum::<usize>()
+        .max(1)
 }
 
 impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
@@ -69,7 +69,15 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                     .zip(mus_records.par_iter()),
             )
             .for_each(|(chunk, ((record, tower), mus_for_proof))| {
-                if record.layer_count() == 0 {
+                if chunk.is_empty() {
+                    return;
+                }
+
+                let active_row_count = (0..record.layer_count())
+                    .map(|layer_idx| record.logup_count_at(layer_idx))
+                    .sum::<usize>();
+
+                if active_row_count == 0 {
                     debug_assert_eq!(chunk.len(), width);
                     let row_data = &mut chunk[..width];
                     let cols: &mut TowerLogupSumCheckClaimCols<F> = row_data.borrow_mut();
@@ -98,7 +106,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                     cols.acc_sum = [F::ZERO; D_EF];
                     cols.acc_p_cross = [F::ZERO; D_EF];
                     cols.acc_q_cross = [F::ZERO; D_EF];
-                    cols.num_logup_count = F::ONE;
+                    cols.num_logup_count = F::ZERO;
                     return;
                 }
 
@@ -111,9 +119,14 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                         .get(layer_idx)
                         .map(|rows| rows.as_slice())
                         .unwrap_or(&[]);
-                    let total_rows = record.logup_count_at(layer_idx).max(1);
+                    let logup_active = tower
+                        .logup_active
+                        .get(layer_idx)
+                        .map(|rows| rows.as_slice())
+                        .unwrap_or(&[]);
+                    let total_rows = record.logup_count_at(layer_idx);
                     debug_assert!(
-                        total_rows == logup_rows.len().max(1),
+                        total_rows == logup_rows.len(),
                         "unexpected logup count mismatch at layer {layer_idx}"
                     );
 
@@ -127,10 +140,12 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                         .try_into()
                         .unwrap();
                     let mu_basis: [F; D_EF] = mu.as_basis_coefficients_slice().try_into().unwrap();
-                    let layer_tidx = record.claim_tidx(layer_idx);
+                    let group_offset =
+                        record.read_count_at(layer_idx) + record.write_count_at(layer_idx);
+                    let layer_tidx = record.claim_tidx(layer_idx) + group_offset * 2 * D_EF;
 
-                    let mut pow_lambda = EF::ONE;
-                    let mut pow_lambda_prime = EF::ONE;
+                    let mut pow_lambda = ext_pow(lambda, group_offset);
+                    let mut pow_lambda_prime = ext_pow(lambda_prime, group_offset);
                     let mut acc_sum = EF::ZERO;
                     let mut acc_p_cross = EF::ZERO;
                     let mut acc_q_cross = EF::ZERO;
@@ -140,7 +155,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                             .next()
                             .expect("chunk should have enough rows for layer");
                         let cols: &mut TowerLogupSumCheckClaimCols<F> = row.borrow_mut();
-                        let is_real = row_in_layer < logup_rows.len();
+                        let is_real = logup_active.get(row_in_layer).copied().unwrap_or(false);
                         let quad = if is_real {
                             logup_rows[row_in_layer]
                         } else {
@@ -215,8 +230,8 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                         acc_sum += contribution;
                         acc_p_cross += p_cross_contribution;
                         acc_q_cross += q_cross_contribution;
-                        pow_lambda *= lambda;
-                        pow_lambda_prime *= lambda_prime;
+                        pow_lambda *= lambda * lambda;
+                        pow_lambda_prime *= lambda_prime * lambda_prime;
 
                         proof_row_idx += 1;
                     }

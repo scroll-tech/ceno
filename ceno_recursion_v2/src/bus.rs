@@ -1,4 +1,3 @@
-use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use recursion_circuit::{
     bus as upstream, define_typed_per_proof_lookup_bus, define_typed_per_proof_permutation_bus,
@@ -19,7 +18,7 @@ pub use upstream::{
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct ForkedTranscriptBusMessage<T> {
-    /// Fork identifier (1-based). Matches TranscriptAir's fork_id column.
+    /// Fork identifier (0-based). Matches TranscriptAir's fork_id column.
     pub fork_id: T,
     /// Position within the fork transcript namespace.
     pub tidx: T,

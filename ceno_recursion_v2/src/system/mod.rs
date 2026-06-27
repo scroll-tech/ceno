@@ -251,6 +251,28 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         Self::new_with_options(child_vk, VerifierConfig::default())
     }
 
+    fn vm_pvs_lookup_challenges_from_transcript<TS>(sponge: &TS) -> (EF, EF)
+    where
+        TS: Clone + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
+    {
+        let log = sponge.clone().into_log();
+        let values = log.values();
+        let samples = log.samples();
+        let start = values
+            .len()
+            .checked_sub(2 * D_EF)
+            .expect("VM PVS transcript must end with alpha/beta extension samples");
+        debug_assert!(
+            samples[start..start + 2 * D_EF]
+                .iter()
+                .all(|is_sample| *is_sample),
+            "VM PVS transcript suffix must contain alpha/beta samples"
+        );
+        let alpha = EF::from_basis_coefficients_fn(|i| values[start + i]);
+        let beta = EF::from_basis_coefficients_fn(|i| values[start + D_EF + i]);
+        (alpha, beta)
+    }
+
     pub fn new_with_options(child_vk: Arc<RecursionVk>, config: VerifierConfig) -> Self {
         // let child_mvk = convert_vk_from_zkvm(child_vk.as_ref());
         // let proof_shape_constraint = LinearConstraint {
@@ -350,16 +372,22 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             + Clone,
     {
         let mut preflight = Preflight::default();
+        let (alpha_ext, beta_ext) = Self::vm_pvs_lookup_challenges_from_transcript(&sponge);
+        preflight.vm_pvs.lookup_challenge_alpha = alpha_ext;
+        preflight.vm_pvs.lookup_challenge_beta = beta_ext;
 
         // Phase 1: Trunk operations.
         // Proof-shape metadata and alpha/beta sampling after pre-verifier transcript observes.
         self.proof_shape
             .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+        let num_lookup_challenge_consumers = preflight.proof_shape.sorted_trace_vdata.len();
+        preflight.vm_pvs.lookup_challenge_alpha_lookup_count = num_lookup_challenge_consumers;
+        preflight.vm_pvs.lookup_challenge_beta_lookup_count = num_lookup_challenge_consumers;
 
-        // VmPvs is owned by pre-system preflight. Consume vm_pvs challenge
-        // fields directly here.
-        let alpha_ext = preflight.vm_pvs.lookup_challenge_alpha;
-        let beta_ext = preflight.vm_pvs.lookup_challenge_beta;
+        // VmPvs is owned by the pre-system preflight. The incoming transcript
+        // has already sampled these two challenges; recover and forward them
+        // so forked chip transcripts bind the same alpha/beta as the native
+        // verifier.
         preflight.proof_shape.lookup_challenge_alpha = ef_to_limbs(alpha_ext);
         preflight.proof_shape.lookup_challenge_beta = ef_to_limbs(beta_ext);
 
@@ -400,13 +428,26 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             }
 
             let tower_tidx = fs.len();
-            let tower_replay =
+            let (tower_schedule, tower_replay) =
                 crate::tower::record_and_replay_tower_preflight(fs, child_vk, chip_idx, chip_proof);
+
+            let main_claim = crate::tower::derive_tower_input_claim_for_transcript(
+                child_vk,
+                chip_idx,
+                chip_proof,
+                &tower_replay,
+                &tower_schedule,
+            );
 
             // Record tower entry with fork-local tidx at tower stage start.
             preflight.gkr.chips.push(TowerChipTranscriptRange {
                 chip_idx,
                 instance_idx,
+                num_layers: if chip_proof.tower_proof.proofs.is_empty() {
+                    0
+                } else {
+                    chip_proof.tower_proof.proofs.len() + 1
+                },
                 tidx: tower_tidx,
                 fork_idx: fork_id,
                 tower_replay,
@@ -414,7 +455,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
             // Main preflight for this chip.
             let main_tidx = fs.len();
-            crate::main::record_main_transcript(fs, chip_idx, chip_proof);
+            crate::main::record_main_transcript(fs, main_claim);
 
             preflight.main.chips.push(ChipTranscriptRange {
                 chip_idx,

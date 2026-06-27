@@ -56,7 +56,9 @@ use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
     p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
+#[cfg(test)]
+use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use recursion_circuit::primitives::exp_bits_len::ExpBitsLenTraceGenerator;
@@ -107,15 +109,23 @@ pub mod tower_transcript_len {
 
     // Label field-element counts: ceil(byte_len / 4).
     // b"combine subset evals" = 20 bytes → 5 field elements
-    const LABEL_COMBINE: usize = 5;
+    pub const LABEL_COMBINE: usize = 5;
     // b"product_sum" = 11 bytes → 3 field elements
-    const LABEL_PRODUCT_SUM: usize = 3;
+    pub const LABEL_PRODUCT_SUM: usize = 3;
     // b"Internal round" = 14 bytes → 4 field elements
-    const LABEL_INTERNAL_ROUND: usize = 4;
+    pub const LABEL_INTERNAL_ROUND: usize = 4;
     // b"merge" = 5 bytes → 2 field elements
-    const LABEL_MERGE: usize = 2;
+    pub const LABEL_MERGE: usize = 2;
     // usize::to_le_bytes() = 8 bytes → 2 field elements (64-bit platform)
-    const LABEL_USIZE: usize = 2;
+    pub const LABEL_USIZE: usize = 2;
+
+    pub const LABEL_COMBINE_VALUES: [usize; LABEL_COMBINE] =
+        [1651339107, 543518313, 1935832435, 1696625765, 1936482678];
+    pub const LABEL_PRODUCT_SUM_VALUES: [usize; LABEL_PRODUCT_SUM] =
+        [1685025392, 1601463157, 7173491];
+    pub const LABEL_INTERNAL_ROUND_VALUES: [usize; LABEL_INTERNAL_ROUND] =
+        [1702129225, 1818324594, 1970237984, 25710];
+    pub const LABEL_MERGE_VALUES: [usize; LABEL_MERGE] = [1735550317, 101];
 
     /// label "combine subset evals" (5) + sample alpha (D_EF)
     pub const ALPHA_LEN: usize = LABEL_COMBINE + D_EF;
@@ -179,7 +189,7 @@ pub mod layer;
 pub mod sumcheck;
 #[allow(clippy::module_inception)]
 mod tower;
-pub(crate) use tower::{TowerReplayResult, replay_tower_proof, replay_tower_proof_poseidon};
+pub(crate) use tower::{TowerReplayResult, replay_tower_proof_poseidon};
 pub struct TowerModule {
     // Global bus inventory
     bus_inventory: BusInventory,
@@ -202,18 +212,21 @@ pub(crate) struct TowerTowerEvalRecord {
     pub(crate) read_layers: Vec<Vec<[EF; 2]>>,
     pub(crate) write_layers: Vec<Vec<[EF; 2]>>,
     pub(crate) logup_layers: Vec<Vec<[EF; 4]>>,
+    pub(crate) read_active: Vec<Vec<bool>>,
+    pub(crate) write_active: Vec<Vec<bool>>,
+    pub(crate) logup_active: Vec<Vec<bool>>,
 }
 
 pub(crate) struct TowerBlobCpu {
-    input_records: Vec<TowerInputRecord>,
-    /// Per-proof q0 claims matching input_records (one per proof).
-    proof_q0_claims: Vec<EF>,
-    layer_records: Vec<TowerLayerRecord>,
-    tower_records: Vec<TowerTowerEvalRecord>,
-    sumcheck_records: Vec<TowerSumcheckRecord>,
-    mus_records: Vec<Vec<EF>>,
+    pub(crate) input_records: Vec<TowerInputRecord>,
+    /// q0 claims matching input_records.
+    pub(crate) proof_q0_claims: Vec<EF>,
+    pub(crate) layer_records: Vec<TowerLayerRecord>,
+    pub(crate) tower_records: Vec<TowerTowerEvalRecord>,
+    pub(crate) sumcheck_records: Vec<TowerSumcheckRecord>,
+    pub(crate) mus_records: Vec<Vec<EF>>,
     /// Per-chip q0 claims matching layer_records.
-    q0_claims: Vec<EF>,
+    pub(crate) q0_claims: Vec<EF>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -258,12 +271,17 @@ impl TowerModule {
         for (&chip_idx, chip_instances) in &proof.chip_proofs {
             for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
                 let tidx = ts.len();
-                let tower_replay =
+                let (_, tower_replay) =
                     record_and_replay_tower_preflight(ts, child_vk, chip_idx, chip_proof);
 
                 preflight.gkr.chips.push(TowerChipTranscriptRange {
                     chip_idx,
                     instance_idx,
+                    num_layers: if chip_proof.tower_proof.proofs.is_empty() {
+                        0
+                    } else {
+                        chip_proof.tower_proof.proofs.len() + 1
+                    },
                     tidx,
                     fork_idx: 0, // unused in forked flow
                     tower_replay,
@@ -305,9 +323,20 @@ pub(crate) fn interpolate_pair(values: [EF; 2], mu: EF) -> EF {
     values[0] + delta * mu
 }
 
-fn accumulate_prod_claims(rows: &[[EF; 2]], lambda: EF, lambda_prime: EF, mu: EF) -> (EF, EF) {
-    let mut pow_lambda = EF::ONE;
-    let mut pow_lambda_prime = EF::ONE;
+fn ext_pow(base: EF, exp: usize) -> EF {
+    (0..exp).fold(EF::ONE, |acc, _| acc * base)
+}
+
+fn accumulate_prod_claims(
+    rows: &[[EF; 2]],
+    lambda: EF,
+    lambda_prime: EF,
+    mu: EF,
+    lambda_start: EF,
+    lambda_prime_start: EF,
+) -> (EF, EF) {
+    let mut pow_lambda = lambda_start;
+    let mut pow_lambda_prime = lambda_prime_start;
     let mut acc_sum = EF::ZERO;
     let mut acc_sum_prime = EF::ZERO;
 
@@ -323,11 +352,18 @@ fn accumulate_prod_claims(rows: &[[EF; 2]], lambda: EF, lambda_prime: EF, mu: EF
     (acc_sum, acc_sum_prime)
 }
 
-fn accumulate_logup_claims(rows: &[[EF; 4]], lambda: EF, lambda_prime: EF, mu: EF) -> (EF, EF) {
-    let mut pow_lambda = EF::ONE;
-    let mut pow_lambda_prime = EF::ONE;
+fn accumulate_logup_claims(
+    rows: &[[EF; 4]],
+    lambda: EF,
+    lambda_prime: EF,
+    mu: EF,
+    lambda_start: EF,
+    lambda_prime_start: EF,
+) -> (EF, EF) {
+    let mut pow_lambda = lambda_start;
+    let mut pow_lambda_prime = lambda_prime_start;
     let mut acc_sum = EF::ZERO;
-    let mut acc_q = EF::ZERO;
+    let mut acc_eval = EF::ZERO;
 
     for quad in rows {
         let p_vals = [quad[0], quad[1]];
@@ -335,13 +371,14 @@ fn accumulate_logup_claims(rows: &[[EF; 4]], lambda: EF, lambda_prime: EF, mu: E
         let p_xi = interpolate_pair(p_vals, mu);
         let q_xi = interpolate_pair(q_vals, mu);
         acc_sum += pow_lambda * (p_xi + lambda * q_xi);
+        let p_cross = quad[0] * quad[3] + quad[1] * quad[2];
         let q_cross = quad[2] * quad[3];
-        acc_q += pow_lambda_prime * lambda_prime * q_cross;
-        pow_lambda *= lambda;
-        pow_lambda_prime *= lambda_prime;
+        acc_eval += pow_lambda_prime * (p_cross + lambda_prime * q_cross);
+        pow_lambda *= lambda * lambda;
+        pow_lambda_prime *= lambda_prime * lambda_prime;
     }
 
-    (acc_sum, acc_q)
+    (acc_sum, acc_eval)
 }
 
 pub(crate) fn circuit_vk_for_idx(
@@ -361,23 +398,49 @@ pub(crate) fn record_and_replay_tower_preflight<TS>(
     child_vk: &RecursionVk,
     chip_idx: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
-) -> TowerReplayResult
+) -> (TowerTranscriptSchedule, TowerReplayResult)
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
-    let _ = record_gkr_transcript(ts, chip_idx, chip_proof);
-    match circuit_vk_for_idx(child_vk, chip_idx) {
-        Some(circuit_vk) => match replay_tower_proof(chip_proof, circuit_vk) {
+    let schedule = record_gkr_transcript(ts, chip_idx, chip_proof);
+    let replay = match circuit_vk_for_idx(child_vk, chip_idx) {
+        Some(circuit_vk) => match replay_tower_proof_poseidon(chip_proof, circuit_vk, &schedule) {
             Ok(replay) => replay,
             Err(err) => {
                 error!(
                     ?err,
-                    chip_idx, "failed to replay tower proof during preflight"
+                    chip_idx, "failed to replay Poseidon tower proof during preflight"
                 );
                 TowerReplayResult::default()
             }
         },
         None => TowerReplayResult::default(),
+    };
+    (schedule, replay)
+}
+
+pub(crate) fn derive_tower_input_claim_for_transcript(
+    child_vk: &RecursionVk,
+    chip_idx: usize,
+    chip_proof: &ZKVMChipProof<RecursionField>,
+    replay: &TowerReplayResult,
+    schedule: &TowerTranscriptSchedule,
+) -> EF {
+    let Some(circuit_vk) = circuit_vk_for_idx(child_vk, chip_idx) else {
+        return EF::ZERO;
+    };
+
+    match build_chip_records(
+        0, 0, chip_idx, 0, true, chip_proof, circuit_vk, replay, schedule, 0,
+    ) {
+        Ok((input_record, ..)) => input_record.input_layer_claim,
+        Err(err) => {
+            error!(
+                ?err,
+                chip_idx, "failed to derive tower input claim during preflight"
+            );
+            EF::ZERO
+        }
     }
 }
 
@@ -385,6 +448,8 @@ where
 fn build_chip_records(
     proof_idx: usize,
     idx: usize,
+    chip_idx: usize,
+    fork_idx: usize,
     is_first_air_idx: bool,
     chip_proof: &ZKVMChipProof<RecursionField>,
     _circuit_vk: &VerifyingKey<RecursionField>,
@@ -407,42 +472,94 @@ fn build_chip_records(
         .chain(chip_proof.tower_proof.prod_specs_eval.iter().map(Vec::len))
         .max()
         .unwrap_or(0);
-    let layer_count = replay.layers.len().max(spec_layer_count);
+    let proof_layer_count = chip_proof.tower_proof.proofs.len();
+    let layer_count = if proof_layer_count == 0 {
+        0
+    } else {
+        proof_layer_count + 1
+    };
+    let _ = spec_layer_count;
 
     let read_count = chip_proof.r_out_evals.len();
     let write_count = chip_proof.w_out_evals.len();
     let logup_count = chip_proof.lk_out_evals.len();
 
-    let mut read_layers = vec![Vec::with_capacity(read_count); layer_count];
-    let mut write_layers = vec![Vec::with_capacity(write_count); layer_count];
-    let mut logup_layers = vec![Vec::with_capacity(logup_count); layer_count];
+    let mut read_layers = vec![vec![[EF::ZERO; 2]; read_count]; layer_count];
+    let mut write_layers = vec![vec![[EF::ZERO; 2]; write_count]; layer_count];
+    let mut logup_layers = vec![vec![[EF::ZERO; 4]; logup_count]; layer_count];
+    let mut read_active = vec![vec![false; read_count]; layer_count];
+    let mut write_active = vec![vec![false; write_count]; layer_count];
+    let mut logup_active = vec![vec![false; logup_count]; layer_count];
 
-    for (spec_idx, rounds) in chip_proof.tower_proof.prod_specs_eval.iter().enumerate() {
-        for layer_idx in 0..layer_count {
-            let mut pair = [EF::ZERO; 2];
-            if let Some(values) = rounds.get(layer_idx) {
-                for (dst, src) in pair.iter_mut().zip(values.iter().take(2)) {
+    if layer_count > 0 {
+        for (spec_idx, evals) in chip_proof.r_out_evals.iter().enumerate() {
+            if spec_idx < read_count {
+                let mut pair = [EF::ZERO; 2];
+                for (dst, src) in pair.iter_mut().zip(evals.iter().take(2)) {
                     *dst = *src;
                 }
+                read_layers[0][spec_idx] = pair;
+                read_active[0][spec_idx] = true;
             }
-            if spec_idx < read_count {
-                read_layers[layer_idx].push(pair);
-            } else {
-                write_layers[layer_idx].push(pair);
+        }
+        for (spec_idx, evals) in chip_proof.w_out_evals.iter().enumerate() {
+            if spec_idx < write_count {
+                let mut pair = [EF::ZERO; 2];
+                for (dst, src) in pair.iter_mut().zip(evals.iter().take(2)) {
+                    *dst = *src;
+                }
+                write_layers[0][spec_idx] = pair;
+                write_active[0][spec_idx] = true;
+            }
+        }
+        for (spec_idx, evals) in chip_proof.lk_out_evals.iter().enumerate() {
+            if spec_idx < logup_count {
+                let mut quad = [EF::ZERO; 4];
+                for (dst, src) in quad.iter_mut().zip(evals.iter().take(4)) {
+                    *dst = *src;
+                }
+                logup_layers[0][spec_idx] = quad;
+                logup_active[0][spec_idx] = true;
             }
         }
     }
 
-    for rounds in &chip_proof.tower_proof.logup_specs_eval {
+    for (spec_idx, rounds) in chip_proof.tower_proof.prod_specs_eval.iter().enumerate() {
+        for round_idx in 0..proof_layer_count {
+            if let Some(values) = rounds.get(round_idx) {
+                let layer_idx = round_idx + 1;
+                let mut pair = [EF::ZERO; 2];
+                for (dst, src) in pair.iter_mut().zip(values.iter().take(2)) {
+                    *dst = *src;
+                }
+                if spec_idx < read_count {
+                    read_layers[layer_idx][spec_idx] = pair;
+                    read_active[layer_idx][spec_idx] = true;
+                } else {
+                    let write_idx = spec_idx - read_count;
+                    if write_idx < write_count {
+                        write_layers[layer_idx][write_idx] = pair;
+                        write_active[layer_idx][write_idx] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    for (spec_idx, rounds) in chip_proof.tower_proof.logup_specs_eval.iter().enumerate() {
         #[allow(clippy::needless_range_loop)]
-        for layer_idx in 0..layer_count {
-            let mut quad = [EF::ZERO; 4];
-            if let Some(values) = rounds.get(layer_idx) {
+        for round_idx in 0..proof_layer_count {
+            if let Some(values) = rounds.get(round_idx) {
+                let layer_idx = round_idx + 1;
+                let mut quad = [EF::ZERO; 4];
                 for (dst, src) in quad.iter_mut().zip(values.iter().take(4)) {
                     *dst = *src;
                 }
+                if spec_idx < logup_count {
+                    logup_layers[layer_idx][spec_idx] = quad;
+                    logup_active[layer_idx][spec_idx] = true;
+                }
             }
-            logup_layers[layer_idx].push(quad);
         }
     }
 
@@ -450,14 +567,16 @@ fn build_chip_records(
         read_layers,
         write_layers,
         logup_layers,
+        read_active,
+        write_active,
+        logup_active,
     };
 
     let mut layer_record = TowerLayerRecord {
         proof_idx,
         idx,
         is_first_air_idx,
-        // TowerLayerAir starts after alpha/beta labels+sampling.
-        tidx: tidx + tower_transcript_len::ALPHA_BETA_LEN,
+        tidx,
         layer_claims: Vec::with_capacity(layer_count),
         lambdas: vec![EF::ZERO; layer_count],
         eq_at_r_primes: vec![EF::ZERO; layer_count],
@@ -494,9 +613,9 @@ fn build_chip_records(
         //     read_len == write_len,
         //     "read/write prod spec count mismatch at layer {layer_idx}: read={read_len}, write={write_len}"
         // );
-        layer_record.read_counts[layer_idx] = read_len.max(1);
-        layer_record.write_counts[layer_idx] = write_len.max(1);
-        layer_record.logup_counts[layer_idx] = logup_len.max(1);
+        layer_record.read_counts[layer_idx] = read_len;
+        layer_record.write_counts[layer_idx] = write_len;
+        layer_record.logup_counts[layer_idx] = logup_len;
     }
 
     for layer_idx in 0..layer_count {
@@ -505,22 +624,12 @@ fn build_chip_records(
             .push(convert_logup_claim(chip_proof, layer_idx));
     }
 
-    let input_layer_claim = layer_record
-        .layer_claims
-        .last()
-        .map(|claim| claim[0])
-        .unwrap_or(EF::ZERO);
-
     let mut sumcheck_record = TowerSumcheckRecord {
         proof_idx,
         idx,
         is_first_air_idx,
-        // First sumcheck transcript row starts at layer_tidx(1) + ALPHA_LEN + SUMCHECK_INIT_LEN.
-        tidx: tidx
-            + tower_transcript_len::ALPHA_BETA_LEN
-            + tower_transcript_len::POST_SUMCHECK_LEN
-            + tower_transcript_len::ALPHA_LEN
-            + tower_transcript_len::SUMCHECK_INIT_LEN,
+        tidx: 0,
+        layer_tidxs: Vec::new(),
         evals: Vec::new(),
         ris: Vec::new(),
         claims: vec![EF::ZERO; layer_count.saturating_sub(1)],
@@ -546,6 +655,16 @@ fn build_chip_records(
         }
     }
     let mut mus_record = vec![EF::ZERO; layer_count];
+    if !mus_record.is_empty() {
+        mus_record[0] = schedule.beta;
+    }
+    for layer_idx in 0..layer_count {
+        layer_record.lambdas[layer_idx] =
+            schedule.lambdas.get(layer_idx).copied().unwrap_or(EF::ZERO);
+        if layer_idx > 0 {
+            mus_record[layer_idx] = schedule.mus.get(layer_idx - 1).copied().unwrap_or(EF::ZERO);
+        }
+    }
 
     let q0_claim = chip_proof
         .lk_out_evals
@@ -554,15 +673,24 @@ fn build_chip_records(
         .copied()
         .unwrap_or(EF::ZERO);
 
-    let layer_output_lambda = schedule.lambdas.last().copied().unwrap_or(EF::ZERO);
-    let layer_output_mu = schedule.mus.last().copied().unwrap_or(EF::ZERO);
-    let input_record = TowerInputRecord {
+    let layer_output_lambda = if layer_count == 0 {
+        EF::ZERO
+    } else {
+        schedule.lambdas.last().copied().unwrap_or(EF::ZERO)
+    };
+    let layer_output_mu = if layer_count == 0 {
+        EF::ZERO
+    } else {
+        schedule.mus.last().copied().unwrap_or(EF::ZERO)
+    };
+    let mut input_record = TowerInputRecord {
         proof_idx,
         idx,
         tidx,
+        final_tidx: tidx,
         n_logup: layer_count,
         alpha_logup: schedule.alpha_logup,
-        input_layer_claim,
+        input_layer_claim: EF::ZERO,
         layer_output_lambda,
         layer_output_mu,
     };
@@ -576,20 +704,16 @@ fn build_chip_records(
             sumcheck_record.evals.len()
         );
     }
-    for (layer_idx, data) in replay.layers.iter().enumerate() {
+    for (round_idx, data) in replay.layers.iter().enumerate() {
+        let layer_idx = round_idx + 1;
         if layer_idx < layer_record.eq_at_r_primes.len() {
             layer_record.eq_at_r_primes[layer_idx] = data.eq_at_r;
-            layer_record.lambdas[layer_idx] =
-                schedule.lambdas.get(layer_idx).copied().unwrap_or(EF::ZERO);
-            mus_record[layer_idx] = schedule.mus.get(layer_idx).copied().unwrap_or(EF::ZERO);
         }
-        if layer_idx + 1 < layer_count {
-            if layer_idx < sumcheck_record.claims.len() {
-                sumcheck_record.claims[layer_idx] = data.claim_in;
-            }
-            if layer_idx < layer_record.sumcheck_claims.len() {
-                layer_record.sumcheck_claims[layer_idx] = data.claim_in;
-            }
+        if round_idx < sumcheck_record.claims.len() {
+            sumcheck_record.claims[round_idx] = data.claim_in;
+        }
+        if round_idx < layer_record.sumcheck_claims.len() {
+            layer_record.sumcheck_claims[round_idx] = data.claim_in;
         }
     }
 
@@ -601,19 +725,48 @@ fn build_chip_records(
             .unwrap_or(EF::ZERO);
         let lambda_prime = layer_record.lambda_prime_at(layer_idx);
         let mu = mus_record.get(layer_idx).copied().unwrap_or(EF::ZERO);
+        let read_count = layer_record.read_count_at(layer_idx);
+        let write_count = layer_record.write_count_at(layer_idx);
+        let read_lambda_start = EF::ONE;
+        let read_lambda_prime_start = EF::ONE;
+        let write_lambda_start = ext_pow(lambda, read_count);
+        let write_lambda_prime_start = ext_pow(lambda_prime, read_count);
+        let logup_lambda_start = ext_pow(lambda, read_count + write_count);
+        let logup_lambda_prime_start = ext_pow(lambda_prime, read_count + write_count);
 
         if let Some(rows) = tower_record.read_layers.get(layer_idx) {
-            let (claim, prime) = accumulate_prod_claims(rows, lambda, lambda_prime, mu);
+            let (claim, prime) = accumulate_prod_claims(
+                rows,
+                lambda,
+                lambda_prime,
+                mu,
+                read_lambda_start,
+                read_lambda_prime_start,
+            );
             layer_record.read_claims[layer_idx] = claim;
             layer_record.read_prime_claims[layer_idx] = prime;
         }
         if let Some(rows) = tower_record.write_layers.get(layer_idx) {
-            let (claim, prime) = accumulate_prod_claims(rows, lambda, lambda_prime, mu);
+            let (claim, prime) = accumulate_prod_claims(
+                rows,
+                lambda,
+                lambda_prime,
+                mu,
+                write_lambda_start,
+                write_lambda_prime_start,
+            );
             layer_record.write_claims[layer_idx] = claim;
             layer_record.write_prime_claims[layer_idx] = prime;
         }
         if let Some(rows) = tower_record.logup_layers.get(layer_idx) {
-            let (claim, prime) = accumulate_logup_claims(rows, lambda, lambda_prime, mu);
+            let (claim, prime) = accumulate_logup_claims(
+                rows,
+                lambda,
+                lambda_prime,
+                mu,
+                logup_lambda_start,
+                logup_lambda_prime_start,
+            );
             layer_record.logup_claims[layer_idx] = claim;
             layer_record.logup_prime_claims[layer_idx] = prime;
         }
@@ -627,18 +780,59 @@ fn build_chip_records(
         let folded = layer_record.read_claims[k]
             + layer_record.write_claims[k]
             + layer_record.logup_claims[k];
+        if let Some(replay_layer) = replay.layers.get(k) {
+            eyre::ensure!(
+                folded == replay_layer.claim_in,
+                "tower folded claim mismatch at proof {proof_idx} chip {idx} layer {k}: folded={folded:?}, replay={:?}",
+                replay_layer.claim_in
+            );
+        }
         sumcheck_record.claims[k] = folded;
         layer_record.sumcheck_claims[k] = folded;
+    }
+
+    if let Some(last_layer_idx) = layer_count.checked_sub(1) {
+        input_record.input_layer_claim = layer_record.read_claims[last_layer_idx]
+            + layer_record.write_claims[last_layer_idx]
+            + layer_record.logup_claims[last_layer_idx];
+        input_record.layer_output_lambda = layer_record.lambdas[last_layer_idx];
+        input_record.layer_output_mu = mus_record[last_layer_idx];
+        input_record.final_tidx =
+            layer_record.layer_tidx(last_layer_idx) + layer_record.layer_span(last_layer_idx);
     }
 
     // Compute eq_at_r_primes from ris and mus so that TowerLayerAir's eq values
     // match the sumcheck trace's eq_out on the sumcheck_output_bus.
     // Sumcheck internal layer k (0-indexed) → TowerLayerAir layer k+1.
     let num_sumcheck_layers = layer_count.saturating_sub(1);
+    sumcheck_record.layer_tidxs = (0..num_sumcheck_layers)
+        .map(|k| layer_record.layer_tidx(k + 1) + tower_transcript_len::SUMCHECK_INIT_LEN)
+        .collect();
+    if let Some(&first_tidx) = sumcheck_record.layer_tidxs.first() {
+        sumcheck_record.tidx = first_tidx;
+    }
     for k in 0..num_sumcheck_layers {
         let eq = TowerSumcheckRecord::compute_eq_for_layer(k, &mus_record, &sumcheck_record.ris);
         if k + 1 < layer_record.eq_at_r_primes.len() {
             layer_record.eq_at_r_primes[k + 1] = eq;
+        }
+    }
+    for (round_idx, replay_layer) in replay.layers.iter().enumerate() {
+        let layer_idx = round_idx + 1;
+        if layer_idx < layer_record.layer_count() {
+            let expected = layer_record.eq_at_r_primes[layer_idx]
+                * (layer_record.read_prime_claims[layer_idx]
+                    + layer_record.write_prime_claims[layer_idx]
+                    + layer_record.logup_prime_claims[layer_idx]);
+            eyre::ensure!(
+                expected == replay_layer.claim_out,
+                "tower expected-eval mismatch at proof {proof_idx} idx {idx} chip_idx {chip_idx} fork_idx {fork_idx} layer {layer_idx}: expected={expected:?}, replay={:?}, eq={:?}, read_prime={:?}, write_prime={:?}, logup_prime={:?}",
+                replay_layer.claim_out,
+                layer_record.eq_at_r_primes[layer_idx],
+                layer_record.read_prime_claims[layer_idx],
+                layer_record.write_prime_claims[layer_idx],
+                layer_record.logup_prime_claims[layer_idx],
+            );
         }
     }
 
@@ -753,11 +947,6 @@ pub(crate) fn build_gkr_blob(
 
     for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
         let mut has_chip = false;
-        let mut first_chip_alpha = EF::ZERO;
-        let mut first_chip_q0 = EF::ZERO;
-        let mut last_input_layer_claim = EF::ZERO;
-        let mut last_layer_output_lambda = EF::ZERO;
-        let mut last_layer_output_mu = EF::ZERO;
 
         let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
             .proof_shape
@@ -819,6 +1008,8 @@ pub(crate) fn build_gkr_blob(
             ) = build_chip_records(
                 proof_idx,
                 idx,
+                chip_idx,
+                pf_entry.fork_idx,
                 entry_idx == 0,
                 chip_proof,
                 circuit_vk,
@@ -827,36 +1018,14 @@ pub(crate) fn build_gkr_blob(
                 global_tidx,
             )?;
 
-            // Capture first chip's alpha and q0 for the proof-level record
-            if entry_idx == 0 {
-                first_chip_alpha = chip_input_record.alpha_logup;
-                first_chip_q0 = q0_claim;
-            }
-            // Always update to latest chip for combined values
-            last_input_layer_claim = chip_input_record.input_layer_claim;
-            last_layer_output_lambda = chip_input_record.layer_output_lambda;
-            last_layer_output_mu = chip_input_record.layer_output_mu;
-
-            // Per-chip records (not input_records)
+            input_records.push(chip_input_record);
+            proof_q0_claims.push(q0_claim);
             layer_records.push(layer_record);
             tower_records.push(tower_record);
             sumcheck_records.push(sumcheck_record);
             mus_records.push(mus_record);
             q0_claims.push(q0_claim);
         }
-
-        // ONE input record per proof (matching ProofIdxSubAir constraint)
-        input_records.push(TowerInputRecord {
-            proof_idx,
-            idx: 0,
-            tidx: preflight.proof_shape.post_tidx,
-            n_logup: preflight.proof_shape.n_logup,
-            alpha_logup: first_chip_alpha,
-            input_layer_claim: last_input_layer_claim,
-            layer_output_lambda: last_layer_output_lambda,
-            layer_output_mu: last_layer_output_mu,
-        });
-        proof_q0_claims.push(first_chip_q0);
 
         if !has_chip {
             layer_records.push(TowerLayerRecord {
@@ -875,16 +1044,6 @@ pub(crate) fn build_gkr_blob(
             mus_records.push(vec![]);
             q0_claims.push(EF::ZERO);
         }
-    }
-
-    if input_records.is_empty() {
-        input_records.push(TowerInputRecord::default());
-        proof_q0_claims.push(EF::ZERO);
-        layer_records.push(TowerLayerRecord::default());
-        sumcheck_records.push(TowerSumcheckRecord::default());
-        tower_records.push(TowerTowerEvalRecord::default());
-        mus_records.push(vec![]);
-        q0_claims.push(EF::ZERO);
     }
 
     Ok(TowerBlobCpu {
@@ -934,53 +1093,47 @@ where
     // Reconstruct the transcript events consumed by tower-related AIRs.
     // This keeps preflight transcript history aligned with TowerLayer/Sumcheck/
     // ProdClaim/LogupClaim transcript bus interactions.
-    let read_count = chip_proof.r_out_evals.len();
-    let layer_count = chip_proof
-        .tower_proof
-        .logup_specs_eval
-        .iter()
-        .map(Vec::len)
-        .chain(chip_proof.tower_proof.prod_specs_eval.iter().map(Vec::len))
-        .max()
-        .unwrap_or(0);
+    let round_count = chip_proof.tower_proof.proofs.len();
 
     let log2_num_fanin: usize = 1; // ceil_log2(NUM_FANIN=2) = 1
 
-    let mut lambdas = Vec::with_capacity(layer_count);
-    let mut mus = Vec::with_capacity(layer_count);
+    let mut lambdas = Vec::with_capacity(round_count + 1);
+    lambdas.push(alpha_logup);
+    let mut mus = Vec::with_capacity(round_count);
     let mut ris = Vec::new();
 
-    for layer_idx in 0..layer_count {
-        // For layer 0, there is no transcript lambda sample — the native verifier
-        // goes straight from beta to sumcheck. Use alpha_logup as the weighting
-        // challenge for the root layer (matching native's initial alpha_pows).
-        // For layers > 0, this sample corresponds to get_challenge_pows in the
-        // native verifier (the "next alpha" after the previous round's merge).
-        let lambda = if layer_idx > 0 {
-            transcript_observe_label(ts, b"combine subset evals");
-            FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts)
-        } else {
-            alpha_logup
-        };
-        lambdas.push(lambda);
+    for round_idx in 0..round_count {
+        let round_msgs = &chip_proof.tower_proof.proofs[round_idx];
+        // Mirror native sumcheck IOPVerifierState::verify init:
+        // append_message(max_num_variables.to_leBytes())
+        // append_message(max_degree.to_leBytes())
+        let max_num_variables = (round_idx + 1) * log2_num_fanin;
+        let max_degree: usize = 3; // NUM_FANIN + 1
+        transcript_observe_label(ts, &max_num_variables.to_le_bytes());
+        transcript_observe_label(ts, &max_degree.to_le_bytes());
 
-        if let Some(round_msgs) = chip_proof.tower_proof.proofs.get(layer_idx) {
-            // Mirror native sumcheck IOPVerifierState::verify init:
-            // append_message(max_num_variables.to_leBytes())
-            // append_message(max_degree.to_leBytes())
-            let max_num_variables = (layer_idx + 1) * log2_num_fanin;
-            let max_degree: usize = 3; // NUM_FANIN + 1
-            transcript_observe_label(ts, &max_num_variables.to_le_bytes());
-            transcript_observe_label(ts, &max_degree.to_le_bytes());
+        for msg in round_msgs {
+            for eval in &msg.evaluations {
+                ts.observe_ext(*eval);
+            }
+            // Mirror native: sample_and_append_challenge(b"Internal round")
+            transcript_observe_label(ts, b"Internal round");
+            let ri = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+            ris.push(ri);
+        }
 
-            for (_ri_idx, msg) in round_msgs.iter().enumerate() {
-                for eval in &msg.evaluations {
+        for rounds in &chip_proof.tower_proof.prod_specs_eval {
+            if let Some(evals) = rounds.get(round_idx) {
+                for eval in evals {
                     ts.observe_ext(*eval);
                 }
-                // Mirror native: sample_and_append_challenge(b"Internal round")
-                transcript_observe_label(ts, b"Internal round");
-                let ri = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
-                ris.push(ri);
+            }
+        }
+        for rounds in &chip_proof.tower_proof.logup_specs_eval {
+            if let Some(evals) = rounds.get(round_idx) {
+                for eval in evals {
+                    ts.observe_ext(*eval);
+                }
             }
         }
 
@@ -988,9 +1141,12 @@ where
         transcript_observe_label(ts, b"merge");
         let mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         mus.push(mu);
+
+        transcript_observe_label(ts, b"combine subset evals");
+        let next_lambda = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+        lambdas.push(next_lambda);
     }
 
-    let _ = read_count;
     TowerTranscriptSchedule {
         alpha_logup,
         beta,
@@ -1041,6 +1197,510 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             .collect::<Vec<_>>()
             .into_iter()
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::*;
+    use crate::{
+        system::RecursionPcs,
+        utils::{TranscriptLabel, transcript_observe_label},
+    };
+    use ceno_zkvm::scheme::{constants::NUM_FANIN, verifier::TowerVerify};
+    use mpcs::PolynomialCommitmentScheme;
+    use multilinear_extensions::util::ceil_log2;
+    use openvm_stark_sdk::config::baby_bear_poseidon2::default_duplex_sponge_recorder;
+    use p3_field::BasedVectorSpace;
+    use transcript::{Transcript, basic::BasicTranscript};
+    use witness::next_pow2_instance_padding;
+
+    fn limbs(value: RecursionField) -> [F; D_EF] {
+        value.as_basis_coefficients_slice().try_into().unwrap()
+    }
+
+    fn fixture_path(file_name: &str) -> Option<std::path::PathBuf> {
+        std::env::var_os("CENO_RECURSION_V2_FIXTURE_DIR")
+            .map(std::path::PathBuf::from)
+            .into_iter()
+            .chain([std::path::PathBuf::from("./src/imported")])
+            .map(|dir| dir.join(file_name))
+            .find(|path| path.exists())
+    }
+
+    fn load_fixture() -> Option<(RecursionProof, RecursionVk)> {
+        let proof_path = fixture_path("proof.bin")?;
+        let vk_path = fixture_path("vk.bin")?;
+        let proof_bytes = std::fs::read(proof_path).ok()?;
+        let proof = bincode::deserialize::<Vec<RecursionProof>>(&proof_bytes)
+            .ok()
+            .and_then(|proofs| proofs.into_iter().next())
+            .or_else(|| bincode::deserialize::<RecursionProof>(&proof_bytes).ok())?;
+        let mut vk = bincode::deserialize::<RecursionVk>(&std::fs::read(vk_path).ok()?).ok()?;
+        vk.rebuild_circuit_index();
+        Some((proof, vk))
+    }
+
+    fn observe_basic_prefix(
+        ts: &mut BasicTranscript<RecursionField>,
+        vk: &RecursionVk,
+        proof: &RecursionProof,
+    ) {
+        ts.append_field_element_exts(&vk.compute_digest());
+        for (_, circuit_vk) in vk.circuit_vks.iter() {
+            for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
+                ts.append_field_element(
+                    &proof
+                        .public_values
+                        .query_by_index::<RecursionField>(instance_value.0),
+                );
+            }
+        }
+        if let Some(commitment) = vk.fixed_commit.as_ref() {
+            RecursionPcs::write_commitment(commitment, ts).unwrap();
+        }
+        if let Some(commitment) = vk.fixed_no_omc_init_commit.as_ref() {
+            RecursionPcs::write_commitment(commitment, ts).unwrap();
+        }
+        RecursionPcs::write_commitment(&proof.witin_commit, ts).unwrap();
+    }
+
+    fn observe_basic_tower(
+        ts: &mut BasicTranscript<RecursionField>,
+        chip_proof: &ZKVMChipProof<RecursionField>,
+    ) -> TowerTranscriptSchedule {
+        for eval in chip_proof
+            .r_out_evals
+            .iter()
+            .chain(chip_proof.w_out_evals.iter())
+            .chain(chip_proof.lk_out_evals.iter())
+            .flatten()
+        {
+            ts.append_field_element_ext(eval);
+        }
+        let alpha_logup = ::sumcheck::util::get_challenge_pows::<RecursionField>(
+            chip_proof.r_out_evals.len()
+                + chip_proof.w_out_evals.len()
+                + 2 * chip_proof.lk_out_evals.len(),
+            ts,
+        )
+        .get(1)
+        .copied()
+        .unwrap_or(RecursionField::ONE);
+        let beta = ts.sample_and_append_vec(b"product_sum", 1)[0];
+        let mut lambdas = vec![alpha_logup];
+        let mut mus = Vec::new();
+        let mut ris = Vec::new();
+        for (round_idx, round_msgs) in chip_proof.tower_proof.proofs.iter().enumerate() {
+            ts.append_message(&(round_idx + 1).to_le_bytes());
+            ts.append_message(&3usize.to_le_bytes());
+            for msg in round_msgs {
+                for eval in &msg.evaluations {
+                    ts.append_field_element_ext(eval);
+                }
+                ris.push(ts.sample_and_append_challenge(b"Internal round").elements);
+            }
+            for rounds in &chip_proof.tower_proof.prod_specs_eval {
+                if let Some(evals) = rounds.get(round_idx) {
+                    ts.append_field_element_exts(evals);
+                }
+            }
+            for rounds in &chip_proof.tower_proof.logup_specs_eval {
+                if let Some(evals) = rounds.get(round_idx) {
+                    ts.append_field_element_exts(evals);
+                }
+            }
+            mus.push(ts.sample_and_append_vec(b"merge", 1)[0]);
+            let next_lambda = ::sumcheck::util::get_challenge_pows::<RecursionField>(
+                chip_proof.r_out_evals.len()
+                    + chip_proof.w_out_evals.len()
+                    + 2 * chip_proof.lk_out_evals.len(),
+                ts,
+            )
+            .get(1)
+            .copied()
+            .unwrap_or(RecursionField::ONE);
+            lambdas.push(next_lambda);
+        }
+        TowerTranscriptSchedule {
+            alpha_logup,
+            beta,
+            lambdas,
+            mus,
+            ris,
+        }
+    }
+
+    fn manual_first_expected(chip_proof: &ZKVMChipProof<RecursionField>, lambda: EF, eq: EF) -> EF {
+        let prod_count = chip_proof.r_out_evals.len() + chip_proof.w_out_evals.len();
+        let mut total = EF::ZERO;
+        let mut pow = EF::ONE;
+        for rounds in &chip_proof.tower_proof.prod_specs_eval {
+            if let Some(evals) = rounds.first() {
+                total += pow * evals.iter().copied().product::<EF>();
+            }
+            pow *= lambda;
+        }
+        debug_assert_eq!(prod_count, chip_proof.tower_proof.prod_specs_eval.len());
+        for rounds in &chip_proof.tower_proof.logup_specs_eval {
+            if let Some(evals) = rounds.first() {
+                let (p1, p2, q1, q2) = (evals[0], evals[1], evals[2], evals[3]);
+                total += pow * (p1 * q2 + p2 * q1);
+                pow *= lambda;
+                total += pow * (q1 * q2);
+                pow *= lambda;
+            }
+        }
+        eq * total
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_chip_15_tower() {
+        let Some((proof, vk)) = load_fixture() else {
+            return;
+        };
+
+        let target_fork = 10usize;
+        let (chip_idx, chip_proof) = proof
+            .chip_proofs
+            .iter()
+            .flat_map(|(chip_idx, proofs)| {
+                proofs.iter().map(move |chip_proof| (*chip_idx, chip_proof))
+            })
+            .nth(target_fork)
+            .expect("target fork should exist");
+        assert_eq!(chip_idx, 15);
+        let circuit_vk = circuit_vk_for_idx(&vk, chip_idx).unwrap();
+
+        let mut basic = BasicTranscript::<RecursionField>::new(b"riscv");
+        observe_basic_prefix(&mut basic, &vk, &proof);
+        let basic_alpha = basic.read_challenge().elements;
+        let basic_beta = basic.read_challenge().elements;
+
+        let mut basic_fork = BasicTranscript::<RecursionField>::new(b"fork");
+        basic_fork.append_field_element_ext(&basic_alpha);
+        basic_fork.append_field_element_ext(&basic_beta);
+        basic_fork.append_field_element(&F::from_usize(target_fork));
+        basic_fork.append_field_element(&F::from_usize(chip_idx));
+        for num_instance in &chip_proof.num_instances {
+            basic_fork.append_field_element(&F::from_usize(*num_instance));
+        }
+        let basic_schedule = observe_basic_tower(&mut basic_fork, chip_proof);
+
+        let num_instances: usize = chip_proof.num_instances.iter().sum();
+        let mut num_vars = ceil_log2(next_pow2_instance_padding(num_instances));
+        if circuit_vk.get_cs().has_ecc_ops() {
+            num_vars += 1;
+        }
+        num_vars += circuit_vk.get_cs().rotation_vars().unwrap_or(0);
+        let num_batched = chip_proof.r_out_evals.len()
+            + chip_proof.w_out_evals.len()
+            + chip_proof.lk_out_evals.len();
+
+        let eq0 = basic_schedule.beta * basic_schedule.ris[0]
+            + (EF::ONE - basic_schedule.beta) * (EF::ONE - basic_schedule.ris[0]);
+        eprintln!(
+            "chip_idx={chip_idx} fork={target_fork} num_vars={num_vars} num_batched={num_batched} r={} w={} lk={} proofs={} prod_specs={} logup_specs={} lambda0={:?} beta0={:?} ri0={:?} manual_expected={:?}",
+            chip_proof.r_out_evals.len(),
+            chip_proof.w_out_evals.len(),
+            chip_proof.lk_out_evals.len(),
+            chip_proof.tower_proof.proofs.len(),
+            chip_proof.tower_proof.prod_specs_eval.len(),
+            chip_proof.tower_proof.logup_specs_eval.len(),
+            limbs(basic_schedule.alpha_logup),
+            limbs(basic_schedule.beta),
+            limbs(basic_schedule.ris[0]),
+            limbs(manual_first_expected(
+                chip_proof,
+                basic_schedule.alpha_logup,
+                eq0
+            )),
+        );
+
+        let replay = replay_tower_proof_poseidon(chip_proof, circuit_vk, &basic_schedule).unwrap();
+        if let Some(layer0) = replay.layers.first() {
+            eprintln!(
+                "poseidon replay claim_in={:?} claim_out={:?} eq={:?}",
+                limbs(layer0.claim_in),
+                limbs(layer0.claim_out),
+                limbs(layer0.eq_at_r),
+            );
+        }
+
+        let mut basic_verify = BasicTranscript::<RecursionField>::new(b"fork");
+        basic_verify.append_field_element_ext(&basic_alpha);
+        basic_verify.append_field_element_ext(&basic_beta);
+        basic_verify.append_field_element(&F::from_usize(target_fork));
+        basic_verify.append_field_element(&F::from_usize(chip_idx));
+        for num_instance in &chip_proof.num_instances {
+            basic_verify.append_field_element(&F::from_usize(*num_instance));
+        }
+        for eval in chip_proof
+            .r_out_evals
+            .iter()
+            .chain(chip_proof.w_out_evals.iter())
+            .chain(chip_proof.lk_out_evals.iter())
+            .flatten()
+        {
+            basic_verify.append_field_element_ext(eval);
+        }
+        let tower_verify_result = TowerVerify::verify(
+            chip_proof
+                .r_out_evals
+                .iter()
+                .cloned()
+                .chain(chip_proof.w_out_evals.iter().cloned())
+                .collect(),
+            chip_proof.lk_out_evals.clone(),
+            &chip_proof.tower_proof,
+            vec![num_vars; num_batched],
+            NUM_FANIN,
+            &mut basic_verify,
+        );
+        eprintln!(
+            "native TowerVerify result={:?}",
+            tower_verify_result.as_ref().map(|_| ())
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_compare_all_tower_schedules() {
+        let Some((proof, vk)) = load_fixture() else {
+            return;
+        };
+
+        let mut basic = BasicTranscript::<RecursionField>::new(b"riscv");
+        observe_basic_prefix(&mut basic, &vk, &proof);
+        let basic_alpha = basic.read_challenge().elements;
+        let basic_beta = basic.read_challenge().elements;
+
+        let mut sponge = default_duplex_sponge_recorder();
+        transcript_observe_label(&mut sponge, TranscriptLabel::Riscv.as_bytes());
+        let mut openvm_preflight = Preflight::default();
+        super::super::circuit::inner::vm_pvs::run_preflight(
+            &vk,
+            &proof,
+            &mut openvm_preflight,
+            &mut sponge,
+        );
+        let openvm_alpha = openvm_preflight.vm_pvs.lookup_challenge_alpha;
+        let openvm_beta = openvm_preflight.vm_pvs.lookup_challenge_beta;
+
+        eprintln!(
+            "global basic alpha={:?} beta={:?}; openvm alpha={:?} beta={:?}",
+            limbs(basic_alpha),
+            limbs(basic_beta),
+            limbs(openvm_alpha),
+            limbs(openvm_beta),
+        );
+
+        let mut checked = 0usize;
+        let mut mismatches = 0usize;
+        for (fork_id, (&chip_idx, chip_proof)) in proof
+            .chip_proofs
+            .iter()
+            .flat_map(|(chip_idx, proofs)| {
+                proofs.iter().map(move |chip_proof| (chip_idx, chip_proof))
+            })
+            .enumerate()
+        {
+            let mut basic_fork = BasicTranscript::<RecursionField>::new(b"fork");
+            basic_fork.append_field_element_ext(&basic_alpha);
+            basic_fork.append_field_element_ext(&basic_beta);
+            basic_fork.append_field_element(&F::from_usize(fork_id));
+            basic_fork.append_field_element(&F::from_usize(chip_idx));
+            for num_instance in &chip_proof.num_instances {
+                basic_fork.append_field_element(&F::from_usize(*num_instance));
+            }
+            let basic_schedule = observe_basic_tower(&mut basic_fork, chip_proof);
+
+            let mut openvm_fork = default_duplex_sponge_recorder();
+            transcript_observe_label(&mut openvm_fork, TranscriptLabel::Fork.as_bytes());
+            FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
+                &mut openvm_fork,
+                openvm_alpha,
+            );
+            FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
+                &mut openvm_fork,
+                openvm_beta,
+            );
+            FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
+                &mut openvm_fork,
+                F::from_usize(fork_id),
+            );
+            FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
+                &mut openvm_fork,
+                F::from_usize(chip_idx),
+            );
+            for num_instance in &chip_proof.num_instances {
+                FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
+                    &mut openvm_fork,
+                    F::from_usize(*num_instance),
+                );
+            }
+            let openvm_schedule = record_gkr_transcript(&mut openvm_fork, chip_idx, chip_proof);
+
+            let same = basic_schedule.alpha_logup == openvm_schedule.alpha_logup
+                && basic_schedule.beta == openvm_schedule.beta
+                && basic_schedule.lambdas == openvm_schedule.lambdas
+                && basic_schedule.mus == openvm_schedule.mus
+                && basic_schedule.ris == openvm_schedule.ris;
+            if !same {
+                mismatches += 1;
+                eprintln!(
+                    "schedule mismatch fork={fork_id} chip_idx={chip_idx} basic lambda0={:?} beta0={:?} ri0={:?}; openvm lambda0={:?} beta0={:?} ri0={:?}",
+                    limbs(basic_schedule.alpha_logup),
+                    limbs(basic_schedule.beta),
+                    basic_schedule.ris.first().copied().map(limbs),
+                    limbs(openvm_schedule.alpha_logup),
+                    limbs(openvm_schedule.beta),
+                    openvm_schedule.ris.first().copied().map(limbs),
+                );
+            }
+            checked += 1;
+        }
+
+        eprintln!("checked {checked} fork schedules, mismatches={mismatches}");
+        assert_eq!(mismatches, 0);
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_compare_tower_transcripts() {
+        let Some((proof, vk)) = load_fixture() else {
+            return;
+        };
+        let (&chip_idx, chip_instances) = proof.chip_proofs.iter().next().unwrap();
+        let chip_proof = &chip_instances[0];
+        let circuit_vk = circuit_vk_for_idx(&vk, chip_idx).unwrap();
+
+        let mut basic = BasicTranscript::<RecursionField>::new(b"riscv");
+        observe_basic_prefix(&mut basic, &vk, &proof);
+        let basic_alpha = basic.read_challenge().elements;
+        let basic_beta = basic.read_challenge().elements;
+
+        let mut basic_fork = BasicTranscript::<RecursionField>::new(b"fork");
+        basic_fork.append_field_element_ext(&basic_alpha);
+        basic_fork.append_field_element_ext(&basic_beta);
+        basic_fork.append_field_element(&F::from_usize(0));
+        basic_fork.append_field_element(&F::from_usize(chip_idx));
+        for num_instance in &chip_proof.num_instances {
+            basic_fork.append_field_element(&F::from_usize(*num_instance));
+        }
+        let basic_schedule = observe_basic_tower(&mut basic_fork, chip_proof);
+
+        let mut sponge = default_duplex_sponge_recorder();
+        transcript_observe_label(&mut sponge, TranscriptLabel::Riscv.as_bytes());
+        let mut openvm_preflight = Preflight::default();
+        super::super::circuit::inner::vm_pvs::run_preflight(
+            &vk,
+            &proof,
+            &mut openvm_preflight,
+            &mut sponge,
+        );
+        let openvm_alpha = openvm_preflight.vm_pvs.lookup_challenge_alpha;
+        let openvm_beta = openvm_preflight.vm_pvs.lookup_challenge_beta;
+        let mut openvm_fork = default_duplex_sponge_recorder();
+        transcript_observe_label(&mut openvm_fork, TranscriptLabel::Fork.as_bytes());
+        FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(
+            &mut openvm_fork,
+            openvm_alpha,
+        );
+        FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(&mut openvm_fork, openvm_beta);
+        FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
+            &mut openvm_fork,
+            F::from_usize(0),
+        );
+        FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
+            &mut openvm_fork,
+            F::from_usize(chip_idx),
+        );
+        for num_instance in &chip_proof.num_instances {
+            FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
+                &mut openvm_fork,
+                F::from_usize(*num_instance),
+            );
+        }
+        let openvm_schedule = record_gkr_transcript(&mut openvm_fork, chip_idx, chip_proof);
+
+        eprintln!(
+            "basic alpha={:?} beta={:?} tower_lambda0={:?} beta0={:?} ri0={:?}",
+            limbs(basic_alpha),
+            limbs(basic_beta),
+            limbs(basic_schedule.alpha_logup),
+            limbs(basic_schedule.beta),
+            limbs(basic_schedule.ris[0]),
+        );
+        eprintln!(
+            "openvm alpha={:?} beta={:?} tower_lambda0={:?} beta0={:?} ri0={:?}",
+            limbs(openvm_alpha),
+            limbs(openvm_beta),
+            limbs(openvm_schedule.alpha_logup),
+            limbs(openvm_schedule.beta),
+            limbs(openvm_schedule.ris[0]),
+        );
+        let eq0 = basic_schedule.beta * basic_schedule.ris[0]
+            + (EF::ONE - basic_schedule.beta) * (EF::ONE - basic_schedule.ris[0]);
+        eprintln!(
+            "manual expected cur={:?} next={:?} eq={:?}",
+            limbs(manual_first_expected(
+                chip_proof,
+                basic_schedule.lambdas[0],
+                eq0
+            )),
+            limbs(manual_first_expected(
+                chip_proof,
+                basic_schedule.lambdas[1],
+                eq0
+            )),
+            limbs(eq0),
+        );
+
+        let mut basic_verify = BasicTranscript::<RecursionField>::new(b"fork");
+        basic_verify.append_field_element_ext(&basic_alpha);
+        basic_verify.append_field_element_ext(&basic_beta);
+        basic_verify.append_field_element(&F::from_usize(0));
+        basic_verify.append_field_element(&F::from_usize(chip_idx));
+        for num_instance in &chip_proof.num_instances {
+            basic_verify.append_field_element(&F::from_usize(*num_instance));
+        }
+        for eval in chip_proof
+            .r_out_evals
+            .iter()
+            .chain(chip_proof.w_out_evals.iter())
+            .chain(chip_proof.lk_out_evals.iter())
+            .flatten()
+        {
+            basic_verify.append_field_element_ext(eval);
+        }
+        let num_instances: usize = chip_proof.num_instances.iter().sum();
+        let mut num_vars = ceil_log2(next_pow2_instance_padding(num_instances));
+        if circuit_vk.get_cs().has_ecc_ops() {
+            num_vars += 1;
+        }
+        num_vars += circuit_vk.get_cs().rotation_vars().unwrap_or(0);
+        let num_batched = chip_proof.r_out_evals.len()
+            + chip_proof.w_out_evals.len()
+            + chip_proof.lk_out_evals.len();
+        let tower_verify_result = TowerVerify::verify(
+            chip_proof
+                .r_out_evals
+                .iter()
+                .cloned()
+                .chain(chip_proof.w_out_evals.iter().cloned())
+                .collect(),
+            chip_proof.lk_out_evals.clone(),
+            &chip_proof.tower_proof,
+            vec![num_vars; num_batched],
+            NUM_FANIN,
+            &mut basic_verify,
+        );
+        eprintln!(
+            "native TowerVerify result={:?}",
+            tower_verify_result.as_ref().map(|_| ())
+        );
     }
 }
 

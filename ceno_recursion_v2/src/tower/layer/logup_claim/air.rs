@@ -174,40 +174,48 @@ where
             .when(local.is_enabled * next.is_enabled * next.is_first_layer)
             .assert_zero(next.index_id);
         builder
-            .when(is_within_layer.clone() * is_not_dummy.clone())
+            .when(is_within_layer.clone())
             .assert_eq(next.index_id, local.index_id + AB::Expr::ONE);
         builder
-            .when(is_layer_end.clone() * is_not_dummy.clone())
+            .when(is_layer_end.clone() * local.num_logup_count)
             .assert_eq(local.index_id + AB::Expr::ONE, local.num_logup_count);
 
         assert_zeros(
-            &mut builder.when(local.is_first * is_not_dummy.clone()),
+            &mut builder.when(local.is_first),
             local.acc_sum.map(Into::into),
         );
         assert_zeros(
-            &mut builder.when(local.is_first * is_not_dummy.clone()),
+            &mut builder.when(local.is_first),
             local.acc_p_cross.map(Into::into),
         );
         assert_zeros(
-            &mut builder.when(local.is_first * is_not_dummy.clone()),
+            &mut builder.when(local.is_first),
             local.acc_q_cross.map(Into::into),
         );
-        builder
-            .when(local.is_first * is_not_dummy.clone())
-            .assert_eq(local.pow_lambda[0], AB::Expr::ONE);
-        for limb in local.pow_lambda.iter().copied().skip(1) {
-            builder
-                .when(local.is_first * is_not_dummy.clone())
-                .assert_zero(limb);
-        }
-        builder
-            .when(local.is_first * is_not_dummy.clone())
-            .assert_eq(local.pow_lambda_prime[0], AB::Expr::ONE);
-        for limb in local.pow_lambda_prime.iter().copied().skip(1) {
-            builder
-                .when(local.is_first * is_not_dummy.clone())
-                .assert_zero(limb);
-        }
+        assert_zeros(
+            &mut builder.when(local.is_dummy),
+            local.p_xi_0.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(local.is_dummy),
+            local.p_xi_1.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(local.is_dummy),
+            local.q_xi_0.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(local.is_dummy),
+            local.q_xi_1.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(local.is_dummy),
+            local.p_xi.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(local.is_dummy),
+            local.q_xi.map(Into::into),
+        );
 
         let delta_p = ext_field_subtract::<AB::Expr>(local.p_xi_1, local.p_xi_0);
         let expected_p_xi =
@@ -237,7 +245,8 @@ where
             next.acc_sum,
             acc_sum_with_cur,
         );
-        let pow_lambda_next = ext_field_multiply::<AB::Expr>(pow_lambda, lambda.clone());
+        let lambda_sq = ext_field_multiply::<AB::Expr>(lambda.clone(), lambda.clone());
+        let pow_lambda_next = ext_field_multiply::<AB::Expr>(pow_lambda, lambda_sq);
         assert_array_eq(
             &mut builder.when(is_within_layer.clone()),
             next.pow_lambda,
@@ -265,8 +274,10 @@ where
             next.acc_q_cross,
             acc_q_with_cur.clone(),
         );
+        let lambda_prime_sq =
+            ext_field_multiply::<AB::Expr>(lambda_prime.clone(), lambda_prime.clone());
         let pow_lambda_prime_next =
-            ext_field_multiply::<AB::Expr>(pow_lambda_prime, lambda_prime.clone());
+            ext_field_multiply::<AB::Expr>(pow_lambda_prime, lambda_prime_sq);
         assert_array_eq(
             &mut builder.when(is_within_layer.clone()),
             next.pow_lambda_prime,
@@ -282,9 +293,11 @@ where
                 tidx: local.tidx.into(),
                 lambda: lambda.clone(),
                 lambda_prime: lambda_prime.clone(),
+                lambda_start: local.pow_lambda.map(Into::into),
+                lambda_prime_start: local.pow_lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            local.is_first.into(),
+            local.is_first * local.is_enabled * local.num_logup_count,
         );
 
         self.logup_claim_bus.send(
@@ -294,14 +307,15 @@ where
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
                 lambda_claim: acc_sum_export.map(Into::into),
-                lambda_prime_claim: acc_q_with_cur.map(Into::into),
+                lambda_prime_claim: ext_field_add::<AB::Expr>(acc_p_with_cur, acc_q_with_cur)
+                    .map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
-            is_layer_end,
+            is_layer_end * local.num_logup_count,
         );
 
         let mut tidx = local.tidx.into();
-        for claim in [local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1] {
+        for claim in [local.p_xi_0, local.p_xi_1, local.q_xi_0, local.q_xi_1] {
             self.transcript_bus.observe_ext(
                 builder,
                 local.proof_idx,

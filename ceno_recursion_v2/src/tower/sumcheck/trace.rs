@@ -14,6 +14,7 @@ pub struct TowerSumcheckRecord {
     pub idx: usize,
     pub is_first_air_idx: bool,
     pub tidx: usize,
+    pub layer_tidxs: Vec<usize>,
     pub evals: Vec<[EF; 3]>,
     pub ris: Vec<EF>,
     pub claims: Vec<EF>,
@@ -43,22 +44,24 @@ impl TowerSumcheckRecord {
 
     #[inline]
     fn derive_tidx(&self, layer_idx: usize, round_in_layer: usize) -> usize {
-        let rounds_before_layer = Self::layer_start_index(layer_idx);
-        self.tidx
-            + tower_transcript_len::ROUND_LEN * (rounds_before_layer + round_in_layer)
-            + tower_transcript_len::LAYER_GAP_LEN * layer_idx
+        self.layer_tidxs
+            .get(layer_idx)
+            .copied()
+            .unwrap_or(self.tidx)
+            + tower_transcript_len::ROUND_LEN * round_in_layer
     }
 
     #[inline]
     pub fn prev_challenge(layer_idx: usize, round_in_layer: usize, mus: &[EF], ris: &[EF]) -> EF {
-        if round_in_layer == 0 {
-            mus[layer_idx]
-        } else {
-            let prev_layer = layer_idx
-                .checked_sub(1)
-                .expect("round_in_layer > 0 only occurs for non-root layers");
-            let offset = Self::layer_start_index(prev_layer) + (round_in_layer - 1);
+        if layer_idx == 0 {
+            debug_assert_eq!(round_in_layer, 0);
+            mus[0]
+        } else if round_in_layer < layer_idx {
+            let prev_layer = layer_idx - 1;
+            let offset = Self::layer_start_index(prev_layer) + round_in_layer;
             ris[offset]
+        } else {
+            mus[layer_idx]
         }
     }
 

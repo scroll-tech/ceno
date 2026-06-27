@@ -18,10 +18,7 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
-use recursion_circuit::{
-    subairs::proof_idx::{ProofIdxIoCols, ProofIdxSubAir},
-    utils::assert_zeros,
-};
+use recursion_circuit::utils::assert_zeros;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 #[repr(C)]
@@ -42,6 +39,7 @@ pub struct TowerInputCols<T> {
 
     /// Transcript index
     pub tidx: T,
+    pub final_tidx: T,
 
     pub r0_claim: [T; D_EF],
     pub w0_claim: [T; D_EF],
@@ -88,25 +86,33 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         // Proof Index Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        // This subair has the following constraints:
-        // 1. Boolean enabled flag
-        // 2. Disabled rows are followed by disabled rows
-        // 3. Proof index increments by exactly one between enabled rows
-        ProofIdxSubAir.eval(
-            builder,
-            (
-                ProofIdxIoCols {
-                    is_enabled: local.is_enabled,
-                    proof_idx: local.proof_idx,
-                }
-                .map_into(),
-                ProofIdxIoCols {
-                    is_enabled: next.is_enabled,
-                    proof_idx: next.proof_idx,
-                }
-                .map_into(),
-            ),
-        );
+        builder.assert_bool(local.is_enabled);
+        builder
+            .when_transition()
+            .when(AB::Expr::ONE - local.is_enabled)
+            .assert_zero(next.is_enabled);
+        builder
+            .when_first_row()
+            .when(local.is_enabled)
+            .assert_zero(local.proof_idx);
+        builder
+            .when_first_row()
+            .when(local.is_enabled)
+            .assert_zero(local.idx);
+
+        let proof_diff: AB::Expr = next.proof_idx - local.proof_idx;
+        builder
+            .when_transition()
+            .when(next.is_enabled)
+            .assert_bool(proof_diff.clone());
+        builder
+            .when_transition()
+            .when(next.is_enabled * proof_diff.clone())
+            .assert_zero(next.idx);
+        builder
+            .when_transition()
+            .when(next.is_enabled * (AB::Expr::ONE - proof_diff))
+            .assert_eq(next.idx, local.idx + AB::Expr::ONE);
 
         ///////////////////////////////////////////////////////////////////////
         // Base Constraints
@@ -151,21 +157,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         let num_layers = local.n_logup;
 
         // Add PoW (if any) and alpha label+sample, beta label+sample
-        use crate::tower::tower_transcript_len::{
-            ALPHA_BETA_LEN, ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
-        };
-        let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN);
-        // Add GKR layers + Sumcheck.
-        // Total GKR span: n*(10n+25) - 13 for n>0.
-        // layers_cumulative(n) = 10n² + 25n - 13.
-        let gkr_inner = num_layers.clone() * AB::Expr::from_usize(ROUND_LEN / 2)
-            + AB::Expr::from_usize(
-                ALPHA_LEN + SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN - ROUND_LEN / 2,
-            );
-        let tidx_after_gkr_layers = tidx_after_alpha_beta.clone()
-            + has_interactions.clone()
-                * (num_layers.clone() * gkr_inner
-                    - AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN));
         // 1. TowerLayerInputBus
         // 1a. Send input to TowerLayerAir
         self.layer_input_bus.send(
@@ -173,7 +164,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.proof_idx,
             TowerLayerInputMessage {
                 idx: local.idx.into(),
-                tidx: tidx_after_alpha_beta.clone() * has_interactions.clone(),
+                tidx: local.tidx.into(),
                 r0_claim: local.r0_claim.map(Into::into),
                 w0_claim: local.w0_claim.map(Into::into),
                 q0_claim: local.q0_claim.map(Into::into),
@@ -187,7 +178,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.proof_idx,
             TowerLayerOutputMessage {
                 idx: local.idx.into(),
-                tidx: tidx_after_gkr_layers.clone(),
+                tidx: local.final_tidx.into(),
                 layer_idx_end: num_layers - AB::Expr::ONE,
                 input_layer_claim: local.input_layer_claim.map(Into::into),
                 lambda: local.layer_output_lambda.map(Into::into),
@@ -206,27 +197,18 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.proof_idx,
             TowerModuleMessage {
                 idx: local.idx.into(),
-                tidx: local.tidx.into(),
+                tidx: AB::Expr::ZERO,
                 n_logup: local.n_logup.into(),
             },
             local.is_enabled,
         );
 
-        // 2. TranscriptBus
-        // 2a. Sample alpha_logup challenge
-        self.transcript_bus.sample_ext(
-            builder,
-            local.proof_idx,
-            local.tidx,
-            local.alpha_logup.map(Into::into),
-            local.is_enabled,
-        );
         self.main_bus.send(
             builder,
             local.proof_idx,
             MainMessage {
                 idx: local.idx.into(),
-                tidx: tidx_after_gkr_layers.clone(),
+                tidx: local.final_tidx.into(),
                 claim: local.input_layer_claim.map(Into::into),
             },
             local.is_enabled * has_interactions,

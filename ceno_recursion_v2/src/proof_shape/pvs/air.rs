@@ -8,9 +8,12 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
 
+use ceno_zkvm::structs::VK_DIGEST_LEN;
+use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
+
 use crate::{
-    bus::{PublicValuesBus, PublicValuesBusMessage, TranscriptBus, TranscriptBusMessage},
-    proof_shape::bus::{NumPublicValuesBus, NumPublicValuesMessage},
+    bus::{PublicValuesBus, PublicValuesBusMessage, TranscriptBus},
+    proof_shape::bus::NumPublicValuesBus,
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     utils::TranscriptLabel,
 };
@@ -90,12 +93,12 @@ where
             .assert_one(next.is_first_in_air);
 
         let is_same_air = local.is_valid * next.is_valid * not(next.is_first_in_air);
-        // TODO fix first tidx to be TranscriptLabel::Riscv.field_len()
-        // TODO fix comment as well
-        // first tidx happened here
+        let first_public_value_tidx =
+            AB::Expr::from_usize(TranscriptLabel::Riscv.field_len() + VK_DIGEST_LEN * D_EF);
+
         builder
             .when(local.is_valid * local.is_first_in_proof * local.is_first_in_air)
-            .assert_zero(local.tidx);
+            .assert_eq(local.tidx, first_public_value_tidx);
 
         // self.num_pvs_bus.receive(
         //     builder,
@@ -123,29 +126,9 @@ where
             },
             local.is_valid,
         );
-        if self.continuations_enabled {
-            self.public_values_bus.send(
-                builder,
-                local.proof_idx,
-                PublicValuesBusMessage {
-                    air_idx: local.air_idx,
-                    pv_idx: local.pv_idx,
-                    value: local.value,
-                },
-                local.is_valid,
-            );
-        }
+        let _ = self.continuations_enabled;
 
-        // Receive transcript read of public values
-        self.transcript_bus.receive(
-            builder,
-            local.proof_idx,
-            TranscriptBusMessage {
-                tidx: local.tidx.into(),
-                value: local.value.into(),
-                is_sample: AB::Expr::ZERO,
-            },
-            local.is_valid,
-        );
+        // VmPvsAir owns the verifier transcript prefix, including these public values.
+        let _ = &self.transcript_bus;
     }
 }

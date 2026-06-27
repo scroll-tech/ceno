@@ -1,8 +1,8 @@
 use std::{borrow::BorrowMut, sync::Arc};
 
 use openvm_circuit_primitives::encoder::Encoder;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, F};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::air::ProofShapeCols;
@@ -45,6 +45,17 @@ fn two_instance_heights_from_chip_instances(
                 h2 + num_instances.get(1).copied().unwrap_or(0),
             )
         })
+}
+
+fn fork_merge_sample(preflight: &Preflight, fork_id: usize) -> Option<(usize, [F; D_EF])> {
+    let fork_log = preflight
+        .fork_transcripts
+        .iter()
+        .find(|fork| fork.fork_id == fork_id)?;
+    let sample_tidx = fork_log.log.len().checked_sub(D_EF)?;
+    let mut sample = [F::ZERO; D_EF];
+    sample.copy_from_slice(&fork_log.log.values()[sample_tidx..sample_tidx + D_EF]);
+    Some((sample_tidx, sample))
 }
 
 trait BorrowNumInstances {
@@ -100,6 +111,18 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
         let mut chunks = trace.chunks_exact_mut(width);
 
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
+            let fork_id_by_chip: std::collections::BTreeMap<usize, usize> = proof
+                .chip_proofs
+                .iter()
+                .flat_map(|(chip_idx, instances)| {
+                    instances
+                        .iter()
+                        .enumerate()
+                        .map(move |(instance_idx, _)| (*chip_idx, instance_idx))
+                })
+                .enumerate()
+                .map(|(fork_id, (chip_idx, _instance_idx))| (chip_idx, fork_id))
+                .collect();
             let mut sorted_idx = 0usize;
             let mut num_present = 0usize;
 
@@ -124,11 +147,35 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.sorted_idx = F::from_usize(sorted_idx);
                 cols.log_height = F::from_usize(log_height);
                 cols.need_rot = F::ZERO;
+                cols.num_tower_layers = F::from_usize(
+                    proof
+                        .chip_proofs
+                        .get(air_idx)
+                        .and_then(|instances| {
+                            instances
+                                .iter()
+                                .map(|p| {
+                                    let proof_layers = p.tower_proof.proofs.len();
+                                    if proof_layers == 0 {
+                                        0
+                                    } else {
+                                        proof_layers + 1
+                                    }
+                                })
+                                .max()
+                        })
+                        .unwrap_or(0),
+                );
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[*air_idx]);
                 cols.is_present = F::ONE;
                 cols.height_1 = F::from_usize(height_1);
                 cols.height_2 = F::from_usize(height_2);
                 cols.num_present = F::from_usize(num_present);
+                let fork_id = fork_id_by_chip
+                    .get(air_idx)
+                    .copied()
+                    .unwrap_or(num_present.saturating_sub(1));
+                cols.fork_id = F::from_usize(fork_id);
                 cols.height_1_limbs =
                     decompose_usize::<NUM_LIMBS, LIMB_BITS>(height_1).map(F::from_usize);
                 cols.height_2_limbs =
@@ -139,10 +186,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.num_columns = F::ZERO;
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
-                cols.after_forked_challenge_1 =
-                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_1);
-                cols.after_forked_challenge_2 =
-                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_2);
+                if let Some((sample_tidx, sample)) = fork_merge_sample(preflight, fork_id) {
+                    cols.fork_sample_tidx = F::from_usize(sample_tidx);
+                    cols.merge_tidx =
+                        F::from_usize(preflight.proof_shape.fork_start_tidx + fork_id * D_EF);
+                    cols.fork_merge_sample = sample;
+                }
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -152,7 +201,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     *dst = F::from_u32(*src);
                 }
 
-                self.pow_checker.add_pow(log_height);
                 sorted_idx += 1;
             }
 
@@ -172,11 +220,13 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.sorted_idx = F::from_usize(sorted_idx);
                 cols.log_height = F::ZERO;
                 cols.need_rot = F::ZERO;
+                cols.num_tower_layers = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[air_idx]);
                 cols.is_present = F::ZERO;
                 cols.height_1 = F::ZERO;
                 cols.height_2 = F::ZERO;
                 cols.num_present = F::from_usize(num_present);
+                cols.fork_id = F::ZERO;
                 cols.height_1_limbs = [F::ZERO; NUM_LIMBS];
                 cols.height_2_limbs = [F::ZERO; NUM_LIMBS];
                 cols.n_max = F::from_usize(preflight.proof_shape.n_max);
@@ -185,10 +235,9 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.num_columns = F::ZERO;
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
-                cols.after_forked_challenge_1 =
-                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_1);
-                cols.after_forked_challenge_2 =
-                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_2);
+                cols.fork_sample_tidx = F::ZERO;
+                cols.merge_tidx = F::ZERO;
+                cols.fork_merge_sample = [F::ZERO; D_EF];
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -212,11 +261,13 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.sorted_idx = F::ZERO;
             cols.log_height = F::from_usize(preflight.proof_shape.n_logup);
             cols.need_rot = F::ZERO;
+            cols.num_tower_layers = F::from_usize(preflight.proof_shape.n_logup);
             cols.starting_tidx = F::from_usize(preflight.proof_shape.post_tidx);
             cols.is_present = F::ZERO;
             cols.height_1 = F::ZERO;
             cols.height_2 = F::ZERO;
             cols.num_present = F::from_usize(num_present);
+            cols.fork_id = F::ZERO;
             cols.height_1_limbs = [F::ZERO; NUM_LIMBS];
             cols.height_2_limbs = [F::ZERO; NUM_LIMBS];
             cols.n_max = F::from_usize(preflight.proof_shape.n_max);
@@ -226,10 +277,9 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.num_columns = F::ZERO;
             cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
             cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
-            cols.after_forked_challenge_1 =
-                ef_to_limbs(preflight.proof_shape.after_forked_challenge_1);
-            cols.after_forked_challenge_2 =
-                ef_to_limbs(preflight.proof_shape.after_forked_challenge_2);
+            cols.fork_sample_tidx = F::ZERO;
+            cols.merge_tidx = F::ZERO;
+            cols.fork_merge_sample = [F::ZERO; D_EF];
         }
 
         for chunk in chunks {
@@ -239,10 +289,4 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
 
         Some(RowMajorMatrix::new(trace, width))
     }
-}
-
-fn ef_to_limbs(value: EF) -> [F; D_EF] {
-    let mut out = [F::ZERO; D_EF];
-    out.copy_from_slice(value.as_basis_coefficients_slice());
-    out
 }

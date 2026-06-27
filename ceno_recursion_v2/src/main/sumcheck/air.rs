@@ -1,6 +1,6 @@
 use core::borrow::Borrow;
 
-use openvm_circuit_primitives::{SubAir, utils::assert_array_eq};
+use openvm_circuit_primitives::utils::assert_array_eq;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
@@ -8,12 +8,9 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_matrix::Matrix;
-use recursion_circuit::{
-    subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
-    utils::{
-        assert_one_ext, ext_field_add, ext_field_multiply, ext_field_multiply_scalar,
-        ext_field_one_minus, ext_field_subtract,
-    },
+use recursion_circuit::utils::{
+    assert_one_ext, ext_field_add, ext_field_multiply, ext_field_multiply_scalar,
+    ext_field_one_minus, ext_field_subtract,
 };
 use stark_recursion_circuit_derive::AlignedBorrow;
 
@@ -76,34 +73,53 @@ where
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_last_round);
         builder.assert_bool(local.is_first_round);
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_first_idx);
+        builder.assert_bool(next.is_first_idx);
+        builder.assert_bool(next.is_first_round);
+        builder
+            .when_transition()
+            .when(AB::Expr::ONE - local.is_enabled)
+            .assert_zero(next.is_enabled);
+        builder
+            .when_first_row()
+            .when(local.is_enabled)
+            .assert_zero(local.proof_idx);
+        builder
+            .when_first_row()
+            .when(local.is_enabled)
+            .assert_one(local.is_first_idx);
+        builder
+            .when(local.is_first_idx)
+            .assert_one(local.is_first_round);
 
-        type LoopSubAir = NestedForLoopSubAir<2>;
-        LoopSubAir {}.eval(
-            builder,
-            (
-                NestedForLoopIoCols {
-                    is_enabled: local.is_enabled,
-                    counter: [local.proof_idx, local.idx],
-                    is_first: [local.is_first_idx, local.is_first_round],
-                }
-                .map_into(),
-                NestedForLoopIoCols {
-                    is_enabled: next.is_enabled,
-                    counter: [next.proof_idx, next.idx],
-                    is_first: [next.is_first_idx, next.is_first_round],
-                }
-                .map_into(),
-            ),
-        );
+        let proof_diff = next.proof_idx - local.proof_idx;
+        builder
+            .when_transition()
+            .when(next.is_enabled)
+            .assert_bool(proof_diff.clone());
+        builder
+            .when_transition()
+            .when(next.is_enabled * proof_diff.clone())
+            .assert_one(next.is_first_idx);
+        builder
+            .when_transition()
+            .when(next.is_enabled * (AB::Expr::ONE - proof_diff))
+            .assert_zero(next.is_first_idx);
 
-        let is_transition_round =
-            LoopSubAir::local_is_transition(next.is_enabled, next.is_first_round);
+        let is_transition_round = next.is_enabled * (AB::Expr::ONE - next.is_first_round);
         let computed_is_last =
-            LoopSubAir::local_is_last(local.is_enabled, next.is_enabled, next.is_first_round);
+            local.is_enabled * (AB::Expr::ONE - next.is_enabled + next.is_first_round);
 
         builder
             .when(local.is_enabled)
             .assert_eq(local.is_last_round, computed_is_last.clone());
+        builder
+            .when(is_transition_round.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when(is_transition_round.clone())
+            .assert_eq(next.idx, local.idx);
 
         builder.when(local.is_first_round).assert_zero(local.round);
         builder
