@@ -13,8 +13,10 @@ use crate::{tower::tower_transcript_len, tracegen::RowMajorChip};
 pub struct TowerLayerRecord {
     pub proof_idx: usize,
     pub idx: usize,
+    pub chip_id: usize,
     pub is_first_air_idx: bool,
     pub tidx: usize,
+    pub initial_tower_claim: EF,
     pub layer_claims: Vec<[EF; 4]>,
     pub lambdas: Vec<EF>,
     pub eq_at_r_primes: Vec<EF>,
@@ -197,8 +199,7 @@ pub(crate) fn ext_pow(base: EF, exp: usize) -> EF {
 pub struct TowerLayerTraceGenerator;
 
 impl RowMajorChip<F> for TowerLayerTraceGenerator {
-    // (gkr_layer_records, mus, q0_claims)
-    type Ctx<'a> = (&'a [TowerLayerRecord], &'a [Vec<EF>], &'a [EF]);
+    type Ctx<'a> = (&'a [TowerLayerRecord], &'a [Vec<EF>]);
 
     #[tracing::instrument(level = "trace", skip_all)]
     fn generate_trace(
@@ -206,9 +207,8 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
         ctx: &Self::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
-        let (gkr_layer_records, mus, q0_claims) = ctx;
+        let (gkr_layer_records, mus) = ctx;
         debug_assert_eq!(gkr_layer_records.len(), mus.len());
-        debug_assert_eq!(gkr_layer_records.len(), q0_claims.len());
 
         let width = TowerLayerCols::<F>::width();
         let rows_per_proof: Vec<usize> = gkr_layer_records
@@ -239,15 +239,14 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
 
         trace_slices
             .par_iter_mut()
-            .zip(
-                gkr_layer_records
-                    .par_iter()
-                    .zip(mus.par_iter())
-                    .zip(q0_claims.par_iter()),
-            )
-            .for_each(|(chunk, ((record, mus_for_proof), q0_claim))| {
-                let q0_basis = q0_claim.as_basis_coefficients_slice();
+            .zip(gkr_layer_records.par_iter().zip(mus.par_iter()))
+            .for_each(|(chunk, (record, mus_for_proof))| {
                 let mus_for_proof = mus_for_proof.as_slice();
+                let initial_tower_claim: [F; D_EF] = record
+                    .initial_tower_claim
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap();
 
                 if record.layer_claims.is_empty() {
                     debug_assert_eq!(chunk.len(), width);
@@ -256,6 +255,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.is_enabled = F::ONE;
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
+                    cols.chip_id = F::from_usize(record.chip_id);
                     cols.is_first_air_idx = F::from_bool(record.is_first_air_idx);
                     cols.is_first = F::ONE;
                     cols.is_dummy = F::ONE;
@@ -283,10 +283,9 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.num_read_count = F::ZERO;
                     cols.num_write_count = F::ZERO;
                     cols.num_logup_count = F::ZERO;
+                    cols.num_layers = F::ZERO;
                     cols.eq_at_r_prime = [F::ZERO; D_EF];
-                    cols.r0_claim.copy_from_slice(q0_basis);
-                    cols.w0_claim.copy_from_slice(q0_basis);
-                    cols.q0_claim.copy_from_slice(q0_basis);
+                    cols.initial_tower_claim = initial_tower_claim;
                     return;
                 }
 
@@ -301,6 +300,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.is_dummy = F::ZERO;
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
+                    cols.chip_id = F::from_usize(record.chip_id);
                     cols.is_first_air_idx = F::from_bool(layer_idx == 0 && record.is_first_air_idx);
                     cols.is_first = F::from_bool(layer_idx == 0);
                     cols.layer_idx = F::from_usize(layer_idx);
@@ -344,6 +344,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.num_read_count = F::from_usize(read_count);
                     cols.num_write_count = F::from_usize(write_count);
                     cols.num_logup_count = F::from_usize(logup_count);
+                    cols.num_layers = F::from_usize(record.layer_count());
                     let lambda = record.lambda_at(layer_idx);
                     let lambda_prime = record.lambda_prime_at(layer_idx);
                     let read_lambda_end = ext_pow(lambda, read_count);
@@ -372,9 +373,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
-                    cols.r0_claim.copy_from_slice(q0_basis);
-                    cols.w0_claim.copy_from_slice(q0_basis);
-                    cols.q0_claim.copy_from_slice(q0_basis);
+                    cols.initial_tower_claim = initial_tower_claim;
                     cols.read_claim_prime =
                         read_prime.as_basis_coefficients_slice().try_into().unwrap();
                     cols.write_claim_prime = write_prime

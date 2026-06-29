@@ -17,11 +17,10 @@ use crate::{
         bus::{
             TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus,
             TowerLayerOutputMessage, TowerLogupClaimBus, TowerLogupClaimInputBus,
-            TowerLogupClaimMessage, TowerLogupLayerChallengeMessage,
-            TowerProdLayerChallengeMessage, TowerProdReadClaimBus, TowerProdReadClaimInputBus,
-            TowerProdSumClaimMessage, TowerProdWriteClaimBus, TowerProdWriteClaimInputBus,
-            TowerSumcheckInputBus, TowerSumcheckInputMessage, TowerSumcheckOutputBus,
-            TowerSumcheckOutputMessage,
+            TowerLogupClaimMessage, TowerLogupLayerChallengeMessage, TowerProdLayerInputMessage,
+            TowerProdReadClaimBus, TowerProdReadClaimInputBus, TowerProdSumClaimMessage,
+            TowerProdWriteClaimBus, TowerProdWriteClaimInputBus, TowerSumcheckInputBus,
+            TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
         },
     },
 };
@@ -39,6 +38,7 @@ pub struct TowerLayerCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
+    pub chip_id: T,
     pub is_first_air_idx: T,
     pub is_first: T,
 
@@ -77,13 +77,12 @@ pub struct TowerLayerCols<T> {
     pub num_read_count: T,
     pub num_write_count: T,
     pub num_logup_count: T,
+    pub num_layers: T,
 
     /// Received from TowerLayerSumcheckAir
     pub eq_at_r_prime: [T; D_EF],
 
-    pub r0_claim: [T; D_EF],
-    pub w0_claim: [T; D_EF],
-    pub q0_claim: [T; D_EF],
+    pub initial_tower_claim: [T; D_EF],
 }
 
 /// The TowerLayerAir handles layer-to-layer transitions in the GKR protocol
@@ -205,6 +204,11 @@ where
         let read_plus_write = ext_field_add::<AB::Expr>(local.read_claim, local.write_claim);
         let folded_claim = ext_field_add::<AB::Expr>(read_plus_write, local.logup_claim);
         assert_array_eq(
+            &mut builder.when(local.is_first),
+            folded_claim.clone(),
+            local.initial_tower_claim,
+        );
+        assert_array_eq(
             &mut builder.when(is_transition.clone()),
             next.sumcheck_claim_in,
             folded_claim.clone(),
@@ -272,30 +276,34 @@ where
         self.prod_read_claim_input_bus.send(
             builder,
             local.proof_idx,
-            TowerProdLayerChallengeMessage {
-                idx: local.idx.into(),
+            TowerProdLayerInputMessage {
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: read_tidx,
-                lambda: local.lambda.map(Into::into),
-                lambda_prime: local.lambda_prime.map(Into::into),
-                lambda_start: lambda_one.clone(),
-                lambda_prime_start: lambda_one.clone(),
+                lambda_next: local.lambda.map(Into::into),
+                lambda_cur: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
+                prod_offset: AB::Expr::ZERO,
+                lambda_next_start: lambda_one.clone(),
+                lambda_cur_start: lambda_one.clone(),
+                num_prod_count: local.num_read_count.into(),
             },
             read_claim_mult.clone(),
         );
         self.prod_write_claim_input_bus.send(
             builder,
             local.proof_idx,
-            TowerProdLayerChallengeMessage {
-                idx: local.idx.into(),
+            TowerProdLayerInputMessage {
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: write_tidx,
-                lambda: local.lambda.map(Into::into),
-                lambda_prime: local.lambda_prime.map(Into::into),
-                lambda_start: local.read_lambda_end.map(Into::into),
-                lambda_prime_start: local.read_lambda_prime_end.map(Into::into),
+                lambda_next: local.lambda.map(Into::into),
+                lambda_cur: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
+                prod_offset: local.num_read_count.into(),
+                lambda_next_start: local.read_lambda_end.map(Into::into),
+                lambda_cur_start: local.read_lambda_prime_end.map(Into::into),
+                num_prod_count: local.num_write_count.into(),
             },
             write_claim_mult.clone(),
         );
@@ -303,14 +311,15 @@ where
             builder,
             local.proof_idx,
             TowerLogupLayerChallengeMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: logup_tidx,
-                lambda: local.lambda.map(Into::into),
-                lambda_prime: local.lambda_prime.map(Into::into),
-                lambda_start: local.write_lambda_end.map(Into::into),
-                lambda_prime_start: local.write_lambda_prime_end.map(Into::into),
+                lambda_next: local.lambda.map(Into::into),
+                lambda_cur: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
+                lambda_next_start: local.write_lambda_end.map(Into::into),
+                lambda_cur_start: local.write_lambda_prime_end.map(Into::into),
+                num_logup_count: local.num_logup_count.into(),
             },
             logup_claim_mult.clone(),
         );
@@ -318,13 +327,12 @@ where
             builder,
             local.proof_idx,
             TowerProdSumClaimMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_claim: local.read_claim.map(Into::into),
-                lambda_prime_claim: local.read_claim_prime.map(Into::into),
-                lambda_end: local.read_lambda_end.map(Into::into),
-                lambda_prime_end: local.read_lambda_prime_end.map(Into::into),
-                num_prod_count: local.num_read_count.into(),
+                lambda_next_claim: local.read_claim.map(Into::into),
+                lambda_cur_claim: local.read_claim_prime.map(Into::into),
+                lambda_next_end: local.read_lambda_end.map(Into::into),
+                lambda_cur_end: local.read_lambda_prime_end.map(Into::into),
             },
             read_claim_mult,
         );
@@ -332,13 +340,12 @@ where
             builder,
             local.proof_idx,
             TowerProdSumClaimMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_claim: local.write_claim.map(Into::into),
-                lambda_prime_claim: local.write_claim_prime.map(Into::into),
-                lambda_end: local.write_lambda_end.map(Into::into),
-                lambda_prime_end: local.write_lambda_prime_end.map(Into::into),
-                num_prod_count: local.num_write_count.into(),
+                lambda_next_claim: local.write_claim.map(Into::into),
+                lambda_cur_claim: local.write_claim_prime.map(Into::into),
+                lambda_next_end: local.write_lambda_end.map(Into::into),
+                lambda_cur_end: local.write_lambda_prime_end.map(Into::into),
             },
             write_claim_mult,
         );
@@ -346,11 +353,10 @@ where
             builder,
             local.proof_idx,
             TowerLogupClaimMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_claim: local.logup_claim.map(Into::into),
-                lambda_prime_claim: local.logup_claim_prime.map(Into::into),
-                num_logup_count: local.num_logup_count.into(),
+                lambda_next_claim: local.logup_claim.map(Into::into),
+                lambda_cur_claim: local.logup_claim_prime.map(Into::into),
             },
             logup_claim_mult,
         );
@@ -361,11 +367,13 @@ where
             builder,
             local.proof_idx,
             TowerLayerInputMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 tidx: local.tidx.into(),
-                r0_claim: local.r0_claim.map(Into::into),
-                w0_claim: local.w0_claim.map(Into::into),
-                q0_claim: local.q0_claim.map(Into::into),
+                num_layers: local.num_layers.into(),
+                num_read_specs: local.num_read_count.into(),
+                num_write_specs: local.num_write_count.into(),
+                num_logup_specs: local.num_logup_count.into(),
+                initial_tower_claim: local.initial_tower_claim.map(Into::into),
             },
             local.is_first * active_non_dummy.clone(),
         );
@@ -375,11 +383,11 @@ where
             builder,
             local.proof_idx,
             TowerLayerOutputMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 tidx: tidx_end,
                 layer_idx_end: local.layer_idx.into(),
                 input_layer_claim: folded_claim.map(Into::into),
-                lambda: local.lambda.map(Into::into),
+                lambda_next: local.lambda.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
             is_last.clone() * active_non_dummy.clone(),
@@ -391,7 +399,7 @@ where
             builder,
             local.proof_idx,
             TowerSumcheckInputMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
                 is_last_layer: is_last.clone(),
                 tidx: local.tidx + AB::Expr::from_usize(SUMCHECK_INIT_LEN),
@@ -410,7 +418,7 @@ where
             builder,
             local.proof_idx,
             TowerSumcheckOutputMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: tidx_after_sumcheck.clone(),
                 claim_out: sumcheck_claim_out.map(Into::into),
@@ -424,7 +432,7 @@ where
             builder,
             local.proof_idx,
             TowerSumcheckChallengeMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
                 sumcheck_round: local.layer_idx.into(),
                 challenge: local.mu.map(Into::into),

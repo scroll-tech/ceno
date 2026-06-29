@@ -21,6 +21,7 @@ pub struct MainCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
+    pub chip_id: T,
     pub is_first_idx: T,
     pub is_first: T,
     pub has_tower: T,
@@ -94,7 +95,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
             builder,
             local.proof_idx,
             MainMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 tidx: local.tidx.into(),
                 claim: local.claim_in.map(Into::into),
             },

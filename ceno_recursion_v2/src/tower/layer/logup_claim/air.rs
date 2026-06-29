@@ -11,12 +11,13 @@ use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::tower::bus::{
-    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage,
-    TowerLogupLayerChallengeMessage,
+    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage, TowerLogupInitBus,
+    TowerLogupInitMessage, TowerLogupLayerChallengeMessage, TowerLogupRootBus,
+    TowerLogupRootInputBus, TowerLogupRootInputMessage, TowerLogupRootMessage,
 };
 use recursion_circuit::{
     bus::TranscriptBus,
-    utils::{assert_zeros, ext_field_add, ext_field_multiply, ext_field_subtract},
+    utils::{assert_one_ext, assert_zeros, ext_field_add, ext_field_multiply, ext_field_subtract},
 };
 
 #[repr(C)]
@@ -25,9 +26,11 @@ pub struct TowerLogupSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
+    pub chip_id: T,
     pub is_first_layer: T,
     pub is_first: T,
     pub is_dummy: T,
+    pub is_root_layer: T,
 
     pub layer_idx: T,
     pub index_id: T,
@@ -49,6 +52,8 @@ pub struct TowerLogupSumCheckClaimCols<T> {
     pub acc_sum: [T; D_EF],
     pub acc_p_cross: [T; D_EF],
     pub acc_q_cross: [T; D_EF],
+    pub root_p_acc: [T; D_EF],
+    pub root_q_acc: [T; D_EF],
     pub num_logup_count: T,
 }
 
@@ -56,6 +61,9 @@ pub struct TowerLogupSumCheckClaimAir {
     pub transcript_bus: TranscriptBus,
     pub logup_claim_input_bus: TowerLogupClaimInputBus,
     pub logup_claim_bus: TowerLogupClaimBus,
+    pub root_input_bus: TowerLogupRootInputBus,
+    pub root_bus: TowerLogupRootBus,
+    pub init_bus: TowerLogupInitBus,
 }
 
 impl<F: Field> BaseAir<F> for TowerLogupSumCheckClaimAir {
@@ -83,6 +91,10 @@ where
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_first_layer);
+        builder.assert_bool(local.is_root_layer);
+        builder
+            .when(local.is_root_layer)
+            .assert_zero(local.layer_idx);
 
         ///////////////////////////////////////////////////////////////////////
         // Structural constraints (replaces NestedForLoopSubAir<2>)
@@ -193,6 +205,22 @@ where
             local.acc_q_cross.map(Into::into),
         );
         assert_zeros(
+            &mut builder.when(local.is_first * local.is_root_layer),
+            local.root_p_acc.map(Into::into),
+        );
+        assert_one_ext(
+            &mut builder.when(local.is_first * local.is_root_layer),
+            local.root_q_acc,
+        );
+        assert_zeros(
+            &mut builder.when(local.is_first * (AB::Expr::ONE - local.is_root_layer)),
+            local.root_p_acc.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(local.is_first * (AB::Expr::ONE - local.is_root_layer)),
+            local.root_q_acc.map(Into::into),
+        );
+        assert_zeros(
             &mut builder.when(local.is_dummy),
             local.p_xi_0.map(Into::into),
         );
@@ -229,6 +257,12 @@ where
 
         let (p_cross_term, q_cross_term) =
             compute_recursive_relations(local.p_xi_0, local.q_xi_0, local.p_xi_1, local.q_xi_1);
+        let root_p_with_cur = ext_field_add::<AB::Expr>(
+            ext_field_multiply::<AB::Expr>(local.root_p_acc, q_cross_term.clone()),
+            ext_field_multiply::<AB::Expr>(p_cross_term.clone(), local.root_q_acc),
+        );
+        let root_q_with_cur =
+            ext_field_multiply::<AB::Expr>(local.root_q_acc, q_cross_term.clone());
 
         let lambda = local.lambda.map(Into::into);
         let pow_lambda = local.pow_lambda.map(Into::into);
@@ -274,6 +308,16 @@ where
             next.acc_q_cross,
             acc_q_with_cur.clone(),
         );
+        assert_array_eq(
+            &mut builder.when(is_within_layer.clone()),
+            next.root_p_acc,
+            root_p_with_cur.clone(),
+        );
+        assert_array_eq(
+            &mut builder.when(is_within_layer.clone()),
+            next.root_q_acc,
+            root_q_with_cur.clone(),
+        );
         let lambda_prime_sq =
             ext_field_multiply::<AB::Expr>(lambda_prime.clone(), lambda_prime.clone());
         let pow_lambda_prime_next =
@@ -288,14 +332,15 @@ where
             builder,
             local.proof_idx,
             TowerLogupLayerChallengeMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into(),
-                lambda: lambda.clone(),
-                lambda_prime: lambda_prime.clone(),
-                lambda_start: local.pow_lambda.map(Into::into),
-                lambda_prime_start: local.pow_lambda_prime.map(Into::into),
+                lambda_next: lambda.clone(),
+                lambda_cur: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
+                lambda_next_start: local.pow_lambda.map(Into::into),
+                lambda_cur_start: local.pow_lambda_prime.map(Into::into),
+                num_logup_count: local.num_logup_count.into(),
             },
             local.is_first * local.is_enabled * local.num_logup_count,
         );
@@ -304,14 +349,46 @@ where
             builder,
             local.proof_idx,
             TowerLogupClaimMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_claim: acc_sum_export.map(Into::into),
-                lambda_prime_claim: ext_field_add::<AB::Expr>(acc_p_with_cur, acc_q_with_cur)
+                lambda_next_claim: acc_sum_export.clone().map(Into::into),
+                lambda_cur_claim: ext_field_add::<AB::Expr>(acc_p_with_cur, acc_q_with_cur)
                     .map(Into::into),
+            },
+            is_layer_end.clone() * local.num_logup_count,
+        );
+
+        self.root_input_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerLogupRootInputMessage {
+                chip_id: local.chip_id.into(),
+                tidx: local.tidx.into(),
+                lambda_1: lambda,
+                r_1: local.mu.map(Into::into),
+                lambda_1_start: local.pow_lambda.map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
-            is_layer_end * local.num_logup_count,
+            local.is_first * local.is_enabled * local.num_logup_count * local.is_root_layer,
+        );
+        self.root_bus.send(
+            builder,
+            local.proof_idx,
+            TowerLogupRootMessage {
+                chip_id: local.chip_id.into(),
+                p0_claim: root_p_with_cur.map(Into::into),
+                q0_claim: root_q_with_cur.map(Into::into),
+            },
+            is_layer_end.clone() * local.num_logup_count * local.is_root_layer,
+        );
+        self.init_bus.send(
+            builder,
+            local.proof_idx,
+            TowerLogupInitMessage {
+                chip_id: local.chip_id.into(),
+                initial_claim: acc_sum_export.map(Into::into),
+            },
+            is_layer_end * local.num_logup_count * local.is_root_layer,
         );
 
         let mut tidx = local.tidx.into();

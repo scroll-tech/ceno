@@ -99,10 +99,13 @@ fn generate_prod_trace(
                 cols.is_first_layer = F::from_bool(record.is_first_air_idx);
                 cols.is_first = F::ONE; // single row = first of its (degenerate) layer
                 cols.is_dummy = F::ONE;
+                cols.is_root_layer = F::ONE;
                 cols.proof_idx = F::from_usize(record.proof_idx);
                 cols.idx = F::from_usize(record.idx);
+                cols.chip_id = F::from_usize(record.chip_id);
                 cols.layer_idx = F::ZERO;
                 cols.index_id = F::ZERO;
+                cols.prod_offset = F::ZERO;
                 cols.tidx = F::from_usize(record.tidx);
                 cols.lambda = [F::ZERO; D_EF];
                 let mut lambda_prime_one = [F::ZERO; D_EF];
@@ -116,6 +119,7 @@ fn generate_prod_trace(
                 cols.pow_lambda_prime = lambda_prime_one;
                 cols.acc_sum = [F::ZERO; D_EF];
                 cols.acc_sum_prime = [F::ZERO; D_EF];
+                cols.root_output_acc = lambda_prime_one;
                 cols.num_prod_count = F::ZERO;
                 return;
             }
@@ -180,6 +184,7 @@ fn generate_prod_trace(
                 let mut pow_lambda_prime = ext_pow(lambda_prime, group_offset);
                 let mut acc_sum = EF::ZERO;
                 let mut acc_sum_prime = EF::ZERO;
+                let mut root_output_acc = if layer_idx == 0 { EF::ONE } else { EF::ZERO };
 
                 for row_in_layer in 0..total_rows {
                     let row = chunk_iter
@@ -205,6 +210,7 @@ fn generate_prod_trace(
 
                     cols.is_enabled = F::ONE;
                     cols.is_dummy = F::from_bool(!is_real);
+                    cols.is_root_layer = F::from_bool(layer_idx == 0);
                     let is_first_row_of_layer = row_in_layer == 0;
                     let is_first_row_of_record = proof_row_idx == 0;
                     cols.is_first_layer =
@@ -212,8 +218,10 @@ fn generate_prod_trace(
                     cols.is_first = F::from_bool(is_first_row_of_layer);
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
+                    cols.chip_id = F::from_usize(record.chip_id);
                     cols.layer_idx = F::from_usize(layer_idx);
                     cols.index_id = F::from_usize(row_in_layer);
+                    cols.prod_offset = F::from_usize(group_offset);
                     cols.tidx = F::from_usize(layer_tidx + row_in_layer * 2 * D_EF);
                     cols.lambda = lambda_basis;
                     cols.lambda_prime = lambda_prime_basis;
@@ -231,10 +239,17 @@ fn generate_prod_trace(
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
+                    cols.root_output_acc = root_output_acc
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
                     cols.num_prod_count = F::from_usize(total_rows);
 
                     acc_sum += contribution;
                     acc_sum_prime += prime_contribution;
+                    if is_real {
+                        root_output_acc *= prime_product;
+                    }
                     pow_lambda *= lambda;
                     pow_lambda_prime *= lambda_prime;
 

@@ -132,7 +132,8 @@ impl MainModule {
                 let main_record = MainRecord {
                     proof_idx,
                     idx: entry_idx,
-                    has_tower: tower_input.n_logup > 0,
+                    chip_id: chip_idx,
+                    has_tower: tower_input.num_layers > 0,
                     has_sumcheck: !sumcheck_record.rounds.is_empty(),
                     tidx: global_tidx,
                     claim,

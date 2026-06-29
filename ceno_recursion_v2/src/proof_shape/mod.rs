@@ -164,7 +164,17 @@ impl ProofShapeModule {
             .chip_proofs
             .values()
             .flat_map(|instances| instances.iter())
-            .map(|chip_proof| chip_proof.tower_proof.proofs.len())
+            .map(|chip_proof| {
+                let proof_layers = chip_proof.tower_proof.proofs.len();
+                let has_root_specs = !chip_proof.r_out_evals.is_empty()
+                    || !chip_proof.w_out_evals.is_empty()
+                    || !chip_proof.lk_out_evals.is_empty();
+                if proof_layers == 0 && !has_root_specs {
+                    0
+                } else {
+                    proof_layers + 1
+                }
+            })
             .max()
             .unwrap_or(0);
 
@@ -254,6 +264,7 @@ impl AirModule for ProofShapeModule {
             fraction_folder_input_bus: self.bus_inventory.fraction_folder_input_bus,
             expression_claim_n_max_bus: self.bus_inventory.expression_claim_n_max_bus,
             tower_module_bus: self.bus_inventory.tower_module_bus,
+            tower_root_claim_bus: self.bus_inventory.tower_root_claim_bus,
             air_shape_bus: self.bus_inventory.air_shape_bus,
             hyperdim_bus: self.bus_inventory.hyperdim_bus,
             lifted_heights_bus: self.bus_inventory.lifted_heights_bus,

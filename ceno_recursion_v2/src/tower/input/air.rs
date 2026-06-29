@@ -1,15 +1,22 @@
 use core::borrow::Borrow;
 
 use crate::{
-    bus::{MainBus, MainMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus},
+    bus::{
+        MainBus, MainMessage, TowerModuleBus, TowerModuleMessage, TowerRootClaimBus,
+        TowerRootClaimMessage, TranscriptBus,
+    },
     tower::bus::{
         TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus, TowerLayerOutputMessage,
+        TowerLogupInitBus, TowerLogupInitMessage, TowerLogupRootBus, TowerLogupRootInputBus,
+        TowerLogupRootInputMessage, TowerLogupRootMessage, TowerProdInitMessage,
+        TowerProdRootInputMessage, TowerProdRootMessage, TowerReadInitBus, TowerReadRootBus,
+        TowerReadRootInputBus, TowerWriteInitBus, TowerWriteRootBus, TowerWriteRootInputBus,
     },
 };
 use openvm_circuit_primitives::{
     SubAir,
     is_zero::{IsZeroAuxCols, IsZeroIo, IsZeroSubAir},
-    utils::not,
+    utils::{assert_array_eq, not},
 };
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
@@ -29,13 +36,17 @@ pub struct TowerInputCols<T> {
 
     pub proof_idx: T,
     pub idx: T,
+    pub chip_id: T,
 
-    pub n_logup: T,
+    pub num_layers: T,
+    pub num_read_specs: T,
+    pub num_write_specs: T,
+    pub num_logup_specs: T,
 
     /// Flag indicating whether there are any interactions
-    /// n_logup = 0 <=> total_interactions = 0
-    pub is_n_logup_zero: T,
-    pub is_n_logup_zero_aux: IsZeroAuxCols<T>,
+    /// num_layers = 0 <=> total_interactions = 0
+    pub is_num_layers_zero: T,
+    pub is_num_layers_zero_aux: IsZeroAuxCols<T>,
 
     /// Transcript index
     pub tidx: T,
@@ -43,10 +54,20 @@ pub struct TowerInputCols<T> {
 
     pub r0_claim: [T; D_EF],
     pub w0_claim: [T; D_EF],
+    /// Root numerator claim
+    pub p0_claim: [T; D_EF],
     /// Root denominator claim
     pub q0_claim: [T; D_EF],
 
     pub alpha_logup: [T; D_EF],
+    pub r_1: [T; D_EF],
+
+    pub read_initial_claim: [T; D_EF],
+    pub write_initial_claim: [T; D_EF],
+    pub logup_initial_claim: [T; D_EF],
+    pub initial_tower_claim: [T; D_EF],
+    pub write_lambda_1_start: [T; D_EF],
+    pub logup_lambda_1_start: [T; D_EF],
 
     pub input_layer_claim: [T; D_EF],
     pub layer_output_lambda: [T; D_EF],
@@ -57,10 +78,20 @@ pub struct TowerInputCols<T> {
 pub struct TowerInputAir {
     // Buses
     pub tower_module_bus: TowerModuleBus,
+    pub tower_root_claim_bus: TowerRootClaimBus,
     pub main_bus: MainBus,
     pub transcript_bus: TranscriptBus,
     pub layer_input_bus: TowerLayerInputBus,
     pub layer_output_bus: TowerLayerOutputBus,
+    pub read_root_input_bus: TowerReadRootInputBus,
+    pub read_root_bus: TowerReadRootBus,
+    pub read_init_bus: TowerReadInitBus,
+    pub write_root_input_bus: TowerWriteRootInputBus,
+    pub write_root_bus: TowerWriteRootBus,
+    pub write_init_bus: TowerWriteInitBus,
+    pub logup_root_input_bus: TowerLogupRootInputBus,
+    pub logup_root_bus: TowerLogupRootBus,
+    pub logup_init_bus: TowerLogupInitBus,
 }
 
 impl<F: Field> BaseAir<F> for TowerInputAir {
@@ -118,16 +149,16 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         // Base Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        // 1. Check if n_logup is zero (no logup constraints needed)
+        // 1. Check if num_layers is zero (no tower reduction needed)
         IsZeroSubAir.eval(
             builder,
             (
                 IsZeroIo::new(
-                    local.n_logup.into(),
-                    local.is_n_logup_zero.into(),
+                    local.num_layers.into(),
+                    local.is_num_layers_zero.into(),
                     local.is_enabled.into(),
                 ),
-                local.is_n_logup_zero_aux.inv,
+                local.is_num_layers_zero_aux.inv,
             ),
         );
 
@@ -135,7 +166,19 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         // Output Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        let has_interactions = AB::Expr::ONE - local.is_n_logup_zero;
+        let has_interactions = AB::Expr::ONE - local.is_num_layers_zero;
+        let initial_sum = {
+            let read_plus_write = recursion_circuit::utils::ext_field_add::<AB::Expr>(
+                local.read_initial_claim,
+                local.write_initial_claim,
+            );
+            recursion_circuit::utils::ext_field_add::<AB::Expr>(
+                read_plus_write,
+                local.logup_initial_claim,
+            )
+        };
+        assert_array_eq(builder, local.initial_tower_claim, initial_sum);
+
         // Input layer claim defaults to zero when no interactions
         assert_zeros(
             &mut builder.when(not::<AB::Expr>(has_interactions.clone())),
@@ -154,7 +197,111 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         // Module Interactions
         ///////////////////////////////////////////////////////////////////////
 
-        let num_layers = local.n_logup;
+        let num_layers = local.num_layers;
+        let prod_eval_span = AB::Expr::from_usize(2 * D_EF);
+        let read_claim_tidx = local.tidx;
+        let write_claim_tidx = read_claim_tidx + local.num_read_specs * prod_eval_span.clone();
+        let logup_claim_tidx = write_claim_tidx.clone() + local.num_write_specs * prod_eval_span;
+        let one = {
+            let mut arr = core::array::from_fn(|_| AB::Expr::ZERO);
+            arr[0] = AB::Expr::ONE;
+            arr
+        };
+
+        self.read_root_input_bus.send(
+            builder,
+            local.proof_idx,
+            TowerProdRootInputMessage {
+                chip_id: local.chip_id.into(),
+                tidx: read_claim_tidx.into(),
+                lambda_1: local.alpha_logup.map(Into::into),
+                r_1: local.r_1.map(Into::into),
+                lambda_1_start: one.clone(),
+                num_prod_count: local.num_read_specs.into(),
+            },
+            local.is_enabled * local.num_read_specs,
+        );
+        self.write_root_input_bus.send(
+            builder,
+            local.proof_idx,
+            TowerProdRootInputMessage {
+                chip_id: local.chip_id.into(),
+                tidx: write_claim_tidx,
+                lambda_1: local.alpha_logup.map(Into::into),
+                r_1: local.r_1.map(Into::into),
+                lambda_1_start: local.write_lambda_1_start.map(Into::into),
+                num_prod_count: local.num_write_specs.into(),
+            },
+            local.is_enabled * local.num_write_specs,
+        );
+        self.logup_root_input_bus.send(
+            builder,
+            local.proof_idx,
+            TowerLogupRootInputMessage {
+                chip_id: local.chip_id.into(),
+                tidx: logup_claim_tidx,
+                lambda_1: local.alpha_logup.map(Into::into),
+                r_1: local.r_1.map(Into::into),
+                lambda_1_start: local.logup_lambda_1_start.map(Into::into),
+                num_logup_count: local.num_logup_specs.into(),
+            },
+            local.is_enabled * local.num_logup_specs,
+        );
+        self.read_root_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerProdRootMessage {
+                chip_id: local.chip_id.into(),
+                output_claim: local.r0_claim.map(Into::into),
+            },
+            local.is_enabled * local.num_read_specs,
+        );
+        self.write_root_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerProdRootMessage {
+                chip_id: local.chip_id.into(),
+                output_claim: local.w0_claim.map(Into::into),
+            },
+            local.is_enabled * local.num_write_specs,
+        );
+        self.logup_root_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerLogupRootMessage {
+                chip_id: local.chip_id.into(),
+                p0_claim: local.p0_claim.map(Into::into),
+                q0_claim: local.q0_claim.map(Into::into),
+            },
+            local.is_enabled * local.num_logup_specs,
+        );
+        self.read_init_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerProdInitMessage {
+                chip_id: local.chip_id.into(),
+                initial_claim: local.read_initial_claim.map(Into::into),
+            },
+            local.is_enabled * local.num_read_specs,
+        );
+        self.write_init_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerProdInitMessage {
+                chip_id: local.chip_id.into(),
+                initial_claim: local.write_initial_claim.map(Into::into),
+            },
+            local.is_enabled * local.num_write_specs,
+        );
+        self.logup_init_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerLogupInitMessage {
+                chip_id: local.chip_id.into(),
+                initial_claim: local.logup_initial_claim.map(Into::into),
+            },
+            local.is_enabled * local.num_logup_specs,
+        );
 
         // Add PoW (if any) and alpha label+sample, beta label+sample
         // 1. TowerLayerInputBus
@@ -163,11 +310,13 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             builder,
             local.proof_idx,
             TowerLayerInputMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 tidx: local.tidx.into(),
-                r0_claim: local.r0_claim.map(Into::into),
-                w0_claim: local.w0_claim.map(Into::into),
-                q0_claim: local.q0_claim.map(Into::into),
+                num_layers: local.num_layers.into(),
+                num_read_specs: local.num_read_specs.into(),
+                num_write_specs: local.num_write_specs.into(),
+                num_logup_specs: local.num_logup_specs.into(),
+                initial_tower_claim: local.initial_tower_claim.map(Into::into),
             },
             local.is_enabled * has_interactions.clone(),
         );
@@ -177,11 +326,11 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             builder,
             local.proof_idx,
             TowerLayerOutputMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 tidx: local.final_tidx.into(),
                 layer_idx_end: num_layers - AB::Expr::ONE,
                 input_layer_claim: local.input_layer_claim.map(Into::into),
-                lambda: local.layer_output_lambda.map(Into::into),
+                lambda_next: local.layer_output_lambda.map(Into::into),
                 mu: local.layer_output_mu.map(Into::into),
             },
             local.is_enabled * has_interactions.clone(),
@@ -196,9 +345,24 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             builder,
             local.proof_idx,
             TowerModuleMessage {
-                idx: local.idx.into(),
-                tidx: AB::Expr::ZERO,
-                n_logup: local.n_logup.into(),
+                chip_id: local.chip_id.into(),
+                num_layers: local.num_layers.into(),
+                num_read_specs: local.num_read_specs.into(),
+                num_write_specs: local.num_write_specs.into(),
+                num_logup_specs: local.num_logup_specs.into(),
+            },
+            local.is_enabled,
+        );
+
+        self.tower_root_claim_bus.send(
+            builder,
+            local.proof_idx,
+            TowerRootClaimMessage {
+                chip_id: local.chip_id.into(),
+                r0_claim: local.r0_claim.map(Into::into),
+                w0_claim: local.w0_claim.map(Into::into),
+                p0_claim: local.p0_claim.map(Into::into),
+                q0_claim: local.q0_claim.map(Into::into),
             },
             local.is_enabled,
         );
@@ -207,7 +371,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             builder,
             local.proof_idx,
             MainMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 tidx: local.final_tidx.into(),
                 claim: local.input_layer_claim.map(Into::into),
             },

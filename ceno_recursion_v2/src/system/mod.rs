@@ -443,11 +443,11 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             preflight.gkr.chips.push(TowerChipTranscriptRange {
                 chip_idx,
                 instance_idx,
-                num_layers: if chip_proof.tower_proof.proofs.is_empty() {
-                    0
-                } else {
-                    chip_proof.tower_proof.proofs.len() + 1
-                },
+                num_layers: crate::tower::circuit_vk_for_idx(child_vk, chip_idx)
+                    .map(|circuit_vk| {
+                        crate::tower::tower_layer_count_from_vk(circuit_vk, chip_proof)
+                    })
+                    .unwrap_or(0),
                 tidx: tower_tidx,
                 fork_idx: fork_id,
                 tower_replay,

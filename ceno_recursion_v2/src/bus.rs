@@ -56,17 +56,31 @@ define_typed_per_proof_lookup_bus!(LookupChallengeBus, LookupChallengeMessage);
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct TowerModuleMessage<T> {
-    pub idx: T,
-    pub tidx: T,
-    pub n_logup: T,
+    pub chip_id: T,
+    pub num_layers: T,
+    pub num_read_specs: T,
+    pub num_write_specs: T,
+    pub num_logup_specs: T,
 }
 
 define_typed_per_proof_permutation_bus!(TowerModuleBus, TowerModuleMessage);
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct TowerRootClaimMessage<T> {
+    pub chip_id: T,
+    pub r0_claim: [T; D_EF],
+    pub w0_claim: [T; D_EF],
+    pub p0_claim: [T; D_EF],
+    pub q0_claim: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(TowerRootClaimBus, TowerRootClaimMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct MainMessage<T> {
-    pub idx: T,
+    pub chip_id: T,
     pub tidx: T,
     pub claim: [T; D_EF],
 }

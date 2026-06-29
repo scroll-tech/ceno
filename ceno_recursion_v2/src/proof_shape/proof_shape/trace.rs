@@ -1,14 +1,14 @@
 use std::{borrow::BorrowMut, sync::Arc};
 
 use openvm_circuit_primitives::encoder::Encoder;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, F};
-use p3_field::PrimeCharacteristicRing;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::air::ProofShapeCols;
 use crate::{
     primitives::{pow::PowerCheckerCpuTraceGenerator, range::RangeCheckerCpuTraceGenerator},
-    system::{POW_CHECKER_HEIGHT, Preflight, RecursionProof, RecursionVk},
+    system::{POW_CHECKER_HEIGHT, Preflight, RecursionField, RecursionProof, RecursionVk},
     tracegen::RowMajorChip,
 };
 
@@ -19,6 +19,52 @@ pub(in crate::proof_shape) struct ProofShapeVarColsMut<'a, F> {
 fn borrow_var_cols_mut<F>(slice: &mut [F], idx_flags: usize) -> ProofShapeVarColsMut<'_, F> {
     ProofShapeVarColsMut {
         idx_flags: &mut slice[..idx_flags],
+    }
+}
+
+fn root_claims_for_chip(proof: &RecursionProof, air_idx: usize) -> (EF, EF, EF, EF) {
+    let Some(chip_proof) = proof
+        .chip_proofs
+        .get(&air_idx)
+        .and_then(|instances| instances.first())
+    else {
+        return (EF::ZERO, EF::ZERO, EF::ZERO, EF::ZERO);
+    };
+
+    let r0 = chip_proof
+        .r_out_evals
+        .iter()
+        .map(|evals| evals[0] * evals[1])
+        .product::<EF>();
+    let w0 = chip_proof
+        .w_out_evals
+        .iter()
+        .map(|evals| evals[0] * evals[1])
+        .product::<EF>();
+    let mut p0 = EF::ZERO;
+    let mut q0 = EF::ONE;
+    for evals in &chip_proof.lk_out_evals {
+        let p_cross = evals[0] * evals[3] + evals[1] * evals[2];
+        let q_cross = evals[2] * evals[3];
+        p0 = p0 * q_cross + p_cross * q0;
+        q0 *= q_cross;
+    }
+    (r0, w0, p0, q0)
+}
+
+fn assign_ext(dst: &mut [F; D_EF], value: EF) {
+    dst.copy_from_slice(value.as_basis_coefficients_slice());
+}
+
+fn tower_layer_count(chip_proof: &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>) -> usize {
+    let proof_layers = chip_proof.tower_proof.proofs.len();
+    let has_root_specs = !chip_proof.r_out_evals.is_empty()
+        || !chip_proof.w_out_evals.is_empty()
+        || !chip_proof.lk_out_evals.is_empty();
+    if proof_layers == 0 && !has_root_specs {
+        0
+    } else {
+        proof_layers + 1
     }
 }
 
@@ -151,19 +197,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     proof
                         .chip_proofs
                         .get(air_idx)
-                        .and_then(|instances| {
-                            instances
-                                .iter()
-                                .map(|p| {
-                                    let proof_layers = p.tower_proof.proofs.len();
-                                    if proof_layers == 0 {
-                                        0
-                                    } else {
-                                        proof_layers + 1
-                                    }
-                                })
-                                .max()
-                        })
+                        .and_then(|instances| instances.iter().map(tower_layer_count).max())
                         .unwrap_or(0),
                 );
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[*air_idx]);
@@ -192,6 +226,11 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                         F::from_usize(preflight.proof_shape.fork_start_tidx + fork_id * D_EF);
                     cols.fork_merge_sample = sample;
                 }
+                let (r0, w0, p0, q0) = root_claims_for_chip(proof, *air_idx);
+                assign_ext(&mut cols.r0_claim, r0);
+                assign_ext(&mut cols.w0_claim, w0);
+                assign_ext(&mut cols.p0_claim, p0);
+                assign_ext(&mut cols.q0_claim, q0);
 
                 for (dst, src) in var_cols
                     .idx_flags

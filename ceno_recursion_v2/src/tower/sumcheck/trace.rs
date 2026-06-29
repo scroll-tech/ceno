@@ -12,6 +12,7 @@ use crate::{tower::tower_transcript_len, tracegen::RowMajorChip};
 pub struct TowerSumcheckRecord {
     pub proof_idx: usize,
     pub idx: usize,
+    pub chip_id: usize,
     pub is_first_air_idx: bool,
     pub tidx: usize,
     pub layer_tidxs: Vec<usize>,
@@ -148,6 +149,7 @@ impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
                     cols.tidx = F::from_usize(D_EF);
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
+                    cols.chip_id = F::from_usize(record.chip_id);
                     cols.layer_idx = F::ONE;
                     cols.is_first_round = F::ONE;
                     cols.is_first_idx = F::from_bool(record.is_first_air_idx);
@@ -218,6 +220,7 @@ impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
                         cols.is_enabled = F::ONE;
                         cols.proof_idx = F::from_usize(record.proof_idx);
                         cols.idx = F::from_usize(record.idx);
+                        cols.chip_id = F::from_usize(record.chip_id);
 
                         cols.layer_idx = F::from_usize(layer_idx_value);
                         cols.is_last_layer = F::from_bool(is_last_layer);

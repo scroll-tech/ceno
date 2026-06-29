@@ -11,12 +11,15 @@ use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::tower::bus::{
-    TowerProdLayerChallengeMessage, TowerProdReadClaimBus, TowerProdReadClaimInputBus,
+    TowerProdInitMessage, TowerProdLayerInputMessage, TowerProdReadClaimBus,
+    TowerProdReadClaimInputBus, TowerProdRootInputMessage, TowerProdRootMessage,
     TowerProdSumClaimMessage, TowerProdWriteClaimBus, TowerProdWriteClaimInputBus,
+    TowerReadInitBus, TowerReadRootBus, TowerReadRootInputBus, TowerWriteInitBus,
+    TowerWriteRootBus, TowerWriteRootInputBus,
 };
 use recursion_circuit::{
     bus::TranscriptBus,
-    utils::{assert_zeros, ext_field_add, ext_field_multiply, ext_field_subtract},
+    utils::{assert_one_ext, assert_zeros, ext_field_add, ext_field_multiply, ext_field_subtract},
 };
 
 #[repr(C)]
@@ -25,12 +28,15 @@ pub struct TowerProdSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
+    pub chip_id: T,
     pub is_first_layer: T,
     pub is_first: T,
     pub is_dummy: T,
+    pub is_root_layer: T,
 
     pub layer_idx: T,
     pub index_id: T,
+    pub prod_offset: T,
     pub tidx: T,
 
     pub lambda: [T; D_EF],
@@ -43,43 +49,68 @@ pub struct TowerProdSumCheckClaimCols<T> {
     pub pow_lambda_prime: [T; D_EF],
     pub acc_sum: [T; D_EF],
     pub acc_sum_prime: [T; D_EF],
+    pub root_output_acc: [T; D_EF],
     pub num_prod_count: T,
 }
 
-pub struct TowerProdSumCheckClaimAir<IB, OB> {
+pub struct TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB> {
     pub transcript_bus: TranscriptBus,
     pub prod_claim_input_bus: IB,
     pub prod_claim_bus: OB,
+    pub root_input_bus: RIB,
+    pub root_bus: ROB,
+    pub init_bus: INITB,
 }
 
-pub type TowerProdReadSumCheckClaimAir =
-    TowerProdSumCheckClaimAir<TowerProdReadClaimInputBus, TowerProdReadClaimBus>;
-pub type TowerProdWriteSumCheckClaimAir =
-    TowerProdSumCheckClaimAir<TowerProdWriteClaimInputBus, TowerProdWriteClaimBus>;
+pub type TowerProdReadSumCheckClaimAir = TowerProdSumCheckClaimAir<
+    TowerProdReadClaimInputBus,
+    TowerProdReadClaimBus,
+    TowerReadRootInputBus,
+    TowerReadRootBus,
+    TowerReadInitBus,
+>;
+pub type TowerProdWriteSumCheckClaimAir = TowerProdSumCheckClaimAir<
+    TowerProdWriteClaimInputBus,
+    TowerProdWriteClaimBus,
+    TowerWriteRootInputBus,
+    TowerWriteRootBus,
+    TowerWriteInitBus,
+>;
 
-impl<F: Field, IB: Sync, OB: Sync> BaseAir<F> for TowerProdSumCheckClaimAir<IB, OB> {
+impl<F: Field, IB: Sync, OB: Sync, RIB: Sync, ROB: Sync, INITB: Sync> BaseAir<F>
+    for TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
+{
     fn width(&self) -> usize {
         TowerProdSumCheckClaimCols::<F>::width()
     }
 }
 
-impl<F: Field, IB: Sync, OB: Sync> BaseAirWithPublicValues<F>
-    for TowerProdSumCheckClaimAir<IB, OB>
+impl<F: Field, IB: Sync, OB: Sync, RIB: Sync, ROB: Sync, INITB: Sync> BaseAirWithPublicValues<F>
+    for TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
 {
 }
-impl<F: Field, IB: Sync, OB: Sync> PartitionedBaseAir<F> for TowerProdSumCheckClaimAir<IB, OB> {}
+impl<F: Field, IB: Sync, OB: Sync, RIB: Sync, ROB: Sync, INITB: Sync> PartitionedBaseAir<F>
+    for TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
+{
+}
 
-impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
-    fn eval_core<AB, Recv, Send>(
+impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB> {
+    fn eval_core<AB, RecvLayer, SendLayer, RecvRoot, SendRoot, SendInit>(
         &self,
         builder: &mut AB,
-        mut recv_challenge: Recv,
-        mut send_claim: Send,
+        mut recv_challenge: RecvLayer,
+        mut send_claim: SendLayer,
+        mut recv_root: RecvRoot,
+        mut send_root: SendRoot,
+        mut send_init: SendInit,
     ) where
         AB: AirBuilder + InteractionBuilder,
         <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
-        Recv: FnMut(&IB, &mut AB, AB::Var, TowerProdLayerChallengeMessage<AB::Expr>, AB::Expr),
-        Send: FnMut(&OB, &mut AB, AB::Var, TowerProdSumClaimMessage<AB::Expr>, AB::Expr),
+        RecvLayer: FnMut(&IB, &mut AB, AB::Var, TowerProdLayerInputMessage<AB::Expr>, AB::Expr),
+        SendLayer: FnMut(&OB, &mut AB, AB::Var, TowerProdSumClaimMessage<AB::Expr>, AB::Expr),
+        RecvRoot: FnMut(&RIB, &mut AB, AB::Var, TowerProdRootInputMessage<AB::Expr>, AB::Expr),
+        SendRoot: FnMut(&ROB, &mut AB, AB::Var, TowerProdRootMessage<AB::Expr>, AB::Expr),
+        SendInit: FnMut(&INITB, &mut AB, AB::Var, TowerProdInitMessage<AB::Expr>, AB::Expr),
     {
         let main = builder.main();
         let (local_row, next_row) = (
@@ -91,6 +122,10 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_first_layer);
+        builder.assert_bool(local.is_root_layer);
+        builder
+            .when(local.is_root_layer)
+            .assert_zero(local.layer_idx);
 
         ///////////////////////////////////////////////////////////////////////
         // Structural constraints (replaces NestedForLoopSubAir<2>)
@@ -207,6 +242,14 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
             &mut builder.when(local.is_first),
             local.acc_sum_prime.map(Into::into),
         );
+        assert_one_ext(
+            &mut builder.when(local.is_first * local.is_root_layer),
+            local.root_output_acc,
+        );
+        assert_zeros(
+            &mut builder.when(local.is_first * (AB::Expr::ONE - local.is_root_layer)),
+            local.root_output_acc.map(Into::into),
+        );
         assert_zeros(
             &mut builder.when(local.is_dummy),
             local.p_xi_0.map(Into::into),
@@ -231,6 +274,8 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
         let acc_sum_export = acc_sum_with_cur.clone();
 
         let prime_product = ext_field_multiply::<AB::Expr>(local.p_xi_0, local.p_xi_1);
+        let root_output_with_cur =
+            ext_field_multiply::<AB::Expr>(local.root_output_acc, prime_product.clone());
         let pow_lambda_prime = local.pow_lambda_prime.map(Into::into);
         let prime_contribution =
             ext_field_multiply::<AB::Expr>(pow_lambda_prime.clone(), prime_product);
@@ -247,6 +292,11 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
             &mut builder.when(is_within_layer.clone()),
             next.acc_sum_prime,
             acc_sum_prime_with_cur,
+        );
+        assert_array_eq(
+            &mut builder.when(is_within_layer.clone()),
+            next.root_output_acc,
+            root_output_with_cur.clone(),
         );
 
         let lambda = local.lambda.map(Into::into);
@@ -271,15 +321,17 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
             &self.prod_claim_input_bus,
             builder,
             local.proof_idx,
-            TowerProdLayerChallengeMessage {
-                idx: local.idx.into(),
+            TowerProdLayerInputMessage {
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into(),
-                lambda,
-                lambda_prime: lambda_prime.clone(),
-                lambda_start: local.pow_lambda.map(Into::into),
-                lambda_prime_start: local.pow_lambda_prime.map(Into::into),
+                lambda_next: lambda.clone(),
+                lambda_cur: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
+                prod_offset: local.prod_offset.into(),
+                lambda_next_start: local.pow_lambda.map(Into::into),
+                lambda_cur_start: local.pow_lambda_prime.map(Into::into),
+                num_prod_count: local.num_prod_count.into(),
             },
             local.is_first * local.is_enabled * local.num_prod_count,
         );
@@ -289,15 +341,49 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
             builder,
             local.proof_idx,
             TowerProdSumClaimMessage {
-                idx: local.idx.into(),
+                chip_id: local.chip_id.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_claim: acc_sum_export.map(Into::into),
-                lambda_prime_claim: acc_sum_prime_export.map(Into::into),
-                lambda_end: lambda_end.map(Into::into),
-                lambda_prime_end: lambda_prime_end.map(Into::into),
+                lambda_next_claim: acc_sum_export.clone().map(Into::into),
+                lambda_cur_claim: acc_sum_prime_export.map(Into::into),
+                lambda_next_end: lambda_end.map(Into::into),
+                lambda_cur_end: lambda_prime_end.map(Into::into),
+            },
+            is_layer_end.clone() * local.num_prod_count,
+        );
+
+        recv_root(
+            &self.root_input_bus,
+            builder,
+            local.proof_idx,
+            TowerProdRootInputMessage {
+                chip_id: local.chip_id.into(),
+                tidx: local.tidx.into(),
+                lambda_1: lambda,
+                r_1: local.mu.map(Into::into),
+                lambda_1_start: local.pow_lambda.map(Into::into),
                 num_prod_count: local.num_prod_count.into(),
             },
-            is_layer_end * local.num_prod_count,
+            local.is_first * local.is_enabled * local.num_prod_count * local.is_root_layer,
+        );
+        send_root(
+            &self.root_bus,
+            builder,
+            local.proof_idx,
+            TowerProdRootMessage {
+                chip_id: local.chip_id.into(),
+                output_claim: root_output_with_cur.map(Into::into),
+            },
+            is_layer_end.clone() * local.num_prod_count * local.is_root_layer,
+        );
+        send_init(
+            &self.init_bus,
+            builder,
+            local.proof_idx,
+            TowerProdInitMessage {
+                chip_id: local.chip_id.into(),
+                initial_claim: acc_sum_export.map(Into::into),
+            },
+            is_layer_end * local.num_prod_count * local.is_root_layer,
         );
 
         let mut tidx = local.tidx.into();
@@ -331,6 +417,15 @@ macro_rules! impl_prod_sum_air {
                     builder,
                     |bus, builder, proof_idx, msg, mult| {
                         bus.receive(builder, proof_idx, msg, mult);
+                    },
+                    |bus, builder, proof_idx, msg, mult| {
+                        bus.send(builder, proof_idx, msg, mult);
+                    },
+                    |bus, builder, proof_idx, msg, mult| {
+                        bus.receive(builder, proof_idx, msg, mult);
+                    },
+                    |bus, builder, proof_idx, msg, mult| {
+                        bus.send(builder, proof_idx, msg, mult);
                     },
                     |bus, builder, proof_idx, msg, mult| {
                         bus.send(builder, proof_idx, msg, mult);

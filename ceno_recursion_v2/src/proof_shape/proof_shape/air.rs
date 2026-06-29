@@ -21,8 +21,8 @@ use crate::{
         ForkedTranscriptBus, ForkedTranscriptBusMessage, FractionFolderInputBus,
         FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage, LiftedHeightsBus,
         LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage,
-        NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
-        TranscriptBusMessage,
+        NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TowerRootClaimBus,
+        TowerRootClaimMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
@@ -93,6 +93,11 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     /// Trunk tidx where this fork's final sample is observed during merge.
     pub merge_tidx: F,
     pub fork_merge_sample: [F; D_EF],
+
+    pub r0_claim: [F; D_EF],
+    pub w0_claim: [F; D_EF],
+    pub p0_claim: [F; D_EF],
+    pub q0_claim: [F; D_EF],
 }
 
 // Variable-length columns are stored at the end
@@ -119,6 +124,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
 
     // Inter-module buses
     pub tower_module_bus: TowerModuleBus,
+    pub tower_root_claim_bus: TowerRootClaimBus,
     pub air_shape_bus: AirShapeBus,
     pub expression_claim_n_max_bus: ExpressionClaimNMaxBus,
     pub fraction_folder_input_bus: FractionFolderInputBus,
@@ -213,6 +219,9 @@ where
         let mut num_pvs = AB::Expr::ZERO;
         // Per-selected-air tower transcript span (used for fork challenge tidx bump).
         let mut tower_tidx_bump = AB::Expr::ZERO;
+        let mut num_read_count = AB::Expr::ZERO;
+        let mut num_write_count = AB::Expr::ZERO;
+        let mut num_logup_count = AB::Expr::ZERO;
 
         for (i, air_data) in self.per_air.iter().enumerate() {
             // We keep a running tally of how many transcript reads there should be up to any
@@ -226,6 +235,9 @@ where
             num_fixed += is_current_air.clone() * AB::F::from_usize(air_data.num_fixed);
 
             num_pvs += is_current_air.clone() * AB::F::from_usize(air_data.num_public_values);
+            num_read_count += is_current_air.clone() * AB::F::from_usize(air_data.num_read_count);
+            num_write_count += is_current_air.clone() * AB::F::from_usize(air_data.num_write_count);
+            num_logup_count += is_current_air.clone() * AB::F::from_usize(air_data.num_logup_count);
 
             if air_data.is_required {
                 is_required += is_current_air.clone();
@@ -627,9 +639,24 @@ where
             builder,
             local.proof_idx,
             TowerModuleMessage {
-                idx: local.sorted_idx.into(),
-                tidx: AB::Expr::ZERO,
-                n_logup: num_tower_layers,
+                chip_id: air_idx.clone(),
+                num_layers: num_tower_layers,
+                num_read_specs: num_read_count.clone(),
+                num_write_specs: num_write_count.clone(),
+                num_logup_specs: num_logup_count.clone(),
+            },
+            local.is_present * local.is_valid,
+        );
+
+        self.tower_root_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerRootClaimMessage {
+                chip_id: air_idx.clone(),
+                r0_claim: local.r0_claim.map(Into::into),
+                w0_claim: local.w0_claim.map(Into::into),
+                p0_claim: local.p0_claim.map(Into::into),
+                q0_claim: local.q0_claim.map(Into::into),
             },
             local.is_present * local.is_valid,
         );
