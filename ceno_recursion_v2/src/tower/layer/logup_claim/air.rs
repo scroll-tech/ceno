@@ -11,9 +11,9 @@ use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::tower::bus::{
-    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage, TowerLogupInitBus,
-    TowerLogupInitMessage, TowerLogupLayerChallengeMessage, TowerLogupRootBus,
-    TowerLogupRootInputBus, TowerLogupRootInputMessage, TowerLogupRootMessage,
+    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage,
+    TowerLogupLayerChallengeMessage, TowerLogupRootBus, TowerLogupRootInputBus,
+    TowerLogupRootInputMessage, TowerLogupRootMessage,
 };
 use recursion_circuit::{
     bus::TranscriptBus,
@@ -26,7 +26,7 @@ pub struct TowerLogupSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
-    pub chip_id: T,
+    pub chip_idx: T,
     pub is_first_layer: T,
     pub is_first: T,
     pub is_dummy: T,
@@ -63,7 +63,6 @@ pub struct TowerLogupSumCheckClaimAir {
     pub logup_claim_bus: TowerLogupClaimBus,
     pub root_input_bus: TowerLogupRootInputBus,
     pub root_bus: TowerLogupRootBus,
-    pub init_bus: TowerLogupInitBus,
 }
 
 impl<F: Field> BaseAir<F> for TowerLogupSumCheckClaimAir {
@@ -102,6 +101,9 @@ where
 
         builder.assert_bool(local.is_enabled);
         builder.assert_bool(local.is_first);
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.idx, local.chip_idx);
 
         // is_enabled monotone decreasing: once disabled, stays disabled
         builder
@@ -332,7 +334,7 @@ where
             builder,
             local.proof_idx,
             TowerLogupLayerChallengeMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into(),
                 lambda_next: lambda.clone(),
@@ -349,7 +351,7 @@ where
             builder,
             local.proof_idx,
             TowerLogupClaimMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
                 lambda_next_claim: acc_sum_export.clone().map(Into::into),
                 lambda_cur_claim: ext_field_add::<AB::Expr>(acc_p_with_cur, acc_q_with_cur)
@@ -362,7 +364,7 @@ where
             builder,
             local.proof_idx,
             TowerLogupRootInputMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 tidx: local.tidx.into(),
                 lambda_1: lambda,
                 r_1: local.mu.map(Into::into),
@@ -375,17 +377,9 @@ where
             builder,
             local.proof_idx,
             TowerLogupRootMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 p0_claim: root_p_with_cur.map(Into::into),
                 q0_claim: root_q_with_cur.map(Into::into),
-            },
-            is_layer_end.clone() * local.num_logup_count * local.is_root_layer,
-        );
-        self.init_bus.send(
-            builder,
-            local.proof_idx,
-            TowerLogupInitMessage {
-                chip_id: local.chip_id.into(),
                 initial_claim: acc_sum_export.map(Into::into),
             },
             is_layer_end * local.num_logup_count * local.is_root_layer,

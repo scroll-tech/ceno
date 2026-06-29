@@ -3,20 +3,11 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::define_typed_per_proof_permutation_bus;
 
-#[repr(C)]
-#[derive(AlignedBorrow, Debug, Clone)]
-pub struct TowerXiSamplerMessage<T> {
-    pub chip_id: T,
-    pub tidx: T,
-}
-
-define_typed_per_proof_permutation_bus!(TowerXiSamplerBus, TowerXiSamplerMessage);
-
 /// Message sent from TowerInputAir to TowerLayerAir
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerLayerInputMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub tidx: T,
     pub num_layers: T,
     pub num_read_specs: T,
@@ -31,7 +22,7 @@ define_typed_per_proof_permutation_bus!(TowerLayerInputBus, TowerLayerInputMessa
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerLayerOutputMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub tidx: T,
     pub layer_idx_end: T,
     pub input_layer_claim: [T; D_EF],
@@ -44,7 +35,7 @@ define_typed_per_proof_permutation_bus!(TowerLayerOutputBus, TowerLayerOutputMes
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerProdLayerInputMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub layer_idx: T,
     pub tidx: T,
     pub lambda_next: [T; D_EF],
@@ -62,7 +53,7 @@ define_typed_per_proof_permutation_bus!(TowerProdWriteClaimInputBus, TowerProdLa
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerProdSumClaimMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub layer_idx: T,
     pub lambda_next_claim: [T; D_EF],
     pub lambda_cur_claim: [T; D_EF],
@@ -76,7 +67,7 @@ define_typed_per_proof_permutation_bus!(TowerProdWriteClaimBus, TowerProdSumClai
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerLogupLayerChallengeMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub layer_idx: T,
     pub tidx: T,
     pub lambda_next: [T; D_EF],
@@ -92,7 +83,7 @@ define_typed_per_proof_permutation_bus!(TowerLogupClaimInputBus, TowerLogupLayer
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerLogupClaimMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub layer_idx: T,
     pub lambda_next_claim: [T; D_EF],
     pub lambda_cur_claim: [T; D_EF],
@@ -100,10 +91,15 @@ pub struct TowerLogupClaimMessage<T> {
 
 define_typed_per_proof_permutation_bus!(TowerLogupClaimBus, TowerLogupClaimMessage);
 
+/// Root-mode input for the read/write product claim AIRs.
+///
+/// `TowerInputAir` sends this after sampling the root batching challenge `lambda_1` and interpolation point `r_1`.
+/// The product claim AIR consumes `num_prod_count` root out-eval pairs starting at transcript cursor `tidx`, multiplies
+/// them into `r0_claim`/`w0_claim`, and folds their contribution to `C_1(r_1)` starting from `lambda_1_start`.
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerProdRootInputMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub tidx: T,
     pub lambda_1: [T; D_EF],
     pub r_1: [T; D_EF],
@@ -114,10 +110,15 @@ pub struct TowerProdRootInputMessage<T> {
 define_typed_per_proof_permutation_bus!(TowerReadRootInputBus, TowerProdRootInputMessage);
 define_typed_per_proof_permutation_bus!(TowerWriteRootInputBus, TowerProdRootInputMessage);
 
+/// Root-mode output from a read/write product claim AIR.
+///
+/// This returns the product of the consumed root out-eval pairs: `r0_claim` for `TowerReadRootBus` and `w0_claim` for
+/// `TowerWriteRootBus`. `TowerInputAir` forwards these chip-level root claims to `ProofShapeAir`, which checks the
+/// global read/write product relation across chips.
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerProdRootMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub output_claim: [T; D_EF],
 }
 
@@ -127,7 +128,7 @@ define_typed_per_proof_permutation_bus!(TowerWriteRootBus, TowerProdRootMessage)
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerProdInitMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub initial_claim: [T; D_EF],
 }
 
@@ -137,10 +138,11 @@ define_typed_per_proof_permutation_bus!(TowerWriteInitBus, TowerProdInitMessage)
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerLogupRootInputMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub tidx: T,
     pub lambda_1: [T; D_EF],
     pub r_1: [T; D_EF],
+    /// Starting `lambda_1` power for logup terms after read/write root terms.
     pub lambda_1_start: [T; D_EF],
     pub num_logup_count: T,
 }
@@ -150,28 +152,20 @@ define_typed_per_proof_permutation_bus!(TowerLogupRootInputBus, TowerLogupRootIn
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerLogupRootMessage<T> {
-    pub chip_id: T,
+    pub chip_idx: T,
     pub p0_claim: [T; D_EF],
     pub q0_claim: [T; D_EF],
-}
-
-define_typed_per_proof_permutation_bus!(TowerLogupRootBus, TowerLogupRootMessage);
-
-#[repr(C)]
-#[derive(AlignedBorrow, Debug, Clone)]
-pub struct TowerLogupInitMessage<T> {
-    pub chip_id: T,
     pub initial_claim: [T; D_EF],
 }
 
-define_typed_per_proof_permutation_bus!(TowerLogupInitBus, TowerLogupInitMessage);
+define_typed_per_proof_permutation_bus!(TowerLogupRootBus, TowerLogupRootMessage);
 
 /// Message sent from TowerLayerAir to TowerLayerSumcheckAir
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerSumcheckInputMessage<T> {
     /// Module index within the proof
-    pub chip_id: T,
+    pub chip_idx: T,
     /// GKR layer index
     pub layer_idx: T,
     pub is_last_layer: T,
@@ -188,7 +182,7 @@ define_typed_per_proof_permutation_bus!(TowerSumcheckInputBus, TowerSumcheckInpu
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerSumcheckOutputMessage<T> {
     /// Module index within the proof
-    pub chip_id: T,
+    pub chip_idx: T,
     /// GKR layer index
     pub layer_idx: T,
     /// Transcript index after sumcheck
@@ -206,7 +200,7 @@ define_typed_per_proof_permutation_bus!(TowerSumcheckOutputBus, TowerSumcheckOut
 #[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerSumcheckChallengeMessage<T> {
     /// Module index within the proof
-    pub chip_id: T,
+    pub chip_idx: T,
     /// GKR layer index
     pub layer_idx: T,
     /// Sumcheck round number

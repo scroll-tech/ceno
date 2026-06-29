@@ -5,9 +5,10 @@ are specified in `tower_air_spec.md`; this file focuses on how the tower module 
 recursive verifier circuit.
 
 The tower module is verifier code. Its primary job is to verify every chip tower proof in every Ceno proof being
-recursively verified: for each `(proof_idx, chip_id)`, it replays the native Ceno tower verifier for that chip's tower
-proof. Transcript order, shape metadata, batching challenges, and exported claims must stay in lockstep with
-`ceno_zkvm::scheme::verifier::TowerVerify`.
+recursively verified: for each `(proof_idx, chip_idx)`, it replays the native Ceno tower verifier for that chip proof.
+The VK-assigned `chip_id` is used to fetch metadata and the chip proof from the child proof; the tower AIR buses use
+`chip_idx`, the proof-local index supplied by proof shape. Transcript order, shape metadata, batching challenges, and
+exported claims must stay in lockstep with `ceno_zkvm::scheme::verifier::TowerVerify`.
 
 ## Table Of Contents
 
@@ -29,7 +30,7 @@ proof. Transcript order, shape metadata, batching challenges, and exported claim
 
 ## Scope
 
-The tower module reduces each `(proof_idx, chip_id)` tower proof to an input-layer claim. It does not own downstream
+The tower module reduces each `(proof_idx, chip_idx)` tower proof to an input-layer claim. It does not own downstream
 batch-constraint semantics; the next module checks what that reduced claim means. The interaction contract is captured by
 the AIR sequence diagram and the per-AIR contracts below.
 
@@ -44,8 +45,9 @@ Use these names consistently in diagrams, contracts, and AIR specs.
 | Name | Meaning |
 |------|---------|
 | `proof_idx` | Logical index of the Ceno proof being recursively verified; scopes all per-proof buses. |
-| `chip_id` | VK-assigned unique id for one chip; together with `proof_idx`, uniquely identifies one tower proof. |
-| `layer_idx` | Active tower layer currently being reduced inside one `(proof_idx, chip_id)` tower proof. |
+| `chip_id` | VK/circuit identity used outside tower AIRs to select chip metadata and fetch the chip proof from the child proof map. |
+| `chip_idx` | Proof-local chip proof index supplied by `ProofShapeAir` (`sorted_idx`); together with `proof_idx`, it scopes tower and main buses. |
+| `layer_idx` | Active tower layer currently being reduced inside one `(proof_idx, chip_idx)` tower proof. |
 | `tidx` | Per-proof transcript cursor at which an observe/sample event occurs. |
 | `num_layers` | VK/proof-shape-derived number of active tower layers for this chip tower proof. |
 | `num_read_specs` | VK-derived number of read product specs for this chip. |
@@ -268,7 +270,7 @@ denominator-cross contribution with their corresponding powers of `lambda_cur`.
 ## Module Interaction Diagram
 
 The diagram below is the high-level circuit contract. It shows which modules own shape, tower verification, and
-downstream claim checking for each `(proof_idx, chip_id)` tower proof.
+downstream claim checking for each `(proof_idx, chip_idx)` tower proof.
 
 ```mermaid
 flowchart LR
@@ -277,10 +279,10 @@ flowchart LR
     MAIN[MainModule]
     DOWN[Downstream batch-constraint modules]
 
-    PS -- "TowerModuleBus\n(proof_idx, chip_id, num_layers,\nnum_read_specs, num_write_specs, num_logup_specs)" --> TW
+    PS -- "TowerModuleBus\n(proof_idx, chip_idx, num_layers,\nnum_read_specs, num_write_specs, num_logup_specs)" --> TW
 
-    TW -- "TowerRootClaimBus\n(proof_idx, chip_id, r0_claim,\nw0_claim, p0_claim, q0_claim)" --> PS
-    TW -- "MainBus\n(proof_idx, chip_id, final_tidx, input_layer_claim)" --> MAIN
+    TW -- "TowerRootClaimBus\n(proof_idx, chip_idx, r0_claim,\nw0_claim, p0_claim, q0_claim)" --> PS
+    TW -- "MainBus\n(proof_idx, chip_idx, final_tidx, input_layer_claim)" --> MAIN
 
     MAIN -- "main claim / expression claim" --> DOWN
 ```
@@ -296,13 +298,14 @@ Boundary rules:
 
 ### Proof Shape Module
 
-There is one native tower proof per chip per Ceno proof. The proof-shape side owns the VK-derived shape metadata for each
-`(proof_idx, chip_id)` pair and starts each tower verification by sending `TowerModuleMessage`:
+There is one native tower proof per proof-shape chip row per Ceno proof. The proof-shape side owns the VK-derived shape
+metadata for each selected `chip_id`, assigns that chip proof its proof-local `chip_idx`, and starts each tower
+verification by sending `TowerModuleMessage`:
 
 ```text
 (
   proof_idx,
-  chip_id,
+  chip_idx,
   num_layers,
   num_read_specs,
   num_write_specs,
@@ -314,13 +317,16 @@ where:
 
 - `proof_idx` scopes the Ceno proof being recursively verified. In the current typed per-proof bus implementation this
   may be the bus key rather than a field inside the message payload;
-- `chip_id` is the VK-assigned unique id for this chip, selected by proof-shape;
+- `chip_idx` is `ProofShapeAir`'s sorted proof-local index for this chip proof;
+- `chip_id` remains the VK/circuit identity used before this bus message to select `num_*` metadata and locate the child
+  chip proof, but it is not the tower bus key;
 - `num_layers` is the number of active tower layers for this chip's tower proof in this Ceno proof;
 - `num_read_specs`, `num_write_specs`, and `num_logup_specs` are selected from the chip VK.
 
 The proof-shape-to-tower message is shape metadata only. It should not carry transcript cursor state such as
-`tower_tidx`; transcript scheduling belongs to the transcript/tower transcript contract. It also should not introduce a
-separate tower row identity: `(proof_idx, chip_id)` uniquely identifies the tower proof.
+`tower_tidx`; transcript scheduling belongs to the transcript/tower transcript contract. The tower row identity is
+`(proof_idx, chip_idx)`. Implementations may keep `chip_id` in preflight records for VK/proof lookup, but AIR messages
+must not use it as the tower proof key.
 
 For the selected chip VK, proof-shape derives:
 
@@ -357,7 +363,7 @@ product/LogUp spec counts than the native verifier, it can verify a different to
 `TowerInputAir` emits the reduced tower claim through `MainBus`, keyed by `proof_idx`:
 
 ```text
-MainMessage { chip_id, tidx, claim }
+MainMessage { chip_idx, tidx, claim }
 ```
 
 This claim is the tower output after all active layers have been reduced to the input layer. The downstream main/batch
@@ -368,7 +374,7 @@ The tower output boundary should specify:
 - the final transcript cursor after tower processing;
 - the reduced input-layer claim;
 - the final layer batching challenge and merge challenge if downstream modules need them;
-- the exact `chip_id` and `proof_idx` scoping rules for multi-proof aggregation.
+- the exact `chip_idx` and `proof_idx` scoping rules for multi-proof aggregation.
 
 ## Internal Tower Structure
 
@@ -390,6 +396,9 @@ TowerProdSumCheckClaimAir
 TowerLogupSumCheckClaimAir
   folds LogUp child claims for each layer
 ```
+
+`TowerLayerAir` rows are ordered as a three-level loop: `proof_idx > chip_idx > layer_idx`. The first two counters scope
+the tower proof, and `layer_idx` walks the active tower layers inside that proof-local chip proof.
 
 The internal AIR split may change, but the module boundary should continue to expose protocol-level values:
 
@@ -423,7 +432,7 @@ For tower, an AIR contract should state:
 - the exact bus messages received and sent;
 - the transcript events the AIR owns, in native verifier order;
 - the algebraic meaning of each emitted claim;
-- the `proof_idx` and `chip_id` scope of every message;
+- the `proof_idx` and `chip_idx` scope of every message;
 - the zero-work behavior when a chip has no tower interactions.
 
 The corresponding `tower_air_spec.md` should start each AIR section with this contract before listing column-level
@@ -432,7 +441,7 @@ constraints.
 ## AIR Interaction Sequence
 
 For both human developers and AI agents, the diagram below is the first-pass debugging reference for one
-`(proof_idx, chip_id)` tower proof. It shows the expected order of bus sends/receives and transcript interactions. A
+`(proof_idx, chip_idx)` tower proof. It shows the expected order of bus sends/receives and transcript interactions. A
 constraint error should usually map to one arrow: either the producer did not send the matching message, the consumer
 used the wrong scope/counter, or a transcript event was placed at the wrong `tidx`. Exact cursor arithmetic is handled by
 the `tidx` columns and `tower_transcript_len`.
@@ -465,7 +474,7 @@ sequenceDiagram
     TI->>TR: 3. TranscriptBus: sample lambda_1, r_1
     PR->>TI: 4a. Read root+init buses: r0 + C_1 part
     PW->>TI: 4b. Write root+init buses: w0 + C_1 part
-    LU->>TI: 4c. LogUp root+init buses: p0/q0 + C_1 part
+    LU->>TI: 4c. TowerLogupRootBus: p0/q0 + C_1 part
     TI->>PS: 4d. TowerRootClaimBus: root claims
     TI->>TL: 5. TowerLayerInputBus: initial claim + shape
 
@@ -514,8 +523,9 @@ sequenceDiagram
 Step 3 represents two transcript samples with distinct cursor positions: `lambda_1` followed by `r_1`.
 The step-1 root input buses may carry `lambda_1` and `r_1` as values even though the transcript samples occur at step 3.
 Only `TranscriptBus` arrows define transcript chronology. The root AIRs must use the same observed out-eval rows for both
-the step-4 root claims and the step-4 initial-claim contributions. For each root fold AIR, the root bus and init bus are
-sent by the same final accumulator row.
+the step-4 root claims and the step-4 initial-claim contributions. Product root fold AIRs send separate root and init
+buses from the same final accumulator row; the LogUp root fold AIR sends `(p0_claim, q0_claim, logup_initial_claim)` in
+one `TowerLogupRootBus` message from that row.
 
 ## Per-AIR Contracts
 
@@ -526,8 +536,8 @@ fields, go to the bus table first. If the bus balances but the proof is semantic
 ### ProofShapeAir
 
 `ProofShapeAir` is outside the tower module. It owns VK-derived shape truth and must not derive tower counts from the
-proof. For each `(proof_idx, chip_id)` tower proof, it sends `num_layers`, `num_read_specs`, `num_write_specs`, and
-`num_logup_specs` to `TowerInputAir`.
+proof. For each selected `chip_id`, it sends `num_layers`, `num_read_specs`, `num_write_specs`, and `num_logup_specs` to
+`TowerInputAir` under the proof-local `(proof_idx, chip_idx)` tower identity.
 
 It also consumes each chip's root claims from `TowerInputAir` and, across all chips in the same `proof_idx`, enforces:
 
@@ -543,9 +553,9 @@ follow the LogUp/fraction-folding contract used by the downstream proof-shape ch
 
 ### TowerInputAir
 
-`TowerInputAir` is the per-`(proof_idx, chip_id)` tower entry and exit boundary.
+`TowerInputAir` is the per-`(proof_idx, chip_idx)` tower entry and exit boundary.
 
-- one active `TowerInputAir` row corresponds to one `(proof_idx, chip_id)` tower proof;
+- one active `TowerInputAir` row corresponds to one `(proof_idx, chip_idx)` tower proof;
 - it anchors the VK-derived spec counts to the tower instance, but does not derive them;
 - it obtains tower transcript cursor state from the transcript/tower transcript contract, not from `TowerModuleBus`;
 - it sends output-mode fold tasks to the product and LogUp claim AIRs; these tasks may carry `lambda_1` and `r_1` as
@@ -554,7 +564,7 @@ follow the LogUp/fraction-folding contract used by the downstream proof-shape ch
   `initial_tower_claim = read_initial_claim + write_initial_claim + logup_initial_claim`;
 - it forwards `num_layers`, spec counts, and `initial_tower_claim = C_1(r_1)` to `TowerLayerAir`;
 - it returns `r0_claim`, `w0_claim`, `p0_claim`, and `q0_claim` to `ProofShapeAir` for cross-chip root checks;
-- it routes the final reduced input-layer claim to `MainBus` under the same `chip_id`;
+- it routes the final reduced input-layer claim to `MainBus` under the same `chip_idx`;
 - if `num_layers = 0` or all spec counts are zero, it must not create active layer work and must use the documented
   zero-work output behavior.
 
@@ -638,18 +648,20 @@ DeriveOutputClaim:
     + sum_k lambda_1^(logup_offset + 2k + 1) * Q_k(r_1)
   ```
 
-- in `DeriveOutputClaim` mode, `TowerLogupRootBus` and `TowerLogupInitBus` are sent by the same final accumulator row;
+- in `DeriveOutputClaim` mode, `TowerLogupRootBus` returns `(p0_claim, q0_claim, logup_initial_claim)` from the same
+  final accumulator row;
 - `num_logup_count` fixes the number of active LogUp accumulator rows for the selected chip/layer or root claim group;
 - it observes LogUp child claims in the same order as the native verifier.
 
 ## Bus Summary
 
 All quantities are scoped by `proof_idx`. `PermutationCheck` buses are typed per-proof permutation buses unless noted
-otherwise. Tower-specific buses are further scoped by `chip_id`, so `(proof_idx, chip_id)` identifies the chip tower
+otherwise. Tower-specific buses are further scoped by `chip_idx`, so `(proof_idx, chip_idx)` identifies the chip tower
 proof inside the recursive verifier. The `TowerModuleBus` payload is the proof-shape metadata:
-`(proof_idx, chip_id, num_layers, num_read_specs, num_write_specs, num_logup_specs)`. If `proof_idx` is already the
+`(proof_idx, chip_idx, num_layers, num_read_specs, num_write_specs, num_logup_specs)`. If `proof_idx` is already the
 typed per-proof bus key, the implementation may omit it from the message struct while preserving it as part of the
-logical contract.
+logical contract. `chip_id` is intentionally absent from these payloads; it is only used before trace generation to select
+VK metadata and proof-map entries.
 
 For bus-balance logs, a positive count is a send and a negative count is a receive. In BabyBear logs the raw value
 `2013265920` is `-1`. The first debugging question is therefore: "which row should have produced the exact same payload
@@ -657,30 +669,29 @@ under the opposite sign?"
 
 | Bus | Bus Type | Producer | Consumer | Payload | Scope | Meaning |
 |-----|----------|----------|----------|---------|-------|---------|
-| `TowerModuleBus` | `PermutationCheck` | `ProofShapeAir` | `TowerInputAir` | `(proof_idx, chip_id, num_layers, num_read_specs, num_write_specs, num_logup_specs)` | per `(proof_idx, chip_id)` tower proof | Starts one tower verification with VK-derived shape metadata. |
-| `TowerLayerInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerLayerAir` | `(chip_id, layer_tidx, num_layers, num_read_specs, num_write_specs, num_logup_specs, initial_tower_claim)` | per `(proof_idx, chip_id)` tower proof | Anchors the initial batched tower claim and shape counts for all tower layers. |
-| `TowerLayerOutputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerInputAir` | `(chip_id, final_tidx, layer_idx_end, input_layer_claim, lambda_next, mu)` | per `(proof_idx, chip_id)` tower proof | Returns the reduced terminal/input-layer tower claim. |
-| `TowerReadRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerProdReadSumCheckClaimAir` | `(chip_id, claim_tidx, lambda_1, r_1, lambda_1_start, num_read_count)` | per `(proof_idx, chip_id)` root claim group | Starts read root product folding and passes the initial-claim challenges. |
-| `TowerReadRootBus` | `PermutationCheck` | `TowerProdReadSumCheckClaimAir` | `TowerInputAir` | `(chip_id, r0_claim)` | per `(proof_idx, chip_id)` root claim group | Returns `r0_claim = product_k r_out_evals[k][0] * r_out_evals[k][1]`. |
-| `TowerReadInitBus` | `PermutationCheck` | `TowerProdReadSumCheckClaimAir` | `TowerInputAir` | `(chip_id, read_initial_claim)` | per `(proof_idx, chip_id)` root claim group | Returns the read contribution to `C_1(r_1)` from the same rows as `r0_claim`. |
-| `TowerWriteRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerProdWriteSumCheckClaimAir` | `(chip_id, claim_tidx, lambda_1, r_1, lambda_1_start, num_write_count)` | per `(proof_idx, chip_id)` root claim group | Starts write root product folding and passes the initial-claim challenges. |
-| `TowerWriteRootBus` | `PermutationCheck` | `TowerProdWriteSumCheckClaimAir` | `TowerInputAir` | `(chip_id, w0_claim)` | per `(proof_idx, chip_id)` root claim group | Returns `w0_claim = product_k w_out_evals[k][0] * w_out_evals[k][1]`. |
-| `TowerWriteInitBus` | `PermutationCheck` | `TowerProdWriteSumCheckClaimAir` | `TowerInputAir` | `(chip_id, write_initial_claim)` | per `(proof_idx, chip_id)` root claim group | Returns the write contribution to `C_1(r_1)` from the same rows as `w0_claim`. |
-| `TowerLogupRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerLogupSumCheckClaimAir` | `(chip_id, claim_tidx, lambda_1, r_1, lambda_1_start, num_logup_count)` | per `(proof_idx, chip_id)` root claim group | Starts root LogUp fractional folding and passes the initial-claim challenges. |
-| `TowerLogupRootBus` | `PermutationCheck` | `TowerLogupSumCheckClaimAir` | `TowerInputAir` | `(chip_id, p0_claim, q0_claim)` | per `(proof_idx, chip_id)` root claim group | Returns the chip-level root LogUp fractional pair. |
-| `TowerLogupInitBus` | `PermutationCheck` | `TowerLogupSumCheckClaimAir` | `TowerInputAir` | `(chip_id, logup_initial_claim)` | per `(proof_idx, chip_id)` root claim group | Returns the LogUp contribution to `C_1(r_1)` from the same rows as `(p0_claim, q0_claim)`. |
-| `TowerProdReadClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerProdReadSumCheckClaimAir` | `(chip_id, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, prod_offset, lambda_next_start, lambda_cur_start, num_read_count)` | per `(proof_idx, chip_id, layer_idx)` | Starts read product child-claim folding at flattened product offset `0`; start powers are one. |
-| `TowerProdReadClaimBus` | `PermutationCheck` | `TowerProdReadSumCheckClaimAir` | `TowerLayerAir` | `(chip_id, layer_idx, read_next_claim, read_current_claim, lambda_next_end, lambda_cur_end)` | per `(proof_idx, chip_id, layer_idx)` | Returns read product contributions and the powers after the read product range. |
-| `TowerProdWriteClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerProdWriteSumCheckClaimAir` | `(chip_id, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, prod_offset, lambda_next_start, lambda_cur_start, num_write_count)` | per `(proof_idx, chip_id, layer_idx)` | Starts write product child-claim folding at `num_read_specs`; start powers are the read product end powers. |
-| `TowerProdWriteClaimBus` | `PermutationCheck` | `TowerProdWriteSumCheckClaimAir` | `TowerLayerAir` | `(chip_id, layer_idx, write_next_claim, write_current_claim, lambda_next_end, lambda_cur_end)` | per `(proof_idx, chip_id, layer_idx)` | Returns write product contributions and the powers after the full product range. |
-| `TowerLogupClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerLogupSumCheckClaimAir` | `(chip_id, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, lambda_next_start, lambda_cur_start, num_logup_count)` | per `(proof_idx, chip_id, layer_idx)` | Starts LogUp numerator/denominator child-claim folding at the product write end powers. |
-| `TowerLogupClaimBus` | `PermutationCheck` | `TowerLogupSumCheckClaimAir` | `TowerLayerAir` | `(chip_id, layer_idx, logup_next_claim, logup_current_claim)` | per `(proof_idx, chip_id, layer_idx)` | Returns LogUp contributions to `C_{i+1}(rho, mu)` and `T_i(rho)`. |
-| `TowerSumcheckInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerLayerSumcheckAir` | `(chip_id, layer_idx, is_last_layer, sumcheck_tidx, claim)` | per `(proof_idx, chip_id, layer_idx)` | Starts the layer sumcheck from current claim `C_i(r_i)`. |
-| `TowerSumcheckOutputBus` | `PermutationCheck` | `TowerLayerSumcheckAir` | `TowerLayerAir` | `(chip_id, layer_idx, tidx_after_sumcheck, final_evaluation, eq_at_r_prime)` | per `(proof_idx, chip_id, layer_idx)` | Returns the sumcheck final evaluation and `eq(r_i, rho)`. |
-| `TowerSumcheckChallengeBus` | `PermutationCheck` | `TowerLayerAir`, `TowerLayerSumcheckAir` | `TowerLayerSumcheckAir` | `(chip_id, layer_idx, round, challenge)` | per `(proof_idx, chip_id, layer_idx, round)` | Links each round challenge, including the layer-to-layer `mu` when it seeds the next layer. |
-| `TowerRootClaimBus` | `PermutationCheck` | `TowerInputAir` | `ProofShapeAir` | `(chip_id, r0_claim, w0_claim, p0_claim, q0_claim)` | per `(proof_idx, chip_id)` tower proof | Returns chip root claims so proof-shape can enforce cross-chip product and LogUp fraction checks. |
+| `TowerModuleBus` | `PermutationCheck` | `ProofShapeAir` | `TowerInputAir` | `(proof_idx, chip_idx, num_layers, num_read_specs, num_write_specs, num_logup_specs)` | per `(proof_idx, chip_idx)` tower proof | Starts one tower verification with VK-derived shape metadata. |
+| `TowerLayerInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerLayerAir` | `(chip_idx, layer_tidx, num_layers, num_read_specs, num_write_specs, num_logup_specs, initial_tower_claim)` | per `(proof_idx, chip_idx)` tower proof | Anchors the initial batched tower claim and shape counts for all tower layers. |
+| `TowerLayerOutputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerInputAir` | `(chip_idx, final_tidx, layer_idx_end, input_layer_claim, lambda_next, mu)` | per `(proof_idx, chip_idx)` tower proof | Returns the reduced terminal/input-layer tower claim. |
+| `TowerReadRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerProdReadSumCheckClaimAir` | `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_read_count)` | per `(proof_idx, chip_idx)` root claim group | Starts read root product folding and passes the initial-claim challenges. |
+| `TowerReadRootBus` | `PermutationCheck` | `TowerProdReadSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, r0_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns `r0_claim = product_k r_out_evals[k][0] * r_out_evals[k][1]`. |
+| `TowerReadInitBus` | `PermutationCheck` | `TowerProdReadSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, read_initial_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns the read contribution to `C_1(r_1)` from the same rows as `r0_claim`. |
+| `TowerWriteRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerProdWriteSumCheckClaimAir` | `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_write_count)` | per `(proof_idx, chip_idx)` root claim group | Starts write root product folding and passes the initial-claim challenges. |
+| `TowerWriteRootBus` | `PermutationCheck` | `TowerProdWriteSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, w0_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns `w0_claim = product_k w_out_evals[k][0] * w_out_evals[k][1]`. |
+| `TowerWriteInitBus` | `PermutationCheck` | `TowerProdWriteSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, write_initial_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns the write contribution to `C_1(r_1)` from the same rows as `w0_claim`. |
+| `TowerLogupRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerLogupSumCheckClaimAir` | `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_logup_count)` | per `(proof_idx, chip_idx)` root claim group | Starts root LogUp fractional folding and passes the initial-claim challenges. |
+| `TowerLogupRootBus` | `PermutationCheck` | `TowerLogupSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, p0_claim, q0_claim, logup_initial_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns the chip-level root LogUp fractional pair and the LogUp contribution to `C_1(r_1)` from the same rows. |
+| `TowerProdReadClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerProdReadSumCheckClaimAir` | `(chip_idx, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, prod_offset, lambda_next_start, lambda_cur_start, num_read_count)` | per `(proof_idx, chip_idx, layer_idx)` | Starts read product child-claim folding at flattened product offset `0`; start powers are one. |
+| `TowerProdReadClaimBus` | `PermutationCheck` | `TowerProdReadSumCheckClaimAir` | `TowerLayerAir` | `(chip_idx, layer_idx, read_next_claim, read_current_claim, lambda_next_end, lambda_cur_end)` | per `(proof_idx, chip_idx, layer_idx)` | Returns read product contributions and the powers after the read product range. |
+| `TowerProdWriteClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerProdWriteSumCheckClaimAir` | `(chip_idx, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, prod_offset, lambda_next_start, lambda_cur_start, num_write_count)` | per `(proof_idx, chip_idx, layer_idx)` | Starts write product child-claim folding at `num_read_specs`; start powers are the read product end powers. |
+| `TowerProdWriteClaimBus` | `PermutationCheck` | `TowerProdWriteSumCheckClaimAir` | `TowerLayerAir` | `(chip_idx, layer_idx, write_next_claim, write_current_claim, lambda_next_end, lambda_cur_end)` | per `(proof_idx, chip_idx, layer_idx)` | Returns write product contributions and the powers after the full product range. |
+| `TowerLogupClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerLogupSumCheckClaimAir` | `(chip_idx, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, lambda_next_start, lambda_cur_start, num_logup_count)` | per `(proof_idx, chip_idx, layer_idx)` | Starts LogUp numerator/denominator child-claim folding at the product write end powers. |
+| `TowerLogupClaimBus` | `PermutationCheck` | `TowerLogupSumCheckClaimAir` | `TowerLayerAir` | `(chip_idx, layer_idx, logup_next_claim, logup_current_claim)` | per `(proof_idx, chip_idx, layer_idx)` | Returns LogUp contributions to `C_{i+1}(rho, mu)` and `T_i(rho)`. |
+| `TowerSumcheckInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerLayerSumcheckAir` | `(chip_idx, layer_idx, is_last_layer, sumcheck_tidx, claim)` | per `(proof_idx, chip_idx, layer_idx)` | Starts the layer sumcheck from current claim `C_i(r_i)`. |
+| `TowerSumcheckOutputBus` | `PermutationCheck` | `TowerLayerSumcheckAir` | `TowerLayerAir` | `(chip_idx, layer_idx, tidx_after_sumcheck, final_evaluation, eq_at_r_prime)` | per `(proof_idx, chip_idx, layer_idx)` | Returns the sumcheck final evaluation and `eq(r_i, rho)`. |
+| `TowerSumcheckChallengeBus` | `PermutationCheck` | `TowerLayerAir`, `TowerLayerSumcheckAir` | `TowerLayerSumcheckAir` | `(chip_idx, layer_idx, round, challenge)` | per `(proof_idx, chip_idx, layer_idx, round)` | Links each round challenge, including the layer-to-layer `mu` when it seeds the next layer. |
+| `TowerRootClaimBus` | `PermutationCheck` | `TowerInputAir` | `ProofShapeAir` | `(chip_idx, r0_claim, w0_claim, p0_claim, q0_claim)` | per `(proof_idx, chip_idx)` tower proof | Returns chip root claims so proof-shape can enforce cross-chip product and LogUp fraction checks. |
 | `TranscriptBus` | `PermutationCheck` | `TranscriptAir` for samples; tower AIRs for observations | `TowerInputAir`, `TowerLayerAir`, `TowerLayerSumcheckAir`, product/logup claim AIRs for samples; `TranscriptAir` for observations | `(tidx, value, access metadata)` | per-proof | Enforces native verifier observe/sample order. |
-| `MainBus` | `PermutationCheck` | `TowerInputAir` | `MainAir` | `(chip_id, final_tidx, input_layer_claim)` | per `(proof_idx, chip_id)` main claim | Exports the reduced tower claim for downstream constraint checking. |
+| `MainBus` | `PermutationCheck` | `TowerInputAir` | `MainAir` | `(chip_idx, final_tidx, input_layer_claim)` | per `(proof_idx, chip_idx)` main claim | Exports the reduced tower claim for downstream constraint checking. |
 
 ## Layer Verification Contract
 
@@ -717,7 +728,7 @@ to this next expected claim.
 These cases must be explicit because they affect bus multiplicities, transcript cursor movement, and whether inactive
 rows are allowed to send messages.
 
-- **Zero tower work:** if a selected `(proof_idx, chip_id)` has `num_layers = 0` or all spec counts are zero,
+- **Zero tower work:** if a selected `(proof_idx, chip_idx)` has `num_layers = 0` or all spec counts are zero,
   `TowerInputAir` must still consume the proof-shape task, but it must not create active layer, sumcheck, product, or
   LogUp work. The exported claim and transcript movement must match the native verifier's documented zero-work behavior.
 - **Zero read specs:** `TowerProdReadSumCheckClaimAir` has no active child claims. It must create no positive-count read
@@ -745,8 +756,8 @@ field, or one transcript cursor.
 
 | Symptom | Check first | Likely broken contract |
 |---------|-------------|------------------------|
-| `TowerModuleBus` receive does not match | `proof_idx`, `chip_id`, and VK-derived counts from proof-shape | Proof-shape sent the wrong tower task or tower consumed it under the wrong scope. |
-| Multiple or missing tower input rows for a chip | one active `TowerInputAir` row per `(proof_idx, chip_id)` | Tower proof identity is not keyed exactly by `(proof_idx, chip_id)`. |
+| `TowerModuleBus` receive does not match | `proof_idx`, `chip_idx`, and VK-derived counts from proof-shape | Proof-shape sent the wrong tower task or tower consumed it under the wrong scope. |
+| Multiple or missing tower input rows for a chip | one active `TowerInputAir` row per `(proof_idx, chip_idx)` | Tower proof identity is not keyed exactly by `(proof_idx, chip_idx)`. |
 | Product or LogUp claim count mismatch | `num_read_specs`, `num_write_specs`, `num_logup_specs`, and per-layer active counts | Claim AIR is using proof-provided lengths or stale forwarded counts instead of `TowerModuleBus` shape metadata. |
 | Product write claim bus fails but read claim bus balances | `prod_offset`, `lambda_next_start`, `lambda_cur_start` on write input | Write product folding did not start at the read product end powers. |
 | LogUp claim bus fails with paired send/receive payloads differing only in last limbs | `lambda_next_start`, `lambda_cur_start`, and two-power LogUp progression | LogUp folding did not start after all product specs or advanced by one power instead of two. |
@@ -755,8 +766,8 @@ field, or one transcript cursor.
 | Next layer expected claim is wrong | `next_claim` outputs, `mu`, inactive spec masks, and fresh `lambda_next` powers | `TowerLayerAir` derived `C_{i+1}(rho, mu)` with the wrong interpolation challenge or batching weights. |
 | Terminal layer still expects another layer | `layer_idx`, `num_layers`, and `is_last_layer` | Terminal/non-terminal gating is wrong, causing an invalid `C_{i+1}` transition. |
 | `TranscriptBus` failure at a specific `tidx` | nearest numbered arrow in the AIR sequence diagram | The owner AIR observed or sampled at the wrong cursor, wrong order, or wrong multiplicity. |
-| `MainBus` claim mismatch | `TowerLayerOutputBus` and `TowerInputAir` export row | Tower emitted the wrong `input_layer_claim` or changed `chip_id`/`final_tidx` at the boundary. |
-| Cross-proof or cross-chip leakage | all bus scope fields and typed per-proof bus instances | A message omitted `chip_id`, used the wrong per-proof bus key, or reused state across tower proofs. |
+| `MainBus` claim mismatch | `TowerLayerOutputBus` and `TowerInputAir` export row | Tower emitted the wrong `input_layer_claim` or changed `chip_idx`/`final_tidx` at the boundary. |
+| Cross-proof or cross-chip leakage | all bus scope fields and typed per-proof bus instances | A message omitted `chip_idx`, used `chip_id` as a tower key, used the wrong per-proof bus key, or reused state across tower proofs. |
 
 ## Design Invariants
 

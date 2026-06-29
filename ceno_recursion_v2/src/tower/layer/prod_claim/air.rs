@@ -28,7 +28,7 @@ pub struct TowerProdSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
-    pub chip_id: T,
+    pub chip_idx: T,
     pub is_first_layer: T,
     pub is_first: T,
     pub is_dummy: T,
@@ -140,6 +140,9 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
 
         builder.assert_bool(local.is_enabled);
         builder.assert_bool(local.is_first);
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.idx, local.chip_idx);
 
         // is_enabled monotone decreasing: once disabled, stays disabled
         builder
@@ -322,7 +325,7 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
             builder,
             local.proof_idx,
             TowerProdLayerInputMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into(),
                 lambda_next: lambda.clone(),
@@ -341,7 +344,7 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
             builder,
             local.proof_idx,
             TowerProdSumClaimMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
                 lambda_next_claim: acc_sum_export.clone().map(Into::into),
                 lambda_cur_claim: acc_sum_prime_export.map(Into::into),
@@ -356,7 +359,7 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
             builder,
             local.proof_idx,
             TowerProdRootInputMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 tidx: local.tidx.into(),
                 lambda_1: lambda,
                 r_1: local.mu.map(Into::into),
@@ -370,7 +373,7 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
             builder,
             local.proof_idx,
             TowerProdRootMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 output_claim: root_output_with_cur.map(Into::into),
             },
             is_layer_end.clone() * local.num_prod_count * local.is_root_layer,
@@ -380,7 +383,7 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
             builder,
             local.proof_idx,
             TowerProdInitMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 initial_claim: acc_sum_export.map(Into::into),
             },
             is_layer_end * local.num_prod_count * local.is_root_layer,

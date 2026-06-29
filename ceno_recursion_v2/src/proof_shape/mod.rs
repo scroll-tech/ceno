@@ -111,7 +111,7 @@ impl ProofShapeModule {
         let mut sorted_trace_vdata = proof
             .chip_proofs
             .iter()
-            .map(|(&chip_idx, chip_instances)| {
+            .map(|(&chip_id, chip_instances)| {
                 let num_instances: usize = chip_instances
                     .iter()
                     .flat_map(|instance| instance.num_instances.iter())
@@ -119,7 +119,7 @@ impl ProofShapeModule {
                     .sum();
                 let padded = num_instances.max(1).next_power_of_two();
                 let log_height = padded.ilog2() as usize;
-                (chip_idx, TraceVData { log_height })
+                (chip_id, TraceVData { log_height })
             })
             .collect_vec();
         sorted_trace_vdata.sort_by_key(|(air_idx, v)| (usize::MAX - v.log_height, *air_idx));

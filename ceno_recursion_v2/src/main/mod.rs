@@ -92,13 +92,13 @@ impl MainModule {
                 .sorted_trace_vdata
                 .iter()
                 .enumerate()
-                .map(|(sorted_idx, (chip_idx, _))| (*chip_idx, sorted_idx))
+                .map(|(sorted_idx, (chip_id, _))| (*chip_id, sorted_idx))
                 .collect();
             let mut sorted_pf_entries: Vec<_> = preflight.main.chips.iter().collect();
             sorted_pf_entries.sort_by_key(|entry| {
                 (
                     sorted_idx_by_chip
-                        .get(&entry.chip_idx)
+                        .get(&entry.chip_id)
                         .copied()
                         .unwrap_or(usize::MAX),
                     entry.instance_idx,
@@ -106,17 +106,25 @@ impl MainModule {
             });
 
             for (entry_idx, pf_entry) in sorted_pf_entries.into_iter().enumerate() {
-                let chip_idx = pf_entry.chip_idx;
+                let chip_id = pf_entry.chip_id;
+                let chip_idx = sorted_idx_by_chip
+                    .get(&chip_id)
+                    .copied()
+                    .ok_or_else(|| eyre!("missing proof-shape index for chip {chip_id}"))?;
+                eyre::ensure!(
+                    chip_idx == entry_idx,
+                    "proof-local chip index mismatch for chip {chip_id}: proof-shape={chip_idx}, main-row={entry_idx}"
+                );
                 let instance_idx = pf_entry.instance_idx;
                 let chip_instances = proof
                     .chip_proofs
-                    .get(&chip_idx)
-                    .ok_or_else(|| eyre!("missing chip proof instances for chip {chip_idx}"))?;
+                    .get(&chip_id)
+                    .ok_or_else(|| eyre!("missing chip proof instances for chip {chip_id}"))?;
                 let chip_proof = chip_instances.get(instance_idx).ok_or_else(|| {
-                    eyre!("missing chip proof instance {instance_idx} for chip {chip_idx}")
+                    eyre!("missing chip proof instance {instance_idx} for chip {chip_id}")
                 })?;
-                let tower_input = tower_inputs.get(&(proof_idx, entry_idx)).ok_or_else(|| {
-                    eyre!("missing tower input record for proof {proof_idx} idx {entry_idx}")
+                let tower_input = tower_inputs.get(&(proof_idx, chip_idx)).ok_or_else(|| {
+                    eyre!("missing tower input record for proof {proof_idx} chip_idx {chip_idx}")
                 })?;
                 saw_chip = true;
 
@@ -124,15 +132,15 @@ impl MainModule {
                 let global_tidx = tower_input.final_tidx;
                 let sumcheck_record = build_sumcheck_record_from_chip(
                     proof_idx,
-                    entry_idx,
+                    chip_idx,
                     claim,
                     chip_proof,
                     global_tidx,
                 );
                 let main_record = MainRecord {
                     proof_idx,
-                    idx: entry_idx,
-                    chip_id: chip_idx,
+                    idx: chip_idx,
+                    chip_idx,
                     has_tower: tower_input.num_layers > 0,
                     has_sumcheck: !sumcheck_record.rounds.is_empty(),
                     tidx: global_tidx,
@@ -193,12 +201,12 @@ impl MainModule {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         let _ = (self, child_vk);
-        for (&chip_idx, chip_instances) in &proof.chip_proofs {
+        for (&chip_id, chip_instances) in &proof.chip_proofs {
             for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
                 let tidx = ts.len();
                 record_main_transcript(ts, input_layer_claim(chip_proof));
                 preflight.main.chips.push(ChipTranscriptRange {
-                    chip_idx,
+                    chip_id,
                     instance_idx,
                     tidx,
                     fork_idx: 0, // unused in forked flow

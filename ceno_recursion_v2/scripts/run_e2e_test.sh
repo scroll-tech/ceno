@@ -57,7 +57,7 @@ fi
 
 if CENO_RECURSION_V2_FIXTURE_DIR="$FIXTURE_DIR" \
     RUST_MIN_STACK=33554432 \
-    cargo test \
+    cargo test --release \
         'continuation::tests::prover_integration::agg_prover_single_shard' \
         -- --nocapture 2>&1 | tee "$TEST_LOG"; then
     if [[ "$REMOVE_TEST_LOG" == "1" ]]; then

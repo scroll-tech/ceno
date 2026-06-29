@@ -342,11 +342,11 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         )> = proof
             .chip_proofs
             .iter()
-            .flat_map(|(&chip_idx, instances)| {
+            .flat_map(|(&chip_id, instances)| {
                 instances
                     .iter()
                     .enumerate()
-                    .map(move |(instance_idx, chip_proof)| (chip_idx, instance_idx, chip_proof))
+                    .map(move |(instance_idx, chip_proof)| (chip_id, instance_idx, chip_proof))
             })
             .collect();
         chip_proof_list
@@ -406,7 +406,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         // Fork-local tidx values are recorded directly; global offsets are
         // computed on demand during trace generation.
 
-        for (fork_id, &(chip_idx, instance_idx, chip_proof)) in chip_proof_list.iter().enumerate() {
+        for (fork_id, &(chip_id, instance_idx, chip_proof)) in chip_proof_list.iter().enumerate() {
             let fs = &mut fork_sponges[fork_id];
 
             // Strict upstream semantics: each fork transcript starts from a
@@ -422,18 +422,18 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             // Fork IDs are normalized to 0-based indexing for forked
             // transcripts (fork_id in 0..num_forks).
             fs.observe(F::from_usize(fork_id));
-            fs.observe(F::from_u64(chip_idx as u64));
+            fs.observe(F::from_u64(chip_id as u64));
             for num_instance in chip_proof.num_instances {
                 fs.observe(F::from_usize(num_instance));
             }
 
             let tower_tidx = fs.len();
             let (tower_schedule, tower_replay) =
-                crate::tower::record_and_replay_tower_preflight(fs, child_vk, chip_idx, chip_proof);
+                crate::tower::record_and_replay_tower_preflight(fs, child_vk, chip_id, chip_proof);
 
             let main_claim = crate::tower::derive_tower_input_claim_for_transcript(
                 child_vk,
-                chip_idx,
+                chip_id,
                 chip_proof,
                 &tower_replay,
                 &tower_schedule,
@@ -441,9 +441,9 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
             // Record tower entry with fork-local tidx at tower stage start.
             preflight.gkr.chips.push(TowerChipTranscriptRange {
-                chip_idx,
+                chip_id,
                 instance_idx,
-                num_layers: crate::tower::circuit_vk_for_idx(child_vk, chip_idx)
+                num_layers: crate::tower::circuit_vk_for_idx(child_vk, chip_id)
                     .map(|circuit_vk| {
                         crate::tower::tower_layer_count_from_vk(circuit_vk, chip_proof)
                     })
@@ -458,7 +458,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             crate::main::record_main_transcript(fs, main_claim);
 
             preflight.main.chips.push(ChipTranscriptRange {
-                chip_idx,
+                chip_id,
                 instance_idx,
                 tidx: main_tidx,
                 fork_idx: fork_id,

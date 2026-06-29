@@ -11,7 +11,7 @@ use p3_matrix::dense::RowMajorMatrix;
 pub struct TowerInputRecord {
     pub proof_idx: usize,
     pub idx: usize,
-    pub chip_id: usize,
+    pub chip_idx: usize,
     pub tidx: usize,
     pub final_tidx: usize,
     pub num_layers: usize,
@@ -73,7 +73,7 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
             cols.is_enabled = F::ONE;
             cols.proof_idx = F::from_usize(record.proof_idx);
             cols.idx = F::from_usize(record.idx);
-            cols.chip_id = F::from_usize(record.chip_id);
+            cols.chip_idx = F::from_usize(record.chip_idx);
 
             cols.tidx = F::from_usize(record.tidx);
             cols.final_tidx = F::from_usize(record.final_tidx);

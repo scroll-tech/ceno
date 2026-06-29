@@ -639,7 +639,7 @@ where
             builder,
             local.proof_idx,
             TowerModuleMessage {
-                chip_id: air_idx.clone(),
+                chip_idx: local.sorted_idx.into(),
                 num_layers: num_tower_layers,
                 num_read_specs: num_read_count.clone(),
                 num_write_specs: num_write_count.clone(),
@@ -652,7 +652,7 @@ where
             builder,
             local.proof_idx,
             TowerRootClaimMessage {
-                chip_id: air_idx.clone(),
+                chip_idx: local.sorted_idx.into(),
                 r0_claim: local.r0_claim.map(Into::into),
                 w0_claim: local.w0_claim.map(Into::into),
                 p0_claim: local.p0_claim.map(Into::into),

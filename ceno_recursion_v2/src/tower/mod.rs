@@ -90,16 +90,15 @@ use eyre::Result;
 // Internal bus definitions
 mod bus;
 pub use bus::{
-    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage, TowerLogupInitBus,
-    TowerLogupInitMessage, TowerLogupLayerChallengeMessage, TowerLogupRootBus,
-    TowerLogupRootInputBus, TowerLogupRootInputMessage, TowerLogupRootMessage,
-    TowerProdInitMessage, TowerProdLayerInputMessage, TowerProdReadClaimBus,
-    TowerProdReadClaimInputBus, TowerProdRootInputMessage, TowerProdRootMessage,
-    TowerProdSumClaimMessage, TowerProdWriteClaimBus, TowerProdWriteClaimInputBus,
-    TowerReadInitBus, TowerReadRootBus, TowerReadRootInputBus, TowerSumcheckChallengeBus,
-    TowerSumcheckChallengeMessage, TowerSumcheckInputBus, TowerSumcheckInputMessage,
-    TowerSumcheckOutputBus, TowerSumcheckOutputMessage, TowerWriteInitBus, TowerWriteRootBus,
-    TowerWriteRootInputBus,
+    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage,
+    TowerLogupLayerChallengeMessage, TowerLogupRootBus, TowerLogupRootInputBus,
+    TowerLogupRootInputMessage, TowerLogupRootMessage, TowerProdInitMessage,
+    TowerProdLayerInputMessage, TowerProdReadClaimBus, TowerProdReadClaimInputBus,
+    TowerProdRootInputMessage, TowerProdRootMessage, TowerProdSumClaimMessage,
+    TowerProdWriteClaimBus, TowerProdWriteClaimInputBus, TowerReadInitBus, TowerReadRootBus,
+    TowerReadRootInputBus, TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage,
+    TowerSumcheckInputBus, TowerSumcheckInputMessage, TowerSumcheckOutputBus,
+    TowerSumcheckOutputMessage, TowerWriteInitBus, TowerWriteRootBus, TowerWriteRootInputBus,
 };
 
 /// Transcript field-element lengths per tower operation.
@@ -217,7 +216,6 @@ pub struct TowerModule {
     write_init_bus: TowerWriteInitBus,
     logup_root_input_bus: TowerLogupRootInputBus,
     logup_root_bus: TowerLogupRootBus,
-    logup_init_bus: TowerLogupInitBus,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -270,7 +268,6 @@ impl TowerModule {
             write_init_bus: TowerWriteInitBus::new(b.new_bus_idx()),
             logup_root_input_bus: TowerLogupRootInputBus::new(b.new_bus_idx()),
             logup_root_bus: TowerLogupRootBus::new(b.new_bus_idx()),
-            logup_init_bus: TowerLogupInitBus::new(b.new_bus_idx()),
         }
     }
 
@@ -286,16 +283,16 @@ impl TowerModule {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         let _ = self;
-        for (&chip_idx, chip_instances) in &proof.chip_proofs {
+        for (&chip_id, chip_instances) in &proof.chip_proofs {
             for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
                 let tidx = ts.len();
                 let (_, tower_replay) =
-                    record_and_replay_tower_preflight(ts, child_vk, chip_idx, chip_proof);
+                    record_and_replay_tower_preflight(ts, child_vk, chip_id, chip_proof);
 
                 preflight.gkr.chips.push(TowerChipTranscriptRange {
-                    chip_idx,
+                    chip_id,
                     instance_idx,
-                    num_layers: circuit_vk_for_idx(child_vk, chip_idx)
+                    num_layers: circuit_vk_for_idx(child_vk, chip_id)
                         .map(|circuit_vk| tower_layer_count_from_vk(circuit_vk, chip_proof))
                         .unwrap_or(0),
                     tidx,
@@ -399,10 +396,10 @@ fn accumulate_logup_claims(
 
 pub(crate) fn circuit_vk_for_idx(
     vk: &RecursionVk,
-    chip_idx: usize,
+    chip_id: usize,
 ) -> Option<&VerifyingKey<RecursionField>> {
     vk.circuit_index_to_name
-        .get(&chip_idx)
+        .get(&chip_id)
         .and_then(|name| vk.circuit_vks.get(name))
 }
 
@@ -426,20 +423,20 @@ pub(crate) fn tower_layer_count_from_vk(
 pub(crate) fn record_and_replay_tower_preflight<TS>(
     ts: &mut TS,
     child_vk: &RecursionVk,
-    chip_idx: usize,
+    chip_id: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
 ) -> (TowerTranscriptSchedule, TowerReplayResult)
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
-    let schedule = record_gkr_transcript(ts, chip_idx, chip_proof);
-    let replay = match circuit_vk_for_idx(child_vk, chip_idx) {
+    let schedule = record_gkr_transcript(ts, chip_id, chip_proof);
+    let replay = match circuit_vk_for_idx(child_vk, chip_id) {
         Some(circuit_vk) => match replay_tower_proof_poseidon(chip_proof, circuit_vk, &schedule) {
             Ok(replay) => replay,
             Err(err) => {
                 error!(
                     ?err,
-                    chip_idx, "failed to replay Poseidon tower proof during preflight"
+                    chip_id, "failed to replay Poseidon tower proof during preflight"
                 );
                 TowerReplayResult::default()
             }
@@ -451,23 +448,23 @@ where
 
 pub(crate) fn derive_tower_input_claim_for_transcript(
     child_vk: &RecursionVk,
-    chip_idx: usize,
+    chip_id: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
     replay: &TowerReplayResult,
     schedule: &TowerTranscriptSchedule,
 ) -> EF {
-    let Some(circuit_vk) = circuit_vk_for_idx(child_vk, chip_idx) else {
+    let Some(circuit_vk) = circuit_vk_for_idx(child_vk, chip_id) else {
         return EF::ZERO;
     };
 
     match build_chip_records(
-        0, 0, chip_idx, 0, true, chip_proof, circuit_vk, replay, schedule, 0,
+        0, 0, chip_id, 0, true, chip_proof, circuit_vk, replay, schedule, 0,
     ) {
         Ok((input_record, ..)) => input_record.input_layer_claim,
         Err(err) => {
             error!(
                 ?err,
-                chip_idx, "failed to derive tower input claim during preflight"
+                chip_id, "failed to derive tower input claim during preflight"
             );
             EF::ZERO
         }
@@ -478,7 +475,7 @@ pub(crate) fn derive_tower_input_claim_for_transcript(
 fn build_chip_records(
     proof_idx: usize,
     idx: usize,
-    chip_idx: usize,
+    chip_id: usize,
     fork_idx: usize,
     is_first_air_idx: bool,
     chip_proof: &ZKVMChipProof<RecursionField>,
@@ -510,17 +507,17 @@ fn build_chip_records(
     let _ = spec_layer_count;
     eyre::ensure!(
         chip_proof.r_out_evals.len() == read_count,
-        "read root eval count mismatch at proof {proof_idx} chip {chip_idx}: proof={}, vk={read_count}",
+        "read root eval count mismatch at proof {proof_idx} chip {chip_id}: proof={}, vk={read_count}",
         chip_proof.r_out_evals.len()
     );
     eyre::ensure!(
         chip_proof.w_out_evals.len() == write_count,
-        "write root eval count mismatch at proof {proof_idx} chip {chip_idx}: proof={}, vk={write_count}",
+        "write root eval count mismatch at proof {proof_idx} chip {chip_id}: proof={}, vk={write_count}",
         chip_proof.w_out_evals.len()
     );
     eyre::ensure!(
         chip_proof.lk_out_evals.len() == logup_count,
-        "logup root eval count mismatch at proof {proof_idx} chip {chip_idx}: proof={}, vk={logup_count}",
+        "logup root eval count mismatch at proof {proof_idx} chip {chip_id}: proof={}, vk={logup_count}",
         chip_proof.lk_out_evals.len()
     );
 
@@ -615,7 +612,7 @@ fn build_chip_records(
     let mut layer_record = TowerLayerRecord {
         proof_idx,
         idx,
-        chip_id: chip_idx,
+        chip_idx: idx,
         is_first_air_idx,
         tidx,
         initial_tower_claim: EF::ZERO,
@@ -669,7 +666,7 @@ fn build_chip_records(
     let mut sumcheck_record = TowerSumcheckRecord {
         proof_idx,
         idx,
-        chip_id: chip_idx,
+        chip_idx: idx,
         is_first_air_idx,
         tidx: 0,
         layer_tidxs: Vec::new(),
@@ -722,7 +719,7 @@ fn build_chip_records(
     let mut input_record = TowerInputRecord {
         proof_idx,
         idx,
-        chip_id: chip_idx,
+        chip_idx: idx,
         tidx,
         final_tidx: tidx,
         num_layers: layer_count,
@@ -774,22 +771,22 @@ fn build_chip_records(
             .get(layer_idx)
             .copied()
             .unwrap_or(EF::ZERO);
-        let lambda_prime = layer_record.lambda_prime_at(layer_idx);
+        let lambda_cur = layer_record.lambda_cur_at(layer_idx);
         let mu = mus_record.get(layer_idx).copied().unwrap_or(EF::ZERO);
         let read_count = layer_record.read_count_at(layer_idx);
         let write_count = layer_record.write_count_at(layer_idx);
         let read_lambda_start = EF::ONE;
         let read_lambda_prime_start = EF::ONE;
         let write_lambda_start = ext_pow(lambda, read_count);
-        let write_lambda_prime_start = ext_pow(lambda_prime, read_count);
+        let write_lambda_prime_start = ext_pow(lambda_cur, read_count);
         let logup_lambda_start = ext_pow(lambda, read_count + write_count);
-        let logup_lambda_prime_start = ext_pow(lambda_prime, read_count + write_count);
+        let logup_lambda_prime_start = ext_pow(lambda_cur, read_count + write_count);
 
         if let Some(rows) = tower_record.read_layers.get(layer_idx) {
             let (claim, prime) = accumulate_prod_claims(
                 rows,
                 lambda,
-                lambda_prime,
+                lambda_cur,
                 mu,
                 read_lambda_start,
                 read_lambda_prime_start,
@@ -809,7 +806,7 @@ fn build_chip_records(
             let (claim, prime) = accumulate_prod_claims(
                 rows,
                 lambda,
-                lambda_prime,
+                lambda_cur,
                 mu,
                 write_lambda_start,
                 write_lambda_prime_start,
@@ -829,7 +826,7 @@ fn build_chip_records(
             let (claim, prime) = accumulate_logup_claims(
                 rows,
                 lambda,
-                lambda_prime,
+                lambda_cur,
                 mu,
                 logup_lambda_start,
                 logup_lambda_prime_start,
@@ -915,7 +912,7 @@ fn build_chip_records(
                     + layer_record.logup_prime_claims[layer_idx]);
             eyre::ensure!(
                 expected == replay_layer.claim_out,
-                "tower expected-eval mismatch at proof {proof_idx} idx {idx} chip_idx {chip_idx} fork_idx {fork_idx} layer {layer_idx}: expected={expected:?}, replay={:?}, eq={:?}, read_prime={:?}, write_prime={:?}, logup_prime={:?}",
+                "tower expected-eval mismatch at proof {proof_idx} idx {idx} chip_id {chip_id} fork_idx {fork_idx} layer {layer_idx}: expected={expected:?}, replay={:?}, eq={:?}, read_prime={:?}, write_prime={:?}, logup_prime={:?}",
                 replay_layer.claim_out,
                 layer_record.eq_at_r_primes[layer_idx],
                 layer_record.read_prime_claims[layer_idx],
@@ -955,12 +952,10 @@ impl AirModule for TowerModule {
             write_init_bus: self.write_init_bus,
             logup_root_input_bus: self.logup_root_input_bus,
             logup_root_bus: self.logup_root_bus,
-            logup_init_bus: self.logup_init_bus,
         };
 
         let gkr_layer_air = TowerLayerAir {
             transcript_bus: self.bus_inventory.transcript_bus,
-            air_shape_bus: self.bus_inventory.air_shape_bus,
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
             sumcheck_input_bus: self.sumcheck_input_bus,
@@ -998,7 +993,6 @@ impl AirModule for TowerModule {
             logup_claim_bus: self.logup_claim_bus,
             root_input_bus: self.logup_root_input_bus,
             root_bus: self.logup_root_bus,
-            init_bus: self.logup_init_bus,
         };
 
         let gkr_sumcheck_air = TowerLayerSumcheckAir::new(
@@ -1058,27 +1052,35 @@ pub(crate) fn build_gkr_blob(
             .sorted_trace_vdata
             .iter()
             .enumerate()
-            .map(|(sorted_idx, (chip_idx, _))| (*chip_idx, sorted_idx))
+            .map(|(sorted_idx, (chip_id, _))| (*chip_id, sorted_idx))
             .collect();
         let mut sorted_pf_entries: Vec<_> = preflight.gkr.chips.iter().collect();
         sorted_pf_entries.sort_by_key(|entry| {
             (
                 sorted_idx_by_chip
-                    .get(&entry.chip_idx)
+                    .get(&entry.chip_id)
                     .copied()
                     .unwrap_or(usize::MAX),
                 entry.instance_idx,
             )
         });
         for (entry_idx, pf_entry) in sorted_pf_entries.into_iter().enumerate() {
-            let chip_idx = pf_entry.chip_idx;
+            let chip_id = pf_entry.chip_id;
+            let chip_idx = sorted_idx_by_chip
+                .get(&chip_id)
+                .copied()
+                .ok_or_else(|| eyre::eyre!("missing proof-shape index for chip {chip_id}"))?;
+            eyre::ensure!(
+                chip_idx == entry_idx,
+                "proof-local chip index mismatch for chip {chip_id}: proof-shape={chip_idx}, tower-row={entry_idx}"
+            );
             let instance_idx = pf_entry.instance_idx;
             let chip_instances = proof
                 .chip_proofs
-                .get(&chip_idx)
-                .ok_or_else(|| eyre::eyre!("missing chip proof instances for chip {chip_idx}"))?;
+                .get(&chip_id)
+                .ok_or_else(|| eyre::eyre!("missing chip proof instances for chip {chip_id}"))?;
             let chip_proof = chip_instances.get(instance_idx).ok_or_else(|| {
-                eyre::eyre!("missing chip proof instance {instance_idx} for chip {chip_idx}")
+                eyre::eyre!("missing chip proof instance {instance_idx} for chip {chip_id}")
             })?;
             has_chip = true;
             // Access the fork log directly using fork_idx and fork-local tidx.
@@ -1086,10 +1088,10 @@ pub(crate) fn build_gkr_blob(
                 let fork_log = preflight.fork_log(pf_entry.fork_idx);
                 ReadOnlyTranscript::new(fork_log, pf_entry.tidx)
             };
-            let schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
+            let schedule = record_gkr_transcript(&mut ts, chip_id, chip_proof);
 
-            let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
-                .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_idx}"))?;
+            let circuit_vk = circuit_vk_for_idx(child_vk, chip_id)
+                .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_id}"))?;
 
             // Re-run the tower replay with Poseidon2-derived challenges from the
             // schedule so that eq_at_r / claim_in / mu / lambda match the native
@@ -1098,18 +1100,18 @@ pub(crate) fn build_gkr_blob(
             let poseidon_replay = replay_tower_proof_poseidon(chip_proof, circuit_vk, &schedule)
                 .unwrap_or_else(|_err| TowerReplayResult::default());
 
-            // Use sequential index for NestedForLoop compatibility (idx must increment
-            // by 0 or 1 within each proof_idx group).
-            let idx = entry_idx;
+            // Tower buses are keyed by the proof-local chip proof index. The
+            // VK/circuit index (`chip_id`) is only used above to fetch metadata.
+            let idx = chip_idx;
             // Compute global tidx from fork-local tidx for trace column values.
             let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
             let (chip_input_record, layer_record, tower_record, sumcheck_record, mus_record) =
                 build_chip_records(
                     proof_idx,
                     idx,
-                    chip_idx,
+                    chip_id,
                     pf_entry.fork_idx,
-                    entry_idx == 0,
+                    chip_idx == 0,
                     chip_proof,
                     circuit_vk,
                     &poseidon_replay,
@@ -1127,7 +1129,7 @@ pub(crate) fn build_gkr_blob(
         if !has_chip {
             layer_records.push(TowerLayerRecord {
                 idx: 0,
-                chip_id: 0,
+                chip_idx: 0,
                 proof_idx,
                 is_first_air_idx: true,
                 ..Default::default()
@@ -1136,7 +1138,7 @@ pub(crate) fn build_gkr_blob(
             sumcheck_records.push(TowerSumcheckRecord {
                 proof_idx,
                 idx: 0,
-                chip_id: 0,
+                chip_idx: 0,
                 is_first_air_idx: true,
                 ..Default::default()
             });
@@ -1155,7 +1157,7 @@ pub(crate) fn build_gkr_blob(
 
 pub(crate) fn record_gkr_transcript<TS>(
     ts: &mut TS,
-    _chip_idx: usize,
+    _chip_id: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
 ) -> TowerTranscriptSchedule
 where
@@ -1458,16 +1460,16 @@ mod debug_tests {
         };
 
         let target_fork = 10usize;
-        let (chip_idx, chip_proof) = proof
+        let (chip_id, chip_proof) = proof
             .chip_proofs
             .iter()
-            .flat_map(|(chip_idx, proofs)| {
-                proofs.iter().map(move |chip_proof| (*chip_idx, chip_proof))
+            .flat_map(|(chip_id, proofs)| {
+                proofs.iter().map(move |chip_proof| (*chip_id, chip_proof))
             })
             .nth(target_fork)
             .expect("target fork should exist");
-        assert_eq!(chip_idx, 15);
-        let circuit_vk = circuit_vk_for_idx(&vk, chip_idx).unwrap();
+        assert_eq!(chip_id, 15);
+        let circuit_vk = circuit_vk_for_idx(&vk, chip_id).unwrap();
 
         let mut basic = BasicTranscript::<RecursionField>::new(b"riscv");
         observe_basic_prefix(&mut basic, &vk, &proof);
@@ -1478,7 +1480,7 @@ mod debug_tests {
         basic_fork.append_field_element_ext(&basic_alpha);
         basic_fork.append_field_element_ext(&basic_beta);
         basic_fork.append_field_element(&F::from_usize(target_fork));
-        basic_fork.append_field_element(&F::from_usize(chip_idx));
+        basic_fork.append_field_element(&F::from_usize(chip_id));
         for num_instance in &chip_proof.num_instances {
             basic_fork.append_field_element(&F::from_usize(*num_instance));
         }
@@ -1497,7 +1499,7 @@ mod debug_tests {
         let eq0 = basic_schedule.beta * basic_schedule.ris[0]
             + (EF::ONE - basic_schedule.beta) * (EF::ONE - basic_schedule.ris[0]);
         eprintln!(
-            "chip_idx={chip_idx} fork={target_fork} num_vars={num_vars} num_batched={num_batched} r={} w={} lk={} proofs={} prod_specs={} logup_specs={} lambda0={:?} beta0={:?} ri0={:?} manual_expected={:?}",
+            "chip_id={chip_id} fork={target_fork} num_vars={num_vars} num_batched={num_batched} r={} w={} lk={} proofs={} prod_specs={} logup_specs={} lambda0={:?} beta0={:?} ri0={:?} manual_expected={:?}",
             chip_proof.r_out_evals.len(),
             chip_proof.w_out_evals.len(),
             chip_proof.lk_out_evals.len(),
@@ -1528,7 +1530,7 @@ mod debug_tests {
         basic_verify.append_field_element_ext(&basic_alpha);
         basic_verify.append_field_element_ext(&basic_beta);
         basic_verify.append_field_element(&F::from_usize(target_fork));
-        basic_verify.append_field_element(&F::from_usize(chip_idx));
+        basic_verify.append_field_element(&F::from_usize(chip_id));
         for num_instance in &chip_proof.num_instances {
             basic_verify.append_field_element(&F::from_usize(*num_instance));
         }
@@ -1594,11 +1596,11 @@ mod debug_tests {
 
         let mut checked = 0usize;
         let mut mismatches = 0usize;
-        for (fork_id, (&chip_idx, chip_proof)) in proof
+        for (fork_id, (&chip_id, chip_proof)) in proof
             .chip_proofs
             .iter()
-            .flat_map(|(chip_idx, proofs)| {
-                proofs.iter().map(move |chip_proof| (chip_idx, chip_proof))
+            .flat_map(|(chip_id, proofs)| {
+                proofs.iter().map(move |chip_proof| (chip_id, chip_proof))
             })
             .enumerate()
         {
@@ -1606,7 +1608,7 @@ mod debug_tests {
             basic_fork.append_field_element_ext(&basic_alpha);
             basic_fork.append_field_element_ext(&basic_beta);
             basic_fork.append_field_element(&F::from_usize(fork_id));
-            basic_fork.append_field_element(&F::from_usize(chip_idx));
+            basic_fork.append_field_element(&F::from_usize(chip_id));
             for num_instance in &chip_proof.num_instances {
                 basic_fork.append_field_element(&F::from_usize(*num_instance));
             }
@@ -1628,7 +1630,7 @@ mod debug_tests {
             );
             FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
                 &mut openvm_fork,
-                F::from_usize(chip_idx),
+                F::from_usize(chip_id),
             );
             for num_instance in &chip_proof.num_instances {
                 FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
@@ -1636,7 +1638,7 @@ mod debug_tests {
                     F::from_usize(*num_instance),
                 );
             }
-            let openvm_schedule = record_gkr_transcript(&mut openvm_fork, chip_idx, chip_proof);
+            let openvm_schedule = record_gkr_transcript(&mut openvm_fork, chip_id, chip_proof);
 
             let same = basic_schedule.alpha_logup == openvm_schedule.alpha_logup
                 && basic_schedule.beta == openvm_schedule.beta
@@ -1646,7 +1648,7 @@ mod debug_tests {
             if !same {
                 mismatches += 1;
                 eprintln!(
-                    "schedule mismatch fork={fork_id} chip_idx={chip_idx} basic lambda0={:?} beta0={:?} ri0={:?}; openvm lambda0={:?} beta0={:?} ri0={:?}",
+                    "schedule mismatch fork={fork_id} chip_id={chip_id} basic lambda0={:?} beta0={:?} ri0={:?}; openvm lambda0={:?} beta0={:?} ri0={:?}",
                     limbs(basic_schedule.alpha_logup),
                     limbs(basic_schedule.beta),
                     basic_schedule.ris.first().copied().map(limbs),
@@ -1668,9 +1670,9 @@ mod debug_tests {
         let Some((proof, vk)) = load_fixture() else {
             return;
         };
-        let (&chip_idx, chip_instances) = proof.chip_proofs.iter().next().unwrap();
+        let (&chip_id, chip_instances) = proof.chip_proofs.iter().next().unwrap();
         let chip_proof = &chip_instances[0];
-        let circuit_vk = circuit_vk_for_idx(&vk, chip_idx).unwrap();
+        let circuit_vk = circuit_vk_for_idx(&vk, chip_id).unwrap();
 
         let mut basic = BasicTranscript::<RecursionField>::new(b"riscv");
         observe_basic_prefix(&mut basic, &vk, &proof);
@@ -1681,7 +1683,7 @@ mod debug_tests {
         basic_fork.append_field_element_ext(&basic_alpha);
         basic_fork.append_field_element_ext(&basic_beta);
         basic_fork.append_field_element(&F::from_usize(0));
-        basic_fork.append_field_element(&F::from_usize(chip_idx));
+        basic_fork.append_field_element(&F::from_usize(chip_id));
         for num_instance in &chip_proof.num_instances {
             basic_fork.append_field_element(&F::from_usize(*num_instance));
         }
@@ -1711,7 +1713,7 @@ mod debug_tests {
         );
         FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
             &mut openvm_fork,
-            F::from_usize(chip_idx),
+            F::from_usize(chip_id),
         );
         for num_instance in &chip_proof.num_instances {
             FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
@@ -1719,7 +1721,7 @@ mod debug_tests {
                 F::from_usize(*num_instance),
             );
         }
-        let openvm_schedule = record_gkr_transcript(&mut openvm_fork, chip_idx, chip_proof);
+        let openvm_schedule = record_gkr_transcript(&mut openvm_fork, chip_id, chip_proof);
 
         eprintln!(
             "basic alpha={:?} beta={:?} tower_lambda0={:?} beta0={:?} ri0={:?}",
@@ -1758,7 +1760,7 @@ mod debug_tests {
         basic_verify.append_field_element_ext(&basic_alpha);
         basic_verify.append_field_element_ext(&basic_beta);
         basic_verify.append_field_element(&F::from_usize(0));
-        basic_verify.append_field_element(&F::from_usize(chip_idx));
+        basic_verify.append_field_element(&F::from_usize(chip_id));
         for num_instance in &chip_proof.num_instances {
             basic_verify.append_field_element(&F::from_usize(*num_instance));
         }

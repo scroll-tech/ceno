@@ -102,7 +102,7 @@ fn generate_prod_trace(
                 cols.is_root_layer = F::ONE;
                 cols.proof_idx = F::from_usize(record.proof_idx);
                 cols.idx = F::from_usize(record.idx);
-                cols.chip_id = F::from_usize(record.chip_id);
+                cols.chip_idx = F::from_usize(record.chip_idx);
                 cols.layer_idx = F::ZERO;
                 cols.index_id = F::ZERO;
                 cols.prod_offset = F::ZERO;
@@ -164,7 +164,7 @@ fn generate_prod_trace(
                     "unexpected prod count mismatch at layer {layer_idx}"
                 );
                 let lambda = record.lambda_at(layer_idx);
-                let lambda_prime = record.lambda_prime_at(layer_idx);
+                let lambda_prime = record.lambda_cur_at(layer_idx);
                 let mu = mus_for_proof.get(layer_idx).copied().unwrap_or(EF::ZERO);
                 let lambda_basis: [F; D_EF] =
                     lambda.as_basis_coefficients_slice().try_into().unwrap();
@@ -218,7 +218,7 @@ fn generate_prod_trace(
                     cols.is_first = F::from_bool(is_first_row_of_layer);
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
-                    cols.chip_id = F::from_usize(record.chip_id);
+                    cols.chip_idx = F::from_usize(record.chip_idx);
                     cols.layer_idx = F::from_usize(layer_idx);
                     cols.index_id = F::from_usize(row_in_layer);
                     cols.prod_offset = F::from_usize(group_offset);

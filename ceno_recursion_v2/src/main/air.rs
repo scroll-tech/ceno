@@ -21,7 +21,7 @@ pub struct MainCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
-    pub chip_id: T,
+    pub chip_idx: T,
     pub is_first_idx: T,
     pub is_first: T,
     pub has_tower: T,
@@ -64,6 +64,9 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
         builder.assert_bool(local.has_tower);
         builder.assert_bool(local.has_sumcheck);
         builder
+            .when(local.is_enabled)
+            .assert_eq(local.idx, local.chip_idx);
+        builder
             .when_transition()
             .when(AB::Expr::ONE - local.is_enabled)
             .assert_zero(next.is_enabled);
@@ -95,7 +98,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
             builder,
             local.proof_idx,
             MainMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 tidx: local.tidx.into(),
                 claim: local.claim_in.map(Into::into),
             },

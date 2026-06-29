@@ -160,14 +160,14 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             let fork_id_by_chip: std::collections::BTreeMap<usize, usize> = proof
                 .chip_proofs
                 .iter()
-                .flat_map(|(chip_idx, instances)| {
+                .flat_map(|(chip_id, instances)| {
                     instances
                         .iter()
                         .enumerate()
-                        .map(move |(instance_idx, _)| (*chip_idx, instance_idx))
+                        .map(move |(instance_idx, _)| (*chip_id, instance_idx))
                 })
                 .enumerate()
-                .map(|(fork_id, (chip_idx, _instance_idx))| (chip_idx, fork_id))
+                .map(|(fork_id, (chip_id, _instance_idx))| (chip_id, fork_id))
                 .collect();
             let mut sorted_idx = 0usize;
             let mut num_present = 0usize;

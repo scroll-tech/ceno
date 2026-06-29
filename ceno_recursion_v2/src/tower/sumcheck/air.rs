@@ -29,7 +29,7 @@ pub struct TowerLayerSumcheckCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
-    pub chip_id: T,
+    pub chip_idx: T,
     pub layer_idx: T,
     pub is_first_idx: T,
     pub is_first_layer: T,
@@ -142,6 +142,9 @@ where
         builder.assert_bool(local.is_first_idx);
         builder.assert_bool(local.is_first_layer);
         builder.assert_bool(local.is_first_round);
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.idx, local.chip_idx);
         builder.assert_bool(next.is_first_idx);
         builder.assert_bool(next.is_first_layer);
         builder.assert_bool(next.is_first_round);
@@ -310,7 +313,7 @@ where
             builder,
             local.proof_idx,
             TowerSumcheckInputMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
                 is_last_layer: local.is_last_layer.into(),
                 tidx: local.tidx.into(),
@@ -324,7 +327,7 @@ where
             builder,
             local.proof_idx,
             TowerSumcheckOutputMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into() + AB::Expr::from_usize(ROUND_LEN),
                 claim_out: local.claim_out.map(Into::into),
@@ -339,7 +342,7 @@ where
             builder,
             local.proof_idx,
             TowerSumcheckChallengeMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx - AB::Expr::ONE,
                 sumcheck_round: local.round.into(),
                 challenge: local.prev_challenge.map(Into::into),
@@ -351,7 +354,7 @@ where
             builder,
             local.proof_idx,
             TowerSumcheckChallengeMessage {
-                chip_id: local.chip_id.into(),
+                chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
                 sumcheck_round: local.round.into(),
                 challenge: local.challenge.map(Into::into),
