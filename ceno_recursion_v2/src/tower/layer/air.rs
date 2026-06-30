@@ -258,6 +258,10 @@ where
         );
 
         let tidx_for_claims = tidx_after_sumcheck.clone();
+        let read_claim_enabled = is_not_dummy.clone() * local.num_read_count;
+        let write_claim_enabled = is_not_dummy.clone() * local.num_write_count;
+        let logup_claim_enabled = is_not_dummy.clone() * local.num_logup_count;
+
         self.prod_read_claim_input_bus.send(
             builder,
             local.proof_idx,
@@ -269,7 +273,7 @@ where
                 lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            is_not_dummy.clone(),
+            read_claim_enabled.clone(),
         );
         // TODO separate lambda, lambda_prime for prod-write the relation should be local.lambda^(num_read)
         self.prod_write_claim_input_bus.send(
@@ -283,7 +287,7 @@ where
                 lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            is_not_dummy.clone(),
+            write_claim_enabled.clone(),
         );
         // TODO separate lambda, lambda_prime for logup the relation should be local.lambda^(num_read + num_write)
         self.logup_claim_input_bus.send(
@@ -297,7 +301,7 @@ where
                 lambda_prime: local.lambda_prime.map(Into::into),
                 mu: local.mu.map(Into::into),
             },
-            is_not_dummy.clone(),
+            logup_claim_enabled.clone(),
         );
         self.prod_read_claim_bus.receive(
             builder,
@@ -309,7 +313,7 @@ where
                 lambda_prime_claim: local.read_claim_prime.map(Into::into),
                 num_prod_count: local.num_read_count.into(),
             },
-            is_not_dummy.clone(),
+            read_claim_enabled,
         );
         self.prod_write_claim_bus.receive(
             builder,
@@ -321,7 +325,7 @@ where
                 lambda_prime_claim: local.write_claim_prime.map(Into::into),
                 num_prod_count: local.num_write_count.into(),
             },
-            is_not_dummy.clone(),
+            write_claim_enabled,
         );
         self.logup_claim_bus.receive(
             builder,
@@ -333,7 +337,7 @@ where
                 lambda_prime_claim: local.logup_claim_prime.map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
-            is_not_dummy.clone(),
+            logup_claim_enabled,
         );
 
         let root_layer_mask = local.is_first * is_not_dummy.clone();

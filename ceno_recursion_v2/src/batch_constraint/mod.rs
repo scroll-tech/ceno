@@ -126,22 +126,14 @@ impl BatchConstraintModule {
 
         // Replay a lightweight subset of batch-constraint transcript observes from per-chip
         // sumcheck messages, then sample mu.
-        for chip_proof in proof
-            .chip_proofs
-            .values()
-            .flat_map(|instances| instances.iter())
-        {
+        for chip_proof in proof.chip_proofs.values() {
             observe_main_sumcheck_msgs(ts, chip_proof);
         }
         let _mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         let tidx_before_univariate = ts.len();
 
         let mut sumcheck_rnd = vec![];
-        for chip_proof in proof
-            .chip_proofs
-            .values()
-            .flat_map(|instances| instances.iter())
-        {
+        for chip_proof in proof.chip_proofs.values() {
             if let Some(layer) = chip_proof
                 .gkr_iop_proof
                 .as_ref()

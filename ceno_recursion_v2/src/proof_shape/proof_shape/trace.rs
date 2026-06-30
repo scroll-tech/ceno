@@ -33,18 +33,12 @@ fn decompose_usize<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
     })
 }
 
-fn two_instance_heights_from_chip_instances(
-    chip_instances: &[impl BorrowNumInstances],
-) -> (usize, usize) {
-    chip_instances
-        .iter()
-        .fold((0usize, 0usize), |(h1, h2), instance| {
-            let num_instances = instance.borrow_num_instances();
-            (
-                h1 + num_instances.first().copied().unwrap_or(0),
-                h2 + num_instances.get(1).copied().unwrap_or(0),
-            )
-        })
+fn two_instance_heights_from_chip_proof(instance: &impl BorrowNumInstances) -> (usize, usize) {
+    let num_instances = instance.borrow_num_instances();
+    (
+        num_instances.first().copied().unwrap_or(0),
+        num_instances.get(1).copied().unwrap_or(0),
+    )
 }
 
 trait BorrowNumInstances {
@@ -113,7 +107,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 let (height_1, height_2) = proof
                     .chip_proofs
                     .get(air_idx)
-                    .map(|instances| two_instance_heights_from_chip_instances(instances))
+                    .map(two_instance_heights_from_chip_proof)
                     .unwrap_or((0, 0));
                 num_present += 1;
 

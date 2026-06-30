@@ -255,20 +255,17 @@ impl TowerModule {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         let _ = self;
-        for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
-                let tidx = ts.len();
-                let tower_replay =
-                    record_and_replay_tower_preflight(ts, child_vk, chip_idx, chip_proof);
+        for (&chip_idx, chip_proof) in &proof.chip_proofs {
+            let tidx = ts.len();
+            let tower_replay =
+                record_and_replay_tower_preflight(ts, child_vk, chip_idx, chip_proof);
 
-                preflight.gkr.chips.push(TowerChipTranscriptRange {
-                    chip_idx,
-                    instance_idx,
-                    tidx,
-                    fork_idx: 0, // unused in forked flow
-                    tower_replay,
-                });
-            }
+            preflight.gkr.chips.push(TowerChipTranscriptRange {
+                chip_idx,
+                tidx,
+                fork_idx: 0, // unused in forked flow
+                tower_replay,
+            });
         }
     }
 }
@@ -391,6 +388,7 @@ fn build_chip_records(
     replay: &TowerReplayResult,
     schedule: &TowerTranscriptSchedule,
     tidx: usize,
+    input_layer_claim: EF,
 ) -> Result<(
     TowerInputRecord,
     TowerLayerRecord,
@@ -494,9 +492,9 @@ fn build_chip_records(
         //     read_len == write_len,
         //     "read/write prod spec count mismatch at layer {layer_idx}: read={read_len}, write={write_len}"
         // );
-        layer_record.read_counts[layer_idx] = read_len.max(1);
-        layer_record.write_counts[layer_idx] = write_len.max(1);
-        layer_record.logup_counts[layer_idx] = logup_len.max(1);
+        layer_record.read_counts[layer_idx] = read_len;
+        layer_record.write_counts[layer_idx] = write_len;
+        layer_record.logup_counts[layer_idx] = logup_len;
     }
 
     for layer_idx in 0..layer_count {
@@ -504,12 +502,6 @@ fn build_chip_records(
             .layer_claims
             .push(convert_logup_claim(chip_proof, layer_idx));
     }
-
-    let input_layer_claim = layer_record
-        .layer_claims
-        .last()
-        .map(|claim| claim[0])
-        .unwrap_or(EF::ZERO);
 
     let mut sumcheck_record = TowerSumcheckRecord {
         proof_idx,
@@ -773,19 +765,15 @@ pub(crate) fn build_gkr_blob(
                     .get(&entry.chip_idx)
                     .copied()
                     .unwrap_or(usize::MAX),
-                entry.instance_idx,
+                entry.chip_idx,
             )
         });
         for (entry_idx, pf_entry) in sorted_pf_entries.into_iter().enumerate() {
             let chip_idx = pf_entry.chip_idx;
-            let instance_idx = pf_entry.instance_idx;
-            let chip_instances = proof
+            let chip_proof = proof
                 .chip_proofs
                 .get(&chip_idx)
-                .ok_or_else(|| eyre::eyre!("missing chip proof instances for chip {chip_idx}"))?;
-            let chip_proof = chip_instances.get(instance_idx).ok_or_else(|| {
-                eyre::eyre!("missing chip proof instance {instance_idx} for chip {chip_idx}")
-            })?;
+                .ok_or_else(|| eyre::eyre!("missing chip proof for chip {chip_idx}"))?;
             has_chip = true;
             // Access the fork log directly using fork_idx and fork-local tidx.
             let mut ts = {
@@ -825,6 +813,7 @@ pub(crate) fn build_gkr_blob(
                 &poseidon_replay,
                 &schedule,
                 global_tidx,
+                proof.main_constraint_proof.claimed_sum,
             )?;
 
             // Capture first chip's alpha and q0 for the proof-level record

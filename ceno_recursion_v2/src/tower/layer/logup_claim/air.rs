@@ -284,7 +284,7 @@ where
                 lambda_prime: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
             },
-            local.is_first.into(),
+            local.is_first.into() * is_not_dummy.clone(),
         );
 
         self.logup_claim_bus.send(
@@ -297,7 +297,7 @@ where
                 lambda_prime_claim: acc_q_with_cur.map(Into::into),
                 num_logup_count: local.num_logup_count.into(),
             },
-            is_layer_end,
+            is_layer_end * is_not_dummy.clone(),
         );
 
         let mut tidx = local.tidx.into();

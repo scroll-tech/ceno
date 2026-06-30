@@ -111,12 +111,8 @@ impl ProofShapeModule {
         let mut sorted_trace_vdata = proof
             .chip_proofs
             .iter()
-            .map(|(&chip_idx, chip_instances)| {
-                let num_instances: usize = chip_instances
-                    .iter()
-                    .flat_map(|instance| instance.num_instances.iter())
-                    .copied()
-                    .sum();
+            .map(|(&chip_idx, chip_proof)| {
+                let num_instances: usize = chip_proof.num_instances.iter().copied().sum();
                 let padded = num_instances.max(1).next_power_of_two();
                 let log_height = padded.ilog2() as usize;
                 (chip_idx, TraceVData { log_height })
@@ -163,7 +159,6 @@ impl ProofShapeModule {
         preflight.proof_shape.n_logup = proof
             .chip_proofs
             .values()
-            .flat_map(|instances| instances.iter())
             .map(|chip_proof| chip_proof.tower_proof.proofs.len())
             .max()
             .unwrap_or(0);
@@ -192,7 +187,11 @@ fn extract_rwlk_counts(child_vk: &RecursionVk, expected_len: usize) -> Vec<(usiz
                 .and_then(|name| child_vk.circuit_vks.get(name))
                 .map(|circuit_vk| {
                     let cs = circuit_vk.get_cs();
-                    (cs.num_reads(), cs.num_writes(), cs.num_lks())
+                    (
+                        usize::from(cs.num_reads() > 0),
+                        usize::from(cs.num_writes() > 0),
+                        usize::from(cs.num_lks() > 0),
+                    )
                 })
                 .unwrap_or_else(|| {
                     // TODO: Populate GKR count metadata once every AIR is backed by a concrete VK.

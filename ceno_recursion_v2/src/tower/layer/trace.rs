@@ -272,9 +272,9 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
-                    cols.num_read_count = F::from_usize(record.read_count_at(layer_idx).max(1));
-                    cols.num_write_count = F::from_usize(record.write_count_at(layer_idx).max(1));
-                    cols.num_logup_count = F::from_usize(record.logup_count_at(layer_idx).max(1));
+                    cols.num_read_count = F::from_usize(record.read_count_at(layer_idx));
+                    cols.num_write_count = F::from_usize(record.write_count_at(layer_idx));
+                    cols.num_logup_count = F::from_usize(record.logup_count_at(layer_idx));
                     cols.eq_at_r_prime = record
                         .eq_at(layer_idx)
                         .as_basis_coefficients_slice()

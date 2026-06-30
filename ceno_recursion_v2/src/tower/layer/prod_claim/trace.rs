@@ -102,7 +102,7 @@ fn generate_prod_trace(
                 cols.pow_lambda_prime = lambda_prime_one;
                 cols.acc_sum = [F::ZERO; D_EF];
                 cols.acc_sum_prime = [F::ZERO; D_EF];
-                cols.num_prod_count = F::ONE;
+                cols.num_prod_count = F::ZERO;
                 return;
             }
 
@@ -199,7 +199,7 @@ fn generate_prod_trace(
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
-                    cols.num_prod_count = F::from_usize(total_rows);
+                    cols.num_prod_count = F::from_usize(active_rows.len());
 
                     acc_sum += contribution;
                     acc_sum_prime += prime_contribution;

@@ -171,10 +171,24 @@ fn build_tower_replay_result(
     let rotation_vars = cs.rotation_vars().unwrap_or(0);
     let num_var_with_rotation = log2_num_instances + rotation_vars;
 
-    let read_count = cs.num_reads();
-    let write_count = cs.num_writes();
-    let lookup_count = cs.num_lks();
-    let num_batched = read_count + write_count + lookup_count;
+    let raw_read_count = cs.num_reads();
+    let raw_write_count = cs.num_writes();
+    let raw_lookup_count = cs.num_lks();
+    let grouped_read_count = usize::from(raw_read_count > 0);
+    let grouped_write_count = usize::from(raw_write_count > 0);
+    let grouped_lookup_count = usize::from(raw_lookup_count > 0);
+    ensure!(
+        chip_proof.r_out_evals.len() == grouped_read_count
+            && chip_proof.w_out_evals.len() == grouped_write_count
+            && chip_proof.lk_out_evals.len() == grouped_lookup_count,
+        "recursion-v2 supports grouped tower shape only: proof ({}, {}, {}) != grouped ({}, {}, {})",
+        chip_proof.r_out_evals.len(),
+        chip_proof.w_out_evals.len(),
+        chip_proof.lk_out_evals.len(),
+        grouped_read_count,
+        grouped_write_count,
+        grouped_lookup_count,
+    );
 
     let prod_out_evals: Vec<Vec<RecursionField>> = chip_proof
         .r_out_evals
@@ -247,8 +261,49 @@ fn build_tower_replay_result(
 
     let mut point_and_eval = PointAndEval::new(initial_rt, initial_claim);
     let mut layers = Vec::new();
-    let max_num_variables = num_var_with_rotation;
-    let num_variables = vec![num_var_with_rotation; num_batched];
+    let group_num_vars =
+        |op_count: usize| num_var_with_rotation + ceil_log2(op_count.next_power_of_two());
+    let num_variables = chip_proof
+        .r_out_evals
+        .iter()
+        .map(|_| group_num_vars(raw_read_count))
+        .chain(
+            chip_proof
+                .w_out_evals
+                .iter()
+                .map(|_| group_num_vars(raw_write_count)),
+        )
+        .chain(
+            chip_proof
+                .lk_out_evals
+                .iter()
+                .map(|_| group_num_vars(raw_lookup_count)),
+        )
+        .collect::<Vec<_>>();
+    let Some(max_num_variables) = num_variables.iter().copied().max() else {
+        return Ok(TowerReplayResult { layers });
+    };
+    for (spec_idx, max_round) in num_variables
+        .iter()
+        .copied()
+        .take(num_prod_spec)
+        .enumerate()
+    {
+        ensure!(
+            tower_proof.prod_specs_eval[spec_idx].len() >= max_round.saturating_sub(1),
+            "prod spec {spec_idx} eval rounds {} < required {}",
+            tower_proof.prod_specs_eval[spec_idx].len(),
+            max_round.saturating_sub(1),
+        );
+    }
+    for (spec_idx, max_round) in num_variables[num_prod_spec..].iter().copied().enumerate() {
+        ensure!(
+            tower_proof.logup_specs_eval[spec_idx].len() >= max_round.saturating_sub(1),
+            "logup spec {spec_idx} eval rounds {} < required {}",
+            tower_proof.logup_specs_eval[spec_idx].len(),
+            max_round.saturating_sub(1),
+        );
+    }
 
     for round in 0..max_num_variables.saturating_sub(1) {
         let out_rt = point_and_eval.point.clone();

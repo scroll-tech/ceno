@@ -92,7 +92,6 @@ pub struct TowerPreflight {
 #[derive(Clone, Debug, Default)]
 pub struct TowerChipTranscriptRange {
     pub chip_idx: usize,
-    pub instance_idx: usize,
     /// Fork-local tidx (position within the fork's transcript log).
     pub tidx: usize,
     /// Index into `Preflight::fork_transcripts`.
@@ -112,7 +111,6 @@ pub struct BatchConstraintPreflight {
 #[derive(Clone, Debug, Default)]
 pub struct ChipTranscriptRange {
     pub chip_idx: usize,
-    pub instance_idx: usize,
     /// Fork-local tidx (position within the fork's transcript log).
     pub tidx: usize,
     /// Index into `Preflight::fork_transcripts`.

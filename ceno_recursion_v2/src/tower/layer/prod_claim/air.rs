@@ -281,7 +281,7 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
                 lambda_prime: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
             },
-            local.is_first.into(),
+            local.is_first.into() * is_not_dummy.clone(),
         );
 
         send_claim(
@@ -295,7 +295,7 @@ impl<IB, OB> TowerProdSumCheckClaimAir<IB, OB> {
                 lambda_prime_claim: acc_sum_prime_export.map(Into::into),
                 num_prod_count: local.num_prod_count.into(),
             },
-            is_layer_end,
+            is_layer_end * is_not_dummy.clone(),
         );
 
         let mut tidx = local.tidx.into();

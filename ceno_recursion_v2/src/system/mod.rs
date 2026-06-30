@@ -306,27 +306,15 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     #[allow(clippy::type_complexity)]
     fn build_chip_proof_list<'a>(
         proof: &'a RecursionProof,
-    ) -> Vec<(
-        usize,
-        usize,
-        &'a ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
-    )> {
-        // Keep current deterministic ordering: iterate chip map order, then
-        // instance order within each chip. Fork IDs are assigned in this order.
-        let chip_proof_list: Vec<(
-            usize,
-            usize,
-            &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
-        )> = proof
-            .chip_proofs
-            .iter()
-            .flat_map(|(&chip_idx, instances)| {
-                instances
-                    .iter()
-                    .enumerate()
-                    .map(move |(instance_idx, chip_proof)| (chip_idx, instance_idx, chip_proof))
-            })
-            .collect();
+    ) -> Vec<(usize, &'a ceno_zkvm::scheme::ZKVMChipProof<RecursionField>)> {
+        // Keep current deterministic ordering: iterate chip map order.
+        // Fork IDs are assigned in this order.
+        let chip_proof_list: Vec<(usize, &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>)> =
+            proof
+                .chip_proofs
+                .iter()
+                .map(|(&chip_idx, chip_proof)| (chip_idx, chip_proof))
+                .collect();
         chip_proof_list
     }
 
@@ -378,7 +366,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         // Fork-local tidx values are recorded directly; global offsets are
         // computed on demand during trace generation.
 
-        for (fork_id, &(chip_idx, instance_idx, chip_proof)) in chip_proof_list.iter().enumerate() {
+        for (fork_id, &(chip_idx, chip_proof)) in chip_proof_list.iter().enumerate() {
             let fs = &mut fork_sponges[fork_id];
 
             // Strict upstream semantics: each fork transcript starts from a
@@ -406,7 +394,6 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             // Record tower entry with fork-local tidx at tower stage start.
             preflight.gkr.chips.push(TowerChipTranscriptRange {
                 chip_idx,
-                instance_idx,
                 tidx: tower_tidx,
                 fork_idx: fork_id,
                 tower_replay,
@@ -414,11 +401,14 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
             // Main preflight for this chip.
             let main_tidx = fs.len();
-            crate::main::record_main_transcript(fs, chip_idx, chip_proof);
+            crate::main::record_main_transcript(
+                fs,
+                chip_idx,
+                proof.main_constraint_proof.claimed_sum,
+            );
 
             preflight.main.chips.push(ChipTranscriptRange {
                 chip_idx,
-                instance_idx,
                 tidx: main_tidx,
                 fork_idx: fork_id,
             });

@@ -29,7 +29,6 @@ use crate::{
         AirModule, BusIndexManager, BusInventory, ChipTranscriptRange, GlobalCtxCpu, Preflight,
         RecursionField, RecursionProof, RecursionVk, TraceGenModule,
     },
-    tower::convert_logup_claim,
     tracegen::{ModuleChip, RowMajorChip},
 };
 
@@ -77,47 +76,40 @@ impl MainModule {
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
             let mut chip_pf_iter = preflight.main.chips.iter();
             let mut saw_chip = false;
-            for (&chip_idx, chip_instances) in &proof.chip_proofs {
-                for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
-                    saw_chip = true;
-                    let pf_entry = chip_pf_iter
-                        .next()
-                        .ok_or_else(|| eyre!(
-                            "missing main preflight entry for chip {chip_idx} instance {instance_idx}"
-                        ))?;
-                    if pf_entry.chip_idx != chip_idx || pf_entry.instance_idx != instance_idx {
-                        bail!(
-                            "main preflight chip mismatch: expected ({}, {}), got ({}, {})",
-                            chip_idx,
-                            instance_idx,
-                            pf_entry.chip_idx,
-                            pf_entry.instance_idx
-                        );
-                    }
-                    let claim = input_layer_claim(chip_proof);
-                    // Access the fork log directly using fork_idx and fork-local tidx.
-                    let fork_log = preflight.fork_log(pf_entry.fork_idx);
-                    let mut ts = ReadOnlyTranscript::new(fork_log, pf_entry.tidx);
-                    record_main_transcript(&mut ts, chip_idx, chip_proof);
-
-                    // Compute global tidx for trace column values.
-                    let global_tidx =
-                        preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
-                    let main_record = MainRecord {
-                        proof_idx,
-                        idx: chip_idx,
-                        tidx: global_tidx,
-                        claim,
-                    };
-                    let sumcheck_record = build_sumcheck_record_from_chip(
-                        proof_idx,
+            for (&chip_idx, chip_proof) in &proof.chip_proofs {
+                saw_chip = true;
+                let pf_entry = chip_pf_iter
+                    .next()
+                    .ok_or_else(|| eyre!("missing main preflight entry for chip {chip_idx}"))?;
+                if pf_entry.chip_idx != chip_idx {
+                    bail!(
+                        "main preflight chip mismatch: expected {}, got {}",
                         chip_idx,
-                        claim,
-                        chip_proof,
-                        global_tidx,
+                        pf_entry.chip_idx
                     );
-                    paired.push((main_record, sumcheck_record));
                 }
+                let claim = proof.main_constraint_proof.claimed_sum;
+                // Access the fork log directly using fork_idx and fork-local tidx.
+                let fork_log = preflight.fork_log(pf_entry.fork_idx);
+                let mut ts = ReadOnlyTranscript::new(fork_log, pf_entry.tidx);
+                record_main_transcript(&mut ts, chip_idx, claim);
+
+                // Compute global tidx for trace column values.
+                let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
+                let main_record = MainRecord {
+                    proof_idx,
+                    idx: chip_idx,
+                    tidx: global_tidx,
+                    claim,
+                };
+                let sumcheck_record = build_sumcheck_record_from_chip(
+                    proof_idx,
+                    chip_idx,
+                    claim,
+                    chip_proof,
+                    global_tidx,
+                );
+                paired.push((main_record, sumcheck_record));
             }
 
             if !saw_chip {
@@ -171,17 +163,14 @@ impl MainModule {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         let _ = (self, child_vk);
-        for (&chip_idx, chip_instances) in &proof.chip_proofs {
-            for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
-                let tidx = ts.len();
-                record_main_transcript(ts, chip_idx, chip_proof);
-                preflight.main.chips.push(ChipTranscriptRange {
-                    chip_idx,
-                    instance_idx,
-                    tidx,
-                    fork_idx: 0, // unused in forked flow
-                });
-            }
+        for &chip_idx in proof.chip_proofs.keys() {
+            let tidx = ts.len();
+            record_main_transcript(ts, chip_idx, proof.main_constraint_proof.claimed_sum);
+            preflight.main.chips.push(ChipTranscriptRange {
+                chip_idx,
+                tidx,
+                fork_idx: 0, // unused in forked flow
+            });
         }
     }
 }
@@ -267,27 +256,6 @@ impl RowMajorChip<F> for MainModuleChip {
     }
 }
 
-fn input_layer_claim(chip_proof: &ZKVMChipProof<RecursionField>) -> EF {
-    let layer_count = chip_proof
-        .tower_proof
-        .logup_specs_eval
-        .iter()
-        .map(|spec_layers| spec_layers.len())
-        .chain(
-            chip_proof
-                .tower_proof
-                .prod_specs_eval
-                .iter()
-                .map(|spec_layers| spec_layers.len()),
-        )
-        .max()
-        .unwrap_or(0);
-    if layer_count == 0 {
-        return EF::ZERO;
-    }
-    convert_logup_claim(chip_proof, layer_count - 1)[0]
-}
-
 fn build_sumcheck_record_from_chip(
     proof_idx: usize,
     chip_idx: usize,
@@ -325,12 +293,9 @@ fn build_sumcheck_record_from_chip(
     }
 }
 
-pub(crate) fn record_main_transcript<TS>(
-    ts: &mut TS,
-    _chip_idx: usize,
-    chip_proof: &ZKVMChipProof<RecursionField>,
-) where
+pub(crate) fn record_main_transcript<TS>(ts: &mut TS, _chip_idx: usize, claim: EF)
+where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
-    ts.observe_ext(input_layer_claim(chip_proof));
+    ts.observe_ext(claim);
 }
