@@ -390,10 +390,10 @@ TowerLayerAir
 TowerLayerSumcheckAir
   verifies each layer sumcheck proof round and returns (claim_out, eq_at_r_prime)
 
-TowerProdSumCheckClaimAir
+TowerProdClaimAir
   folds read/write product child claims for each layer
 
-TowerLogupSumCheckClaimAir
+TowerLogupClaimAir
   folds LogUp child claims for each layer
 ```
 
@@ -458,9 +458,9 @@ sequenceDiagram
     participant TI as TowerInputAir
     participant TR as TranscriptAir
     participant TL as TowerLayerAir
-    participant PR as TowerProdReadSumCheckClaimAir
-    participant PW as TowerProdWriteSumCheckClaimAir
-    participant LU as TowerLogupSumCheckClaimAir
+    participant PR as TowerProdReadClaimAir
+    participant PW as TowerProdWriteClaimAir
+    participant LU as TowerLogupClaimAir
     participant SC as TowerLayerSumcheckAir
     participant M as MainAir
 
@@ -489,12 +489,16 @@ sequenceDiagram
             SC->>TL: 8. TowerSumcheckOutputBus: final_eval + eq
         end
 
-        TL->>PR: 9a. TowerProdReadClaimInputBus: read layer fold
-        TL->>PW: 9b. TowerProdWriteClaimInputBus: write layer fold
-        TL->>LU: 9c. TowerLogupClaimInputBus: LogUp layer fold
-        PR->>TR: 10a. TranscriptBus: observe read claims
-        PW->>TR: 10b. TranscriptBus: observe write claims
-        LU->>TR: 10c. TranscriptBus: observe LogUp claims
+        alt layer_idx > 0
+            TL->>PR: 9a. TowerProdReadClaimInputBus: read layer fold
+            TL->>PW: 9b. TowerProdWriteClaimInputBus: write layer fold
+            TL->>LU: 9c. TowerLogupClaimInputBus: LogUp layer fold
+            PR->>TR: 10a. TranscriptBus: observe read claims
+            PW->>TR: 10b. TranscriptBus: observe write claims
+            LU->>TR: 10c. TranscriptBus: observe LogUp claims
+        else root layer
+            TL-->>TL: 10. use C_1(r_1) from TowerInputAir
+        end
         TL->>TR: 11. TranscriptBus: sample mu_i
 
         alt non-last layer
@@ -503,10 +507,14 @@ sequenceDiagram
             TL-->>TL: 12. no lambda_next sample
         end
 
-        PR->>TL: 13a. TowerProdReadClaimBus: read claims + end powers
-        PW->>TL: 13b. TowerProdWriteClaimBus: write claims + end powers
-        LU->>TL: 13c. TowerLogupClaimBus: LogUp claims
-        TL->>TL: 14. check final_eval = eq * T_i(rho)
+        alt layer_idx > 0
+            PR->>TL: 13a. TowerProdReadClaimBus: read claims + end powers
+            PW->>TL: 13b. TowerProdWriteClaimBus: write claims + end powers
+            LU->>TL: 13c. TowerLogupClaimBus: LogUp claims
+            TL->>TL: 14. check final_eval = eq * T_i(rho)
+        else root layer
+            TL->>TL: 14. check initial folded claim = C_1(r_1)
+        end
 
         alt non-last layer
             TL->>SC: 15a. TowerSumcheckChallengeBus: seed next layer
@@ -580,6 +588,8 @@ follow the LogUp/fraction-folding contract used by the downstream proof-shape ch
 - it owns `lambda_cur`/`lambda_next` power handoff between read products, write products, and LogUp specs;
 - it checks read/write/LogUp counts against the shape metadata forwarded from `TowerInputAir`/`TowerModuleBus`, not
   against proof-provided lengths alone.
+- root output/init folding is handled by `TowerInputAir`'s root buses; `TowerLayerAir` sends product/LogUp claim-folding
+  buses only for non-root layers.
 
 ### TowerLayerSumcheckAir
 
@@ -589,7 +599,7 @@ follow the LogUp/fraction-folding contract used by the downstream proof-shape ch
 - it emits the final sumcheck evaluation and `eq_at_r_prime = eq(r_i, rho)`;
 - it does not know product or LogUp semantics; `TowerLayerAir` interprets the final evaluation against `T_i(rho)`.
 
-### TowerProdReadSumCheckClaimAir and TowerProdWriteSumCheckClaimAir
+### TowerProdReadClaimAir and TowerProdWriteClaimAir
 
 The read and write product claim AIRs have the same contract, with separate buses. Each AIR supports two modes:
 
@@ -601,6 +611,7 @@ DeriveOutputClaim:
   consumes root out-eval pairs and returns r0_claim/w0_claim plus the C_1 contribution
 ```
 
+- in `DeriveLayerClaims` mode, rows have `layer_idx > 0`; root rows use `DeriveOutputClaim` mode only;
 - in `DeriveLayerClaims` mode, `current_claim` is the current code/bus name for this product group's `eval_claim`, i.e.
   its contribution to `T_i(rho)`;
 - in `DeriveLayerClaims` mode, `next_claim` is this product group's contribution to `C_{i+1}(rho, mu)`;
@@ -619,9 +630,9 @@ DeriveOutputClaim:
   claim group;
 - the AIR owns the transcript observation of the product child claims but not the layer-level sumcheck check.
 
-### TowerLogupSumCheckClaimAir
+### TowerLogupClaimAir
 
-`TowerLogupSumCheckClaimAir` folds the LogUp numerator/denominator child claims. It supports two modes:
+`TowerLogupClaimAir` folds the LogUp numerator/denominator child claims. It supports two modes:
 
 ```text
 DeriveLayerClaims:
@@ -631,6 +642,7 @@ DeriveOutputClaim:
   consumes root LogUp out-evals and returns (p0_claim, q0_claim) plus the C_1 contribution
 ```
 
+- in `DeriveLayerClaims` mode, rows have `layer_idx > 0`; root rows use `DeriveOutputClaim` mode only;
 - in `DeriveLayerClaims` mode, `current_claim` is the current code/bus name for this LogUp group's `eval_claim`, i.e. its
   contribution to `T_i(rho)` using the native numerator/denominator reduction;
 - in `DeriveLayerClaims` mode, `next_claim` is the LogUp contribution to `C_{i+1}(rho, mu)` after interpolation at `mu`;
@@ -672,20 +684,20 @@ under the opposite sign?"
 | `TowerModuleBus` | `PermutationCheck` | `ProofShapeAir` | `TowerInputAir` | `(proof_idx, chip_idx, num_layers, num_read_specs, num_write_specs, num_logup_specs)` | per `(proof_idx, chip_idx)` tower proof | Starts one tower verification with VK-derived shape metadata. |
 | `TowerLayerInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerLayerAir` | `(chip_idx, layer_tidx, num_layers, num_read_specs, num_write_specs, num_logup_specs, initial_tower_claim)` | per `(proof_idx, chip_idx)` tower proof | Anchors the initial batched tower claim and shape counts for all tower layers. |
 | `TowerLayerOutputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerInputAir` | `(chip_idx, final_tidx, layer_idx_end, input_layer_claim, lambda_next, mu)` | per `(proof_idx, chip_idx)` tower proof | Returns the reduced terminal/input-layer tower claim. |
-| `TowerReadRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerProdReadSumCheckClaimAir` | `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_read_count)` | per `(proof_idx, chip_idx)` root claim group | Starts read root product folding and passes the initial-claim challenges. |
-| `TowerReadRootBus` | `PermutationCheck` | `TowerProdReadSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, r0_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns `r0_claim = product_k r_out_evals[k][0] * r_out_evals[k][1]`. |
-| `TowerReadInitBus` | `PermutationCheck` | `TowerProdReadSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, read_initial_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns the read contribution to `C_1(r_1)` from the same rows as `r0_claim`. |
-| `TowerWriteRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerProdWriteSumCheckClaimAir` | `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_write_count)` | per `(proof_idx, chip_idx)` root claim group | Starts write root product folding and passes the initial-claim challenges. |
-| `TowerWriteRootBus` | `PermutationCheck` | `TowerProdWriteSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, w0_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns `w0_claim = product_k w_out_evals[k][0] * w_out_evals[k][1]`. |
-| `TowerWriteInitBus` | `PermutationCheck` | `TowerProdWriteSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, write_initial_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns the write contribution to `C_1(r_1)` from the same rows as `w0_claim`. |
-| `TowerLogupRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerLogupSumCheckClaimAir` | `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_logup_count)` | per `(proof_idx, chip_idx)` root claim group | Starts root LogUp fractional folding and passes the initial-claim challenges. |
-| `TowerLogupRootBus` | `PermutationCheck` | `TowerLogupSumCheckClaimAir` | `TowerInputAir` | `(chip_idx, p0_claim, q0_claim, logup_initial_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns the chip-level root LogUp fractional pair and the LogUp contribution to `C_1(r_1)` from the same rows. |
-| `TowerProdReadClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerProdReadSumCheckClaimAir` | `(chip_idx, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, prod_offset, lambda_next_start, lambda_cur_start, num_read_count)` | per `(proof_idx, chip_idx, layer_idx)` | Starts read product child-claim folding at flattened product offset `0`; start powers are one. |
-| `TowerProdReadClaimBus` | `PermutationCheck` | `TowerProdReadSumCheckClaimAir` | `TowerLayerAir` | `(chip_idx, layer_idx, read_next_claim, read_current_claim, lambda_next_end, lambda_cur_end)` | per `(proof_idx, chip_idx, layer_idx)` | Returns read product contributions and the powers after the read product range. |
-| `TowerProdWriteClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerProdWriteSumCheckClaimAir` | `(chip_idx, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, prod_offset, lambda_next_start, lambda_cur_start, num_write_count)` | per `(proof_idx, chip_idx, layer_idx)` | Starts write product child-claim folding at `num_read_specs`; start powers are the read product end powers. |
-| `TowerProdWriteClaimBus` | `PermutationCheck` | `TowerProdWriteSumCheckClaimAir` | `TowerLayerAir` | `(chip_idx, layer_idx, write_next_claim, write_current_claim, lambda_next_end, lambda_cur_end)` | per `(proof_idx, chip_idx, layer_idx)` | Returns write product contributions and the powers after the full product range. |
-| `TowerLogupClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerLogupSumCheckClaimAir` | `(chip_idx, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, lambda_next_start, lambda_cur_start, num_logup_count)` | per `(proof_idx, chip_idx, layer_idx)` | Starts LogUp numerator/denominator child-claim folding at the product write end powers. |
-| `TowerLogupClaimBus` | `PermutationCheck` | `TowerLogupSumCheckClaimAir` | `TowerLayerAir` | `(chip_idx, layer_idx, logup_next_claim, logup_current_claim)` | per `(proof_idx, chip_idx, layer_idx)` | Returns LogUp contributions to `C_{i+1}(rho, mu)` and `T_i(rho)`. |
+| `TowerReadRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerProdReadClaimAir` | `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_read_count)` | per `(proof_idx, chip_idx)` root claim group | Starts read root product folding and passes the initial-claim challenges. |
+| `TowerReadRootBus` | `PermutationCheck` | `TowerProdReadClaimAir` | `TowerInputAir` | `(chip_idx, r0_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns `r0_claim = product_k r_out_evals[k][0] * r_out_evals[k][1]`. |
+| `TowerReadInitBus` | `PermutationCheck` | `TowerProdReadClaimAir` | `TowerInputAir` | `(chip_idx, read_initial_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns the read contribution to `C_1(r_1)` from the same rows as `r0_claim`. |
+| `TowerWriteRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerProdWriteClaimAir` | `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_write_count)` | per `(proof_idx, chip_idx)` root claim group | Starts write root product folding and passes the initial-claim challenges. |
+| `TowerWriteRootBus` | `PermutationCheck` | `TowerProdWriteClaimAir` | `TowerInputAir` | `(chip_idx, w0_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns `w0_claim = product_k w_out_evals[k][0] * w_out_evals[k][1]`. |
+| `TowerWriteInitBus` | `PermutationCheck` | `TowerProdWriteClaimAir` | `TowerInputAir` | `(chip_idx, write_initial_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns the write contribution to `C_1(r_1)` from the same rows as `w0_claim`. |
+| `TowerLogupRootInputBus` | `PermutationCheck` | `TowerInputAir` | `TowerLogupClaimAir` | `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_logup_count)` | per `(proof_idx, chip_idx)` root claim group | Starts root LogUp fractional folding and passes the initial-claim challenges. |
+| `TowerLogupRootBus` | `PermutationCheck` | `TowerLogupClaimAir` | `TowerInputAir` | `(chip_idx, p0_claim, q0_claim, logup_initial_claim)` | per `(proof_idx, chip_idx)` root claim group | Returns the chip-level root LogUp fractional pair and the LogUp contribution to `C_1(r_1)` from the same rows. |
+| `TowerProdReadClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerProdReadClaimAir` | `(chip_idx, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, prod_offset, lambda_next_start, lambda_cur_start, num_read_count)` | per non-root `(proof_idx, chip_idx, layer_idx)` | Starts read product child-claim folding at flattened product offset `0`; start powers are one. |
+| `TowerProdReadClaimBus` | `PermutationCheck` | `TowerProdReadClaimAir` | `TowerLayerAir` | `(chip_idx, layer_idx, read_next_claim, read_current_claim, lambda_next_end, lambda_cur_end)` | per non-root `(proof_idx, chip_idx, layer_idx)` | Returns read product contributions and the powers after the read product range. |
+| `TowerProdWriteClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerProdWriteClaimAir` | `(chip_idx, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, prod_offset, lambda_next_start, lambda_cur_start, num_write_count)` | per non-root `(proof_idx, chip_idx, layer_idx)` | Starts write product child-claim folding at `num_read_specs`; start powers are the read product end powers. |
+| `TowerProdWriteClaimBus` | `PermutationCheck` | `TowerProdWriteClaimAir` | `TowerLayerAir` | `(chip_idx, layer_idx, write_next_claim, write_current_claim, lambda_next_end, lambda_cur_end)` | per non-root `(proof_idx, chip_idx, layer_idx)` | Returns write product contributions and the powers after the full product range. |
+| `TowerLogupClaimInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerLogupClaimAir` | `(chip_idx, layer_idx, claim_tidx, lambda_next, lambda_cur, mu, lambda_next_start, lambda_cur_start, num_logup_count)` | per non-root `(proof_idx, chip_idx, layer_idx)` | Starts LogUp numerator/denominator child-claim folding at the product write end powers. |
+| `TowerLogupClaimBus` | `PermutationCheck` | `TowerLogupClaimAir` | `TowerLayerAir` | `(chip_idx, layer_idx, logup_next_claim, logup_current_claim)` | per non-root `(proof_idx, chip_idx, layer_idx)` | Returns LogUp contributions to `C_{i+1}(rho, mu)` and `T_i(rho)`. |
 | `TowerSumcheckInputBus` | `PermutationCheck` | `TowerLayerAir` | `TowerLayerSumcheckAir` | `(chip_idx, layer_idx, is_last_layer, sumcheck_tidx, claim)` | per `(proof_idx, chip_idx, layer_idx)` | Starts the layer sumcheck from current claim `C_i(r_i)`. |
 | `TowerSumcheckOutputBus` | `PermutationCheck` | `TowerLayerSumcheckAir` | `TowerLayerAir` | `(chip_idx, layer_idx, tidx_after_sumcheck, final_evaluation, eq_at_r_prime)` | per `(proof_idx, chip_idx, layer_idx)` | Returns the sumcheck final evaluation and `eq(r_i, rho)`. |
 | `TowerSumcheckChallengeBus` | `PermutationCheck` | `TowerLayerAir`, `TowerLayerSumcheckAir` | `TowerLayerSumcheckAir` | `(chip_idx, layer_idx, round, challenge)` | per `(proof_idx, chip_idx, layer_idx, round)` | Links each round challenge, including the layer-to-layer `mu` when it seeds the next layer. |
@@ -731,13 +743,13 @@ rows are allowed to send messages.
 - **Zero tower work:** if a selected `(proof_idx, chip_idx)` has `num_layers = 0` or all spec counts are zero,
   `TowerInputAir` must still consume the proof-shape task, but it must not create active layer, sumcheck, product, or
   LogUp work. The exported claim and transcript movement must match the native verifier's documented zero-work behavior.
-- **Zero read specs:** `TowerProdReadSumCheckClaimAir` has no active child claims. It must create no positive-count read
+- **Zero read specs:** `TowerProdReadClaimAir` has no active child claims. It must create no positive-count read
   folding work; any required zero-count boundary message must be fully scoped and masked. The read contribution to both
   `T_i(rho)` and `C_{i+1}(rho, mu)` is zero.
-- **Zero write specs:** `TowerProdWriteSumCheckClaimAir` has no active child claims. It must create no positive-count
+- **Zero write specs:** `TowerProdWriteClaimAir` has no active child claims. It must create no positive-count
   write folding work; any required zero-count boundary message must be fully scoped and masked. The write contribution
   to both `T_i(rho)` and `C_{i+1}(rho, mu)` is zero.
-- **Zero LogUp specs:** `TowerLogupSumCheckClaimAir` has no active child claims. It must create no positive-count LogUp
+- **Zero LogUp specs:** `TowerLogupClaimAir` has no active child claims. It must create no positive-count LogUp
   folding work; any required zero-count boundary message must be fully scoped and masked. The LogUp contribution to both
   `T_i(rho)` and `C_{i+1}(rho, mu)` is zero.
 - **Inactive specs in later layers:** a spec that has no remaining active round must not contribute to the next expected

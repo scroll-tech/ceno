@@ -1,5 +1,6 @@
 use core::borrow::BorrowMut;
 
+use openvm_circuit_primitives::{TraceSubRowGenerator, is_zero::IsZeroSubAir};
 use openvm_stark_backend::p3_maybe_rayon::prelude::*;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
@@ -196,6 +197,22 @@ pub(crate) fn ext_pow(base: EF, exp: usize) -> EF {
     (0..exp).fold(EF::ONE, |acc, _| acc * base)
 }
 
+#[inline]
+fn ext_to_base(value: EF) -> [F; D_EF] {
+    value.as_basis_coefficients_slice().try_into().unwrap()
+}
+
+#[inline]
+fn ext_one_base() -> [F; D_EF] {
+    ext_to_base(EF::ONE)
+}
+
+#[inline]
+fn fill_noop_flag(cols: &mut TowerLayerCols<F>) {
+    let noop_poly = cols.num_layers * (cols.num_layers - F::ONE);
+    IsZeroSubAir.generate_subrow(noop_poly, (&mut cols.is_noop_aux.inv, &mut cols.is_noop));
+}
+
 pub struct TowerLayerTraceGenerator;
 
 impl RowMajorChip<F> for TowerLayerTraceGenerator {
@@ -213,7 +230,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
         let width = TowerLayerCols::<F>::width();
         let rows_per_proof: Vec<usize> = gkr_layer_records
             .iter()
-            .map(|record| record.layer_count().max(1))
+            .map(|record| record.layer_count().saturating_sub(1).max(1))
             .collect();
         let num_valid_rows: usize = rows_per_proof.iter().sum();
         let height = if let Some(height) = required_height {
@@ -242,13 +259,11 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
             .zip(gkr_layer_records.par_iter().zip(mus.par_iter()))
             .for_each(|(chunk, (record, mus_for_proof))| {
                 let mus_for_proof = mus_for_proof.as_slice();
-                let initial_tower_claim: [F; D_EF] = record
-                    .initial_tower_claim
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap();
+                let initial_tower_claim = ext_to_base(record.initial_tower_claim);
+                let lambda_one = ext_one_base();
+                let layer_count = record.layer_count();
 
-                if record.layer_claims.is_empty() {
+                if layer_count <= 1 {
                     debug_assert_eq!(chunk.len(), width);
                     let row_data = &mut chunk[..width];
                     let cols: &mut TowerLayerCols<F> = row_data.borrow_mut();
@@ -257,93 +272,84 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.chip_idx = F::from_usize(record.chip_idx);
                     cols.is_first_proof_idx = F::from_bool(record.is_first_air_idx);
                     cols.is_first_chip_idx = F::ONE;
-                    cols.is_noop = F::ONE;
                     cols.layer_idx = F::ZERO;
-                    cols.tidx = F::from_usize(record.tidx);
-                    cols.lambda_next = [F::ZERO; D_EF];
-                    let mut lambda_cur_one = [F::ZERO; D_EF];
-                    lambda_cur_one[0] = F::ONE;
-                    cols.lambda_cur = lambda_cur_one;
-                    cols.mu = [F::ZERO; D_EF];
-                    cols.sumcheck_claim_in = [F::ZERO; D_EF];
+                    cols.tidx = F::from_usize(if layer_count == 0 {
+                        record.tidx
+                    } else {
+                        record.layer_tidx(1)
+                    });
+                    let lambda_cur = if layer_count == 0 {
+                        EF::ONE
+                    } else {
+                        record.lambda_at(0)
+                    };
+                    let mu = if layer_count == 0 {
+                        EF::ZERO
+                    } else {
+                        mus_for_proof.first().copied().unwrap_or(EF::ZERO)
+                    };
+                    cols.lambda_next = ext_to_base(lambda_cur);
+                    cols.lambda_cur = ext_to_base(lambda_cur);
+                    cols.mu = ext_to_base(mu);
+                    cols.sumcheck_claim_in = if layer_count == 0 {
+                        [F::ZERO; D_EF]
+                    } else {
+                        initial_tower_claim
+                    };
                     cols.read_claim_next = [F::ZERO; D_EF];
                     cols.read_claim_cur = [F::ZERO; D_EF];
                     cols.write_claim_next = [F::ZERO; D_EF];
                     cols.write_claim_cur = [F::ZERO; D_EF];
                     cols.logup_claim_next = [F::ZERO; D_EF];
                     cols.logup_claim_cur = [F::ZERO; D_EF];
-                    cols.read_lambda_next_end = lambda_cur_one;
-                    cols.read_lambda_cur_end = lambda_cur_one;
-                    cols.write_lambda_next_end = lambda_cur_one;
-                    cols.write_lambda_cur_end = lambda_cur_one;
-                    cols.num_read_count = F::ZERO;
-                    cols.num_write_count = F::ZERO;
-                    cols.num_logup_count = F::ZERO;
-                    cols.num_layers = F::ZERO;
+                    cols.read_lambda_next_end = lambda_one;
+                    cols.read_lambda_cur_end = lambda_one;
+                    cols.write_lambda_next_end = lambda_one;
+                    cols.write_lambda_cur_end = lambda_one;
+                    cols.num_read_count = F::from_usize(record.read_count_at(0));
+                    cols.num_write_count = F::from_usize(record.write_count_at(0));
+                    cols.num_logup_count = F::from_usize(record.logup_count_at(0));
+                    cols.num_layers = F::from_usize(layer_count);
+                    fill_noop_flag(cols);
                     cols.eq_at_r_prime = [F::ZERO; D_EF];
-                    cols.initial_tower_claim = initial_tower_claim;
                     return;
                 }
 
-                let mut prev_folded_claim: Option<EF> = None;
-                for (layer_idx, row_data) in chunk
+                let mut prev_folded_claim = record.initial_tower_claim;
+                for (row_position, row_data) in chunk
                     .chunks_mut(width)
-                    .take(record.layer_count())
+                    .take(layer_count.saturating_sub(1))
                     .enumerate()
                 {
+                    let layer_idx = row_position + 1;
                     let cols: &mut TowerLayerCols<F> = row_data.borrow_mut();
                     cols.is_enabled = F::ONE;
-                    cols.is_noop = F::ZERO;
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.chip_idx = F::from_usize(record.chip_idx);
                     cols.is_first_proof_idx =
-                        F::from_bool(layer_idx == 0 && record.is_first_air_idx);
-                    cols.is_first_chip_idx = F::from_bool(layer_idx == 0);
+                        F::from_bool(row_position == 0 && record.is_first_air_idx);
+                    cols.is_first_chip_idx = F::from_bool(row_position == 0);
                     cols.layer_idx = F::from_usize(layer_idx);
                     cols.tidx = F::from_usize(record.layer_tidx(layer_idx));
-                    cols.lambda_next = record
-                        .lambda_at(layer_idx)
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
-                    cols.lambda_cur = record
-                        .lambda_cur_at(layer_idx)
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
+                    cols.lambda_next = ext_to_base(record.lambda_at(layer_idx));
+                    cols.lambda_cur = ext_to_base(record.lambda_cur_at(layer_idx));
                     let mu = mus_for_proof.get(layer_idx).copied().unwrap_or(EF::ZERO);
-                    cols.mu = mu.as_basis_coefficients_slice().try_into().unwrap();
-                    let sumcheck_claim = if layer_idx == 0 {
-                        EF::ZERO
-                    } else {
-                        prev_folded_claim.unwrap_or(EF::ZERO)
-                    };
-                    cols.sumcheck_claim_in = sumcheck_claim
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
+                    cols.mu = ext_to_base(mu);
+                    cols.sumcheck_claim_in = ext_to_base(prev_folded_claim);
                     let (read_claim_next, read_claim_cur) = record.read_claim_at(layer_idx);
-                    cols.read_claim_next = read_claim_next
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
+                    cols.read_claim_next = ext_to_base(read_claim_next);
                     let (write_claim_next, write_claim_cur) = record.write_claim_at(layer_idx);
-                    cols.write_claim_next = write_claim_next
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
+                    cols.write_claim_next = ext_to_base(write_claim_next);
                     let (logup_claim_next, logup_claim_cur) = record.logup_claim_at(layer_idx);
-                    cols.logup_claim_next = logup_claim_next
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
+                    cols.logup_claim_next = ext_to_base(logup_claim_next);
                     let read_count = record.read_count_at(layer_idx);
                     let write_count = record.write_count_at(layer_idx);
                     let logup_count = record.logup_count_at(layer_idx);
                     cols.num_read_count = F::from_usize(read_count);
                     cols.num_write_count = F::from_usize(write_count);
                     cols.num_logup_count = F::from_usize(logup_count);
-                    cols.num_layers = F::from_usize(record.layer_count());
+                    cols.num_layers = F::from_usize(layer_count);
+                    fill_noop_flag(cols);
                     let lambda_next = record.lambda_at(layer_idx);
                     let lambda_cur = record.lambda_cur_at(layer_idx);
                     let read_lambda_next_end = ext_pow(lambda_next, read_count);
@@ -352,41 +358,15 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                         read_lambda_next_end * ext_pow(lambda_next, write_count);
                     let write_lambda_cur_end =
                         read_lambda_cur_end * ext_pow(lambda_cur, write_count);
-                    cols.read_lambda_next_end = read_lambda_next_end
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
-                    cols.read_lambda_cur_end = read_lambda_cur_end
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
-                    cols.write_lambda_next_end = write_lambda_next_end
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
-                    cols.write_lambda_cur_end = write_lambda_cur_end
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
-                    cols.eq_at_r_prime = record
-                        .eq_at(layer_idx)
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
-                    cols.initial_tower_claim = initial_tower_claim;
-                    cols.read_claim_cur = read_claim_cur
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
-                    cols.write_claim_cur = write_claim_cur
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
-                    cols.logup_claim_cur = logup_claim_cur
-                        .as_basis_coefficients_slice()
-                        .try_into()
-                        .unwrap();
-                    prev_folded_claim = Some(read_claim_next + write_claim_next + logup_claim_next);
+                    cols.read_lambda_next_end = ext_to_base(read_lambda_next_end);
+                    cols.read_lambda_cur_end = ext_to_base(read_lambda_cur_end);
+                    cols.write_lambda_next_end = ext_to_base(write_lambda_next_end);
+                    cols.write_lambda_cur_end = ext_to_base(write_lambda_cur_end);
+                    cols.eq_at_r_prime = ext_to_base(record.eq_at(layer_idx));
+                    cols.read_claim_cur = ext_to_base(read_claim_cur);
+                    cols.write_claim_cur = ext_to_base(write_claim_cur);
+                    cols.logup_claim_cur = ext_to_base(logup_claim_cur);
+                    prev_folded_claim = read_claim_next + write_claim_next + logup_claim_next;
                 }
             });
 

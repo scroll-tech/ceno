@@ -292,7 +292,7 @@ current intended design:
 
 - `TowerInputAir` refers to `n_layer`, but code still has `n_logup`;
 - `TowerLayerAir` says read/write/logup counts must equal `n_logup`;
-- `TowerLogupSumCheckClaimAir` appears twice;
+- `TowerLogupClaimAir` appears twice;
 - the first LogUp section says `acc_p_cross` remains internal, which contradicts the math;
 - the second LogUp section is stale and says only `(lambda * q_xi) * pow_lambda`;
 - `Xi randomness bus` is still documented.

@@ -89,6 +89,13 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
                     &mut cols.is_num_layers_zero,
                 ),
             );
+            IsZeroSubAir.generate_subrow(
+                cols.num_layers - F::ONE,
+                (
+                    &mut cols.is_num_layers_one_aux.inv,
+                    &mut cols.is_num_layers_one,
+                ),
+            );
 
             cols.r0_claim = record
                 .r0_claim

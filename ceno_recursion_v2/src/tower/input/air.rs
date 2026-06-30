@@ -10,7 +10,8 @@ use crate::{
         TowerLogupRootBus, TowerLogupRootInputBus, TowerLogupRootInputMessage,
         TowerLogupRootMessage, TowerProdInitMessage, TowerProdRootInputMessage,
         TowerProdRootMessage, TowerReadInitBus, TowerReadRootBus, TowerReadRootInputBus,
-        TowerWriteInitBus, TowerWriteRootBus, TowerWriteRootInputBus,
+        TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerWriteInitBus,
+        TowerWriteRootBus, TowerWriteRootInputBus,
     },
 };
 use openvm_circuit_primitives::{
@@ -47,6 +48,8 @@ pub struct TowerInputCols<T> {
     /// num_layers = 0 <=> total_interactions = 0
     pub is_num_layers_zero: T,
     pub is_num_layers_zero_aux: IsZeroAuxCols<T>,
+    pub is_num_layers_one: T,
+    pub is_num_layers_one_aux: IsZeroAuxCols<T>,
 
     /// Transcript index
     pub tidx: T,
@@ -91,6 +94,7 @@ pub struct TowerInputAir {
     pub write_init_bus: TowerWriteInitBus,
     pub logup_root_input_bus: TowerLogupRootInputBus,
     pub logup_root_bus: TowerLogupRootBus,
+    pub sumcheck_challenge_bus: TowerSumcheckChallengeBus,
 }
 
 impl<F: Field> BaseAir<F> for TowerInputAir {
@@ -163,16 +167,24 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 local.is_num_layers_zero_aux.inv,
             ),
         );
-        // TowerLayerAir does not support zero-layer placeholder rows.
-        builder
-            .when(local.is_enabled)
-            .assert_zero(local.is_num_layers_zero);
-
+        IsZeroSubAir.eval(
+            builder,
+            (
+                IsZeroIo::new(
+                    local.num_layers - AB::Expr::ONE,
+                    local.is_num_layers_one.into(),
+                    local.is_enabled.into(),
+                ),
+                local.is_num_layers_one_aux.inv,
+            ),
+        );
         ///////////////////////////////////////////////////////////////////////
         // Output Constraints
         ///////////////////////////////////////////////////////////////////////
 
         let has_interactions = AB::Expr::ONE - local.is_num_layers_zero;
+        let has_non_root_layers =
+            has_interactions.clone() * (AB::Expr::ONE - local.is_num_layers_one);
         let initial_sum = {
             let read_plus_write = recursion_circuit::utils::ext_field_add::<AB::Expr>(
                 local.read_initial_claim,
@@ -208,6 +220,16 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         let read_claim_tidx = local.tidx;
         let write_claim_tidx = read_claim_tidx + local.num_read_specs * prod_eval_span.clone();
         let logup_claim_tidx = write_claim_tidx.clone() + local.num_write_specs * prod_eval_span;
+        let out_eval_span = (local.num_read_specs * AB::Expr::from_usize(2)
+            + local.num_write_specs * AB::Expr::from_usize(2)
+            + local.num_logup_specs * AB::Expr::from_usize(4))
+            * AB::Expr::from_usize(D_EF);
+        use crate::tower::tower_transcript_len::{
+            ALPHA_BETA_LEN, LABEL_COMBINE, LABEL_COMBINE_VALUES, LABEL_PRODUCT_SUM,
+            LABEL_PRODUCT_SUM_VALUES,
+        };
+        let layer_start_tidx =
+            local.tidx + out_eval_span.clone() + AB::Expr::from_usize(ALPHA_BETA_LEN);
         let one = {
             let mut arr = core::array::from_fn(|_| AB::Expr::ZERO);
             arr[0] = AB::Expr::ONE;
@@ -311,12 +333,13 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.proof_idx,
             TowerLayerInputMessage {
                 chip_idx: local.chip_idx.into(),
-                tidx: local.tidx.into(),
+                tidx: layer_start_tidx.clone(),
                 num_layers: local.num_layers.into(),
                 num_read_specs: local.num_read_specs.into(),
                 num_write_specs: local.num_write_specs.into(),
                 num_logup_specs: local.num_logup_specs.into(),
-                initial_tower_claim: local.initial_tower_claim.map(Into::into),
+                sumcheck_claim_in: local.initial_tower_claim.map(Into::into),
+                lambda_cur: local.alpha_logup.map(Into::into),
             },
             local.is_enabled * has_interactions.clone(),
         );
@@ -328,12 +351,24 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             TowerLayerOutputMessage {
                 chip_idx: local.chip_idx.into(),
                 tidx: local.final_tidx.into(),
-                layer_idx_end: num_layers - AB::Expr::ONE,
+                layer_idx_end: num_layers - has_interactions.clone(),
                 input_layer_claim: local.input_layer_claim.map(Into::into),
                 lambda_next: local.layer_output_lambda.map(Into::into),
                 mu: local.layer_output_mu.map(Into::into),
             },
             local.is_enabled * has_interactions.clone(),
+        );
+
+        self.sumcheck_challenge_bus.send(
+            builder,
+            local.proof_idx,
+            TowerSumcheckChallengeMessage {
+                chip_idx: local.chip_idx.into(),
+                layer_idx: AB::Expr::ZERO,
+                sumcheck_round: AB::Expr::ZERO,
+                challenge: local.r_1.map(Into::into),
+            },
+            local.is_enabled * has_non_root_layers,
         );
         ///////////////////////////////////////////////////////////////////////
         // External Interactions
@@ -375,6 +410,44 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 tidx: local.final_tidx.into(),
                 claim: local.input_layer_claim.map(Into::into),
             },
+            local.is_enabled * has_interactions.clone(),
+        );
+
+        let root_lambda_label_tidx = local.tidx + out_eval_span;
+        for (i, value) in LABEL_COMBINE_VALUES.iter().enumerate() {
+            self.transcript_bus.observe(
+                builder,
+                local.proof_idx,
+                root_lambda_label_tidx.clone() + AB::Expr::from_usize(i),
+                AB::Expr::from_usize(*value),
+                local.is_enabled * has_interactions.clone(),
+            );
+        }
+        let root_lambda_tidx = root_lambda_label_tidx + AB::Expr::from_usize(LABEL_COMBINE);
+        self.transcript_bus.sample_ext(
+            builder,
+            local.proof_idx,
+            root_lambda_tidx.clone(),
+            local.alpha_logup,
+            local.is_enabled * has_interactions.clone(),
+        );
+
+        let root_mu_label_tidx = root_lambda_tidx + AB::Expr::from_usize(D_EF);
+        for (i, value) in LABEL_PRODUCT_SUM_VALUES.iter().enumerate() {
+            self.transcript_bus.observe(
+                builder,
+                local.proof_idx,
+                root_mu_label_tidx.clone() + AB::Expr::from_usize(i),
+                AB::Expr::from_usize(*value),
+                local.is_enabled * has_interactions.clone(),
+            );
+        }
+        let root_mu_tidx = root_mu_label_tidx + AB::Expr::from_usize(LABEL_PRODUCT_SUM);
+        self.transcript_bus.sample_ext(
+            builder,
+            local.proof_idx,
+            root_mu_tidx,
+            local.r_1,
             local.is_enabled * has_interactions,
         );
     }

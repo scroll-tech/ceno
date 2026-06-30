@@ -11,9 +11,9 @@ use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::tower::bus::{
-    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage,
-    TowerLogupLayerChallengeMessage, TowerLogupRootBus, TowerLogupRootInputBus,
-    TowerLogupRootInputMessage, TowerLogupRootMessage,
+    TowerClaimInputBus, TowerClaimLayerInputMessage, TowerClaimOp, TowerLogupClaimBus,
+    TowerLogupClaimMessage, TowerLogupRootBus, TowerLogupRootInputBus, TowerLogupRootInputMessage,
+    TowerLogupRootMessage,
 };
 use recursion_circuit::{
     bus::TranscriptBus,
@@ -57,24 +57,24 @@ pub struct TowerLogupSumCheckClaimCols<T> {
     pub num_logup_count: T,
 }
 
-pub struct TowerLogupSumCheckClaimAir {
+pub struct TowerLogupClaimAir {
     pub transcript_bus: TranscriptBus,
-    pub logup_claim_input_bus: TowerLogupClaimInputBus,
+    pub claim_input_bus: TowerClaimInputBus,
     pub logup_claim_bus: TowerLogupClaimBus,
     pub root_input_bus: TowerLogupRootInputBus,
     pub root_bus: TowerLogupRootBus,
 }
 
-impl<F: Field> BaseAir<F> for TowerLogupSumCheckClaimAir {
+impl<F: Field> BaseAir<F> for TowerLogupClaimAir {
     fn width(&self) -> usize {
         TowerLogupSumCheckClaimCols::<F>::width()
     }
 }
 
-impl<F: Field> BaseAirWithPublicValues<F> for TowerLogupSumCheckClaimAir {}
-impl<F: Field> PartitionedBaseAir<F> for TowerLogupSumCheckClaimAir {}
+impl<F: Field> BaseAirWithPublicValues<F> for TowerLogupClaimAir {}
+impl<F: Field> PartitionedBaseAir<F> for TowerLogupClaimAir {}
 
-impl<AB> Air<AB> for TowerLogupSumCheckClaimAir
+impl<AB> Air<AB> for TowerLogupClaimAir
 where
     AB: AirBuilder + InteractionBuilder,
     <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
@@ -171,6 +171,7 @@ where
         // is_layer_end: current row is the last of its GKR layer
         let is_layer_end: AB::Expr = local.is_enabled - next.is_enabled + next.is_first;
         let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
+        let is_layer_mode = AB::Expr::ONE - local.is_root_layer;
 
         ///////////////////////////////////////////////////////////////////////
         // layer_idx: GKR layer index, constant within each layer
@@ -330,21 +331,23 @@ where
             pow_lambda_prime_next,
         );
 
-        self.logup_claim_input_bus.receive(
+        self.claim_input_bus.receive(
             builder,
             local.proof_idx,
-            TowerLogupLayerChallengeMessage {
+            TowerClaimLayerInputMessage {
+                op: AB::Expr::from_usize(TowerClaimOp::Logup.as_usize()),
                 chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into(),
                 lambda_next: lambda.clone(),
                 lambda_cur: lambda_prime.clone(),
                 mu: local.mu.map(Into::into),
+                prod_offset: AB::Expr::ZERO,
                 lambda_next_start: local.pow_lambda.map(Into::into),
                 lambda_cur_start: local.pow_lambda_prime.map(Into::into),
-                num_logup_count: local.num_logup_count.into(),
+                num_count: local.num_logup_count.into(),
             },
-            local.is_first * local.is_enabled * local.num_logup_count,
+            local.is_first * local.is_enabled * local.num_logup_count * is_layer_mode.clone(),
         );
 
         self.logup_claim_bus.send(
@@ -357,7 +360,7 @@ where
                 lambda_cur_claim: ext_field_add::<AB::Expr>(acc_p_with_cur, acc_q_with_cur)
                     .map(Into::into),
             },
-            is_layer_end.clone() * local.num_logup_count,
+            is_layer_end.clone() * local.num_logup_count * is_layer_mode,
         );
 
         self.root_input_bus.receive(

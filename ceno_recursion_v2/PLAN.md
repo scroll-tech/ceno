@@ -87,8 +87,8 @@ The PCS verification pipeline — critical path for a sound recursive proof.
 | Tower/GKR | `TowerInputAir` | `tower/input/air.rs` |
 | Tower/GKR | `TowerLayerAir` | `tower/layer/air.rs` |
 | Tower/GKR | `TowerLayerSumcheckAir` | `tower/sumcheck/air.rs` |
-| Tower/GKR | `TowerProdSumCheckClaimAir` | `tower/layer/prod_claim/air.rs` |
-| Tower/GKR | `TowerLogupSumCheckClaimAir` | `tower/layer/logup_claim/air.rs` |
+| Tower/GKR | `TowerProdClaimAir` | `tower/layer/prod_claim/air.rs` |
+| Tower/GKR | `TowerLogupClaimAir` | `tower/layer/logup_claim/air.rs` |
 | Main | `MainAir` | `main/air.rs` |
 | Main | `MainSumcheckAir` | `main/sumcheck/air.rs` |
 | Inner | `UnsetPvsAir` | `circuit/inner/unset/air.rs` |

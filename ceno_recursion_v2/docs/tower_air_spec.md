@@ -109,7 +109,8 @@ Use [tower_air_review_checklist.md](tower_air_review_checklist.md) to track spec
 | `chip_idx`                         | scalar        | Proof-local chip proof index used to scope tower claim/sumcheck messages.  |
 | `is_first_proof_idx`               | scalar        | First row flag for each `proof_idx` group.                                 |
 | `is_first_chip_idx`                | scalar        | First row flag for each `(proof_idx, chip_idx)` tower proof.               |
-| `is_noop`                          | scalar        | Marks enabled no-op rows that satisfy constraints without bus traffic.      |
+| `is_noop`                          | scalar        | Zero-test output: `is_noop = 1` iff `num_layers = 0`.                      |
+| `is_num_layers_zero_aux`           | `IsZeroAux`   | Witness used to enforce the `num_layers == 0` zero test.                   |
 | `layer_idx`                        | scalar        | Layer number, enforced to start at 0 and increment per transition.         |
 | `tidx`                             | scalar        | Transcript cursor at the start of the layer.                               |
 | `lambda_next`                      | `[D_EF]`      | Fresh/outgoing batching challenge for the next-layer claim.                |
@@ -149,11 +150,10 @@ Use [tower_air_review_checklist.md](tower_air_review_checklist.md) to track spec
 - **Inter-layer propagation**: `next.sumcheck_claim_in = read_claim_next + write_claim_next + logup_claim_next` on transitions. The
   current-claim versions feed `sumcheck_claim_out = read_claim_cur + write_claim_cur + logup_claim_cur`, which is what
   the sumcheck AIR receives.
-- **Count consistency**: `num_read_count`, `num_write_count`, and `num_logup_count` are individually checked against the
-  shape metadata forwarded from `TowerInputAir`/`TowerModuleBus` for read product specs, write product specs, and LogUp
-  specs.
-- **No-op rows**: No-op rows allow reusing the same AIR width even when no layer work is pending; constraints are
-  guarded by `is_not_noop` to avoid accidentally constraining padding rows.
+- **Count consistency**: `num_layers`, `num_read_count`, `num_write_count`, and `num_logup_count` are anchored by the
+  first-row shape metadata from `TowerInputAir` and must stay constant across the chip's tower rows.
+- **No-op rows**: `IsZeroSubAir` enforces `is_noop` iff `num_layers == 0`; no-op rows allow reusing the same AIR width
+  when no layer work is pending, and bus traffic is guarded by `is_not_noop`.
 - **Transcript timing**: Same `tidx` arithmetic as before, but now the post-sumcheck transcript window must also cover
   the sample/observe operations that the product/logup AIRs perform themselves.
 
@@ -175,6 +175,7 @@ Use [tower_air_review_checklist.md](tower_air_review_checklist.md) to track spec
     - Samples `lambda_next` for non-root layers and `mu` for every active layer.
     - Product and LogUp child-claim observations are owned by the product/LogUp claim AIRs, not by `TowerLayerAir`.
 - **Prod/logup buses**
+    - Sends claim-folding inputs only on non-root layers; root output/init folding is owned by `TowerInputAir`'s root buses.
     - Sends read product input with `prod_offset = 0`, start powers equal to one, and `num_prod_count = num_read_count`.
     - Receives read product claims plus `read_lambda_next_end` and `read_lambda_cur_end`, then sends write product input with
       `prod_offset = num_read_count`, start powers equal to the read end powers, and `num_prod_count = num_write_count`.
@@ -184,14 +185,14 @@ Use [tower_air_review_checklist.md](tower_air_review_checklist.md) to track spec
     - Root init buses are outside `TowerLayerAir`; this AIR receives the already assembled
       `initial_tower_claim = C_1(r_1)` from `TowerInputAir`.
 
-## TowerProdSumCheckClaimAir (`src/tower/layer/prod_claim/air.rs`)
+## TowerProdClaimAir (`src/tower/layer/prod_claim/air.rs`)
 
 ### Columns
 
 There are two product claim AIR instances with the same contract:
 
-- `TowerProdReadSumCheckClaimAir` folds read product specs;
-- `TowerProdWriteSumCheckClaimAir` folds write product specs.
+- `TowerProdReadClaimAir` folds read product specs;
+- `TowerProdWriteClaimAir` folds write product specs.
 
 The read variant uses:
 
@@ -222,7 +223,7 @@ The trace needs columns equivalent to:
 
 So if a chip has `num_read_specs = 4` and `num_write_specs = 6`, the read product claim AIR needs 4 active rows and the
 write product claim AIR needs 6 active rows. Together they fold the 10 product specs. LogUp specs are folded separately by
-`TowerLogupSumCheckClaimAir`.
+`TowerLogupClaimAir`.
 
 ### Row Constraints
 
@@ -350,7 +351,7 @@ The common loop constraints are:
 
 - One active row corresponds to one product spec.
 - The mode bit must be constant across the group.
-- `DeriveLayerClaims` mode is grouped by `(proof_idx, chip_idx, layer_idx)` inside each read/write AIR instance.
+- `DeriveLayerClaims` mode is grouped by non-root `(proof_idx, chip_idx, layer_idx)` inside each read/write AIR instance.
 - `DeriveOutputClaim` mode is grouped by `(proof_idx, chip_idx)` inside each read/write AIR instance.
 - `DeriveLayerClaims` mode initializes additive accumulators to zero and power accumulators from the input message.
 - `DeriveOutputClaim` mode initializes the multiplicative output accumulator to one, initializes the additive
@@ -361,7 +362,7 @@ The common loop constraints are:
 
 ### Interactions
 
-In `DeriveLayerClaims` mode, the AIR receives the layer input message on the first row:
+In `DeriveLayerClaims` mode, the AIR receives the non-root layer input message on the first row:
 
 ```text
 TowerProdLayerInputMessage {
@@ -587,7 +588,7 @@ The common loop constraints are:
 
 - One active row corresponds to one LogUp spec.
 - The mode bit must be constant across the group.
-- `DeriveLayerClaims` mode is grouped by `(proof_idx, chip_idx, layer_idx)`.
+- `DeriveLayerClaims` mode is grouped by non-root `(proof_idx, chip_idx, layer_idx)`.
 - `DeriveOutputClaim` mode is grouped by `(proof_idx, chip_idx)`.
 - In `DeriveLayerClaims` mode, recompute `P_mu_k` and `Q_mu_k` every row using interpolation at `mu`.
 - Recompute `P_cross_k` and `Q_cross_k` every row.
@@ -599,7 +600,7 @@ The common loop constraints are:
 
 ### Interactions
 
-In `DeriveLayerClaims` mode, the AIR receives the layer input message on the first row:
+In `DeriveLayerClaims` mode, the AIR receives the non-root layer input message on the first row:
 
 ```text
 TowerLogupLayerInputMessage {

@@ -74,9 +74,9 @@ use crate::{
         bus::{TowerLayerInputBus, TowerLayerOutputBus},
         input::{TowerInputAir, TowerInputRecord, TowerInputTraceGenerator},
         layer::{
-            TowerLayerAir, TowerLayerRecord, TowerLayerTraceGenerator, TowerLogupSumCheckClaimAir,
-            TowerLogupSumCheckClaimTraceGenerator, TowerProdReadSumCheckClaimAir,
-            TowerProdReadSumCheckClaimTraceGenerator, TowerProdWriteSumCheckClaimAir,
+            TowerLayerAir, TowerLayerRecord, TowerLayerTraceGenerator, TowerLogupClaimAir,
+            TowerLogupSumCheckClaimTraceGenerator, TowerProdReadClaimAir,
+            TowerProdReadSumCheckClaimTraceGenerator, TowerProdWriteClaimAir,
             TowerProdWriteSumCheckClaimTraceGenerator,
         },
         sumcheck::{TowerLayerSumcheckAir, TowerSumcheckRecord, TowerSumcheckTraceGenerator},
@@ -90,15 +90,14 @@ use eyre::Result;
 // Internal bus definitions
 mod bus;
 pub use bus::{
-    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage,
-    TowerLogupLayerChallengeMessage, TowerLogupRootBus, TowerLogupRootInputBus,
-    TowerLogupRootInputMessage, TowerLogupRootMessage, TowerProdInitMessage,
-    TowerProdLayerInputMessage, TowerProdReadClaimBus, TowerProdReadClaimInputBus,
-    TowerProdRootInputMessage, TowerProdRootMessage, TowerProdSumClaimMessage,
-    TowerProdWriteClaimBus, TowerProdWriteClaimInputBus, TowerReadInitBus, TowerReadRootBus,
-    TowerReadRootInputBus, TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage,
-    TowerSumcheckInputBus, TowerSumcheckInputMessage, TowerSumcheckOutputBus,
-    TowerSumcheckOutputMessage, TowerWriteInitBus, TowerWriteRootBus, TowerWriteRootInputBus,
+    TowerClaimInputBus, TowerClaimLayerInputMessage, TowerClaimOp, TowerLogupClaimBus,
+    TowerLogupClaimMessage, TowerLogupRootBus, TowerLogupRootInputBus, TowerLogupRootInputMessage,
+    TowerLogupRootMessage, TowerProdInitMessage, TowerProdReadClaimBus, TowerProdRootInputMessage,
+    TowerProdRootMessage, TowerProdSumClaimMessage, TowerProdWriteClaimBus, TowerReadInitBus,
+    TowerReadRootBus, TowerReadRootInputBus, TowerSumcheckChallengeBus,
+    TowerSumcheckChallengeMessage, TowerSumcheckInputBus, TowerSumcheckInputMessage,
+    TowerSumcheckOutputBus, TowerSumcheckOutputMessage, TowerWriteInitBus, TowerWriteRootBus,
+    TowerWriteRootInputBus,
 };
 
 /// Transcript field-element lengths per tower operation.
@@ -202,11 +201,9 @@ pub struct TowerModule {
     sumcheck_input_bus: TowerSumcheckInputBus,
     sumcheck_output_bus: TowerSumcheckOutputBus,
     sumcheck_challenge_bus: TowerSumcheckChallengeBus,
-    prod_read_claim_input_bus: TowerProdReadClaimInputBus,
+    claim_input_bus: TowerClaimInputBus,
     prod_read_claim_bus: TowerProdReadClaimBus,
-    prod_write_claim_input_bus: TowerProdWriteClaimInputBus,
     prod_write_claim_bus: TowerProdWriteClaimBus,
-    logup_claim_input_bus: TowerLogupClaimInputBus,
     logup_claim_bus: TowerLogupClaimBus,
     read_root_input_bus: TowerReadRootInputBus,
     read_root_bus: TowerReadRootBus,
@@ -254,11 +251,9 @@ impl TowerModule {
             sumcheck_input_bus: TowerSumcheckInputBus::new(b.new_bus_idx()),
             sumcheck_output_bus: TowerSumcheckOutputBus::new(b.new_bus_idx()),
             sumcheck_challenge_bus: TowerSumcheckChallengeBus::new(b.new_bus_idx()),
-            prod_read_claim_input_bus: TowerProdReadClaimInputBus::new(b.new_bus_idx()),
+            claim_input_bus: TowerClaimInputBus::new(b.new_bus_idx()),
             prod_read_claim_bus: TowerProdReadClaimBus::new(b.new_bus_idx()),
-            prod_write_claim_input_bus: TowerProdWriteClaimInputBus::new(b.new_bus_idx()),
             prod_write_claim_bus: TowerProdWriteClaimBus::new(b.new_bus_idx()),
-            logup_claim_input_bus: TowerLogupClaimInputBus::new(b.new_bus_idx()),
             logup_claim_bus: TowerLogupClaimBus::new(b.new_bus_idx()),
             read_root_input_bus: TowerReadRootInputBus::new(b.new_bus_idx()),
             read_root_bus: TowerReadRootBus::new(b.new_bus_idx()),
@@ -952,6 +947,7 @@ impl AirModule for TowerModule {
             write_init_bus: self.write_init_bus,
             logup_root_input_bus: self.logup_root_input_bus,
             logup_root_bus: self.logup_root_bus,
+            sumcheck_challenge_bus: self.sumcheck_challenge_bus,
         };
 
         let gkr_layer_air = TowerLayerAir {
@@ -961,35 +957,35 @@ impl AirModule for TowerModule {
             sumcheck_input_bus: self.sumcheck_input_bus,
             sumcheck_output_bus: self.sumcheck_output_bus,
             sumcheck_challenge_bus: self.sumcheck_challenge_bus,
-            prod_read_claim_input_bus: self.prod_read_claim_input_bus,
+            claim_input_bus: self.claim_input_bus,
             prod_read_claim_bus: self.prod_read_claim_bus,
-            prod_write_claim_input_bus: self.prod_write_claim_input_bus,
             prod_write_claim_bus: self.prod_write_claim_bus,
-            logup_claim_input_bus: self.logup_claim_input_bus,
             logup_claim_bus: self.logup_claim_bus,
         };
 
-        let gkr_prod_read_sum_air = TowerProdReadSumCheckClaimAir {
+        let gkr_prod_read_claim_air = TowerProdReadClaimAir {
             transcript_bus: self.bus_inventory.transcript_bus,
-            prod_claim_input_bus: self.prod_read_claim_input_bus,
+            op: TowerClaimOp::Read,
+            prod_claim_input_bus: self.claim_input_bus,
             prod_claim_bus: self.prod_read_claim_bus,
             root_input_bus: self.read_root_input_bus,
             root_bus: self.read_root_bus,
             init_bus: self.read_init_bus,
         };
 
-        let gkr_prod_write_sum_air = TowerProdWriteSumCheckClaimAir {
+        let gkr_prod_write_claim_air = TowerProdWriteClaimAir {
             transcript_bus: self.bus_inventory.transcript_bus,
-            prod_claim_input_bus: self.prod_write_claim_input_bus,
+            op: TowerClaimOp::Write,
+            prod_claim_input_bus: self.claim_input_bus,
             prod_claim_bus: self.prod_write_claim_bus,
             root_input_bus: self.write_root_input_bus,
             root_bus: self.write_root_bus,
             init_bus: self.write_init_bus,
         };
 
-        let gkr_logup_sum_air = TowerLogupSumCheckClaimAir {
+        let gkr_logup_claim_air = TowerLogupClaimAir {
             transcript_bus: self.bus_inventory.transcript_bus,
-            logup_claim_input_bus: self.logup_claim_input_bus,
+            claim_input_bus: self.claim_input_bus,
             logup_claim_bus: self.logup_claim_bus,
             root_input_bus: self.logup_root_input_bus,
             root_bus: self.logup_root_bus,
@@ -1006,9 +1002,9 @@ impl AirModule for TowerModule {
         vec![
             Arc::new(gkr_input_air) as AirRef<_>,
             Arc::new(gkr_layer_air) as AirRef<_>,
-            Arc::new(gkr_prod_read_sum_air) as AirRef<_>,
-            Arc::new(gkr_prod_write_sum_air) as AirRef<_>,
-            Arc::new(gkr_logup_sum_air) as AirRef<_>,
+            Arc::new(gkr_prod_read_claim_air) as AirRef<_>,
+            Arc::new(gkr_prod_write_claim_air) as AirRef<_>,
+            Arc::new(gkr_logup_claim_air) as AirRef<_>,
             Arc::new(gkr_sumcheck_air) as AirRef<_>,
         ]
     }

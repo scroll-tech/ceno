@@ -13,7 +13,8 @@ pub struct TowerLayerInputMessage<T> {
     pub num_read_specs: T,
     pub num_write_specs: T,
     pub num_logup_specs: T,
-    pub initial_tower_claim: [T; D_EF],
+    pub sumcheck_claim_in: [T; D_EF],
+    pub lambda_cur: [T; D_EF],
 }
 
 define_typed_per_proof_permutation_bus!(TowerLayerInputBus, TowerLayerInputMessage);
@@ -32,9 +33,26 @@ pub struct TowerLayerOutputMessage<T> {
 
 define_typed_per_proof_permutation_bus!(TowerLayerOutputBus, TowerLayerOutputMessage);
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TowerClaimOp {
+    Read = 0,
+    Write = 1,
+    Logup = 2,
+}
+
+impl TowerClaimOp {
+    #[inline]
+    pub const fn as_usize(self) -> usize {
+        self as usize
+    }
+}
+
+/// Message sent from TowerLayerAir to read/write/LogUp claim AIRs.
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
-pub struct TowerProdLayerInputMessage<T> {
+pub struct TowerClaimLayerInputMessage<T> {
+    pub op: T,
     pub chip_idx: T,
     pub layer_idx: T,
     pub tidx: T,
@@ -44,11 +62,10 @@ pub struct TowerProdLayerInputMessage<T> {
     pub prod_offset: T,
     pub lambda_next_start: [T; D_EF],
     pub lambda_cur_start: [T; D_EF],
-    pub num_prod_count: T,
+    pub num_count: T,
 }
 
-define_typed_per_proof_permutation_bus!(TowerProdReadClaimInputBus, TowerProdLayerInputMessage);
-define_typed_per_proof_permutation_bus!(TowerProdWriteClaimInputBus, TowerProdLayerInputMessage);
+define_typed_per_proof_permutation_bus!(TowerClaimInputBus, TowerClaimLayerInputMessage);
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
@@ -63,22 +80,6 @@ pub struct TowerProdSumClaimMessage<T> {
 
 define_typed_per_proof_permutation_bus!(TowerProdReadClaimBus, TowerProdSumClaimMessage);
 define_typed_per_proof_permutation_bus!(TowerProdWriteClaimBus, TowerProdSumClaimMessage);
-
-#[repr(C)]
-#[derive(AlignedBorrow, Debug, Clone)]
-pub struct TowerLogupLayerChallengeMessage<T> {
-    pub chip_idx: T,
-    pub layer_idx: T,
-    pub tidx: T,
-    pub lambda_next: [T; D_EF],
-    pub lambda_cur: [T; D_EF],
-    pub mu: [T; D_EF],
-    pub lambda_next_start: [T; D_EF],
-    pub lambda_cur_start: [T; D_EF],
-    pub num_logup_count: T,
-}
-
-define_typed_per_proof_permutation_bus!(TowerLogupClaimInputBus, TowerLogupLayerChallengeMessage);
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]

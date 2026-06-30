@@ -11,11 +11,10 @@ use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::tower::bus::{
-    TowerProdInitMessage, TowerProdLayerInputMessage, TowerProdReadClaimBus,
-    TowerProdReadClaimInputBus, TowerProdRootInputMessage, TowerProdRootMessage,
-    TowerProdSumClaimMessage, TowerProdWriteClaimBus, TowerProdWriteClaimInputBus,
-    TowerReadInitBus, TowerReadRootBus, TowerReadRootInputBus, TowerWriteInitBus,
-    TowerWriteRootBus, TowerWriteRootInputBus,
+    TowerClaimInputBus, TowerClaimLayerInputMessage, TowerClaimOp, TowerProdInitMessage,
+    TowerProdReadClaimBus, TowerProdRootInputMessage, TowerProdRootMessage,
+    TowerProdSumClaimMessage, TowerProdWriteClaimBus, TowerReadInitBus, TowerReadRootBus,
+    TowerReadRootInputBus, TowerWriteInitBus, TowerWriteRootBus, TowerWriteRootInputBus,
 };
 use recursion_circuit::{
     bus::TranscriptBus,
@@ -53,8 +52,9 @@ pub struct TowerProdSumCheckClaimCols<T> {
     pub num_prod_count: T,
 }
 
-pub struct TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB> {
+pub struct TowerProdClaimAir<IB, OB, RIB, ROB, INITB> {
     pub transcript_bus: TranscriptBus,
+    pub op: TowerClaimOp,
     pub prod_claim_input_bus: IB,
     pub prod_claim_bus: OB,
     pub root_input_bus: RIB,
@@ -62,15 +62,15 @@ pub struct TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB> {
     pub init_bus: INITB,
 }
 
-pub type TowerProdReadSumCheckClaimAir = TowerProdSumCheckClaimAir<
-    TowerProdReadClaimInputBus,
+pub type TowerProdReadClaimAir = TowerProdClaimAir<
+    TowerClaimInputBus,
     TowerProdReadClaimBus,
     TowerReadRootInputBus,
     TowerReadRootBus,
     TowerReadInitBus,
 >;
-pub type TowerProdWriteSumCheckClaimAir = TowerProdSumCheckClaimAir<
-    TowerProdWriteClaimInputBus,
+pub type TowerProdWriteClaimAir = TowerProdClaimAir<
+    TowerClaimInputBus,
     TowerProdWriteClaimBus,
     TowerWriteRootInputBus,
     TowerWriteRootBus,
@@ -78,7 +78,7 @@ pub type TowerProdWriteSumCheckClaimAir = TowerProdSumCheckClaimAir<
 >;
 
 impl<F: Field, IB: Sync, OB: Sync, RIB: Sync, ROB: Sync, INITB: Sync> BaseAir<F>
-    for TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
+    for TowerProdClaimAir<IB, OB, RIB, ROB, INITB>
 {
     fn width(&self) -> usize {
         TowerProdSumCheckClaimCols::<F>::width()
@@ -86,15 +86,15 @@ impl<F: Field, IB: Sync, OB: Sync, RIB: Sync, ROB: Sync, INITB: Sync> BaseAir<F>
 }
 
 impl<F: Field, IB: Sync, OB: Sync, RIB: Sync, ROB: Sync, INITB: Sync> BaseAirWithPublicValues<F>
-    for TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
+    for TowerProdClaimAir<IB, OB, RIB, ROB, INITB>
 {
 }
 impl<F: Field, IB: Sync, OB: Sync, RIB: Sync, ROB: Sync, INITB: Sync> PartitionedBaseAir<F>
-    for TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
+    for TowerProdClaimAir<IB, OB, RIB, ROB, INITB>
 {
 }
 
-impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB> {
+impl<IB, OB, RIB, ROB, INITB> TowerProdClaimAir<IB, OB, RIB, ROB, INITB> {
     fn eval_core<AB, RecvLayer, SendLayer, RecvRoot, SendRoot, SendInit>(
         &self,
         builder: &mut AB,
@@ -106,7 +106,7 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
     ) where
         AB: AirBuilder + InteractionBuilder,
         <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
-        RecvLayer: FnMut(&IB, &mut AB, AB::Var, TowerProdLayerInputMessage<AB::Expr>, AB::Expr),
+        RecvLayer: FnMut(&IB, &mut AB, AB::Var, TowerClaimLayerInputMessage<AB::Expr>, AB::Expr),
         SendLayer: FnMut(&OB, &mut AB, AB::Var, TowerProdSumClaimMessage<AB::Expr>, AB::Expr),
         RecvRoot: FnMut(&RIB, &mut AB, AB::Var, TowerProdRootInputMessage<AB::Expr>, AB::Expr),
         SendRoot: FnMut(&ROB, &mut AB, AB::Var, TowerProdRootMessage<AB::Expr>, AB::Expr),
@@ -212,6 +212,7 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
         // is_layer_end: current row is the last of its GKR layer
         let is_layer_end: AB::Expr = local.is_enabled - next.is_enabled + next.is_first;
         let is_not_dummy = local.is_enabled * (AB::Expr::ONE - local.is_dummy);
+        let is_layer_mode = AB::Expr::ONE - local.is_root_layer;
 
         ///////////////////////////////////////////////////////////////////////
         // layer_idx: GKR layer index, constant within each layer
@@ -324,7 +325,8 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
             &self.prod_claim_input_bus,
             builder,
             local.proof_idx,
-            TowerProdLayerInputMessage {
+            TowerClaimLayerInputMessage {
+                op: AB::Expr::from_usize(self.op.as_usize()),
                 chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
                 tidx: local.tidx.into(),
@@ -334,9 +336,9 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
                 prod_offset: local.prod_offset.into(),
                 lambda_next_start: local.pow_lambda.map(Into::into),
                 lambda_cur_start: local.pow_lambda_prime.map(Into::into),
-                num_prod_count: local.num_prod_count.into(),
+                num_count: local.num_prod_count.into(),
             },
-            local.is_first * local.is_enabled * local.num_prod_count,
+            local.is_first * local.is_enabled * local.num_prod_count * is_layer_mode.clone(),
         );
 
         send_claim(
@@ -351,7 +353,7 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
                 lambda_next_end: lambda_end.map(Into::into),
                 lambda_cur_end: lambda_prime_end.map(Into::into),
             },
-            is_layer_end.clone() * local.num_prod_count,
+            is_layer_end.clone() * local.num_prod_count * is_layer_mode,
         );
 
         recv_root(
@@ -408,7 +410,7 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdSumCheckClaimAir<IB, OB, RIB, ROB, INITB>
     }
 }
 
-macro_rules! impl_prod_sum_air {
+macro_rules! impl_prod_claim_air {
     ($ty:ty) => {
         impl<AB> Air<AB> for $ty
         where
@@ -439,5 +441,5 @@ macro_rules! impl_prod_sum_air {
     };
 }
 
-impl_prod_sum_air!(TowerProdReadSumCheckClaimAir);
-impl_prod_sum_air!(TowerProdWriteSumCheckClaimAir);
+impl_prod_claim_air!(TowerProdReadClaimAir);
+impl_prod_claim_air!(TowerProdWriteClaimAir);

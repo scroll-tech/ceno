@@ -33,7 +33,7 @@ the spec, the AIR implementation, and the trace-generation path that populates t
 - [ ] Review sumcheck input/output/challenge buses and their layer/round scopes.
 - [ ] Review transcript timing for `lambda_next`, `mu`, and child-claim observation windows.
 
-## TowerProdReadSumCheckClaimAir and TowerProdWriteSumCheckClaimAir
+## TowerProdReadClaimAir and TowerProdWriteClaimAir
 
 - [ ] Review shared columns against the product claim cols and both read/write witness paths.
 - [ ] Review `DeriveLayerClaims` constraints for `A_mu`, `A_cross`, `lambda_next` powers, and `lambda_cur` powers.
