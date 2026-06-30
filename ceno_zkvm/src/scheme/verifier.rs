@@ -19,10 +19,7 @@ use crate::{
     scheme::{
         constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
-        utils::{
-            GkrOutputStageMask, assign_group_evals, derive_ecc_bridge_claims,
-            first_layer_output_group_stage_masks,
-        },
+        utils::{assign_group_evals, derive_ecc_bridge_claims, first_layer_selector_contexts},
     },
     structs::{
         ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs, VK_DIGEST_LEN,
@@ -1013,27 +1010,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let first_layer = gkr_circuit.layers.first().ok_or_else(|| {
             ZKVMError::InvalidProof(format!("{_name} empty gkr circuit layers").into())
         })?;
-        let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, gkr_circuit);
-        let selector_ctxs = first_layer
-            .out_sel_and_eval_exprs
-            .iter()
-            .zip_eq(group_stage_masks.iter())
-            .map(|((selector, _), stage_mask)| {
-                if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty() {
-                    SelectorContext::new(0, num_instances, num_var_with_rotation)
-                } else if cs.r_selector.as_ref() == Some(selector) {
-                    SelectorContext::new(0, proof.num_instances[0], num_var_with_rotation)
-                } else if cs.w_selector.as_ref() == Some(selector) {
-                    SelectorContext::new(
-                        proof.num_instances[0],
-                        proof.num_instances[1],
-                        num_var_with_rotation,
-                    )
-                } else {
-                    SelectorContext::new(0, num_instances, num_var_with_rotation)
-                }
-            })
-            .collect_vec();
+        let selector_ctxs = first_layer_selector_contexts(
+            composed_cs,
+            gkr_circuit,
+            proof.num_instances,
+            num_var_with_rotation,
+        );
 
         let mut out_evals =
             vec![PointAndEval::new(rt_main.clone(), E::ZERO); gkr_circuit.n_evaluations];

@@ -7,7 +7,10 @@ use rustc_hash::FxHashSet;
 use crate::{
     e2e::ShardContext,
     error::ZKVMError,
-    tables::{MemFinalRecord, ShardRamConfig, ShardRamRecord, Y6_LO_TOP_BYTE_LT_BOUND},
+    tables::{
+        MemFinalRecord, ShardRamConfig, ShardRamEcTreeConfig, ShardRamRecord,
+        Y6_LO_TOP_BYTE_LT_BOUND,
+    },
 };
 
 /// Filter and construct a cross-shard ShardRamRecord without EC computation.
@@ -67,11 +70,9 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
 
     let mut x = [0u32; 7];
     let mut y = [0u32; 7];
-    let mut slope = [0u32; 7];
     for i in 0..7 {
         x[i] = config.x[i].id as u32;
         y[i] = config.y[i].id as u32;
-        slope[i] = config.slope[i].id as u32;
     }
 
     // Poseidon2 columns: p3_cols are contiguous, followed by post_linear_layer_cols
@@ -111,10 +112,42 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
         is_global_write,
         x,
         y,
-        slope,
+        slope: [0; 7],
         poseidon2_base_col,
         num_poseidon2_cols,
         num_p3_cols,
+        num_cols: num_witin as u32,
+    }
+}
+
+pub fn extract_shard_ram_ec_tree_column_map<E: ExtensionField>(
+    config: &ShardRamEcTreeConfig<E>,
+    num_witin: usize,
+) -> ShardRamColumnMap {
+    let mut x = [0u32; 7];
+    let mut y = [0u32; 7];
+    let mut slope = [0u32; 7];
+    for i in 0..7 {
+        x[i] = config.x[i].id as u32;
+        y[i] = config.y[i].id as u32;
+        slope[i] = config.slope[i].id as u32;
+    }
+
+    ShardRamColumnMap {
+        addr: 0,
+        is_ram_register: 0,
+        value: [0; 2],
+        shard: 0,
+        global_clk: 0,
+        local_clk: 0,
+        nonce: 0,
+        is_global_write: 0,
+        x,
+        y,
+        slope,
+        poseidon2_base_col: 0,
+        num_poseidon2_cols: 0,
+        num_p3_cols: 0,
         num_cols: num_witin as u32,
     }
 }
@@ -124,7 +157,6 @@ pub fn extract_shard_ram_column_map<E: ExtensionField>(
 // ---------------------------------------------------------------------------
 
 use ceno_gpu::common::witgen::types::GpuShardRamRecord;
-use p3::field::PrimeCharacteristicRing as FieldAlgebra;
 use tracing::info_span;
 
 /// Convert a ShardRamRecord to GpuShardRamRecord (metadata only, EC fields zeroed).
@@ -211,7 +243,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
 ) -> Result<Option<crate::tables::RMMCollections<E::BaseField>>, ZKVMError> {
     use crate::scheme::constants::SEPTIC_EXTENSION_DEGREE;
     use ceno_gpu::{
-        Buffer, CudaHal,
+        Buffer,
         bb31::CudaHalBB31,
         common::{transpose::matrix_transpose, witgen::types::GpuShardRamRecord},
     };
@@ -242,8 +274,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
         .take_while(|s| s.record.is_to_write_set)
         .count();
 
-    let n = next_pow2_instance_padding(steps.len());
-    let num_rows_padded = 2 * n;
+    let num_rows_padded = next_pow2_instance_padding(steps.len());
 
     // 1. Convert ShardRamInput → GpuShardRamRecord
     let gpu_records: Vec<GpuShardRamRecord> =
@@ -303,67 +334,7 @@ pub(crate) fn try_gpu_assign_shard_ram<E: ExtensionField>(
             })
     })?;
 
-    // 4. GPU Phase 2: EC binary tree
-    let witness_buf =
-        tracing::info_span!("gpu_shard_ram_ec_tree", n).in_scope(|| -> Result<_, ZKVMError> {
-            let col_offsets = col_map.to_flat();
-            let gpu_cols = hal.alloc_u32_from_host(&col_offsets, None).map_err(|e| {
-                ZKVMError::InvalidWitness(format!("GPU alloc col offsets failed: {e}").into())
-            })?;
-
-            let mut init_x = vec![BB::ZERO; n * 7];
-            let mut init_y = vec![BB::ZERO; n * 7];
-            for (i, step) in steps.iter().enumerate() {
-                for j in 0..7 {
-                    init_x[i * 7 + j] = unsafe {
-                        *(&step.ec_point.point.x.0[j] as *const E::BaseField as *const BB)
-                    };
-                    init_y[i * 7 + j] = unsafe {
-                        *(&step.ec_point.point.y.0[j] as *const E::BaseField as *const BB)
-                    };
-                }
-            }
-
-            let mut cur_x = hal.alloc_elems_from_host(&init_x, None).map_err(|e| {
-                ZKVMError::InvalidWitness(format!("GPU alloc init_x failed: {e}").into())
-            })?;
-            let mut cur_y = hal.alloc_elems_from_host(&init_y, None).map_err(|e| {
-                ZKVMError::InvalidWitness(format!("GPU alloc init_y failed: {e}").into())
-            })?;
-
-            let mut witness_buf = gpu_witness.device_buffer;
-            let mut offset = num_rows_padded / 2;
-            let mut current_layer_len = n;
-
-            loop {
-                if current_layer_len <= 1 {
-                    break;
-                }
-
-                let (next_x, next_y) = hal
-                    .witgen
-                    .shard_ram_ec_tree_layer(
-                        &gpu_cols,
-                        &cur_x,
-                        &cur_y,
-                        &mut witness_buf,
-                        current_layer_len,
-                        offset,
-                        num_rows_padded,
-                        None,
-                    )
-                    .map_err(|e| {
-                        ZKVMError::InvalidWitness(format!("GPU EC tree layer failed: {e}").into())
-                    })?;
-
-                current_layer_len /= 2;
-                offset += current_layer_len;
-                cur_x = next_x;
-                cur_y = next_y;
-            }
-
-            Ok(witness_buf)
-        })?;
+    let witness_buf = gpu_witness.device_buffer;
 
     // 5. Structural witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
@@ -531,7 +502,7 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
     num_records: usize,
     num_local_writes: usize,
 ) -> Result<Option<crate::tables::RMMCollections<E::BaseField>>, ZKVMError> {
-    use ceno_gpu::{Buffer, CudaHal, bb31::CudaHalBB31, common::transpose::matrix_transpose};
+    use ceno_gpu::{Buffer, bb31::CudaHalBB31, common::transpose::matrix_transpose};
     use gkr_iop::gpu::gpu_prover::get_cuda_hal;
     use witness::{DeviceMatrixLayout, InstancePaddingStrategy, next_pow2_instance_padding};
 
@@ -546,8 +517,7 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
         Err(_) => return Ok(None),
     };
 
-    let n = next_pow2_instance_padding(num_records);
-    let num_rows_padded = 2 * n;
+    let num_rows_padded = next_pow2_instance_padding(num_records);
 
     let col_map = extract_shard_ram_column_map(config, num_witin);
 
@@ -577,55 +547,7 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
             })
     })?;
 
-    // GPU: extract EC points from device records
-    let witness_buf = tracing::info_span!("gpu_shard_ram_ec_tree_from_device", n).in_scope(
-        || -> Result<_, ZKVMError> {
-            let col_offsets = col_map.to_flat();
-            let gpu_cols = hal.alloc_u32_from_host(&col_offsets, None).map_err(|e| {
-                ZKVMError::InvalidWitness(format!("GPU alloc col offsets failed: {e}").into())
-            })?;
-
-            let (mut cur_x, mut cur_y) = hal
-                .witgen
-                .extract_ec_points_from_device(device_records, num_records, n, None)
-                .map_err(|e| {
-                    ZKVMError::InvalidWitness(format!("GPU extract_ec_points failed: {e}").into())
-                })?;
-
-            let mut witness_buf = gpu_witness.device_buffer;
-            let mut offset = num_rows_padded / 2;
-            let mut current_layer_len = n;
-
-            loop {
-                if current_layer_len <= 1 {
-                    break;
-                }
-
-                let (next_x, next_y) = hal
-                    .witgen
-                    .shard_ram_ec_tree_layer(
-                        &gpu_cols,
-                        &cur_x,
-                        &cur_y,
-                        &mut witness_buf,
-                        current_layer_len,
-                        offset,
-                        num_rows_padded,
-                        None,
-                    )
-                    .map_err(|e| {
-                        ZKVMError::InvalidWitness(format!("GPU EC tree layer failed: {e}").into())
-                    })?;
-
-                current_layer_len /= 2;
-                offset += current_layer_len;
-                cur_x = next_x;
-                cur_y = next_y;
-            }
-
-            Ok(witness_buf)
-        },
-    )?;
+    let witness_buf = gpu_witness.device_buffer;
 
     // Structural witness: keep device-resident only when cache policy keeps device backing.
     // In debug mode or cache-none mode, do transpose + D2H.
@@ -770,6 +692,220 @@ pub(crate) fn try_gpu_assign_shard_ram_from_device<E: ExtensionField>(
     Ok(Some([raw_witin, raw_structural_witin]))
 }
 
+pub(crate) fn try_gpu_assign_shard_ram_ec_tree_from_device<E: ExtensionField>(
+    config: &ShardRamEcTreeConfig<E>,
+    num_witin: usize,
+    num_structural_witin: usize,
+    device_records: &ceno_gpu::common::buffer::BufferImpl<'static, u32>,
+    num_records: usize,
+    num_write_records: usize,
+) -> Result<Option<crate::tables::RMMCollections<E::BaseField>>, ZKVMError> {
+    use ceno_gpu::{Buffer, CudaHal, bb31::CudaHalBB31, common::transpose::matrix_transpose};
+    use gkr_iop::gpu::gpu_prover::get_cuda_hal;
+    use witness::{DeviceMatrixLayout, InstancePaddingStrategy, next_pow2_instance_padding};
+
+    type BB = <ff_ext::BabyBearExt4 as ExtensionField>::BaseField;
+
+    if std::any::TypeId::of::<E::BaseField>() != std::any::TypeId::of::<BB>() {
+        return Ok(None);
+    }
+
+    let hal = match get_cuda_hal() {
+        Ok(h) => h,
+        Err(_) => return Ok(None),
+    };
+
+    if num_records == 0 {
+        return Ok(Some([
+            witness::RowMajorMatrix::empty(),
+            witness::RowMajorMatrix::empty(),
+        ]));
+    }
+
+    let n = next_pow2_instance_padding(num_records);
+    let num_rows_padded = 2 * n;
+    let col_map = extract_shard_ram_ec_tree_column_map(config, num_witin);
+
+    let (mut gpu_witness, gpu_structural, mut cur_x, mut cur_y) = tracing::info_span!(
+        "gpu_shard_ram_ec_tree_per_row_from_device",
+        n = num_records,
+        num_write_records,
+        num_rows_padded,
+        num_witin,
+    )
+    .in_scope(|| {
+        hal.witgen
+            .witgen_shard_ram_ec_tree_per_row_from_device(
+                &col_map,
+                device_records,
+                num_records,
+                num_write_records,
+                num_witin as u32,
+                num_structural_witin as u32,
+                num_rows_padded as u32,
+                None,
+            )
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(
+                    format!("GPU shard_ram EC tree per-row kernel failed: {e:?}").into(),
+                )
+            })
+    })?;
+
+    tracing::info_span!("gpu_shard_ram_ec_tree_layers_from_device", n).in_scope(
+        || -> Result<(), ZKVMError> {
+            let col_offsets = col_map.to_flat();
+            let gpu_cols = hal.alloc_u32_from_host(&col_offsets, None).map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU alloc col offsets failed: {e}").into())
+            })?;
+
+            let mut offset = n;
+            let mut current_layer_len = n;
+            while current_layer_len > 1 {
+                let (next_x, next_y) = hal
+                    .witgen
+                    .shard_ram_ec_tree_layer(
+                        &gpu_cols,
+                        &cur_x,
+                        &cur_y,
+                        &mut gpu_witness.device_buffer,
+                        current_layer_len,
+                        offset,
+                        num_rows_padded,
+                        None,
+                    )
+                    .map_err(|e| {
+                        ZKVMError::InvalidWitness(format!("GPU EC tree layer failed: {e}").into())
+                    })?;
+
+                current_layer_len /= 2;
+                offset += current_layer_len;
+                cur_x = next_x;
+                cur_y = next_y;
+            }
+
+            Ok(())
+        },
+    )?;
+
+    let raw_structural_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
+    {
+        let struct_data = tracing::info_span!(
+            "gpu_shard_ram_ec_tree_structural_transpose_d2h_from_device",
+            rows = gpu_structural.num_rows,
+            num_structural_witin,
+        )
+        .in_scope(|| -> Result<_, ZKVMError> {
+            let mut struct_rmm_buf = hal
+                .witgen
+                .alloc_elems_on_device(num_rows_padded * num_structural_witin, false, None)
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(
+                        format!("GPU alloc for EC tree struct transpose failed: {e}").into(),
+                    )
+                })?;
+            matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+                &hal.inner,
+                &mut struct_rmm_buf,
+                &gpu_structural.device_buffer,
+                num_rows_padded,
+                num_structural_witin,
+            )
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(
+                    format!("GPU EC tree struct transpose failed: {e}").into(),
+                )
+            })?;
+
+            let gpu_struct_data: Vec<BB> = struct_rmm_buf.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU D2H EC tree struct failed: {e}").into())
+            })?;
+            let out: Vec<E::BaseField> = unsafe {
+                let mut data = std::mem::ManuallyDrop::new(gpu_struct_data);
+                Vec::from_raw_parts(
+                    data.as_mut_ptr() as *mut E::BaseField,
+                    data.len(),
+                    data.capacity(),
+                )
+            };
+            Ok(out)
+        })?;
+        witness::RowMajorMatrix::new_by_values(
+            struct_data,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        )
+    } else {
+        let mut rmm = witness::RowMajorMatrix::new(
+            num_rows_padded,
+            num_structural_witin,
+            InstancePaddingStrategy::Default,
+        );
+        rmm.set_device_backing(gpu_structural.device_buffer, DeviceMatrixLayout::ColMajor);
+        rmm
+    };
+
+    let raw_witin = if crate::instructions::gpu::config::is_debug_compare_enabled()
+        || !crate::instructions::gpu::config::should_materialize_witness_on_gpu()
+    {
+        tracing::info_span!(
+            "gpu_shard_ram_ec_tree_witness_transpose_d2h_from_device",
+            num_rows_padded,
+            num_witin,
+        )
+        .in_scope(|| -> Result<_, ZKVMError> {
+            let mut rmm_buf = hal
+                .witgen
+                .alloc_elems_on_device(num_rows_padded * num_witin, false, None)
+                .map_err(|e| {
+                    ZKVMError::InvalidWitness(
+                        format!("GPU alloc for EC tree witness transpose failed: {e}").into(),
+                    )
+                })?;
+            matrix_transpose::<CudaHalBB31, ff_ext::BabyBearExt4, _>(
+                &hal.inner,
+                &mut rmm_buf,
+                &gpu_witness.device_buffer,
+                num_rows_padded,
+                num_witin,
+            )
+            .map_err(|e| {
+                ZKVMError::InvalidWitness(
+                    format!("GPU EC tree witness transpose failed: {e}").into(),
+                )
+            })?;
+
+            let gpu_wit_data: Vec<BB> = rmm_buf.to_vec().map_err(|e| {
+                ZKVMError::InvalidWitness(format!("GPU D2H EC tree witness failed: {e}").into())
+            })?;
+            let wit_data: Vec<E::BaseField> = unsafe {
+                let mut data = std::mem::ManuallyDrop::new(gpu_wit_data);
+                Vec::from_raw_parts(
+                    data.as_mut_ptr() as *mut E::BaseField,
+                    data.len(),
+                    data.capacity(),
+                )
+            };
+            Ok(witness::RowMajorMatrix::new_by_values(
+                wit_data,
+                num_witin,
+                InstancePaddingStrategy::Default,
+            ))
+        })?
+    } else {
+        let mut rmm = witness::RowMajorMatrix::new(
+            num_rows_padded,
+            num_witin,
+            InstancePaddingStrategy::Default,
+        );
+        rmm.set_device_backing(gpu_witness.device_buffer, DeviceMatrixLayout::ColMajor);
+        rmm
+    };
+
+    Ok(Some([raw_witin, raw_structural_witin]))
+}
+
 /// Full GPU pipeline for assign_shared_circuit: device-resident EC merge + partition + assign.
 /// Returns `Ok(None)` if GPU is unavailable, `Ok(Some((inputs, lk_mlt)))` on
 /// success — `lk_mlt` carries the y6_lo byte / LTU lookup multiplicity that
@@ -784,10 +920,14 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         &[crate::tables::MemFinalRecord],
     )],
     config: &ShardRamConfig<E>,
+    ec_tree_config: &crate::tables::ShardRamEcTreeConfig<E>,
     num_witin: usize,
     num_structural_witin: usize,
+    ec_tree_num_witin: usize,
+    ec_tree_num_structural_witin: usize,
 ) -> Result<
     Option<(
+        Vec<crate::structs::ChipInput<E>>,
         Vec<crate::structs::ChipInput<E>>,
         gkr_iop::utils::lk_multiplicity::Multiplicity<u64>,
     )>,
@@ -795,11 +935,13 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
 > {
     use crate::{
         instructions::gpu::{
-            chips::shard_ram::gpu_batch_continuation_ec_on_device,
+            chips::shard_ram::{
+                gpu_batch_continuation_ec_on_device, try_gpu_assign_shard_ram_ec_tree_from_device,
+            },
             dispatch::take_shared_device_buffers,
         },
         structs::{ChipInput, ZKVMWitnesses},
-        tables::{ShardRamCircuit, ShardRamRecord, TableCircuit},
+        tables::{ShardRamCircuit, ShardRamEcTreeCircuit, ShardRamRecord, TableCircuit},
         witness::LkMultiplicity,
     };
     use ceno_gpu::Buffer;
@@ -984,6 +1126,17 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
     const IS_TO_WRITE_SET_U32_OFFSET: usize = 10;
     const POINT_Y6_U32_OFFSET: usize = 25;
 
+    let host_data: Vec<u32> = if total_records == 0 {
+        vec![]
+    } else {
+        partitioned_buf.to_vec().map_err(|e| {
+            ZKVMError::InvalidWitness(
+                format!("[GPU full pipeline] partitioned_buf D2H: {e}").into(),
+            )
+        })?
+    };
+    debug_assert_eq!(host_data.len(), total_records * record_u32s);
+
     // 6.5. Derive ShardRam's per-row y6_lo byte / LTU lookup multiplicity
     // from the partitioned device buffer. Mirrors the per-row CPU push in
     // `ShardRamCircuit::assign_instance`; the constraint these queries serve
@@ -993,12 +1146,6 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
             if total_records == 0 {
                 return Ok(gkr_iop::utils::lk_multiplicity::Multiplicity::default());
             }
-            let host_data: Vec<u32> = partitioned_buf.to_vec().map_err(|e| {
-                ZKVMError::InvalidWitness(
-                    format!("[GPU full pipeline] partitioned_buf D2H: {e}").into(),
-                )
-            })?;
-            debug_assert_eq!(host_data.len(), total_records * record_u32s);
             let prime = <E::BaseField as SmallField>::MODULUS_U64;
             let lk_multiplicity = LkMultiplicity::default();
             host_data.par_chunks_exact(record_u32s).for_each(|rec| {
@@ -1021,10 +1168,10 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
 
     // 7. GPU assign_instances from device buffer. The proof format stores one
     // chip proof per circuit, so shard RAM must stay in one witness entry.
-    let circuit_inputs =
+    let (circuit_inputs, ec_tree_circuit_inputs) =
         info_span!("shard_ram_assign_from_device", n = total_records).in_scope(|| {
             if total_records == 0 {
-                return Ok::<Vec<ChipInput<E>>, ZKVMError>(vec![]);
+                return Ok::<(Vec<ChipInput<E>>, Vec<ChipInput<E>>), ZKVMError>((vec![], vec![]));
             }
 
             let witness = ShardRamCircuit::<E>::try_gpu_assign_instances_from_device(
@@ -1040,11 +1187,31 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
                 ZKVMError::InvalidWitness("GPU shard_ram from_device returned None".into())
             })?;
 
-            Ok::<_, ZKVMError>(vec![ChipInput::new(
+            let num_reads = total_records - num_writes;
+            let circuit_inputs = vec![ChipInput::new(
                 ShardRamCircuit::<E>::name(),
                 witness,
-                [num_writes, total_records - num_writes],
-            )])
+                [num_writes, num_reads],
+            )];
+
+            let ec_tree_witness = try_gpu_assign_shard_ram_ec_tree_from_device(
+                ec_tree_config,
+                ec_tree_num_witin,
+                ec_tree_num_structural_witin,
+                &partitioned_buf,
+                total_records,
+                num_writes,
+            )?
+            .ok_or_else(|| {
+                ZKVMError::InvalidWitness("GPU shard_ram EC tree from_device returned None".into())
+            })?;
+            let ec_tree_circuit_inputs = vec![ChipInput::new(
+                ShardRamEcTreeCircuit::<E>::name(),
+                ec_tree_witness,
+                [num_reads, num_writes],
+            )];
+
+            Ok::<_, ZKVMError>((circuit_inputs, ec_tree_circuit_inputs))
         })?;
 
     tracing::info!(
@@ -1052,7 +1219,7 @@ pub(crate) fn try_gpu_assign_shared_circuit<E: ExtensionField>(
         total_records,
     );
 
-    Ok(Some((circuit_inputs, lk_mlt)))
+    Ok(Some((circuit_inputs, ec_tree_circuit_inputs, lk_mlt)))
 }
 
 #[cfg(test)]
