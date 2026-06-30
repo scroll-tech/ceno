@@ -17,8 +17,8 @@ use crate::{
         ZKVMWitnesses,
     },
     tables::{
-        MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig, ShardRamCircuit,
-        TableCircuit,
+        MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig,
+        ShardRamEcTreeCircuit, TableCircuit,
     },
 };
 use ceno_emul::{
@@ -1682,20 +1682,21 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     )
             }).unwrap();
 
-            if let Some(shard_ram_witnesses) =
-                zkvm_witness.get_witness(&ShardRamCircuit::<E>::name())
+            if let Some(shard_ram_ec_tree_witnesses) =
+                zkvm_witness.get_witness(&ShardRamEcTreeCircuit::<E>::name())
             {
                 info_span!("shard_ram_ec_sum").in_scope(|| {
-                    let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
-                        .iter()
-                        .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
-                        .map(|shard_ram_witness| {
-                            ShardRamCircuit::<E>::extract_ec_sum(
-                                &system_config.mmu_config.ram_bus_circuit,
-                                &shard_ram_witness.witness_rmms[0],
-                            )
-                        })
-                        .sum();
+                    let shard_ram_ec_sum: SepticPoint<E::BaseField> =
+                        shard_ram_ec_tree_witnesses
+                            .iter()
+                            .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
+                            .map(|shard_ram_witness| {
+                                ShardRamEcTreeCircuit::<E>::extract_ec_sum(
+                                    &system_config.mmu_config.ram_bus_ec_tree_circuit,
+                                    &shard_ram_witness.witness_rmms[0],
+                                )
+                            })
+                            .sum();
 
                     let xy = shard_ram_ec_sum
                         .x

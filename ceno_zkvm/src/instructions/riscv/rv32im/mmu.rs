@@ -6,8 +6,8 @@ use crate::{
     tables::{
         DynVolatileRamTable, HeapInitCircuit, HeapTable, HintsInitCircuit, HintsTable,
         LocalFinalCircuit, MemFinalRecord, MemInitRecord, NonVolatileTable, RegTable,
-        RegTableInitCircuit, ShardRamCircuit, StackInitCircuit, StackTable, StaticMemInitCircuit,
-        StaticMemTable, TableCircuit,
+        RegTableInitCircuit, ShardRamCircuit, ShardRamEcTreeCircuit, StackInitCircuit, StackTable,
+        StaticMemInitCircuit, StaticMemTable, TableCircuit,
     },
 };
 use ceno_emul::{Addr, IterAddresses, WORD_SIZE, Word};
@@ -30,6 +30,8 @@ pub struct MmuConfig<E: ExtensionField> {
     pub local_final_circuit: <LocalFinalCircuit<E> as TableCircuit<E>>::TableConfig,
     /// ram bus to deal with cross shard read/write
     pub ram_bus_circuit: <ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
+    /// EC accumulation tree for cross-shard read/write points.
+    pub ram_bus_ec_tree_circuit: <ShardRamEcTreeCircuit<E> as TableCircuit<E>>::TableConfig,
     pub params: ProgramParams,
 }
 
@@ -44,6 +46,7 @@ impl<E: ExtensionField> MmuConfig<E> {
         let heap_init_config = cs.register_table_circuit::<HeapInitCircuit<E>>();
         let local_final_circuit = cs.register_table_circuit::<LocalFinalCircuit<E>>();
         let ram_bus_circuit = cs.register_table_circuit::<ShardRamCircuit<E>>();
+        let ram_bus_ec_tree_circuit = cs.register_table_circuit::<ShardRamEcTreeCircuit<E>>();
 
         Self {
             reg_init_config,
@@ -53,6 +56,7 @@ impl<E: ExtensionField> MmuConfig<E> {
             heap_init_config,
             local_final_circuit,
             ram_bus_circuit,
+            ram_bus_ec_tree_circuit,
             params: cs.params.clone(),
         }
     }
@@ -205,6 +209,7 @@ impl<E: ExtensionField> MmuConfig<E> {
                 cs,
                 &(shard_ctx, all_records.as_slice()),
                 &self.ram_bus_circuit,
+                &self.ram_bus_ec_tree_circuit,
             )
         })?;
         Ok(())

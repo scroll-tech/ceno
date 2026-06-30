@@ -15,6 +15,7 @@ use gkr_iop::{
         layer::{LayerWitness, ROTATION_OPENING_COUNT},
     },
     hal::{MultilinearPolynomial, ProtocolWitnessGeneratorProver, ProverBackend},
+    selector::{SelectorContext, SelectorType},
 };
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
@@ -159,6 +160,41 @@ pub(crate) fn first_layer_output_group_stage_masks<E: ExtensionField>(
     );
 
     group_masks
+}
+
+pub(crate) fn first_layer_selector_contexts<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    circuit: &GKRCircuit<E>,
+    num_instances: [usize; 2],
+    num_vars: usize,
+) -> Vec<SelectorContext> {
+    let cs = &composed_cs.zkvm_v1_css;
+    let total_num_instances = num_instances.iter().sum();
+    let first_layer = circuit.layers.first().expect("empty gkr circuit layer");
+    let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, circuit);
+    let distinct_rw_selectors =
+        cs.r_selector.is_some() && cs.w_selector.is_some() && cs.r_selector != cs.w_selector;
+
+    first_layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .zip_eq(group_stage_masks.iter())
+        .map(|((selector, _), stage_mask)| {
+            if stage_mask.contains(GkrOutputStageMask::TOWER)
+                && distinct_rw_selectors
+                && matches!(selector, SelectorType::Prefix(_))
+            {
+                if cs.r_selector.as_ref() == Some(selector) {
+                    return SelectorContext::new(0, num_instances[0], num_vars);
+                }
+                if cs.w_selector.as_ref() == Some(selector) {
+                    return SelectorContext::new(num_instances[0], num_instances[1], num_vars);
+                }
+            }
+
+            SelectorContext::new(0, total_num_instances, num_vars)
+        })
+        .collect_vec()
 }
 
 pub(crate) struct EccBridgeClaims<E: ExtensionField> {

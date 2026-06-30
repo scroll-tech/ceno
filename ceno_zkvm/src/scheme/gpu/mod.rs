@@ -15,7 +15,7 @@ use crate::{
         utils::{
             GkrOutputStageMask, assign_group_evals, derive_ecc_bridge_claims,
             extract_ecc_quark_witness_inputs, first_layer_output_group_stage_masks,
-            split_rotation_evals,
+            first_layer_selector_contexts, split_rotation_evals,
         },
         verifier::eval_batched_main_frontload_terms,
     },
@@ -513,7 +513,6 @@ pub fn prove_main_constraints_impl<
         gkr_circuit,
     } = composed_cs;
 
-    let num_instances = input.num_instances();
     let log2_num_instances = input.log2_num_instances();
     let num_threads = optimal_sumcheck_threads(log2_num_instances);
     let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
@@ -539,38 +538,12 @@ pub fn prove_main_constraints_impl<
     }
     let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
     let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, gkr_circuit);
-    let selector_ctxs = first_layer
-        .out_sel_and_eval_exprs
-        .iter()
-        .zip_eq(group_stage_masks.iter())
-        .map(|((selector, _), stage_mask)| {
-            if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty() {
-                SelectorContext {
-                    offset: 0,
-                    num_instances,
-                    num_vars: num_var_with_rotation,
-                }
-            } else if cs.r_selector.as_ref() == Some(selector) {
-                SelectorContext {
-                    offset: 0,
-                    num_instances: input.num_instances[0],
-                    num_vars: num_var_with_rotation,
-                }
-            } else if cs.w_selector.as_ref() == Some(selector) {
-                SelectorContext {
-                    offset: input.num_instances[0],
-                    num_instances: input.num_instances[1],
-                    num_vars: num_var_with_rotation,
-                }
-            } else {
-                SelectorContext {
-                    offset: 0,
-                    num_instances,
-                    num_vars: num_var_with_rotation,
-                }
-            }
-        })
-        .collect_vec();
+    let selector_ctxs = first_layer_selector_contexts(
+        composed_cs,
+        gkr_circuit,
+        input.num_instances,
+        num_var_with_rotation,
+    );
 
     let mut out_evals =
         vec![PointAndEval::new(rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
@@ -2643,11 +2616,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let mut max_num_variables = 0usize;
 
         for job in &jobs {
-            let ComposedConstrainSystem {
-                zkvm_v1_css: cs,
-                gkr_circuit,
-            } = job.cs;
-            let num_instances = job.input.num_instances();
+            let ComposedConstrainSystem { gkr_circuit, .. } = job.cs;
             let log2_num_instances = job.input.log2_num_instances();
             let num_var_with_rotation = log2_num_instances + job.cs.rotation_vars().unwrap_or(0);
             max_num_variables = max_num_variables.max(num_var_with_rotation);
@@ -2656,40 +2625,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 panic!("empty gkr circuit")
             };
             let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
-            let group_stage_masks = first_layer_output_group_stage_masks(job.cs, gkr_circuit);
-            let selector_ctxs = first_layer
-                .out_sel_and_eval_exprs
-                .iter()
-                .zip_eq(group_stage_masks.iter())
-                .map(|((selector, _), stage_mask)| {
-                    if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty()
-                    {
-                        SelectorContext {
-                            offset: 0,
-                            num_instances,
-                            num_vars: num_var_with_rotation,
-                        }
-                    } else if cs.r_selector.as_ref() == Some(selector) {
-                        SelectorContext {
-                            offset: 0,
-                            num_instances: job.input.num_instances[0],
-                            num_vars: num_var_with_rotation,
-                        }
-                    } else if cs.w_selector.as_ref() == Some(selector) {
-                        SelectorContext {
-                            offset: job.input.num_instances[0],
-                            num_instances: job.input.num_instances[1],
-                            num_vars: num_var_with_rotation,
-                        }
-                    } else {
-                        SelectorContext {
-                            offset: 0,
-                            num_instances,
-                            num_vars: num_var_with_rotation,
-                        }
-                    }
-                })
-                .collect_vec();
+            let selector_ctxs = first_layer_selector_contexts(
+                job.cs,
+                gkr_circuit,
+                job.input.num_instances,
+                num_var_with_rotation,
+            );
 
             let mut out_evals =
                 vec![PointAndEval::new(job.rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
