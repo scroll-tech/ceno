@@ -66,10 +66,6 @@ pub struct TowerLayerCols<T> {
     pub write_claim_next: [T; D_EF],
     pub logup_claim_next: [T; D_EF],
 
-    /// Previous read/write/LogUp current-layer contributions propagated to this layer.
-    pub read_eval_claim: [T; D_EF],
-    pub write_eval_claim: [T; D_EF],
-    pub logup_eval_claim: [T; D_EF],
     /// End powers after the read group and after the combined read/write groups.
     pub read_lambda_next_end: [T; D_EF],
     pub read_lambda_cur_end: [T; D_EF],
@@ -217,22 +213,6 @@ where
             next.sumcheck_claim_in,
             folded_claim.clone(),
         );
-        assert_array_eq(
-            &mut builder.when(is_transition.clone()),
-            next.read_eval_claim,
-            local.read_claim_cur,
-        );
-        assert_array_eq(
-            &mut builder.when(is_transition.clone()),
-            next.write_eval_claim,
-            local.write_claim_cur,
-        );
-        assert_array_eq(
-            &mut builder.when(is_transition.clone()),
-            next.logup_eval_claim,
-            local.logup_claim_cur,
-        );
-
         // Transcript index increment
         use crate::tower::tower_transcript_len::{
             ALPHA_BETA_LEN, ALPHA_LEN, LABEL_COMBINE, LABEL_COMBINE_VALUES, LABEL_MERGE,

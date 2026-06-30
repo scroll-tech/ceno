@@ -272,9 +272,6 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.write_claim_cur = [F::ZERO; D_EF];
                     cols.logup_claim_next = [F::ZERO; D_EF];
                     cols.logup_claim_cur = [F::ZERO; D_EF];
-                    cols.read_eval_claim = [F::ZERO; D_EF];
-                    cols.write_eval_claim = [F::ZERO; D_EF];
-                    cols.logup_eval_claim = [F::ZERO; D_EF];
                     cols.read_lambda_next_end = lambda_cur_one;
                     cols.read_lambda_cur_end = lambda_cur_one;
                     cols.write_lambda_next_end = lambda_cur_one;
@@ -389,40 +386,6 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
-                    let read_eval = if layer_idx == 0 {
-                        EF::ZERO
-                    } else {
-                        record
-                            .read_prime_claims
-                            .get(layer_idx - 1)
-                            .copied()
-                            .unwrap_or(EF::ZERO)
-                    };
-                    let write_eval = if layer_idx == 0 {
-                        EF::ZERO
-                    } else {
-                        record
-                            .write_prime_claims
-                            .get(layer_idx - 1)
-                            .copied()
-                            .unwrap_or(EF::ZERO)
-                    };
-                    let logup_eval = if layer_idx == 0 {
-                        EF::ZERO
-                    } else {
-                        record
-                            .logup_prime_claims
-                            .get(layer_idx - 1)
-                            .copied()
-                            .unwrap_or(EF::ZERO)
-                    };
-                    cols.read_eval_claim =
-                        read_eval.as_basis_coefficients_slice().try_into().unwrap();
-                    cols.write_eval_claim =
-                        write_eval.as_basis_coefficients_slice().try_into().unwrap();
-                    cols.logup_eval_claim =
-                        logup_eval.as_basis_coefficients_slice().try_into().unwrap();
-
                     prev_folded_claim = Some(read_claim_next + write_claim_next + logup_claim_next);
                 }
             });
