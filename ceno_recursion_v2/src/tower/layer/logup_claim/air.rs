@@ -356,8 +356,8 @@ where
             TowerLogupClaimMessage {
                 chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_next_claim: acc_sum_export.clone().map(Into::into),
-                lambda_cur_claim: ext_field_add::<AB::Expr>(acc_p_with_cur, acc_q_with_cur)
+                next_claim: acc_sum_export.clone().map(Into::into),
+                eval_claim: ext_field_add::<AB::Expr>(acc_p_with_cur, acc_q_with_cur)
                     .map(Into::into),
             },
             is_layer_end.clone() * local.num_logup_count * is_layer_mode,

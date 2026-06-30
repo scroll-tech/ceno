@@ -12,8 +12,6 @@ The tower protocol math is specified in
 contract through columns, buses, row loops, and local constraints. Keep per-AIR accumulator formulas here when they are
 needed to debug constraints, but do not duplicate the global layer-reduction source of truth.
 
-Use [tower_air_review_checklist.md](tower_air_review_checklist.md) to track spec-to-code review progress.
-
 ## TowerInputAir (`src/tower/input/air.rs`)
 
 ### Columns
@@ -181,7 +179,7 @@ Use [tower_air_review_checklist.md](tower_air_review_checklist.md) to track spec
       `prod_offset = num_read_count`, start powers equal to the read end powers, and `num_prod_count = num_write_count`.
     - Receives write product claims plus `write_lambda_next_end` and `write_lambda_cur_end`, then sends the LogUp input
       with start powers equal to the write end powers and `num_logup_count`.
-    - Receives back both `lambda_next_claim` and `lambda_cur_claim` from each claim AIR.
+    - Receives back both `next_claim` and `eval_claim` from each claim AIR.
     - Root init buses are outside `TowerLayerAir`; this AIR receives the already assembled
       `initial_tower_claim = C_1(r_1)` from `TowerInputAir`.
 
@@ -294,8 +292,8 @@ The final active row sends:
 TowerProdSumClaimMessage {
   chip_idx,
   layer_idx,
-  lambda_next_claim       = prod_next_claim,
-  lambda_cur_claim        = prod_eval_claim,
+  next_claim              = prod_next_claim,
+  eval_claim              = prod_eval_claim,
   lambda_next_end         = lambda_next_start * lambda_next^num_prod_count,
   lambda_cur_end          = lambda_cur_start  * lambda_cur^num_prod_count
 }
@@ -385,8 +383,8 @@ and sends on the final active row:
 TowerProdSumClaimMessage {
   chip_idx,
   layer_idx,
-  lambda_next_claim       = prod_next_claim,
-  lambda_cur_claim        = prod_eval_claim,
+  next_claim              = prod_next_claim,
+  eval_claim              = prod_eval_claim,
   lambda_next_end         = lambda_next_start * lambda_next^num_prod_count,
   lambda_cur_end          = lambda_cur_start  * lambda_cur^num_prod_count
 }
@@ -543,8 +541,8 @@ The final active row sends:
 TowerLogupClaimMessage {
   chip_idx,
   layer_idx,
-  lambda_next_claim       = logup_next_claim,
-  lambda_cur_claim        = logup_eval_claim
+  next_claim              = logup_next_claim,
+  eval_claim              = logup_eval_claim
 }
 ```
 
@@ -622,8 +620,8 @@ and sends on the final active row:
 TowerLogupClaimMessage {
   chip_idx,
   layer_idx,
-  lambda_next_claim       = logup_next_claim,
-  lambda_cur_claim        = logup_eval_claim
+  next_claim              = logup_next_claim,
+  eval_claim              = logup_eval_claim
 }
 ```
 

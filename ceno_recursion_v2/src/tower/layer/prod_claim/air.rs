@@ -348,8 +348,8 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdClaimAir<IB, OB, RIB, ROB, INITB> {
             TowerProdSumClaimMessage {
                 chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_next_claim: acc_sum_export.clone().map(Into::into),
-                lambda_cur_claim: acc_sum_prime_export.map(Into::into),
+                next_claim: acc_sum_export.clone().map(Into::into),
+                eval_claim: acc_sum_prime_export.map(Into::into),
                 lambda_next_end: lambda_end.map(Into::into),
                 lambda_cur_end: lambda_prime_end.map(Into::into),
             },

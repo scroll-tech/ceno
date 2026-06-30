@@ -72,8 +72,8 @@ define_typed_per_proof_permutation_bus!(TowerClaimInputBus, TowerClaimLayerInput
 pub struct TowerProdSumClaimMessage<T> {
     pub chip_idx: T,
     pub layer_idx: T,
-    pub lambda_next_claim: [T; D_EF],
-    pub lambda_cur_claim: [T; D_EF],
+    pub next_claim: [T; D_EF],
+    pub eval_claim: [T; D_EF],
     pub lambda_next_end: [T; D_EF],
     pub lambda_cur_end: [T; D_EF],
 }
@@ -86,8 +86,8 @@ define_typed_per_proof_permutation_bus!(TowerProdWriteClaimBus, TowerProdSumClai
 pub struct TowerLogupClaimMessage<T> {
     pub chip_idx: T,
     pub layer_idx: T,
-    pub lambda_next_claim: [T; D_EF],
-    pub lambda_cur_claim: [T; D_EF],
+    pub next_claim: [T; D_EF],
+    pub eval_claim: [T; D_EF],
 }
 
 define_typed_per_proof_permutation_bus!(TowerLogupClaimBus, TowerLogupClaimMessage);

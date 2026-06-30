@@ -412,14 +412,14 @@ terminal layer: reduced input-layer claim
 Use `lambda_cur` for the current layer expected-evaluation path `T_i(rho)` and `lambda_next` for the outgoing
 `C_{i+1}(rho, mu)` path.
 
-When the current Rust bus structs use `lambda_next_claim` and `lambda_cur_claim`, the contract-level names are:
+The claim bus structs use `next_claim` and `eval_claim` with the following contract-level meanings:
 
 ```text
-lambda_next_claim = next_claim = contribution to C_{i+1}(rho, mu)
-lambda_cur_claim  = eval_claim = contribution to T_i(rho)
+next_claim       = contribution to C_{i+1}(rho, mu)
+eval_claim       = contribution to T_i(rho)
 ```
 
-`lambda_cur_claim` is not the current claim. The current claim is `C_i(r_i)`, the value passed into the sumcheck proof.
+`eval_claim` is not the current claim. The current claim is `C_i(r_i)`, the value passed into the sumcheck proof.
 
 ## AIR Contract Priority
 

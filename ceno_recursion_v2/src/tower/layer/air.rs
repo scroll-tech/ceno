@@ -265,7 +265,7 @@ where
             arr
         };
 
-        // 1. Claim buses
+        // 1. Next layer expected sum claims and current layer evaluation claims
         // 1a. Send read/write/logup input to the claim air
         self.claim_input_bus.send(
             builder,
@@ -328,8 +328,8 @@ where
             TowerProdSumClaimMessage {
                 chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_next_claim: local.read_claim_next.map(Into::into),
-                lambda_cur_claim: local.read_claim_cur.map(Into::into),
+                next_claim: local.read_claim_next.map(Into::into),
+                eval_claim: local.read_claim_cur.map(Into::into),
                 lambda_next_end: local.read_lambda_next_end.map(Into::into),
                 lambda_cur_end: local.read_lambda_cur_end.map(Into::into),
             },
@@ -341,8 +341,8 @@ where
             TowerProdSumClaimMessage {
                 chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_next_claim: local.write_claim_next.map(Into::into),
-                lambda_cur_claim: local.write_claim_cur.map(Into::into),
+                next_claim: local.write_claim_next.map(Into::into),
+                eval_claim: local.write_claim_cur.map(Into::into),
                 lambda_next_end: local.write_lambda_next_end.map(Into::into),
                 lambda_cur_end: local.write_lambda_cur_end.map(Into::into),
             },
@@ -354,14 +354,14 @@ where
             TowerLogupClaimMessage {
                 chip_idx: local.chip_idx.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_next_claim: local.logup_claim_next.map(Into::into),
-                lambda_cur_claim: local.logup_claim_cur.map(Into::into),
+                next_claim: local.logup_claim_next.map(Into::into),
+                eval_claim: local.logup_claim_cur.map(Into::into),
             },
             logup_claim_mult,
         );
 
-        // 1. TowerLayerInputBus
-        // 1a. Receive GKR layers input
+        // 2. TowerLayerInputBus
+        // 2a. Receive GKR layers input
         self.layer_input_bus.receive(
             builder,
             local.proof_idx,
@@ -378,7 +378,7 @@ where
             local.is_first_chip_idx * has_tower.clone(),
         );
         // 2. TowerLayerOutputBus
-        // 2a. Send GKR input layer claims back
+        // 2b. Send GKR input layer claims back
         let noop = local.is_noop.into();
         let output_tidx = noop.clone() * local.tidx + is_not_noop.clone() * tidx_end.clone();
         let output_claim = core::array::from_fn(|i| {
