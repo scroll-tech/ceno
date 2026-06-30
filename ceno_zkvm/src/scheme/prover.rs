@@ -450,6 +450,23 @@ impl<
                     / (1024.0 * 1024.0)
             );
 
+            for (trace_idx, rmm) in &wits_rmms {
+                let bytes = rmm.values.len() * std::mem::size_of::<E::BaseField>();
+                let gib = bytes as f64 / (1024.0 * 1024.0 * 1024.0);
+                let circuit_name = name_and_instances
+                    .get(*trace_idx)
+                    .map(|(name, _)| name.as_str())
+                    .unwrap_or("<unknown>");
+                println!(
+                    "[wits_rmms] trace_idx={} circuit={} num_instances={} elements={} size={:.6} GiB",
+                    trace_idx,
+                    circuit_name,
+                    rmm.num_instances(),
+                    rmm.values.len(),
+                    gib
+                );
+            }
+
             // Build trace index map: maps circuit enum index -> trace index in pcs_data.
             // BTreeMap iterates in key order, so trace indices match insertion order.
             // GPU uses this for witness extraction; CPU ignores it.
@@ -1030,7 +1047,7 @@ impl<
     fn collect_chip_results<'a>(
         results: Vec<ChipTaskResult<'a, PB>>,
     ) -> (
-        BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+        BTreeMap<usize, ZKVMChipProof<E>>,
         Vec<MainConstraintJob<'a, PB>>,
     ) {
         let mut chip_proofs = BTreeMap::new();
@@ -1046,10 +1063,12 @@ impl<
             if let Some(job) = result.main_constraint_job {
                 main_constraint_jobs.push(job);
             }
-            chip_proofs
-                .entry(result.circuit_idx)
-                .or_insert(vec![])
-                .push(result.proof);
+            let prev = chip_proofs.insert(result.circuit_idx, result.proof);
+            assert!(
+                prev.is_none(),
+                "duplicate chip proof for circuit_idx={} is not supported",
+                result.circuit_idx
+            );
         }
 
         (chip_proofs, main_constraint_jobs)

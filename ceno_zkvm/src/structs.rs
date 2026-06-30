@@ -21,10 +21,7 @@ use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance, ToExpr};
 use p3::field::FieldAlgebra;
 use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
-use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    prelude::ParallelSlice,
-};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -732,55 +729,58 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         let lk_multiplicity = LkMultiplicity::default();
         let (circuit_inputs, ec_tree_circuit_inputs) =
             info_span!("shard_ram_assign_instances", n = n_global).in_scope(|| {
-                global_input
-                    .par_chunks(shard_ctx.max_num_cross_shard_accesses)
-                    .map(|shard_accesses| {
-                        let mut lk_multiplicity = lk_multiplicity.clone();
-                        let num_reads = shard_accesses
-                            .par_iter()
-                            .filter(|access| access.record.is_to_write_set)
-                            .count();
-                        let num_writes = shard_accesses.len() - num_reads;
-                        let witness = ShardRamCircuit::assign_instances_with_lk_multiplicities(
-                            config,
-                            shard_ram_cs.zkvm_v1_css.num_witin as usize,
-                            shard_ram_cs.zkvm_v1_css.num_structural_witin as usize,
-                            &mut lk_multiplicity,
-                            shard_accesses,
-                        )?;
-                        let ec_tree_witness =
-                            ShardRamEcTreeCircuit::assign_instances_with_lk_multiplicities(
-                                ec_tree_config,
-                                ec_tree_cs.zkvm_v1_css.num_witin as usize,
-                                ec_tree_cs.zkvm_v1_css.num_structural_witin as usize,
-                                &mut LkMultiplicity::default(),
-                                &shard_accesses
-                                    .iter()
-                                    .filter(|access| !access.record.is_to_write_set)
-                                    .chain(
-                                        shard_accesses
-                                            .iter()
-                                            .filter(|access| access.record.is_to_write_set),
-                                    )
-                                    .cloned()
-                                    .collect_vec(),
-                            )?;
+                if global_input.is_empty() {
+                    return Ok::<(Vec<ChipInput<E>>, Vec<ChipInput<E>>), ZKVMError>((
+                        vec![],
+                        vec![],
+                    ));
+                }
 
-                        Ok((
-                            ChipInput::new(
-                                ShardRamCircuit::<E>::name(),
-                                witness,
-                                [num_reads, num_writes],
-                            ),
-                            ChipInput::new(
-                                ShardRamEcTreeCircuit::<E>::name(),
-                                ec_tree_witness,
-                                [num_writes, num_reads],
-                            ),
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, ZKVMError>>()
-                    .map(|pairs| pairs.into_iter().unzip::<_, _, Vec<_>, Vec<_>>())
+                let mut lk_multiplicity = lk_multiplicity.clone();
+                let witness = ShardRamCircuit::assign_instances_with_lk_multiplicities(
+                    config,
+                    shard_ram_cs.zkvm_v1_css.num_witin as usize,
+                    shard_ram_cs.zkvm_v1_css.num_structural_witin as usize,
+                    &mut lk_multiplicity,
+                    &global_input,
+                )?;
+                let num_reads = global_input
+                    .par_iter()
+                    .filter(|access| access.record.is_to_write_set)
+                    .count();
+                let num_writes = global_input.len() - num_reads;
+
+                let ec_tree_input = global_input
+                    .iter()
+                    .filter(|access| !access.record.is_to_write_set)
+                    .chain(
+                        global_input
+                            .iter()
+                            .filter(|access| access.record.is_to_write_set),
+                    )
+                    .cloned()
+                    .collect_vec();
+                let ec_tree_witness =
+                    ShardRamEcTreeCircuit::assign_instances_with_lk_multiplicities(
+                        ec_tree_config,
+                        ec_tree_cs.zkvm_v1_css.num_witin as usize,
+                        ec_tree_cs.zkvm_v1_css.num_structural_witin as usize,
+                        &mut LkMultiplicity::default(),
+                        &ec_tree_input,
+                    )?;
+
+                Ok((
+                    vec![ChipInput::new(
+                        ShardRamCircuit::<E>::name(),
+                        witness,
+                        [num_reads, num_writes],
+                    )],
+                    vec![ChipInput::new(
+                        ShardRamEcTreeCircuit::<E>::name(),
+                        ec_tree_witness,
+                        [num_writes, num_reads],
+                    )],
+                ))
             })?;
 
         assert!(
@@ -838,7 +838,6 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             shard_ram_cs.zkvm_v1_css.num_structural_witin as usize,
             ec_tree_cs.zkvm_v1_css.num_witin as usize,
             ec_tree_cs.zkvm_v1_css.num_structural_witin as usize,
-            shard_ctx.max_num_cross_shard_accesses,
         )? {
             Some((circuit_inputs, ec_tree_circuit_inputs, lk_mlt)) => {
                 assert!(
