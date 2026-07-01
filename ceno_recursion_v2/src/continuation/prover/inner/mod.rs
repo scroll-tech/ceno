@@ -197,8 +197,11 @@ where
         }
 
         let engine = E::new(self.pk.params.clone());
-        #[cfg(debug_assertions)]
-        debug_constraints(&self.circuit, &ctx, &engine);
+        if cfg!(debug_assertions)
+            || std::env::var_os("CENO_RECURSION_V2_DEBUG_CONSTRAINTS").is_some()
+        {
+            debug_constraints(&self.circuit, &ctx, &engine);
+        }
         let prove_start = Instant::now();
         let proof = engine.prove(&self.d_pk, ctx)?;
         tracing::info!(
