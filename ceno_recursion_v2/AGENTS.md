@@ -1,3 +1,8 @@
+# Commit Gate
+
+- Do not commit changes in `ceno_recursion_v2` unless `scripts/run_e2e_test.sh`
+  passes. This is the main acceptance criterion for commits in this crate.
+
 # Tower Coding Style
 
 - Prefer semantic names over overloaded names:
