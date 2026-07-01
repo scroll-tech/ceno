@@ -20,7 +20,6 @@ needed to debug constraints, but do not duplicate the global layer-reduction sou
 |----------------------------|-----------------|----------------------------------------------------------------------|
 | `is_enabled`               | scalar          | Row selector (0 = padding).                                          |
 | `proof_idx`                | scalar          | Outer proof loop index enforced by nested sub-AIRs.                  |
-| `idx`                      | scalar          | Structural row counter inside one proof; constrained to `chip_idx`.  |
 | `chip_idx`                 | scalar          | Proof-local chip proof index, supplied by `ProofShapeAir`.           |
 | `num_layers`               | scalar          | Number of active GKR layers for the proof.                           |
 | `is_num_layers_zero`       | scalar          | Flag for `num_layers == 0` (drives “no interaction” branches).       |
@@ -41,7 +40,7 @@ needed to debug constraints, but do not duplicate the global layer-reduction sou
 
 - **Enablement / identity**: Constraints enforce boolean `is_enabled`, padding-after-padding, and one enabled
   `TowerInputAir` row per `(proof_idx, chip_idx)` tower proof. `chip_idx` is the proof-local index of the chip proof, not
-  the VK-assigned `chip_id`. The structural `idx` column is constrained to equal `chip_idx` on enabled rows.
+  the VK-assigned `chip_id`.
 - **Zero test**: `IsZeroSubAir` checks `num_layers` against `is_num_layers_zero`, unlocking the “no interaction” path.
 - **Input layer defaults**: When `num_layers == 0`, the root claims must be `r0_claim = 1`, `w0_claim = 1`,
   `p0_claim = 0`, and `q0_claim = 1`; the input-layer claim must be `[0, alpha_logup]` (numerator zero, denominator
@@ -660,13 +659,12 @@ The AIR owns transcript observations for active LogUp child claims. It does not 
 |-------------------------------|----------|-------------------------------------------------------------|
 | `is_enabled`                  | scalar   | Row selector.                                               |
 | `proof_idx`                   | scalar   | Proof counter.                                              |
-| `idx`                         | scalar   | Structural tower row counter; constrained to `chip_idx`.    |
 | `chip_idx`                    | scalar   | Proof-local chip proof index used on sumcheck buses.        |
 | `layer_idx`                   | scalar   | Layer whose sumcheck is being executed.                     |
 | `is_first_idx`                | scalar   | First sumcheck row for the current `(proof_idx, chip_idx)`. |
 | `is_first_layer`              | scalar   | First round row for the current layer.                      |
 | `is_first_round`              | scalar   | First round inside the layer.                               |
-| `is_dummy`                    | scalar   | Padding flag.                                               |
+| `is_noop`                     | scalar   | Placeholder for a chip tower with no layer sumcheck.        |
 | `is_last_layer`               | scalar   | Whether this layer is the final GKR layer.                  |
 | `round`                       | scalar   | Sub-round index within the layer (0 .. layer_idx-1).        |
 | `tidx`                        | scalar   | Transcript cursor before reading evaluations.               
@@ -682,20 +680,23 @@ The AIR owns transcript observations for active LogUp child claims. It does not 
   `is_first_layer` protects the per-layer bookkeeping just before the round loop begins. No additional local tower
   identifier is used.
 - **Round counter**: `round` starts at 0 and increments each transition; final round enforces `round = layer_idx - 1`.
+- **Last-layer flag**: `is_last_layer` is bound by the input bus on the first round, propagated across all rounds in
+  the layer, and checked against the chip-local segment end on the final round.
 - **Eq accumulator**: `eq_in = 1` on the first round; `eq_out = update_eq(eq_in, prev_challenge, challenge)` and
   propagates forward.
 - **Claim flow**: `claim_out` computed via `interpolate_cubic_at_0123` using `(claim_in - ev1)` as `ev0`;
   `next.claim_in = claim_out` across transitions.
 - **Transcript timing**: Each transition bumps `next.tidx = tidx + 4·D_EF` (three observations + challenge sample).
-- **Dummy rows**: Dummy rows short-circuit all bus traffic; guard send/receive calls with `is_not_dummy`.
+- **No-op rows**: No-op rows short-circuit all bus traffic and are constrained to be a single enabled row for
+  the whole chip-local sumcheck segment; guard send/receive calls with `is_not_noop`.
 - **Arity assumption**: The layout assumes cubic polynomials (degree 3) and would need updates if the sumcheck arity
   changes.
 
 ### Interactions
 
-- `sumcheck_input.receive`: first non-dummy round pulls `(chip_idx, layer_idx, is_last_layer, tidx, claim)` from
+- `sumcheck_input.receive`: first non-no-op round pulls `(chip_idx, layer_idx, is_last_layer, tidx, claim)` from
   `TowerLayerAir`.
-- `sumcheck_output.send`: last non-dummy round returns `(chip_idx, layer_idx, claim_out, eq_at_r_prime)` to the layer AIR.
+- `sumcheck_output.send`: last non-no-op round returns `(chip_idx, layer_idx, claim_out, eq_at_r_prime)` to the layer AIR.
 - `sumcheck_challenge.receive/send`: enforces challenge chaining between layers/rounds (`prev_challenge` from prior
   layer, `challenge` published for the next layer or eq export).
 - All three tower sumcheck buses include `chip_idx` so messages disambiguate chip tower proofs inside the same proof.
