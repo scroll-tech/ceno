@@ -26,7 +26,6 @@ use recursion_circuit::{
 pub struct TowerProdSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
-    pub idx: T,
     pub chip_idx: T,
     pub is_first_layer: T,
     pub is_first: T,
@@ -131,18 +130,15 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdClaimAir<IB, OB, RIB, ROB, INITB> {
         // Structural constraints (replaces NestedForLoopSubAir<2>)
         //
         // The trace has a 3-level nested structure:
-        //   proof_idx > idx (chip) > GKR layer (marked by is_first)
+        //   proof_idx > chip_idx > GKR layer (marked by is_first)
         // NestedForLoopSubAir<2> only supports 2 levels and would forbid
-        // is_first=1 when idx stays the same. We need is_first at every
+        // is_first=1 when chip_idx stays the same. We need is_first at every
         // GKR layer boundary for correct bus send counts, so we write the
         // loop constraints manually.
         ///////////////////////////////////////////////////////////////////////
 
         builder.assert_bool(local.is_enabled);
         builder.assert_bool(local.is_first);
-        builder
-            .when(local.is_enabled)
-            .assert_eq(local.idx, local.chip_idx);
 
         // is_enabled monotone decreasing: once disabled, stays disabled
         builder
@@ -166,11 +162,13 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdClaimAir<IB, OB, RIB, ROB, INITB> {
             .when(local.is_enabled)
             .assert_zero(local.proof_idx);
 
-        // is_first_layer implies is_first and idx=0
+        // is_first_layer implies is_first and chip_idx=0
         builder
             .when(local.is_first_layer)
             .assert_one(local.is_first);
-        builder.when(local.is_first_layer).assert_zero(local.idx);
+        builder
+            .when(local.is_first_layer)
+            .assert_zero(local.chip_idx);
 
         // proof_idx transitions: can stay same or increment by 1
         let proof_diff: AB::Expr = next.proof_idx - local.proof_idx;
@@ -189,19 +187,19 @@ impl<IB, OB, RIB, ROB, INITB> TowerProdClaimAir<IB, OB, RIB, ROB, INITB> {
             .when(next.is_enabled * (AB::Expr::ONE - proof_diff))
             .assert_zero(next.is_first_layer);
 
-        // idx transitions within same proof (non-proof-boundary)
-        let idx_diff: AB::Expr = next.idx - local.idx;
+        // chip_idx transitions within same proof (non-proof-boundary)
+        let chip_diff: AB::Expr = next.chip_idx - local.chip_idx;
         builder
             .when_transition()
             .when(next.is_enabled * (AB::Expr::ONE - next.is_first_layer))
-            .assert_bool(idx_diff.clone());
-        // When idx changes: next.is_first must be 1
+            .assert_bool(chip_diff.clone());
+        // When chip_idx changes: next.is_first must be 1
         builder
             .when_transition()
-            .when(next.is_enabled * (AB::Expr::ONE - next.is_first_layer) * idx_diff)
+            .when(next.is_enabled * (AB::Expr::ONE - next.is_first_layer) * chip_diff)
             .assert_one(next.is_first);
-        // NOTE: We do NOT constrain is_first=0 when idx stays the same.
-        // Within the same idx (chip), is_first=1 marks GKR layer boundaries.
+        // NOTE: We do NOT constrain is_first=0 when chip_idx stays the same.
+        // Within the same chip_idx, is_first=1 marks GKR layer boundaries.
 
         ///////////////////////////////////////////////////////////////////////
         // Derived flags

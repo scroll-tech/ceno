@@ -13,7 +13,6 @@ use crate::{tower::tower_transcript_len, tracegen::RowMajorChip};
 #[derive(Debug, Clone, Default)]
 pub struct TowerLayerRecord {
     pub proof_idx: usize,
-    pub idx: usize,
     pub chip_idx: usize,
     pub is_first_air_idx: bool,
     pub tidx: usize,
@@ -115,8 +114,8 @@ impl TowerLayerRecord {
     #[inline]
     pub(crate) fn layer_tidx(&self, layer_idx: usize) -> usize {
         let mut tidx = self.tidx;
-        for idx in 0..layer_idx {
-            tidx += self.layer_span(idx);
+        for prior_layer_idx in 0..layer_idx {
+            tidx += self.layer_span(prior_layer_idx);
         }
         tidx
     }

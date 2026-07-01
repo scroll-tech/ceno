@@ -36,7 +36,6 @@ pub struct TowerInputCols<T> {
     pub is_enabled: T,
 
     pub proof_idx: T,
-    pub idx: T,
     pub chip_idx: T,
 
     pub num_layers: T,
@@ -132,7 +131,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         builder
             .when_first_row()
             .when(local.is_enabled)
-            .assert_zero(local.idx);
+            .assert_zero(local.chip_idx);
 
         let proof_diff: AB::Expr = next.proof_idx - local.proof_idx;
         builder
@@ -142,14 +141,11 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         builder
             .when_transition()
             .when(next.is_enabled * proof_diff.clone())
-            .assert_zero(next.idx);
+            .assert_zero(next.chip_idx);
         builder
             .when_transition()
             .when(next.is_enabled * (AB::Expr::ONE - proof_diff))
-            .assert_eq(next.idx, local.idx + AB::Expr::ONE);
-        builder
-            .when(local.is_enabled)
-            .assert_eq(local.idx, local.chip_idx);
+            .assert_eq(next.chip_idx, local.chip_idx + AB::Expr::ONE);
 
         ///////////////////////////////////////////////////////////////////////
         // Base Constraints

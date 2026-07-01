@@ -81,7 +81,7 @@ impl MainModule {
         let tower_inputs: BTreeMap<(usize, usize), _> = tower_blob
             .input_records
             .iter()
-            .map(|record| ((record.proof_idx, record.idx), record))
+            .map(|record| ((record.proof_idx, record.chip_idx), record))
             .collect();
 
         let mut paired = Vec::new();

@@ -25,7 +25,6 @@ use recursion_circuit::{
 pub struct TowerLogupSumCheckClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
-    pub idx: T,
     pub chip_idx: T,
     pub is_first_layer: T,
     pub is_first: T,
@@ -101,9 +100,6 @@ where
 
         builder.assert_bool(local.is_enabled);
         builder.assert_bool(local.is_first);
-        builder
-            .when(local.is_enabled)
-            .assert_eq(local.idx, local.chip_idx);
 
         // is_enabled monotone decreasing: once disabled, stays disabled
         builder
@@ -127,11 +123,13 @@ where
             .when(local.is_enabled)
             .assert_zero(local.proof_idx);
 
-        // is_first_layer implies is_first and idx=0
+        // is_first_layer implies is_first and chip_idx=0
         builder
             .when(local.is_first_layer)
             .assert_one(local.is_first);
-        builder.when(local.is_first_layer).assert_zero(local.idx);
+        builder
+            .when(local.is_first_layer)
+            .assert_zero(local.chip_idx);
 
         // proof_idx transitions: can stay same or increment by 1
         let proof_diff: AB::Expr = next.proof_idx - local.proof_idx;
@@ -150,16 +148,16 @@ where
             .when(next.is_enabled * (AB::Expr::ONE - proof_diff))
             .assert_zero(next.is_first_layer);
 
-        // idx transitions within same proof (non-proof-boundary)
-        let idx_diff: AB::Expr = next.idx - local.idx;
+        // chip_idx transitions within same proof (non-proof-boundary)
+        let chip_diff: AB::Expr = next.chip_idx - local.chip_idx;
         builder
             .when_transition()
             .when(next.is_enabled * (AB::Expr::ONE - next.is_first_layer))
-            .assert_bool(idx_diff.clone());
-        // When idx changes: next.is_first must be 1
+            .assert_bool(chip_diff.clone());
+        // When chip_idx changes: next.is_first must be 1
         builder
             .when_transition()
-            .when(next.is_enabled * (AB::Expr::ONE - next.is_first_layer) * idx_diff)
+            .when(next.is_enabled * (AB::Expr::ONE - next.is_first_layer) * chip_diff)
             .assert_one(next.is_first);
 
         ///////////////////////////////////////////////////////////////////////

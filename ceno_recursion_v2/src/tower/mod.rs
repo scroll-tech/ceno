@@ -469,7 +469,7 @@ pub(crate) fn derive_tower_input_claim_for_transcript(
 #[allow(clippy::too_many_arguments)]
 fn build_chip_records(
     proof_idx: usize,
-    idx: usize,
+    chip_idx: usize,
     chip_id: usize,
     fork_idx: usize,
     is_first_air_idx: bool,
@@ -606,8 +606,7 @@ fn build_chip_records(
 
     let mut layer_record = TowerLayerRecord {
         proof_idx,
-        idx,
-        chip_idx: idx,
+        chip_idx,
         is_first_air_idx,
         tidx,
         initial_tower_claim: EF::ZERO,
@@ -660,8 +659,7 @@ fn build_chip_records(
 
     let mut sumcheck_record = TowerSumcheckRecord {
         proof_idx,
-        idx,
-        chip_idx: idx,
+        chip_idx,
         is_first_air_idx,
         tidx: 0,
         layer_tidxs: Vec::new(),
@@ -713,8 +711,7 @@ fn build_chip_records(
     };
     let mut input_record = TowerInputRecord {
         proof_idx,
-        idx,
-        chip_idx: idx,
+        chip_idx,
         tidx,
         final_tidx: tidx,
         num_layers: layer_count,
@@ -864,7 +861,7 @@ fn build_chip_records(
         if let Some(replay_layer) = replay.layers.get(k) {
             eyre::ensure!(
                 folded == replay_layer.claim_in,
-                "tower folded claim mismatch at proof {proof_idx} chip {idx} layer {k}: folded={folded:?}, replay={:?}",
+                "tower folded claim mismatch at proof {proof_idx} chip {chip_idx} layer {k}: folded={folded:?}, replay={:?}",
                 replay_layer.claim_in
             );
         }
@@ -907,7 +904,7 @@ fn build_chip_records(
                     + layer_record.logup_prime_claims[layer_idx]);
             eyre::ensure!(
                 expected == replay_layer.claim_out,
-                "tower expected-eval mismatch at proof {proof_idx} idx {idx} chip_id {chip_id} fork_idx {fork_idx} layer {layer_idx}: expected={expected:?}, replay={:?}, eq={:?}, read_prime={:?}, write_prime={:?}, logup_prime={:?}",
+                "tower expected-eval mismatch at proof {proof_idx} chip_idx {chip_idx} chip_id {chip_id} fork_idx {fork_idx} layer {layer_idx}: expected={expected:?}, replay={:?}, eq={:?}, read_prime={:?}, write_prime={:?}, logup_prime={:?}",
                 replay_layer.claim_out,
                 layer_record.eq_at_r_primes[layer_idx],
                 layer_record.read_prime_claims[layer_idx],
@@ -1098,13 +1095,12 @@ pub(crate) fn build_gkr_blob(
 
             // Tower buses are keyed by the proof-local chip proof index. The
             // VK/circuit index (`chip_id`) is only used above to fetch metadata.
-            let idx = chip_idx;
             // Compute global tidx from fork-local tidx for trace column values.
             let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
             let (chip_input_record, layer_record, tower_record, sumcheck_record, mus_record) =
                 build_chip_records(
                     proof_idx,
-                    idx,
+                    chip_idx,
                     chip_id,
                     pf_entry.fork_idx,
                     chip_idx == 0,
@@ -1124,7 +1120,6 @@ pub(crate) fn build_gkr_blob(
 
         if !has_chip {
             layer_records.push(TowerLayerRecord {
-                idx: 0,
                 chip_idx: 0,
                 proof_idx,
                 is_first_air_idx: true,
@@ -1133,7 +1128,6 @@ pub(crate) fn build_gkr_blob(
             tower_records.push(TowerTowerEvalRecord::default());
             sumcheck_records.push(TowerSumcheckRecord {
                 proof_idx,
-                idx: 0,
                 chip_idx: 0,
                 is_first_air_idx: true,
                 ..Default::default()

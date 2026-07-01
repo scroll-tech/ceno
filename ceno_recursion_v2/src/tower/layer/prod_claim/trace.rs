@@ -101,7 +101,6 @@ fn generate_prod_trace(
                 cols.is_dummy = F::ONE;
                 cols.is_root_layer = F::ONE;
                 cols.proof_idx = F::from_usize(record.proof_idx);
-                cols.idx = F::from_usize(record.idx);
                 cols.chip_idx = F::from_usize(record.chip_idx);
                 cols.layer_idx = F::ZERO;
                 cols.index_id = F::ZERO;
@@ -217,7 +216,6 @@ fn generate_prod_trace(
                         F::from_bool(is_first_row_of_record && record.is_first_air_idx);
                     cols.is_first = F::from_bool(is_first_row_of_layer);
                     cols.proof_idx = F::from_usize(record.proof_idx);
-                    cols.idx = F::from_usize(record.idx);
                     cols.chip_idx = F::from_usize(record.chip_idx);
                     cols.layer_idx = F::from_usize(layer_idx);
                     cols.index_id = F::from_usize(row_in_layer);

@@ -68,7 +68,7 @@ Make AIR traces real (not placeholder) — module by module.
 The PCS verification pipeline — critical path for a sound recursive proof.
 
 - Write Basefold module spec
-- Implement 7 Jagged AIRs per `docs/jagged_reduction_spec.md`
+- Implement Jagged reduction AIRs
 - Implement Basefold AIR(s)
 
 ### Phase 3: Multi-proof aggregation
@@ -87,8 +87,8 @@ The PCS verification pipeline — critical path for a sound recursive proof.
 | Tower/GKR | `TowerInputAir` | `tower/input/air.rs` |
 | Tower/GKR | `TowerLayerAir` | `tower/layer/air.rs` |
 | Tower/GKR | `TowerLayerSumcheckAir` | `tower/sumcheck/air.rs` |
-| Tower/GKR | `TowerProdSumCheckClaimAir` | `tower/layer/prod_claim/air.rs` |
-| Tower/GKR | `TowerLogupSumCheckClaimAir` | `tower/layer/logup_claim/air.rs` |
+| Tower/GKR | `TowerProdClaimAir` | `tower/layer/prod_claim/air.rs` |
+| Tower/GKR | `TowerLogupClaimAir` | `tower/layer/logup_claim/air.rs` |
 | Main | `MainAir` | `main/air.rs` |
 | Main | `MainSumcheckAir` | `main/sumcheck/air.rs` |
 | Inner | `UnsetPvsAir` | `circuit/inner/unset/air.rs` |
@@ -106,7 +106,7 @@ The PCS verification pipeline — critical path for a sound recursive proof.
 | Inner | `VerifierPvsAir` | Tracegen TODO |
 | Inner | `DeferralPvsAir` | Tracegen TODO |
 
-### Not started — Jagged Reduction (7 AIRs, spec in `docs/jagged_reduction_spec.md`)
+### Not started — Jagged Reduction (7 AIRs)
 
 | AIR | Purpose |
 |-----|---------|
