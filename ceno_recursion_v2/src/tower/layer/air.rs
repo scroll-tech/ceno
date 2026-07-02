@@ -179,6 +179,7 @@ where
         ///////////////////////////////////////////////////////////////////////
 
         let is_not_dummy = AB::Expr::ONE - local.is_dummy;
+        let enabled_not_dummy = local.is_enabled * is_not_dummy.clone();
         builder
             .when(is_transition.clone())
             .assert_eq(next.is_dummy, local.is_dummy);
@@ -526,7 +527,7 @@ where
                     + AB::Expr::from_usize(SUMCHECK_INIT_LEN),
                 claim: local.sumcheck_claim_in.map(Into::into),
             },
-            is_not_dummy.clone(),
+            enabled_not_dummy.clone(),
         );
         // 3. TowerSumcheckOutputBus
         // 3a. Receive sumcheck results
@@ -552,7 +553,7 @@ where
                 claim_out: sumcheck_claim_out.map(Into::into),
                 eq_at_r_prime: local.eq_at_r_prime.map(Into::into),
             },
-            is_not_dummy.clone(),
+            enabled_not_dummy.clone(),
         );
         // 4. TowerSumcheckChallengeBus
         // 4a. Send challenge mu
