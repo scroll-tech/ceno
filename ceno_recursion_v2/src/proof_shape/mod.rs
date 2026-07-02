@@ -10,6 +10,7 @@ use openvm_stark_backend::{
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
+use witness::next_pow2_instance_padding;
 
 use crate::{
     proof_shape::{
@@ -118,7 +119,7 @@ impl ProofShapeModule {
             .iter()
             .map(|(&chip_idx, chip_proof)| {
                 let num_instances: usize = chip_proof.num_instances.iter().copied().sum();
-                let padded = num_instances.max(1).next_power_of_two();
+                let padded = next_pow2_instance_padding(num_instances);
                 let log_height = padded.ilog2() as usize;
                 (chip_idx, TraceVData { log_height })
             })

@@ -94,12 +94,10 @@ impl MainModule {
                 let mut ts = ReadOnlyTranscript::new(fork_log, pf_entry.tidx);
                 record_main_transcript(&mut ts, chip_idx, claim);
 
-                // Compute global tidx for trace column values.
-                let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
                 let main_record = MainRecord {
                     proof_idx,
                     idx: chip_idx,
-                    tidx: global_tidx,
+                    tidx: pf_entry.tidx,
                     claim,
                 };
                 let sumcheck_record = build_sumcheck_record_from_chip(
@@ -107,7 +105,7 @@ impl MainModule {
                     chip_idx,
                     claim,
                     chip_proof,
-                    global_tidx,
+                    pf_entry.tidx,
                 );
                 paired.push((main_record, sumcheck_record));
             }

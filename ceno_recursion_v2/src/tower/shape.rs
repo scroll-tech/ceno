@@ -24,7 +24,10 @@ const TOWER_ACTIVITY_KINDS: usize = 3;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TowerShapeRecord {
     pub(crate) proof_idx: usize,
+    /// Compact per-proof tower row index used inside the tower module.
     pub(crate) idx: usize,
+    /// ProofShapeAir sorted row index used to agree on AirShapeBus.
+    pub(crate) air_idx: usize,
     pub(crate) num_vars: usize,
     pub(crate) read_op_vars: usize,
     pub(crate) write_op_vars: usize,
@@ -45,6 +48,7 @@ pub struct TowerShapeCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
+    pub air_idx: T,
     pub num_vars: T,
     pub read_op_vars: T,
     pub write_op_vars: T,
@@ -144,7 +148,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerShapeAir {
                 builder,
                 local.proof_idx,
                 AirShapeBusMessage {
-                    sort_idx: local.idx.into(),
+                    sort_idx: local.air_idx.into(),
                     property_idx: property_idx.to_field(),
                     value,
                 },
@@ -209,6 +213,7 @@ impl RowMajorChip<openvm_stark_sdk::config::baby_bear_poseidon2::F> for TowerSha
             cols.is_enabled = F::ONE;
             cols.proof_idx = F::from_usize(record.proof_idx);
             cols.idx = F::from_usize(record.idx);
+            cols.air_idx = F::from_usize(record.air_idx);
             cols.num_vars = F::from_usize(record.num_vars);
             cols.read_op_vars = F::from_usize(record.read_op_vars);
             cols.write_op_vars = F::from_usize(record.write_op_vars);

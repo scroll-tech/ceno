@@ -492,7 +492,7 @@ where
                 w0_claim: local.w0_claim.map(Into::into),
                 q0_claim: local.q0_claim.map(Into::into),
             },
-            local.is_first_air_idx * is_not_dummy.clone(),
+            local.is_first * is_not_dummy.clone(),
         );
         // 2. TowerLayerOutputBus
         // 2a. Send GKR input layer claims back

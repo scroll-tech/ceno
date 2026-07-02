@@ -51,15 +51,22 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
 
         let (data_slice, _) = trace.split_at_mut(num_valid_rows * width);
 
-        for (row_data, (record, q0_claim)) in data_slice
+        let mut prev_proof_idx = usize::MAX;
+        let mut prev_idx = usize::MAX;
+        for (row_idx, (row_data, (record, q0_claim))) in data_slice
             .chunks_exact_mut(width)
             .zip(gkr_input_records.iter().zip(q0_claims.iter()))
+            .enumerate()
         {
             let cols: &mut TowerInputCols<F> = row_data.borrow_mut();
+            let is_new_proof_idx = prev_proof_idx != record.proof_idx;
+            let is_new_idx = is_new_proof_idx || prev_idx != record.idx;
 
             cols.is_enabled = F::ONE;
             cols.proof_idx = F::from_usize(record.proof_idx);
             cols.idx = F::from_usize(record.idx);
+            cols.is_first_idx = F::from_bool(is_new_proof_idx);
+            cols.is_first = F::from_bool(is_new_idx);
             cols.fork_id = F::from_usize(record.fork_id);
 
             cols.tidx = F::from_usize(record.tidx);
@@ -94,6 +101,20 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
                 .as_basis_coefficients_slice()
                 .try_into()
                 .unwrap();
+            if std::env::var_os("CENO_REC_V2_DEBUG_TOWER_INPUT").is_some() {
+                eprintln!(
+                    "rec-v2-debug module=tower_input source=trace row={} proof_idx={} idx={} is_first_idx={} is_first={} tidx={} n_logup={}",
+                    row_idx,
+                    record.proof_idx,
+                    record.idx,
+                    is_new_proof_idx,
+                    is_new_idx,
+                    record.tidx,
+                    record.n_logup,
+                );
+            }
+            prev_proof_idx = record.proof_idx;
+            prev_idx = record.idx;
         }
 
         Some(RowMajorMatrix::new(trace, width))

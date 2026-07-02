@@ -375,6 +375,7 @@ fn grouped_op_vars(raw_count: usize) -> usize {
 fn build_tower_shape_record(
     proof_idx: usize,
     idx: usize,
+    air_idx: usize,
     chip_proof: &ZKVMChipProof<RecursionField>,
     circuit_vk: &VerifyingKey<RecursionField>,
 ) -> TowerShapeRecord {
@@ -411,6 +412,7 @@ fn build_tower_shape_record(
     TowerShapeRecord {
         proof_idx,
         idx,
+        air_idx,
         num_vars,
         read_op_vars,
         write_op_vars,
@@ -450,6 +452,7 @@ fn tower_schedule_from_replay(
 fn build_chip_records(
     proof_idx: usize,
     idx: usize,
+    air_idx: usize,
     fork_id: usize,
     is_first_air_idx: bool,
     chip_proof: &ZKVMChipProof<RecursionField>,
@@ -457,7 +460,6 @@ fn build_chip_records(
     replay: &TowerReplayResult,
     schedule: &TowerTranscriptSchedule,
     tidx: usize,
-    input_layer_claim: EF,
 ) -> Result<(
     TowerShapeRecord,
     TowerInputRecord,
@@ -467,7 +469,7 @@ fn build_chip_records(
     Vec<EF>,
     EF,
 )> {
-    let shape_record = build_tower_shape_record(proof_idx, idx, chip_proof, circuit_vk);
+    let shape_record = build_tower_shape_record(proof_idx, idx, air_idx, chip_proof, circuit_vk);
     let layer_count = shape_record.max_layer_count;
 
     let read_count = usize::from(shape_record.has_read);
@@ -603,19 +605,6 @@ fn build_chip_records(
         .copied()
         .unwrap_or(EF::ZERO);
 
-    let layer_output_lambda = schedule.lambdas.last().copied().unwrap_or(EF::ZERO);
-    let layer_output_mu = schedule.mus.last().copied().unwrap_or(EF::ZERO);
-    let input_record = TowerInputRecord {
-        proof_idx,
-        idx,
-        fork_id,
-        tidx,
-        n_logup: layer_count,
-        alpha_logup: schedule.alpha_logup,
-        input_layer_claim,
-        layer_output_lambda,
-        layer_output_mu,
-    };
     // Truncate ris to match the sumcheck trace's expected total_rounds.
     sumcheck_record.ris = schedule.ris[..total_sumcheck_rounds.min(schedule.ris.len())].to_vec();
     if !replay.layers.is_empty() && total_sumcheck_rounds > 0 {
@@ -679,6 +668,79 @@ fn build_chip_records(
             layer_record.eq_at_r_primes[k] = eq;
         }
     }
+
+    let layer_output_claim = if layer_count == 0 {
+        EF::ZERO
+    } else {
+        let layer_idx = layer_count - 1;
+        let alpha = layer_record.lambda_at(layer_idx);
+        let mut pow = EF::ONE;
+        let read_weight = if shape_record.has_read {
+            let weight = pow;
+            pow *= alpha;
+            if layer_record.read_active_at(layer_idx) {
+                weight
+            } else {
+                EF::ZERO
+            }
+        } else {
+            EF::ZERO
+        };
+        let write_weight = if shape_record.has_write {
+            let weight = pow;
+            pow *= alpha;
+            if layer_record.write_active_at(layer_idx) {
+                weight
+            } else {
+                EF::ZERO
+            }
+        } else {
+            EF::ZERO
+        };
+        let (logup_p_weight, logup_q_weight) = if shape_record.has_logup {
+            let p_weight = pow;
+            let q_weight = pow * alpha;
+            if layer_record.logup_active_at(layer_idx) {
+                (p_weight, q_weight)
+            } else {
+                (EF::ZERO, EF::ZERO)
+            }
+        } else {
+            (EF::ZERO, EF::ZERO)
+        };
+        let mu = mus_record.get(layer_idx).copied().unwrap_or(EF::ZERO);
+        let logup_quad = tower_record
+            .logup_layers
+            .get(layer_idx)
+            .and_then(|rows| rows.first())
+            .copied()
+            .unwrap_or([EF::ZERO; 4]);
+        read_weight * layer_record.read_claims[layer_idx]
+            + write_weight * layer_record.write_claims[layer_idx]
+            + logup_p_weight * interpolate_pair([logup_quad[0], logup_quad[1]], mu)
+            + logup_q_weight * interpolate_pair([logup_quad[2], logup_quad[3]], mu)
+    };
+    let layer_output_lambda = if layer_count == 0 {
+        EF::ZERO
+    } else {
+        schedule.lambdas.last().copied().unwrap_or(EF::ZERO)
+    };
+    let layer_output_mu = if layer_count == 0 {
+        EF::ZERO
+    } else {
+        schedule.mus.last().copied().unwrap_or(EF::ZERO)
+    };
+    let input_record = TowerInputRecord {
+        proof_idx,
+        idx,
+        fork_id,
+        tidx,
+        n_logup: layer_count,
+        alpha_logup: schedule.alpha_logup,
+        input_layer_claim: layer_output_claim,
+        layer_output_lambda,
+        layer_output_mu,
+    };
 
     if std::env::var_os("CENO_TOWER_DEBUG").is_some() {
         for layer_idx in 0..layer_count {
@@ -855,11 +917,6 @@ pub(crate) fn build_gkr_blob(
 
     for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
         let mut has_chip = false;
-        let mut first_chip_alpha = EF::ZERO;
-        let mut first_chip_q0 = EF::ZERO;
-        let mut last_input_layer_claim = EF::ZERO;
-        let mut last_layer_output_lambda = EF::ZERO;
-        let mut last_layer_output_mu = EF::ZERO;
 
         let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
             .proof_shape
@@ -917,6 +974,7 @@ pub(crate) fn build_gkr_blob(
             ) = build_chip_records(
                 proof_idx,
                 idx,
+                entry_idx,
                 pf_entry.fork_idx,
                 entry_idx == 0,
                 chip_proof,
@@ -924,20 +982,10 @@ pub(crate) fn build_gkr_blob(
                 replay,
                 &schedule,
                 pf_entry.tidx,
-                proof.main_constraint_proof.claimed_sum,
             )?;
 
-            // Capture first chip's alpha and q0 for the proof-level record
-            if entry_idx == 0 {
-                first_chip_alpha = chip_input_record.alpha_logup;
-                first_chip_q0 = q0_claim;
-            }
-            // Always update to latest chip for combined values
-            last_input_layer_claim = chip_input_record.input_layer_claim;
-            last_layer_output_lambda = chip_input_record.layer_output_lambda;
-            last_layer_output_mu = chip_input_record.layer_output_mu;
-
-            // Per-chip records (not input_records)
+            input_records.push(chip_input_record);
+            proof_q0_claims.push(q0_claim);
             shape_records.push(shape_record);
             layer_records.push(layer_record);
             tower_records.push(tower_record);
@@ -946,21 +994,13 @@ pub(crate) fn build_gkr_blob(
             q0_claims.push(q0_claim);
         }
 
-        // ONE input record per proof (matching ProofIdxSubAir constraint)
-        input_records.push(TowerInputRecord {
-            proof_idx,
-            idx: 0,
-            fork_id: 0,
-            tidx: preflight.proof_shape.post_tidx,
-            n_logup: preflight.proof_shape.n_logup,
-            alpha_logup: first_chip_alpha,
-            input_layer_claim: last_input_layer_claim,
-            layer_output_lambda: last_layer_output_lambda,
-            layer_output_mu: last_layer_output_mu,
-        });
-        proof_q0_claims.push(first_chip_q0);
-
         if !has_chip {
+            input_records.push(TowerInputRecord {
+                proof_idx,
+                idx: 0,
+                ..Default::default()
+            });
+            proof_q0_claims.push(EF::ZERO);
             shape_records.push(TowerShapeRecord {
                 idx: 0,
                 proof_idx,
