@@ -1065,6 +1065,79 @@ pub(crate) fn build_gkr_blob(
     })
 }
 
+pub(crate) fn collect_tower_range_checks(
+    child_vk: &RecursionVk,
+    proofs: &[RecursionProof],
+    preflights: &[Preflight],
+) -> Result<Vec<usize>> {
+    let mut values = Vec::new();
+    eyre::ensure!(
+        proofs.len() == preflights.len(),
+        "proof/preflight length mismatch"
+    );
+
+    for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
+        let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
+            .proof_shape
+            .sorted_trace_vdata
+            .iter()
+            .enumerate()
+            .map(|(sorted_idx, (chip_idx, _))| (*chip_idx, sorted_idx))
+            .collect();
+        let mut sorted_pf_entries: Vec<_> = preflight.gkr.chips.iter().collect();
+        sorted_pf_entries.sort_by_key(|entry| {
+            (
+                sorted_idx_by_chip
+                    .get(&entry.chip_idx)
+                    .copied()
+                    .unwrap_or(usize::MAX),
+                entry.chip_idx,
+            )
+        });
+
+        for (entry_idx, pf_entry) in sorted_pf_entries.into_iter().enumerate() {
+            let chip_idx = pf_entry.chip_idx;
+            let chip_proof = proof
+                .chip_proofs
+                .get(&chip_idx)
+                .ok_or_else(|| eyre::eyre!("missing chip proof for chip {chip_idx}"))?;
+            let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
+                .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_idx}"))?;
+            let record =
+                build_tower_shape_record(proof_idx, entry_idx, entry_idx, chip_proof, circuit_vk);
+
+            for tower_vars in [
+                record.read_tower_vars,
+                record.write_tower_vars,
+                record.logup_tower_vars,
+            ] {
+                values.push(record.max_tower_vars - tower_vars);
+            }
+
+            for layer_idx in 0..record.max_layer_count {
+                for kind in 0..shape::TOWER_ACTIVITY_KINDS {
+                    let (has_kind, tower_vars) = match kind {
+                        shape::TOWER_ACTIVITY_READ => (record.has_read, record.read_tower_vars),
+                        shape::TOWER_ACTIVITY_WRITE => (record.has_write, record.write_tower_vars),
+                        shape::TOWER_ACTIVITY_LOGUP => (record.has_logup, record.logup_tower_vars),
+                        _ => unreachable!(),
+                    };
+                    let active = has_kind && layer_idx + 1 < tower_vars;
+                    if active {
+                        values.push(tower_vars - 1 - layer_idx);
+                    } else if tower_vars == 0 {
+                        values.push(layer_idx + 1);
+                    } else {
+                        values.push(layer_idx + 1 - tower_vars);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(values)
+}
+
 pub(crate) fn record_gkr_transcript<TS>(
     ts: &mut TS,
     _chip_idx: usize,

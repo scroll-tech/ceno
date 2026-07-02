@@ -378,7 +378,9 @@ where
                         value: eval[i].into(),
                         is_sample: AB::Expr::ZERO,
                     },
-                    local.is_enabled * is_not_dummy.clone(),
+                    local.is_enabled
+                        * is_not_dummy.clone()
+                        * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
                 );
             }
             tidx += AB::Expr::from_usize(D_EF);
@@ -394,7 +396,9 @@ where
                     value: local.challenge[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_enabled * is_not_dummy.clone(),
+                local.is_enabled
+                    * is_not_dummy.clone()
+                    * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
             );
         }
 

@@ -313,7 +313,7 @@ where
             builder,
             RangeCheckerBusMessage {
                 value: local.log_height - next.log_height,
-                max_bits: AB::Expr::from_usize(5),
+                max_bits: AB::Expr::from_usize(8),
             },
             and(local.is_valid, not(next.is_last)),
         );
@@ -376,6 +376,7 @@ where
         // Native verifier merge phase:
         //   sample one EF from each fresh fork transcript, then observe that EF
         //   on the trunk in fork-id order.
+        let transcript_enabled = AB::Expr::from_bool(!self.tower_prefix_only);
         let merge_tidx = local.fork_start_tidx.into() + local.fork_id * AB::Expr::from_usize(D_EF);
         for i in 0..D_EF {
             self.transcript_bus.receive(
@@ -386,7 +387,7 @@ where
                     value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_present,
+                local.is_present * transcript_enabled.clone(),
             );
         }
 
@@ -418,7 +419,7 @@ where
                     value: local.lookup_challenge_alpha[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_present * local.is_valid,
+                local.is_present * local.is_valid * transcript_enabled.clone(),
             );
             self.forked_transcript_bus.receive(
                 builder,
@@ -429,7 +430,7 @@ where
                     value: local.lookup_challenge_beta[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_present * local.is_valid,
+                local.is_present * local.is_valid * transcript_enabled.clone(),
             );
         }
         self.forked_transcript_bus.receive(
@@ -441,7 +442,7 @@ where
                 value: fork_id.clone().into(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_present * local.is_valid,
+            local.is_present * local.is_valid * transcript_enabled.clone(),
         );
         // Fork transcript metadata order is fixed: num_present, air_idx, then log_height.
         self.forked_transcript_bus.receive(
@@ -453,7 +454,7 @@ where
                 value: air_idx.clone(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_present * local.is_valid,
+            local.is_present * local.is_valid * transcript_enabled.clone(),
         );
         self.forked_transcript_bus.receive(
             builder,
@@ -464,7 +465,7 @@ where
                 value: local.log_height.into(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_present * local.is_valid,
+            local.is_present * local.is_valid * transcript_enabled.clone(),
         );
 
         // Skip the full per-air tower transcript span (out-evals, alpha/beta,
@@ -486,7 +487,7 @@ where
                     value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_present * local.is_valid,
+                local.is_present * local.is_valid * transcript_enabled.clone(),
             );
             self.forked_transcript_bus.receive(
                 builder,
@@ -497,7 +498,7 @@ where
                     value: local.after_forked_challenge_2[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_present * local.is_valid,
+                local.is_present * local.is_valid * transcript_enabled.clone(),
             );
         }
 
@@ -603,7 +604,7 @@ where
             builder,
             RangeCheckerBusMessage {
                 value: n.clone(),
-                max_bits: AB::Expr::from_usize(5),
+                max_bits: AB::Expr::from_usize(8),
             },
             local.is_present,
         );
@@ -712,7 +713,7 @@ where
             RangeCheckerBusMessage {
                 value: (local.n_max - n.clone())
                     * (local.is_n_max_greater * AB::F::TWO - AB::F::ONE),
-                max_bits: AB::Expr::from_usize(5),
+                max_bits: AB::Expr::from_usize(8),
             },
             local.is_last,
         );

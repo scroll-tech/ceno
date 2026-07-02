@@ -593,7 +593,9 @@ where
                     value: local.lambda[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                is_non_root_layer.clone() * is_not_dummy.clone(),
+                is_non_root_layer.clone()
+                    * is_not_dummy.clone()
+                    * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
             );
         }
         // 1b. Observe layer claims
@@ -609,7 +611,9 @@ where
                     value: local.mu[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_enabled * is_not_dummy.clone(),
+                local.is_enabled
+                    * is_not_dummy.clone()
+                    * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
             );
         }
     }

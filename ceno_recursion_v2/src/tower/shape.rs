@@ -19,7 +19,7 @@ use crate::{
 pub(crate) const TOWER_ACTIVITY_READ: usize = 0;
 pub(crate) const TOWER_ACTIVITY_WRITE: usize = 1;
 pub(crate) const TOWER_ACTIVITY_LOGUP: usize = 2;
-const TOWER_ACTIVITY_KINDS: usize = 3;
+pub(crate) const TOWER_ACTIVITY_KINDS: usize = 3;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct TowerShapeRecord {
@@ -132,7 +132,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerShapeAir {
                 builder,
                 RangeCheckerBusMessage {
                     value: local.max_tower_vars - tower_vars,
-                    max_bits: AB::Expr::from_usize(6),
+                    max_bits: AB::Expr::from_usize(8),
                 },
                 local.is_enabled,
             );
@@ -337,7 +337,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerActivityAir {
             builder,
             RangeCheckerBusMessage {
                 value: active_limit.clone() - local.layer_idx,
-                max_bits: AB::Expr::from_usize(6),
+                max_bits: AB::Expr::from_usize(8),
             },
             local.is_enabled * local.active,
         );
@@ -345,7 +345,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerActivityAir {
             builder,
             RangeCheckerBusMessage {
                 value: local.layer_idx - active_limit,
-                max_bits: AB::Expr::from_usize(6),
+                max_bits: AB::Expr::from_usize(8),
             },
             local.is_enabled * (AB::Expr::ONE - local.active),
         );

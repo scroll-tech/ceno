@@ -169,7 +169,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
                         pv_idx: AB::Expr::from_usize(pv_idx),
                         value: vm_public_value_by_index::<AB>(local, *global_pv_idx),
                     },
-                    local.is_valid,
+                    local.is_valid * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
                 );
             }
         }
@@ -199,7 +199,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
                     value: (*value).into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_valid,
+                local.is_valid * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
             );
         }
         for (didx, value) in local.child_pvs.fixed_no_omc_init_commit.iter().enumerate() {
@@ -211,7 +211,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
                     value: (*value).into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_valid,
+                local.is_valid * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
             );
         }
         for (didx, value) in local.child_pvs.witness_commit.iter().enumerate() {
@@ -225,7 +225,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
                     value: (*value).into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_valid,
+                local.is_valid * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
             );
         }
 

@@ -248,7 +248,9 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                     value: local.alpha_logup[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_enabled * has_interactions.clone(),
+                local.is_enabled
+                    * has_interactions.clone()
+                    * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
             );
         }
         self.main_bus.send(

@@ -121,9 +121,9 @@ where
                 pv_idx: local.pv_idx,
                 value: local.value,
             },
-            local.is_valid,
+            local.is_valid * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
         );
-        if self.continuations_enabled {
+        if self.continuations_enabled && !crate::system::TOWER_PREFIX_ONLY {
             self.public_values_bus.send(
                 builder,
                 local.proof_idx,
@@ -145,7 +145,7 @@ where
                 value: local.value.into(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_valid,
+            local.is_valid * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
         );
     }
 }

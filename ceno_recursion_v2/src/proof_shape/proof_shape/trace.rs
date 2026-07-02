@@ -143,6 +143,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
             let mut sorted_idx = 0usize;
             let mut num_present = 0usize;
+            let mut row_log_heights = Vec::with_capacity(num_airs);
             let fork_id_by_chip = proof
                 .chip_proofs
                 .keys()
@@ -193,10 +194,16 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.height_1 = F::from_usize(height_1);
                 cols.height_2 = F::from_usize(height_2);
                 cols.num_present = F::from_usize(num_present);
-                cols.height_1_limbs =
-                    decompose_usize::<NUM_LIMBS, LIMB_BITS>(height_1).map(F::from_usize);
-                cols.height_2_limbs =
-                    decompose_usize::<NUM_LIMBS, LIMB_BITS>(height_2).map(F::from_usize);
+                let height_1_limbs = decompose_usize::<NUM_LIMBS, LIMB_BITS>(height_1);
+                let height_2_limbs = decompose_usize::<NUM_LIMBS, LIMB_BITS>(height_2);
+                cols.height_1_limbs = height_1_limbs.map(F::from_usize);
+                cols.height_2_limbs = height_2_limbs.map(F::from_usize);
+                for limb in height_1_limbs {
+                    self.range_checker.add_count(limb);
+                }
+                for limb in height_2_limbs {
+                    self.range_checker.add_count(limb);
+                }
                 cols.n_max = F::from_usize(preflight.proof_shape.n_max);
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
@@ -221,6 +228,8 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 }
 
                 self.pow_checker.add_pow(log_height);
+                self.range_checker.add_count(log_height);
+                row_log_heights.push(log_height);
                 sorted_idx += 1;
             }
 
@@ -249,6 +258,9 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.num_present = F::from_usize(num_present);
                 cols.height_1_limbs = [F::ZERO; NUM_LIMBS];
                 cols.height_2_limbs = [F::ZERO; NUM_LIMBS];
+                for _ in 0..(2 * NUM_LIMBS) {
+                    self.range_checker.add_count(0);
+                }
                 cols.n_max = F::from_usize(preflight.proof_shape.n_max);
                 cols.is_n_max_greater = F::ZERO;
                 cols.num_air_id_lookups = F::ZERO;
@@ -270,7 +282,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     *dst = F::from_u32(*src);
                 }
 
+                row_log_heights.push(0);
                 sorted_idx += 1;
+            }
+
+            for pair in row_log_heights.windows(2) {
+                self.range_checker.add_count(pair[0] - pair[1]);
             }
 
             let chunk = chunks.next().unwrap();
@@ -296,6 +313,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.n_max = F::from_usize(preflight.proof_shape.n_max);
             cols.is_n_max_greater =
                 F::from_bool(preflight.proof_shape.n_max > preflight.proof_shape.n_logup);
+            self.range_checker.add_count(
+                preflight
+                    .proof_shape
+                    .n_max
+                    .abs_diff(preflight.proof_shape.n_logup),
+            );
             cols.num_air_id_lookups = F::ZERO;
             cols.num_columns = F::ZERO;
             cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;

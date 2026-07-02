@@ -221,16 +221,22 @@ impl<'a> TraceModuleRef<'a> {
                 ),
                 required_heights,
             ),
-            TraceModuleRef::ProofShape(module) => module.generate_proving_ctxs(
-                child_vk,
-                proofs,
-                preflights,
-                &(
-                    pow_checker_gen.clone(),
-                    external_data.range_check_inputs.as_slice(),
-                ),
-                required_heights,
-            ),
+            TraceModuleRef::ProofShape(module) => {
+                let mut range_check_inputs = external_data.range_check_inputs.to_vec();
+                if TOWER_PREFIX_ONLY {
+                    range_check_inputs.extend(
+                        crate::tower::collect_tower_range_checks(child_vk, proofs, preflights)
+                            .ok()?,
+                    );
+                }
+                module.generate_proving_ctxs(
+                    child_vk,
+                    proofs,
+                    preflights,
+                    &(pow_checker_gen.clone(), range_check_inputs.as_slice()),
+                    required_heights,
+                )
+            }
             TraceModuleRef::Main(module) => {
                 module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
             }
@@ -339,6 +345,25 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             + Clone,
     {
         let mut preflight = Preflight::default();
+
+        if TOWER_PREFIX_ONLY {
+            let log = sponge.clone().into_log();
+            let values = log.values();
+            if values.len() >= 2 * D_EF {
+                let alpha_start = values.len() - 2 * D_EF;
+                let beta_start = values.len() - D_EF;
+                if let Some(alpha) =
+                    EF::from_basis_coefficients_slice(&values[alpha_start..alpha_start + D_EF])
+                {
+                    preflight.vm_pvs.lookup_challenge_alpha = alpha;
+                }
+                if let Some(beta) =
+                    EF::from_basis_coefficients_slice(&values[beta_start..beta_start + D_EF])
+                {
+                    preflight.vm_pvs.lookup_challenge_beta = beta;
+                }
+            }
+        }
 
         // Phase 1: Trunk operations.
         // Proof-shape metadata and alpha/beta sampling after pre-verifier transcript observes.

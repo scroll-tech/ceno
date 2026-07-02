@@ -249,17 +249,21 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
                 is_sample: AB::Expr::ONE,
             };
             let is_trunk = AB::Expr::ONE - local.is_fork;
+            let transcript_bus_enabled = AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY);
             self.transcript_bus.send(
                 builder,
                 local.proof_idx,
                 observe_message,
-                is_trunk.clone() * local.mask[i] * (AB::Expr::ONE - local.is_sample),
+                is_trunk.clone()
+                    * local.mask[i]
+                    * (AB::Expr::ONE - local.is_sample)
+                    * transcript_bus_enabled.clone(),
             );
             self.transcript_bus.send(
                 builder,
                 local.proof_idx,
                 sample_message,
-                is_trunk.clone() * local.mask[i] * local.is_sample,
+                is_trunk.clone() * local.mask[i] * local.is_sample * transcript_bus_enabled.clone(),
             );
 
             self.forked_transcript_bus.send(
@@ -271,7 +275,10 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
                     value: local.prev_state[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_fork * local.mask[i] * (AB::Expr::ONE - local.is_sample),
+                local.is_fork
+                    * local.mask[i]
+                    * (AB::Expr::ONE - local.is_sample)
+                    * transcript_bus_enabled.clone(),
             );
             self.forked_transcript_bus.send(
                 builder,
@@ -282,7 +289,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
                     value: local.prev_state[CHUNK - 1 - i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_fork * local.mask[i] * local.is_sample,
+                local.is_fork * local.mask[i] * local.is_sample * transcript_bus_enabled.clone(),
             );
         }
 
