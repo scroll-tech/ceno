@@ -97,6 +97,8 @@ pub struct TowerChipTranscriptRange {
     pub num_layers: usize,
     /// Fork-local tidx (position within the fork's transcript log).
     pub tidx: usize,
+    /// Fork-local tidx immediately after this tower transcript span.
+    pub tidx_end: usize,
     /// Index into `Preflight::fork_transcripts`.
     pub fork_idx: usize,
     pub tower_replay: TowerReplayResult,

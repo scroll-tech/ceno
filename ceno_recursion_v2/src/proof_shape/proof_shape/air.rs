@@ -17,11 +17,10 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirShapeBus, AirShapeBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
-        ForkedTranscriptBus, ForkedTranscriptBusMessage, FractionFolderInputBus,
-        FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage, LiftedHeightsBus,
-        LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage,
-        NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TowerRootClaimBus,
+        AirShapeBus, AirShapeBusMessage, ExpressionClaimNMaxBus, ForkedTranscriptBus,
+        ForkedTranscriptBusMessage, FractionFolderInputBus, HyperdimBus, HyperdimBusMessage,
+        LiftedHeightsBus, LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind,
+        LookupChallengeMessage, NLiftBus, TowerModuleBus, TowerModuleMessage, TowerRootClaimBus,
         TowerRootClaimMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
@@ -661,36 +660,17 @@ where
             local.is_present * local.is_valid,
         );
 
-        // Send n_max value to expression claim air
-        self.expression_claim_n_max_bus.send(
-            builder,
-            local.proof_idx,
-            ExpressionClaimNMaxMessage {
-                n_max: local.n_max.into(),
-            },
-            AB::Expr::ZERO,
+        // TODO(recursive-circuit-incremental): re-enable these exports once
+        // BatchConstraintModule is active and can consume them:
+        // - ExpressionClaimNMaxBus(n_max)
+        // - NLiftBus(air_idx, n_lift)
+        // - FractionFolderInputBus(num_present_airs)
+        let _ = (
+            &self.expression_claim_n_max_bus,
+            &self.n_lift_bus,
+            &self.fraction_folder_input_bus,
         );
-
-        // Send n_lift to constraint folding air
-        self.n_lift_bus.send(
-            builder,
-            local.proof_idx,
-            NLiftMessage {
-                air_idx: air_idx,
-                n_lift: local.log_height.into(),
-            },
-            AB::Expr::ZERO,
-        );
-
-        // Send count of present airs to fraction folder air
-        self.fraction_folder_input_bus.send(
-            builder,
-            local.proof_idx,
-            FractionFolderInputMessage {
-                num_present_airs: local.num_present,
-            },
-            AB::Expr::ZERO,
-        );
+        let _ = air_idx;
     }
 }
 

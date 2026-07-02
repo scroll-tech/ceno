@@ -291,6 +291,7 @@ impl TowerModule {
                         .map(|circuit_vk| tower_layer_count_from_vk(circuit_vk, chip_proof))
                         .unwrap_or(0),
                     tidx,
+                    tidx_end: ts.len(),
                     fork_idx: 0, // unused in forked flow
                     tower_replay,
                 });
@@ -441,6 +442,7 @@ where
     (schedule, replay)
 }
 
+#[allow(dead_code)]
 pub(crate) fn derive_tower_input_claim_for_transcript(
     child_vk: &RecursionVk,
     chip_id: usize,

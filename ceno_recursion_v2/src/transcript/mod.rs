@@ -353,23 +353,13 @@ fn should_export_global(tidx: usize, ranges: Option<&[(usize, usize)]>) -> bool 
 }
 
 fn fork_global_export_ranges(preflight: &Preflight, fork_idx: usize) -> Vec<(usize, usize)> {
-    let Some(main_tidx) = preflight
-        .main
-        .chips
-        .iter()
-        .find(|entry| entry.fork_idx == fork_idx)
-        .map(|entry| entry.tidx)
-    else {
-        return Vec::new();
-    };
-
     preflight
         .gkr
         .chips
         .iter()
         .filter(|entry| entry.fork_idx == fork_idx)
         .filter(|entry| entry.num_layers > 0)
-        .flat_map(|entry| [(entry.tidx, main_tidx), (main_tidx, main_tidx + D_EF)])
+        .filter_map(|entry| (entry.tidx < entry.tidx_end).then_some((entry.tidx, entry.tidx_end)))
         .collect()
 }
 
@@ -378,6 +368,10 @@ fn trunk_global_export_ranges(preflight: &Preflight) -> Vec<(usize, usize)> {
     if preflight.batch_constraint.lambda_tidx == 0
         && preflight.batch_constraint.tidx_before_univariate == 0
     {
+        // VmPvsAir remains active outside the system module and consumes the
+        // verifier transcript prefix. With BatchConstraint disabled, the trunk
+        // contains only that prefix plus fork-merge observations, so exporting
+        // the full trunk remains balanced.
         return if log_len == 0 {
             Vec::new()
         } else {
@@ -416,10 +410,12 @@ impl AirModule for TranscriptModule {
             transcript_bus: self.bus_inventory.transcript_bus,
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             poseidon2_permute_bus: self.bus_inventory.poseidon2_permute_bus,
-            final_state_bus: self
-                .final_state_bus_enabled
-                .then_some(self.bus_inventory.final_state_bus),
+            // TODO(recursive-circuit-incremental): re-enable final transcript
+            // state export once its consumer module is active in the reduced
+            // recursive circuit.
+            final_state_bus: None,
         };
+        let _ = self.final_state_bus_enabled;
         let poseidon2_air = Poseidon2Air::<F, SBOX_REGISTERS> {
             subair: self.sub_chip.air.clone(),
             poseidon2_permute_bus: self.bus_inventory.poseidon2_permute_bus,

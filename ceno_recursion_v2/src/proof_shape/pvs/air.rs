@@ -116,6 +116,8 @@ where
         when_same_air.assert_eq(next.pv_idx, local.pv_idx + AB::Expr::ONE);
         when_same_air.assert_eq(next.tidx, local.tidx + AB::Expr::ONE);
 
+        // VmPvsAir remains active outside the system module and consumes
+        // verifier public values through this bus.
         self.public_values_bus.send(
             builder,
             local.proof_idx,
