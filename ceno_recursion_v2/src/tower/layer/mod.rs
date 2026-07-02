@@ -5,11 +5,10 @@ mod trace;
 
 pub use air::{TowerLayerAir, TowerLayerCols};
 pub use logup_claim::{
-    TowerLogupSumCheckClaimAir, TowerLogupSumCheckClaimCols, TowerLogupSumCheckClaimTraceGenerator,
+    TowerLogupClaimAir, TowerLogupSumCheckClaimCols, TowerLogupSumCheckClaimTraceGenerator,
 };
 pub use prod_claim::{
-    TowerProdReadSumCheckClaimAir, TowerProdReadSumCheckClaimTraceGenerator,
-    TowerProdSumCheckClaimCols, TowerProdWriteSumCheckClaimAir,
-    TowerProdWriteSumCheckClaimTraceGenerator,
+    TowerProdReadClaimAir, TowerProdReadSumCheckClaimTraceGenerator, TowerProdSumCheckClaimCols,
+    TowerProdWriteClaimAir, TowerProdWriteSumCheckClaimTraceGenerator,
 };
 pub use trace::{TowerLayerRecord, TowerLayerTraceGenerator};

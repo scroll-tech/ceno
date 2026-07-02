@@ -4,7 +4,7 @@ use itertools::fold;
 use openvm_circuit_primitives::{
     SubAir,
     encoder::Encoder,
-    utils::{and, not, or},
+    utils::{and, not},
 };
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
@@ -21,10 +21,9 @@ use crate::{
         ForkedTranscriptBus, ForkedTranscriptBusMessage, FractionFolderInputBus,
         FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage, LiftedHeightsBus,
         LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage,
-        NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
-        TranscriptBusMessage,
+        NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TowerRootClaimBus,
+        TowerRootClaimMessage, TranscriptBus, TranscriptBusMessage,
     },
-    circuit::inner::vm_pvs::VmPvs,
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
         AirMetadata,
@@ -53,6 +52,8 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     pub log_height: F,
     /// Whether this AIR needs rotation openings.
     pub need_rot: F,
+    /// Number of tower reduction layers for this chip proof.
+    pub num_tower_layers: F,
 
     // First possible transcript index of the current AIR.
     pub starting_tidx: F,
@@ -68,6 +69,8 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
 
     // Number of present AIRs so far
     pub num_present: F,
+    /// Native fork transcript id for this chip proof.
+    pub fork_id: F,
 
     /// Limb decomposition of per-instance heights used for range/decomposition checks.
     pub height_1_limbs: [F; NUM_LIMBS],
@@ -85,8 +88,16 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     /// forking). Constrained to be identical across all rows within a proof.
     pub lookup_challenge_alpha: [F; D_EF],
     pub lookup_challenge_beta: [F; D_EF],
-    pub after_forked_challenge_1: [F; D_EF],
-    pub after_forked_challenge_2: [F; D_EF],
+    /// Fork-local tidx of the final fork sample merged back into the trunk transcript.
+    pub fork_sample_tidx: F,
+    /// Trunk tidx where this fork's final sample is observed during merge.
+    pub merge_tidx: F,
+    pub fork_merge_sample: [F; D_EF],
+
+    pub r0_claim: [F; D_EF],
+    pub w0_claim: [F; D_EF],
+    pub p0_claim: [F; D_EF],
+    pub q0_claim: [F; D_EF],
 }
 
 // Variable-length columns are stored at the end
@@ -113,6 +124,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
 
     // Inter-module buses
     pub tower_module_bus: TowerModuleBus,
+    pub tower_root_claim_bus: TowerRootClaimBus,
     pub air_shape_bus: AirShapeBus,
     pub expression_claim_n_max_bus: ExpressionClaimNMaxBus,
     pub fraction_folder_input_bus: FractionFolderInputBus,
@@ -157,6 +169,7 @@ where
         let local: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*local)[..const_width].borrow();
         let next: &ProofShapeCols<AB::Var, NUM_LIMBS> = (*next)[..const_width].borrow();
         let n = local.log_height.into();
+        let num_tower_layers: AB::Expr = local.num_tower_layers.into();
 
         self.idx_encoder.eval(builder, localv.idx_flags);
 
@@ -204,11 +217,11 @@ where
 
         // Select values for NumPublicValuesBus
         let mut num_pvs = AB::Expr::ZERO;
+        // Per-selected-air tower transcript span (used for fork challenge tidx bump).
+        let mut tower_tidx_bump = AB::Expr::ZERO;
         let mut num_read_count = AB::Expr::ZERO;
         let mut num_write_count = AB::Expr::ZERO;
         let mut num_logup_count = AB::Expr::ZERO;
-        // Per-selected-air tower transcript span (used for fork challenge tidx bump).
-        let mut tower_tidx_bump = AB::Expr::ZERO;
 
         for (i, air_data) in self.per_air.iter().enumerate() {
             // We keep a running tally of how many transcript reads there should be up to any
@@ -222,25 +235,21 @@ where
             num_fixed += is_current_air.clone() * AB::F::from_usize(air_data.num_fixed);
 
             num_pvs += is_current_air.clone() * AB::F::from_usize(air_data.num_public_values);
+            num_read_count += is_current_air.clone() * AB::F::from_usize(air_data.num_read_count);
+            num_write_count += is_current_air.clone() * AB::F::from_usize(air_data.num_write_count);
+            num_logup_count += is_current_air.clone() * AB::F::from_usize(air_data.num_logup_count);
 
             if air_data.is_required {
                 is_required += is_current_air.clone();
                 when_current.assert_one(local.is_present);
             }
 
-            num_read_count +=
-                is_current_air.clone() * AB::Expr::from_usize(air_data.num_read_count);
-            num_write_count +=
-                is_current_air.clone() * AB::Expr::from_usize(air_data.num_write_count);
-            num_logup_count +=
-                is_current_air.clone() * AB::Expr::from_usize(air_data.num_logup_count);
-
             // Keep this aligned with TowerInputAir's `tidx_after_gkr_layers`
             // arithmetic so fork challenge placement and tower buses share one
             // transcript span model.
             tower_tidx_bump += is_current_air
                 * per_air_tower_span::<AB>(
-                    n.clone(),
+                    num_tower_layers.clone(),
                     air_data.num_read_count,
                     air_data.num_write_count,
                     air_data.num_logup_count,
@@ -290,7 +299,7 @@ where
                 value: local.log_height - next.log_height,
                 max_bits: AB::Expr::from_usize(5),
             },
-            and(local.is_valid, not(next.is_last)),
+            AB::Expr::ZERO,
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -305,7 +314,7 @@ where
                     word_idx: AB::Expr::from_usize(i),
                     value: local.lookup_challenge_alpha[i].into(),
                 },
-                local.is_present * local.is_valid,
+                AB::Expr::ZERO,
             );
         }
         for i in 0..D_EF {
@@ -317,22 +326,13 @@ where
                     word_idx: AB::Expr::from_usize(i),
                     value: local.lookup_challenge_beta[i].into(),
                 },
-                local.is_present * local.is_valid,
+                AB::Expr::ZERO,
             );
         }
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // TRANSCRIPT OBSERVATIONS
         ///////////////////////////////////////////////////////////////////////////////////////////
-
-        let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
-
-        // The first AIR starts immediately after the fixed trunk transcript prefix.
-        builder.when(is_first_idx.clone()).assert_eq(
-            local.starting_tidx,
-            AB::Expr::from_usize(TranscriptLabel::Riscv.field_len() + VmPvs::<u8>::width())
-                + AB::Expr::from_usize(2 * D_EF),
-        );
 
         self.starting_tidx_bus.receive(
             builder,
@@ -342,44 +342,10 @@ where
                     + AB::Expr::from_usize(self.per_air.len()) * local.is_last,
                 tidx: local.starting_tidx.into(),
             },
-            or(
-                local.is_last,
-                and(local.is_valid, not::<AB::Expr>(is_first_idx)),
-            ),
+            AB::Expr::ZERO,
         );
 
-        // Challenges are laid out in trunk transcript as contiguous EF limbs per present AIR.
-        // We jump directly to this AIR's segment using num_present (1-based among present AIRs).
-        let mut tidx =
-            local.starting_tidx.into() + local.num_present * AB::Expr::from_usize(2 * D_EF);
-
-        for i in 0..D_EF {
-            self.transcript_bus.receive(
-                builder,
-                local.proof_idx,
-                TranscriptBusMessage {
-                    tidx: tidx.clone() + AB::Expr::from_usize(i),
-                    value: local.after_forked_challenge_1[i].into(),
-                    is_sample: AB::Expr::ZERO,
-                },
-                local.is_present,
-            );
-        }
-        tidx += AB::Expr::from_usize(D_EF) * local.is_present;
-
-        for i in 0..D_EF {
-            self.transcript_bus.receive(
-                builder,
-                local.proof_idx,
-                TranscriptBusMessage {
-                    tidx: tidx.clone() + AB::Expr::from_usize(i),
-                    value: local.after_forked_challenge_2[i].into(),
-                    is_sample: AB::Expr::ZERO,
-                },
-                local.is_present,
-            );
-        }
-        tidx += AB::Expr::from_usize(D_EF) * local.is_present;
+        let tidx = local.starting_tidx + local.is_present * tower_tidx_bump;
 
         // constrain next air tid
         self.starting_tidx_bus.send(
@@ -389,7 +355,7 @@ where
                 air_idx: air_idx.clone() + AB::F::ONE,
                 tidx,
             },
-            local.is_valid,
+            AB::Expr::ZERO,
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -402,7 +368,18 @@ where
         // chips would require a separate fork_id column.
         // Receive fork transcript words after the fork label prefix.
         let fork_tidx_base = TranscriptLabel::Fork.field_len();
-        let fork_id = local.num_present - AB::F::ONE;
+        let fork_id = local.fork_id.into();
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: fork_id.clone(),
+                tidx: AB::Expr::ZERO,
+                value: AB::Expr::from_usize(1802661734), // u32::from_le_bytes(*b"fork")
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
+        );
         // observe lookup alpha/beta
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
@@ -457,20 +434,22 @@ where
             ForkedTranscriptBusMessage {
                 fork_id: fork_id.clone().into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 2),
-                value: local.log_height.into(),
+                value: local.height_1.into(),
                 is_sample: AB::Expr::ZERO,
             },
             local.is_present * local.is_valid,
         );
-
-        // Skip the full per-air tower transcript span (out-evals, alpha/beta,
-        // and all GKR/sumcheck layer transcript activity) before binding the
-        // post-fork sampled challenges.
-        let forked_challenge_1_tidx =
-            AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3) + tower_tidx_bump;
-        // Challenge 2 starts after challenge 1 plus the product_sum label span.
-        let forked_challenge_2_tidx =
-            forked_challenge_1_tidx.clone() + AB::Expr::from_usize(tower_transcript_len::BETA_LEN);
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: fork_id.clone().into(),
+                tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3),
+                value: local.height_2.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
+        );
 
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
@@ -478,20 +457,19 @@ where
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: fork_id.clone().into(),
-                    tidx: forked_challenge_1_tidx.clone() + AB::Expr::from_usize(i),
-                    value: local.after_forked_challenge_1[i].into(),
+                    tidx: local.fork_sample_tidx.into() + AB::Expr::from_usize(i),
+                    value: local.fork_merge_sample[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
                 local.is_present * local.is_valid,
             );
-            self.forked_transcript_bus.receive(
+            self.transcript_bus.receive(
                 builder,
                 local.proof_idx,
-                ForkedTranscriptBusMessage {
-                    fork_id: fork_id.clone().into(),
-                    tidx: forked_challenge_2_tidx.clone() + AB::Expr::from_usize(i),
-                    value: local.after_forked_challenge_2[i].into(),
-                    is_sample: AB::Expr::ONE,
+                TranscriptBusMessage {
+                    tidx: local.merge_tidx.into() + AB::Expr::from_usize(i),
+                    value: local.fork_merge_sample[i].into(),
+                    is_sample: AB::Expr::ZERO,
                 },
                 local.is_present * local.is_valid,
             );
@@ -508,7 +486,7 @@ where
                 property_idx: AirShapeProperty::AirId.to_field(),
                 value: air_idx.clone(),
             },
-            local.is_present * local.num_air_id_lookups,
+            AB::Expr::ZERO,
         );
 
         self.air_shape_bus.add_key_with_lookups(
@@ -519,7 +497,7 @@ where
                 property_idx: AirShapeProperty::NumInteractions.to_field(),
                 value: AB::Expr::ZERO,
             },
-            local.is_present,
+            AB::Expr::ZERO,
         );
 
         self.air_shape_bus.add_key_with_lookups(
@@ -530,40 +508,8 @@ where
                 property_idx: AirShapeProperty::NeedRot.to_field(),
                 value: local.need_rot.into(),
             },
-            local.is_present * local.num_columns,
+            AB::Expr::ZERO,
         );
-        self.air_shape_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NumRead.to_field(),
-                value: num_read_count.clone(),
-            },
-            // each layer lookup once if current air was present
-            local.is_present * n.clone(),
-        );
-        self.air_shape_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NumWrite.to_field(),
-                value: num_write_count.clone(),
-            },
-            local.is_present * n.clone(),
-        );
-        self.air_shape_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NumLk.to_field(),
-                value: num_logup_count,
-            },
-            local.is_present * n.clone(),
-        );
-
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HYPERDIM LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -581,7 +527,7 @@ where
                 value: n.clone(),
                 max_bits: AB::Expr::from_usize(5),
             },
-            local.is_present,
+            AB::Expr::ZERO,
         );
 
         self.hyperdim_bus.add_key_with_lookups(
@@ -592,7 +538,7 @@ where
                 n_abs: n.clone(),
                 n_sign_bit: AB::Expr::ZERO,
             },
-            local.is_present * (local.num_air_id_lookups + AB::F::ONE),
+            AB::Expr::ZERO,
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -622,7 +568,7 @@ where
                 lifted_height: combined_height.into(),
                 log_lifted_height: local.log_height.into(),
             },
-            local.is_present * (num_witin + num_structural_witin + num_fixed),
+            AB::Expr::ZERO,
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -640,7 +586,7 @@ where
                     value: local.height_1_limbs[i].into(),
                     max_bits: AB::Expr::from_usize(LIMB_BITS),
                 },
-                local.is_valid,
+                AB::Expr::ZERO,
             );
             self.range_bus.lookup_key(
                 builder,
@@ -648,7 +594,7 @@ where
                     value: local.height_2_limbs[i].into(),
                     max_bits: AB::Expr::from_usize(LIMB_BITS),
                 },
-                local.is_valid,
+                AB::Expr::ZERO,
             );
         }
 
@@ -686,18 +632,33 @@ where
                     * (local.is_n_max_greater * AB::F::TWO - AB::F::ONE),
                 max_bits: AB::Expr::from_usize(5),
             },
-            local.is_last,
+            AB::Expr::ZERO,
         );
 
         self.tower_module_bus.send(
             builder,
             local.proof_idx,
             TowerModuleMessage {
-                idx: air_idx.clone(),
-                tidx: local.starting_tidx.into(),
-                n_logup: n,
+                chip_idx: local.sorted_idx.into(),
+                num_layers: num_tower_layers,
+                num_read_specs: num_read_count.clone(),
+                num_write_specs: num_write_count.clone(),
+                num_logup_specs: num_logup_count.clone(),
             },
-            local.is_last,
+            local.is_present * local.is_valid,
+        );
+
+        self.tower_root_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerRootClaimMessage {
+                chip_idx: local.sorted_idx.into(),
+                r0_claim: local.r0_claim.map(Into::into),
+                w0_claim: local.w0_claim.map(Into::into),
+                p0_claim: local.p0_claim.map(Into::into),
+                q0_claim: local.q0_claim.map(Into::into),
+            },
+            local.is_present * local.is_valid,
         );
 
         // Send n_max value to expression claim air
@@ -707,7 +668,7 @@ where
             ExpressionClaimNMaxMessage {
                 n_max: local.n_max.into(),
             },
-            local.is_last,
+            AB::Expr::ZERO,
         );
 
         // Send n_lift to constraint folding air
@@ -718,7 +679,7 @@ where
                 air_idx: air_idx,
                 n_lift: local.log_height.into(),
             },
-            local.is_present,
+            AB::Expr::ZERO,
         );
 
         // Send count of present airs to fraction folder air
@@ -728,7 +689,7 @@ where
             FractionFolderInputMessage {
                 num_present_airs: local.num_present,
             },
-            local.is_last,
+            AB::Expr::ZERO,
         );
     }
 }

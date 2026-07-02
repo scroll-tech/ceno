@@ -13,7 +13,8 @@ use crate::bus::{
     FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
     LiftedHeightsBus as LocalLiftedHeightsBus, LookupChallengeBus, MainBus, MainExpressionClaimBus,
     MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
-    PublicValuesBus as LocalPublicValuesBus, TowerModuleBus, TranscriptBus as LocalTranscriptBus,
+    PublicValuesBus as LocalPublicValuesBus, TowerModuleBus, TowerRootClaimBus,
+    TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
@@ -23,6 +24,7 @@ pub struct BusInventory {
     pub poseidon2_compress_bus: Poseidon2CompressBus,
     pub merkle_verify_bus: MerkleVerifyBus,
     pub tower_module_bus: TowerModuleBus,
+    pub tower_root_claim_bus: TowerRootClaimBus,
     pub expression_claim_n_max_bus: LocalExpressionClaimNMaxBus,
     pub fraction_folder_input_bus: LocalFractionFolderInputBus,
     pub air_shape_bus: AirShapeBus,
@@ -54,6 +56,7 @@ impl BusInventory {
 
         let gkr_bus_idx = b.new_bus_idx();
         let tower_module_bus = TowerModuleBus::new(gkr_bus_idx);
+        let tower_root_claim_bus = TowerRootClaimBus::new(b.new_bus_idx());
 
         let air_shape_bus = AirShapeBus::new(b.new_bus_idx());
         let hyperdim_bus = LocalHyperdimBus::new(b.new_bus_idx());
@@ -85,6 +88,7 @@ impl BusInventory {
             poseidon2_compress_bus,
             merkle_verify_bus,
             tower_module_bus,
+            tower_root_claim_bus,
             expression_claim_n_max_bus,
             fraction_folder_input_bus,
             air_shape_bus,

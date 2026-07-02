@@ -20,7 +20,6 @@ use openvm_circuit_primitives::{
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
@@ -46,11 +45,18 @@ pub struct ForkedTranscriptCols<T> {
     pub proof_idx: T,
     pub is_proof_start: T,
 
+    /// Fork-local transcript index. For trunk rows this is equal to `global_tidx`.
     pub tidx: T,
+    /// Absolute transcript index in the flattened proof transcript namespace.
+    pub global_tidx: T,
     /// Indicator for sample/observe.
     pub is_sample: T,
     /// 0/1 indicators for positions being absorbed/squeezed.
     pub mask: [T; CHUNK],
+    /// 0/1 indicators for positions exported to the global TranscriptBus.
+    pub global_bus_mask: [T; CHUNK],
+    /// 0/1 indicators for fork-local transcript positions exported to `ForkedTranscriptBus`.
+    pub forked_bus_mask: [T; CHUNK],
 
     /// The poseidon2 state.
     pub prev_state: [T; POSEIDON2_WIDTH],
@@ -59,18 +65,22 @@ pub struct ForkedTranscriptCols<T> {
     // --- fork extensions ---
     /// 1 on the first row of a forked transcript chain.
     pub is_fork_start: T,
+    /// 1 for rows belonging to a forked transcript chain.
+    pub is_fork: T,
     /// Fork identifier (0-based across forked chip transcripts).
     pub fork_id: T,
 }
 
 impl<T: Copy> ForkedTranscriptCols<T> {
     pub const fn width() -> usize {
-        // proof_idx, is_proof_start, tidx, is_sample = 4
+        // proof_idx, is_proof_start, tidx, global_tidx, is_sample = 5
         // mask = CHUNK
+        // global_bus_mask = CHUNK
+        // forked_bus_mask = CHUNK
         // prev_state = POSEIDON2_WIDTH
         // post_state = POSEIDON2_WIDTH
-        // is_fork_start, fork_id = 2
-        4 + CHUNK + 2 * POSEIDON2_WIDTH + 2
+        // is_fork_start, is_fork, fork_id = 3
+        5 + 3 * CHUNK + 2 * POSEIDON2_WIDTH + 3
     }
 }
 
@@ -127,6 +137,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         // is_proof_start and is_fork_start are mutually exclusive booleans
         builder.assert_bool(local.is_proof_start);
         builder.assert_bool(local.is_fork_start);
+        builder.assert_bool(local.is_fork);
         // A row is a "chain start" if either is_proof_start or is_fork_start
         let is_chain_start: AB::Expr = local.is_proof_start.into() + local.is_fork_start.into();
         // At most one of these can be 1
@@ -157,15 +168,22 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
 
         // When is_proof_start: tidx = 0, sponge state = 0 (trunk start)
         builder.when(local.is_proof_start).assert_zero(local.tidx);
+        builder
+            .when(local.is_proof_start)
+            .assert_zero(local.global_tidx);
         builder.when(local.is_proof_start).assert_one(is_valid);
         builder
             .when(local.is_proof_start)
             .assert_zero(local.fork_id);
+        builder
+            .when(local.is_proof_start)
+            .assert_zero(local.is_fork);
         builder.assert_bool(local.is_sample);
 
-        // When is_fork_start: fork chain begins (tidx is NOT zero; it's the
-        // fork's global tidx offset). Only constrain validity.
+        // When is_fork_start: fork chain begins at fork-local tidx 0.
         builder.when(local.is_fork_start).assert_one(is_valid);
+        builder.when(local.is_fork_start).assert_one(local.is_fork);
+        builder.when(local.is_fork_start).assert_zero(local.tidx);
 
         // Initial state for proof start (trunk): all-zero sponge
         for i in 0..CHUNK {
@@ -187,6 +205,18 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         let mut count = AB::Expr::ZERO;
         for i in 0..CHUNK {
             builder.assert_bool(local.mask[i]);
+            builder.assert_bool(local.global_bus_mask[i]);
+            builder.assert_bool(local.forked_bus_mask[i]);
+            builder
+                .when(local.global_bus_mask[i])
+                .assert_one(local.mask[i]);
+            builder
+                .when(local.forked_bus_mask[i])
+                .assert_one(local.is_fork);
+            builder
+                .when(local.forked_bus_mask[i])
+                .assert_one(local.mask[i]);
+            builder.assert_zero(local.global_bus_mask[i] * local.forked_bus_mask[i]);
             count += local.mask[i].into();
 
             let skip = local.mask[i] - AB::Expr::ONE;
@@ -212,6 +242,9 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         builder
             .when(local_next_same_chain.clone())
             .assert_eq(next.tidx, local.tidx + count.clone());
+        builder
+            .when(local_next_same_chain.clone())
+            .assert_eq(next.global_tidx, local.global_tidx + count.clone());
 
         // If local.is_sample == next.is_sample within the same chain,
         // there must be exactly CHUNK operations.
@@ -224,83 +257,66 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for ForkedTranscriptAir {
         builder
             .when(local_next_same_chain.clone())
             .assert_eq(local.fork_id, next.fork_id);
+        builder
+            .when(local_next_same_chain.clone())
+            .assert_eq(local.is_fork, next.is_fork);
 
         ///////////////////////////////////////////////////////////////////////
         // Transcript bus interactions (send)
         ///////////////////////////////////////////////////////////////////////
         for i in 0..CHUNK {
             let observe_message = TranscriptBusMessage {
-                tidx: local.tidx + AB::Expr::from_usize(i),
+                tidx: local.global_tidx + AB::Expr::from_usize(i),
                 value: local.prev_state[i].into(),
                 is_sample: AB::Expr::ZERO,
             };
             let sample_message = TranscriptBusMessage {
-                tidx: local.tidx + AB::Expr::from_usize(i),
+                tidx: local.global_tidx + AB::Expr::from_usize(i),
                 value: local.prev_state[CHUNK - 1 - i].into(),
                 is_sample: AB::Expr::ONE,
             };
+            let transcript_mult = local.global_bus_mask[i];
             self.transcript_bus.send(
                 builder,
                 local.proof_idx,
                 observe_message,
-                local.mask[i] * (AB::Expr::ONE - local.is_sample),
+                transcript_mult.clone() * (AB::Expr::ONE - local.is_sample),
             );
             self.transcript_bus.send(
                 builder,
                 local.proof_idx,
                 sample_message,
-                local.mask[i] * local.is_sample,
+                transcript_mult * local.is_sample,
             );
         }
 
         ///////////////////////////////////////////////////////////////////////
-        // Forked transcript bus interactions (send fork state)
+        // Forked transcript bus interactions (send fork-local operations)
         ///////////////////////////////////////////////////////////////////////
-        // On is_fork_start rows, send fork-local transcript words with fork_id.
-        for i in 0..D_EF {
+        for i in 0..CHUNK {
+            let observe_message = ForkedTranscriptBusMessage {
+                fork_id: local.fork_id.into(),
+                tidx: local.tidx + AB::Expr::from_usize(i),
+                value: local.prev_state[i].into(),
+                is_sample: AB::Expr::ZERO,
+            };
+            let sample_message = ForkedTranscriptBusMessage {
+                fork_id: local.fork_id.into(),
+                tidx: local.tidx + AB::Expr::from_usize(i),
+                value: local.prev_state[CHUNK - 1 - i].into(),
+                is_sample: AB::Expr::ONE,
+            };
             self.forked_transcript_bus.send(
                 builder,
                 local.proof_idx,
-                ForkedTranscriptBusMessage {
-                    fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(i),
-                    value: local.prev_state[i].into(),
-                    is_sample: AB::Expr::ZERO,
-                },
-                local.is_fork_start,
+                observe_message,
+                local.forked_bus_mask[i] * (AB::Expr::ONE - local.is_sample),
             );
             self.forked_transcript_bus.send(
                 builder,
                 local.proof_idx,
-                ForkedTranscriptBusMessage {
-                    fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(D_EF + i),
-                    value: local.prev_state[i].into(),
-                    is_sample: AB::Expr::ZERO,
-                },
-                local.is_fork_start,
-            );
-            self.forked_transcript_bus.send(
-                builder,
-                local.proof_idx,
-                ForkedTranscriptBusMessage {
-                    fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(2 * D_EF + i),
-                    value: local.prev_state[i].into(),
-                    is_sample: AB::Expr::ONE,
-                },
-                local.is_fork_start,
-            );
-            self.forked_transcript_bus.send(
-                builder,
-                local.proof_idx,
-                ForkedTranscriptBusMessage {
-                    fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(3 * D_EF + i),
-                    value: local.prev_state[i].into(),
-                    is_sample: AB::Expr::ONE,
-                },
-                local.is_fork_start,
+                sample_message,
+                local.forked_bus_mask[i] * local.is_sample,
             );
         }
 

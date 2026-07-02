@@ -111,7 +111,7 @@ impl ProofShapeModule {
         let mut sorted_trace_vdata = proof
             .chip_proofs
             .iter()
-            .map(|(&chip_idx, chip_instances)| {
+            .map(|(&chip_id, chip_instances)| {
                 let num_instances: usize = chip_instances
                     .iter()
                     .flat_map(|instance| instance.num_instances.iter())
@@ -119,7 +119,7 @@ impl ProofShapeModule {
                     .sum();
                 let padded = num_instances.max(1).next_power_of_two();
                 let log_height = padded.ilog2() as usize;
-                (chip_idx, TraceVData { log_height })
+                (chip_id, TraceVData { log_height })
             })
             .collect_vec();
         sorted_trace_vdata.sort_by_key(|(air_idx, v)| (usize::MAX - v.log_height, *air_idx));
@@ -164,7 +164,17 @@ impl ProofShapeModule {
             .chip_proofs
             .values()
             .flat_map(|instances| instances.iter())
-            .map(|chip_proof| chip_proof.tower_proof.proofs.len())
+            .map(|chip_proof| {
+                let proof_layers = chip_proof.tower_proof.proofs.len();
+                let has_root_specs = !chip_proof.r_out_evals.is_empty()
+                    || !chip_proof.w_out_evals.is_empty()
+                    || !chip_proof.lk_out_evals.is_empty();
+                if proof_layers == 0 && !has_root_specs {
+                    0
+                } else {
+                    proof_layers + 1
+                }
+            })
             .max()
             .unwrap_or(0);
 
@@ -254,6 +264,7 @@ impl AirModule for ProofShapeModule {
             fraction_folder_input_bus: self.bus_inventory.fraction_folder_input_bus,
             expression_claim_n_max_bus: self.bus_inventory.expression_claim_n_max_bus,
             tower_module_bus: self.bus_inventory.tower_module_bus,
+            tower_root_claim_bus: self.bus_inventory.tower_root_claim_bus,
             air_shape_bus: self.bus_inventory.air_shape_bus,
             hyperdim_bus: self.bus_inventory.hyperdim_bus,
             lifted_heights_bus: self.bus_inventory.lifted_heights_bus,

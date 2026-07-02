@@ -82,6 +82,8 @@ impl<
         let circuit = Arc::new(InnerCircuit::new(
             Arc::new(verifier_circuit),
             def_hook_commit.map(|d| d.into()),
+            child_vk.fixed_commit.is_some(),
+            child_vk.fixed_no_omc_init_commit.is_some(),
             instance_public_value_indices,
         ));
         let (pk, vk) = engine.keygen(&circuit.airs());
@@ -127,6 +129,8 @@ impl<
         let circuit = Arc::new(InnerCircuit::new(
             Arc::new(verifier_circuit),
             def_hook_commit.map(|d| d.into()),
+            child_vk.fixed_commit.is_some(),
+            child_vk.fixed_no_omc_init_commit.is_some(),
             instance_public_value_indices,
         ));
         let vk = Arc::new(pk.get_vk());
@@ -153,22 +157,17 @@ impl<
 }
 
 fn build_instance_public_value_indices(child_vk: &RecursionVk) -> Vec<Vec<usize>> {
-    (0..child_vk.circuit_vks.len())
-        .map(|air_idx| {
-            child_vk
-                .circuit_index_to_name
-                .get(&air_idx)
-                .and_then(|name| child_vk.circuit_vks.get(name))
-                .map(|circuit_vk| {
-                    circuit_vk
-                        .get_cs()
-                        .zkvm_v1_css
-                        .instance
-                        .iter()
-                        .map(|instance_value| instance_value.0)
-                        .collect()
-                })
-                .unwrap_or_default()
+    child_vk
+        .circuit_vks
+        .iter()
+        .map(|(_, circuit_vk)| {
+            circuit_vk
+                .get_cs()
+                .zkvm_v1_css
+                .instance
+                .iter()
+                .map(|instance_value| instance_value.0)
+                .collect()
         })
         .collect()
 }
@@ -198,8 +197,11 @@ where
         }
 
         let engine = E::new(self.pk.params.clone());
-        #[cfg(debug_assertions)]
-        debug_constraints(&self.circuit, &ctx, &engine);
+        if cfg!(debug_assertions)
+            || std::env::var_os("CENO_RECURSION_V2_DEBUG_CONSTRAINTS").is_some()
+        {
+            debug_constraints(&self.circuit, &ctx, &engine);
+        }
         let prove_start = Instant::now();
         let proof = engine.prove(&self.d_pk, ctx)?;
         tracing::info!(

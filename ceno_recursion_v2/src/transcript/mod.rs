@@ -5,7 +5,7 @@ use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::{POSEIDON2_WIDTH, Poseidon2Config, Poseidon2SubChip};
 use openvm_stark_backend::{AirRef, StarkProtocolConfig, prover::AirProvingContext};
 use openvm_stark_sdk::{
-    config::baby_bear_poseidon2::{F, poseidon2_perm},
+    config::baby_bear_poseidon2::{D_EF, F, poseidon2_perm},
     p3_baby_bear::Poseidon2BabyBear,
 };
 use p3_air::BaseAir;
@@ -13,8 +13,12 @@ use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_symmetric::Permutation;
 
-use crate::system::{
-    AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
+use crate::{
+    system::{
+        AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk,
+        TraceGenModule,
+    },
+    utils::TranscriptLabel,
 };
 use recursion_circuit::transcript::poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols};
 
@@ -98,12 +102,20 @@ impl TranscriptModule {
         is_fork_start: bool,
         initial_state: [F; POSEIDON2_WIDTH],
         tidx_offset: usize,
+        global_export_ranges: Option<&[(usize, usize)]>,
         poseidon2_perm_inputs: &mut Vec<[F; POSEIDON2_WIDTH]>,
     ) -> [F; POSEIDON2_WIDTH] {
         let mut tidx = 0usize;
         let mut prev_poseidon_state = initial_state;
+        let fork_prelude_len = TranscriptLabel::Fork.field_len() + 2 * D_EF + 4;
+        let fork_sample_start = if is_fork_start {
+            log.len().saturating_sub(D_EF)
+        } else {
+            usize::MAX
+        };
 
         for (i, row) in trace.chunks_exact_mut(transcript_width).enumerate() {
+            let row_start_tidx = tidx;
             let cols: &mut ForkedTranscriptCols<F> = row.borrow_mut();
             cols.proof_idx = F::from_usize(proof_idx);
             cols.fork_id = F::from_usize(fork_id);
@@ -117,8 +129,16 @@ impl TranscriptModule {
 
             let is_sample = log.samples()[tidx];
             cols.is_sample = F::from_bool(is_sample);
-            cols.tidx = F::from_usize(tidx + tidx_offset);
+            cols.tidx = F::from_usize(row_start_tidx);
+            cols.global_tidx = F::from_usize(tidx + tidx_offset);
+            cols.is_fork = F::from_bool(is_fork_start);
             cols.mask[0] = F::ONE;
+            cols.global_bus_mask[0] =
+                F::from_bool(should_export_global(row_start_tidx, global_export_ranges));
+            cols.forked_bus_mask[0] = F::from_bool(
+                is_fork_start
+                    && (row_start_tidx < fork_prelude_len || row_start_tidx >= fork_sample_start),
+            );
             cols.prev_state = prev_poseidon_state;
 
             if is_sample {
@@ -141,6 +161,12 @@ impl TranscriptModule {
                 }
 
                 cols.mask[idx] = F::ONE;
+                let op_tidx = row_start_tidx + idx;
+                cols.global_bus_mask[idx] =
+                    F::from_bool(should_export_global(op_tidx, global_export_ranges));
+                cols.forked_bus_mask[idx] = F::from_bool(
+                    is_fork_start && (op_tidx < fork_prelude_len || op_tidx >= fork_sample_start),
+                );
                 if is_sample {
                     debug_assert_eq!(cols.prev_state[CHUNK - 1 - idx], log.values()[tidx]);
                 } else {
@@ -217,6 +243,7 @@ impl TranscriptModule {
             let info = &proof_infos[pidx];
 
             // Fill trunk rows (fork_id = 0, tidx_offset = 0).
+            let trunk_global_export_ranges = trunk_global_export_ranges(preflight);
             let trunk_end = offset + info.trunk_rows;
             let trunk_slice =
                 &mut transcript_trace[offset * transcript_width..trunk_end * transcript_width];
@@ -230,12 +257,14 @@ impl TranscriptModule {
                 false,                      // is_fork_start
                 [F::ZERO; POSEIDON2_WIDTH], // trunk starts with zero state
                 0,                          // tidx_offset: trunk starts at global tidx 0
+                Some(trunk_global_export_ranges.as_slice()),
                 &mut poseidon2_perm_inputs,
             );
             offset = trunk_end;
 
-            // Fill fork rows with fork-local tidx offsets.
+            // Fill fork rows with fork-local tidx and global TranscriptBus offsets.
             for (fi, fork_log) in preflight.fork_transcripts.iter().enumerate() {
+                let global_export_ranges = fork_global_export_ranges(preflight, fi);
                 let fork_rows = info.fork_rows[fi];
                 let fork_end = offset + fork_rows;
                 let fork_slice =
@@ -251,7 +280,8 @@ impl TranscriptModule {
                     false, // is_proof_start
                     true,  // is_fork_start
                     [F::ZERO; POSEIDON2_WIDTH],
-                    0,
+                    preflight.fork_global_offset(fi),
+                    Some(global_export_ranges.as_slice()),
                     &mut poseidon2_perm_inputs,
                 );
                 offset = fork_end;
@@ -310,6 +340,69 @@ impl TranscriptModule {
         }
 
         (deduped, counts)
+    }
+}
+
+fn should_export_global(tidx: usize, ranges: Option<&[(usize, usize)]>) -> bool {
+    match ranges {
+        None => true,
+        Some(ranges) => ranges
+            .iter()
+            .any(|&(start, end)| start <= tidx && tidx < end),
+    }
+}
+
+fn fork_global_export_ranges(preflight: &Preflight, fork_idx: usize) -> Vec<(usize, usize)> {
+    let Some(main_tidx) = preflight
+        .main
+        .chips
+        .iter()
+        .find(|entry| entry.fork_idx == fork_idx)
+        .map(|entry| entry.tidx)
+    else {
+        return Vec::new();
+    };
+
+    preflight
+        .gkr
+        .chips
+        .iter()
+        .filter(|entry| entry.fork_idx == fork_idx)
+        .filter(|entry| entry.num_layers > 0)
+        .flat_map(|entry| [(entry.tidx, main_tidx), (main_tidx, main_tidx + D_EF)])
+        .collect()
+}
+
+fn trunk_global_export_ranges(preflight: &Preflight) -> Vec<(usize, usize)> {
+    let log_len = preflight.transcript.len();
+    if preflight.batch_constraint.lambda_tidx == 0
+        && preflight.batch_constraint.tidx_before_univariate == 0
+    {
+        return if log_len == 0 {
+            Vec::new()
+        } else {
+            vec![(0, log_len)]
+        };
+    }
+
+    let lambda_start = preflight.batch_constraint.lambda_tidx.min(log_len);
+    let lambda_end = (lambda_start + D_EF).min(log_len);
+    let mu_end = preflight
+        .batch_constraint
+        .tidx_before_univariate
+        .min(log_len);
+    let mu_start = mu_end.saturating_sub(D_EF);
+
+    let mut ranges = Vec::new();
+    push_nonempty_range(&mut ranges, 0, lambda_start);
+    push_nonempty_range(&mut ranges, lambda_end, mu_start);
+    push_nonempty_range(&mut ranges, mu_end, log_len);
+    ranges
+}
+
+fn push_nonempty_range(ranges: &mut Vec<(usize, usize)>, start: usize, end: usize) {
+    if start < end {
+        ranges.push((start, end));
     }
 }
 

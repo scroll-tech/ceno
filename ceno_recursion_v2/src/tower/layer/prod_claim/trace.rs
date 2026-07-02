@@ -7,7 +7,10 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use super::TowerProdSumCheckClaimCols;
 use crate::{
-    tower::{TowerTowerEvalRecord, interpolate_pair, layer::trace::TowerLayerRecord},
+    tower::{
+        TowerTowerEvalRecord, interpolate_pair,
+        layer::trace::{TowerLayerRecord, ext_pow},
+    },
     tracegen::RowMajorChip,
 };
 
@@ -21,19 +24,16 @@ type ProdTraceCtx<'a> = (
 );
 
 fn prod_rows_for_record(record: &TowerLayerRecord, is_write: bool) -> usize {
-    if record.layer_count() == 0 {
-        1
-    } else {
-        (0..record.layer_count())
-            .map(|layer_idx| {
-                if is_write {
-                    record.write_count_at(layer_idx).max(1)
-                } else {
-                    record.read_count_at(layer_idx).max(1)
-                }
-            })
-            .sum()
-    }
+    (0..record.layer_count())
+        .map(|layer_idx| {
+            if is_write {
+                record.write_count_at(layer_idx)
+            } else {
+                record.read_count_at(layer_idx)
+            }
+        })
+        .sum::<usize>()
+        .max(1)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -77,7 +77,21 @@ fn generate_prod_trace(
                 .zip(mus_records.par_iter()),
         )
         .for_each(|(chunk, ((record, tower), mus_for_proof))| {
-            if record.layer_count() == 0 {
+            if chunk.is_empty() {
+                return;
+            }
+
+            let active_row_count = (0..record.layer_count())
+                .map(|layer_idx| {
+                    if is_write {
+                        record.write_count_at(layer_idx)
+                    } else {
+                        record.read_count_at(layer_idx)
+                    }
+                })
+                .sum::<usize>();
+
+            if active_row_count == 0 {
                 debug_assert_eq!(chunk.len(), width);
                 let row_data = &mut chunk[..width];
                 let cols: &mut TowerProdSumCheckClaimCols<F> = row_data.borrow_mut();
@@ -85,10 +99,12 @@ fn generate_prod_trace(
                 cols.is_first_layer = F::from_bool(record.is_first_air_idx);
                 cols.is_first = F::ONE; // single row = first of its (degenerate) layer
                 cols.is_dummy = F::ONE;
+                cols.is_root_layer = F::ONE;
                 cols.proof_idx = F::from_usize(record.proof_idx);
-                cols.idx = F::from_usize(record.idx);
+                cols.chip_idx = F::from_usize(record.chip_idx);
                 cols.layer_idx = F::ZERO;
                 cols.index_id = F::ZERO;
+                cols.prod_offset = F::ZERO;
                 cols.tidx = F::from_usize(record.tidx);
                 cols.lambda = [F::ZERO; D_EF];
                 let mut lambda_prime_one = [F::ZERO; D_EF];
@@ -102,7 +118,8 @@ fn generate_prod_trace(
                 cols.pow_lambda_prime = lambda_prime_one;
                 cols.acc_sum = [F::ZERO; D_EF];
                 cols.acc_sum_prime = [F::ZERO; D_EF];
-                cols.num_prod_count = F::ONE;
+                cols.root_output_acc = lambda_prime_one;
+                cols.num_prod_count = F::ZERO;
                 return;
             }
 
@@ -123,17 +140,30 @@ fn generate_prod_trace(
                         .map(|rows| rows.as_slice())
                         .unwrap_or(&[])
                 };
-                let total_rows = if is_write {
-                    record.write_count_at(layer_idx).max(1)
+                let active_mask = if is_write {
+                    tower
+                        .write_active
+                        .get(layer_idx)
+                        .map(|rows| rows.as_slice())
+                        .unwrap_or(&[])
                 } else {
-                    record.read_count_at(layer_idx).max(1)
+                    tower
+                        .read_active
+                        .get(layer_idx)
+                        .map(|rows| rows.as_slice())
+                        .unwrap_or(&[])
+                };
+                let total_rows = if is_write {
+                    record.write_count_at(layer_idx)
+                } else {
+                    record.read_count_at(layer_idx)
                 };
                 debug_assert!(
-                    total_rows == active_rows.len().max(1),
+                    total_rows == active_rows.len(),
                     "unexpected prod count mismatch at layer {layer_idx}"
                 );
                 let lambda = record.lambda_at(layer_idx);
-                let lambda_prime = record.lambda_prime_at(layer_idx);
+                let lambda_prime = record.lambda_cur_at(layer_idx);
                 let mu = mus_for_proof.get(layer_idx).copied().unwrap_or(EF::ZERO);
                 let lambda_basis: [F; D_EF] =
                     lambda.as_basis_coefficients_slice().try_into().unwrap();
@@ -142,19 +172,25 @@ fn generate_prod_trace(
                     .try_into()
                     .unwrap();
                 let mu_basis: [F; D_EF] = mu.as_basis_coefficients_slice().try_into().unwrap();
-                let layer_tidx = record.claim_tidx(layer_idx);
+                let group_offset = if is_write {
+                    record.read_count_at(layer_idx)
+                } else {
+                    0
+                };
+                let layer_tidx = record.claim_tidx(layer_idx) + group_offset * 2 * D_EF;
 
-                let mut pow_lambda = EF::ONE;
-                let mut pow_lambda_prime = EF::ONE;
+                let mut pow_lambda = ext_pow(lambda, group_offset);
+                let mut pow_lambda_prime = ext_pow(lambda_prime, group_offset);
                 let mut acc_sum = EF::ZERO;
                 let mut acc_sum_prime = EF::ZERO;
+                let mut root_output_acc = if layer_idx == 0 { EF::ONE } else { EF::ZERO };
 
                 for row_in_layer in 0..total_rows {
                     let row = chunk_iter
                         .next()
                         .expect("chunk should have enough rows for layer");
                     let cols: &mut TowerProdSumCheckClaimCols<F> = row.borrow_mut();
-                    let is_real = row_in_layer < active_rows.len();
+                    let is_real = active_mask.get(row_in_layer).copied().unwrap_or(false);
                     let pair = if is_real {
                         active_rows[row_in_layer]
                     } else {
@@ -173,15 +209,17 @@ fn generate_prod_trace(
 
                     cols.is_enabled = F::ONE;
                     cols.is_dummy = F::from_bool(!is_real);
+                    cols.is_root_layer = F::from_bool(layer_idx == 0);
                     let is_first_row_of_layer = row_in_layer == 0;
                     let is_first_row_of_record = proof_row_idx == 0;
                     cols.is_first_layer =
                         F::from_bool(is_first_row_of_record && record.is_first_air_idx);
                     cols.is_first = F::from_bool(is_first_row_of_layer);
                     cols.proof_idx = F::from_usize(record.proof_idx);
-                    cols.idx = F::from_usize(record.idx);
+                    cols.chip_idx = F::from_usize(record.chip_idx);
                     cols.layer_idx = F::from_usize(layer_idx);
                     cols.index_id = F::from_usize(row_in_layer);
+                    cols.prod_offset = F::from_usize(group_offset);
                     cols.tidx = F::from_usize(layer_tidx + row_in_layer * 2 * D_EF);
                     cols.lambda = lambda_basis;
                     cols.lambda_prime = lambda_prime_basis;
@@ -199,10 +237,17 @@ fn generate_prod_trace(
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
+                    cols.root_output_acc = root_output_acc
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
                     cols.num_prod_count = F::from_usize(total_rows);
 
                     acc_sum += contribution;
                     acc_sum_prime += prime_contribution;
+                    if is_real {
+                        root_output_acc *= prime_product;
+                    }
                     pow_lambda *= lambda;
                     pow_lambda_prime *= lambda_prime;
 

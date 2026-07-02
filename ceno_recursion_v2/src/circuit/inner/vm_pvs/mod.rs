@@ -1,3 +1,4 @@
+use ceno_zkvm::instructions::riscv::constants::PUBIO_DIGEST_U16_LIMBS;
 use openvm_stark_backend::{FiatShamirTranscript, TranscriptHistory};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use p3_field::PrimeCharacteristicRing;
@@ -28,7 +29,7 @@ pub struct VmPvs<F> {
     pub heap_shard_len: F,
     pub hint_start_addr: F,
     pub hint_shard_len: F,
-    pub public_io: [F; 2],
+    pub public_io: [F; PUBIO_DIGEST_U16_LIMBS],
     pub shard_rw_sum: [F; 2 * SEPTIC_EXTENSION_DEGREE],
 }
 
@@ -44,6 +45,11 @@ pub fn run_preflight<TS>(
 ) where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
 {
+    let vk_digest = child_vk.compute_digest();
+    for elem in vk_digest {
+        ts.observe_ext(elem);
+    }
+
     // Observe public values in canonical circuit-instance order first.
     for (_, circuit_vk) in child_vk.circuit_vks.iter() {
         for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
@@ -77,7 +83,6 @@ pub fn run_preflight<TS>(
 
     let alpha_ext = ts.sample_ext();
     let beta_ext = ts.sample_ext();
-    eprintln!("vm_pvs alpha {} beta {}", alpha_ext, beta_ext);
     preflight.vm_pvs.lookup_challenge_alpha = alpha_ext;
     preflight.vm_pvs.lookup_challenge_beta = beta_ext;
     preflight.vm_pvs.lookup_challenge_alpha_lookup_count = 0;

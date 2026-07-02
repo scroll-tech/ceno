@@ -40,6 +40,7 @@ pub struct TowerReplayResult {
     pub layers: Vec<TowerLayerData>,
 }
 
+#[allow(dead_code)]
 pub fn replay_tower_proof(
     chip_proof: &ZKVMChipProof<RecursionField>,
     vk: &VerifyingKey<RecursionField>,

@@ -2,15 +2,14 @@ mod air;
 mod sumcheck;
 mod trace;
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use ceno_zkvm::scheme::ZKVMChipProof;
 use eyre::{Result, bail, eyre};
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
-    AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
-    prover::AirProvingContext,
+    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory, prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
 use p3_field::PrimeCharacteristicRing;
@@ -24,12 +23,14 @@ use self::{
     trace::{MainRecord, MainTraceGenerator},
 };
 use crate::{
-    bus::{MainBus, MainExpressionClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus},
+    bus::{
+        MainBus, MainExpressionClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus, TranscriptBus,
+    },
     system::{
         AirModule, BusIndexManager, BusInventory, ChipTranscriptRange, GlobalCtxCpu, Preflight,
         RecursionField, RecursionProof, RecursionVk, TraceGenModule,
     },
-    tower::convert_logup_claim,
+    tower::build_gkr_blob,
     tracegen::{ModuleChip, RowMajorChip},
 };
 
@@ -42,6 +43,7 @@ pub struct MainModule {
     sumcheck_input_bus: MainSumcheckInputBus,
     sumcheck_output_bus: MainSumcheckOutputBus,
     expression_claim_bus: MainExpressionClaimBus,
+    transcript_bus: TranscriptBus,
 }
 
 impl MainModule {
@@ -51,17 +53,19 @@ impl MainModule {
         let sumcheck_input_bus = bus_inventory.main_sumcheck_input_bus;
         let sumcheck_output_bus = bus_inventory.main_sumcheck_output_bus;
         let expression_claim_bus = bus_inventory.main_expression_claim_bus;
+        let transcript_bus = bus_inventory.transcript_bus;
         Self {
             main_bus,
             sumcheck_input_bus,
             sumcheck_output_bus,
             expression_claim_bus,
+            transcript_bus,
         }
     }
 
     fn collect_records(
         &self,
-        _child_vk: &RecursionVk,
+        child_vk: &RecursionVk,
         proofs: &[RecursionProof],
         preflights: &[Preflight],
     ) -> Result<Vec<(MainRecord, MainSumcheckRecord)>> {
@@ -73,51 +77,76 @@ impl MainModule {
             );
         }
 
+        let tower_blob = build_gkr_blob(child_vk, proofs, preflights)?;
+        let tower_inputs: BTreeMap<(usize, usize), _> = tower_blob
+            .input_records
+            .iter()
+            .map(|record| ((record.proof_idx, record.chip_idx), record))
+            .collect();
+
         let mut paired = Vec::new();
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
-            let mut chip_pf_iter = preflight.main.chips.iter();
             let mut saw_chip = false;
-            for (&chip_idx, chip_instances) in &proof.chip_proofs {
-                for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
-                    saw_chip = true;
-                    let pf_entry = chip_pf_iter
-                        .next()
-                        .ok_or_else(|| eyre!(
-                            "missing main preflight entry for chip {chip_idx} instance {instance_idx}"
-                        ))?;
-                    if pf_entry.chip_idx != chip_idx || pf_entry.instance_idx != instance_idx {
-                        bail!(
-                            "main preflight chip mismatch: expected ({}, {}), got ({}, {})",
-                            chip_idx,
-                            instance_idx,
-                            pf_entry.chip_idx,
-                            pf_entry.instance_idx
-                        );
-                    }
-                    let claim = input_layer_claim(chip_proof);
-                    // Access the fork log directly using fork_idx and fork-local tidx.
-                    let fork_log = preflight.fork_log(pf_entry.fork_idx);
-                    let mut ts = ReadOnlyTranscript::new(fork_log, pf_entry.tidx);
-                    record_main_transcript(&mut ts, chip_idx, chip_proof);
+            let sorted_idx_by_chip: BTreeMap<usize, usize> = preflight
+                .proof_shape
+                .sorted_trace_vdata
+                .iter()
+                .enumerate()
+                .map(|(sorted_idx, (chip_id, _))| (*chip_id, sorted_idx))
+                .collect();
+            let mut sorted_pf_entries: Vec<_> = preflight.main.chips.iter().collect();
+            sorted_pf_entries.sort_by_key(|entry| {
+                (
+                    sorted_idx_by_chip
+                        .get(&entry.chip_id)
+                        .copied()
+                        .unwrap_or(usize::MAX),
+                    entry.instance_idx,
+                )
+            });
 
-                    // Compute global tidx for trace column values.
-                    let global_tidx =
-                        preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
-                    let main_record = MainRecord {
-                        proof_idx,
-                        idx: chip_idx,
-                        tidx: global_tidx,
-                        claim,
-                    };
-                    let sumcheck_record = build_sumcheck_record_from_chip(
-                        proof_idx,
-                        chip_idx,
-                        claim,
-                        chip_proof,
-                        global_tidx,
-                    );
-                    paired.push((main_record, sumcheck_record));
-                }
+            for (entry_idx, pf_entry) in sorted_pf_entries.into_iter().enumerate() {
+                let chip_id = pf_entry.chip_id;
+                let chip_idx = sorted_idx_by_chip
+                    .get(&chip_id)
+                    .copied()
+                    .ok_or_else(|| eyre!("missing proof-shape index for chip {chip_id}"))?;
+                eyre::ensure!(
+                    chip_idx == entry_idx,
+                    "proof-local chip index mismatch for chip {chip_id}: proof-shape={chip_idx}, main-row={entry_idx}"
+                );
+                let instance_idx = pf_entry.instance_idx;
+                let chip_instances = proof
+                    .chip_proofs
+                    .get(&chip_id)
+                    .ok_or_else(|| eyre!("missing chip proof instances for chip {chip_id}"))?;
+                let chip_proof = chip_instances.get(instance_idx).ok_or_else(|| {
+                    eyre!("missing chip proof instance {instance_idx} for chip {chip_id}")
+                })?;
+                let tower_input = tower_inputs.get(&(proof_idx, chip_idx)).ok_or_else(|| {
+                    eyre!("missing tower input record for proof {proof_idx} chip_idx {chip_idx}")
+                })?;
+                saw_chip = true;
+
+                let claim = tower_input.input_layer_claim;
+                let global_tidx = tower_input.final_tidx;
+                let sumcheck_record = build_sumcheck_record_from_chip(
+                    proof_idx,
+                    chip_idx,
+                    claim,
+                    chip_proof,
+                    global_tidx,
+                );
+                let main_record = MainRecord {
+                    proof_idx,
+                    idx: chip_idx,
+                    chip_idx,
+                    has_tower: tower_input.num_layers > 0,
+                    has_sumcheck: !sumcheck_record.rounds.is_empty(),
+                    tidx: global_tidx,
+                    claim,
+                };
+                paired.push((main_record, sumcheck_record));
             }
 
             if !saw_chip {
@@ -150,6 +179,7 @@ impl AirModule for MainModule {
             sumcheck_input_bus: self.sumcheck_input_bus,
             sumcheck_output_bus: self.sumcheck_output_bus,
             expression_claim_bus: self.expression_claim_bus,
+            transcript_bus: self.transcript_bus,
         };
         let main_sumcheck_air = MainSumcheckAir {
             sumcheck_input_bus: self.sumcheck_input_bus,
@@ -171,12 +201,12 @@ impl MainModule {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         let _ = (self, child_vk);
-        for (&chip_idx, chip_instances) in &proof.chip_proofs {
+        for (&chip_id, chip_instances) in &proof.chip_proofs {
             for (instance_idx, chip_proof) in chip_instances.iter().enumerate() {
                 let tidx = ts.len();
-                record_main_transcript(ts, chip_idx, chip_proof);
+                record_main_transcript(ts, input_layer_claim(chip_proof));
                 preflight.main.chips.push(ChipTranscriptRange {
-                    chip_idx,
+                    chip_id,
                     instance_idx,
                     tidx,
                     fork_idx: 0, // unused in forked flow
@@ -199,22 +229,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
         let mut paired = self.collect_records(child_vk, proofs, preflights).ok()?;
         paired.sort_by_key(|(record, _)| (record.proof_idx, record.idx));
-        // Replace chip_idx with sequential index per proof_idx group to satisfy
-        // NestedForLoopSubAir counter constraints (must increment by 0 or 1).
-        // This matches the tower module which also uses entry_idx.
-        {
-            let mut prev_proof_idx = usize::MAX;
-            let mut seq_idx = 0usize;
-            for (record, sumcheck_record) in paired.iter_mut() {
-                if record.proof_idx != prev_proof_idx {
-                    seq_idx = 0;
-                    prev_proof_idx = record.proof_idx;
-                }
-                record.idx = seq_idx;
-                sumcheck_record.idx = seq_idx;
-                seq_idx += 1;
-            }
-        }
         let (main_records, sumcheck_records): (Vec<_>, Vec<_>) = paired.into_iter().unzip();
         let ctx = MainTraceCtx {
             main_records: &main_records,
@@ -268,24 +282,8 @@ impl RowMajorChip<F> for MainModuleChip {
 }
 
 fn input_layer_claim(chip_proof: &ZKVMChipProof<RecursionField>) -> EF {
-    let layer_count = chip_proof
-        .tower_proof
-        .logup_specs_eval
-        .iter()
-        .map(|spec_layers| spec_layers.len())
-        .chain(
-            chip_proof
-                .tower_proof
-                .prod_specs_eval
-                .iter()
-                .map(|spec_layers| spec_layers.len()),
-        )
-        .max()
-        .unwrap_or(0);
-    if layer_count == 0 {
-        return EF::ZERO;
-    }
-    convert_logup_claim(chip_proof, layer_count - 1)[0]
+    let _ = chip_proof;
+    EF::ZERO
 }
 
 fn build_sumcheck_record_from_chip(
@@ -325,12 +323,9 @@ fn build_sumcheck_record_from_chip(
     }
 }
 
-pub(crate) fn record_main_transcript<TS>(
-    ts: &mut TS,
-    _chip_idx: usize,
-    chip_proof: &ZKVMChipProof<RecursionField>,
-) where
+pub(crate) fn record_main_transcript<TS>(ts: &mut TS, claim: EF)
+where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
-    ts.observe_ext(input_layer_claim(chip_proof));
+    ts.observe_ext(claim);
 }

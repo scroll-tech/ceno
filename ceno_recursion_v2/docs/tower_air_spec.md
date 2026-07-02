@@ -1,8 +1,9 @@
-# GKR AIR Spec
+# Tower AIR Spec
 
-This document captures the current behavior of each GKR-related AIR that lives in `src/tower`. It mirrors the code so we
-can reason about constraints or plan refactors without diving back into Rust. Update the relevant section whenever an
-AIR’s columns, constraints, or interactions change.
+This document captures the current behavior of each tower-related AIR that lives in `src/tower`. We use a
+spec-driven development approach for this tower work: update this spec first when an AIR’s columns, constraints, or
+interactions need to change, then an AI agent or human developer can port the spec changes into the codebase and keep
+the implementation in lockstep with the documented contract.
 
 ## Protocol Math Reference
 
@@ -19,10 +20,10 @@ needed to debug constraints, but do not duplicate the global layer-reduction sou
 |----------------------------|-----------------|----------------------------------------------------------------------|
 | `is_enabled`               | scalar          | Row selector (0 = padding).                                          |
 | `proof_idx`                | scalar          | Outer proof loop index enforced by nested sub-AIRs.                  |
-| `chip_id`                  | scalar          | VK-assigned chip identity for this tower proof.                      |
-| `n_layer`                  | scalar          | Number of active GKR layers for the proof.                           |
-| `is_n_layer_zero`          | scalar          | Flag for `n_layer == 0` (drives “no interaction” branches).          |
-| `is_n_layer_zero_aux`      | `IsZeroAuxCols` | Witness used by `IsZeroSubAir` to enforce the zero test.             |
+| `chip_idx`                 | scalar          | Proof-local chip proof index, supplied by `ProofShapeAir`.           |
+| `num_layers`               | scalar          | Number of active GKR layers for the proof.                           |
+| `is_num_layers_zero`       | scalar          | Flag for `num_layers == 0` (drives “no interaction” branches).       |
+| `is_num_layers_zero_aux`   | `IsZeroAuxCols` | Witness used by `IsZeroSubAir` to enforce the zero test.             |
 | `tidx`                     | scalar          | Transcript cursor at start of the proof.                             |
 | `r0_claim`                 | `[D_EF]`        | Product of read root out-eval pairs returned to `ProofShapeAir`.     |
 | `w0_claim`                 | `[D_EF]`        | Product of write root out-eval pairs returned to `ProofShapeAir`.    |
@@ -38,13 +39,14 @@ needed to debug constraints, but do not duplicate the global layer-reduction sou
 ### Row Constraints
 
 - **Enablement / identity**: Constraints enforce boolean `is_enabled`, padding-after-padding, and one enabled
-  `TowerInputAir` row per `(proof_idx, chip_id)` tower proof. No additional local tower identifier is used; `chip_id` is
-  the per-chip tower identity.
-- **Zero test**: `IsZeroSubAir` checks `n_layer` against `is_n_layer_zero`, unlocking the “no interaction” path.
-- **Input layer defaults**: When `n_layer == 0`, the input-layer claim must be `[0, alpha_logup]` (numerator zero, denominator
+  `TowerInputAir` row per `(proof_idx, chip_idx)` tower proof. `chip_idx` is the proof-local index of the chip proof, not
+  the VK-assigned `chip_id`.
+- **Zero test**: `IsZeroSubAir` checks `num_layers` against `is_num_layers_zero`, unlocking the “no interaction” path.
+- **Input layer defaults**: When `num_layers == 0`, the root claims must be `r0_claim = 1`, `w0_claim = 1`,
+  `p0_claim = 0`, and `q0_claim = 1`; the input-layer claim must be `[0, alpha_logup]` (numerator zero, denominator
   equals `alpha_logup`).
 - **Transcript math**: Local expressions derive the transcript offsets for batching-challenge sampling, per-layer reductions, and the
-  xi-sampling window directly from `n_layer`. No auxiliary `n_max` adjustment is needed.
+  xi-sampling window directly from `num_layers`. No auxiliary `n_max` adjustment is needed.
 - **Root claim export**: `TowerInputAir` returns `(r0_claim, w0_claim, p0_claim, q0_claim)` to `ProofShapeAir`.
   The read/write roots are:
 
@@ -73,22 +75,21 @@ needed to debug constraints, but do not duplicate the global layer-reduction sou
 
 - **Internal buses**
     - `Tower{Read,Write}RootInputBus.send`: starts root product folding with
-      `(chip_id, claim_tidx, lambda_1, r_1, lambda_1_start, num_prod_count)`.
+      `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_prod_count)`.
     - `TowerLogupRootInputBus.send`: starts root LogUp folding with
-      `(chip_id, claim_tidx, lambda_1, r_1, lambda_1_start, num_logup_count)`.
+      `(chip_idx, claim_tidx, lambda_1, r_1, lambda_1_start, num_logup_count)`.
     - `Tower{Read,Write}RootBus.receive`: pulls `r0_claim` or `w0_claim` from the product root folds.
-    - `TowerLogupRootBus.receive`: pulls `(p0_claim, q0_claim)` from the LogUp root fold.
+    - `TowerLogupRootBus.receive`: pulls `(p0_claim, q0_claim, logup_initial_claim)` from the LogUp root fold.
     - `Tower{Read,Write}InitBus.receive`: pulls the read/write contributions to `C_1(r_1)`.
-    - `TowerLogupInitBus.receive`: pulls the LogUp contribution to `C_1(r_1)`.
     - `TowerLayerInputBus.send`: emits
-      `(chip_id, layer_tidx, num_layers, num_read_specs, num_write_specs, num_logup_specs, initial_tower_claim)`
+      `(chip_idx, layer_tidx, num_layers, num_read_specs, num_write_specs, num_logup_specs, initial_tower_claim)`
       when interactions exist.
     - `TowerLayerOutputBus.receive`: pulls reduced
-      `(chip_id, layer_idx_end, input_layer_claim, lambda_next, mu)` back.
+      `(chip_idx, layer_idx_end, input_layer_claim, lambda_next, mu)` back.
 - **External buses**
     - `TowerModuleBus.receive`: proof-shape message
-      `(proof_idx, chip_id, num_layers, num_read_specs, num_write_specs, num_logup_specs)` per enabled row.
-    - `TowerRootClaimBus.send`: returns `(chip_id, r0_claim, w0_claim, p0_claim, q0_claim)` to `ProofShapeAir`.
+      `(proof_idx, chip_idx, num_layers, num_read_specs, num_write_specs, num_logup_specs)` per enabled row.
+    - `TowerRootClaimBus.send`: returns `(chip_idx, r0_claim, w0_claim, p0_claim, q0_claim)` to `ProofShapeAir`.
     - `MainBus.send`: forwards the final input-layer claim with the final transcript index.
     - `TranscriptBus`: sample the root batching/interpolation challenges and observe root claim data only when
       `has_interactions`. The root input buses may carry sampled values into child AIRs as ordinary dataflow; only the
@@ -102,10 +103,11 @@ needed to debug constraints, but do not duplicate the global layer-reduction sou
 |------------------------------------|---------------|----------------------------------------------------------------------------|
 | `is_enabled`                       | scalar        | Row selector.                                                              |
 | `proof_idx`                        | scalar        | Proof counter shared with input AIR.                                       |
-| `chip_id`                          | scalar        | VK-assigned chip id used to scope tower claim/sumcheck messages.           |
-| `is_first_tower`                   | scalar        | First row flag for each `(proof_idx, chip_id)` tower proof.                |
-| `is_first`                         | scalar        | Indicates the first layer row of a proof.                                  |
-| `is_dummy`                         | scalar        | Marks padding rows that still satisfy constraints.                         |
+| `chip_idx`                         | scalar        | Proof-local chip proof index used to scope tower claim/sumcheck messages.  |
+| `is_first_proof_idx`               | scalar        | First row flag for each `proof_idx` group.                                 |
+| `is_first_chip_idx`                | scalar        | First row flag for each `(proof_idx, chip_idx)` tower proof.               |
+| `is_noop`                          | scalar        | Zero-test output: `is_noop = 1` iff `num_layers = 0`.                      |
+| `is_num_layers_zero_aux`           | `IsZeroAux`   | Witness used to enforce the `num_layers == 0` zero test.                   |
 | `layer_idx`                        | scalar        | Layer number, enforced to start at 0 and increment per transition.         |
 | `tidx`                             | scalar        | Transcript cursor at the start of the layer.                               |
 | `lambda_next`                      | `[D_EF]`      | Fresh/outgoing batching challenge for the next-layer claim.                |
@@ -131,64 +133,63 @@ needed to debug constraints, but do not duplicate the global layer-reduction sou
 ### Row Constraints
 
 - **Looping**: Loop constraints enforce boolean enablement, padding-after-padding, and grouping by
-  `(proof_idx, chip_id)`. `is_first_tower` scopes the tower input bus handshake to the very first active row for that
-  chip tower proof, while `is_first` marks the first layer row. No additional local tower identifier is used; `chip_id`
-  is the VK-assigned protocol identity carried on tower proof messages and remains constant across all layer rows of the
-  tower proof.
-- **Layer counter**: `layer_idx = 0` on the `is_first` row and increments by one on every transition flagged by the loop
-  helper.
+  `(proof_idx, chip_idx)`. `NestedForLoopSubAir<2>` tracks the two outer counters `proof_idx` and `chip_idx`, while
+  `layer_idx` is the innermost counter. `is_first_proof_idx` resets the outer proof counter; `is_first_chip_idx` scopes
+  the tower input bus handshake to the first active row for that chip tower proof and also marks `layer_idx = 0`.
+- **Layer counter**: `layer_idx = 0` on the `is_first_chip_idx` row and increments by one on every transition flagged by
+  the loop helper.
 - **`lambda_cur` propagation**: On the first active tower row, `lambda_cur` must equal `[1, 0, …, 0]`; on each transition
   the next row’s `lambda_cur` is constrained to equal the previous row’s sampled `lambda_next`. This lets downstream AIRs
   reuse the same logic for both initialization and continuing layers.
-- **Initial claim**: When `is_first = 1`, the layer sumcheck starts from the supplied `initial_tower_claim = C_1(r_1)`.
+- **Initial claim**: When `is_first_chip_idx = 1`, the layer sumcheck starts from the supplied `initial_tower_claim = C_1(r_1)`.
   The `*_claim_cur` values received from downstream AIRs are used to assemble `T_i(rho)`, not to recompute
   `r0_claim`/`w0_claim`.
 - **Inter-layer propagation**: `next.sumcheck_claim_in = read_claim_next + write_claim_next + logup_claim_next` on transitions. The
   current-claim versions feed `sumcheck_claim_out = read_claim_cur + write_claim_cur + logup_claim_cur`, which is what
   the sumcheck AIR receives.
-- **Count consistency**: `num_read_count`, `num_write_count`, and `num_logup_count` are individually checked against the
-  shape metadata forwarded from `TowerInputAir`/`TowerModuleBus` for read product specs, write product specs, and LogUp
-  specs.
-- **Dummy rows**: Dummy rows allow reusing the same AIR width even when no layer work is pending; constraints are
-  guarded by `is_not_dummy` to avoid accidentally constraining padding rows.
+- **Count consistency**: `num_layers`, `num_read_count`, `num_write_count`, and `num_logup_count` are anchored by the
+  first-row shape metadata from `TowerInputAir` and must stay constant across the chip's tower rows.
+- **No-op rows**: `IsZeroSubAir` enforces `is_noop` iff `num_layers == 0`; no-op rows allow reusing the same AIR width
+  when no layer work is pending, and bus traffic is guarded by `is_not_noop`.
 - **Transcript timing**: Same `tidx` arithmetic as before, but now the post-sumcheck transcript window must also cover
   the sample/observe operations that the product/logup AIRs perform themselves.
 
 ### Interactions
 
 - **Layer buses**
-    - `layer_input.receive`: only on the first non-dummy row; provides
-      `(chip_id, layer_tidx, num_layers, num_read_specs, num_write_specs, num_logup_specs, initial_tower_claim)`.
-    - `layer_output.send`: on the last non-dummy row; reports
-      `(chip_id, tidx_end, layer_idx_end, input_layer_claim, lambda_next, mu)`
+    - `layer_input.receive`: only on the first non-no-op row; provides
+      `(chip_idx, layer_tidx, num_layers, num_read_specs, num_write_specs, num_logup_specs, initial_tower_claim)`.
+    - `layer_output.send`: on the last non-no-op row; reports
+      `(chip_idx, tidx_end, layer_idx_end, input_layer_claim, lambda_next, mu)`
       back to `TowerInputAir` so the caller can record the transcript state for downstream verifiers.
 - **Sumcheck buses**
     - `sumcheck_input.send`: for non-root layers, dispatches
-      `(chip_id, layer_idx, is_last_layer, tidx + D_EF, claim)` to the sumcheck AIR.
-    - `sumcheck_output.receive`: ingests `(chip_id, layer_idx, claim_out, eq_at_r_prime)` and re-encodes them into local
+      `(chip_idx, layer_idx, is_last_layer, tidx + D_EF, claim)` to the sumcheck AIR.
+    - `sumcheck_output.receive`: ingests `(chip_idx, layer_idx, claim_out, eq_at_r_prime)` and re-encodes them into local
       columns.
-    - `sumcheck_challenge.send`: posts `(chip_id, layer_idx, round = 0, mu)` as round 0 for the next layer’s sumcheck.
+    - `sumcheck_challenge.send`: posts `(chip_idx, layer_idx, round = 0, mu)` as round 0 for the next layer’s sumcheck.
 - **Transcript bus**
     - Samples `lambda_next` for non-root layers and `mu` for every active layer.
     - Product and LogUp child-claim observations are owned by the product/LogUp claim AIRs, not by `TowerLayerAir`.
 - **Prod/logup buses**
+    - Sends claim-folding inputs only on non-root layers; root output/init folding is owned by `TowerInputAir`'s root buses.
     - Sends read product input with `prod_offset = 0`, start powers equal to one, and `num_prod_count = num_read_count`.
     - Receives read product claims plus `read_lambda_next_end` and `read_lambda_cur_end`, then sends write product input with
       `prod_offset = num_read_count`, start powers equal to the read end powers, and `num_prod_count = num_write_count`.
     - Receives write product claims plus `write_lambda_next_end` and `write_lambda_cur_end`, then sends the LogUp input
       with start powers equal to the write end powers and `num_logup_count`.
-    - Receives back both `lambda_next_claim` and `lambda_cur_claim` from each claim AIR.
+    - Receives back both `next_claim` and `eval_claim` from each claim AIR.
     - Root init buses are outside `TowerLayerAir`; this AIR receives the already assembled
       `initial_tower_claim = C_1(r_1)` from `TowerInputAir`.
 
-## TowerProdSumCheckClaimAir (`src/tower/layer/prod_claim/air.rs`)
+## TowerProdClaimAir (`src/tower/layer/prod_claim/air.rs`)
 
 ### Columns
 
 There are two product claim AIR instances with the same contract:
 
-- `TowerProdReadSumCheckClaimAir` folds read product specs;
-- `TowerProdWriteSumCheckClaimAir` folds write product specs.
+- `TowerProdReadClaimAir` folds read product specs;
+- `TowerProdWriteClaimAir` folds write product specs.
 
 The read variant uses:
 
@@ -206,7 +207,7 @@ num_prod_count = num_write_specs
 
 The trace needs columns equivalent to:
 
-- loop metadata: `is_enabled`, `(proof_idx, chip_id)` scope, and optional `layer_idx`;
+- loop metadata: `is_enabled`, `(proof_idx, chip_idx)` scope, and optional `layer_idx`;
 - a mode selector for `DeriveLayerClaims` versus `DeriveOutputClaim`;
 - `claim_tidx` for transcript observation of the product claim tuple;
 - `num_prod_count` and the active row counter inside the selected group;
@@ -219,7 +220,7 @@ The trace needs columns equivalent to:
 
 So if a chip has `num_read_specs = 4` and `num_write_specs = 6`, the read product claim AIR needs 4 active rows and the
 write product claim AIR needs 6 active rows. Together they fold the 10 product specs. LogUp specs are folded separately by
-`TowerLogupSumCheckClaimAir`.
+`TowerLogupClaimAir`.
 
 ### Row Constraints
 
@@ -288,10 +289,10 @@ The final active row sends:
 
 ```text
 TowerProdSumClaimMessage {
-  chip_id,
+  chip_idx,
   layer_idx,
-  lambda_next_claim       = prod_next_claim,
-  lambda_cur_claim        = prod_eval_claim,
+  next_claim              = prod_next_claim,
+  eval_claim              = prod_eval_claim,
   lambda_next_end         = lambda_next_start * lambda_next^num_prod_count,
   lambda_cur_end          = lambda_cur_start  * lambda_cur^num_prod_count
 }
@@ -347,8 +348,8 @@ The common loop constraints are:
 
 - One active row corresponds to one product spec.
 - The mode bit must be constant across the group.
-- `DeriveLayerClaims` mode is grouped by `(proof_idx, chip_id, layer_idx)` inside each read/write AIR instance.
-- `DeriveOutputClaim` mode is grouped by `(proof_idx, chip_id)` inside each read/write AIR instance.
+- `DeriveLayerClaims` mode is grouped by non-root `(proof_idx, chip_idx, layer_idx)` inside each read/write AIR instance.
+- `DeriveOutputClaim` mode is grouped by `(proof_idx, chip_idx)` inside each read/write AIR instance.
 - `DeriveLayerClaims` mode initializes additive accumulators to zero and power accumulators from the input message.
 - `DeriveOutputClaim` mode initializes the multiplicative output accumulator to one, initializes the additive
   initial-claim accumulator to zero, and initializes `init_pow` from the root input message.
@@ -358,11 +359,11 @@ The common loop constraints are:
 
 ### Interactions
 
-In `DeriveLayerClaims` mode, the AIR receives the layer input message on the first row:
+In `DeriveLayerClaims` mode, the AIR receives the non-root layer input message on the first row:
 
 ```text
 TowerProdLayerInputMessage {
-  chip_id,
+  chip_idx,
   layer_idx,
   tidx,
   lambda_next, // next-layer batching challenge
@@ -379,10 +380,10 @@ and sends on the final active row:
 
 ```text
 TowerProdSumClaimMessage {
-  chip_id,
+  chip_idx,
   layer_idx,
-  lambda_next_claim       = prod_next_claim,
-  lambda_cur_claim        = prod_eval_claim,
+  next_claim              = prod_next_claim,
+  eval_claim              = prod_eval_claim,
   lambda_next_end         = lambda_next_start * lambda_next^num_prod_count,
   lambda_cur_end          = lambda_cur_start  * lambda_cur^num_prod_count
 }
@@ -392,7 +393,7 @@ In `DeriveOutputClaim` mode, the AIR receives the root input bus message on the 
 
 ```text
 Tower{Read,Write}RootInputBus {
-  chip_id,
+  chip_idx,
   claim_tidx,
   lambda_1,
   r_1,
@@ -401,16 +402,16 @@ Tower{Read,Write}RootInputBus {
 }
 ```
 
-and sends both root-mode messages from the same final active row:
+and sends both product root-mode messages from the same final active row:
 
 ```text
 Tower{Read,Write}RootBus {
-  chip_id,
+  chip_idx,
   output_claim
 }
 
 Tower{Read,Write}InitBus {
-  chip_id,
+  chip_idx,
   initial_claim
 }
 ```
@@ -434,7 +435,7 @@ logup_offset = num_read_specs + num_write_specs = num_prod_specs
 
 The trace needs columns equivalent to:
 
-- loop metadata: `is_enabled`, `(proof_idx, chip_id)` scope, and optional `layer_idx`;
+- loop metadata: `is_enabled`, `(proof_idx, chip_idx)` scope, and optional `layer_idx`;
 - a mode selector for `DeriveLayerClaims` versus `DeriveOutputClaim`;
 - `claim_tidx` for transcript observation of the LogUp tuple;
 - `num_logup_count` and the active row counter inside the selected group;
@@ -537,10 +538,10 @@ The final active row sends:
 
 ```text
 TowerLogupClaimMessage {
-  chip_id,
+  chip_idx,
   layer_idx,
-  lambda_next_claim       = logup_next_claim,
-  lambda_cur_claim        = logup_eval_claim
+  next_claim              = logup_next_claim,
+  eval_claim              = logup_eval_claim
 }
 ```
 
@@ -584,8 +585,8 @@ The common loop constraints are:
 
 - One active row corresponds to one LogUp spec.
 - The mode bit must be constant across the group.
-- `DeriveLayerClaims` mode is grouped by `(proof_idx, chip_id, layer_idx)`.
-- `DeriveOutputClaim` mode is grouped by `(proof_idx, chip_id)`.
+- `DeriveLayerClaims` mode is grouped by non-root `(proof_idx, chip_idx, layer_idx)`.
+- `DeriveOutputClaim` mode is grouped by `(proof_idx, chip_idx)`.
 - In `DeriveLayerClaims` mode, recompute `P_mu_k` and `Q_mu_k` every row using interpolation at `mu`.
 - Recompute `P_cross_k` and `Q_cross_k` every row.
 - In `DeriveLayerClaims` mode, update the next-claim accumulator using `lambda_next`.
@@ -596,11 +597,11 @@ The common loop constraints are:
 
 ### Interactions
 
-In `DeriveLayerClaims` mode, the AIR receives the layer input message on the first row:
+In `DeriveLayerClaims` mode, the AIR receives the non-root layer input message on the first row:
 
 ```text
 TowerLogupLayerInputMessage {
-  chip_id,
+  chip_idx,
   layer_idx,
   tidx,
   lambda_next, // next-layer batching challenge
@@ -616,10 +617,10 @@ and sends on the final active row:
 
 ```text
 TowerLogupClaimMessage {
-  chip_id,
+  chip_idx,
   layer_idx,
-  lambda_next_claim       = logup_next_claim,
-  lambda_cur_claim        = logup_eval_claim
+  next_claim              = logup_next_claim,
+  eval_claim              = logup_eval_claim
 }
 ```
 
@@ -627,7 +628,7 @@ In `DeriveOutputClaim` mode, the AIR receives the root input message on the firs
 
 ```text
 TowerLogupRootInputBus {
-  chip_id,
+  chip_idx,
   claim_tidx,
   lambda_1,
   r_1,
@@ -636,17 +637,13 @@ TowerLogupRootInputBus {
 }
 ```
 
-and sends both root-mode messages from the same final active row:
+and sends the root fractional pair and initial-claim contribution in one message from the same final active row:
 
 ```text
 TowerLogupRootBus {
-  chip_id,
+  chip_idx,
   p0_claim,
-  q0_claim
-}
-
-TowerLogupInitBus {
-  chip_id,
+  q0_claim,
   logup_initial_claim
 }
 ```
@@ -662,12 +659,12 @@ The AIR owns transcript observations for active LogUp child claims. It does not 
 |-------------------------------|----------|-------------------------------------------------------------|
 | `is_enabled`                  | scalar   | Row selector.                                               |
 | `proof_idx`                   | scalar   | Proof counter.                                              |
-| `chip_id`                     | scalar   | VK-assigned chip id used on sumcheck buses.                 |
+| `chip_idx`                    | scalar   | Proof-local chip proof index used on sumcheck buses.        |
 | `layer_idx`                   | scalar   | Layer whose sumcheck is being executed.                     |
-| `is_first_tower`              | scalar   | First sumcheck row for the current `(proof_idx, chip_id)`.  |
+| `is_first_idx`                | scalar   | First sumcheck row for the current `(proof_idx, chip_idx)`. |
 | `is_first_layer`              | scalar   | First round row for the current layer.                      |
 | `is_first_round`              | scalar   | First round inside the layer.                               |
-| `is_dummy`                    | scalar   | Padding flag.                                               |
+| `is_noop`                     | scalar   | Placeholder for a chip tower with no layer sumcheck.        |
 | `is_last_layer`               | scalar   | Whether this layer is the final GKR layer.                  |
 | `round`                       | scalar   | Sub-round index within the layer (0 .. layer_idx-1).        |
 | `tidx`                        | scalar   | Transcript cursor before reading evaluations.               
@@ -678,26 +675,29 @@ The AIR owns transcript observations for active LogUp child claims. It does not 
 
 ### Row Constraints
 
-- **Looping**: Loop constraints iterate over `(proof_idx, chip_id, layer_idx)` with the sumcheck round serving as the
-  innermost loop. The `is_first_tower` flag gates reset logic when we advance to a new chip tower proof, while
+- **Looping**: Loop constraints iterate over `(proof_idx, chip_idx, layer_idx)` with the sumcheck round serving as the
+  innermost loop. The `is_first_idx` flag gates reset logic when we advance to a new chip tower proof, while
   `is_first_layer` protects the per-layer bookkeeping just before the round loop begins. No additional local tower
   identifier is used.
 - **Round counter**: `round` starts at 0 and increments each transition; final round enforces `round = layer_idx - 1`.
+- **Last-layer flag**: `is_last_layer` is bound by the input bus on the first round, propagated across all rounds in
+  the layer, and checked against the chip-local segment end on the final round.
 - **Eq accumulator**: `eq_in = 1` on the first round; `eq_out = update_eq(eq_in, prev_challenge, challenge)` and
   propagates forward.
 - **Claim flow**: `claim_out` computed via `interpolate_cubic_at_0123` using `(claim_in - ev1)` as `ev0`;
   `next.claim_in = claim_out` across transitions.
 - **Transcript timing**: Each transition bumps `next.tidx = tidx + 4·D_EF` (three observations + challenge sample).
-- **Dummy rows**: Dummy rows short-circuit all bus traffic; guard send/receive calls with `is_not_dummy`.
+- **No-op rows**: No-op rows short-circuit all bus traffic and are constrained to be a single enabled row for
+  the whole chip-local sumcheck segment; guard send/receive calls with `is_not_noop`.
 - **Arity assumption**: The layout assumes cubic polynomials (degree 3) and would need updates if the sumcheck arity
   changes.
 
 ### Interactions
 
-- `sumcheck_input.receive`: first non-dummy round pulls `(chip_id, layer_idx, is_last_layer, tidx, claim)` from
+- `sumcheck_input.receive`: first non-no-op round pulls `(chip_idx, layer_idx, is_last_layer, tidx, claim)` from
   `TowerLayerAir`.
-- `sumcheck_output.send`: last non-dummy round returns `(chip_id, layer_idx, claim_out, eq_at_r_prime)` to the layer AIR.
+- `sumcheck_output.send`: last non-no-op round returns `(chip_idx, layer_idx, claim_out, eq_at_r_prime)` to the layer AIR.
 - `sumcheck_challenge.receive/send`: enforces challenge chaining between layers/rounds (`prev_challenge` from prior
   layer, `challenge` published for the next layer or eq export).
-- All three tower sumcheck buses include `chip_id` so messages disambiguate chip tower proofs inside the same proof.
+- All three tower sumcheck buses include `chip_idx` so messages disambiguate chip tower proofs inside the same proof.
 - `transcript_bus.observe_ext`: records `ev1/ev2/ev3`, followed by `sample_ext` of `challenge`.

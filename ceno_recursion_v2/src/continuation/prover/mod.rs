@@ -67,9 +67,8 @@ impl AggregationOptions {
 }
 
 type CenoProof = ZKVMProof<RecursionField, Basefold<RecursionField, BasefoldRSParams>>;
-type Engine = BabyBearPoseidon2CpuEngine<
-    openvm_stark_sdk::config::baby_bear_poseidon2::DuplexSponge,
->;
+type Engine =
+    BabyBearPoseidon2CpuEngine<openvm_stark_sdk::config::baby_bear_poseidon2::DuplexSponge>;
 
 /// Full recursion pipeline that aggregates N Ceno base-layer shard proofs
 /// into a single compact root proof.
@@ -91,9 +90,7 @@ pub struct AggProver<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> {
     options: AggregationOptions,
 }
 
-impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize>
-    AggProver<LEAF_FANIN, INTERNAL_FANIN>
-{
+impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> AggProver<LEAF_FANIN, INTERNAL_FANIN> {
     /// Create a new aggregation prover from the base-layer verifying key.
     pub fn new(child_vk: Arc<RecursionVk>, options: AggregationOptions) -> Self {
         let leaf_prover = InnerCpuProver::<LEAF_FANIN>::new::<Engine>(

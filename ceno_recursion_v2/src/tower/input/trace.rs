@@ -10,10 +10,25 @@ use p3_matrix::dense::RowMajorMatrix;
 #[derive(Debug, Clone, Default)]
 pub struct TowerInputRecord {
     pub proof_idx: usize,
-    pub idx: usize,
+    pub chip_idx: usize,
     pub tidx: usize,
-    pub n_logup: usize,
+    pub final_tidx: usize,
+    pub num_layers: usize,
+    pub num_read_specs: usize,
+    pub num_write_specs: usize,
+    pub num_logup_specs: usize,
+    pub r0_claim: EF,
+    pub w0_claim: EF,
+    pub p0_claim: EF,
+    pub q0_claim: EF,
     pub alpha_logup: EF,
+    pub r_1: EF,
+    pub read_initial_claim: EF,
+    pub write_initial_claim: EF,
+    pub logup_initial_claim: EF,
+    pub initial_tower_claim: EF,
+    pub write_lambda_1_start: EF,
+    pub logup_lambda_1_start: EF,
     pub input_layer_claim: EF,
     pub layer_output_lambda: EF,
     pub layer_output_mu: EF,
@@ -22,8 +37,7 @@ pub struct TowerInputRecord {
 pub struct TowerInputTraceGenerator;
 
 impl RowMajorChip<F> for TowerInputTraceGenerator {
-    // (gkr_input_records, q0_claims)
-    type Ctx<'a> = (&'a [TowerInputRecord], &'a [EF]);
+    type Ctx<'a> = &'a [TowerInputRecord];
 
     #[tracing::instrument(level = "trace", skip_all)]
     fn generate_trace(
@@ -31,8 +45,7 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
         ctx: &Self::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
-        let (gkr_input_records, q0_claims) = ctx;
-        debug_assert_eq!(gkr_input_records.len(), q0_claims.len());
+        let gkr_input_records = *ctx;
 
         let width = TowerInputCols::<F>::width();
 
@@ -50,30 +63,91 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
 
         let (data_slice, _) = trace.split_at_mut(num_valid_rows * width);
 
-        for (row_data, (record, q0_claim)) in data_slice
+        for (row_data, record) in data_slice
             .chunks_exact_mut(width)
-            .zip(gkr_input_records.iter().zip(q0_claims.iter()))
+            .zip(gkr_input_records.iter())
         {
             let cols: &mut TowerInputCols<F> = row_data.borrow_mut();
 
             cols.is_enabled = F::ONE;
             cols.proof_idx = F::from_usize(record.proof_idx);
-            cols.idx = F::from_usize(record.idx);
+            cols.chip_idx = F::from_usize(record.chip_idx);
 
             cols.tidx = F::from_usize(record.tidx);
+            cols.final_tidx = F::from_usize(record.final_tidx);
 
-            cols.n_logup = F::from_usize(record.n_logup);
+            cols.num_layers = F::from_usize(record.num_layers);
+            cols.num_read_specs = F::from_usize(record.num_read_specs);
+            cols.num_write_specs = F::from_usize(record.num_write_specs);
+            cols.num_logup_specs = F::from_usize(record.num_logup_specs);
             IsZeroSubAir.generate_subrow(
-                cols.n_logup,
-                (&mut cols.is_n_logup_zero_aux.inv, &mut cols.is_n_logup_zero),
+                cols.num_layers,
+                (
+                    &mut cols.is_num_layers_zero_aux.inv,
+                    &mut cols.is_num_layers_zero,
+                ),
+            );
+            IsZeroSubAir.generate_subrow(
+                cols.num_layers - F::ONE,
+                (
+                    &mut cols.is_num_layers_one_aux.inv,
+                    &mut cols.is_num_layers_one,
+                ),
             );
 
-            let q0_basis = q0_claim.as_basis_coefficients_slice();
-            cols.r0_claim.copy_from_slice(q0_basis);
-            cols.w0_claim.copy_from_slice(q0_basis);
-            cols.q0_claim.copy_from_slice(q0_basis);
+            cols.r0_claim = record
+                .r0_claim
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.w0_claim = record
+                .w0_claim
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.p0_claim = record
+                .p0_claim
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.q0_claim = record
+                .q0_claim
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
             cols.alpha_logup = record
                 .alpha_logup
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.r_1 = record.r_1.as_basis_coefficients_slice().try_into().unwrap();
+            cols.read_initial_claim = record
+                .read_initial_claim
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.write_initial_claim = record
+                .write_initial_claim
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.logup_initial_claim = record
+                .logup_initial_claim
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.initial_tower_claim = record
+                .initial_tower_claim
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.write_lambda_1_start = record
+                .write_lambda_1_start
+                .as_basis_coefficients_slice()
+                .try_into()
+                .unwrap();
+            cols.logup_lambda_1_start = record
+                .logup_lambda_1_start
                 .as_basis_coefficients_slice()
                 .try_into()
                 .unwrap();
