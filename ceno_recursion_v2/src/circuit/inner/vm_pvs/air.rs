@@ -3,7 +3,7 @@ use std::{borrow::Borrow, sync::Arc};
 use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
 use ceno_zkvm::{
     instructions::riscv::constants::{
-        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, EXIT_PC, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
         HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBIO_DIGEST_IDX,
         PUBIO_DIGEST_U16_LIMBS, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
     },
@@ -140,22 +140,14 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .when(and(local.is_valid, next.is_valid))
             .assert_eq(local.has_verifier_pvs, next.has_verifier_pvs);
 
-        // We constrain segment adjacency so adjacent rows correspond to adjacent segments.
-        // Non-final segments must suspend with EXIT_PC.
-        let suspend_exit_pc = EXIT_PC as u32;
-        let suspend_exit_code_lo = AB::Expr::from_u32(suspend_exit_pc & 0xffff);
-        let suspend_exit_code_hi = AB::Expr::from_u32((suspend_exit_pc >> 16) & 0xffff);
+        // Proof rows are verified in the same order as the native full-trace verifier.
         builder
-            .when(and(local.is_valid, not(local.is_last)))
-            .assert_eq(local.child_pvs.exit_code[0], suspend_exit_code_lo);
-        builder
-            .when(and(local.is_valid, not(local.is_last)))
-            .assert_eq(local.child_pvs.exit_code[1], suspend_exit_code_hi);
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.shard_id, local.proof_idx);
 
         // When local and next are valid, enforce continuation consistency.
         let mut when_both_valid = builder.when(and(local.is_valid, not(local.is_last)));
         when_both_valid.assert_eq(local.child_pvs.end_pc, next.child_pvs.init_pc);
-        when_both_valid.assert_eq(local.child_pvs.end_cycle, next.child_pvs.init_cycle);
         when_both_valid.assert_eq(
             local.child_pvs.shard_id + AB::Expr::ONE,
             next.child_pvs.shard_id,
@@ -164,6 +156,11 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             local.child_pvs.heap_start_addr
                 + local.child_pvs.heap_shard_len * AB::Expr::from_u32(WORD_SIZE as u32),
             next.child_pvs.heap_start_addr,
+        );
+        when_both_valid.assert_eq(
+            local.child_pvs.hint_start_addr
+                + local.child_pvs.hint_shard_len * AB::Expr::from_u32(WORD_SIZE as u32),
+            next.child_pvs.hint_start_addr,
         );
 
         // Mirror verifier invariant: every shard starts at SUBCYCLES_PER_INSN.
@@ -384,15 +381,45 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             shard_rw_sum,
         } = builder.public_values().borrow();
 
-        // constrain first proof pvs
+        // The aggregate output copies first-proof values except for terminal fields.
+        assert_array_eq(
+            &mut builder.when_first_row(),
+            local.child_pvs.witness_commit,
+            witness_commit,
+        );
         builder
             .when_first_row()
             .assert_eq(local.child_pvs.init_pc, init_pc);
         builder
             .when_first_row()
             .assert_eq(local.child_pvs.init_cycle, init_cycle);
+        builder
+            .when_first_row()
+            .assert_eq(local.child_pvs.shard_id, shard_id);
+        builder
+            .when_first_row()
+            .assert_eq(local.child_pvs.heap_start_addr, heap_start_addr);
+        builder
+            .when_first_row()
+            .assert_eq(local.child_pvs.heap_shard_len, heap_shard_len);
+        builder
+            .when_first_row()
+            .assert_eq(local.child_pvs.hint_start_addr, hint_start_addr);
+        builder
+            .when_first_row()
+            .assert_eq(local.child_pvs.hint_shard_len, hint_shard_len);
+        assert_array_eq(
+            &mut builder.when_first_row(),
+            local.child_pvs.public_io,
+            public_io,
+        );
+        assert_array_eq(
+            &mut builder.when_first_row(),
+            local.child_pvs.shard_rw_sum,
+            shard_rw_sum,
+        );
 
-        // constrain last proof pvs
+        // The aggregate output copies terminal values from the last child proof.
         builder
             .when(local.is_last)
             .assert_eq(local.child_pvs.end_pc, end_pc);
@@ -405,54 +432,16 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             exit_code,
         );
 
-        // constrain static per-proof public values
-        builder
-            .when(local.is_valid)
-            .assert_eq(local.child_pvs.shard_id, shard_id);
-        builder
-            .when(local.is_valid)
-            .assert_eq(local.child_pvs.heap_start_addr, heap_start_addr);
-        builder
-            .when(local.is_valid)
-            .assert_eq(local.child_pvs.heap_shard_len, heap_shard_len);
-        builder
-            .when(local.is_valid)
-            .assert_eq(local.child_pvs.hint_start_addr, hint_start_addr);
-        builder
-            .when(local.is_valid)
-            .assert_eq(local.child_pvs.hint_shard_len, hint_shard_len);
-        assert_array_eq(
-            &mut builder.when(local.is_valid),
-            local.child_pvs.public_io,
-            public_io,
-        );
-        assert_array_eq(
-            &mut builder.when(local.is_valid),
-            local.child_pvs.shard_rw_sum,
-            shard_rw_sum,
-        );
-
-        // constrain fixed commits
+        // Fixed commits are VK-level data and must match every child proof row.
         assert_array_eq(
             &mut builder.when(local.is_valid),
             local.child_pvs.fixed_commit,
             fixed_commit,
         );
-        builder
-            .when(local.is_valid)
-            .assert_eq(local.child_pvs.init_pc, init_pc);
-        builder
-            .when(local.is_valid)
-            .assert_eq(local.child_pvs.init_cycle, init_cycle);
         assert_array_eq(
             &mut builder.when(local.is_valid),
             local.child_pvs.fixed_no_omc_init_commit,
             fixed_no_omc_init_commit,
-        );
-        assert_array_eq(
-            &mut builder.when(local.is_valid),
-            local.child_pvs.witness_commit,
-            witness_commit,
         );
     }
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Group Stark interaction-bus balance failures by bus id.
+"""Group Stark debug constraint failures.
 
 Usage:
     python3 scripts/group_bus_failures.py prover.log
@@ -53,32 +53,19 @@ BUS_NAMES = {
     31: "TowerSumcheckInputBus",
     32: "TowerSumcheckOutputBus",
     33: "TowerSumcheckChallengeBus",
-    34: "TowerProdReadClaimInputBus",
+    34: "TowerClaimInputBus",
     35: "TowerProdReadClaimBus",
-    36: "TowerProdWriteClaimInputBus",
-    37: "TowerProdWriteClaimBus",
-    38: "TowerLogupClaimInputBus",
-    39: "TowerLogupClaimBus",
-    40: "TowerReadRootInputBus",
-    41: "TowerReadRootBus",
-    42: "TowerReadInitBus",
-    43: "TowerWriteRootInputBus",
-    44: "TowerWriteRootBus",
-    45: "TowerWriteInitBus",
-    46: "TowerLogupRootInputBus",
-    47: "TowerLogupRootBus",
-    48: "TowerLogupInitBus",
-    49: "AirPresenceBus",
-    50: "ColumnClaimsBus",
-    51: "SelHypercubeBus",
-    52: "SelUniBus",
-    53: "BatchConstraintConductorBus",
-    54: "EqNOuterBus",
-    55: "SymbolicExpressionBus",
-    56: "ExpressionClaimBus",
-    57: "InteractionsFoldingBus",
-    58: "ConstraintsFoldingBus",
-    59: "PvsAirConsistencyBus",
+    36: "TowerProdWriteClaimBus",
+    37: "TowerLogupClaimBus",
+    38: "TowerReadRootInputBus",
+    39: "TowerReadRootBus",
+    40: "TowerReadInitBus",
+    41: "TowerWriteRootInputBus",
+    42: "TowerWriteRootBus",
+    43: "TowerWriteInitBus",
+    44: "TowerLogupRootInputBus",
+    45: "TowerLogupRootBus",
+    46: "PvsAirConsistencyBus",
 }
 
 FAILURE_RE = re.compile(
@@ -87,6 +74,11 @@ FAILURE_RE = re.compile(
 CONNECTION_RE = re.compile(
     r"Air idx:\s*(?P<air_idx>\d+),\s*Air name:\s*(?P<air_name>.*?),\s*count:\s*(?P<count>\d+)"
 )
+CONSTRAINT_RE = re.compile(
+    r"constraints had nonzero value on air (?P<air_name>.*?),row (?P<row>\d+)"
+)
+LEFT_RE = re.compile(r"\bleft:\s*(?P<left>[-]?\d+)")
+RIGHT_RE = re.compile(r"\bright:\s*(?P<right>[-]?\d+)")
 
 
 @dataclass(frozen=True)
@@ -110,6 +102,14 @@ class Failure:
     bus: int
     fields: str
     connections: list[Connection] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ConstraintFailure:
+    air_name: str
+    row: int
+    left: str | None = None
+    right: str | None = None
 
 
 def decode_field(value: int, modulus: int) -> int:
@@ -156,7 +156,35 @@ def parse_failures(lines: list[str], modulus: int) -> list[Failure]:
     return failures
 
 
-def print_summary(failures: list[Failure]) -> None:
+def parse_constraint_failures(lines: list[str]) -> list[ConstraintFailure]:
+    failures: list[ConstraintFailure] = []
+    for idx, line in enumerate(lines):
+        constraint_match = CONSTRAINT_RE.search(line)
+        if not constraint_match:
+            continue
+
+        left: str | None = None
+        right: str | None = None
+        for detail_line in lines[idx + 1 : idx + 6]:
+            if left is None and (left_match := LEFT_RE.search(detail_line)):
+                left = left_match.group("left")
+            if right is None and (right_match := RIGHT_RE.search(detail_line)):
+                right = right_match.group("right")
+            if left is not None and right is not None:
+                break
+
+        failures.append(
+            ConstraintFailure(
+                air_name=constraint_match.group("air_name").strip(),
+                row=int(constraint_match.group("row")),
+                left=left,
+                right=right,
+            )
+        )
+    return failures
+
+
+def print_bus_summary(failures: list[Failure]) -> None:
     by_bus: dict[int, list[Failure]] = defaultdict(list)
     for failure in failures:
         by_bus[failure.bus].append(failure)
@@ -214,6 +242,25 @@ def print_summary(failures: list[Failure]) -> None:
         print()
 
 
+def print_constraint_summary(failures: list[ConstraintFailure]) -> None:
+    if not failures:
+        print("No debug constraint failures found.")
+        return
+
+    print("Debug constraint failures:")
+    for failure, occurrences in sorted(
+        Counter(failures).items(),
+        key=lambda item: (item[0].air_name, item[0].row, item[0].left or "", item[0].right or ""),
+    ):
+        values = ""
+        if failure.left is not None or failure.right is not None:
+            values = f" left={failure.left or '?'} right={failure.right or '?'}"
+        print(
+            f"  air={failure.air_name} row={failure.row}{values} occurrences={occurrences}"
+        )
+    print()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("logs", nargs="*", type=Path, help="Log files. Reads stdin when omitted.")
@@ -225,8 +272,9 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    failures = parse_failures(read_lines(args.logs), args.modulus)
-    print_summary(failures)
+    lines = read_lines(args.logs)
+    print_constraint_summary(parse_constraint_failures(lines))
+    print_bus_summary(parse_failures(lines, args.modulus))
     return 0
 
 

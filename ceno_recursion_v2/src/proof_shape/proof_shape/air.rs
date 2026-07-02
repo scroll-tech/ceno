@@ -313,7 +313,7 @@ where
                     word_idx: AB::Expr::from_usize(i),
                     value: local.lookup_challenge_alpha[i].into(),
                 },
-                AB::Expr::ZERO,
+                local.is_present * local.is_valid,
             );
         }
         for i in 0..D_EF {
@@ -325,7 +325,7 @@ where
                     word_idx: AB::Expr::from_usize(i),
                     value: local.lookup_challenge_beta[i].into(),
                 },
-                AB::Expr::ZERO,
+                local.is_present * local.is_valid,
             );
         }
 

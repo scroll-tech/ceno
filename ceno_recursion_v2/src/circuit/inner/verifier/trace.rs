@@ -44,19 +44,23 @@ pub fn generate_proving_ctx(
 
     let mut trace = vec![F::ZERO; rows * width];
 
-    if rows > 0 {
-        let first_row = &mut trace[..width];
+    let valid_rows = proofs.len().max(1);
+    for (row_idx, row) in trace.chunks_exact_mut(width).enumerate() {
+        if row_idx >= valid_rows {
+            continue;
+        }
+
         let base_width = VerifierPvsCols::<u8>::width();
-        let (base_row, def_row) = first_row.split_at_mut(base_width);
+        let (base_row, def_row) = row.split_at_mut(base_width);
 
         let cols: &mut VerifierPvsCols<F> = base_row.borrow_mut();
-        cols.proof_idx = F::ZERO;
+        cols.proof_idx = F::from_usize(row_idx);
         cols.is_valid = F::ONE;
         cols.has_verifier_pvs = F::ZERO;
 
         if deferral_enabled {
             let def_cols: &mut VerifierDeferralCols<F> = def_row.borrow_mut();
-            def_cols.is_last = F::ONE;
+            def_cols.is_last = F::from_bool(row_idx + 1 == valid_rows);
             def_cols.child_pvs.deferral_flag = F::ZERO;
         }
     }

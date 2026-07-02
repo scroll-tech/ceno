@@ -90,6 +90,11 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
                 let mut preflight = Preflight::default();
                 super::verifier::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
                 super::vm_pvs::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+                let num_lookup_challenge_consumers = proof.chip_proofs.len();
+                preflight.vm_pvs.lookup_challenge_alpha_lookup_count =
+                    num_lookup_challenge_consumers;
+                preflight.vm_pvs.lookup_challenge_beta_lookup_count =
+                    num_lookup_challenge_consumers;
                 (preflight, sponge)
             })
             .unzip();
