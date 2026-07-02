@@ -53,8 +53,40 @@ pub fn generate_proving_ctx(
             cols.is_valid = F::ONE;
             cols.is_last = F::from_bool(row_idx + 1 == proofs.len());
             cols.has_verifier_pvs = F::ZERO;
+            cols.fixed_commit_present = F::from_bool(child_vk.fixed_commit.is_some());
+            cols.fixed_no_omc_init_commit_present =
+                F::from_bool(child_vk.fixed_no_omc_init_commit.is_some());
             cols.lookup_challenge_alpha = ef_to_limbs(preflight.vm_pvs.lookup_challenge_alpha);
             cols.lookup_challenge_beta = ef_to_limbs(preflight.vm_pvs.lookup_challenge_beta);
+            cols.lookup_challenge_alpha_tidx =
+                F::from_usize(preflight.vm_pvs.lookup_challenge_alpha_tidx);
+            cols.lookup_challenge_beta_tidx =
+                F::from_usize(preflight.vm_pvs.lookup_challenge_beta_tidx);
+            let (fixed_tidx, fixed_no_omc_tidx, witness_tidx) =
+                commitment_digest_tidxs(child_vk, proof);
+            cols.fixed_commit_tidx = F::from_usize(fixed_tidx);
+            cols.fixed_no_omc_init_commit_tidx = F::from_usize(fixed_no_omc_tidx);
+            cols.witness_commit_tidx = F::from_usize(witness_tidx);
+            let fixed_meta = child_vk
+                .fixed_commit
+                .as_ref()
+                .map(commit_fixed_metadata)
+                .unwrap_or_default();
+            cols.fixed_commit_log2_max_codeword_size = fixed_meta[0];
+            cols.fixed_commit_reshape_log_height = fixed_meta[1];
+            cols.fixed_commit_cumulative_heights_len = fixed_meta[2];
+            let fixed_no_omc_meta = child_vk
+                .fixed_no_omc_init_commit
+                .as_ref()
+                .map(commit_fixed_metadata)
+                .unwrap_or_default();
+            cols.fixed_no_omc_init_commit_log2_max_codeword_size = fixed_no_omc_meta[0];
+            cols.fixed_no_omc_init_commit_reshape_log_height = fixed_no_omc_meta[1];
+            cols.fixed_no_omc_init_commit_cumulative_heights_len = fixed_no_omc_meta[2];
+            let witness_meta = commit_fixed_metadata(&proof.witin_commit);
+            cols.witness_commit_log2_max_codeword_size = witness_meta[0];
+            cols.witness_commit_reshape_log_height = witness_meta[1];
+            cols.witness_commit_cumulative_heights_len = witness_meta[2];
             cols.lookup_challenge_alpha_lookup_count =
                 F::from_usize(preflight.vm_pvs.lookup_challenge_alpha_lookup_count);
             cols.lookup_challenge_beta_lookup_count =
@@ -117,6 +149,43 @@ fn extract_commit(commit: Option<impl IntoIterator<Item = F>>) -> [F; DIGEST_SIZ
         }
     }
     out
+}
+
+fn commitment_digest_tidxs(
+    child_vk: &RecursionVk,
+    proof: &RecursionProof,
+) -> (usize, usize, usize) {
+    let mut tidx = crate::utils::TranscriptLabel::Riscv.field_len()
+        + child_vk
+            .circuit_vks
+            .values()
+            .map(|circuit_vk| circuit_vk.get_cs().zkvm_v1_css.instance.len())
+            .sum::<usize>();
+
+    let fixed_tidx = tidx;
+    if let Some(commitment) = child_vk.fixed_commit.as_ref() {
+        tidx += commitment_transcript_len(commitment);
+    }
+
+    let fixed_no_omc_tidx = tidx;
+    if let Some(commitment) = child_vk.fixed_no_omc_init_commit.as_ref() {
+        tidx += commitment_transcript_len(commitment);
+    }
+
+    let witness_tidx = tidx;
+    (fixed_tidx, fixed_no_omc_tidx, witness_tidx)
+}
+
+fn commitment_transcript_len(commitment: &super::RecursionCommitment) -> usize {
+    DIGEST_SIZE + 3 + commitment.cumulative_heights.len()
+}
+
+fn commit_fixed_metadata(commitment: &super::RecursionCommitment) -> [F; 3] {
+    [
+        F::from_u64(commitment.inner.log2_max_codeword_size as u64),
+        F::from_u64(commitment.reshape_log_height as u64),
+        F::from_u64(commitment.cumulative_heights.len() as u64),
+    ]
 }
 
 fn split_u32_lo_hi(value: u32) -> [F; 2] {

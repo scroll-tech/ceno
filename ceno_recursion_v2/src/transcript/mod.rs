@@ -171,6 +171,7 @@ impl TranscriptModule {
     #[tracing::instrument(name = "generate_trace.transcript", level = "trace", skip_all)]
     fn build_transcript_trace(
         &self,
+        proofs: &[RecursionProof],
         preflights: &[Preflight],
         required_height: Option<usize>,
     ) -> Option<(RowMajorMatrix<F>, Vec<[F; POSEIDON2_WIDTH]>)> {
@@ -371,7 +372,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         };
 
         let (transcript_trace, mut poseidon2_perm_inputs) =
-            self.build_transcript_trace(preflights, required_transcript)?;
+            self.build_transcript_trace(proofs, preflights, required_transcript)?;
         let mut poseidon2_compress_inputs = Vec::new();
 
         poseidon2_perm_inputs.extend_from_slice(ctx.0);

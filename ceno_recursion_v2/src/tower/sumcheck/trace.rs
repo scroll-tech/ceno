@@ -19,6 +19,9 @@ pub struct TowerSumcheckRecord {
     pub evals: Vec<[EF; 3]>,
     pub ris: Vec<EF>,
     pub claims: Vec<EF>,
+    pub read_counts: Vec<usize>,
+    pub write_counts: Vec<usize>,
+    pub logup_counts: Vec<usize>,
 }
 
 impl TowerSumcheckRecord {
@@ -45,8 +48,18 @@ impl TowerSumcheckRecord {
 
     #[inline]
     fn derive_tidx(&self, layer_idx: usize, round_in_layer: usize) -> usize {
+        let previous_layers = (0..layer_idx)
+            .map(|idx| {
+                tower_transcript_len::compact_layer_span(
+                    idx,
+                    self.read_counts.get(idx).copied().unwrap_or(0) != 0,
+                    self.write_counts.get(idx).copied().unwrap_or(0) != 0,
+                    self.logup_counts.get(idx).copied().unwrap_or(0) != 0,
+                )
+            })
+            .sum::<usize>();
         self.tidx
-            + tower_transcript_len::layers_cumulative(layer_idx)
+            + previous_layers
             + tower_transcript_len::sumcheck_start_offset_in_layer(layer_idx)
             + tower_transcript_len::ROUND_LEN * round_in_layer
     }

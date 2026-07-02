@@ -12,9 +12,12 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{ForkedTranscriptBus, ForkedTranscriptBusMessage},
-    tower::bus::{
-        TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
-        TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
+    tower::{
+        bus::{
+            TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
+            TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
+        },
+        tower_transcript_len::{LABEL_INTERNAL_ROUND, SUMCHECK_INIT_LEN},
     },
 };
 use recursion_circuit::{
@@ -293,7 +296,7 @@ where
         );
 
         // Transcript index increment
-        use crate::tower::tower_transcript_len::ROUND_LEN;
+        use crate::tower::tower_transcript_len::{LABEL_INTERNAL_ROUND, ROUND_LEN};
         builder.when(is_transition_round.clone()).assert_eq(
             next.tidx,
             local.tidx.into() + AB::Expr::from_usize(ROUND_LEN),
@@ -364,8 +367,29 @@ where
         // External Interactions
         ///////////////////////////////////////////////////////////////////////
 
-        // 1. TranscriptBus
-        // 1a. Observe evaluations
+        // 1. ForkedTranscriptBus
+        // 1a. Observe sumcheck init labels on the first round of each layer.
+        let init_tidx = local.tidx - AB::Expr::from_usize(SUMCHECK_INIT_LEN);
+        for (offset, value) in [
+            (0usize, local.layer_idx.into()),
+            (1usize, AB::Expr::ZERO),
+            (2usize, AB::Expr::from_u32(3)),
+            (3usize, AB::Expr::ZERO),
+        ] {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: init_tidx.clone() + AB::Expr::from_usize(offset),
+                    value,
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_enabled * local.is_first_round * is_not_dummy.clone(),
+            );
+        }
+
+        // 1b. Observe evaluations.
         let mut tidx = local.tidx.into();
         for eval in [local.ev1, local.ev2, local.ev3].into_iter() {
             for i in 0..D_EF {
@@ -378,14 +402,29 @@ where
                         value: eval[i].into(),
                         is_sample: AB::Expr::ZERO,
                     },
-                    local.is_enabled
-                        * is_not_dummy.clone()
-                        * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
+                    local.is_enabled * is_not_dummy.clone(),
                 );
             }
             tidx += AB::Expr::from_usize(D_EF);
         }
-        // 1b. Sample challenge `ri`
+        for (offset, value) in [1_702_129_225u32, 1_818_324_594, 1_970_237_984, 25_710]
+            .into_iter()
+            .enumerate()
+        {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: tidx.clone() + AB::Expr::from_usize(offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_enabled * is_not_dummy.clone(),
+            );
+        }
+        tidx += AB::Expr::from_usize(LABEL_INTERNAL_ROUND);
+        // 1c. Sample challenge `ri`.
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
                 builder,
@@ -396,9 +435,7 @@ where
                     value: local.challenge[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_enabled
-                    * is_not_dummy.clone()
-                    * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
+                local.is_enabled * is_not_dummy.clone(),
             );
         }
 

@@ -177,7 +177,17 @@ impl TowerLayerRecord {
 
     #[inline]
     pub(crate) fn layer_tidx(&self, layer_idx: usize) -> usize {
-        self.tidx + tower_transcript_len::layers_cumulative(layer_idx)
+        self.tidx
+            + (0..layer_idx)
+                .map(|idx| {
+                    tower_transcript_len::compact_layer_span(
+                        idx,
+                        self.read_active_at(idx),
+                        self.write_active_at(idx),
+                        self.logup_active_at(idx),
+                    )
+                })
+                .sum::<usize>()
     }
 
     #[inline]

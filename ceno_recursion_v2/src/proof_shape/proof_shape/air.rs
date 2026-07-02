@@ -33,7 +33,6 @@ use crate::{
         },
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
-    tower::tower_transcript_len,
     utils::TranscriptLabel,
 };
 
@@ -88,6 +87,7 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     pub lookup_challenge_alpha: [F; D_EF],
     pub lookup_challenge_beta: [F; D_EF],
     pub after_forked_challenge_1: [F; D_EF],
+    pub after_forked_challenge_1_tidx: F,
     pub after_forked_challenge_2: [F; D_EF],
     pub tower_n_logup: F,
     pub tower_is_read_max: F,
@@ -223,9 +223,6 @@ where
         let mut read_op_vars = AB::Expr::ZERO;
         let mut write_op_vars = AB::Expr::ZERO;
         let mut logup_op_vars = AB::Expr::ZERO;
-        // Per-selected-air tower transcript span (used for fork challenge tidx bump).
-        let mut tower_tidx_bump = AB::Expr::ZERO;
-
         for (i, air_data) in self.per_air.iter().enumerate() {
             // We keep a running tally of how many transcript reads there should be up to any
             // given point, and use that to constrain initial_tidx
@@ -259,17 +256,6 @@ where
             read_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.read_op_vars);
             write_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.write_op_vars);
             logup_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.logup_op_vars);
-
-            // Keep this aligned with TowerInputAir's `tidx_after_gkr_layers`
-            // arithmetic so fork challenge placement and tower buses share one
-            // transcript span model.
-            tower_tidx_bump += is_current_air
-                * per_air_tower_span::<AB>(
-                    n.clone(),
-                    air_data.num_read_count,
-                    air_data.num_write_count,
-                    air_data.num_logup_count,
-                );
         }
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -376,7 +362,6 @@ where
         // Native verifier merge phase:
         //   sample one EF from each fresh fork transcript, then observe that EF
         //   on the trunk in fork-id order.
-        let transcript_enabled = AB::Expr::from_bool(!self.tower_prefix_only);
         let merge_tidx = local.fork_start_tidx.into() + local.fork_id * AB::Expr::from_usize(D_EF);
         for i in 0..D_EF {
             self.transcript_bus.receive(
@@ -387,7 +372,7 @@ where
                     value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_present * transcript_enabled.clone(),
+                local.is_present,
             );
         }
 
@@ -408,6 +393,17 @@ where
         // Receive fork transcript words after the fork label prefix.
         let fork_tidx_base = TranscriptLabel::Fork.field_len();
         let fork_id = local.fork_id;
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: fork_id.clone().into(),
+                tidx: AB::Expr::ZERO,
+                value: AB::Expr::from_u32(1_802_661_734),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
+        );
         // observe lookup alpha/beta
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
@@ -419,7 +415,7 @@ where
                     value: local.lookup_challenge_alpha[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_present * local.is_valid * transcript_enabled.clone(),
+                local.is_present * local.is_valid,
             );
             self.forked_transcript_bus.receive(
                 builder,
@@ -430,7 +426,7 @@ where
                     value: local.lookup_challenge_beta[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_present * local.is_valid * transcript_enabled.clone(),
+                local.is_present * local.is_valid,
             );
         }
         self.forked_transcript_bus.receive(
@@ -442,9 +438,11 @@ where
                 value: fork_id.clone().into(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_present * local.is_valid * transcript_enabled.clone(),
+            local.is_present * local.is_valid,
         );
-        // Fork transcript metadata order is fixed: num_present, air_idx, then log_height.
+        // Fork transcript metadata order is fixed: fork_id, circuit_index,
+        // num_instances[0], num_instances[1]. The two fixed num-instance
+        // fields are represented as height_1/height_2 in this AIR.
         self.forked_transcript_bus.receive(
             builder,
             local.proof_idx,
@@ -454,7 +452,7 @@ where
                 value: air_idx.clone(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_present * local.is_valid * transcript_enabled.clone(),
+            local.is_present * local.is_valid,
         );
         self.forked_transcript_bus.receive(
             builder,
@@ -462,21 +460,27 @@ where
             ForkedTranscriptBusMessage {
                 fork_id: fork_id.clone().into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 2),
-                value: local.log_height.into(),
+                value: local.height_1.into(),
                 is_sample: AB::Expr::ZERO,
             },
-            local.is_present * local.is_valid * transcript_enabled.clone(),
+            local.is_present * local.is_valid,
+        );
+        self.forked_transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkedTranscriptBusMessage {
+                fork_id: fork_id.clone().into(),
+                tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3),
+                value: local.height_2.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_present * local.is_valid,
         );
 
-        // Skip the full per-air tower transcript span (out-evals, alpha/beta,
-        // and all GKR/sumcheck layer transcript activity) before binding the
-        // post-fork sampled challenges.
-        let forked_challenge_1_tidx =
-            AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3) + tower_tidx_bump;
-        // Challenge 2 starts after challenge 1 plus the product_sum label span.
-        let forked_challenge_2_tidx =
-            forked_challenge_1_tidx.clone() + AB::Expr::from_usize(tower_transcript_len::BETA_LEN);
-
+        // Bind the final sample from this fork transcript. Preflight owns the
+        // replayed fork-local tidx; semantic tower AIRs consume the transcript
+        // rows before this point.
+        let forked_challenge_1_tidx = local.after_forked_challenge_1_tidx.into();
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
                 builder,
@@ -487,18 +491,7 @@ where
                     value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_present * local.is_valid * transcript_enabled.clone(),
-            );
-            self.forked_transcript_bus.receive(
-                builder,
-                local.proof_idx,
-                ForkedTranscriptBusMessage {
-                    fork_id: fork_id.clone().into(),
-                    tidx: forked_challenge_2_tidx.clone() + AB::Expr::from_usize(i),
-                    value: local.after_forked_challenge_2[i].into(),
-                    is_sample: AB::Expr::ONE,
-                },
-                local.is_present * local.is_valid * transcript_enabled.clone(),
+                local.is_present * local.is_valid,
             );
         }
 
@@ -768,41 +761,6 @@ where
             local.is_last * downstream_enabled,
         );
     }
-}
-
-fn per_air_tower_span<AB: AirBuilder>(
-    n_logup: AB::Expr,
-    num_read_count: usize,
-    num_write_count: usize,
-    num_logup_count: usize,
-) -> AB::Expr {
-    use tower_transcript_len::{
-        ALPHA_BETA_LEN, ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
-    };
-
-    // Derivation notes (matches tower transcript replay order used by verifier):
-    // 1) Out-evals before alpha/beta:
-    //    - read spec contributes 2 EF evals, write spec contributes 2 EF evals,
-    //      logup spec contributes 4 EF evals.
-    //    - each EF observe_ext contributes D_EF base-field transcript words.
-    // 2) Always sample alpha/beta next (ALPHA_BETA_LEN words).
-    // 3) If this air has interactions, add full GKR layer transcript span:
-    //    this is identical to TowerInputAir's closed-form tidx advancement
-    //    from `tidx_after_alpha_beta` to `tidx_after_gkr_layers`.
-    let out_eval_words = 2 * num_read_count + 2 * num_write_count + 4 * num_logup_count;
-    let out_eval_span = AB::Expr::from_usize(out_eval_words * D_EF);
-
-    let gkr_span = if out_eval_words == 0 {
-        AB::Expr::ZERO
-    } else {
-        let gkr_inner = n_logup.clone() * AB::Expr::from_usize(ROUND_LEN / 2)
-            + AB::Expr::from_usize(
-                ALPHA_LEN + SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN - ROUND_LEN / 2,
-            );
-        n_logup * gkr_inner - AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN)
-    };
-
-    out_eval_span + AB::Expr::from_usize(ALPHA_BETA_LEN) + gkr_span
 }
 
 pub(super) fn borrow_var_cols<F>(slice: &[F], idx_flags: usize) -> ProofShapeVarCols<'_, F> {

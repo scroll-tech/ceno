@@ -56,7 +56,7 @@ use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
     p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use recursion_circuit::primitives::exp_bits_len::ExpBitsLenTraceGenerator;
@@ -104,14 +104,14 @@ pub mod tower_transcript_len {
     use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 
     // Label field-element counts: ceil(byte_len / 4).
-    // b"combine subset evals" = 20 bytes → 5 field elements
-    const LABEL_COMBINE: usize = 5;
-    // b"product_sum" = 11 bytes → 3 field elements
-    const LABEL_PRODUCT_SUM: usize = 3;
-    // b"Internal round" = 14 bytes → 4 field elements
-    const LABEL_INTERNAL_ROUND: usize = 4;
-    // b"merge" = 5 bytes → 2 field elements
-    const LABEL_MERGE: usize = 2;
+    // b"combine subset evals" = 20 bytes -> 5 field elements
+    pub const LABEL_COMBINE: usize = 5;
+    // b"product_sum" = 11 bytes -> 3 field elements
+    pub const LABEL_PRODUCT_SUM: usize = 3;
+    // b"Internal round" = 14 bytes -> 4 field elements
+    pub const LABEL_INTERNAL_ROUND: usize = 4;
+    // b"merge" = 5 bytes -> 2 field elements
+    pub const LABEL_MERGE: usize = 2;
     // usize::to_le_bytes() = 8 bytes → 2 field elements (64-bit platform)
     const LABEL_USIZE: usize = 2;
 
@@ -128,8 +128,10 @@ pub mod tower_transcript_len {
     /// Merge: label "merge" (2) + sample mu (D_EF)
     pub const MERGE_LEN: usize = LABEL_MERGE + D_EF;
 
-    /// Post-sumcheck tidx span: claim observation slots (4*D_EF) + MERGE_LEN.
-    /// This is the tidx gap from `tidx_after_sumcheck` to `tidx_end`.
+    /// Legacy maximum post-sumcheck tidx span.
+    ///
+    /// Interleaved towers compact this at runtime based on active read/write/logup
+    /// slots for the current layer.
     pub const POST_SUMCHECK_LEN: usize = 4 * D_EF + MERGE_LEN;
 
     /// Gap between consecutive sumcheck blocks across GKR layers:
@@ -177,6 +179,40 @@ pub mod tower_transcript_len {
         } else {
             ALPHA_LEN + SUMCHECK_INIT_LEN
         }
+    }
+
+    pub const fn compact_claim_len(
+        read_active: bool,
+        write_active: bool,
+        logup_active: bool,
+    ) -> usize {
+        (if read_active { 2 * D_EF } else { 0 })
+            + (if write_active { 2 * D_EF } else { 0 })
+            + (if logup_active { 4 * D_EF } else { 0 })
+    }
+
+    pub const fn compact_post_sumcheck_len(
+        read_active: bool,
+        write_active: bool,
+        logup_active: bool,
+    ) -> usize {
+        compact_claim_len(read_active, write_active, logup_active) + MERGE_LEN
+    }
+
+    pub fn compact_layer_span(
+        layer_idx: usize,
+        read_active: bool,
+        write_active: bool,
+        logup_active: bool,
+    ) -> usize {
+        let pre_sumcheck = if layer_idx == 0 {
+            SUMCHECK_INIT_LEN
+        } else {
+            ALPHA_LEN + SUMCHECK_INIT_LEN
+        };
+        pre_sumcheck
+            + (layer_idx + 1) * ROUND_LEN
+            + compact_post_sumcheck_len(read_active, write_active, logup_active)
     }
 }
 
@@ -307,6 +343,20 @@ pub(crate) fn interpolate_pair(values: [EF; 2], mu: EF) -> EF {
     values[0] + delta * mu
 }
 
+pub(crate) fn tower_pre_alpha_tidx(
+    chip_proof: &ZKVMChipProof<RecursionField>,
+    tower_start_tidx: usize,
+) -> usize {
+    let out_eval_count = chip_proof
+        .r_out_evals
+        .iter()
+        .chain(chip_proof.w_out_evals.iter())
+        .chain(chip_proof.lk_out_evals.iter())
+        .map(Vec::len)
+        .sum::<usize>();
+    tower_start_tidx + out_eval_count * D_EF
+}
+
 fn accumulate_prod_claims(rows: &[[EF; 2]], lambda: EF, lambda_prime: EF, mu: EF) -> (EF, EF) {
     let _ = (lambda, lambda_prime);
     let Some(pair) = rows.first() else {
@@ -425,26 +475,6 @@ fn build_tower_shape_record(
         logup_tower_vars,
         max_tower_vars,
         max_layer_count: max_tower_vars.saturating_sub(1),
-    }
-}
-
-fn tower_schedule_from_replay(
-    replay: &TowerReplayResult,
-    fallback: &TowerTranscriptSchedule,
-) -> TowerTranscriptSchedule {
-    if replay.layers.is_empty() {
-        return fallback.clone();
-    }
-    TowerTranscriptSchedule {
-        alpha_logup: replay.layers[0].lambda,
-        beta: fallback.beta,
-        lambdas: replay.layers.iter().map(|layer| layer.lambda).collect(),
-        mus: replay.layers.iter().map(|layer| layer.mu).collect(),
-        ris: replay
-            .layers
-            .iter()
-            .flat_map(|layer| layer.challenges.iter().copied())
-            .collect(),
     }
 }
 
@@ -583,6 +613,9 @@ fn build_chip_records(
         evals: Vec::new(),
         ris: Vec::new(),
         claims: vec![EF::ZERO; layer_count],
+        read_counts: layer_record.read_counts.clone(),
+        write_counts: layer_record.write_counts.clone(),
+        logup_counts: layer_record.logup_counts.clone(),
     };
 
     // Native verifier processes every tower round through IOPVerifierState,
@@ -740,6 +773,24 @@ fn build_chip_records(
     } else {
         schedule.mus.last().copied().unwrap_or(EF::ZERO)
     };
+    let mut read_out_evals = [EF::ZERO; 2];
+    if let Some(values) = chip_proof.r_out_evals.first() {
+        for (dst, src) in read_out_evals.iter_mut().zip(values.iter().take(2)) {
+            *dst = *src;
+        }
+    }
+    let mut write_out_evals = [EF::ZERO; 2];
+    if let Some(values) = chip_proof.w_out_evals.first() {
+        for (dst, src) in write_out_evals.iter_mut().zip(values.iter().take(2)) {
+            *dst = *src;
+        }
+    }
+    let mut logup_out_evals = [EF::ZERO; 4];
+    if let Some(values) = chip_proof.lk_out_evals.first() {
+        for (dst, src) in logup_out_evals.iter_mut().zip(values.iter().take(4)) {
+            *dst = *src;
+        }
+    }
     let input_record = TowerInputRecord {
         proof_idx,
         idx,
@@ -748,6 +799,15 @@ fn build_chip_records(
         n_logup: layer_count,
         alpha_logup: schedule.alpha_logup,
         beta: schedule.beta,
+        read_out_evals,
+        write_out_evals,
+        logup_out_evals,
+        has_read_out: !chip_proof.r_out_evals.is_empty(),
+        has_write_out: !chip_proof.w_out_evals.is_empty(),
+        has_logup_out: !chip_proof.lk_out_evals.is_empty(),
+        read_tower_vars: shape_record.read_tower_vars,
+        write_tower_vars: shape_record.write_tower_vars,
+        logup_tower_vars: shape_record.logup_tower_vars,
         input_layer_claim: layer_output_claim,
         layer_output_lambda,
         layer_output_mu,
@@ -970,17 +1030,13 @@ pub(crate) fn build_gkr_blob(
             let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
                 .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_idx}"))?;
 
-            // Native ceno_zkvm child proofs are generated and verified with
-            // BasicTranscript. Use the preflight child-verifier replay as the
-            // semantic source of truth for tower claims/challenges; the outer
-            // recursion transcript schedule is only replayed above to populate
-            // transcript rows.
             let replay = &pf_entry.tower_replay;
-            let schedule = tower_schedule_from_replay(replay, &transcript_schedule);
+            let schedule = &transcript_schedule;
 
             // Use sequential index for NestedForLoop compatibility (idx must increment
             // by 0 or 1 within each proof_idx group).
             let idx = entry_idx;
+            let tower_air_tidx = tower_pre_alpha_tidx(chip_proof, pf_entry.tidx);
             let (
                 shape_record,
                 chip_input_record,
@@ -998,9 +1054,55 @@ pub(crate) fn build_gkr_blob(
                 chip_proof,
                 circuit_vk,
                 replay,
-                &schedule,
-                pf_entry.tidx,
+                schedule,
+                tower_air_tidx,
             )?;
+            if std::env::var_os("CENO_REC_V2_DEBUG_TOWER").is_some() {
+                let out_eval_span = tower_air_tidx.saturating_sub(pf_entry.tidx);
+                let compact_layer_span = (0..shape_record.max_layer_count)
+                    .map(|layer_idx| {
+                        tower_transcript_len::compact_layer_span(
+                            layer_idx,
+                            layer_record
+                                .read_counts
+                                .get(layer_idx)
+                                .copied()
+                                .unwrap_or(0)
+                                != 0,
+                            layer_record
+                                .write_counts
+                                .get(layer_idx)
+                                .copied()
+                                .unwrap_or(0)
+                                != 0,
+                            layer_record
+                                .logup_counts
+                                .get(layer_idx)
+                                .copied()
+                                .unwrap_or(0)
+                                != 0,
+                        )
+                    })
+                    .sum::<usize>();
+                let computed_tower_span =
+                    out_eval_span + tower_transcript_len::ALPHA_BETA_LEN + compact_layer_span;
+                let fork_len = preflight.fork_log(pf_entry.fork_idx).len();
+                eprintln!(
+                    "rec-v2-debug module=tower source=trace proof_idx={proof_idx} fork_id={} chip_idx={} fork_len={} tower_start={} tower_alpha_tidx={} computed_span={} final_sample_tidx={} expected_final_tidx={} has_read_out={} has_write_out={} has_logup_out={} n_logup={}",
+                    pf_entry.fork_idx,
+                    chip_idx,
+                    fork_len,
+                    pf_entry.tidx,
+                    tower_air_tidx,
+                    computed_tower_span,
+                    pf_entry.tidx + computed_tower_span,
+                    fork_len.saturating_sub(D_EF),
+                    chip_input_record.has_read_out,
+                    chip_input_record.has_write_out,
+                    chip_input_record.has_logup_out,
+                    chip_input_record.n_logup,
+                );
+            }
 
             input_records.push(chip_input_record);
             proof_q0_claims.push(q0_claim);

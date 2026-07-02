@@ -90,6 +90,7 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
                 let mut preflight = Preflight::default();
                 super::verifier::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
                 super::vm_pvs::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+                preflight.transcript = sponge.clone().into_log();
                 (preflight, sponge)
             })
             .unzip();
@@ -101,7 +102,8 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             child_is_app,
             self.deferral_enabled,
         );
-
+        let vm_metadata_ctx =
+            super::vm_pvs::generate_metadata_proving_ctx(child_vk, proofs, &preflights);
         let mut poseidon2_inputs = poseidon2_inputs;
         let idx2_ctx = if self.deferral_enabled {
             let (def_pvs_ctx, def_poseidon2_inputs) = super::def_pvs::generate_proving_ctx(
@@ -117,7 +119,7 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
         };
 
         (
-            vec![verifier_ctx, vm_ctx, idx2_ctx],
+            vec![verifier_ctx, vm_ctx, vm_metadata_ctx, idx2_ctx],
             poseidon2_inputs,
             per_proof_initial_transcripts,
         )

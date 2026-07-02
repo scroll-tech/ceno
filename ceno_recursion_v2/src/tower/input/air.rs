@@ -55,6 +55,21 @@ pub struct TowerInputCols<T> {
     /// Root denominator claim
     pub q0_claim: [T; D_EF],
 
+    pub read_out_0: [T; D_EF],
+    pub read_out_1: [T; D_EF],
+    pub write_out_0: [T; D_EF],
+    pub write_out_1: [T; D_EF],
+    pub logup_out_0: [T; D_EF],
+    pub logup_out_1: [T; D_EF],
+    pub logup_out_2: [T; D_EF],
+    pub logup_out_3: [T; D_EF],
+    pub has_read_out: T,
+    pub has_write_out: T,
+    pub has_logup_out: T,
+    pub read_tower_vars: T,
+    pub write_tower_vars: T,
+    pub logup_tower_vars: T,
+
     pub alpha_logup: [T; D_EF],
     pub beta: [T; D_EF],
 
@@ -133,6 +148,9 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 local.is_n_logup_zero_aux.inv,
             ),
         );
+        builder.assert_bool(local.has_read_out);
+        builder.assert_bool(local.has_write_out);
+        builder.assert_bool(local.has_logup_out);
 
         ///////////////////////////////////////////////////////////////////////
         // Output Constraints
@@ -161,7 +179,8 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
 
         // Add PoW (if any) and alpha label+sample, beta label+sample
         use crate::tower::tower_transcript_len::{
-            ALPHA_BETA_LEN, ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
+            ALPHA_BETA_LEN, ALPHA_LEN, LABEL_COMBINE, LABEL_MERGE, LABEL_PRODUCT_SUM, ROUND_LEN,
+            SUMCHECK_INIT_LEN,
         };
         let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN);
         // Add GKR layers + Sumcheck.
@@ -171,14 +190,20 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         //   n*(SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN)
         //   + n*(n+1)/2*ROUND_LEN
         //   + (n-1)*ALPHA_LEN, for n > 0.
+        let read_active_layers = local.read_tower_vars - local.has_read_out;
+        let write_active_layers = local.write_tower_vars - local.has_write_out;
+        let logup_active_layers = local.logup_tower_vars - local.has_logup_out;
+        let claim_span = read_active_layers * AB::Expr::from_usize(2 * D_EF)
+            + write_active_layers * AB::Expr::from_usize(2 * D_EF)
+            + logup_active_layers * AB::Expr::from_usize(4 * D_EF);
         let fixed_span =
-            num_layers.clone() * AB::Expr::from_usize(SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN);
+            num_layers.clone() * AB::Expr::from_usize(SUMCHECK_INIT_LEN + LABEL_MERGE + D_EF);
         let round_span = num_layers.clone()
             * (num_layers.clone() + AB::Expr::ONE)
             * AB::Expr::from_usize(ROUND_LEN / 2);
         let alpha_span = (num_layers.clone() - AB::Expr::ONE) * AB::Expr::from_usize(ALPHA_LEN);
         let tidx_after_gkr_layers = tidx_after_alpha_beta.clone()
-            + has_interactions.clone() * (fixed_span + round_span + alpha_span);
+            + has_interactions.clone() * (fixed_span + round_span + alpha_span + claim_span);
         // 1. TowerLayerInputBus
         // 1a. Send input to TowerLayerAir
         self.layer_input_bus.send(
@@ -237,20 +262,133 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         );
 
         // 2. TranscriptBus
-        // 2a. Sample alpha_logup challenge
+        // 2a. Observe grouped tower out-evals before alpha/beta sampling.
+        let has_tower_out = AB::Expr::ONE
+            - (AB::Expr::ONE - local.has_read_out)
+                * (AB::Expr::ONE - local.has_write_out)
+                * (AB::Expr::ONE - local.has_logup_out);
+        let out_eval_start_tidx = local.tidx
+            - local.has_read_out * AB::Expr::from_usize(2 * D_EF)
+            - local.has_write_out * AB::Expr::from_usize(2 * D_EF)
+            - local.has_logup_out * AB::Expr::from_usize(4 * D_EF);
+        let mut out_eval_tidx = out_eval_start_tidx;
+        for eval in [local.read_out_0, local.read_out_1] {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: out_eval_tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * local.has_read_out,
+                );
+            }
+            out_eval_tidx += local.has_read_out * AB::Expr::from_usize(D_EF);
+        }
+        for eval in [local.write_out_0, local.write_out_1] {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: out_eval_tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * local.has_write_out,
+                );
+            }
+            out_eval_tidx += local.has_write_out * AB::Expr::from_usize(D_EF);
+        }
+        for eval in [
+            local.logup_out_0,
+            local.logup_out_1,
+            local.logup_out_2,
+            local.logup_out_3,
+        ] {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: out_eval_tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * local.has_logup_out,
+                );
+            }
+            out_eval_tidx += local.has_logup_out * AB::Expr::from_usize(D_EF);
+        }
+
+        // 2b. Observe labels and sample alpha_logup/beta challenges.
+        for (offset, value) in [
+            1_651_339_107u32,
+            543_518_313,
+            1_935_832_435,
+            1_696_625_765,
+            1_936_482_678,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_enabled * has_tower_out.clone(),
+            );
+        }
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(i),
+                    tidx: local.tidx + AB::Expr::from_usize(LABEL_COMBINE + i),
                     value: local.alpha_logup[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_enabled
-                    * has_interactions.clone()
-                    * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
+                local.is_enabled * has_tower_out.clone(),
+            );
+        }
+        for (offset, value) in [1_685_025_392u32, 1_601_463_157, 7_173_491]
+            .into_iter()
+            .enumerate()
+        {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(ALPHA_LEN + offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_enabled * has_tower_out.clone(),
+            );
+        }
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(ALPHA_LEN + LABEL_PRODUCT_SUM + i),
+                    value: local.beta[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_enabled * has_tower_out.clone(),
             );
         }
         self.main_bus.send(

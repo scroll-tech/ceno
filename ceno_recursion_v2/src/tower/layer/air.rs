@@ -380,14 +380,19 @@ where
 
         // Transcript index increment
         use crate::tower::tower_transcript_len::{
-            ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
+            ALPHA_LEN, LABEL_COMBINE, LABEL_MERGE, ROUND_LEN, SUMCHECK_INIT_LEN,
         };
         let tidx_after_sumcheck = local.tidx
             // Sample lambda label+sample on non-root layer
             + (AB::Expr::ONE - local.is_first) * AB::Expr::from_usize(ALPHA_LEN)
             + AB::Expr::from_usize(SUMCHECK_INIT_LEN)
             + (local.layer_idx + AB::Expr::ONE) * AB::Expr::from_usize(ROUND_LEN);
-        let tidx_end = tidx_after_sumcheck.clone() + AB::Expr::from_usize(POST_SUMCHECK_LEN);
+        let compact_claim_len = local.read_active * AB::Expr::from_usize(2 * D_EF)
+            + local.write_active * AB::Expr::from_usize(2 * D_EF)
+            + local.logup_active * AB::Expr::from_usize(4 * D_EF);
+        let tidx_end = tidx_after_sumcheck.clone()
+            + compact_claim_len
+            + AB::Expr::from_usize(LABEL_MERGE + D_EF);
         builder
             .when(is_transition.clone())
             .assert_eq(next.tidx, tidx_end.clone());
@@ -583,23 +588,111 @@ where
         // in last layer: for send back to GKR input layer
         // 1a. Sample `lambda` — only on non-root layers.
         //     Root layer uses alpha_logup (set in trace), not a transcript sample.
+        for (offset, value) in [
+            1_651_339_107u32,
+            543_518_313,
+            1_935_832_435,
+            1_696_625_765,
+            1_936_482_678,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                is_non_root_layer.clone() * is_not_dummy.clone(),
+            );
+        }
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
                     fork_id: local.fork_id.into(),
-                    tidx: local.tidx + AB::Expr::from_usize(i),
+                    tidx: local.tidx + AB::Expr::from_usize(LABEL_COMBINE + i),
                     value: local.lambda[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                is_non_root_layer.clone()
-                    * is_not_dummy.clone()
-                    * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
+                is_non_root_layer.clone() * is_not_dummy.clone(),
             );
         }
         // 1b. Observe layer claims
-        let tidx = tidx_after_sumcheck;
+        let mut claim_tidx = tidx_after_sumcheck.clone();
+        for eval in [local.read_p0, local.read_p1] {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: claim_tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * is_not_dummy.clone() * local.read_active,
+                );
+            }
+            claim_tidx += local.read_active * AB::Expr::from_usize(D_EF);
+        }
+        for eval in [local.write_p0, local.write_p1] {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: claim_tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * is_not_dummy.clone() * local.write_active,
+                );
+            }
+            claim_tidx += local.write_active * AB::Expr::from_usize(D_EF);
+        }
+        for eval in [
+            local.logup_p0,
+            local.logup_p1,
+            local.logup_q0,
+            local.logup_q1,
+        ] {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: claim_tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * is_not_dummy.clone() * local.logup_active,
+                );
+            }
+            claim_tidx += local.logup_active * AB::Expr::from_usize(D_EF);
+        }
+        let merge_label_tidx = claim_tidx;
+        for (offset, value) in [1_735_550_317u32, 101].into_iter().enumerate() {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: merge_label_tidx.clone() + AB::Expr::from_usize(offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_enabled * is_not_dummy.clone(),
+            );
+        }
+        let tidx = merge_label_tidx + AB::Expr::from_usize(LABEL_MERGE);
         // 1c. Sample `mu`
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
@@ -611,9 +704,7 @@ where
                     value: local.mu[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_enabled
-                    * is_not_dummy.clone()
-                    * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
+                local.is_enabled * is_not_dummy.clone(),
             );
         }
     }

@@ -8,6 +8,7 @@ use crate::{
     proof_shape::pvs::PublicValuesCols,
     system::{Preflight, RecursionField, RecursionProof, RecursionVk},
     tracegen::RowMajorChip,
+    utils::TranscriptLabel,
 };
 
 pub struct PublicValuesTraceGenerator;
@@ -43,8 +44,7 @@ impl RowMajorChip<F> for PublicValuesTraceGenerator {
 
         for (proof_idx, proof) in proofs.iter().enumerate() {
             let mut is_first_in_proof = true;
-            // TODO first tidx start from TranscriptLabel::Riscv.field_len()
-            let mut tidx = 0usize;
+            let mut tidx = TranscriptLabel::Riscv.field_len();
 
             for (air_idx, (_, circuit_vk)) in child_vk.circuit_vks.iter().enumerate() {
                 let instance_openings = &circuit_vk.get_cs().zkvm_v1_css.instance;

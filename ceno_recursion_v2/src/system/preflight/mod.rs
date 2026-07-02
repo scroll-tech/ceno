@@ -70,6 +70,8 @@ pub struct ProofShapePreflight {
 pub struct VmPvsPreflight {
     pub lookup_challenge_alpha: EF,
     pub lookup_challenge_beta: EF,
+    pub lookup_challenge_alpha_tidx: usize,
+    pub lookup_challenge_beta_tidx: usize,
     pub lookup_challenge_alpha_lookup_count: usize,
     pub lookup_challenge_beta_lookup_count: usize,
 }

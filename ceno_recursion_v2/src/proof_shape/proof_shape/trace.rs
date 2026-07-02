@@ -10,6 +10,7 @@ use crate::{
     primitives::{pow::PowerCheckerCpuTraceGenerator, range::RangeCheckerCpuTraceGenerator},
     proof_shape::AirMetadata,
     system::{POW_CHECKER_HEIGHT, Preflight, RecursionProof, RecursionVk},
+    tower::tower_pre_alpha_tidx,
     tracegen::RowMajorChip,
 };
 
@@ -87,6 +88,15 @@ fn fork_sample(preflight: &Preflight, fork_id: usize) -> EF {
         .unwrap_or(EF::ZERO)
 }
 
+fn fork_sample_tidx(preflight: &Preflight, fork_id: usize) -> usize {
+    preflight
+        .fork_transcripts
+        .iter()
+        .find(|fork| fork.fork_id == fork_id)
+        .map(|fork| fork.log.len().saturating_sub(D_EF))
+        .unwrap_or(0)
+}
+
 trait BorrowNumInstances {
     fn borrow_num_instances(&self) -> &[usize];
 }
@@ -154,7 +164,11 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 .gkr
                 .chips
                 .iter()
-                .map(|entry| (entry.chip_idx, entry.tidx))
+                .filter_map(|entry| {
+                    proof.chip_proofs.get(&entry.chip_idx).map(|chip_proof| {
+                        (entry.chip_idx, tower_pre_alpha_tidx(chip_proof, entry.tidx))
+                    })
+                })
                 .collect::<std::collections::BTreeMap<_, _>>();
 
             for (air_idx, vdata) in &preflight.proof_shape.sorted_trace_vdata {
@@ -211,6 +225,8 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
                 cols.after_forked_challenge_1 = ef_to_limbs(fork_sample(preflight, fork_id));
+                cols.after_forked_challenge_1_tidx =
+                    F::from_usize(fork_sample_tidx(preflight, fork_id));
                 cols.after_forked_challenge_2 = [F::ZERO; D_EF];
                 let (tower_n_logup, is_read_max, is_write_max, is_logup_max) =
                     tower_shape_max(&self.per_air[*air_idx], log_height);
@@ -268,6 +284,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
                 cols.after_forked_challenge_1 = [F::ZERO; D_EF];
+                cols.after_forked_challenge_1_tidx = F::ZERO;
                 cols.after_forked_challenge_2 = [F::ZERO; D_EF];
                 cols.tower_n_logup = F::ZERO;
                 cols.tower_is_read_max = F::ZERO;
@@ -324,6 +341,7 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
             cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
             cols.after_forked_challenge_1 = [F::ZERO; D_EF];
+            cols.after_forked_challenge_1_tidx = F::ZERO;
             cols.after_forked_challenge_2 = [F::ZERO; D_EF];
             cols.tower_n_logup = F::ZERO;
             cols.tower_is_read_max = F::ZERO;

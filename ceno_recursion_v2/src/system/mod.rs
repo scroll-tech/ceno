@@ -352,6 +352,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             if values.len() >= 2 * D_EF {
                 let alpha_start = values.len() - 2 * D_EF;
                 let beta_start = values.len() - D_EF;
+                preflight.vm_pvs.lookup_challenge_alpha_tidx = alpha_start;
+                preflight.vm_pvs.lookup_challenge_beta_tidx = beta_start;
                 if let Some(alpha) =
                     EF::from_basis_coefficients_slice(&values[alpha_start..alpha_start + D_EF])
                 {
@@ -475,6 +477,20 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 log: fork_log,
                 fork_id,
             });
+        }
+        if std::env::var_os("CENO_REC_V2_DEBUG_TRANSCRIPT").is_some() {
+            eprintln!(
+                "rec-v2-debug module=transcript source=preflight proof_idx=? pvs_end={} fork_start={} trunk_len={} num_forks={} fork_lens={:?}",
+                fork_offset,
+                preflight.proof_shape.fork_start_tidx,
+                trunk_log.len(),
+                preflight.fork_transcripts.len(),
+                preflight
+                    .fork_transcripts
+                    .iter()
+                    .map(|fork| fork.log.len())
+                    .collect::<Vec<_>>()
+            );
         }
 
         preflight.proof_shape.after_forked_challenge_1 = preflight

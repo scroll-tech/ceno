@@ -6,6 +6,7 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 use crate::system::{Preflight, RecursionField, RecursionPcs, RecursionProof, RecursionVk};
 
 mod air;
+mod metadata;
 mod trace;
 
 pub const SEPTIC_EXTENSION_DEGREE: usize = 7;
@@ -33,6 +34,7 @@ pub struct VmPvs<F> {
 }
 
 pub use air::*;
+pub use metadata::*;
 pub use trace::*;
 
 pub(crate) type RecursionCommitment =
@@ -87,10 +89,14 @@ pub fn run_preflight<TS>(
 
     observe_recursion_commitment(&proof.witin_commit, ts);
 
+    let alpha_tidx = ts.len();
     let alpha_ext = ts.sample_ext();
+    let beta_tidx = ts.len();
     let beta_ext = ts.sample_ext();
     preflight.vm_pvs.lookup_challenge_alpha = alpha_ext;
     preflight.vm_pvs.lookup_challenge_beta = beta_ext;
+    preflight.vm_pvs.lookup_challenge_alpha_tidx = alpha_tidx;
+    preflight.vm_pvs.lookup_challenge_beta_tidx = beta_tidx;
     preflight.vm_pvs.lookup_challenge_alpha_lookup_count = proof.chip_proofs.len();
     preflight.vm_pvs.lookup_challenge_beta_lookup_count = proof.chip_proofs.len();
 }
