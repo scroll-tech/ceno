@@ -291,8 +291,7 @@ where
         self.vk.clone()
     }
 
-    #[cfg(test)]
-    pub(crate) fn air_names(&self) -> Vec<String> {
+    pub fn air_names(&self) -> Vec<String> {
         <InnerCircuit<S> as Circuit<SC>>::airs(self.circuit.as_ref())
             .iter()
             .map(|air| air.name().to_string())
