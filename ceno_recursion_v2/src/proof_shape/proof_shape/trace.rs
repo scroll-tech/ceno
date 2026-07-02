@@ -41,6 +41,20 @@ fn two_instance_heights_from_chip_proof(instance: &impl BorrowNumInstances) -> (
     )
 }
 
+fn fork_sample(preflight: &Preflight, fork_id: usize) -> EF {
+    preflight
+        .fork_transcripts
+        .iter()
+        .find(|fork| fork.fork_id == fork_id)
+        .and_then(|fork| {
+            fork.log
+                .values()
+                .get(fork.log.len().saturating_sub(D_EF)..)
+                .and_then(EF::from_basis_coefficients_slice)
+        })
+        .unwrap_or(EF::ZERO)
+}
+
 trait BorrowNumInstances {
     fn borrow_num_instances(&self) -> &[usize];
 }
@@ -96,6 +110,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
             let mut sorted_idx = 0usize;
             let mut num_present = 0usize;
+            let fork_id_by_chip = proof
+                .chip_proofs
+                .keys()
+                .enumerate()
+                .map(|(fork_id, chip_idx)| (*chip_idx, fork_id))
+                .collect::<std::collections::BTreeMap<_, _>>();
 
             for (air_idx, vdata) in &preflight.proof_shape.sorted_trace_vdata {
                 let chunk = chunks.next().unwrap();
@@ -119,6 +139,9 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.log_height = F::from_usize(log_height);
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[*air_idx]);
+                cols.fork_start_tidx = F::from_usize(preflight.proof_shape.fork_start_tidx);
+                let fork_id = fork_id_by_chip.get(air_idx).copied().unwrap_or(0);
+                cols.fork_id = F::from_usize(fork_id);
                 cols.is_present = F::ONE;
                 cols.height_1 = F::from_usize(height_1);
                 cols.height_2 = F::from_usize(height_2);
@@ -133,10 +156,8 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.num_columns = F::ZERO;
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
-                cols.after_forked_challenge_1 =
-                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_1);
-                cols.after_forked_challenge_2 =
-                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_2);
+                cols.after_forked_challenge_1 = ef_to_limbs(fork_sample(preflight, fork_id));
+                cols.after_forked_challenge_2 = [F::ZERO; D_EF];
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -167,6 +188,8 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.log_height = F::ZERO;
                 cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[air_idx]);
+                cols.fork_start_tidx = F::from_usize(preflight.proof_shape.fork_start_tidx);
+                cols.fork_id = F::ZERO;
                 cols.is_present = F::ZERO;
                 cols.height_1 = F::ZERO;
                 cols.height_2 = F::ZERO;
@@ -179,10 +202,8 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.num_columns = F::ZERO;
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
-                cols.after_forked_challenge_1 =
-                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_1);
-                cols.after_forked_challenge_2 =
-                    ef_to_limbs(preflight.proof_shape.after_forked_challenge_2);
+                cols.after_forked_challenge_1 = [F::ZERO; D_EF];
+                cols.after_forked_challenge_2 = [F::ZERO; D_EF];
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -207,6 +228,8 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.log_height = F::from_usize(preflight.proof_shape.n_logup);
             cols.need_rot = F::ZERO;
             cols.starting_tidx = F::from_usize(preflight.proof_shape.post_tidx);
+            cols.fork_start_tidx = F::from_usize(preflight.proof_shape.fork_start_tidx);
+            cols.fork_id = F::ZERO;
             cols.is_present = F::ZERO;
             cols.height_1 = F::ZERO;
             cols.height_2 = F::ZERO;
@@ -220,10 +243,8 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.num_columns = F::ZERO;
             cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
             cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
-            cols.after_forked_challenge_1 =
-                ef_to_limbs(preflight.proof_shape.after_forked_challenge_1);
-            cols.after_forked_challenge_2 =
-                ef_to_limbs(preflight.proof_shape.after_forked_challenge_2);
+            cols.after_forked_challenge_1 = [F::ZERO; D_EF];
+            cols.after_forked_challenge_2 = [F::ZERO; D_EF];
         }
 
         for chunk in chunks {

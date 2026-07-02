@@ -1,9 +1,7 @@
 use std::{sync::Arc, time::Instant};
 
-use ceno_zkvm::scheme::ZKVMProof;
 use continuations_v2::SC;
 use eyre::Result;
-use mpcs::{Basefold, BasefoldRSParams};
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     StarkEngine,
@@ -25,7 +23,7 @@ use crate::{
         inner::{InnerCircuit, InnerTraceGen, ProofsType},
     },
     system::{
-        AggregationSubCircuit, RecursionField, RecursionVk, VerifierConfig, VerifierExternalData,
+        AggregationSubCircuit, RecursionProof, RecursionVk, VerifierConfig, VerifierExternalData,
         VerifierTraceGen,
     },
     utils::{TranscriptLabel, transcript_observe_label},
@@ -183,7 +181,7 @@ where
 {
     pub fn agg_prove_no_def<E: StarkEngine<SC = SC, PB = PB>>(
         &self,
-        proofs: &[ZKVMProof<RecursionField, Basefold<RecursionField, BasefoldRSParams>>],
+        proofs: &[RecursionProof],
         child_vk_kind: ChildVkKind,
     ) -> Result<Proof<SC>> {
         let tracegen_start = Instant::now();
@@ -199,7 +197,9 @@ where
 
         let engine = E::new(self.pk.params.clone());
         #[cfg(debug_assertions)]
-        debug_constraints(&self.circuit, &ctx, &engine);
+        if std::env::var_os("CENO_REC_V2_DEBUG_CONSTRAINTS").is_some() {
+            debug_constraints(&self.circuit, &ctx, &engine);
+        }
         let prove_start = Instant::now();
         let proof = engine.prove(&self.d_pk, ctx)?;
         tracing::info!(
@@ -217,7 +217,7 @@ where
 
     fn generate_proving_ctx(
         &self,
-        proofs: &[ZKVMProof<RecursionField, Basefold<RecursionField, BasefoldRSParams>>],
+        proofs: &[RecursionProof],
         child_vk_kind: ChildVkKind,
         proofs_type: ProofsType,
         absent_trace_pvs: Option<(DeferralPvs<F>, bool)>,

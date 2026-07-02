@@ -2,18 +2,23 @@
 mod prover_integration {
     use crate::{
         continuation::prover::{AggProver, AggregationOptions},
-        system::{AggregationSubCircuit, VerifierSubCircuit, utils::test_system_params_zero_pow},
+        system::{
+            AggregationSubCircuit, RecursionField, RecursionProof, RecursionVk, VerifierSubCircuit,
+            utils::test_system_params_zero_pow,
+        },
     };
     use bincode;
-    use ceno_zkvm::{scheme::ZKVMProof, structs::ZKVMVerifyingKey};
-    use eyre::{Result, eyre};
-    use mpcs::{Basefold, BasefoldRSParams};
-    use openvm_stark_sdk::{
-        config::baby_bear_poseidon2::{BabyBearPoseidon2CpuEngine, DuplexSponge},
-        p3_baby_bear::BabyBear,
+    use ceno_zkvm::{
+        scheme::{MainConstraintProof, PublicValues, ZKVMChipProof, ZKVMProof},
+        structs::ZKVMVerifyingKey,
     };
-    use p3::field::extension::BinomialExtensionField;
+    use eyre::{Result, eyre};
+    use ff_ext::GoldilocksExt2;
+    use mpcs::{Basefold, BasefoldRSParams, Jagged, Whir, WhirDefaultSpec};
+    use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2CpuEngine, DuplexSponge};
     use std::{
+        collections::BTreeMap,
+        io::Cursor,
         path::{Path, PathBuf},
         sync::{Arc, Once},
         time::Instant,
@@ -21,9 +26,95 @@ mod prover_integration {
     use tracing_subscriber::EnvFilter;
 
     type Engine = BabyBearPoseidon2CpuEngine<DuplexSponge>;
-    type E = BinomialExtensionField<BabyBear, 4>;
-    type ZkvmProof = ZKVMProof<E, Basefold<E, BasefoldRSParams>>;
-    type ZkvmVk = ZKVMVerifyingKey<E, Basefold<E, BasefoldRSParams>>;
+    type E = RecursionField;
+    type ZkvmProof = RecursionProof;
+    type ZkvmVk = RecursionVk;
+    type BabyBearJaggedProof = ZKVMProof<E, Jagged<Basefold<E, BasefoldRSParams>>>;
+    type BabyBearWhirProof = ZKVMProof<E, Whir<E, WhirDefaultSpec>>;
+    type GoldilocksBasefoldProof =
+        ZKVMProof<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>>;
+    type GoldilocksJaggedProof =
+        ZKVMProof<GoldilocksExt2, Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>>;
+    type GoldilocksWhirProof = ZKVMProof<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>>;
+
+    fn probe_proof_fixture_type(bytes: &[u8]) -> &'static str {
+        if bincode::deserialize::<Vec<BabyBearJaggedProof>>(bytes).is_ok() {
+            return "babybear+jagged-basefold";
+        }
+        if bincode::deserialize::<Vec<BabyBearWhirProof>>(bytes).is_ok() {
+            return "babybear+whir";
+        }
+        if bincode::deserialize::<Vec<GoldilocksBasefoldProof>>(bytes).is_ok() {
+            return "goldilocks+basefold";
+        }
+        if bincode::deserialize::<Vec<GoldilocksJaggedProof>>(bytes).is_ok() {
+            return "goldilocks+jagged-basefold";
+        }
+        if bincode::deserialize::<Vec<GoldilocksWhirProof>>(bytes).is_ok() {
+            return "goldilocks+whir";
+        }
+        "unknown"
+    }
+
+    fn diagnose_current_proof_layout(bytes: &[u8]) {
+        let mut cursor = Cursor::new(bytes);
+        let len = bincode::deserialize_from::<_, u64>(&mut cursor);
+        println!(
+            "proof decode probe: vec_len={len:?}, offset={}",
+            cursor.position()
+        );
+        let public_values = bincode::deserialize_from::<_, PublicValues>(&mut cursor);
+        println!(
+            "proof decode probe: public_values={} offset={}",
+            public_values
+                .as_ref()
+                .map(|pv| format!(
+                    "ok(exit_code={}, shard_id={}, end_cycle={})",
+                    pv.exit_code, pv.shard_id, pv.end_cycle
+                ))
+                .unwrap_or_else(|err| format!("err({err})")),
+            cursor.position()
+        );
+        let chip_proofs =
+            bincode::deserialize_from::<_, BTreeMap<usize, ZKVMChipProof<E>>>(&mut cursor);
+        println!(
+            "proof decode probe: chip_proofs={} offset={}",
+            chip_proofs
+                .as_ref()
+                .map(|chips| format!("ok(len={})", chips.len()))
+                .unwrap_or_else(|err| format!("err({err})")),
+            cursor.position()
+        );
+        if chip_proofs.is_err() {
+            let mut gl_cursor = Cursor::new(bytes);
+            let _: Result<u64, _> = bincode::deserialize_from(&mut gl_cursor);
+            let _: Result<PublicValues, _> = bincode::deserialize_from(&mut gl_cursor);
+            let gl_chip_proofs = bincode::deserialize_from::<
+                _,
+                BTreeMap<usize, ZKVMChipProof<GoldilocksExt2>>,
+            >(&mut gl_cursor);
+            println!(
+                "proof decode probe: goldilocks chip_proofs={} offset={}",
+                gl_chip_proofs
+                    .as_ref()
+                    .map(|chips| format!("ok(len={})", chips.len()))
+                    .unwrap_or_else(|err| format!("err({err})")),
+                gl_cursor.position()
+            );
+        }
+        if chip_proofs.is_err() {
+            return;
+        }
+        let main_constraint = bincode::deserialize_from::<_, MainConstraintProof<E>>(&mut cursor);
+        println!(
+            "proof decode probe: main_constraint={} offset={}",
+            main_constraint
+                .as_ref()
+                .map(|_| "ok".to_string())
+                .unwrap_or_else(|err| format!("err({err})")),
+            cursor.position()
+        );
+    }
 
     fn init_test_tracing() {
         static INIT: Once = Once::new();
@@ -42,10 +133,22 @@ mod prover_integration {
         if let Ok(proofs) = bincode::deserialize::<Vec<ZkvmProof>>(&bytes) {
             return Ok(Some(proofs));
         }
+        let vec_err = match bincode::deserialize::<Vec<ZkvmProof>>(&bytes) {
+            Ok(_) => unreachable!("proof vec deserialize should have returned above"),
+            Err(err) => err,
+        };
         if let Ok(single) = bincode::deserialize::<ZkvmProof>(&bytes) {
             return Ok(Some(vec![single]));
         }
-        println!("skipping recursion v2 test: incompatible proof.bin fixture");
+        let single_err = match bincode::deserialize::<ZkvmProof>(&bytes) {
+            Ok(_) => unreachable!("proof deserialize should have returned above"),
+            Err(err) => err,
+        };
+        println!(
+            "skipping recursion v2 test: incompatible proof.bin fixture: detected_type={}; vec_err={vec_err}; single_err={single_err}",
+            probe_proof_fixture_type(&bytes),
+        );
+        diagnose_current_proof_layout(&bytes);
         Ok(None)
     }
 

@@ -11,26 +11,19 @@ use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
-    bus::{AirShapeBus, AirShapeBusMessage},
-    proof_shape::bus::AirShapeProperty,
+    bus::{ForkedTranscriptBus, ForkedTranscriptBusMessage},
     tower::{
-        TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage,
-        bus::{
-            TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus,
-            TowerLayerOutputMessage, TowerLogupClaimBus, TowerLogupClaimInputBus,
-            TowerLogupClaimMessage, TowerLogupLayerChallengeMessage,
-            TowerProdLayerChallengeMessage, TowerProdReadClaimBus, TowerProdReadClaimInputBus,
-            TowerProdSumClaimMessage, TowerProdWriteClaimBus, TowerProdWriteClaimInputBus,
-            TowerSumcheckInputBus, TowerSumcheckInputMessage, TowerSumcheckOutputBus,
-            TowerSumcheckOutputMessage,
-        },
+        TOWER_ACTIVITY_LOGUP, TOWER_ACTIVITY_READ, TOWER_ACTIVITY_WRITE, TowerActivityBus,
+        TowerAlphaPowBus, TowerAlphaPowMessage, TowerLayerInputBus, TowerLayerOutputBus,
+        TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
+        TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
+        bus::{TowerActivityMessage, TowerLayerInputMessage, TowerLayerOutputMessage},
     },
 };
 
 use recursion_circuit::{
-    bus::TranscriptBus,
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
-    utils::{assert_zeros, ext_field_add, ext_field_multiply},
+    utils::{assert_zeros, ext_field_add, ext_field_multiply, ext_field_subtract},
 };
 
 #[repr(C)]
@@ -40,6 +33,7 @@ pub struct TowerLayerCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
+    pub fork_id: T,
     pub is_first_air_idx: T,
     pub is_first: T,
 
@@ -68,9 +62,26 @@ pub struct TowerLayerCols<T> {
     pub write_claim_prime: [T; D_EF],
     pub logup_claim: [T; D_EF],
     pub logup_claim_prime: [T; D_EF],
-    pub num_read_count: T,
-    pub num_write_count: T,
-    pub num_logup_count: T,
+    pub read_active: T,
+    pub write_active: T,
+    pub logup_active: T,
+
+    pub read_p0: [T; D_EF],
+    pub read_p1: [T; D_EF],
+    pub read_p_xi: [T; D_EF],
+    pub write_p0: [T; D_EF],
+    pub write_p1: [T; D_EF],
+    pub write_p_xi: [T; D_EF],
+    pub logup_p0: [T; D_EF],
+    pub logup_p1: [T; D_EF],
+    pub logup_q0: [T; D_EF],
+    pub logup_q1: [T; D_EF],
+    pub logup_p_xi: [T; D_EF],
+    pub logup_q_xi: [T; D_EF],
+    pub read_weight: [T; D_EF],
+    pub write_weight: [T; D_EF],
+    pub logup_p_weight: [T; D_EF],
+    pub logup_q_weight: [T; D_EF],
 
     /// Received from TowerLayerSumcheckAir
     pub eq_at_r_prime: [T; D_EF],
@@ -83,20 +94,15 @@ pub struct TowerLayerCols<T> {
 /// The TowerLayerAir handles layer-to-layer transitions in the GKR protocol
 pub struct TowerLayerAir {
     // External buses
-    pub transcript_bus: TranscriptBus,
-    pub air_shape_bus: AirShapeBus,
+    pub forked_transcript_bus: ForkedTranscriptBus,
+    pub activity_bus: TowerActivityBus,
+    pub alpha_pow_bus: TowerAlphaPowBus,
     // Internal buses
     pub layer_input_bus: TowerLayerInputBus,
     pub layer_output_bus: TowerLayerOutputBus,
     pub sumcheck_input_bus: TowerSumcheckInputBus,
     pub sumcheck_output_bus: TowerSumcheckOutputBus,
     pub sumcheck_challenge_bus: TowerSumcheckChallengeBus,
-    pub prod_read_claim_input_bus: TowerProdReadClaimInputBus,
-    pub prod_read_claim_bus: TowerProdReadClaimBus,
-    pub prod_write_claim_input_bus: TowerProdWriteClaimInputBus,
-    pub prod_write_claim_bus: TowerProdWriteClaimBus,
-    pub logup_claim_input_bus: TowerLogupClaimInputBus,
-    pub logup_claim_bus: TowerLogupClaimBus,
 }
 
 impl<F: Field> BaseAir<F> for TowerLayerAir {
@@ -127,6 +133,9 @@ where
 
         builder.assert_bool(local.is_dummy);
         builder.assert_bool(local.is_first_air_idx);
+        builder.assert_bool(local.read_active);
+        builder.assert_bool(local.write_active);
+        builder.assert_bool(local.logup_active);
 
         ///////////////////////////////////////////////////////////////////////
         // Proof Index and Loop Constraints
@@ -165,6 +174,20 @@ where
             .when(is_transition.clone())
             .assert_eq(next.layer_idx, local.layer_idx + AB::Expr::ONE);
 
+        ///////////////////////////////////////////////////////////////////////
+        // Dummy Row Constraints
+        ///////////////////////////////////////////////////////////////////////
+
+        let is_not_dummy = AB::Expr::ONE - local.is_dummy;
+        builder
+            .when(is_transition.clone())
+            .assert_eq(next.is_dummy, local.is_dummy);
+        builder
+            .when(is_transition.clone())
+            .assert_zero(local.is_dummy);
+        builder.when(local.is_dummy).assert_one(local.is_first);
+        builder.when(local.is_dummy).assert_one(is_last.clone());
+
         // constrain lambda_prime
         let lambda_prime_one = {
             let mut arr = core::array::from_fn(|_| AB::Expr::ZERO);
@@ -184,24 +207,173 @@ where
         );
 
         ///////////////////////////////////////////////////////////////////////
-        // Root Layer Constraints
+        // Direct Interleaved Claim Constraints
         ///////////////////////////////////////////////////////////////////////
 
+        let reduce_pair = |p0: [AB::Var; D_EF], p1: [AB::Var; D_EF], mu: [AB::Var; D_EF]| {
+            ext_field_add::<AB::Expr>(
+                p0,
+                ext_field_multiply::<AB::Expr>(ext_field_subtract::<AB::Expr>(p1, p0), mu),
+            )
+        };
+
+        let read_p_xi = reduce_pair(local.read_p0, local.read_p1, local.mu);
+        let write_p_xi = reduce_pair(local.write_p0, local.write_p1, local.mu);
+        let logup_p_xi = reduce_pair(local.logup_p0, local.logup_p1, local.mu);
+        let logup_q_xi = reduce_pair(local.logup_q0, local.logup_q1, local.mu);
+        assert_array_eq(builder, local.read_p_xi, read_p_xi.clone());
+        assert_array_eq(builder, local.write_p_xi, write_p_xi.clone());
+        assert_array_eq(builder, local.logup_p_xi, logup_p_xi.clone());
+        assert_array_eq(builder, local.logup_q_xi, logup_q_xi.clone());
+
+        let read_prime = ext_field_multiply::<AB::Expr>(local.read_p0, local.read_p1);
+        let write_prime = ext_field_multiply::<AB::Expr>(local.write_p0, local.write_p1);
+        let logup_p_cross = ext_field_add::<AB::Expr>(
+            ext_field_multiply::<AB::Expr>(local.logup_p0, local.logup_q1),
+            ext_field_multiply::<AB::Expr>(local.logup_p1, local.logup_q0),
+        );
+        let logup_q_cross = ext_field_multiply::<AB::Expr>(local.logup_q0, local.logup_q1);
+        let logup_prime = ext_field_add::<AB::Expr>(
+            logup_p_cross.clone(),
+            ext_field_multiply::<AB::Expr>(local.lambda_prime, logup_q_cross.clone()),
+        );
+
+        assert_array_eq(
+            &mut builder.when(local.read_active),
+            local.read_claim,
+            local.read_p_xi,
+        );
+        assert_array_eq(
+            &mut builder.when(local.read_active),
+            local.read_claim_prime,
+            read_prime,
+        );
+        assert_array_eq(
+            &mut builder.when(local.write_active),
+            local.write_claim,
+            local.write_p_xi,
+        );
+        assert_array_eq(
+            &mut builder.when(local.write_active),
+            local.write_claim_prime,
+            write_prime,
+        );
+        assert_array_eq(
+            &mut builder.when(local.logup_active),
+            local.logup_claim,
+            ext_field_add::<AB::Expr>(
+                local.logup_p_xi,
+                ext_field_multiply::<AB::Expr>(local.lambda, local.logup_q_xi),
+            ),
+        );
+        assert_array_eq(
+            &mut builder.when(local.logup_active),
+            local.logup_claim_prime,
+            logup_prime,
+        );
+
         assert_zeros(
-            &mut builder.when(local.is_first),
-            local.sumcheck_claim_in.map(Into::into),
+            &mut builder.when(AB::Expr::ONE - local.read_active),
+            local.read_p0.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.read_active),
+            local.read_p1.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.read_active),
+            local.read_p_xi.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.read_active),
+            local.read_claim.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.read_active),
+            local.read_claim_prime.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.write_active),
+            local.write_p0.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.write_active),
+            local.write_p1.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.write_active),
+            local.write_p_xi.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.write_active),
+            local.write_claim.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.write_active),
+            local.write_claim_prime.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_p0.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_p1.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_q0.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_q1.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_p_xi.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_q_xi.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_claim.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_claim_prime.map(Into::into),
         );
 
         ///////////////////////////////////////////////////////////////////////
         // Inter-Layer Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        let read_plus_write = ext_field_add::<AB::Expr>(local.read_claim, local.write_claim);
-        let folded_claim = ext_field_add::<AB::Expr>(read_plus_write, local.logup_claim);
-        assert_array_eq(
-            &mut builder.when(is_transition.clone()),
-            next.sumcheck_claim_in,
-            folded_claim.clone(),
+        let folded_claim = ext_field_add::<AB::Expr>(
+            ext_field_add::<AB::Expr>(
+                ext_field_multiply::<AB::Expr>(local.read_weight, local.read_p_xi),
+                ext_field_multiply::<AB::Expr>(local.write_weight, local.write_p_xi),
+            ),
+            ext_field_add::<AB::Expr>(
+                ext_field_multiply::<AB::Expr>(local.logup_p_weight, local.logup_p_xi),
+                ext_field_multiply::<AB::Expr>(local.logup_q_weight, local.logup_q_xi),
+            ),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.read_active),
+            local.read_weight.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.write_active),
+            local.write_weight.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_p_weight.map(Into::into),
+        );
+        assert_zeros(
+            &mut builder.when(AB::Expr::ONE - local.logup_active),
+            local.logup_q_weight.map(Into::into),
         );
 
         // Transcript index increment
@@ -210,9 +382,9 @@ where
         };
         let tidx_after_sumcheck = local.tidx
             // Sample lambda label+sample on non-root layer
-            + (AB::Expr::ONE - local.is_first)
-                * AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN)
-            + local.layer_idx * AB::Expr::from_usize(ROUND_LEN);
+            + (AB::Expr::ONE - local.is_first) * AB::Expr::from_usize(ALPHA_LEN)
+            + AB::Expr::from_usize(SUMCHECK_INIT_LEN)
+            + (local.layer_idx + AB::Expr::ONE) * AB::Expr::from_usize(ROUND_LEN);
         let tidx_end = tidx_after_sumcheck.clone() + AB::Expr::from_usize(POST_SUMCHECK_LEN);
         builder
             .when(is_transition.clone())
@@ -222,139 +394,90 @@ where
         // Module Interactions
         ///////////////////////////////////////////////////////////////////////
 
-        let is_not_dummy = AB::Expr::ONE - local.is_dummy;
         let is_non_root_layer = local.is_enabled * (AB::Expr::ONE - local.is_first);
 
         let lookup_enable = local.is_enabled * is_not_dummy.clone();
-        self.air_shape_bus.lookup_key(
+        self.activity_bus.receive(
             builder,
             local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.idx.into(),
-                property_idx: AirShapeProperty::NumRead.to_field(),
-                value: local.num_read_count.into(),
+            TowerActivityMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                kind: AB::Expr::from_usize(TOWER_ACTIVITY_READ),
+                active: local.read_active.into(),
             },
             lookup_enable.clone(),
         );
-        self.air_shape_bus.lookup_key(
+        self.activity_bus.receive(
             builder,
             local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.idx.into(),
-                property_idx: AirShapeProperty::NumWrite.to_field(),
-                value: local.num_write_count.into(),
+            TowerActivityMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                kind: AB::Expr::from_usize(TOWER_ACTIVITY_WRITE),
+                active: local.write_active.into(),
             },
             lookup_enable.clone(),
         );
-        self.air_shape_bus.lookup_key(
+        self.activity_bus.receive(
             builder,
             local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.idx.into(),
-                property_idx: AirShapeProperty::NumLk.to_field(),
-                value: local.num_logup_count.into(),
+            TowerActivityMessage {
+                idx: local.idx.into(),
+                layer_idx: local.layer_idx.into(),
+                kind: AB::Expr::from_usize(TOWER_ACTIVITY_LOGUP),
+                active: local.logup_active.into(),
             },
             lookup_enable.clone(),
         );
 
-        let tidx_for_claims = tidx_after_sumcheck.clone();
-        let read_claim_enabled = is_not_dummy.clone() * local.num_read_count;
-        let write_claim_enabled = is_not_dummy.clone() * local.num_write_count;
-        let logup_claim_enabled = is_not_dummy.clone() * local.num_logup_count;
-
-        self.prod_read_claim_input_bus.send(
+        self.alpha_pow_bus.receive(
             builder,
             local.proof_idx,
-            TowerProdLayerChallengeMessage {
+            TowerAlphaPowMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: tidx_for_claims.clone(),
-                lambda: local.lambda.map(Into::into),
-                lambda_prime: local.lambda_prime.map(Into::into),
-                mu: local.mu.map(Into::into),
+                slot_kind: AB::Expr::from_usize(TOWER_ACTIVITY_READ),
+                alpha: local.lambda.map(Into::into),
+                weight: local.read_weight.map(Into::into),
             },
-            read_claim_enabled.clone(),
+            lookup_enable.clone() * local.read_active,
         );
-        // TODO separate lambda, lambda_prime for prod-write the relation should be local.lambda^(num_read)
-        self.prod_write_claim_input_bus.send(
+        self.alpha_pow_bus.receive(
             builder,
             local.proof_idx,
-            TowerProdLayerChallengeMessage {
+            TowerAlphaPowMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: tidx_for_claims.clone(),
-                lambda: local.lambda.map(Into::into),
-                lambda_prime: local.lambda_prime.map(Into::into),
-                mu: local.mu.map(Into::into),
+                slot_kind: AB::Expr::from_usize(TOWER_ACTIVITY_WRITE),
+                alpha: local.lambda.map(Into::into),
+                weight: local.write_weight.map(Into::into),
             },
-            write_claim_enabled.clone(),
+            lookup_enable.clone() * local.write_active,
         );
-        // TODO separate lambda, lambda_prime for logup the relation should be local.lambda^(num_read + num_write)
-        self.logup_claim_input_bus.send(
+        self.alpha_pow_bus.receive(
             builder,
             local.proof_idx,
-            TowerLogupLayerChallengeMessage {
+            TowerAlphaPowMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                tidx: tidx_for_claims.clone(),
-                lambda: local.lambda.map(Into::into),
-                lambda_prime: local.lambda_prime.map(Into::into),
-                mu: local.mu.map(Into::into),
+                slot_kind: AB::Expr::from_usize(TOWER_ACTIVITY_LOGUP),
+                alpha: local.lambda.map(Into::into),
+                weight: local.logup_p_weight.map(Into::into),
             },
-            logup_claim_enabled.clone(),
+            lookup_enable.clone() * local.logup_active,
         );
-        self.prod_read_claim_bus.receive(
+        self.alpha_pow_bus.receive(
             builder,
             local.proof_idx,
-            TowerProdSumClaimMessage {
+            TowerAlphaPowMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                lambda_claim: local.read_claim.map(Into::into),
-                lambda_prime_claim: local.read_claim_prime.map(Into::into),
-                num_prod_count: local.num_read_count.into(),
+                slot_kind: AB::Expr::from_usize(TOWER_ACTIVITY_LOGUP + 1),
+                alpha: local.lambda.map(Into::into),
+                weight: local.logup_q_weight.map(Into::into),
             },
-            read_claim_enabled,
-        );
-        self.prod_write_claim_bus.receive(
-            builder,
-            local.proof_idx,
-            TowerProdSumClaimMessage {
-                idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
-                lambda_claim: local.write_claim.map(Into::into),
-                lambda_prime_claim: local.write_claim_prime.map(Into::into),
-                num_prod_count: local.num_write_count.into(),
-            },
-            write_claim_enabled,
-        );
-        self.logup_claim_bus.receive(
-            builder,
-            local.proof_idx,
-            TowerLogupClaimMessage {
-                idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
-                lambda_claim: local.logup_claim.map(Into::into),
-                lambda_prime_claim: local.logup_claim_prime.map(Into::into),
-                num_logup_count: local.num_logup_count.into(),
-            },
-            logup_claim_enabled,
-        );
-
-        let root_layer_mask = local.is_first * is_not_dummy.clone();
-        assert_array_eq(
-            &mut builder.when(root_layer_mask.clone()),
-            local.read_claim_prime,
-            local.r0_claim,
-        );
-        assert_array_eq(
-            &mut builder.when(root_layer_mask.clone()),
-            local.write_claim_prime,
-            local.w0_claim,
-        );
-        assert_array_eq(
-            &mut builder.when(root_layer_mask),
-            local.logup_claim_prime,
-            local.q0_claim,
+            lookup_enable.clone() * local.logup_active,
         );
 
         // 1. TowerLayerInputBus
@@ -388,37 +511,48 @@ where
         );
         // 3. TowerSumcheckInputBus
         // 3a. Send claim to sumcheck
-        // only send sumcheck on non root layer
+        // Native verifier runs sumcheck for every tower round, including root.
         self.sumcheck_input_bus.send(
             builder,
             local.proof_idx,
             TowerSumcheckInputMessage {
                 idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
+                // TowerLayerSumcheckAir keeps its internal bus layer key 1-based
+                // so `layer_idx - 1` can address the previous GKR layer challenge.
+                layer_idx: local.layer_idx + AB::Expr::ONE,
                 is_last_layer: is_last.clone(),
-                tidx: local.tidx + AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN),
+                tidx: local.tidx
+                    + (AB::Expr::ONE - local.is_first) * AB::Expr::from_usize(ALPHA_LEN)
+                    + AB::Expr::from_usize(SUMCHECK_INIT_LEN),
                 claim: local.sumcheck_claim_in.map(Into::into),
             },
-            is_non_root_layer.clone() * is_not_dummy.clone(),
+            is_not_dummy.clone(),
         );
         // 3. TowerSumcheckOutputBus
         // 3a. Receive sumcheck results
-        let prime_fold = ext_field_add::<AB::Expr>(local.read_claim_prime, local.write_claim_prime);
-        let sumcheck_claim_out = ext_field_multiply::<AB::Expr>(
-            ext_field_add::<AB::Expr>(prime_fold, local.logup_claim_prime),
-            local.eq_at_r_prime,
+        let weighted_prime_fold = ext_field_add::<AB::Expr>(
+            ext_field_add::<AB::Expr>(
+                ext_field_multiply::<AB::Expr>(local.read_weight, local.read_claim_prime),
+                ext_field_multiply::<AB::Expr>(local.write_weight, local.write_claim_prime),
+            ),
+            ext_field_add::<AB::Expr>(
+                ext_field_multiply::<AB::Expr>(local.logup_p_weight, logup_p_cross),
+                ext_field_multiply::<AB::Expr>(local.logup_q_weight, logup_q_cross),
+            ),
         );
+        let sumcheck_claim_out =
+            ext_field_multiply::<AB::Expr>(weighted_prime_fold, local.eq_at_r_prime);
         self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
             TowerSumcheckOutputMessage {
                 idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
+                layer_idx: local.layer_idx + AB::Expr::ONE,
                 tidx: tidx_after_sumcheck.clone(),
                 claim_out: sumcheck_claim_out.map(Into::into),
                 eq_at_r_prime: local.eq_at_r_prime.map(Into::into),
             },
-            is_non_root_layer.clone() * is_not_dummy.clone(),
+            is_not_dummy.clone(),
         );
         // 4. TowerSumcheckChallengeBus
         // 4a. Send challenge mu
@@ -431,7 +565,7 @@ where
                 sumcheck_round: AB::Expr::ZERO,
                 challenge: local.mu.map(Into::into),
             },
-            is_transition.clone() * is_not_dummy.clone(),
+            local.is_enabled * is_not_dummy.clone(),
         );
 
         ///////////////////////////////////////////////////////////////////////
@@ -444,22 +578,34 @@ where
         // in last layer: for send back to GKR input layer
         // 1a. Sample `lambda` — only on non-root layers.
         //     Root layer uses alpha_logup (set in trace), not a transcript sample.
-        self.transcript_bus.sample_ext(
-            builder,
-            local.proof_idx,
-            local.tidx,
-            local.lambda,
-            is_non_root_layer.clone() * is_not_dummy.clone(),
-        );
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(i),
+                    value: local.lambda[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                is_non_root_layer.clone() * is_not_dummy.clone(),
+            );
+        }
         // 1b. Observe layer claims
         let tidx = tidx_after_sumcheck;
         // 1c. Sample `mu`
-        self.transcript_bus.sample_ext(
-            builder,
-            local.proof_idx,
-            tidx,
-            local.mu,
-            local.is_enabled * is_not_dummy.clone(),
-        );
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: tidx.clone() + AB::Expr::from_usize(i),
+                    value: local.mu[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_enabled * is_not_dummy.clone(),
+            );
+        }
     }
 }

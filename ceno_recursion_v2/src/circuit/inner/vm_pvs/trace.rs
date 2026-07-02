@@ -10,7 +10,7 @@ use std::borrow::BorrowMut;
 use crate::{
     circuit::inner::{
         ProofsType,
-        vm_pvs::{VmPvs, air::VmPvsCols},
+        vm_pvs::{VmPvs, air::VmPvsCols, recursion_commit_digest},
     },
     system::{Preflight, RecursionProof, RecursionVk},
 };
@@ -34,17 +34,12 @@ pub fn generate_proving_ctx(
     let width = VmPvsCols::<u8>::width() + (deferral_enabled as usize);
     let mut trace = vec![F::ZERO; rows * width];
 
-    let fixed_commit = extract_commit(
-        child_vk
-            .fixed_commit
-            .as_ref()
-            .map(|commitment| commitment.commit.clone()),
-    );
+    let fixed_commit = extract_commit(child_vk.fixed_commit.as_ref().map(recursion_commit_digest));
     let fixed_no_omc_init_commit = extract_commit(
         child_vk
             .fixed_no_omc_init_commit
             .as_ref()
-            .map(|commitment| commitment.commit.clone()),
+            .map(recursion_commit_digest),
     );
 
     for (row_idx, row) in trace.chunks_exact_mut(width).enumerate() {
@@ -98,7 +93,7 @@ fn build_vm_pvs(
     VmPvs {
         fixed_commit,
         fixed_no_omc_init_commit,
-        witness_commit: extract_commit(Some(proof.witin_commit.commit.clone())),
+        witness_commit: extract_commit(Some(recursion_commit_digest(&proof.witin_commit))),
         exit_code: split_u32_lo_hi(pv.exit_code),
         init_pc: F::from_u32(pv.init_pc),
         init_cycle: F::from_u64(pv.init_cycle),

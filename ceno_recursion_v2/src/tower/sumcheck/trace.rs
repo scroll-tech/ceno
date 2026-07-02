@@ -12,6 +12,7 @@ use crate::{tower::tower_transcript_len, tracegen::RowMajorChip};
 pub struct TowerSumcheckRecord {
     pub proof_idx: usize,
     pub idx: usize,
+    pub fork_id: usize,
     pub is_first_air_idx: bool,
     pub tidx: usize,
     pub evals: Vec<[EF; 3]>,
@@ -43,10 +44,10 @@ impl TowerSumcheckRecord {
 
     #[inline]
     fn derive_tidx(&self, layer_idx: usize, round_in_layer: usize) -> usize {
-        let rounds_before_layer = Self::layer_start_index(layer_idx);
         self.tidx
-            + tower_transcript_len::ROUND_LEN * (rounds_before_layer + round_in_layer)
-            + tower_transcript_len::LAYER_GAP_LEN * layer_idx
+            + tower_transcript_len::layers_cumulative(layer_idx)
+            + tower_transcript_len::sumcheck_start_offset_in_layer(layer_idx)
+            + tower_transcript_len::ROUND_LEN * round_in_layer
     }
 
     #[inline]
@@ -145,6 +146,7 @@ impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
                     cols.tidx = F::from_usize(D_EF);
                     cols.proof_idx = F::from_usize(record.proof_idx);
                     cols.idx = F::from_usize(record.idx);
+                    cols.fork_id = F::from_usize(record.fork_id);
                     cols.layer_idx = F::ONE;
                     cols.is_first_round = F::ONE;
                     cols.is_first_idx = F::from_bool(record.is_first_air_idx);
@@ -215,6 +217,7 @@ impl RowMajorChip<F> for TowerSumcheckTraceGenerator {
                         cols.is_enabled = F::ONE;
                         cols.proof_idx = F::from_usize(record.proof_idx);
                         cols.idx = F::from_usize(record.idx);
+                        cols.fork_id = F::from_usize(record.fork_id);
 
                         cols.layer_idx = F::from_usize(layer_idx_value);
                         cols.is_last_layer = F::from_bool(is_last_layer);

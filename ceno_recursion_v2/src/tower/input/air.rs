@@ -1,7 +1,10 @@
 use core::borrow::Borrow;
 
 use crate::{
-    bus::{MainBus, MainMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus},
+    bus::{
+        ForkedTranscriptBus, ForkedTranscriptBusMessage, MainBus, MainMessage, TowerModuleBus,
+        TowerModuleMessage,
+    },
     tower::bus::{
         TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus, TowerLayerOutputMessage,
     },
@@ -32,6 +35,7 @@ pub struct TowerInputCols<T> {
 
     pub proof_idx: T,
     pub idx: T,
+    pub fork_id: T,
 
     pub n_logup: T,
 
@@ -60,7 +64,7 @@ pub struct TowerInputAir {
     // Buses
     pub tower_module_bus: TowerModuleBus,
     pub main_bus: MainBus,
-    pub transcript_bus: TranscriptBus,
+    pub forked_transcript_bus: ForkedTranscriptBus,
     pub layer_input_bus: TowerLayerInputBus,
     pub layer_output_bus: TowerLayerOutputBus,
 }
@@ -156,16 +160,20 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         };
         let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN);
         // Add GKR layers + Sumcheck.
-        // Total GKR span: n*(10n+25) - 13 for n>0.
-        // layers_cumulative(n) = 10n² + 25n - 13.
-        let gkr_inner = num_layers.clone() * AB::Expr::from_usize(ROUND_LEN / 2)
-            + AB::Expr::from_usize(
-                ALPHA_LEN + SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN - ROUND_LEN / 2,
-            );
+        // Layer 0 includes sumcheck init, one round, and post-sumcheck.
+        // Layer j>0 additionally samples lambda and has j+1 sumcheck rounds.
+        // layers_cumulative(n) =
+        //   n*(SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN)
+        //   + n*(n+1)/2*ROUND_LEN
+        //   + (n-1)*ALPHA_LEN, for n > 0.
+        let fixed_span =
+            num_layers.clone() * AB::Expr::from_usize(SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN);
+        let round_span = num_layers.clone()
+            * (num_layers.clone() + AB::Expr::ONE)
+            * AB::Expr::from_usize(ROUND_LEN / 2);
+        let alpha_span = (num_layers.clone() - AB::Expr::ONE) * AB::Expr::from_usize(ALPHA_LEN);
         let tidx_after_gkr_layers = tidx_after_alpha_beta.clone()
-            + has_interactions.clone()
-                * (num_layers.clone() * gkr_inner
-                    - AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN));
+            + has_interactions.clone() * (fixed_span + round_span + alpha_span);
         // 1. TowerLayerInputBus
         // 1a. Send input to TowerLayerAir
         self.layer_input_bus.send(
@@ -214,13 +222,19 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
 
         // 2. TranscriptBus
         // 2a. Sample alpha_logup challenge
-        self.transcript_bus.sample_ext(
-            builder,
-            local.proof_idx,
-            local.tidx,
-            local.alpha_logup.map(Into::into),
-            local.is_enabled,
-        );
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(i),
+                    value: local.alpha_logup[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_enabled,
+            );
+        }
         self.main_bus.send(
             builder,
             local.proof_idx,

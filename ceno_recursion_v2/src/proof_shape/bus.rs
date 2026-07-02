@@ -39,6 +39,10 @@ pub enum AirShapeProperty {
     NumRead,
     NumWrite,
     NumLk,
+    BaseTowerVars,
+    ReadOpVars,
+    WriteOpVars,
+    LogupOpVars,
 }
 
 impl AirShapeProperty {

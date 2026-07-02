@@ -56,7 +56,7 @@ use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, ReadOnlyTranscript, StarkProtocolConfig, TranscriptHistory,
     p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use recursion_circuit::primitives::exp_bits_len::ExpBitsLenTraceGenerator;
@@ -69,13 +69,13 @@ use crate::{
         RecursionProof, RecursionVk, TowerChipTranscriptRange, TraceGenModule,
     },
     tower::{
-        bus::{TowerLayerInputBus, TowerLayerOutputBus},
+        alpha_pow::{TowerAlphaPowAir, TowerAlphaPowTraceGenerator},
+        bus::{TowerActivityBus, TowerLayerInputBus, TowerLayerOutputBus, TowerShapeBus},
         input::{TowerInputAir, TowerInputRecord, TowerInputTraceGenerator},
-        layer::{
-            TowerLayerAir, TowerLayerRecord, TowerLayerTraceGenerator, TowerLogupSumCheckClaimAir,
-            TowerLogupSumCheckClaimTraceGenerator, TowerProdReadSumCheckClaimAir,
-            TowerProdReadSumCheckClaimTraceGenerator, TowerProdWriteSumCheckClaimAir,
-            TowerProdWriteSumCheckClaimTraceGenerator,
+        layer::{TowerLayerAir, TowerLayerRecord, TowerLayerTraceGenerator},
+        shape::{
+            TowerActivityAir, TowerActivityTraceGenerator, TowerShapeAir, TowerShapeRecord,
+            TowerShapeTraceGenerator,
         },
         sumcheck::{TowerLayerSumcheckAir, TowerSumcheckRecord, TowerSumcheckTraceGenerator},
     },
@@ -84,16 +84,14 @@ use crate::{
 };
 use ceno_zkvm::{scheme::ZKVMChipProof, structs::VerifyingKey};
 use eyre::Result;
+use witness::next_pow2_instance_padding;
 
 // Internal bus definitions
 mod bus;
 pub use bus::{
-    TowerLogupClaimBus, TowerLogupClaimInputBus, TowerLogupClaimMessage,
-    TowerLogupLayerChallengeMessage, TowerProdLayerChallengeMessage, TowerProdReadClaimBus,
-    TowerProdReadClaimInputBus, TowerProdSumClaimMessage, TowerProdWriteClaimBus,
-    TowerProdWriteClaimInputBus, TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage,
-    TowerSumcheckInputBus, TowerSumcheckInputMessage, TowerSumcheckOutputBus,
-    TowerSumcheckOutputMessage,
+    TowerAlphaPowBus, TowerAlphaPowMessage, TowerSumcheckChallengeBus,
+    TowerSumcheckChallengeMessage, TowerSumcheckInputBus, TowerSumcheckInputMessage,
+    TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
 };
 
 /// Transcript field-element lengths per tower operation.
@@ -138,14 +136,14 @@ pub mod tower_transcript_len {
     /// post-sumcheck of previous layer + pre-sumcheck of next layer.
     pub const LAYER_GAP_LEN: usize = POST_SUMCHECK_LEN + ALPHA_LEN + SUMCHECK_INIT_LEN;
 
-    /// Tidx span of layer `layer_idx` (includes claim slots + transcript ops).
-    /// Layer 0 (root): POST_SUMCHECK_LEN (no lambda sample — uses alpha_logup).
-    /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + j*ROUND_LEN + POST_SUMCHECK_LEN.
+    /// Tidx span of layer `layer_idx` (includes sumcheck, claim slots, and transcript ops).
+    /// Layer 0 (root): SUMCHECK_INIT_LEN + 1*ROUND_LEN + POST_SUMCHECK_LEN.
+    /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + (j+1)*ROUND_LEN + POST_SUMCHECK_LEN.
     pub const fn layer_span(layer_idx: usize) -> usize {
         if layer_idx == 0 {
-            POST_SUMCHECK_LEN
+            SUMCHECK_INIT_LEN + ROUND_LEN + POST_SUMCHECK_LEN
         } else {
-            ALPHA_LEN + SUMCHECK_INIT_LEN + layer_idx * ROUND_LEN + POST_SUMCHECK_LEN
+            ALPHA_LEN + SUMCHECK_INIT_LEN + (layer_idx + 1) * ROUND_LEN + POST_SUMCHECK_LEN
         }
     }
 
@@ -162,39 +160,48 @@ pub mod tower_transcript_len {
 
     /// Offset from the start of layer `layer_idx` to `tidx_after_sumcheck`
     /// (where claims start).
-    /// Layer 0: 0.
-    /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + j*ROUND_LEN.
+    /// Layer 0: SUMCHECK_INIT_LEN + 1*ROUND_LEN.
+    /// Layer j>0: ALPHA_LEN + SUMCHECK_INIT_LEN + (j+1)*ROUND_LEN.
     pub const fn claim_offset_in_layer(layer_idx: usize) -> usize {
         if layer_idx == 0 {
-            0
+            SUMCHECK_INIT_LEN + ROUND_LEN
         } else {
-            ALPHA_LEN + SUMCHECK_INIT_LEN + layer_idx * ROUND_LEN
+            ALPHA_LEN + SUMCHECK_INIT_LEN + (layer_idx + 1) * ROUND_LEN
+        }
+    }
+
+    /// Offset from the start of layer `layer_idx` to the first sumcheck round.
+    pub const fn sumcheck_start_offset_in_layer(layer_idx: usize) -> usize {
+        if layer_idx == 0 {
+            SUMCHECK_INIT_LEN
+        } else {
+            ALPHA_LEN + SUMCHECK_INIT_LEN
         }
     }
 }
 
 // Sub-modules for different AIRs
+pub mod alpha_pow;
 pub mod input;
 pub mod layer;
+pub mod shape;
 pub mod sumcheck;
+pub(crate) use shape::{TOWER_ACTIVITY_LOGUP, TOWER_ACTIVITY_READ, TOWER_ACTIVITY_WRITE};
 #[allow(clippy::module_inception)]
 mod tower;
-pub(crate) use tower::{TowerReplayResult, replay_tower_proof, replay_tower_proof_poseidon};
+pub(crate) use tower::{TowerReplayResult, replay_tower_proof_precomputed};
 pub struct TowerModule {
     // Global bus inventory
     bus_inventory: BusInventory,
     // Module buses
+    shape_bus: TowerShapeBus,
+    activity_bus: TowerActivityBus,
     layer_input_bus: TowerLayerInputBus,
     layer_output_bus: TowerLayerOutputBus,
+    alpha_pow_bus: TowerAlphaPowBus,
     sumcheck_input_bus: TowerSumcheckInputBus,
     sumcheck_output_bus: TowerSumcheckOutputBus,
     sumcheck_challenge_bus: TowerSumcheckChallengeBus,
-    prod_read_claim_input_bus: TowerProdReadClaimInputBus,
-    prod_read_claim_bus: TowerProdReadClaimBus,
-    prod_write_claim_input_bus: TowerProdWriteClaimInputBus,
-    prod_write_claim_bus: TowerProdWriteClaimBus,
-    logup_claim_input_bus: TowerLogupClaimInputBus,
-    logup_claim_bus: TowerLogupClaimBus,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -205,6 +212,7 @@ pub(crate) struct TowerTowerEvalRecord {
 }
 
 pub(crate) struct TowerBlobCpu {
+    shape_records: Vec<TowerShapeRecord>,
     input_records: Vec<TowerInputRecord>,
     /// Per-proof q0 claims matching input_records (one per proof).
     proof_q0_claims: Vec<EF>,
@@ -229,17 +237,14 @@ impl TowerModule {
     pub fn new(_vk: &RecursionVk, b: &mut BusIndexManager, bus_inventory: BusInventory) -> Self {
         TowerModule {
             bus_inventory,
+            shape_bus: TowerShapeBus::new(b.new_bus_idx()),
+            activity_bus: TowerActivityBus::new(b.new_bus_idx()),
             layer_input_bus: TowerLayerInputBus::new(b.new_bus_idx()),
             layer_output_bus: TowerLayerOutputBus::new(b.new_bus_idx()),
+            alpha_pow_bus: TowerAlphaPowBus::new(b.new_bus_idx()),
             sumcheck_input_bus: TowerSumcheckInputBus::new(b.new_bus_idx()),
             sumcheck_output_bus: TowerSumcheckOutputBus::new(b.new_bus_idx()),
             sumcheck_challenge_bus: TowerSumcheckChallengeBus::new(b.new_bus_idx()),
-            prod_read_claim_input_bus: TowerProdReadClaimInputBus::new(b.new_bus_idx()),
-            prod_read_claim_bus: TowerProdReadClaimBus::new(b.new_bus_idx()),
-            prod_write_claim_input_bus: TowerProdWriteClaimInputBus::new(b.new_bus_idx()),
-            prod_write_claim_bus: TowerProdWriteClaimBus::new(b.new_bus_idx()),
-            logup_claim_input_bus: TowerLogupClaimInputBus::new(b.new_bus_idx()),
-            logup_claim_bus: TowerLogupClaimBus::new(b.new_bus_idx()),
         }
     }
 
@@ -303,42 +308,22 @@ pub(crate) fn interpolate_pair(values: [EF; 2], mu: EF) -> EF {
 }
 
 fn accumulate_prod_claims(rows: &[[EF; 2]], lambda: EF, lambda_prime: EF, mu: EF) -> (EF, EF) {
-    let mut pow_lambda = EF::ONE;
-    let mut pow_lambda_prime = EF::ONE;
-    let mut acc_sum = EF::ZERO;
-    let mut acc_sum_prime = EF::ZERO;
-
-    for pair in rows {
-        let p_xi = interpolate_pair(*pair, mu);
-        let prime_product = pair[0] * pair[1];
-        acc_sum += pow_lambda * p_xi;
-        acc_sum_prime += pow_lambda_prime * prime_product;
-        pow_lambda *= lambda;
-        pow_lambda_prime *= lambda_prime;
-    }
-
-    (acc_sum, acc_sum_prime)
+    let _ = (lambda, lambda_prime);
+    let Some(pair) = rows.first() else {
+        return (EF::ZERO, EF::ZERO);
+    };
+    (interpolate_pair(*pair, mu), pair[0] * pair[1])
 }
 
 fn accumulate_logup_claims(rows: &[[EF; 4]], lambda: EF, lambda_prime: EF, mu: EF) -> (EF, EF) {
-    let mut pow_lambda = EF::ONE;
-    let mut pow_lambda_prime = EF::ONE;
-    let mut acc_sum = EF::ZERO;
-    let mut acc_q = EF::ZERO;
-
-    for quad in rows {
-        let p_vals = [quad[0], quad[1]];
-        let q_vals = [quad[2], quad[3]];
-        let p_xi = interpolate_pair(p_vals, mu);
-        let q_xi = interpolate_pair(q_vals, mu);
-        acc_sum += pow_lambda * (p_xi + lambda * q_xi);
-        let q_cross = quad[2] * quad[3];
-        acc_q += pow_lambda_prime * lambda_prime * q_cross;
-        pow_lambda *= lambda;
-        pow_lambda_prime *= lambda_prime;
-    }
-
-    (acc_sum, acc_q)
+    let Some(quad) = rows.first() else {
+        return (EF::ZERO, EF::ZERO);
+    };
+    let p_xi = interpolate_pair([quad[0], quad[1]], mu);
+    let q_xi = interpolate_pair([quad[2], quad[3]], mu);
+    let p_cross = quad[0] * quad[3] + quad[1] * quad[2];
+    let q_cross = quad[2] * quad[3];
+    (p_xi + lambda * q_xi, p_cross + lambda_prime * q_cross)
 }
 
 pub(crate) fn circuit_vk_for_idx(
@@ -362,9 +347,10 @@ pub(crate) fn record_and_replay_tower_preflight<TS>(
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
-    let _ = record_gkr_transcript(ts, chip_idx, chip_proof);
+    let schedule = record_gkr_transcript(ts, chip_idx, chip_proof);
     match circuit_vk_for_idx(child_vk, chip_idx) {
-        Some(circuit_vk) => match replay_tower_proof(chip_proof, circuit_vk) {
+        Some(circuit_vk) => match replay_tower_proof_precomputed(chip_proof, circuit_vk, &schedule)
+        {
             Ok(replay) => replay,
             Err(err) => {
                 error!(
@@ -378,18 +364,102 @@ where
     }
 }
 
+fn grouped_op_vars(raw_count: usize) -> usize {
+    if raw_count == 0 {
+        0
+    } else {
+        raw_count.next_power_of_two().ilog2() as usize
+    }
+}
+
+fn build_tower_shape_record(
+    proof_idx: usize,
+    idx: usize,
+    chip_proof: &ZKVMChipProof<RecursionField>,
+    circuit_vk: &VerifyingKey<RecursionField>,
+) -> TowerShapeRecord {
+    let cs = &circuit_vk.cs;
+    let num_instances: usize = chip_proof.num_instances.iter().copied().sum();
+    let next_pow2_instance = next_pow2_instance_padding(num_instances);
+    let mut log2_num_instances = next_pow2_instance.ilog2() as usize;
+    if cs.has_ecc_ops() {
+        log2_num_instances += 1;
+    }
+    let num_vars = log2_num_instances + cs.rotation_vars().unwrap_or(0);
+    let raw_read_count = cs.num_reads();
+    let raw_write_count = cs.num_writes();
+    let raw_logup_count = cs.num_lks();
+    let read_op_vars = grouped_op_vars(raw_read_count);
+    let write_op_vars = grouped_op_vars(raw_write_count);
+    let logup_op_vars = grouped_op_vars(raw_logup_count);
+    let has_read = raw_read_count > 0;
+    let has_write = raw_write_count > 0;
+    let has_logup = raw_logup_count > 0;
+    let read_tower_vars = if has_read { num_vars + read_op_vars } else { 0 };
+    let write_tower_vars = if has_write {
+        num_vars + write_op_vars
+    } else {
+        0
+    };
+    let logup_tower_vars = if has_logup {
+        num_vars + logup_op_vars
+    } else {
+        0
+    };
+    let max_tower_vars = read_tower_vars.max(write_tower_vars).max(logup_tower_vars);
+
+    TowerShapeRecord {
+        proof_idx,
+        idx,
+        num_vars,
+        read_op_vars,
+        write_op_vars,
+        logup_op_vars,
+        has_read,
+        has_write,
+        has_logup,
+        read_tower_vars,
+        write_tower_vars,
+        logup_tower_vars,
+        max_tower_vars,
+        max_layer_count: max_tower_vars.saturating_sub(1),
+    }
+}
+
+fn tower_schedule_from_replay(
+    replay: &TowerReplayResult,
+    fallback: &TowerTranscriptSchedule,
+) -> TowerTranscriptSchedule {
+    if replay.layers.is_empty() {
+        return fallback.clone();
+    }
+    TowerTranscriptSchedule {
+        alpha_logup: replay.layers[0].lambda,
+        beta: fallback.beta,
+        lambdas: replay.layers.iter().map(|layer| layer.lambda).collect(),
+        mus: replay.layers.iter().map(|layer| layer.mu).collect(),
+        ris: replay
+            .layers
+            .iter()
+            .flat_map(|layer| layer.challenges.iter().copied())
+            .collect(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_chip_records(
     proof_idx: usize,
     idx: usize,
+    fork_id: usize,
     is_first_air_idx: bool,
     chip_proof: &ZKVMChipProof<RecursionField>,
-    _circuit_vk: &VerifyingKey<RecursionField>,
+    circuit_vk: &VerifyingKey<RecursionField>,
     replay: &TowerReplayResult,
     schedule: &TowerTranscriptSchedule,
     tidx: usize,
     input_layer_claim: EF,
 ) -> Result<(
+    TowerShapeRecord,
     TowerInputRecord,
     TowerLayerRecord,
     TowerTowerEvalRecord,
@@ -397,19 +467,12 @@ fn build_chip_records(
     Vec<EF>,
     EF,
 )> {
-    let spec_layer_count = chip_proof
-        .tower_proof
-        .logup_specs_eval
-        .iter()
-        .map(Vec::len)
-        .chain(chip_proof.tower_proof.prod_specs_eval.iter().map(Vec::len))
-        .max()
-        .unwrap_or(0);
-    let layer_count = replay.layers.len().max(spec_layer_count);
+    let shape_record = build_tower_shape_record(proof_idx, idx, chip_proof, circuit_vk);
+    let layer_count = shape_record.max_layer_count;
 
-    let read_count = chip_proof.r_out_evals.len();
-    let write_count = chip_proof.w_out_evals.len();
-    let logup_count = chip_proof.lk_out_evals.len();
+    let read_count = usize::from(shape_record.has_read);
+    let write_count = usize::from(shape_record.has_write);
+    let logup_count = usize::from(shape_record.has_logup);
 
     let mut read_layers = vec![Vec::with_capacity(read_count); layer_count];
     let mut write_layers = vec![Vec::with_capacity(write_count); layer_count];
@@ -423,9 +486,9 @@ fn build_chip_records(
                     *dst = *src;
                 }
             }
-            if spec_idx < read_count {
+            if spec_idx < read_count && layer_idx + 1 < shape_record.read_tower_vars {
                 read_layers[layer_idx].push(pair);
-            } else {
+            } else if layer_idx + 1 < shape_record.write_tower_vars {
                 write_layers[layer_idx].push(pair);
             }
         }
@@ -440,7 +503,9 @@ fn build_chip_records(
                     *dst = *src;
                 }
             }
-            logup_layers[layer_idx].push(quad);
+            if layer_idx + 1 < shape_record.logup_tower_vars {
+                logup_layers[layer_idx].push(quad);
+            }
         }
     }
 
@@ -453,6 +518,7 @@ fn build_chip_records(
     let mut layer_record = TowerLayerRecord {
         proof_idx,
         idx,
+        fork_id,
         is_first_air_idx,
         // TowerLayerAir starts after alpha/beta labels+sampling.
         tidx: tidx + tower_transcript_len::ALPHA_BETA_LEN,
@@ -487,11 +553,10 @@ fn build_chip_records(
             .get(layer_idx)
             .map(|rows| rows.len())
             .unwrap_or(0);
-        // NOTE: some chip only got read or write
-        // eyre::ensure!(
-        //     read_len == write_len,
-        //     "read/write prod spec count mismatch at layer {layer_idx}: read={read_len}, write={write_len}"
-        // );
+        eyre::ensure!(
+            read_len <= 1 && write_len <= 1 && logup_len <= 1,
+            "grouped tower layer {layer_idx} has too many specs: read={read_len}, write={write_len}, logup={logup_len}"
+        );
         layer_record.read_counts[layer_idx] = read_len;
         layer_record.write_counts[layer_idx] = write_len;
         layer_record.logup_counts[layer_idx] = logup_len;
@@ -506,30 +571,22 @@ fn build_chip_records(
     let mut sumcheck_record = TowerSumcheckRecord {
         proof_idx,
         idx,
+        fork_id,
         is_first_air_idx,
-        // First sumcheck transcript row starts at layer_tidx(1) + ALPHA_LEN + SUMCHECK_INIT_LEN.
-        tidx: tidx
-            + tower_transcript_len::ALPHA_BETA_LEN
-            + tower_transcript_len::POST_SUMCHECK_LEN
-            + tower_transcript_len::ALPHA_LEN
-            + tower_transcript_len::SUMCHECK_INIT_LEN,
+        // Base tidx of tower layer 0. Each sumcheck row derives its own
+        // per-layer offset from this base.
+        tidx: tidx + tower_transcript_len::ALPHA_BETA_LEN,
         evals: Vec::new(),
         ris: Vec::new(),
-        claims: vec![EF::ZERO; layer_count.saturating_sub(1)],
+        claims: vec![EF::ZERO; layer_count],
     };
 
-    // The sumcheck trace processes num_sumcheck_layers = layer_count - 1 layers.
-    // Layer k (0-indexed) has layer_rounds(k) = k+1 sumcheck rounds.
-    // Total rounds = num_sumcheck_layers*(num_sumcheck_layers+1)/2.
-    // record_gkr_transcript produces ris/evals for ALL layer_count layers,
-    // but the last layer is not processed by the sumcheck AIR (it corresponds
-    // to the final input layer claim, not a sumcheck). Truncate to
-    // total_rounds.
-    let num_sumcheck_layers = layer_count.saturating_sub(1);
+    // Native verifier processes every tower round through IOPVerifierState,
+    // including root layer 0. Layer k has k+1 sumcheck rounds.
+    let num_sumcheck_layers = layer_count;
     let total_sumcheck_rounds = num_sumcheck_layers * (num_sumcheck_layers + 1) / 2;
 
     for (k, round_msgs) in chip_proof.tower_proof.proofs.iter().enumerate() {
-        // Only include sumcheck evals for the first num_sumcheck_layers layers
         if k >= num_sumcheck_layers {
             break;
         }
@@ -551,6 +608,7 @@ fn build_chip_records(
     let input_record = TowerInputRecord {
         proof_idx,
         idx,
+        fork_id,
         tidx,
         n_logup: layer_count,
         alpha_logup: schedule.alpha_logup,
@@ -575,7 +633,7 @@ fn build_chip_records(
                 schedule.lambdas.get(layer_idx).copied().unwrap_or(EF::ZERO);
             mus_record[layer_idx] = schedule.mus.get(layer_idx).copied().unwrap_or(EF::ZERO);
         }
-        if layer_idx + 1 < layer_count {
+        if layer_idx < layer_count {
             if layer_idx < sumcheck_record.claims.len() {
                 sumcheck_record.claims[layer_idx] = data.claim_in;
             }
@@ -611,30 +669,91 @@ fn build_chip_records(
         }
     }
 
-    // Sync sumcheck claims with accumulated values so that the sumcheck trace
-    // uses the same claim_in that TowerLayerAir sends on the sumcheck_input_bus.
-    // TowerLayerAir layer j (j >= 1) sends: sumcheck_claim_in = read[j-1] + write[j-1] + logup[j-1]
-    // Sumcheck internal layer k uses: claims[k], where k = j - 1.
-    for k in 0..layer_count.saturating_sub(1) {
-        let folded = layer_record.read_claims[k]
-            + layer_record.write_claims[k]
-            + layer_record.logup_claims[k];
-        sumcheck_record.claims[k] = folded;
-        layer_record.sumcheck_claims[k] = folded;
-    }
-
     // Compute eq_at_r_primes from ris and mus so that TowerLayerAir's eq values
     // match the sumcheck trace's eq_out on the sumcheck_output_bus.
-    // Sumcheck internal layer k (0-indexed) → TowerLayerAir layer k+1.
-    let num_sumcheck_layers = layer_count.saturating_sub(1);
+    // Sumcheck internal layer k (0-indexed) → TowerLayerAir layer k.
+    let num_sumcheck_layers = layer_count;
     for k in 0..num_sumcheck_layers {
         let eq = TowerSumcheckRecord::compute_eq_for_layer(k, &mus_record, &sumcheck_record.ris);
-        if k + 1 < layer_record.eq_at_r_primes.len() {
-            layer_record.eq_at_r_primes[k + 1] = eq;
+        if k < layer_record.eq_at_r_primes.len() {
+            layer_record.eq_at_r_primes[k] = eq;
+        }
+    }
+
+    if std::env::var_os("CENO_TOWER_DEBUG").is_some() {
+        for layer_idx in 0..layer_count {
+            let alpha = layer_record.lambda_at(layer_idx);
+            let mut pow = EF::ONE;
+            let read_weight = if shape_record.has_read {
+                let weight = pow;
+                pow *= alpha;
+                if layer_record.read_active_at(layer_idx) {
+                    weight
+                } else {
+                    EF::ZERO
+                }
+            } else {
+                EF::ZERO
+            };
+            let write_weight = if shape_record.has_write {
+                let weight = pow;
+                pow *= alpha;
+                if layer_record.write_active_at(layer_idx) {
+                    weight
+                } else {
+                    EF::ZERO
+                }
+            } else {
+                EF::ZERO
+            };
+            let (logup_p_weight, logup_q_weight) = if shape_record.has_logup {
+                let p_weight = pow;
+                let q_weight = pow * alpha;
+                if layer_record.logup_active_at(layer_idx) {
+                    (p_weight, q_weight)
+                } else {
+                    (EF::ZERO, EF::ZERO)
+                }
+            } else {
+                (EF::ZERO, EF::ZERO)
+            };
+            let read_prime = layer_record.read_prime_claims[layer_idx];
+            let write_prime = layer_record.write_prime_claims[layer_idx];
+            let logup_quad = tower_record
+                .logup_layers
+                .get(layer_idx)
+                .and_then(|rows| rows.first())
+                .copied()
+                .unwrap_or([EF::ZERO; 4]);
+            let logup_p_cross = logup_quad[0] * logup_quad[3] + logup_quad[1] * logup_quad[2];
+            let logup_q_cross = logup_quad[2] * logup_quad[3];
+            let expected = layer_record.eq_at_r_primes[layer_idx]
+                * (read_weight * read_prime
+                    + write_weight * write_prime
+                    + logup_p_weight * logup_p_cross
+                    + logup_q_weight * logup_q_cross);
+            let replay_claim_out = replay
+                .layers
+                .get(layer_idx)
+                .map(|layer| layer.claim_out)
+                .unwrap_or(EF::ZERO);
+            if expected != replay_claim_out {
+                panic!(
+                    "tower debug mismatch proof_idx={proof_idx} idx={idx} layer={layer_idx} expected={expected:?} replay_claim_out={replay_claim_out:?} alpha={alpha:?} eq={:?} weights=({read_weight:?},{write_weight:?},{logup_p_weight:?},{logup_q_weight:?}) primes=({read_prime:?},{write_prime:?},{logup_p_cross:?},{logup_q_cross:?}) active=({},{},{}) shape=({},{},{})",
+                    layer_record.eq_at_r_primes[layer_idx],
+                    layer_record.read_active_at(layer_idx),
+                    layer_record.write_active_at(layer_idx),
+                    layer_record.logup_active_at(layer_idx),
+                    shape_record.has_read,
+                    shape_record.has_write,
+                    shape_record.has_logup,
+                );
+            }
         }
     }
 
     Ok((
+        shape_record,
         input_record,
         layer_record,
         tower_record,
@@ -650,62 +769,52 @@ impl AirModule for TowerModule {
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
+        let tower_shape_air = TowerShapeAir {
+            air_shape_bus: self.bus_inventory.air_shape_bus,
+            range_bus: self.bus_inventory.range_checker_bus,
+            shape_bus: self.shape_bus,
+        };
+        let tower_activity_air = TowerActivityAir {
+            range_bus: self.bus_inventory.range_checker_bus,
+            shape_bus: self.shape_bus,
+            activity_bus: self.activity_bus,
+        };
         let gkr_input_air = TowerInputAir {
             tower_module_bus: self.bus_inventory.tower_module_bus,
             main_bus: self.bus_inventory.main_bus,
-            transcript_bus: self.bus_inventory.transcript_bus,
+            forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
         };
 
         let gkr_layer_air = TowerLayerAir {
-            transcript_bus: self.bus_inventory.transcript_bus,
-            air_shape_bus: self.bus_inventory.air_shape_bus,
+            forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
+            activity_bus: self.activity_bus,
+            alpha_pow_bus: self.alpha_pow_bus,
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
             sumcheck_input_bus: self.sumcheck_input_bus,
             sumcheck_output_bus: self.sumcheck_output_bus,
             sumcheck_challenge_bus: self.sumcheck_challenge_bus,
-            prod_read_claim_input_bus: self.prod_read_claim_input_bus,
-            prod_read_claim_bus: self.prod_read_claim_bus,
-            prod_write_claim_input_bus: self.prod_write_claim_input_bus,
-            prod_write_claim_bus: self.prod_write_claim_bus,
-            logup_claim_input_bus: self.logup_claim_input_bus,
-            logup_claim_bus: self.logup_claim_bus,
-        };
-
-        let gkr_prod_read_sum_air = TowerProdReadSumCheckClaimAir {
-            transcript_bus: self.bus_inventory.transcript_bus,
-            prod_claim_input_bus: self.prod_read_claim_input_bus,
-            prod_claim_bus: self.prod_read_claim_bus,
-        };
-
-        let gkr_prod_write_sum_air = TowerProdWriteSumCheckClaimAir {
-            transcript_bus: self.bus_inventory.transcript_bus,
-            prod_claim_input_bus: self.prod_write_claim_input_bus,
-            prod_claim_bus: self.prod_write_claim_bus,
-        };
-
-        let gkr_logup_sum_air = TowerLogupSumCheckClaimAir {
-            transcript_bus: self.bus_inventory.transcript_bus,
-            logup_claim_input_bus: self.logup_claim_input_bus,
-            logup_claim_bus: self.logup_claim_bus,
         };
 
         let gkr_sumcheck_air = TowerLayerSumcheckAir::new(
-            self.bus_inventory.transcript_bus,
+            self.bus_inventory.forked_transcript_bus,
             self.bus_inventory.xi_randomness_bus,
             self.sumcheck_input_bus,
             self.sumcheck_output_bus,
             self.sumcheck_challenge_bus,
         );
+        let tower_alpha_pow_air = TowerAlphaPowAir {
+            alpha_pow_bus: self.alpha_pow_bus,
+        };
 
         vec![
+            Arc::new(tower_shape_air) as AirRef<_>,
+            Arc::new(tower_activity_air) as AirRef<_>,
             Arc::new(gkr_input_air) as AirRef<_>,
+            Arc::new(tower_alpha_pow_air) as AirRef<_>,
             Arc::new(gkr_layer_air) as AirRef<_>,
-            Arc::new(gkr_prod_read_sum_air) as AirRef<_>,
-            Arc::new(gkr_prod_write_sum_air) as AirRef<_>,
-            Arc::new(gkr_logup_sum_air) as AirRef<_>,
             Arc::new(gkr_sumcheck_air) as AirRef<_>,
         ]
     }
@@ -730,6 +839,7 @@ pub(crate) fn build_gkr_blob(
     proofs: &[RecursionProof],
     preflights: &[Preflight],
 ) -> Result<TowerBlobCpu> {
+    let mut shape_records = Vec::new();
     let mut input_records = Vec::new();
     let mut proof_q0_claims = Vec::new();
     let mut layer_records = Vec::new();
@@ -780,24 +890,24 @@ pub(crate) fn build_gkr_blob(
                 let fork_log = preflight.fork_log(pf_entry.fork_idx);
                 ReadOnlyTranscript::new(fork_log, pf_entry.tidx)
             };
-            let schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
+            let transcript_schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
 
             let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
                 .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_idx}"))?;
 
-            // Re-run the tower replay with Poseidon2-derived challenges from the
-            // schedule so that eq_at_r / claim_in / mu / lambda match the native
-            // DuplexSponge verifier (the preflight replay used a fresh keccak
-            // BasicTranscript and is wrong).
-            let poseidon_replay = replay_tower_proof_poseidon(chip_proof, circuit_vk, &schedule)
-                .unwrap_or_else(|_err| TowerReplayResult::default());
+            // Native ceno_zkvm child proofs are generated and verified with
+            // BasicTranscript. Use the preflight child-verifier replay as the
+            // semantic source of truth for tower claims/challenges; the outer
+            // recursion transcript schedule is only replayed above to populate
+            // transcript rows.
+            let replay = &pf_entry.tower_replay;
+            let schedule = tower_schedule_from_replay(replay, &transcript_schedule);
 
             // Use sequential index for NestedForLoop compatibility (idx must increment
             // by 0 or 1 within each proof_idx group).
             let idx = entry_idx;
-            // Compute global tidx from fork-local tidx for trace column values.
-            let global_tidx = preflight.fork_global_offset(pf_entry.fork_idx) + pf_entry.tidx;
             let (
+                shape_record,
                 chip_input_record,
                 layer_record,
                 tower_record,
@@ -807,12 +917,13 @@ pub(crate) fn build_gkr_blob(
             ) = build_chip_records(
                 proof_idx,
                 idx,
+                pf_entry.fork_idx,
                 entry_idx == 0,
                 chip_proof,
                 circuit_vk,
-                &poseidon_replay,
+                replay,
                 &schedule,
-                global_tidx,
+                pf_entry.tidx,
                 proof.main_constraint_proof.claimed_sum,
             )?;
 
@@ -827,6 +938,7 @@ pub(crate) fn build_gkr_blob(
             last_layer_output_mu = chip_input_record.layer_output_mu;
 
             // Per-chip records (not input_records)
+            shape_records.push(shape_record);
             layer_records.push(layer_record);
             tower_records.push(tower_record);
             sumcheck_records.push(sumcheck_record);
@@ -838,6 +950,7 @@ pub(crate) fn build_gkr_blob(
         input_records.push(TowerInputRecord {
             proof_idx,
             idx: 0,
+            fork_id: 0,
             tidx: preflight.proof_shape.post_tidx,
             n_logup: preflight.proof_shape.n_logup,
             alpha_logup: first_chip_alpha,
@@ -848,6 +961,11 @@ pub(crate) fn build_gkr_blob(
         proof_q0_claims.push(first_chip_q0);
 
         if !has_chip {
+            shape_records.push(TowerShapeRecord {
+                idx: 0,
+                proof_idx,
+                ..Default::default()
+            });
             layer_records.push(TowerLayerRecord {
                 idx: 0,
                 proof_idx,
@@ -867,6 +985,7 @@ pub(crate) fn build_gkr_blob(
     }
 
     if input_records.is_empty() {
+        shape_records.push(TowerShapeRecord::default());
         input_records.push(TowerInputRecord::default());
         proof_q0_claims.push(EF::ZERO);
         layer_records.push(TowerLayerRecord::default());
@@ -877,6 +996,7 @@ pub(crate) fn build_gkr_blob(
     }
 
     Ok(TowerBlobCpu {
+        shape_records,
         input_records,
         proof_q0_claims,
         layer_records,
@@ -1009,11 +1129,11 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             }
         };
         let chips = [
+            TowerModuleChip::Shape,
+            TowerModuleChip::Activity,
             TowerModuleChip::Input,
+            TowerModuleChip::AlphaPow,
             TowerModuleChip::Layer,
-            TowerModuleChip::ProdReadClaim,
-            TowerModuleChip::ProdWriteClaim,
-            TowerModuleChip::LogupClaim,
             TowerModuleChip::LayerSumcheck,
         ];
 
@@ -1039,11 +1159,11 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 #[strum_discriminants(derive(strum_macros::EnumCount))]
 #[strum_discriminants(repr(usize))]
 enum TowerModuleChip {
+    Shape,
+    Activity,
     Input,
+    AlphaPow,
     Layer,
-    ProdReadClaim,
-    ProdWriteClaim,
-    LogupClaim,
     LayerSumcheck,
 }
 
@@ -1069,24 +1189,23 @@ impl RowMajorChip<F> for TowerModuleChip {
     ) -> Option<RowMajorMatrix<F>> {
         use TowerModuleChip::*;
         match self {
+            Shape => TowerShapeTraceGenerator
+                .generate_trace(&blob.shape_records.as_slice(), required_height),
+            Activity => TowerActivityTraceGenerator
+                .generate_trace(&blob.shape_records.as_slice(), required_height),
             Input => TowerInputTraceGenerator.generate_trace(
                 &(&blob.input_records, &blob.proof_q0_claims),
                 required_height,
             ),
+            AlphaPow => TowerAlphaPowTraceGenerator
+                .generate_trace(&blob.layer_records.as_slice(), required_height),
             Layer => TowerLayerTraceGenerator.generate_trace(
-                &(&blob.layer_records, &blob.mus_records, &blob.q0_claims),
-                required_height,
-            ),
-            ProdReadClaim => TowerProdReadSumCheckClaimTraceGenerator.generate_trace(
-                &(&blob.layer_records, &blob.tower_records, &blob.mus_records),
-                required_height,
-            ),
-            ProdWriteClaim => TowerProdWriteSumCheckClaimTraceGenerator.generate_trace(
-                &(&blob.layer_records, &blob.tower_records, &blob.mus_records),
-                required_height,
-            ),
-            LogupClaim => TowerLogupSumCheckClaimTraceGenerator.generate_trace(
-                &(&blob.layer_records, &blob.tower_records, &blob.mus_records),
+                &(
+                    &blob.layer_records,
+                    &blob.tower_records,
+                    &blob.mus_records,
+                    &blob.q0_claims,
+                ),
                 required_height,
             ),
             LayerSumcheck => TowerSumcheckTraceGenerator.generate_trace(
@@ -1138,6 +1257,8 @@ mod cuda_tracegen {
             };
 
             let chips = [
+                TowerModuleChip::Shape,
+                TowerModuleChip::Activity,
                 TowerModuleChip::Input,
                 TowerModuleChip::Layer,
                 TowerModuleChip::ProdReadClaim,

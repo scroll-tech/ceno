@@ -47,6 +47,11 @@ pub struct AirMetadata {
     num_read_count: usize,
     num_write_count: usize,
     num_logup_count: usize,
+    rotation_vars: usize,
+    ecc_extra_vars: usize,
+    read_op_vars: usize,
+    write_op_vars: usize,
+    logup_op_vars: usize,
 }
 
 pub struct ProofShapeModule {
@@ -178,50 +183,50 @@ impl ProofShapeModule {
     }
 }
 
-fn extract_rwlk_counts(child_vk: &RecursionVk, expected_len: usize) -> Vec<(usize, usize, usize)> {
-    (0..expected_len)
+fn grouped_op_vars(raw_count: usize) -> usize {
+    if raw_count == 0 {
+        0
+    } else {
+        raw_count.next_power_of_two().ilog2() as usize
+    }
+}
+
+fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
+    (0..child_vk.circuit_vks.len())
         .map(|idx| {
-            child_vk
+            let (
+                num_public_values,
+                num_witin,
+                num_structural_witin,
+                num_fixed,
+                raw_read_count,
+                raw_write_count,
+                raw_logup_count,
+                rotation_vars,
+                ecc_extra_vars,
+            ) = child_vk
                 .circuit_index_to_name
                 .get(&idx)
                 .and_then(|name| child_vk.circuit_vks.get(name))
                 .map(|circuit_vk| {
                     let cs = circuit_vk.get_cs();
-                    (
-                        usize::from(cs.num_reads() > 0),
-                        usize::from(cs.num_writes() > 0),
-                        usize::from(cs.num_lks() > 0),
-                    )
-                })
-                .unwrap_or_else(|| {
-                    // TODO: Populate GKR count metadata once every AIR is backed by a concrete VK.
-                    (0, 0, 0)
-                })
-        })
-        .collect()
-}
-
-fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
-    let rwlk_counts = extract_rwlk_counts(child_vk, child_vk.circuit_vks.len());
-    (0..child_vk.circuit_vks.len())
-        .map(|idx| {
-            let (num_read_count, num_write_count, num_logup_count) =
-                rwlk_counts.get(idx).copied().unwrap_or((0, 0, 0));
-
-            let (num_public_values, num_witin, num_structural_witin, num_fixed) = child_vk
-                .circuit_index_to_name
-                .get(&idx)
-                .and_then(|name| child_vk.circuit_vks.get(name))
-                .map(|circuit_vk| {
-                    let css = &circuit_vk.get_cs().zkvm_v1_css;
+                    let css = &cs.zkvm_v1_css;
                     (
                         css.instance.len(),
                         css.num_witin as usize,
                         css.num_structural_witin as usize,
                         css.num_fixed,
+                        cs.num_reads(),
+                        cs.num_writes(),
+                        cs.num_lks(),
+                        cs.rotation_vars().unwrap_or(0),
+                        usize::from(cs.has_ecc_ops()),
                     )
                 })
-                .unwrap_or((0, 0, 0, 0));
+                .unwrap_or((0, 0, 0, 0, 0, 0, 0, 0, 0));
+            let num_read_count = usize::from(raw_read_count > 0);
+            let num_write_count = usize::from(raw_write_count > 0);
+            let num_logup_count = usize::from(raw_logup_count > 0);
 
             AirMetadata {
                 is_required: false,
@@ -232,6 +237,11 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
                 num_read_count,
                 num_write_count,
                 num_logup_count,
+                rotation_vars,
+                ecc_extra_vars,
+                read_op_vars: grouped_op_vars(raw_read_count),
+                write_op_vars: grouped_op_vars(raw_write_count),
+                logup_op_vars: grouped_op_vars(raw_logup_count),
             }
         })
         .collect_vec()

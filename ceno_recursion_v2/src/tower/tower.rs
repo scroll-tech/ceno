@@ -40,6 +40,7 @@ pub struct TowerReplayResult {
     pub layers: Vec<TowerLayerData>,
 }
 
+#[allow(dead_code)]
 pub fn replay_tower_proof(
     chip_proof: &ZKVMChipProof<RecursionField>,
     vk: &VerifyingKey<RecursionField>,
@@ -48,12 +49,10 @@ pub fn replay_tower_proof(
     build_tower_replay_result(chip_proof, vk, &mut transcript)
 }
 
-// ---------------------------------------------------------------------------
-// PrecomputedTranscript: feeds Poseidon2-derived challenges into replay logic
-// ---------------------------------------------------------------------------
-
-/// A transcript pre-loaded with challenge values from a Poseidon2 schedule.
-/// Observations are ignored; samples return pre-computed values in order.
+/// Transcript adapter backed by the tower transcript schedule prepared in
+/// preflight. The schedule must be generated in the same order as native
+/// `BasicTranscript`; this adapter intentionally ignores observations and
+/// returns the precomputed challenges consumed by tower replay.
 #[derive(Clone)]
 struct PrecomputedTranscript {
     challenges: VecDeque<RecursionField>,
@@ -62,15 +61,9 @@ struct PrecomputedTranscript {
 impl PrecomputedTranscript {
     fn from_schedule(schedule: &TowerTranscriptSchedule) -> Self {
         let mut challenges = VecDeque::new();
-        // 1. alpha (get_challenge_pows → sample_and_append_challenge → read_challenge)
         challenges.push_back(schedule.alpha_logup);
-        // 2. beta (sample_and_append_vec → sample_vec(1))
         challenges.push_back(schedule.beta);
 
-        // For each layer k:
-        //   IOPVerifierState::verify → (k+1) read_challenges (the ris)
-        //   sample_and_append_vec("merge",1) → 1 sample (mu)
-        //   get_challenge_pows → 1 read_challenge (lambda for next iteration)
         let num_layers = schedule.mus.len();
         let mut ri_offset = 0;
         for k in 0..num_layers {
@@ -80,11 +73,12 @@ impl PrecomputedTranscript {
             }
             ri_offset += n_ris;
             challenges.push_back(schedule.mus[k]);
-            // lambda for the next iteration
             if k + 1 < schedule.lambdas.len() {
                 challenges.push_back(schedule.lambdas[k + 1]);
             } else {
-                // Last round still samples lambda; use a dummy.
+                // Native still samples the next alpha after the final merge.
+                // TODO(recursion-v2): record and constrain this final unused
+                // challenge in the tower schedule instead of using a sentinel.
                 challenges.push_back(RecursionField::ZERO);
             }
         }
@@ -98,19 +92,21 @@ impl CanObserve<F> for PrecomputedTranscript {
 
 impl CanSampleBits<usize> for PrecomputedTranscript {
     fn sample_bits(&mut self, _bits: usize) -> usize {
-        unimplemented!("PrecomputedTranscript: sample_bits not expected")
+        unimplemented!("PrecomputedTranscript: sample_bits not expected in tower replay")
     }
 }
 
 impl GrindingChallenger for PrecomputedTranscript {
     type Witness = F;
+
     fn grind(&mut self, _bits: usize) -> F {
-        unimplemented!("PrecomputedTranscript: grind not expected")
+        unimplemented!("PrecomputedTranscript: grind not expected in tower replay")
     }
 }
 
 impl Transcript<RecursionField> for PrecomputedTranscript {
     fn append_field_elements(&mut self, _elements: &[F]) {}
+
     fn append_field_element_ext(&mut self, _element: &RecursionField) {}
 
     fn read_challenge(&mut self) -> Challenge<RecursionField> {
@@ -133,18 +129,19 @@ impl Transcript<RecursionField> for PrecomputedTranscript {
     }
 
     fn read_field_element_exts(&self) -> Vec<RecursionField> {
-        unimplemented!()
+        unimplemented!("PrecomputedTranscript: read_field_element_exts not expected")
     }
+
     fn read_field_element(&self) -> F {
-        unimplemented!()
+        unimplemented!("PrecomputedTranscript: read_field_element not expected")
     }
+
     fn send_challenge(&self, _challenge: RecursionField) {}
+
     fn commit_rolling(&mut self) {}
 }
 
-/// Replay the tower proof using Poseidon2-derived challenges from the schedule,
-/// so that eq_at_r / claim_in / mu / lambda match the native DuplexSponge verifier.
-pub fn replay_tower_proof_poseidon(
+pub fn replay_tower_proof_precomputed(
     chip_proof: &ZKVMChipProof<RecursionField>,
     vk: &VerifyingKey<RecursionField>,
     schedule: &TowerTranscriptSchedule,

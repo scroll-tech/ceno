@@ -24,7 +24,6 @@ use crate::{
         NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
         TranscriptBusMessage,
     },
-    circuit::inner::vm_pvs::VmPvs,
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
         AirMetadata,
@@ -56,7 +55,10 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
 
     // First possible transcript index of the current AIR.
     pub starting_tidx: F,
-
+    // First trunk transcript index used by the fork-merge phase.
+    pub fork_start_tidx: F,
+    // Fork id assigned by native chip-proof iteration order.
+    pub fork_id: F,
     // Columns that may be read from the transcript.
     pub is_present: F,
 
@@ -180,6 +182,7 @@ where
             .assert_eq(local.proof_idx, next.proof_idx);
 
         builder.assert_bool(local.is_present);
+        builder.assert_bool(local.is_last);
         builder.when(local.is_present).assert_one(local.is_valid);
 
         builder
@@ -207,6 +210,11 @@ where
         let mut num_read_count = AB::Expr::ZERO;
         let mut num_write_count = AB::Expr::ZERO;
         let mut num_logup_count = AB::Expr::ZERO;
+        let mut rotation_vars = AB::Expr::ZERO;
+        let mut ecc_extra_vars = AB::Expr::ZERO;
+        let mut read_op_vars = AB::Expr::ZERO;
+        let mut write_op_vars = AB::Expr::ZERO;
+        let mut logup_op_vars = AB::Expr::ZERO;
         // Per-selected-air tower transcript span (used for fork challenge tidx bump).
         let mut tower_tidx_bump = AB::Expr::ZERO;
 
@@ -234,6 +242,12 @@ where
                 is_current_air.clone() * AB::Expr::from_usize(air_data.num_write_count);
             num_logup_count +=
                 is_current_air.clone() * AB::Expr::from_usize(air_data.num_logup_count);
+            rotation_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.rotation_vars);
+            ecc_extra_vars +=
+                is_current_air.clone() * AB::Expr::from_usize(air_data.ecc_extra_vars);
+            read_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.read_op_vars);
+            write_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.write_op_vars);
+            logup_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.logup_op_vars);
 
             // Keep this aligned with TowerInputAir's `tidx_after_gkr_layers`
             // arithmetic so fork challenge placement and tower buses share one
@@ -327,13 +341,6 @@ where
 
         let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
 
-        // The first AIR starts immediately after the fixed trunk transcript prefix.
-        builder.when(is_first_idx.clone()).assert_eq(
-            local.starting_tidx,
-            AB::Expr::from_usize(TranscriptLabel::Riscv.field_len() + VmPvs::<u8>::width())
-                + AB::Expr::from_usize(2 * D_EF),
-        );
-
         self.starting_tidx_bus.receive(
             builder,
             local.proof_idx,
@@ -348,38 +355,29 @@ where
             ),
         );
 
-        // Challenges are laid out in trunk transcript as contiguous EF limbs per present AIR.
-        // We jump directly to this AIR's segment using num_present (1-based among present AIRs).
-        let mut tidx =
-            local.starting_tidx.into() + local.num_present * AB::Expr::from_usize(2 * D_EF);
+        // All active proof-shape rows for a proof agree on the trunk fork-merge
+        // start. The value is also constrained by the trunk TranscriptBus
+        // receives below; it is not the same concept as proof-shape post_tidx.
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.fork_start_tidx, next.fork_start_tidx);
 
+        // Native verifier merge phase:
+        //   sample one EF from each fresh fork transcript, then observe that EF
+        //   on the trunk in fork-id order.
+        let merge_tidx = local.fork_start_tidx.into() + local.fork_id * AB::Expr::from_usize(D_EF);
         for i in 0..D_EF {
             self.transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 TranscriptBusMessage {
-                    tidx: tidx.clone() + AB::Expr::from_usize(i),
+                    tidx: merge_tidx.clone() + AB::Expr::from_usize(i),
                     value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ZERO,
                 },
                 local.is_present,
             );
         }
-        tidx += AB::Expr::from_usize(D_EF) * local.is_present;
-
-        for i in 0..D_EF {
-            self.transcript_bus.receive(
-                builder,
-                local.proof_idx,
-                TranscriptBusMessage {
-                    tidx: tidx.clone() + AB::Expr::from_usize(i),
-                    value: local.after_forked_challenge_2[i].into(),
-                    is_sample: AB::Expr::ZERO,
-                },
-                local.is_present,
-            );
-        }
-        tidx += AB::Expr::from_usize(D_EF) * local.is_present;
 
         // constrain next air tid
         self.starting_tidx_bus.send(
@@ -387,7 +385,7 @@ where
             local.proof_idx,
             StartingTidxMessage {
                 air_idx: air_idx.clone() + AB::F::ONE,
-                tidx,
+                tidx: next.starting_tidx.into(),
             },
             local.is_valid,
         );
@@ -395,14 +393,9 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // SNAPSHOT STATE CONTINUITY (forked transcript)
         ///////////////////////////////////////////////////////////////////////////////////////////
-        // Each present AIR corresponds to one fork whose fork_id equals
-        // num_present - 1 (0-based position among present AIRs in sorted order).
-        // This assumes a 1:1 mapping between present AIRs and forks, which
-        // holds when each chip has exactly one proof instance. Multi-instance
-        // chips would require a separate fork_id column.
         // Receive fork transcript words after the fork label prefix.
         let fork_tidx_base = TranscriptLabel::Fork.field_len();
-        let fork_id = local.num_present - AB::F::ONE;
+        let fork_id = local.fork_id;
         // observe lookup alpha/beta
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
@@ -434,7 +427,7 @@ where
             ForkedTranscriptBusMessage {
                 fork_id: fork_id.clone().into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF),
-                value: fork_id.clone(),
+                value: fork_id.clone().into(),
                 is_sample: AB::Expr::ZERO,
             },
             local.is_present * local.is_valid,
@@ -532,36 +525,46 @@ where
             },
             local.is_present * local.num_columns,
         );
+        let base_tower_vars = n.clone() + rotation_vars + ecc_extra_vars;
         self.air_shape_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
             AirShapeBusMessage {
                 sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NumRead.to_field(),
-                value: num_read_count.clone(),
+                property_idx: AirShapeProperty::BaseTowerVars.to_field(),
+                value: base_tower_vars,
             },
-            // each layer lookup once if current air was present
-            local.is_present * n.clone(),
+            local.is_present,
         );
         self.air_shape_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
             AirShapeBusMessage {
                 sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NumWrite.to_field(),
-                value: num_write_count.clone(),
+                property_idx: AirShapeProperty::ReadOpVars.to_field(),
+                value: read_op_vars,
             },
-            local.is_present * n.clone(),
+            local.is_present,
         );
         self.air_shape_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
             AirShapeBusMessage {
                 sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NumLk.to_field(),
-                value: num_logup_count,
+                property_idx: AirShapeProperty::WriteOpVars.to_field(),
+                value: write_op_vars,
             },
-            local.is_present * n.clone(),
+            local.is_present,
+        );
+        self.air_shape_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            AirShapeBusMessage {
+                sort_idx: local.sorted_idx.into(),
+                property_idx: AirShapeProperty::LogupOpVars.to_field(),
+                value: logup_op_vars,
+            },
+            local.is_present,
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////

@@ -114,6 +114,7 @@ impl TranscriptModule {
             if i == 0 && is_fork_start {
                 cols.is_fork_start = F::ONE;
             }
+            cols.is_fork = F::from_bool(is_fork_start);
 
             let is_sample = log.samples()[tidx];
             cols.is_sample = F::from_bool(is_sample);

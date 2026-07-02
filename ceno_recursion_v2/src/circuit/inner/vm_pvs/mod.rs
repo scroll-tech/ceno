@@ -3,7 +3,7 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIG
 use p3_field::PrimeCharacteristicRing;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::system::{Preflight, RecursionField, RecursionProof, RecursionVk};
+use crate::system::{Preflight, RecursionField, RecursionPcs, RecursionProof, RecursionVk};
 
 mod air;
 mod trace;
@@ -35,6 +35,28 @@ pub struct VmPvs<F> {
 pub use air::*;
 pub use trace::*;
 
+pub(crate) type RecursionCommitment =
+    <RecursionPcs as mpcs::PolynomialCommitmentScheme<RecursionField>>::Commitment;
+
+pub(crate) fn recursion_commit_digest(commitment: &RecursionCommitment) -> [F; DIGEST_SIZE] {
+    commitment.inner.commit.clone().into()
+}
+
+fn observe_recursion_commitment<TS>(commitment: &RecursionCommitment, ts: &mut TS)
+where
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
+{
+    for elem in recursion_commit_digest(commitment) {
+        ts.observe(elem);
+    }
+    ts.observe(F::from_u64(commitment.inner.log2_max_codeword_size as u64));
+    ts.observe(F::from_u64(commitment.reshape_log_height as u64));
+    ts.observe(F::from_u64(commitment.cumulative_heights.len() as u64));
+    for height in &commitment.cumulative_heights {
+        ts.observe(F::from_u64(*height as u64));
+    }
+}
+
 #[tracing::instrument(level = "trace", skip_all)]
 pub fn run_preflight<TS>(
     child_vk: &RecursionVk,
@@ -56,24 +78,14 @@ pub fn run_preflight<TS>(
     }
 
     if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
-        for elem in fixed_commit.commit.clone().into_iter() {
-            ts.observe(elem);
-        }
-        ts.observe(F::from_u64(fixed_commit.log2_max_codeword_size as u64));
+        observe_recursion_commitment(fixed_commit, ts);
     }
 
     if let Some(fixed_no_omc) = child_vk.fixed_no_omc_init_commit.as_ref() {
-        for elem in fixed_no_omc.commit.clone().into_iter() {
-            ts.observe(elem);
-        }
-        ts.observe(F::from_u64(fixed_no_omc.log2_max_codeword_size as u64));
+        observe_recursion_commitment(fixed_no_omc, ts);
     }
 
-    let witin = &proof.witin_commit;
-    for elem in witin.commit.clone().into_iter() {
-        ts.observe(elem);
-    }
-    ts.observe(F::from_u64(witin.log2_max_codeword_size as u64));
+    observe_recursion_commitment(&proof.witin_commit, ts);
 
     let alpha_ext = ts.sample_ext();
     let beta_ext = ts.sample_ext();
