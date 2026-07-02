@@ -368,10 +368,9 @@ fn trunk_global_export_ranges(preflight: &Preflight) -> Vec<(usize, usize)> {
     if preflight.batch_constraint.lambda_tidx == 0
         && preflight.batch_constraint.tidx_before_univariate == 0
     {
-        // VmPvsAir remains active outside the system module and consumes the
-        // verifier transcript prefix. With BatchConstraint disabled, the trunk
-        // contains only that prefix plus fork-merge observations, so exporting
-        // the full trunk remains balanced.
+        // ProofShape/PublicValues AIRs consume the verifier transcript prefix. With
+        // BatchConstraint disabled, the trunk contains only that prefix plus fork-merge
+        // observations, so exporting the full trunk remains balanced.
         return if log_len == 0 {
             Vec::new()
         } else {

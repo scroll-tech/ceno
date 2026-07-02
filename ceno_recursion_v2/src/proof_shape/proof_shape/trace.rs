@@ -1,7 +1,8 @@
 use std::{borrow::BorrowMut, sync::Arc};
 
+use ceno_zkvm::structs::VK_DIGEST_LEN;
 use openvm_circuit_primitives::encoder::Encoder;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, DIGEST_SIZE, EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -54,6 +55,43 @@ fn root_claims_for_chip(proof: &RecursionProof, air_idx: usize) -> (EF, EF, EF, 
 
 fn assign_ext(dst: &mut [F; D_EF], value: EF) {
     dst.copy_from_slice(value.as_basis_coefficients_slice());
+}
+
+fn ef_to_limbs(value: EF) -> [F; D_EF] {
+    let mut out = [F::ZERO; D_EF];
+    assign_ext(&mut out, value);
+    out
+}
+
+fn extract_commit(commit: Option<impl IntoIterator<Item = F>>) -> [F; DIGEST_SIZE] {
+    let mut out = [F::ZERO; DIGEST_SIZE];
+    if let Some(commit) = commit {
+        for (dst, src) in out.iter_mut().zip(commit) {
+            *dst = src;
+        }
+    }
+    out
+}
+
+#[allow(clippy::too_many_arguments)]
+fn assign_transcript_prefix_cols<const NUM_LIMBS: usize>(
+    cols: &mut ProofShapeCols<F, NUM_LIMBS>,
+    vk_digest: [[F; D_EF]; VK_DIGEST_LEN],
+    fixed_commit: [F; DIGEST_SIZE],
+    fixed_commit_log2_max_codeword_size: usize,
+    fixed_no_omc_init_commit: [F; DIGEST_SIZE],
+    fixed_no_omc_init_commit_log2_max_codeword_size: usize,
+    proof: &RecursionProof,
+) {
+    cols.vk_digest = vk_digest;
+    cols.fixed_commit = fixed_commit;
+    cols.fixed_commit_log2_max_codeword_size = F::from_usize(fixed_commit_log2_max_codeword_size);
+    cols.fixed_no_omc_init_commit = fixed_no_omc_init_commit;
+    cols.fixed_no_omc_init_commit_log2_max_codeword_size =
+        F::from_usize(fixed_no_omc_init_commit_log2_max_codeword_size);
+    cols.witness_commit = extract_commit(Some(proof.witin_commit.commit));
+    cols.witness_commit_log2_max_codeword_size =
+        F::from_usize(proof.witin_commit.log2_max_codeword_size);
 }
 
 fn tower_layer_count(chip_proof: &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>) -> usize {
@@ -155,6 +193,29 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
         let width = self.placeholder_width();
         let mut trace = vec![F::ZERO; height * width];
         let mut chunks = trace.chunks_exact_mut(width);
+        let vk_digest = child_vk.compute_digest().map(ef_to_limbs);
+        let fixed_commit = extract_commit(
+            child_vk
+                .fixed_commit
+                .as_ref()
+                .map(|commitment| commitment.commit),
+        );
+        let fixed_no_omc_init_commit = extract_commit(
+            child_vk
+                .fixed_no_omc_init_commit
+                .as_ref()
+                .map(|commitment| commitment.commit),
+        );
+        let fixed_commit_log2_max_codeword_size = child_vk
+            .fixed_commit
+            .as_ref()
+            .map(|commitment| commitment.log2_max_codeword_size)
+            .unwrap_or_default();
+        let fixed_no_omc_init_commit_log2_max_codeword_size = child_vk
+            .fixed_no_omc_init_commit
+            .as_ref()
+            .map(|commitment| commitment.log2_max_codeword_size)
+            .unwrap_or_default();
 
         for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights.iter()).enumerate() {
             let fork_id_by_chip: std::collections::BTreeMap<usize, usize> = proof
@@ -220,6 +281,15 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.num_columns = F::ZERO;
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
+                assign_transcript_prefix_cols(
+                    cols,
+                    vk_digest,
+                    fixed_commit,
+                    fixed_commit_log2_max_codeword_size,
+                    fixed_no_omc_init_commit,
+                    fixed_no_omc_init_commit_log2_max_codeword_size,
+                    proof,
+                );
                 if let Some((sample_tidx, sample)) = fork_merge_sample(preflight, fork_id) {
                     cols.fork_sample_tidx = F::from_usize(sample_tidx);
                     cols.merge_tidx =
@@ -274,6 +344,15 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.num_columns = F::ZERO;
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
+                assign_transcript_prefix_cols(
+                    cols,
+                    vk_digest,
+                    fixed_commit,
+                    fixed_commit_log2_max_codeword_size,
+                    fixed_no_omc_init_commit,
+                    fixed_no_omc_init_commit_log2_max_codeword_size,
+                    proof,
+                );
                 cols.fork_sample_tidx = F::ZERO;
                 cols.merge_tidx = F::ZERO;
                 cols.fork_merge_sample = [F::ZERO; D_EF];
@@ -316,6 +395,15 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.num_columns = F::ZERO;
             cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
             cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
+            assign_transcript_prefix_cols(
+                cols,
+                vk_digest,
+                fixed_commit,
+                fixed_commit_log2_max_codeword_size,
+                fixed_no_omc_init_commit,
+                fixed_no_omc_init_commit_log2_max_codeword_size,
+                proof,
+            );
             cols.fork_sample_tidx = F::ZERO;
             cols.merge_tidx = F::ZERO;
             cols.fork_merge_sample = [F::ZERO; D_EF];
