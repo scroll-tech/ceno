@@ -101,6 +101,7 @@ pub use bus::{
 /// `sample_and_append_vec`.  The recursion transcript must reproduce the exact
 /// same sponge sequence.
 pub mod tower_transcript_len {
+    use crate::utils::label_to_field_words;
     use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 
     // Label field-element counts: ceil(byte_len / 4).
@@ -114,6 +115,14 @@ pub mod tower_transcript_len {
     pub const LABEL_MERGE: usize = 2;
     // usize::to_le_bytes() = 8 bytes → 2 field elements (64-bit platform)
     const LABEL_USIZE: usize = 2;
+
+    pub const LABEL_COMBINE_FIELDS: [u32; LABEL_COMBINE] =
+        label_to_field_words(b"combine subset evals");
+    pub const LABEL_PRODUCT_SUM_FIELDS: [u32; LABEL_PRODUCT_SUM] =
+        label_to_field_words(b"product_sum");
+    pub const LABEL_INTERNAL_ROUND_FIELDS: [u32; LABEL_INTERNAL_ROUND] =
+        label_to_field_words(b"Internal round");
+    pub const LABEL_MERGE_FIELDS: [u32; LABEL_MERGE] = label_to_field_words(b"merge");
 
     /// label "combine subset evals" (5) + sample alpha (D_EF)
     pub const ALPHA_LEN: usize = LABEL_COMBINE + D_EF;

@@ -33,7 +33,7 @@ use crate::{
         },
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
-    utils::TranscriptLabel,
+    utils::{LABEL_FORK_FIELDS, TranscriptLabel},
 };
 
 #[repr(C)]
@@ -399,7 +399,7 @@ where
             ForkedTranscriptBusMessage {
                 fork_id: fork_id.clone().into(),
                 tidx: AB::Expr::ZERO,
-                value: AB::Expr::from_u32(1_802_661_734),
+                value: AB::Expr::from_u32(LABEL_FORK_FIELDS[0]),
                 is_sample: AB::Expr::ZERO,
             },
             local.is_present * local.is_valid,

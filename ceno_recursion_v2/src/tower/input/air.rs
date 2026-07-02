@@ -179,8 +179,8 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
 
         // Add PoW (if any) and alpha label+sample, beta label+sample
         use crate::tower::tower_transcript_len::{
-            ALPHA_BETA_LEN, ALPHA_LEN, LABEL_COMBINE, LABEL_MERGE, LABEL_PRODUCT_SUM, ROUND_LEN,
-            SUMCHECK_INIT_LEN,
+            ALPHA_BETA_LEN, ALPHA_LEN, LABEL_COMBINE, LABEL_COMBINE_FIELDS, LABEL_MERGE,
+            LABEL_PRODUCT_SUM, LABEL_PRODUCT_SUM_FIELDS, ROUND_LEN, SUMCHECK_INIT_LEN,
         };
         let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN);
         // Add GKR layers + Sumcheck.
@@ -327,16 +327,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         }
 
         // 2b. Observe labels and sample alpha_logup/beta challenges.
-        for (offset, value) in [
-            1_651_339_107u32,
-            543_518_313,
-            1_935_832_435,
-            1_696_625_765,
-            1_936_482_678,
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        for (offset, value) in LABEL_COMBINE_FIELDS.into_iter().enumerate() {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
@@ -362,10 +353,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 local.is_enabled * has_tower_out.clone(),
             );
         }
-        for (offset, value) in [1_685_025_392u32, 1_601_463_157, 7_173_491]
-            .into_iter()
-            .enumerate()
-        {
+        for (offset, value) in LABEL_PRODUCT_SUM_FIELDS.into_iter().enumerate() {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,

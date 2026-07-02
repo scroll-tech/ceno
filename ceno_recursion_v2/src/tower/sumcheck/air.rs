@@ -17,7 +17,9 @@ use crate::{
             TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
             TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
         },
-        tower_transcript_len::{LABEL_INTERNAL_ROUND, SUMCHECK_INIT_LEN},
+        tower_transcript_len::{
+            LABEL_INTERNAL_ROUND, LABEL_INTERNAL_ROUND_FIELDS, SUMCHECK_INIT_LEN,
+        },
     },
 };
 use recursion_circuit::{
@@ -407,10 +409,7 @@ where
             }
             tidx += AB::Expr::from_usize(D_EF);
         }
-        for (offset, value) in [1_702_129_225u32, 1_818_324_594, 1_970_237_984, 25_710]
-            .into_iter()
-            .enumerate()
-        {
+        for (offset, value) in LABEL_INTERNAL_ROUND_FIELDS.into_iter().enumerate() {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,

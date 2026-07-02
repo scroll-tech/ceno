@@ -380,7 +380,8 @@ where
 
         // Transcript index increment
         use crate::tower::tower_transcript_len::{
-            ALPHA_LEN, LABEL_COMBINE, LABEL_MERGE, ROUND_LEN, SUMCHECK_INIT_LEN,
+            ALPHA_LEN, LABEL_COMBINE, LABEL_COMBINE_FIELDS, LABEL_MERGE, LABEL_MERGE_FIELDS,
+            ROUND_LEN, SUMCHECK_INIT_LEN,
         };
         let tidx_after_sumcheck = local.tidx
             // Sample lambda label+sample on non-root layer
@@ -588,16 +589,7 @@ where
         // in last layer: for send back to GKR input layer
         // 1a. Sample `lambda` — only on non-root layers.
         //     Root layer uses alpha_logup (set in trace), not a transcript sample.
-        for (offset, value) in [
-            1_651_339_107u32,
-            543_518_313,
-            1_935_832_435,
-            1_696_625_765,
-            1_936_482_678,
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        for (offset, value) in LABEL_COMBINE_FIELDS.into_iter().enumerate() {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
@@ -679,7 +671,7 @@ where
             claim_tidx += local.logup_active * AB::Expr::from_usize(D_EF);
         }
         let merge_label_tidx = claim_tidx;
-        for (offset, value) in [1_735_550_317u32, 101].into_iter().enumerate() {
+        for (offset, value) in LABEL_MERGE_FIELDS.into_iter().enumerate() {
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
