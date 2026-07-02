@@ -270,6 +270,7 @@ impl AirModule for ProofShapeModule {
             transcript_bus: self.bus_inventory.transcript_bus,
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             n_lift_bus: self.bus_inventory.n_lift_bus,
+            tower_prefix_only: crate::system::TOWER_PREFIX_ONLY,
         };
         let pvs_air = PublicValuesAir {
             public_values_bus: self.bus_inventory.public_values_bus,
@@ -312,6 +313,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         let range_checker = Arc::new(RangeCheckerCpuTraceGenerator::<8>::default());
         let proof_shape = proof_shape::ProofShapeChip::<4, 8>::new(
             self.idx_encoder.clone(),
+            Arc::new(self.per_air.clone()),
             range_checker.clone(),
             pow_checker.clone(),
         );

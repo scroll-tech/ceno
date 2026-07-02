@@ -50,6 +50,7 @@ use recursion_circuit::primitives::{
 use tracing::Span;
 
 pub const POW_CHECKER_HEIGHT: usize = 32;
+pub(crate) const TOWER_PREFIX_ONLY: bool = true;
 
 /// Local override of the upstream CPU tracegen context so modules accept ZKVM proofs.
 pub struct GlobalCtxCpu;
@@ -348,6 +349,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         // fields directly here.
         let alpha_ext = preflight.vm_pvs.lookup_challenge_alpha;
         let beta_ext = preflight.vm_pvs.lookup_challenge_beta;
+        preflight.vm_pvs.lookup_challenge_alpha_lookup_count = proof.chip_proofs.len();
+        preflight.vm_pvs.lookup_challenge_beta_lookup_count = proof.chip_proofs.len();
         preflight.proof_shape.lookup_challenge_alpha = ef_to_limbs(alpha_ext);
         preflight.proof_shape.lookup_challenge_beta = ef_to_limbs(beta_ext);
 
@@ -399,19 +402,21 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 tower_replay,
             });
 
-            // Main preflight for this chip.
-            let main_tidx = fs.len();
-            crate::main::record_main_transcript(
-                fs,
-                chip_idx,
-                proof.main_constraint_proof.claimed_sum,
-            );
+            if !TOWER_PREFIX_ONLY {
+                // Main preflight for this chip.
+                let main_tidx = fs.len();
+                crate::main::record_main_transcript(
+                    fs,
+                    chip_idx,
+                    proof.main_constraint_proof.claimed_sum,
+                );
 
-            preflight.main.chips.push(ChipTranscriptRange {
-                chip_idx,
-                tidx: main_tidx,
-                fork_idx: fork_id,
-            });
+                preflight.main.chips.push(ChipTranscriptRange {
+                    chip_idx,
+                    tidx: main_tidx,
+                    fork_idx: fork_id,
+                });
+            }
         }
 
         // Phase 4: Merge — sample 1 ext element from each fork, observe into trunk.
@@ -421,10 +426,12 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             sponge.observe_ext(sample);
         }
 
-        // Phase 5: batch-constraint transcript replay on the trunk, after the
-        // fork merge and before PCS opening verification.
-        self.batch_constraint
-            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+        if !TOWER_PREFIX_ONLY {
+            // Phase 5: batch-constraint transcript replay on the trunk, after the
+            // fork merge and before PCS opening verification.
+            self.batch_constraint
+                .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+        }
 
         // The trunk log now contains pre-fork ops (0..fork_offset), merge ops
         // (fork_offset..merge_end), and batch-constraint ops after that. The
@@ -478,16 +485,24 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let t_n = self.transcript.num_airs();
         let ps_n = self.proof_shape.num_airs();
         let gkr_n = self.gkr.num_airs();
-        let main_n = self.main_module.num_airs();
-        let batch_n = self.batch_constraint.num_airs();
-        let module_air_counts = [t_n, ps_n, gkr_n, main_n, batch_n];
+        let module_air_counts = if TOWER_PREFIX_ONLY {
+            vec![t_n, ps_n, gkr_n]
+        } else {
+            vec![
+                t_n,
+                ps_n,
+                gkr_n,
+                self.main_module.num_airs(),
+                self.batch_constraint.num_airs(),
+            ]
+        };
 
         let Some(heights) = required_heights else {
             return (vec![None; module_air_counts.len()], None, None);
         };
 
         let total_module_airs: usize = module_air_counts.iter().sum();
-        let total = total_module_airs + 2;
+        let total = total_module_airs + if TOWER_PREFIX_ONLY { 1 } else { 2 };
         assert_eq!(heights.len(), total);
 
         let mut offset = 0usize;
@@ -496,9 +511,13 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             per_module.push(Some(&heights[offset..offset + n]));
             offset += n;
         }
-        debug_assert_eq!(heights.len() - offset, 2);
-
-        (per_module, Some(heights[offset]), Some(heights[offset + 1]))
+        if TOWER_PREFIX_ONLY {
+            debug_assert_eq!(heights.len() - offset, 1);
+            (per_module, None, Some(heights[offset]))
+        } else {
+            debug_assert_eq!(heights.len() - offset, 2);
+            (per_module, Some(heights[offset]), Some(heights[offset + 1]))
+        }
     }
 }
 
@@ -574,16 +593,25 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         let (module_required, power_checker_required, exp_bits_len_required) =
             self.split_required_heights(external_data.required_heights);
 
-        let modules = [
-            TraceModuleRef::Transcript(&self.transcript),
-            TraceModuleRef::ProofShape(&self.proof_shape),
-            TraceModuleRef::Tower(&self.gkr),
-            TraceModuleRef::Main(&self.main_module),
-            TraceModuleRef::BatchConstraint(&self.batch_constraint),
-        ];
+        let modules = if TOWER_PREFIX_ONLY {
+            vec![
+                TraceModuleRef::Transcript(&self.transcript),
+                TraceModuleRef::ProofShape(&self.proof_shape),
+                TraceModuleRef::Tower(&self.gkr),
+            ]
+        } else {
+            vec![
+                TraceModuleRef::Transcript(&self.transcript),
+                TraceModuleRef::ProofShape(&self.proof_shape),
+                TraceModuleRef::Tower(&self.gkr),
+                TraceModuleRef::Main(&self.main_module),
+                TraceModuleRef::BatchConstraint(&self.batch_constraint),
+            ]
+        };
 
         let span = Span::current();
         let ctxs_by_module = modules
+            .clone()
             .into_par_iter()
             .zip(module_required)
             .map(|(module, required_heights)| {
@@ -616,12 +644,14 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         if power_checker_required.is_some_and(|h| h != POW_CHECKER_HEIGHT) {
             return None;
         }
-        let power_height = power_checker_required.unwrap_or(POW_CHECKER_HEIGHT);
-        let power_trace = power_checker_gen.generate_trace_row_major();
-        if power_trace.height() != power_height {
-            return None;
+        if !TOWER_PREFIX_ONLY {
+            let power_height = power_checker_required.unwrap_or(POW_CHECKER_HEIGHT);
+            let power_trace = power_checker_gen.generate_trace_row_major();
+            if power_trace.height() != power_height {
+                return None;
+            }
+            ctx_per_trace.push(AirProvingContext::simple_no_pis(power_trace));
         }
-        ctx_per_trace.push(AirProvingContext::simple_no_pis(power_trace));
 
         let exp_bits_height = exp_bits_len_required;
         let exp_bits_trace = exp_bits_len_gen.generate_trace_row_major(exp_bits_height)?;
@@ -641,21 +671,30 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
             self.bus_inventory.exp_bits_len_bus,
             self.bus_inventory.right_shift_bus,
         );
-        let power_checker_air = PowerCheckerAir::<2, POW_CHECKER_HEIGHT> {
-            pow_bus: self.bus_inventory.power_checker_bus,
-            range_bus: self.bus_inventory.range_checker_bus,
-        };
+        let power_checker_air =
+            (!TOWER_PREFIX_ONLY).then_some(PowerCheckerAir::<2, POW_CHECKER_HEIGHT> {
+                pow_bus: self.bus_inventory.power_checker_bus,
+                range_bus: self.bus_inventory.range_checker_bus,
+            });
 
         iter::empty()
             .chain(self.transcript.airs())
             .chain(self.proof_shape.airs())
             .chain(self.gkr.airs())
-            .chain(self.main_module.airs())
-            .chain(self.batch_constraint.airs())
-            .chain([
-                Arc::new(power_checker_air) as AirRef<_>,
-                Arc::new(exp_bits_len_air) as AirRef<_>,
-            ])
+            .chain(
+                (!TOWER_PREFIX_ONLY)
+                    .then(|| self.main_module.airs())
+                    .into_iter()
+                    .flatten(),
+            )
+            .chain(
+                (!TOWER_PREFIX_ONLY)
+                    .then(|| self.batch_constraint.airs())
+                    .into_iter()
+                    .flatten(),
+            )
+            .chain(power_checker_air.map(|air| Arc::new(air) as AirRef<_>))
+            .chain([Arc::new(exp_bits_len_air) as AirRef<_>])
             .collect()
     }
 

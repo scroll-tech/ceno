@@ -253,7 +253,9 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
                 deferral_flag,
                 has_verifier_pvs: local.has_verifier_pvs.into(),
             },
-            local.is_valid * consistency_mult,
+            local.is_valid
+                * consistency_mult
+                * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
         );
 
         // Finally, we need to constrain that the public values this AIR produces are consistent

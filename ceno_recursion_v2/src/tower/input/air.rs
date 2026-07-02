@@ -72,6 +72,7 @@ pub struct TowerInputAir {
     pub layer_input_bus: TowerLayerInputBus,
     pub layer_output_bus: TowerLayerOutputBus,
     pub sumcheck_challenge_bus: TowerSumcheckChallengeBus,
+    pub send_main: bool,
 }
 
 impl<F: Field> BaseAir<F> for TowerInputAir {
@@ -258,7 +259,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 tidx: tidx_after_gkr_layers.clone(),
                 claim: local.input_layer_claim.map(Into::into),
             },
-            local.is_enabled * has_interactions,
+            local.is_enabled * has_interactions * AB::Expr::from_bool(self.send_main),
         );
     }
 }

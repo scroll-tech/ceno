@@ -89,6 +89,10 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     pub lookup_challenge_beta: [F; D_EF],
     pub after_forked_challenge_1: [F; D_EF],
     pub after_forked_challenge_2: [F; D_EF],
+    pub tower_n_logup: F,
+    pub tower_is_read_max: F,
+    pub tower_is_write_max: F,
+    pub tower_is_logup_max: F,
 }
 
 // Variable-length columns are stored at the end
@@ -123,6 +127,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub transcript_bus: TranscriptBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub n_lift_bus: NLiftBus,
+    pub tower_prefix_only: bool,
 }
 
 impl<F, const NUM_LIMBS: usize, const LIMB_BITS: usize> BaseAir<F>
@@ -210,6 +215,9 @@ where
         let mut num_read_count = AB::Expr::ZERO;
         let mut num_write_count = AB::Expr::ZERO;
         let mut num_logup_count = AB::Expr::ZERO;
+        let mut has_read = AB::Expr::ZERO;
+        let mut has_write = AB::Expr::ZERO;
+        let mut has_logup = AB::Expr::ZERO;
         let mut rotation_vars = AB::Expr::ZERO;
         let mut ecc_extra_vars = AB::Expr::ZERO;
         let mut read_op_vars = AB::Expr::ZERO;
@@ -242,6 +250,9 @@ where
                 is_current_air.clone() * AB::Expr::from_usize(air_data.num_write_count);
             num_logup_count +=
                 is_current_air.clone() * AB::Expr::from_usize(air_data.num_logup_count);
+            has_read += is_current_air.clone() * AB::Expr::from_bool(air_data.num_read_count > 0);
+            has_write += is_current_air.clone() * AB::Expr::from_bool(air_data.num_write_count > 0);
+            has_logup += is_current_air.clone() * AB::Expr::from_bool(air_data.num_logup_count > 0);
             rotation_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.rotation_vars);
             ecc_extra_vars +=
                 is_current_air.clone() * AB::Expr::from_usize(air_data.ecc_extra_vars);
@@ -352,7 +363,7 @@ where
             or(
                 local.is_last,
                 and(local.is_valid, not::<AB::Expr>(is_first_idx)),
-            ),
+            ) * AB::Expr::from_bool(!self.tower_prefix_only),
         );
 
         // All active proof-shape rows for a proof agree on the trunk fork-merge
@@ -387,7 +398,7 @@ where
                 air_idx: air_idx.clone() + AB::F::ONE,
                 tidx: next.starting_tidx.into(),
             },
-            local.is_valid,
+            local.is_valid * AB::Expr::from_bool(!self.tower_prefix_only),
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -493,6 +504,8 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // AIR SHAPE LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
+        let downstream_enabled = AB::Expr::from_bool(!self.tower_prefix_only);
+
         self.air_shape_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
@@ -501,7 +514,7 @@ where
                 property_idx: AirShapeProperty::AirId.to_field(),
                 value: air_idx.clone(),
             },
-            local.is_present * local.num_air_id_lookups,
+            local.is_present * local.num_air_id_lookups * downstream_enabled.clone(),
         );
 
         self.air_shape_bus.add_key_with_lookups(
@@ -512,7 +525,7 @@ where
                 property_idx: AirShapeProperty::NumInteractions.to_field(),
                 value: AB::Expr::ZERO,
             },
-            local.is_present,
+            local.is_present * downstream_enabled.clone(),
         );
 
         self.air_shape_bus.add_key_with_lookups(
@@ -523,9 +536,17 @@ where
                 property_idx: AirShapeProperty::NeedRot.to_field(),
                 value: local.need_rot.into(),
             },
-            local.is_present * local.num_columns,
+            local.is_present * local.num_columns * downstream_enabled.clone(),
         );
         let base_tower_vars = n.clone() + rotation_vars + ecc_extra_vars;
+        // TODO(recursion-v2): prove this low-degree by sending the
+        // TowerShapeAir-derived max_layer_count to TowerInputAir. The direct
+        // one-hot max expression is too high degree for this AIR.
+        let _ = (has_read, has_write, has_logup);
+        builder.assert_bool(local.tower_is_read_max);
+        builder.assert_bool(local.tower_is_write_max);
+        builder.assert_bool(local.tower_is_logup_max);
+
         self.air_shape_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
@@ -595,7 +616,9 @@ where
                 n_abs: n.clone(),
                 n_sign_bit: AB::Expr::ZERO,
             },
-            local.is_present * (local.num_air_id_lookups + AB::F::ONE),
+            local.is_present
+                * (local.num_air_id_lookups + AB::F::ONE)
+                * AB::Expr::from_bool(!self.tower_prefix_only),
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -625,7 +648,9 @@ where
                 lifted_height: combined_height.into(),
                 log_lifted_height: local.log_height.into(),
             },
-            local.is_present * (num_witin + num_structural_witin + num_fixed),
+            local.is_present
+                * (num_witin + num_structural_witin + num_fixed)
+                * AB::Expr::from_bool(!self.tower_prefix_only),
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -696,11 +721,19 @@ where
             builder,
             local.proof_idx,
             TowerModuleMessage {
-                idx: air_idx.clone(),
+                idx: if self.tower_prefix_only {
+                    local.sorted_idx.into()
+                } else {
+                    air_idx.clone()
+                },
                 tidx: local.starting_tidx.into(),
-                n_logup: n,
+                n_logup: if self.tower_prefix_only {
+                    local.tower_n_logup.into()
+                } else {
+                    n
+                },
             },
-            local.is_last,
+            local.is_present * local.is_valid,
         );
 
         // Send n_max value to expression claim air
@@ -710,7 +743,7 @@ where
             ExpressionClaimNMaxMessage {
                 n_max: local.n_max.into(),
             },
-            local.is_last,
+            local.is_last * downstream_enabled.clone(),
         );
 
         // Send n_lift to constraint folding air
@@ -721,7 +754,7 @@ where
                 air_idx: air_idx,
                 n_lift: local.log_height.into(),
             },
-            local.is_present,
+            local.is_present * downstream_enabled.clone(),
         );
 
         // Send count of present airs to fraction folder air
@@ -731,7 +764,7 @@ where
             FractionFolderInputMessage {
                 num_present_airs: local.num_present,
             },
-            local.is_last,
+            local.is_last * downstream_enabled,
         );
     }
 }

@@ -864,6 +864,7 @@ impl AirModule for TowerModule {
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
             sumcheck_challenge_bus: self.sumcheck_challenge_bus,
+            send_main: !crate::system::TOWER_PREFIX_ONLY,
         };
 
         let gkr_layer_air = TowerLayerAir {

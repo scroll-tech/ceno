@@ -8,6 +8,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use super::air::ProofShapeCols;
 use crate::{
     primitives::{pow::PowerCheckerCpuTraceGenerator, range::RangeCheckerCpuTraceGenerator},
+    proof_shape::AirMetadata,
     system::{POW_CHECKER_HEIGHT, Preflight, RecursionProof, RecursionVk},
     tracegen::RowMajorChip,
 };
@@ -41,6 +42,37 @@ fn two_instance_heights_from_chip_proof(instance: &impl BorrowNumInstances) -> (
     )
 }
 
+fn tower_shape_max(metadata: &AirMetadata, log_height: usize) -> (usize, bool, bool, bool) {
+    let num_vars = log_height + metadata.rotation_vars + metadata.ecc_extra_vars;
+    let read_tower_vars = if metadata.num_read_count > 0 {
+        num_vars + metadata.read_op_vars
+    } else {
+        0
+    };
+    let write_tower_vars = if metadata.num_write_count > 0 {
+        num_vars + metadata.write_op_vars
+    } else {
+        0
+    };
+    let logup_tower_vars = if metadata.num_logup_count > 0 {
+        num_vars + metadata.logup_op_vars
+    } else {
+        0
+    };
+    let max_tower_vars = read_tower_vars.max(write_tower_vars).max(logup_tower_vars);
+    (
+        max_tower_vars.saturating_sub(1),
+        max_tower_vars != 0 && read_tower_vars == max_tower_vars,
+        max_tower_vars != 0
+            && read_tower_vars != max_tower_vars
+            && write_tower_vars == max_tower_vars,
+        max_tower_vars != 0
+            && read_tower_vars != max_tower_vars
+            && write_tower_vars != max_tower_vars
+            && logup_tower_vars == max_tower_vars,
+    )
+}
+
 fn fork_sample(preflight: &Preflight, fork_id: usize) -> EF {
     preflight
         .fork_transcripts
@@ -69,6 +101,7 @@ impl BorrowNumInstances for ceno_zkvm::scheme::ZKVMChipProof<crate::system::Recu
 #[allow(dead_code)]
 pub(in crate::proof_shape) struct ProofShapeChip<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     idx_encoder: Arc<Encoder>,
+    per_air: Arc<Vec<AirMetadata>>,
     range_checker: Arc<RangeCheckerCpuTraceGenerator<LIMB_BITS>>,
     pow_checker: Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
 }
@@ -116,6 +149,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 .enumerate()
                 .map(|(fork_id, chip_idx)| (*chip_idx, fork_id))
                 .collect::<std::collections::BTreeMap<_, _>>();
+            let tower_tidx_by_chip = preflight
+                .gkr
+                .chips
+                .iter()
+                .map(|entry| (entry.chip_idx, entry.tidx))
+                .collect::<std::collections::BTreeMap<_, _>>();
 
             for (air_idx, vdata) in &preflight.proof_shape.sorted_trace_vdata {
                 let chunk = chunks.next().unwrap();
@@ -138,7 +177,15 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.sorted_idx = F::from_usize(sorted_idx);
                 cols.log_height = F::from_usize(log_height);
                 cols.need_rot = F::ZERO;
-                cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[*air_idx]);
+                let starting_tidx = if crate::system::TOWER_PREFIX_ONLY {
+                    tower_tidx_by_chip
+                        .get(air_idx)
+                        .copied()
+                        .unwrap_or(preflight.proof_shape.starting_tidx[*air_idx])
+                } else {
+                    preflight.proof_shape.starting_tidx[*air_idx]
+                };
+                cols.starting_tidx = F::from_usize(starting_tidx);
                 cols.fork_start_tidx = F::from_usize(preflight.proof_shape.fork_start_tidx);
                 let fork_id = fork_id_by_chip.get(air_idx).copied().unwrap_or(0);
                 cols.fork_id = F::from_usize(fork_id);
@@ -158,6 +205,12 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
                 cols.after_forked_challenge_1 = ef_to_limbs(fork_sample(preflight, fork_id));
                 cols.after_forked_challenge_2 = [F::ZERO; D_EF];
+                let (tower_n_logup, is_read_max, is_write_max, is_logup_max) =
+                    tower_shape_max(&self.per_air[*air_idx], log_height);
+                cols.tower_n_logup = F::from_usize(tower_n_logup);
+                cols.tower_is_read_max = F::from_bool(is_read_max);
+                cols.tower_is_write_max = F::from_bool(is_write_max);
+                cols.tower_is_logup_max = F::from_bool(is_logup_max);
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -204,6 +257,10 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
                 cols.after_forked_challenge_1 = [F::ZERO; D_EF];
                 cols.after_forked_challenge_2 = [F::ZERO; D_EF];
+                cols.tower_n_logup = F::ZERO;
+                cols.tower_is_read_max = F::ZERO;
+                cols.tower_is_write_max = F::ZERO;
+                cols.tower_is_logup_max = F::ZERO;
 
                 for (dst, src) in var_cols
                     .idx_flags
@@ -245,6 +302,10 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
             cols.after_forked_challenge_1 = [F::ZERO; D_EF];
             cols.after_forked_challenge_2 = [F::ZERO; D_EF];
+            cols.tower_n_logup = F::ZERO;
+            cols.tower_is_read_max = F::ZERO;
+            cols.tower_is_write_max = F::ZERO;
+            cols.tower_is_logup_max = F::ZERO;
         }
 
         for chunk in chunks {

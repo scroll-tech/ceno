@@ -69,7 +69,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for UnsetPvsAir {
                 deferral_flag: AB::F::from_u32(self.def_flag),
                 has_verifier_pvs: AB::F::ONE,
             },
-            local.is_valid,
+            local.is_valid * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
         );
     }
 }

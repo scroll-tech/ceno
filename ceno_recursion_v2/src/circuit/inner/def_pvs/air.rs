@@ -175,7 +175,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
                 deferral_flag: local.deferral_flag,
                 has_verifier_pvs: local.has_verifier_pvs,
             },
-            local.is_present,
+            local.is_present * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
         );
 
         // If this row corresponds to a direct deferral hook circuit child (i.e.
