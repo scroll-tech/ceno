@@ -7,6 +7,7 @@ use crate::{
     },
     tower::bus::{
         TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus, TowerLayerOutputMessage,
+        TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage,
     },
 };
 use openvm_circuit_primitives::{
@@ -55,6 +56,7 @@ pub struct TowerInputCols<T> {
     pub q0_claim: [T; D_EF],
 
     pub alpha_logup: [T; D_EF],
+    pub beta: [T; D_EF],
 
     pub input_layer_claim: [T; D_EF],
     pub layer_output_lambda: [T; D_EF],
@@ -69,6 +71,7 @@ pub struct TowerInputAir {
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub layer_input_bus: TowerLayerInputBus,
     pub layer_output_bus: TowerLayerOutputBus,
+    pub sumcheck_challenge_bus: TowerSumcheckChallengeBus,
 }
 
 impl<F: Field> BaseAir<F> for TowerInputAir {
@@ -201,6 +204,17 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 input_layer_claim: local.input_layer_claim.map(Into::into),
                 lambda: local.layer_output_lambda.map(Into::into),
                 mu: local.layer_output_mu.map(Into::into),
+            },
+            local.is_enabled * has_interactions.clone(),
+        );
+        self.sumcheck_challenge_bus.send(
+            builder,
+            local.proof_idx,
+            TowerSumcheckChallengeMessage {
+                idx: local.idx.into(),
+                layer_idx: AB::Expr::ZERO,
+                sumcheck_round: AB::Expr::ZERO,
+                challenge: local.beta.map(Into::into),
             },
             local.is_enabled * has_interactions.clone(),
         );

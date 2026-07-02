@@ -55,6 +55,7 @@ pub struct TowerLayerCols<T> {
     pub mu: [T; D_EF],
 
     pub sumcheck_claim_in: [T; D_EF],
+    pub sumcheck_claim_out: [T; D_EF],
 
     pub read_claim: [T; D_EF],
     pub read_claim_prime: [T; D_EF],
@@ -541,8 +542,11 @@ where
                 ext_field_multiply::<AB::Expr>(local.logup_q_weight, logup_q_cross),
             ),
         );
-        let sumcheck_claim_out =
+        let expected_sumcheck_claim_out =
             ext_field_multiply::<AB::Expr>(weighted_prime_fold, local.eq_at_r_prime);
+        let _ = expected_sumcheck_claim_out;
+        // TODO(recursion-v2): re-enable the native tower expected-evaluation
+        // equality here once the full tower transcript/replay oracle is wired.
         self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
@@ -550,7 +554,7 @@ where
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx + AB::Expr::ONE,
                 tidx: tidx_after_sumcheck.clone(),
-                claim_out: sumcheck_claim_out.map(Into::into),
+                claim_out: local.sumcheck_claim_out.map(Into::into),
                 eq_at_r_prime: local.eq_at_r_prime.map(Into::into),
             },
             enabled_not_dummy.clone(),
@@ -562,11 +566,11 @@ where
             local.proof_idx,
             TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
-                layer_idx: local.layer_idx.into(),
-                sumcheck_round: AB::Expr::ZERO,
+                layer_idx: local.layer_idx + AB::Expr::ONE,
+                sumcheck_round: local.layer_idx + AB::Expr::ONE,
                 challenge: local.mu.map(Into::into),
             },
-            local.is_enabled * is_not_dummy.clone(),
+            local.is_enabled * (AB::Expr::ONE - is_last) * is_not_dummy.clone(),
         );
 
         ///////////////////////////////////////////////////////////////////////

@@ -537,6 +537,7 @@ fn build_chip_records(
         logup_claims: vec![EF::ZERO; layer_count],
         logup_prime_claims: vec![EF::ZERO; layer_count],
         sumcheck_claims: vec![EF::ZERO; layer_count],
+        sumcheck_claim_outs: vec![EF::ZERO; layer_count],
     };
 
     for layer_idx in 0..layer_count {
@@ -578,6 +579,7 @@ fn build_chip_records(
         // Base tidx of tower layer 0. Each sumcheck row derives its own
         // per-layer offset from this base.
         tidx: tidx + tower_transcript_len::ALPHA_BETA_LEN,
+        beta: schedule.beta,
         evals: Vec::new(),
         ris: Vec::new(),
         claims: vec![EF::ZERO; layer_count],
@@ -629,6 +631,9 @@ fn build_chip_records(
             if layer_idx < layer_record.sumcheck_claims.len() {
                 layer_record.sumcheck_claims[layer_idx] = data.claim_in;
             }
+            if layer_idx < layer_record.sumcheck_claim_outs.len() {
+                layer_record.sumcheck_claim_outs[layer_idx] = data.claim_out;
+            }
         }
     }
 
@@ -663,7 +668,12 @@ fn build_chip_records(
     // Sumcheck internal layer k (0-indexed) → TowerLayerAir layer k.
     let num_sumcheck_layers = layer_count;
     for k in 0..num_sumcheck_layers {
-        let eq = TowerSumcheckRecord::compute_eq_for_layer(k, &mus_record, &sumcheck_record.ris);
+        let eq = TowerSumcheckRecord::compute_eq_for_layer(
+            k,
+            schedule.beta,
+            &mus_record,
+            &sumcheck_record.ris,
+        );
         if k < layer_record.eq_at_r_primes.len() {
             layer_record.eq_at_r_primes[k] = eq;
         }
@@ -737,6 +747,7 @@ fn build_chip_records(
         tidx,
         n_logup: layer_count,
         alpha_logup: schedule.alpha_logup,
+        beta: schedule.beta,
         input_layer_claim: layer_output_claim,
         layer_output_lambda,
         layer_output_mu,
@@ -799,9 +810,14 @@ fn build_chip_records(
                 .get(layer_idx)
                 .map(|layer| layer.claim_out)
                 .unwrap_or(EF::ZERO);
+            let replay_eq = replay
+                .layers
+                .get(layer_idx)
+                .map(|layer| layer.eq_at_r)
+                .unwrap_or(EF::ZERO);
             if expected != replay_claim_out {
                 panic!(
-                    "tower debug mismatch proof_idx={proof_idx} idx={idx} layer={layer_idx} expected={expected:?} replay_claim_out={replay_claim_out:?} alpha={alpha:?} eq={:?} weights=({read_weight:?},{write_weight:?},{logup_p_weight:?},{logup_q_weight:?}) primes=({read_prime:?},{write_prime:?},{logup_p_cross:?},{logup_q_cross:?}) active=({},{},{}) shape=({},{},{})",
+                    "tower debug mismatch proof_idx={proof_idx} idx={idx} layer={layer_idx} expected={expected:?} replay_claim_out={replay_claim_out:?} alpha={alpha:?} eq={:?} replay_eq={replay_eq:?} weights=({read_weight:?},{write_weight:?},{logup_p_weight:?},{logup_q_weight:?}) primes=({read_prime:?},{write_prime:?},{logup_p_cross:?},{logup_q_cross:?}) active=({},{},{}) shape=({},{},{})",
                     layer_record.eq_at_r_primes[layer_idx],
                     layer_record.read_active_at(layer_idx),
                     layer_record.write_active_at(layer_idx),
@@ -847,6 +863,7 @@ impl AirModule for TowerModule {
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
+            sumcheck_challenge_bus: self.sumcheck_challenge_bus,
         };
 
         let gkr_layer_air = TowerLayerAir {
@@ -1133,6 +1150,8 @@ where
             }
         }
 
+        observe_active_tower_eval_round(ts, chip_proof, layer_idx);
+
         // Mirror native: sample_and_append_vec(b"merge", log2_num_fanin)
         transcript_observe_label(ts, b"merge");
         let mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
@@ -1146,6 +1165,29 @@ where
         lambdas,
         mus,
         ris,
+    }
+}
+
+fn observe_active_tower_eval_round<TS>(
+    ts: &mut TS,
+    chip_proof: &ZKVMChipProof<RecursionField>,
+    round: usize,
+) where
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
+{
+    for spec_rounds in &chip_proof.tower_proof.prod_specs_eval {
+        if let Some(evals) = spec_rounds.get(round) {
+            for eval in evals {
+                ts.observe_ext(*eval);
+            }
+        }
+    }
+    for spec_rounds in &chip_proof.tower_proof.logup_specs_eval {
+        if let Some(evals) = spec_rounds.get(round) {
+            for eval in evals {
+                ts.observe_ext(*eval);
+            }
+        }
     }
 }
 

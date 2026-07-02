@@ -354,7 +354,7 @@ where
             TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                sumcheck_round: local.round.into() + AB::Expr::ONE,
+                sumcheck_round: local.round.into(),
                 challenge: local.challenge.map(Into::into),
             },
             local.is_enabled * (AB::Expr::ONE - local.is_last_layer) * is_not_dummy.clone(),

@@ -93,6 +93,7 @@ pub struct TowerLayerRecord {
     pub logup_claims: Vec<EF>,
     pub logup_prime_claims: Vec<EF>,
     pub sumcheck_claims: Vec<EF>,
+    pub sumcheck_claim_outs: Vec<EF>,
 }
 
 impl TowerLayerRecord {
@@ -299,6 +300,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.lambda_prime = lambda_prime_one;
                     cols.mu = [F::ZERO; D_EF];
                     cols.sumcheck_claim_in = [F::ZERO; D_EF];
+                    cols.sumcheck_claim_out = [F::ZERO; D_EF];
                     cols.read_claim = [F::ZERO; D_EF];
                     cols.read_claim_prime = [F::ZERO; D_EF];
                     cols.write_claim = [F::ZERO; D_EF];
@@ -360,6 +362,14 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.mu = mu.as_basis_coefficients_slice().try_into().unwrap();
                     let sumcheck_claim = record.sumcheck_claim_at(layer_idx);
                     cols.sumcheck_claim_in = sumcheck_claim
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    cols.sumcheck_claim_out = record
+                        .sumcheck_claim_outs
+                        .get(layer_idx)
+                        .copied()
+                        .unwrap_or(EF::ZERO)
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
