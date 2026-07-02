@@ -9,7 +9,7 @@ use recursion_circuit::{
 
 use crate::bus::{
     CachedCommitBus as LocalCachedCommitBus, ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
-    ForkedTranscriptBus as LocalForkedTranscriptBus,
+    ForkFinalSampleBus, ForkedTranscriptBus as LocalForkedTranscriptBus,
     FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
     LiftedHeightsBus as LocalLiftedHeightsBus, LookupChallengeBus, MainBus, MainExpressionClaimBus,
     MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
@@ -42,6 +42,7 @@ pub struct BusInventory {
     pub xi_randomness_bus: XiRandomnessBus,
     pub final_state_bus: FinalTranscriptStateBus,
     pub forked_transcript_bus: LocalForkedTranscriptBus,
+    pub fork_final_sample_bus: ForkFinalSampleBus,
     pub lookup_challenge_bus: LookupChallengeBus,
 }
 
@@ -77,6 +78,7 @@ impl BusInventory {
         let cached_commit_bus = LocalCachedCommitBus::new(b.new_bus_idx());
         let final_state_bus = FinalTranscriptStateBus::new(b.new_bus_idx());
         let forked_transcript_bus = LocalForkedTranscriptBus::new(b.new_bus_idx());
+        let fork_final_sample_bus = ForkFinalSampleBus::new(b.new_bus_idx());
         let lookup_challenge_bus = LookupChallengeBus::new(b.new_bus_idx());
 
         Self {
@@ -104,6 +106,7 @@ impl BusInventory {
             xi_randomness_bus,
             final_state_bus,
             forked_transcript_bus,
+            fork_final_sample_bus,
             lookup_challenge_bus,
         }
     }

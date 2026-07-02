@@ -12,7 +12,10 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 use crate::{
     bus::{AirShapeBus, AirShapeBusMessage},
     proof_shape::bus::AirShapeProperty,
-    tower::bus::{TowerActivityBus, TowerActivityMessage, TowerShapeBus, TowerShapeMessage},
+    tower::bus::{
+        TowerActivityBus, TowerActivityMessage, TowerInputShapeBus, TowerInputShapeMessage,
+        TowerShapeBus, TowerShapeMessage,
+    },
     tracegen::RowMajorChip,
 };
 
@@ -70,6 +73,7 @@ pub struct TowerShapeAir {
     pub air_shape_bus: AirShapeBus,
     pub range_bus: RangeCheckerBus,
     pub shape_bus: TowerShapeBus,
+    pub input_shape_bus: TowerInputShapeBus,
 }
 
 impl<F: Field> BaseAir<F> for TowerShapeAir {
@@ -175,6 +179,26 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerShapeAir {
                 max_layer_count: local.max_layer_count.into(),
             },
             local.is_enabled * local.max_layer_count * AB::Expr::from_usize(TOWER_ACTIVITY_KINDS),
+        );
+
+        self.input_shape_bus.send(
+            builder,
+            local.proof_idx,
+            TowerInputShapeMessage {
+                idx: local.idx.into(),
+                has_read: local.has_read.into(),
+                has_write: local.has_write.into(),
+                has_logup: local.has_logup.into(),
+                read_tower_vars: local.read_tower_vars.into(),
+                write_tower_vars: local.write_tower_vars.into(),
+                logup_tower_vars: local.logup_tower_vars.into(),
+                max_layer_count: local.max_layer_count.into(),
+            },
+            local.is_enabled
+                * (AB::Expr::ONE
+                    - (AB::Expr::ONE - local.has_read)
+                        * (AB::Expr::ONE - local.has_write)
+                        * (AB::Expr::ONE - local.has_logup)),
         );
     }
 }

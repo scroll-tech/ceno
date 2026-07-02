@@ -70,7 +70,10 @@ use crate::{
     },
     tower::{
         alpha_pow::{TowerAlphaPowAir, TowerAlphaPowTraceGenerator},
-        bus::{TowerActivityBus, TowerLayerInputBus, TowerLayerOutputBus, TowerShapeBus},
+        bus::{
+            TowerActivityBus, TowerInputShapeBus, TowerLayerInputBus, TowerLayerOutputBus,
+            TowerShapeBus,
+        },
         input::{TowerInputAir, TowerInputRecord, TowerInputTraceGenerator},
         layer::{TowerLayerAir, TowerLayerRecord, TowerLayerTraceGenerator},
         shape::{
@@ -240,6 +243,7 @@ pub struct TowerModule {
     bus_inventory: BusInventory,
     // Module buses
     shape_bus: TowerShapeBus,
+    input_shape_bus: TowerInputShapeBus,
     activity_bus: TowerActivityBus,
     layer_input_bus: TowerLayerInputBus,
     layer_output_bus: TowerLayerOutputBus,
@@ -283,6 +287,7 @@ impl TowerModule {
         TowerModule {
             bus_inventory,
             shape_bus: TowerShapeBus::new(b.new_bus_idx()),
+            input_shape_bus: TowerInputShapeBus::new(b.new_bus_idx()),
             activity_bus: TowerActivityBus::new(b.new_bus_idx()),
             layer_input_bus: TowerLayerInputBus::new(b.new_bus_idx()),
             layer_output_bus: TowerLayerOutputBus::new(b.new_bus_idx()),
@@ -814,9 +819,13 @@ fn build_chip_records(
         has_read_out: !chip_proof.r_out_evals.is_empty(),
         has_write_out: !chip_proof.w_out_evals.is_empty(),
         has_logup_out: !chip_proof.lk_out_evals.is_empty(),
+        has_read: shape_record.has_read,
+        has_write: shape_record.has_write,
+        has_logup: shape_record.has_logup,
         read_tower_vars: shape_record.read_tower_vars,
         write_tower_vars: shape_record.write_tower_vars,
         logup_tower_vars: shape_record.logup_tower_vars,
+        max_layer_count: shape_record.max_layer_count,
         input_layer_claim: layer_output_claim,
         layer_output_lambda,
         layer_output_mu,
@@ -920,6 +929,7 @@ impl AirModule for TowerModule {
             air_shape_bus: self.bus_inventory.air_shape_bus,
             range_bus: self.bus_inventory.range_checker_bus,
             shape_bus: self.shape_bus,
+            input_shape_bus: self.input_shape_bus,
         };
         let tower_activity_air = TowerActivityAir {
             range_bus: self.bus_inventory.range_checker_bus,
@@ -930,6 +940,8 @@ impl AirModule for TowerModule {
             tower_module_bus: self.bus_inventory.tower_module_bus,
             main_bus: self.bus_inventory.main_bus,
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
+            fork_final_sample_bus: self.bus_inventory.fork_final_sample_bus,
+            input_shape_bus: self.input_shape_bus,
             layer_input_bus: self.layer_input_bus,
             layer_output_bus: self.layer_output_bus,
             sumcheck_challenge_bus: self.sumcheck_challenge_bus,

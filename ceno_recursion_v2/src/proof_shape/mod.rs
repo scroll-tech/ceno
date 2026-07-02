@@ -269,6 +269,7 @@ impl AirModule for ProofShapeModule {
             lifted_heights_bus: self.bus_inventory.lifted_heights_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
+            fork_final_sample_bus: self.bus_inventory.fork_final_sample_bus,
             n_lift_bus: self.bus_inventory.n_lift_bus,
             tower_prefix_only: crate::system::TOWER_PREFIX_ONLY,
         };

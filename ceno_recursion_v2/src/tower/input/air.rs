@@ -2,12 +2,13 @@ use core::borrow::Borrow;
 
 use crate::{
     bus::{
-        ForkedTranscriptBus, ForkedTranscriptBusMessage, MainBus, MainMessage, TowerModuleBus,
-        TowerModuleMessage,
+        ForkFinalSampleBus, ForkFinalSampleMessage, ForkedTranscriptBus,
+        ForkedTranscriptBusMessage, MainBus, MainMessage, TowerModuleBus, TowerModuleMessage,
     },
     tower::bus::{
-        TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus, TowerLayerOutputMessage,
-        TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage,
+        TowerInputShapeBus, TowerInputShapeMessage, TowerLayerInputBus, TowerLayerInputMessage,
+        TowerLayerOutputBus, TowerLayerOutputMessage, TowerSumcheckChallengeBus,
+        TowerSumcheckChallengeMessage,
     },
 };
 use openvm_circuit_primitives::{
@@ -46,6 +47,9 @@ pub struct TowerInputCols<T> {
     /// n_logup = 0 <=> total_interactions = 0
     pub is_n_logup_zero: T,
     pub is_n_logup_zero_aux: IsZeroAuxCols<T>,
+    /// Zero iff this row has no forked tower transcript rows.
+    pub is_tower_transcript_zero: T,
+    pub is_tower_transcript_zero_aux: IsZeroAuxCols<T>,
 
     /// Transcript index
     pub tidx: T,
@@ -66,9 +70,13 @@ pub struct TowerInputCols<T> {
     pub has_read_out: T,
     pub has_write_out: T,
     pub has_logup_out: T,
+    pub has_read: T,
+    pub has_write: T,
+    pub has_logup: T,
     pub read_tower_vars: T,
     pub write_tower_vars: T,
     pub logup_tower_vars: T,
+    pub max_layer_count: T,
 
     pub alpha_logup: [T; D_EF],
     pub beta: [T; D_EF],
@@ -84,6 +92,8 @@ pub struct TowerInputAir {
     pub tower_module_bus: TowerModuleBus,
     pub main_bus: MainBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
+    pub fork_final_sample_bus: ForkFinalSampleBus,
+    pub input_shape_bus: TowerInputShapeBus,
     pub layer_input_bus: TowerLayerInputBus,
     pub layer_output_bus: TowerLayerOutputBus,
     pub sumcheck_challenge_bus: TowerSumcheckChallengeBus,
@@ -151,12 +161,49 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         builder.assert_bool(local.has_read_out);
         builder.assert_bool(local.has_write_out);
         builder.assert_bool(local.has_logup_out);
+        builder.assert_bool(local.has_read);
+        builder.assert_bool(local.has_write);
+        builder.assert_bool(local.has_logup);
 
         ///////////////////////////////////////////////////////////////////////
         // Output Constraints
         ///////////////////////////////////////////////////////////////////////
 
         let has_interactions = AB::Expr::ONE - local.is_n_logup_zero;
+        let tower_transcript_count = local.has_read_out
+            + local.has_write_out
+            + local.has_logup_out
+            + has_interactions.clone();
+        IsZeroSubAir.eval(
+            builder,
+            (
+                IsZeroIo::new(
+                    tower_transcript_count,
+                    local.is_tower_transcript_zero.into(),
+                    local.is_enabled.into(),
+                ),
+                local.is_tower_transcript_zero_aux.inv,
+            ),
+        );
+        let has_tower_transcript = AB::Expr::ONE - local.is_tower_transcript_zero;
+        let has_tower_out = AB::Expr::ONE
+            - (AB::Expr::ONE - local.has_read_out)
+                * (AB::Expr::ONE - local.has_write_out)
+                * (AB::Expr::ONE - local.has_logup_out);
+
+        builder
+            .when(local.is_enabled * has_tower_transcript.clone())
+            .assert_eq(local.has_read_out, local.has_read);
+        builder
+            .when(local.is_enabled * has_tower_transcript.clone())
+            .assert_eq(local.has_write_out, local.has_write);
+        builder
+            .when(local.is_enabled * has_tower_transcript.clone())
+            .assert_eq(local.has_logup_out, local.has_logup);
+        builder
+            .when(local.is_enabled * has_tower_transcript.clone())
+            .assert_eq(local.n_logup, local.max_layer_count);
+
         // Input layer claim defaults to zero when no interactions
         assert_zeros(
             &mut builder.when(not::<AB::Expr>(has_interactions.clone())),
@@ -244,6 +291,30 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             },
             local.is_enabled * has_interactions.clone(),
         );
+        self.input_shape_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerInputShapeMessage {
+                idx: local.idx.into(),
+                has_read: local.has_read.into(),
+                has_write: local.has_write.into(),
+                has_logup: local.has_logup.into(),
+                read_tower_vars: local.read_tower_vars.into(),
+                write_tower_vars: local.write_tower_vars.into(),
+                logup_tower_vars: local.logup_tower_vars.into(),
+                max_layer_count: local.max_layer_count.into(),
+            },
+            local.is_enabled * has_tower_transcript.clone(),
+        );
+        self.fork_final_sample_bus.send(
+            builder,
+            local.proof_idx,
+            ForkFinalSampleMessage {
+                fork_id: local.fork_id.into(),
+                tidx: tidx_after_gkr_layers.clone(),
+            },
+            local.is_enabled * has_tower_transcript.clone(),
+        );
         ///////////////////////////////////////////////////////////////////////
         // External Interactions
         ///////////////////////////////////////////////////////////////////////
@@ -263,10 +334,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
 
         // 2. TranscriptBus
         // 2a. Observe grouped tower out-evals before alpha/beta sampling.
-        let has_tower_out = AB::Expr::ONE
-            - (AB::Expr::ONE - local.has_read_out)
-                * (AB::Expr::ONE - local.has_write_out)
-                * (AB::Expr::ONE - local.has_logup_out);
         let out_eval_start_tidx = local.tidx
             - local.has_read_out * AB::Expr::from_usize(2 * D_EF)
             - local.has_write_out * AB::Expr::from_usize(2 * D_EF)

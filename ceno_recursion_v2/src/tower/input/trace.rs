@@ -22,9 +22,13 @@ pub struct TowerInputRecord {
     pub has_read_out: bool,
     pub has_write_out: bool,
     pub has_logup_out: bool,
+    pub has_read: bool,
+    pub has_write: bool,
+    pub has_logup: bool,
     pub read_tower_vars: usize,
     pub write_tower_vars: usize,
     pub logup_tower_vars: usize,
+    pub max_layer_count: usize,
     pub input_layer_claim: EF,
     pub layer_output_lambda: EF,
     pub layer_output_mu: EF,
@@ -86,6 +90,17 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
                 cols.n_logup,
                 (&mut cols.is_n_logup_zero_aux.inv, &mut cols.is_n_logup_zero),
             );
+            let tower_transcript_count = usize::from(record.has_read_out)
+                + usize::from(record.has_write_out)
+                + usize::from(record.has_logup_out)
+                + usize::from(record.n_logup != 0);
+            IsZeroSubAir.generate_subrow(
+                F::from_usize(tower_transcript_count),
+                (
+                    &mut cols.is_tower_transcript_zero_aux.inv,
+                    &mut cols.is_tower_transcript_zero,
+                ),
+            );
 
             let q0_basis = q0_claim.as_basis_coefficients_slice();
             cols.r0_claim.copy_from_slice(q0_basis);
@@ -142,9 +157,13 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
             cols.has_read_out = F::from_bool(record.has_read_out);
             cols.has_write_out = F::from_bool(record.has_write_out);
             cols.has_logup_out = F::from_bool(record.has_logup_out);
+            cols.has_read = F::from_bool(record.has_read);
+            cols.has_write = F::from_bool(record.has_write);
+            cols.has_logup = F::from_bool(record.has_logup);
             cols.read_tower_vars = F::from_usize(record.read_tower_vars);
             cols.write_tower_vars = F::from_usize(record.write_tower_vars);
             cols.logup_tower_vars = F::from_usize(record.logup_tower_vars);
+            cols.max_layer_count = F::from_usize(record.max_layer_count);
             cols.alpha_logup = record
                 .alpha_logup
                 .as_basis_coefficients_slice()

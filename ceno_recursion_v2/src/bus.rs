@@ -66,6 +66,15 @@ define_typed_per_proof_permutation_bus!(TowerModuleBus, TowerModuleMessage);
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct ForkFinalSampleMessage<T> {
+    pub fork_id: T,
+    pub tidx: T,
+}
+
+define_typed_per_proof_permutation_bus!(ForkFinalSampleBus, ForkFinalSampleMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct MainMessage<T> {
     pub idx: T,
     pub tidx: T,

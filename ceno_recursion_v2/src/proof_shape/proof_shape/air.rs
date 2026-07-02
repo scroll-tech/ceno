@@ -18,11 +18,11 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 use crate::{
     bus::{
         AirShapeBus, AirShapeBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
-        ForkedTranscriptBus, ForkedTranscriptBusMessage, FractionFolderInputBus,
-        FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage, LiftedHeightsBus,
-        LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage,
-        NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
-        TranscriptBusMessage,
+        ForkFinalSampleBus, ForkFinalSampleMessage, ForkedTranscriptBus,
+        ForkedTranscriptBusMessage, FractionFolderInputBus, FractionFolderInputMessage,
+        HyperdimBus, HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage,
+        LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage, NLiftBus, NLiftMessage,
+        TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
@@ -126,6 +126,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub lifted_heights_bus: LiftedHeightsBus,
     pub transcript_bus: TranscriptBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
+    pub fork_final_sample_bus: ForkFinalSampleBus,
     pub n_lift_bus: NLiftBus,
     pub tower_prefix_only: bool,
 }
@@ -481,6 +482,15 @@ where
         // replayed fork-local tidx; semantic tower AIRs consume the transcript
         // rows before this point.
         let forked_challenge_1_tidx = local.after_forked_challenge_1_tidx.into();
+        self.fork_final_sample_bus.receive(
+            builder,
+            local.proof_idx,
+            ForkFinalSampleMessage {
+                fork_id: fork_id.clone().into(),
+                tidx: forked_challenge_1_tidx.clone(),
+            },
+            local.is_present * local.is_valid,
+        );
         for i in 0..D_EF {
             self.forked_transcript_bus.receive(
                 builder,

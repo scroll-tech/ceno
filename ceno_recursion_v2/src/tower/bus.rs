@@ -34,6 +34,21 @@ define_typed_per_proof_permutation_bus!(TowerShapeBus, TowerShapeMessage);
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
+pub struct TowerInputShapeMessage<T> {
+    pub idx: T,
+    pub has_read: T,
+    pub has_write: T,
+    pub has_logup: T,
+    pub read_tower_vars: T,
+    pub write_tower_vars: T,
+    pub logup_tower_vars: T,
+    pub max_layer_count: T,
+}
+
+define_typed_per_proof_permutation_bus!(TowerInputShapeBus, TowerInputShapeMessage);
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug, Clone)]
 pub struct TowerActivityMessage<T> {
     pub idx: T,
     pub layer_idx: T,
