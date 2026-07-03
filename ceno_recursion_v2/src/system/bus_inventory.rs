@@ -11,9 +11,11 @@ use crate::bus::{
     CachedCommitBus as LocalCachedCommitBus, ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
     ForkFinalSampleBus, ForkedTranscriptBus as LocalForkedTranscriptBus,
     FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
-    LiftedHeightsBus as LocalLiftedHeightsBus, LookupChallengeBus, MainBus, MainExpressionClaimBus,
-    MainGlobalClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
-    PublicValuesBus as LocalPublicValuesBus, TowerModuleBus, TranscriptBus as LocalTranscriptBus,
+    LiftedHeightsBus as LocalLiftedHeightsBus, LookupChallengeBus, MainBus, MainContributionBus,
+    MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus, MainGlobalPointBus,
+    MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
+    PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus, TowerModuleBus,
+    TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
@@ -39,6 +41,10 @@ pub struct BusInventory {
     pub main_sumcheck_output_bus: MainSumcheckOutputBus,
     pub main_expression_claim_bus: MainExpressionClaimBus,
     pub main_global_claim_bus: MainGlobalClaimBus,
+    pub main_global_point_bus: MainGlobalPointBus,
+    pub main_eval_bus: MainEvalBus,
+    pub main_contribution_bus: MainContributionBus,
+    pub tower_main_point_bus: TowerMainPointBus,
     pub right_shift_bus: RightShiftBus,
     pub xi_randomness_bus: XiRandomnessBus,
     pub final_state_bus: FinalTranscriptStateBus,
@@ -76,6 +82,10 @@ impl BusInventory {
         let main_sumcheck_output_bus = MainSumcheckOutputBus::new(b.new_bus_idx());
         let main_expression_claim_bus = MainExpressionClaimBus::new(b.new_bus_idx());
         let main_global_claim_bus = MainGlobalClaimBus::new(b.new_bus_idx());
+        let main_global_point_bus = MainGlobalPointBus::new(b.new_bus_idx());
+        let main_eval_bus = MainEvalBus::new(b.new_bus_idx());
+        let main_contribution_bus = MainContributionBus::new(b.new_bus_idx());
+        let tower_main_point_bus = TowerMainPointBus::new(b.new_bus_idx());
 
         let cached_commit_bus = LocalCachedCommitBus::new(b.new_bus_idx());
         let final_state_bus = FinalTranscriptStateBus::new(b.new_bus_idx());
@@ -105,6 +115,10 @@ impl BusInventory {
             main_sumcheck_output_bus,
             main_expression_claim_bus,
             main_global_claim_bus,
+            main_global_point_bus,
+            main_eval_bus,
+            main_contribution_bus,
+            tower_main_point_bus,
             right_shift_bus,
             xi_randomness_bus,
             final_state_bus,

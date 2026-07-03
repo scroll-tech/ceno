@@ -15,7 +15,7 @@ use recursion_circuit::{
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
-    bus::{MainGlobalClaimBus, MainGlobalClaimMessage},
+    bus::{MainGlobalClaimBus, MainGlobalClaimMessage, MainGlobalPointBus, MainGlobalPointMessage},
     system::MainGlobalSumcheckRecord,
     tracegen::RowMajorChip,
 };
@@ -29,6 +29,7 @@ pub struct MainGlobalSumcheckCols<T> {
     pub is_last: T,
     pub is_dummy: T,
     pub round: T,
+    pub point_lookup_count: T,
     pub ev1: [T; D_EF],
     pub ev2: [T; D_EF],
     pub ev3: [T; D_EF],
@@ -41,6 +42,7 @@ pub struct MainGlobalSumcheckCols<T> {
 
 pub struct MainGlobalSumcheckAir {
     pub global_claim_bus: MainGlobalClaimBus,
+    pub global_point_bus: MainGlobalPointBus,
 }
 
 impl<F: Field> BaseAir<F> for MainGlobalSumcheckAir {
@@ -130,6 +132,15 @@ where
                 expected: local.expected.map(Into::into),
             },
             local.is_enabled * local.is_last,
+        );
+        self.global_point_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            MainGlobalPointMessage {
+                round_idx: local.round.into(),
+                value: local.challenge.map(Into::into),
+            },
+            local.is_enabled * (AB::Expr::ONE - local.is_dummy) * local.point_lookup_count,
         );
     }
 }
@@ -232,6 +243,8 @@ impl RowMajorChip<F> for MainGlobalSumcheckTraceGenerator {
                 cols.is_last = F::from_bool(round_idx + 1 == rows);
                 cols.is_dummy = F::from_bool(is_dummy);
                 cols.round = F::from_usize(round_idx);
+                cols.point_lookup_count =
+                    F::from_usize(round.map(|round| round.point_lookup_count).unwrap_or(0));
 
                 let evs = round
                     .map(|round| round.evaluations)

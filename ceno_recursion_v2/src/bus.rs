@@ -118,3 +118,41 @@ pub struct MainGlobalClaimMessage<T> {
 }
 
 define_typed_per_proof_permutation_bus!(MainGlobalClaimBus, MainGlobalClaimMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainGlobalPointMessage<T> {
+    pub round_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(MainGlobalPointBus, MainGlobalPointMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainEvalMessage<T> {
+    pub idx: T,
+    pub eval_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(MainEvalBus, MainEvalMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainContributionMessage<T> {
+    pub idx: T,
+    pub contribution: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(MainContributionBus, MainContributionMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct TowerMainPointMessage<T> {
+    pub idx: T,
+    pub round_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(TowerMainPointBus, TowerMainPointMessage);

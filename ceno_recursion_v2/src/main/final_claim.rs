@@ -12,7 +12,9 @@ use recursion_circuit::utils::ext_field_add;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
-    bus::{MainGlobalClaimBus, MainGlobalClaimMessage},
+    bus::{
+        MainContributionBus, MainContributionMessage, MainGlobalClaimBus, MainGlobalClaimMessage,
+    },
     system::MainFinalClaimRecord,
     tracegen::RowMajorChip,
 };
@@ -34,6 +36,7 @@ pub struct MainFinalClaimCols<T> {
 
 pub struct MainFinalClaimAir {
     pub global_claim_bus: MainGlobalClaimBus,
+    pub contribution_bus: MainContributionBus,
 }
 
 impl<F: Field> BaseAir<F> for MainFinalClaimAir {
@@ -88,6 +91,15 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainFinalClaimAir {
                 expected: local.expected.map(Into::into),
             },
             local.is_enabled * local.is_last,
+        );
+        self.contribution_bus.receive(
+            builder,
+            local.proof_idx,
+            MainContributionMessage {
+                idx: local.idx.into(),
+                contribution: local.contribution.map(Into::into),
+            },
+            local.is_enabled,
         );
 
         let is_transition = next.is_enabled - next.is_first;

@@ -87,6 +87,9 @@ pub struct MainPreflight {
     pub transcript_start: usize,
     pub transcript_end: usize,
     pub global_sumchecks: Vec<MainGlobalSumcheckRecord>,
+    pub evals: Vec<MainEvalRecord>,
+    pub tower_point_eqs: Vec<MainTowerPointEqRecord>,
+    pub frontload_terms: Vec<MainFrontloadTermRecord>,
     pub final_claims: Vec<MainFinalClaimRecord>,
 }
 
@@ -111,11 +114,60 @@ pub struct MainFinalClaimRecord {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct MainEvalRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub eval_idx: usize,
+    pub tidx: usize,
+    pub value: EF,
+    pub lookup_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainTowerPointEqRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub round_idx: usize,
+    pub global_value: EF,
+    pub tower_value: EF,
+    pub eq_in: EF,
+    pub eq_out: EF,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainFrontloadTermRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub term_idx: usize,
+    pub step_idx: usize,
+    pub is_first_step: bool,
+    pub is_last_step: bool,
+    pub eval_idx: usize,
+    pub has_eval_factor: bool,
+    pub global_round_idx: usize,
+    pub has_global_factor: bool,
+    pub factor: EF,
+    pub term_acc_in: EF,
+    pub term_acc_out: EF,
+    pub chip_acc_in: EF,
+    pub chip_acc_out: EF,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct TowerMainPointRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub round_idx: usize,
+    pub value: EF,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct MainGlobalSumcheckRoundRecord {
     pub evaluations: [EF; 4],
     pub challenge: EF,
     pub claim_in: EF,
     pub claim_out: EF,
+    pub point_lookup_count: usize,
 }
 
 #[derive(Clone, Debug, Default)]

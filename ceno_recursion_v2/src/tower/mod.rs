@@ -76,6 +76,7 @@ use crate::{
         },
         input::{TowerInputAir, TowerInputTraceGenerator},
         layer::{TowerLayerAir, TowerLayerRecord, TowerLayerTraceGenerator},
+        main_point::{TowerMainPointAir, TowerMainPointTraceGenerator},
         shape::{
             TowerActivityAir, TowerActivityTraceGenerator, TowerShapeAir, TowerShapeRecord,
             TowerShapeTraceGenerator,
@@ -232,6 +233,7 @@ pub mod tower_transcript_len {
 pub mod alpha_pow;
 pub mod input;
 pub mod layer;
+pub mod main_point;
 pub mod shape;
 pub mod sumcheck;
 pub(crate) use shape::{TOWER_ACTIVITY_LOGUP, TOWER_ACTIVITY_READ, TOWER_ACTIVITY_WRITE};
@@ -270,6 +272,7 @@ pub(crate) struct TowerBlobCpu {
     tower_records: Vec<TowerTowerEvalRecord>,
     sumcheck_records: Vec<TowerSumcheckRecord>,
     mus_records: Vec<Vec<EF>>,
+    main_point_records: Vec<crate::system::TowerMainPointRecord>,
     /// Per-chip q0 claims matching layer_records.
     q0_claims: Vec<EF>,
 }
@@ -512,6 +515,7 @@ fn build_chip_records(
     TowerTowerEvalRecord,
     TowerSumcheckRecord,
     Vec<EF>,
+    Vec<crate::system::TowerMainPointRecord>,
     EF,
 )> {
     let shape_record = build_tower_shape_record(proof_idx, idx, air_idx, chip_proof, circuit_vk);
@@ -788,6 +792,38 @@ fn build_chip_records(
     } else {
         schedule.mus.last().copied().unwrap_or(EF::ZERO)
     };
+    let main_point_records = if layer_count == 0 || shape_record.num_vars == 0 {
+        Vec::new()
+    } else {
+        let final_layer = layer_count - 1;
+        let start = TowerSumcheckRecord::layer_start_index(final_layer);
+        let end = start + TowerSumcheckRecord::layer_rounds(final_layer);
+        eyre::ensure!(
+            sumcheck_record.ris.len() >= end,
+            "tower point source length {} is shorter than final layer end {}",
+            sumcheck_record.ris.len(),
+            end
+        );
+        let mut rt_tower = sumcheck_record.ris[start..end].to_vec();
+        rt_tower.push(layer_output_mu);
+        eyre::ensure!(
+            rt_tower.len() >= shape_record.num_vars,
+            "tower point length {} is shorter than main point length {}",
+            rt_tower.len(),
+            shape_record.num_vars
+        );
+        rt_tower[rt_tower.len() - shape_record.num_vars..]
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(round_idx, value)| crate::system::TowerMainPointRecord {
+                proof_idx,
+                idx,
+                round_idx,
+                value,
+            })
+            .collect()
+    };
     let mut read_out_evals = [EF::ZERO; 2];
     if let Some(values) = chip_proof.r_out_evals.first() {
         for (dst, src) in read_out_evals.iter_mut().zip(values.iter().take(2)) {
@@ -916,6 +952,7 @@ fn build_chip_records(
         tower_record,
         sumcheck_record,
         mus_record,
+        main_point_records,
         q0_claim,
     ))
 }
@@ -1153,6 +1190,9 @@ impl AirModule for TowerModule {
         let tower_alpha_pow_air = TowerAlphaPowAir {
             alpha_pow_bus: self.alpha_pow_bus,
         };
+        let tower_main_point_air = TowerMainPointAir {
+            tower_point_bus: self.bus_inventory.tower_main_point_bus,
+        };
 
         vec![
             Arc::new(tower_shape_air) as AirRef<_>,
@@ -1161,6 +1201,7 @@ impl AirModule for TowerModule {
             Arc::new(tower_alpha_pow_air) as AirRef<_>,
             Arc::new(gkr_layer_air) as AirRef<_>,
             Arc::new(gkr_sumcheck_air) as AirRef<_>,
+            Arc::new(tower_main_point_air) as AirRef<_>,
         ]
     }
 }
@@ -1191,6 +1232,7 @@ pub(crate) fn build_gkr_blob(
     let mut tower_records = Vec::new();
     let mut sumcheck_records = Vec::new();
     let mut mus_records = Vec::new();
+    let mut main_point_records = Vec::new();
     let mut q0_claims = Vec::new();
 
     eyre::ensure!(
@@ -1249,6 +1291,7 @@ pub(crate) fn build_gkr_blob(
                 tower_record,
                 sumcheck_record,
                 mus_record,
+                chip_main_point_records,
                 q0_claim,
             ) = build_chip_records(
                 proof_idx,
@@ -1316,6 +1359,7 @@ pub(crate) fn build_gkr_blob(
             tower_records.push(tower_record);
             sumcheck_records.push(sumcheck_record);
             mus_records.push(mus_record);
+            main_point_records.extend(chip_main_point_records);
             q0_claims.push(q0_claim);
         }
 
@@ -1368,6 +1412,7 @@ pub(crate) fn build_gkr_blob(
         tower_records,
         sumcheck_records,
         mus_records,
+        main_point_records,
         q0_claims,
     })
 }
@@ -1429,6 +1474,14 @@ pub(crate) fn build_tower_input_records(
     }
 
     Ok(input_records)
+}
+
+pub(crate) fn build_tower_main_point_records(
+    child_vk: &RecursionVk,
+    proofs: &[RecursionProof],
+    preflights: &[Preflight],
+) -> Result<Vec<crate::system::TowerMainPointRecord>> {
+    Ok(build_gkr_blob(child_vk, proofs, preflights)?.main_point_records)
 }
 
 pub(crate) fn collect_tower_range_checks(
@@ -1657,6 +1710,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             TowerModuleChip::AlphaPow,
             TowerModuleChip::Layer,
             TowerModuleChip::LayerSumcheck,
+            TowerModuleChip::MainPoint,
         ];
 
         let span = tracing::Span::current();
@@ -1687,6 +1741,7 @@ enum TowerModuleChip {
     AlphaPow,
     Layer,
     LayerSumcheck,
+    MainPoint,
 }
 
 impl TowerModuleChip {
@@ -1734,6 +1789,8 @@ impl RowMajorChip<F> for TowerModuleChip {
                 &(&blob.sumcheck_records, &blob.mus_records),
                 required_height,
             ),
+            MainPoint => TowerMainPointTraceGenerator
+                .generate_trace(&blob.main_point_records.as_slice(), required_height),
         }
     }
 }
