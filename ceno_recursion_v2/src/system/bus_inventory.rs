@@ -12,7 +12,7 @@ use crate::bus::{
     ForkFinalSampleBus, ForkedTranscriptBus as LocalForkedTranscriptBus,
     FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
     LiftedHeightsBus as LocalLiftedHeightsBus, LookupChallengeBus, MainBus, MainExpressionClaimBus,
-    MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
+    MainGlobalClaimBus, MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
     PublicValuesBus as LocalPublicValuesBus, TowerModuleBus, TranscriptBus as LocalTranscriptBus,
 };
 
@@ -38,6 +38,7 @@ pub struct BusInventory {
     pub main_sumcheck_input_bus: MainSumcheckInputBus,
     pub main_sumcheck_output_bus: MainSumcheckOutputBus,
     pub main_expression_claim_bus: MainExpressionClaimBus,
+    pub main_global_claim_bus: MainGlobalClaimBus,
     pub right_shift_bus: RightShiftBus,
     pub xi_randomness_bus: XiRandomnessBus,
     pub final_state_bus: FinalTranscriptStateBus,
@@ -74,6 +75,7 @@ impl BusInventory {
         let main_sumcheck_input_bus = MainSumcheckInputBus::new(b.new_bus_idx());
         let main_sumcheck_output_bus = MainSumcheckOutputBus::new(b.new_bus_idx());
         let main_expression_claim_bus = MainExpressionClaimBus::new(b.new_bus_idx());
+        let main_global_claim_bus = MainGlobalClaimBus::new(b.new_bus_idx());
 
         let cached_commit_bus = LocalCachedCommitBus::new(b.new_bus_idx());
         let final_state_bus = FinalTranscriptStateBus::new(b.new_bus_idx());
@@ -102,6 +104,7 @@ impl BusInventory {
             main_sumcheck_input_bus,
             main_sumcheck_output_bus,
             main_expression_claim_bus,
+            main_global_claim_bus,
             right_shift_bus,
             xi_randomness_bus,
             final_state_bus,

@@ -5,8 +5,8 @@ mod types;
 pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
     BatchConstraintPreflight, ChipTranscriptRange, ForkTranscriptLog, MainFinalClaimRecord,
-    MainPreflight, MainTranscriptRecord, Preflight, ProofShapePreflight, TowerChipTranscriptRange,
-    TowerPreflight, TraceVData,
+    MainGlobalSumcheckRecord, MainGlobalSumcheckRoundRecord, MainPreflight, MainTranscriptRecord,
+    Preflight, ProofShapePreflight, TowerChipTranscriptRange, TowerPreflight, TraceVData,
 };
 pub use recursion_circuit::system::{
     AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule, VerifierConfig,

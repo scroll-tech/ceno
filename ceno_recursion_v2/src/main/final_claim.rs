@@ -11,7 +11,11 @@ use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use recursion_circuit::utils::ext_field_add;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::{system::MainFinalClaimRecord, tracegen::RowMajorChip};
+use crate::{
+    bus::{MainGlobalClaimBus, MainGlobalClaimMessage},
+    system::MainFinalClaimRecord,
+    tracegen::RowMajorChip,
+};
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
@@ -28,7 +32,9 @@ pub struct MainFinalClaimCols<T> {
     pub expected: [T; D_EF],
 }
 
-pub struct MainFinalClaimAir;
+pub struct MainFinalClaimAir {
+    pub global_claim_bus: MainGlobalClaimBus,
+}
 
 impl<F: Field> BaseAir<F> for MainFinalClaimAir {
     fn width(&self) -> usize {
@@ -74,6 +80,14 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainFinalClaimAir {
             &mut builder.when(local.is_enabled * local.is_last),
             local.acc_out,
             local.expected,
+        );
+        self.global_claim_bus.receive(
+            builder,
+            local.proof_idx,
+            MainGlobalClaimMessage {
+                expected: local.expected.map(Into::into),
+            },
+            local.is_enabled * local.is_last,
         );
 
         let is_transition = next.is_enabled - next.is_first;

@@ -86,6 +86,7 @@ pub struct MainPreflight {
     pub chips: Vec<ChipTranscriptRange>,
     pub transcript_start: usize,
     pub transcript_end: usize,
+    pub global_sumchecks: Vec<MainGlobalSumcheckRecord>,
     pub final_claims: Vec<MainFinalClaimRecord>,
 }
 
@@ -107,6 +108,27 @@ pub struct MainFinalClaimRecord {
     pub acc_in: EF,
     pub acc_out: EF,
     pub expected: EF,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainGlobalSumcheckRoundRecord {
+    pub evaluations: [EF; 4],
+    pub challenge: EF,
+    pub claim_in: EF,
+    pub claim_out: EF,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainGlobalSumcheckRecord {
+    pub proof_idx: usize,
+    pub expected: EF,
+    pub rounds: Vec<MainGlobalSumcheckRoundRecord>,
+}
+
+impl MainGlobalSumcheckRecord {
+    pub fn total_rows(&self) -> usize {
+        self.rounds.len().max(1)
+    }
 }
 
 #[derive(Clone, Debug, Default)]

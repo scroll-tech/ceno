@@ -110,3 +110,11 @@ pub struct MainExpressionClaimMessage<T> {
 }
 
 define_typed_per_proof_permutation_bus!(MainExpressionClaimBus, MainExpressionClaimMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainGlobalClaimMessage<T> {
+    pub expected: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(MainGlobalClaimBus, MainGlobalClaimMessage);

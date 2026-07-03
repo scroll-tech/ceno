@@ -1,5 +1,6 @@
 mod air;
 mod final_claim;
+mod global_sumcheck;
 mod trace;
 mod transcript_bind;
 
@@ -27,11 +28,14 @@ use witness::next_pow2_instance_padding;
 use self::{
     air::MainAir,
     final_claim::{MainFinalClaimAir, MainFinalClaimTraceGenerator},
+    global_sumcheck::{MainGlobalSumcheckAir, MainGlobalSumcheckTraceGenerator},
     trace::{MainRecord, MainTraceGenerator},
     transcript_bind::{MainTranscriptBindAir, MainTranscriptBindTraceGenerator},
 };
 use crate::{
-    bus::{ForkedTranscriptBus, MainBus, MainExpressionClaimBus, TranscriptBus},
+    bus::{
+        ForkedTranscriptBus, MainBus, MainExpressionClaimBus, MainGlobalClaimBus, TranscriptBus,
+    },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, MainFinalClaimRecord, Preflight,
         RecursionField, RecursionPcs, RecursionProof, RecursionVk, TraceGenModule, child_vk_digest,
@@ -47,6 +51,7 @@ pub use air::MainCols;
 pub struct MainModule {
     main_bus: MainBus,
     expression_claim_bus: MainExpressionClaimBus,
+    global_claim_bus: MainGlobalClaimBus,
     transcript_bus: TranscriptBus,
     forked_transcript_bus: ForkedTranscriptBus,
 }
@@ -56,11 +61,13 @@ impl MainModule {
         let _ = b;
         let main_bus = bus_inventory.main_bus;
         let expression_claim_bus = bus_inventory.main_expression_claim_bus;
+        let global_claim_bus = bus_inventory.main_global_claim_bus;
         let transcript_bus = bus_inventory.transcript_bus;
         let forked_transcript_bus = bus_inventory.forked_transcript_bus;
         Self {
             main_bus,
             expression_claim_bus,
+            global_claim_bus,
             transcript_bus,
             forked_transcript_bus,
         }
@@ -73,6 +80,7 @@ impl MainModule {
         preflights: &[Preflight],
     ) -> Result<(
         Vec<MainRecord>,
+        Vec<crate::system::MainGlobalSumcheckRecord>,
         Vec<MainFinalClaimRecord>,
         Vec<crate::system::MainTranscriptRecord>,
     )> {
@@ -105,8 +113,21 @@ impl MainModule {
             main_records.push(MainRecord::default());
         }
 
+        let mut global_sumcheck_records = Vec::new();
         let mut final_claim_records = Vec::new();
         for (proof_idx, preflight) in preflights.iter().enumerate() {
+            if let Some(mut record) = preflight.main.global_sumchecks.last().cloned() {
+                record.proof_idx = proof_idx;
+                global_sumcheck_records.push(record);
+            }
+            if preflight.main.global_sumchecks.len() > 1
+                && std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some()
+            {
+                eprintln!(
+                    "rec-v2-debug module=main source=collect proof_idx={proof_idx} key=global_sumcheck_records value={}",
+                    preflight.main.global_sumchecks.len()
+                );
+            }
             final_claim_records.extend(preflight.main.final_claims.iter().cloned().map(
                 move |mut record| {
                     record.proof_idx = proof_idx;
@@ -116,6 +137,24 @@ impl MainModule {
         }
         if final_claim_records.is_empty() {
             final_claim_records.push(MainFinalClaimRecord::default());
+        }
+        if global_sumcheck_records.is_empty() {
+            global_sumcheck_records.push(crate::system::MainGlobalSumcheckRecord::default());
+        }
+        if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
+            for global in &global_sumcheck_records {
+                let final_expected = final_claim_records
+                    .iter()
+                    .find(|record| record.proof_idx == global.proof_idx)
+                    .map(|record| record.expected);
+                eprintln!(
+                    "rec-v2-debug module=main source=collect proof_idx={} key=global_expected value={:?} final_expected={:?} global_rows={}",
+                    global.proof_idx,
+                    global.expected,
+                    final_expected,
+                    global.total_rows()
+                );
+            }
         }
 
         let mut transcript_records = Vec::new();
@@ -162,13 +201,18 @@ impl MainModule {
             transcript_records.push(crate::system::MainTranscriptRecord::default());
         }
 
-        Ok((main_records, final_claim_records, transcript_records))
+        Ok((
+            main_records,
+            global_sumcheck_records,
+            final_claim_records,
+            transcript_records,
+        ))
     }
 }
 
 impl AirModule for MainModule {
     fn num_airs(&self) -> usize {
-        3
+        4
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -183,7 +227,12 @@ impl AirModule for MainModule {
                 transcript_bus: self.transcript_bus,
                 forked_transcript_bus: self.forked_transcript_bus,
             }) as AirRef<_>,
-            Arc::new(MainFinalClaimAir),
+            Arc::new(MainGlobalSumcheckAir {
+                global_claim_bus: self.global_claim_bus,
+            }) as AirRef<_>,
+            Arc::new(MainFinalClaimAir {
+                global_claim_bus: self.global_claim_bus,
+            }) as AirRef<_>,
         ]
     }
 }
@@ -222,19 +271,26 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         _ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
-        let (mut main_records, mut final_claim_records, mut transcript_records) =
-            self.collect_records(child_vk, proofs, preflights).ok()?;
+        let (
+            mut main_records,
+            mut global_sumcheck_records,
+            mut final_claim_records,
+            mut transcript_records,
+        ) = self.collect_records(child_vk, proofs, preflights).ok()?;
         main_records.sort_by_key(|record| (record.proof_idx, record.idx));
+        global_sumcheck_records.sort_by_key(|record| record.proof_idx);
         final_claim_records.sort_by_key(|record| (record.proof_idx, record.idx));
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
         let ctx = MainTraceCtx {
             main_records: &main_records,
+            global_sumcheck_records: &global_sumcheck_records,
             final_claim_records: &final_claim_records,
             transcript_records: &transcript_records,
         };
         let chips = [
             MainModuleChip::Main,
             MainModuleChip::TranscriptBind,
+            MainModuleChip::GlobalSumcheck,
             MainModuleChip::FinalClaim,
         ];
         let span = tracing::Span::current();
@@ -256,6 +312,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
 struct MainTraceCtx<'a> {
     main_records: &'a [MainRecord],
+    global_sumcheck_records: &'a [crate::system::MainGlobalSumcheckRecord],
     final_claim_records: &'a [MainFinalClaimRecord],
     transcript_records: &'a [crate::system::MainTranscriptRecord],
 }
@@ -263,6 +320,7 @@ struct MainTraceCtx<'a> {
 enum MainModuleChip {
     Main,
     TranscriptBind,
+    GlobalSumcheck,
     FinalClaim,
 }
 
@@ -280,6 +338,8 @@ impl RowMajorChip<F> for MainModuleChip {
             }
             MainModuleChip::TranscriptBind => MainTranscriptBindTraceGenerator
                 .generate_trace(&ctx.transcript_records, required_height),
+            MainModuleChip::GlobalSumcheck => MainGlobalSumcheckTraceGenerator
+                .generate_trace(&ctx.global_sumcheck_records, required_height),
             MainModuleChip::FinalClaim => MainFinalClaimTraceGenerator
                 .generate_trace(&ctx.final_claim_records, required_height),
         }
@@ -502,6 +562,14 @@ where
         }
         preflight
             .main
+            .global_sumchecks
+            .push(crate::system::MainGlobalSumcheckRecord {
+                proof_idx: 0,
+                expected: RecursionField::ZERO,
+                rounds: Vec::new(),
+            });
+        preflight
+            .main
             .final_claims
             .push(MainFinalClaimRecord::default());
         return Ok(());
@@ -537,26 +605,85 @@ where
         &global_in_point,
         expected_evaluation,
     )?;
-    let final_claims = if acc == expected_evaluation {
-        final_claims
-    } else {
-        let swapped = [pcs_challenges[1], pcs_challenges[0]];
-        let (swapped_acc, swapped_records) = build_final_claim_records(
-            &layers,
-            &main_proof.proof.evals,
-            &swapped,
-            &alpha_pows,
+    if acc != expected_evaluation {
+        bail!("main constraint claim mismatch: {expected_evaluation} != {acc}");
+    }
+    preflight
+        .main
+        .global_sumchecks
+        .push(build_global_sumcheck_record(
+            0,
+            main_proof.claimed_sum,
+            &main_proof.proof.proof,
             &global_in_point,
             expected_evaluation,
-        )?;
-        if swapped_acc == expected_evaluation {
-            swapped_records
-        } else {
-            bail!("main constraint claim mismatch: {expected_evaluation} != {acc}");
-        }
-    };
+        )?);
     preflight.main.final_claims.extend(final_claims);
     Ok(())
+}
+
+fn build_global_sumcheck_record(
+    proof_idx: usize,
+    claimed_sum: RecursionField,
+    proof: &sumcheck::structs::IOPProof<RecursionField>,
+    global_in_point: &[RecursionField],
+    expected_evaluation: RecursionField,
+) -> Result<crate::system::MainGlobalSumcheckRecord> {
+    if proof.proofs.len() != global_in_point.len() {
+        bail!(
+            "main global sumcheck proof/point length mismatch: {} != {}",
+            proof.proofs.len(),
+            global_in_point.len()
+        );
+    }
+    let mut claim = claimed_sum;
+    let mut rounds = Vec::with_capacity(proof.proofs.len());
+    for (round_idx, (prover_msg, challenge)) in proof
+        .proofs
+        .iter()
+        .zip_eq(global_in_point.iter().copied())
+        .enumerate()
+    {
+        if prover_msg.evaluations.len() > 4 {
+            bail!(
+                "main global sumcheck round {round_idx} has degree-width {}, max supported 4",
+                prover_msg.evaluations.len()
+            );
+        }
+        if prover_msg.evaluations.is_empty() {
+            bail!("main global sumcheck round {round_idx} has no evaluations");
+        }
+        let mut evaluations = [RecursionField::ZERO; 4];
+        for (dst, src) in evaluations
+            .iter_mut()
+            .zip(prover_msg.evaluations.iter().copied())
+        {
+            *dst = src;
+        }
+        if prover_msg.evaluations.len() < 4 {
+            evaluations[3] = extrapolate_uni_poly(
+                claim - evaluations[0],
+                &prover_msg.evaluations,
+                RecursionField::from_u64(4),
+            );
+        }
+        let claim_out = extrapolate_uni_poly(claim - evaluations[0], &evaluations, challenge);
+        rounds.push(crate::system::MainGlobalSumcheckRoundRecord {
+            evaluations,
+            challenge,
+            claim_in: claim,
+            claim_out,
+        });
+        claim = claim_out;
+    }
+    if claim != expected_evaluation {
+        bail!("main global sumcheck fold mismatch: {expected_evaluation} != {claim}");
+    }
+    Ok(crate::system::MainGlobalSumcheckRecord {
+        proof_idx,
+        expected: expected_evaluation,
+        rounds,
+    })
 }
 
 fn native_main_claim_inputs(
