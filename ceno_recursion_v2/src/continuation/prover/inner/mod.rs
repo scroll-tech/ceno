@@ -82,8 +82,6 @@ impl<
         let circuit = Arc::new(InnerCircuit::new(
             Arc::new(verifier_circuit),
             def_hook_commit.map(|d| d.into()),
-            child_vk.fixed_commit.is_some(),
-            child_vk.fixed_no_omc_init_commit.is_some(),
             instance_public_value_indices,
         ));
         let (pk, vk) = engine.keygen(&circuit.airs());
@@ -129,8 +127,6 @@ impl<
         let circuit = Arc::new(InnerCircuit::new(
             Arc::new(verifier_circuit),
             def_hook_commit.map(|d| d.into()),
-            child_vk.fixed_commit.is_some(),
-            child_vk.fixed_no_omc_init_commit.is_some(),
             instance_public_value_indices,
         ));
         let vk = Arc::new(pk.get_vk());

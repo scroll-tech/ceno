@@ -7,8 +7,8 @@ use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
     p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
-use p3_field::PrimeCharacteristicRing;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, EF, F};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::{
@@ -19,7 +19,7 @@ use crate::{
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        RecursionProof, RecursionVk, TraceGenModule, TraceVData,
+        RecursionField, RecursionProof, RecursionVk, TraceGenModule, TraceVData,
     },
     tracegen::{ModuleChip, RowMajorChip},
 };
@@ -52,6 +52,8 @@ pub struct AirMetadata {
 pub struct ProofShapeModule {
     // Verifying key fields
     per_air: Vec<AirMetadata>,
+    has_fixed_commit: bool,
+    has_fixed_no_omc_init_commit: bool,
 
     // Buses (inventory for external, others are internal)
     bus_inventory: BusInventory,
@@ -82,6 +84,8 @@ impl ProofShapeModule {
         let range_bus = bus_inventory.range_checker_bus;
         Self {
             per_air,
+            has_fixed_commit: child_vk.fixed_commit.is_some(),
+            has_fixed_no_omc_init_commit: child_vk.fixed_no_omc_init_commit.is_some(),
             bus_inventory,
             range_bus,
             permutation_bus: ProofShapePermutationBus::new(b.new_bus_idx()),
@@ -102,7 +106,47 @@ impl ProofShapeModule {
     ) where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
     {
-        let _ = self;
+        let vk_digest = child_vk.compute_digest();
+        for elem in vk_digest {
+            ts.observe_ext(elem);
+        }
+
+        // Observe public values in canonical circuit-instance order. PublicValuesAir constrains
+        // the corresponding TranscriptBus receives; proof-shape owns the surrounding prefix.
+        for (_, circuit_vk) in child_vk.circuit_vks.iter() {
+            for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
+                ts.observe(
+                    proof
+                        .public_values
+                        .query_by_index::<RecursionField>(instance_value.0),
+                );
+            }
+        }
+
+        if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
+            for elem in fixed_commit.commit.into_iter() {
+                ts.observe(elem);
+            }
+            ts.observe(F::from_u64(fixed_commit.log2_max_codeword_size as u64));
+        }
+
+        if let Some(fixed_no_omc) = child_vk.fixed_no_omc_init_commit.as_ref() {
+            for elem in fixed_no_omc.commit.into_iter() {
+                ts.observe(elem);
+            }
+            ts.observe(F::from_u64(fixed_no_omc.log2_max_codeword_size as u64));
+        }
+
+        let witin = &proof.witin_commit;
+        for elem in witin.commit.into_iter() {
+            ts.observe(elem);
+        }
+        ts.observe(F::from_u64(witin.log2_max_codeword_size as u64));
+
+        let alpha_ext = ts.sample_ext();
+        let beta_ext = ts.sample_ext();
+        preflight.proof_shape.lookup_challenge_alpha = ef_to_limbs(alpha_ext);
+        preflight.proof_shape.lookup_challenge_beta = ef_to_limbs(beta_ext);
 
         let transcript_start_tidx = ts.len();
         preflight.proof_shape.fork_start_tidx = ts.len();
@@ -248,6 +292,12 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
         .collect_vec()
 }
 
+fn ef_to_limbs(value: EF) -> [F; D_EF] {
+    let mut out = [F::ZERO; D_EF];
+    out.copy_from_slice(value.as_basis_coefficients_slice());
+    out
+}
+
 impl AirModule for ProofShapeModule {
     fn num_airs(&self) -> usize {
         3
@@ -256,6 +306,8 @@ impl AirModule for ProofShapeModule {
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
         let proof_shape_air = ProofShapeAir::<4, 8> {
             per_air: self.per_air.clone(),
+            has_fixed_commit: self.has_fixed_commit,
+            has_fixed_no_omc_init_commit: self.has_fixed_no_omc_init_commit,
             idx_encoder: self.idx_encoder.clone(),
             range_bus: self.range_bus,
             permutation_bus: self.permutation_bus,

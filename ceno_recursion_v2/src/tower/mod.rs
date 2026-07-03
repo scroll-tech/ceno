@@ -1294,7 +1294,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 mod debug_tests {
     use super::*;
     use crate::{
-        system::RecursionPcs,
+        system::{BusIndexManager, BusInventory, RecursionPcs},
         utils::{TranscriptLabel, transcript_observe_label},
     };
     use ceno_zkvm::scheme::{constants::NUM_FANIN, verifier::TowerVerify};
@@ -1419,6 +1419,27 @@ mod debug_tests {
             mus,
             ris,
         }
+    }
+
+    fn proof_shape_lookup_challenges(vk: &RecursionVk, proof: &RecursionProof) -> (EF, EF) {
+        let mut bus_idx_manager = BusIndexManager::new();
+        let bus_inventory = BusInventory::new(&mut bus_idx_manager);
+        let module = crate::proof_shape::ProofShapeModule::new(
+            vk,
+            &mut bus_idx_manager,
+            bus_inventory,
+            false,
+        );
+        let mut sponge = default_duplex_sponge_recorder();
+        transcript_observe_label(&mut sponge, TranscriptLabel::Riscv.as_bytes());
+        let mut preflight = Preflight::default();
+        module.run_preflight(vk, proof, &mut preflight, &mut sponge);
+        let alpha =
+            EF::from_basis_coefficients_slice(&preflight.proof_shape.lookup_challenge_alpha)
+                .unwrap();
+        let beta = EF::from_basis_coefficients_slice(&preflight.proof_shape.lookup_challenge_beta)
+            .unwrap();
+        (alpha, beta)
     }
 
     fn manual_first_expected(chip_proof: &ZKVMChipProof<RecursionField>, lambda: EF, eq: EF) -> EF {
@@ -1566,17 +1587,7 @@ mod debug_tests {
         let basic_alpha = basic.read_challenge().elements;
         let basic_beta = basic.read_challenge().elements;
 
-        let mut sponge = default_duplex_sponge_recorder();
-        transcript_observe_label(&mut sponge, TranscriptLabel::Riscv.as_bytes());
-        let mut openvm_preflight = Preflight::default();
-        super::super::circuit::inner::vm_pvs::run_preflight(
-            &vk,
-            &proof,
-            &mut openvm_preflight,
-            &mut sponge,
-        );
-        let openvm_alpha = openvm_preflight.vm_pvs.lookup_challenge_alpha;
-        let openvm_beta = openvm_preflight.vm_pvs.lookup_challenge_beta;
+        let (openvm_alpha, openvm_beta) = proof_shape_lookup_challenges(&vk, &proof);
 
         eprintln!(
             "global basic alpha={:?} beta={:?}; openvm alpha={:?} beta={:?}",
@@ -1681,17 +1692,7 @@ mod debug_tests {
         }
         let basic_schedule = observe_basic_tower(&mut basic_fork, chip_proof);
 
-        let mut sponge = default_duplex_sponge_recorder();
-        transcript_observe_label(&mut sponge, TranscriptLabel::Riscv.as_bytes());
-        let mut openvm_preflight = Preflight::default();
-        super::super::circuit::inner::vm_pvs::run_preflight(
-            &vk,
-            &proof,
-            &mut openvm_preflight,
-            &mut sponge,
-        );
-        let openvm_alpha = openvm_preflight.vm_pvs.lookup_challenge_alpha;
-        let openvm_beta = openvm_preflight.vm_pvs.lookup_challenge_beta;
+        let (openvm_alpha, openvm_beta) = proof_shape_lookup_challenges(&vk, &proof);
         let mut openvm_fork = default_duplex_sponge_recorder();
         transcript_observe_label(&mut openvm_fork, TranscriptLabel::Fork.as_bytes());
         FiatShamirTranscript::<BabyBearPoseidon2Config>::observe_ext(

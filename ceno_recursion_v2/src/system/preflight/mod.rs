@@ -18,7 +18,6 @@ pub struct Preflight {
     pub main: MainPreflight,
     pub gkr: TowerPreflight,
     pub batch_constraint: BatchConstraintPreflight,
-    pub vm_pvs: VmPvsPreflight,
 }
 
 impl Preflight {
@@ -64,14 +63,6 @@ pub struct ProofShapePreflight {
     pub lookup_challenge_beta: [F; D_EF],
     pub after_forked_challenge_1: EF,
     pub after_forked_challenge_2: EF,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct VmPvsPreflight {
-    pub lookup_challenge_alpha: EF,
-    pub lookup_challenge_beta: EF,
-    pub lookup_challenge_alpha_lookup_count: usize,
-    pub lookup_challenge_beta_lookup_count: usize,
 }
 
 #[derive(Clone, Debug, Default)]

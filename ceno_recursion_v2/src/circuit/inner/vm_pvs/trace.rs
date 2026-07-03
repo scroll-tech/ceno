@@ -1,10 +1,8 @@
 use ceno_zkvm::instructions::riscv::constants::{LIMB_BITS, LIMB_MASK, PUBIO_DIGEST_U16_LIMBS};
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::prover::AirProvingContext;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    BabyBearPoseidon2Config, D_EF, DIGEST_SIZE, EF, F,
-};
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
+use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
@@ -19,12 +17,12 @@ use crate::{
 pub fn generate_proving_ctx(
     child_vk: &RecursionVk,
     proofs: &[RecursionProof],
-    preflights: &[Preflight],
+    _preflights: &[Preflight],
     proofs_type: ProofsType,
     child_is_app: bool,
     deferral_enabled: bool,
 ) -> AirProvingContext<CpuBackend<BabyBearPoseidon2Config>> {
-    debug_assert_eq!(proofs.len(), preflights.len());
+    debug_assert_eq!(proofs.len(), _preflights.len());
     let _ = (proofs_type, child_is_app);
     assert!(
         !deferral_enabled,
@@ -39,26 +37,14 @@ pub fn generate_proving_ctx(
         child_vk
             .fixed_commit
             .as_ref()
-            .map(|commitment| commitment.commit.clone()),
+            .map(|commitment| commitment.commit),
     );
     let fixed_no_omc_init_commit = extract_commit(
         child_vk
             .fixed_no_omc_init_commit
             .as_ref()
-            .map(|commitment| commitment.commit.clone()),
+            .map(|commitment| commitment.commit),
     );
-    let fixed_commit_log2_max_codeword_size = child_vk
-        .fixed_commit
-        .as_ref()
-        .map(|commitment| commitment.log2_max_codeword_size)
-        .unwrap_or_default();
-    let fixed_no_omc_init_commit_log2_max_codeword_size = child_vk
-        .fixed_no_omc_init_commit
-        .as_ref()
-        .map(|commitment| commitment.log2_max_codeword_size)
-        .unwrap_or_default();
-    let vk_digest = child_vk.compute_digest().map(ef_to_limbs);
-
     for (row_idx, row) in trace.chunks_exact_mut(width).enumerate() {
         let (base_row, def_row) = row.split_at_mut(VmPvsCols::<u8>::width());
         let cols: &mut VmPvsCols<F> = base_row.borrow_mut();
@@ -66,23 +52,9 @@ pub fn generate_proving_ctx(
 
         if row_idx < proofs.len() {
             let proof = &proofs[row_idx];
-            let preflight = &preflights[row_idx];
             cols.is_valid = F::ONE;
             cols.is_last = F::from_bool(row_idx + 1 == proofs.len());
             cols.has_verifier_pvs = F::ZERO;
-            cols.vk_digest = vk_digest;
-            cols.lookup_challenge_alpha = ef_to_limbs(preflight.vm_pvs.lookup_challenge_alpha);
-            cols.lookup_challenge_beta = ef_to_limbs(preflight.vm_pvs.lookup_challenge_beta);
-            cols.lookup_challenge_alpha_lookup_count =
-                F::from_usize(preflight.vm_pvs.lookup_challenge_alpha_lookup_count);
-            cols.lookup_challenge_beta_lookup_count =
-                F::from_usize(preflight.vm_pvs.lookup_challenge_beta_lookup_count);
-            cols.fixed_commit_log2_max_codeword_size =
-                F::from_usize(fixed_commit_log2_max_codeword_size);
-            cols.fixed_no_omc_init_commit_log2_max_codeword_size =
-                F::from_usize(fixed_no_omc_init_commit_log2_max_codeword_size);
-            cols.witness_commit_log2_max_codeword_size =
-                F::from_usize(proof.witin_commit.log2_max_codeword_size);
             cols.child_pvs = build_vm_pvs(fixed_commit, fixed_no_omc_init_commit, proof);
         }
 
@@ -117,7 +89,7 @@ fn build_vm_pvs(
     VmPvs {
         fixed_commit,
         fixed_no_omc_init_commit,
-        witness_commit: extract_commit(Some(proof.witin_commit.commit.clone())),
+        witness_commit: extract_commit(Some(proof.witin_commit.commit)),
         exit_code: split_u32_lo_hi(pv.exit_code),
         init_pc: F::from_u32(pv.init_pc),
         init_cycle: F::from_u64(pv.init_cycle),
@@ -156,10 +128,4 @@ fn split_public_io_digest(words: [u32; 8]) -> [F; PUBIO_DIGEST_U16_LIMBS] {
         let limb_idx = idx % 2;
         F::from_u32((words[word_idx] >> (limb_idx * LIMB_BITS)) & LIMB_MASK)
     })
-}
-
-fn ef_to_limbs(value: EF) -> [F; D_EF] {
-    let mut out = [F::ZERO; D_EF];
-    out.copy_from_slice(value.as_basis_coefficients_slice());
-    out
 }

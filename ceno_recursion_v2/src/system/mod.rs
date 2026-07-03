@@ -204,28 +204,6 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         Self::new_with_options(child_vk, VerifierConfig::default())
     }
 
-    fn vm_pvs_lookup_challenges_from_transcript<TS>(sponge: &TS) -> (EF, EF)
-    where
-        TS: Clone + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
-    {
-        let log = sponge.clone().into_log();
-        let values = log.values();
-        let samples = log.samples();
-        let start = values
-            .len()
-            .checked_sub(2 * D_EF)
-            .expect("VM PVS transcript must end with alpha/beta extension samples");
-        debug_assert!(
-            samples[start..start + 2 * D_EF]
-                .iter()
-                .all(|is_sample| *is_sample),
-            "VM PVS transcript suffix must contain alpha/beta samples"
-        );
-        let alpha = EF::from_basis_coefficients_fn(|i| values[start + i]);
-        let beta = EF::from_basis_coefficients_fn(|i| values[start + D_EF + i]);
-        (alpha, beta)
-    }
-
     pub fn new_with_options(child_vk: Arc<RecursionVk>, config: VerifierConfig) -> Self {
         // let child_mvk = convert_vk_from_zkvm(child_vk.as_ref());
         // let proof_shape_constraint = LinearConstraint {
@@ -303,7 +281,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     /// Runs preflight for a single proof, with proper transcript forking.
     ///
     /// This mirrors the native verifier's `verify_proof_validity` fork protocol:
-    /// 1. Trunk: proof-shape metadata only (VmPvs preflight already observed/sampled α/β)
+    /// 1. Trunk: proof-shape observes the verifier prefix and samples α/β
     /// 2. Fork: fresh transcript per chip, observe fork prelude, run Tower + Main
     /// 3. Merge: each fork samples 1 ext element → observe into trunk
     #[tracing::instrument(name = "execute_preflight", skip_all)]
@@ -320,24 +298,17 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             + Clone,
     {
         let mut preflight = Preflight::default();
-        let (alpha_ext, beta_ext) = Self::vm_pvs_lookup_challenges_from_transcript(&sponge);
-        preflight.vm_pvs.lookup_challenge_alpha = alpha_ext;
-        preflight.vm_pvs.lookup_challenge_beta = beta_ext;
 
         // Phase 1: Trunk operations.
-        // Proof-shape metadata and alpha/beta sampling after pre-verifier transcript observes.
+        // Proof-shape owns the verifier transcript prefix and alpha/beta sampling.
         self.proof_shape
             .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
-        let num_lookup_challenge_consumers = preflight.proof_shape.sorted_trace_vdata.len();
-        preflight.vm_pvs.lookup_challenge_alpha_lookup_count = num_lookup_challenge_consumers;
-        preflight.vm_pvs.lookup_challenge_beta_lookup_count = num_lookup_challenge_consumers;
-
-        // VmPvs is owned by the pre-system preflight. The incoming transcript
-        // has already sampled these two challenges; recover and forward them
-        // so forked chip transcripts bind the same alpha/beta as the native
-        // verifier.
-        preflight.proof_shape.lookup_challenge_alpha = ef_to_limbs(alpha_ext);
-        preflight.proof_shape.lookup_challenge_beta = ef_to_limbs(beta_ext);
+        let alpha_ext =
+            EF::from_basis_coefficients_slice(&preflight.proof_shape.lookup_challenge_alpha)
+                .expect("lookup challenge alpha must have extension-field width");
+        let beta_ext =
+            EF::from_basis_coefficients_slice(&preflight.proof_shape.lookup_challenge_beta)
+                .expect("lookup challenge beta must have extension-field width");
 
         // Mark where merge observations begin in the trunk transcript.
         let fork_offset = sponge.len();
@@ -477,12 +448,6 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
 
         (per_module, None, None)
     }
-}
-
-fn ef_to_limbs(value: EF) -> [F; D_EF] {
-    let mut out = [F::ZERO; D_EF];
-    out.copy_from_slice(value.as_basis_coefficients_slice());
-    out
 }
 
 impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
