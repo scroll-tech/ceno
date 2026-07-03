@@ -48,7 +48,7 @@ pub struct InnerAggregationProver<
     agg_node_tracegen: T,
 
     child_vk: Arc<RecursionVk>,
-    child_vk_pcs_data: CommittedTraceData<PB>,
+    child_vk_pcs_data: Option<CommittedTraceData<PB>>,
     circuit: Arc<InnerCircuit<S>>,
 
     self_vk_pcs_data: Option<CommittedTraceData<PB>>,
@@ -178,6 +178,7 @@ impl<
 > InnerAggregationProver<PB, S, T>
 where
     PB::Matrix: Clone,
+    PB::Commitment: Default,
 {
     pub fn agg_prove_no_def<E: StarkEngine<SC = SC, PB = PB>>(
         &self,
@@ -235,6 +236,11 @@ where
         let mut transcript = default_duplex_sponge_recorder();
         transcript_observe_label(&mut transcript, TranscriptLabel::Riscv.as_bytes());
 
+        let child_dag_commit = child_vk_pcs_data
+            .as_ref()
+            .map(|data| data.commitment.clone())
+            .unwrap_or_default();
+
         let (pre_ctxs, poseidon2_compress_inputs, subcircuit_initial_transcripts) = self
             .agg_node_tracegen
             .generate_pre_verifier_subcircuit_ctxs(
@@ -243,7 +249,7 @@ where
                 absent_trace_pvs,
                 child_is_app,
                 child_vk,
-                child_vk_pcs_data.commitment,
+                child_dag_commit,
                 transcript,
             );
 

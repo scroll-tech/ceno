@@ -4,7 +4,7 @@ use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::prover::AirProvingContext;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use verify_stark::pvs::{VerifierBasePvs, VerifierDefPvs};
 
@@ -13,7 +13,7 @@ use crate::{
         ProofsType,
         verifier::air::{VerifierDeferralCols, VerifierPvsCols},
     },
-    system::RecursionProof,
+    system::{RecursionProof, RecursionVk, child_vk_digest},
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -21,6 +21,7 @@ use crate::{
 ///////////////////////////////////////////////////////////////////////////////
 
 pub fn generate_proving_ctx(
+    child_vk: &RecursionVk,
     proofs: &[RecursionProof],
     proofs_type: ProofsType,
     child_is_app: bool,
@@ -33,6 +34,7 @@ pub fn generate_proving_ctx(
     // TODO(recursion-proof-bridge): populate verifier trace/public values from RecursionProof.
     // Any verifier-specific values not available on RecursionProof are currently zero-mocked.
     let _ = (proofs, proofs_type, child_is_app, child_dag_commit);
+    let child_vk_digest = child_vk_digest(child_vk);
 
     let rows = proofs.len().max(1).next_power_of_two();
     let width = VerifierPvsCols::<u8>::width()
@@ -53,6 +55,9 @@ pub fn generate_proving_ctx(
         cols.proof_idx = F::ZERO;
         cols.is_valid = F::ONE;
         cols.has_verifier_pvs = F::ZERO;
+        for (dst, digest_elem) in cols.child_vk_digest.iter_mut().zip(child_vk_digest) {
+            dst.copy_from_slice(digest_elem.as_basis_coefficients_slice());
+        }
 
         if deferral_enabled {
             let def_cols: &mut VerifierDeferralCols<F> = def_row.borrow_mut();

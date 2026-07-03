@@ -450,7 +450,7 @@ where
             local.is_enabled
                 * local.is_last_layer
                 * is_not_dummy.clone()
-                * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
+                * AB::Expr::from_bool(!crate::system::MAIN_PREFIX_ONLY),
         );
     }
 }

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use ceno_zkvm::structs::VK_DIGEST_LEN;
 use itertools::Itertools;
 use openvm_circuit_primitives::encoder::Encoder;
 use openvm_cpu_backend::CpuBackend;
@@ -7,7 +8,7 @@ use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
     p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
 use witness::next_pow2_instance_padding;
@@ -23,6 +24,7 @@ use crate::{
         RecursionProof, RecursionVk, TraceGenModule, TraceVData,
     },
     tracegen::{ModuleChip, RowMajorChip},
+    utils::TranscriptLabel,
 };
 use recursion_circuit::primitives::{
     bus::RangeCheckerBus,
@@ -72,6 +74,7 @@ pub struct ProofShapeModule {
     // Module sends extra public values message for use outside of verifier
     // sub-circuit if true
     continuations_enabled: bool,
+    public_values_start_tidx: usize,
 }
 
 impl ProofShapeModule {
@@ -84,6 +87,7 @@ impl ProofShapeModule {
         let num_airs = child_vk.circuit_vks.len();
         let idx_encoder = Arc::new(Encoder::new(num_airs, 2, true));
         let per_air = extract_air_metadata_from_vk(child_vk);
+        let public_values_start_tidx = TranscriptLabel::Riscv.field_len() + VK_DIGEST_LEN * D_EF;
 
         let range_bus = bus_inventory.range_checker_bus;
         Self {
@@ -95,6 +99,7 @@ impl ProofShapeModule {
             num_pvs_bus: NumPublicValuesBus::new(b.new_bus_idx()),
             idx_encoder,
             continuations_enabled,
+            public_values_start_tidx,
         }
     }
 
@@ -271,13 +276,13 @@ impl AirModule for ProofShapeModule {
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             fork_final_sample_bus: self.bus_inventory.fork_final_sample_bus,
             n_lift_bus: self.bus_inventory.n_lift_bus,
-            tower_prefix_only: crate::system::TOWER_PREFIX_ONLY,
         };
         let pvs_air = PublicValuesAir {
             public_values_bus: self.bus_inventory.public_values_bus,
             num_pvs_bus: self.num_pvs_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             continuations_enabled: self.continuations_enabled,
+            public_values_start_tidx: self.public_values_start_tidx,
         };
         let range_checker = RangeCheckerAir::<8> {
             bus: self.range_bus,

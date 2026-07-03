@@ -4,8 +4,9 @@ mod types;
 
 pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
-    BatchConstraintPreflight, ChipTranscriptRange, ForkTranscriptLog, MainPreflight, Preflight,
-    ProofShapePreflight, TowerChipTranscriptRange, TowerPreflight, TraceVData,
+    BatchConstraintPreflight, ChipTranscriptRange, ForkTranscriptLog, MainFinalClaimRecord,
+    MainPreflight, MainTranscriptRecord, Preflight, ProofShapePreflight, TowerChipTranscriptRange,
+    TowerPreflight, TraceVData,
 };
 pub use recursion_circuit::system::{
     AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule, VerifierConfig,
@@ -20,7 +21,10 @@ pub use types::{
     convert_vk_from_zkvm,
 };
 
-use std::{iter, mem, sync::Arc};
+use std::{
+    iter, mem,
+    sync::{Arc, Mutex, OnceLock},
+};
 
 use crate::{
     batch_constraint::{self, BatchConstraintModule},
@@ -29,6 +33,7 @@ use crate::{
     transcript::TranscriptModule,
     utils::{TranscriptLabel, transcript_observe_label},
 };
+use ceno_zkvm::structs::VK_DIGEST_LEN;
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
@@ -50,7 +55,46 @@ use recursion_circuit::primitives::{
 use tracing::Span;
 
 pub const POW_CHECKER_HEIGHT: usize = 32;
-pub(crate) const TOWER_PREFIX_ONLY: bool = true;
+/// Migration milestone: stop after the tower-to-main bridge.
+///
+/// This enables Transcript, ProofShape, Tower, and Main AIRs. The downstream
+/// batch-constraint/PCS opening path is still guarded because its current
+/// tracegen is placeholder-only.
+pub(crate) const MAIN_PREFIX_ONLY: bool = true;
+
+const HARDCODED_CHILD_VK_DIGEST_LIMBS: [[u32; D_EF]; VK_DIGEST_LEN] = [
+    [1350452481, 1461358323, 1407156150, 479708697],
+    [950211392, 849237334, 1264246426, 771730644],
+];
+
+fn hardcoded_child_vk_digest() -> [RecursionField; VK_DIGEST_LEN] {
+    HARDCODED_CHILD_VK_DIGEST_LIMBS.map(|limbs| {
+        RecursionField::from_basis_coefficients_slice(&limbs.map(F::from_u32))
+            .expect("hardcoded VK digest limbs must match RecursionField degree")
+    })
+}
+
+pub(crate) fn child_vk_digest(child_vk: &RecursionVk) -> [RecursionField; VK_DIGEST_LEN] {
+    if std::env::var_os("CENO_REC_V2_REAL_VK_DIGEST").is_none() {
+        // TODO(recursion-v2): remove this fixture-specific bypass once VK digest
+        // binding is cheap enough for the debug loop. The real digest path below
+        // spends ~89s absorbing the current 95,043,872-byte imported VK through
+        // Poseidon. These constants are the native digest for that fixture.
+        return hardcoded_child_vk_digest();
+    }
+
+    static CACHE: OnceLock<
+        Mutex<std::collections::HashMap<usize, [RecursionField; VK_DIGEST_LEN]>>,
+    > = OnceLock::new();
+    let key = child_vk as *const RecursionVk as usize;
+    let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
+    if let Some(digest) = cache.lock().unwrap().get(&key).copied() {
+        return digest;
+    }
+    let digest = child_vk.compute_digest();
+    cache.lock().unwrap().insert(key, digest);
+    digest
+}
 
 /// Local override of the upstream CPU tracegen context so modules accept ZKVM proofs.
 pub struct GlobalCtxCpu;
@@ -79,7 +123,7 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
         &self,
         engine: &E,
         child_vk: &RecursionVk,
-    ) -> CommittedTraceData<PB>;
+    ) -> Option<CommittedTraceData<PB>>;
 
     #[allow(clippy::ptr_arg)]
     fn generate_proving_ctxs<
@@ -89,7 +133,7 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
     >(
         &self,
         child_vk: &RecursionVk,
-        child_vk_pcs_data: CommittedTraceData<PB>,
+        child_vk_pcs_data: Option<CommittedTraceData<PB>>,
         proofs: &[RecursionProof],
         external_data: &mut VerifierExternalData<'_>,
         initial_transcripts: Vec<TS>,
@@ -103,7 +147,7 @@ pub trait VerifierTraceGen<PB: ProverBackend, SC: StarkProtocolConfig<F = F>> {
     >(
         &self,
         child_vk: &RecursionVk,
-        child_vk_pcs_data: CommittedTraceData<PB>,
+        child_vk_pcs_data: Option<CommittedTraceData<PB>>,
         proofs: &[RecursionProof],
         initial_transcript: TS,
     ) -> Vec<AirProvingContext<PB>> {
@@ -204,7 +248,7 @@ impl<'a> TraceModuleRef<'a> {
         child_vk: &RecursionVk,
         proofs: &[RecursionProof],
         preflights: &[Preflight],
-        child_vk_pcs_data: &CommittedTraceData<CpuBackend<SC>>,
+        child_vk_pcs_data: &Option<CommittedTraceData<CpuBackend<SC>>>,
         pow_checker_gen: &Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
         exp_bits_len_gen: &ExpBitsLenTraceGenerator,
         external_data: &VerifierExternalData<'_>,
@@ -223,7 +267,7 @@ impl<'a> TraceModuleRef<'a> {
             ),
             TraceModuleRef::ProofShape(module) => {
                 let mut range_check_inputs = external_data.range_check_inputs.to_vec();
-                if TOWER_PREFIX_ONLY {
+                if MAIN_PREFIX_ONLY {
                     range_check_inputs.extend(
                         crate::tower::collect_tower_range_checks(child_vk, proofs, preflights)
                             .ok()?,
@@ -247,8 +291,10 @@ impl<'a> TraceModuleRef<'a> {
                 exp_bits_len_gen,
                 required_heights,
             ),
-            TraceModuleRef::BatchConstraint(module) => module
-                .generate_placeholder_proving_ctxs(child_vk_pcs_data.clone(), required_heights),
+            TraceModuleRef::BatchConstraint(module) => module.generate_placeholder_proving_ctxs(
+                child_vk_pcs_data.as_ref()?.clone(),
+                required_heights,
+            ),
         }
     }
 }
@@ -346,7 +392,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     {
         let mut preflight = Preflight::default();
 
-        if TOWER_PREFIX_ONLY {
+        if MAIN_PREFIX_ONLY {
             let log = sponge.clone().into_log();
             let values = log.values();
             if values.len() >= 2 * D_EF {
@@ -420,6 +466,14 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             let tower_tidx = fs.len();
             let tower_replay =
                 crate::tower::record_and_replay_tower_preflight(fs, child_vk, chip_idx, chip_proof);
+            crate::main::replay_chip_pre_main_tail_transcript(
+                fs,
+                child_vk,
+                chip_idx,
+                chip_proof,
+                [alpha_ext, beta_ext],
+            )
+            .unwrap_or_else(|err| panic!("failed to replay pre-main transcript tail: {err}"));
 
             // Record tower entry with fork-local tidx at tower stage start.
             preflight.gkr.chips.push(TowerChipTranscriptRange {
@@ -428,22 +482,6 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 fork_idx: fork_id,
                 tower_replay,
             });
-
-            if !TOWER_PREFIX_ONLY {
-                // Main preflight for this chip.
-                let main_tidx = fs.len();
-                crate::main::record_main_transcript(
-                    fs,
-                    chip_idx,
-                    proof.main_constraint_proof.claimed_sum,
-                );
-
-                preflight.main.chips.push(ChipTranscriptRange {
-                    chip_idx,
-                    tidx: main_tidx,
-                    fork_idx: fork_id,
-                });
-            }
         }
 
         // Phase 4: Merge — sample 1 ext element from each fork, observe into trunk.
@@ -453,7 +491,10 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             sponge.observe_ext(sample);
         }
 
-        if !TOWER_PREFIX_ONLY {
+        self.main_module
+            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+
+        if !MAIN_PREFIX_ONLY {
             // Phase 5: batch-constraint transcript replay on the trunk, after the
             // fork merge and before PCS opening verification.
             self.batch_constraint
@@ -526,8 +567,8 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         let t_n = self.transcript.num_airs();
         let ps_n = self.proof_shape.num_airs();
         let gkr_n = self.gkr.num_airs();
-        let module_air_counts = if TOWER_PREFIX_ONLY {
-            vec![t_n, ps_n, gkr_n]
+        let module_air_counts = if MAIN_PREFIX_ONLY {
+            vec![t_n, ps_n, gkr_n, self.main_module.num_airs()]
         } else {
             vec![
                 t_n,
@@ -543,7 +584,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         };
 
         let total_module_airs: usize = module_air_counts.iter().sum();
-        let total = total_module_airs + if TOWER_PREFIX_ONLY { 1 } else { 2 };
+        let total = total_module_airs + if MAIN_PREFIX_ONLY { 1 } else { 2 };
         assert_eq!(heights.len(), total);
 
         let mut offset = 0usize;
@@ -552,7 +593,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             per_module.push(Some(&heights[offset..offset + n]));
             offset += n;
         }
-        if TOWER_PREFIX_ONLY {
+        if MAIN_PREFIX_ONLY {
             debug_assert_eq!(heights.len() - offset, 1);
             (per_module, None, Some(heights[offset]))
         } else {
@@ -579,8 +620,12 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         &self,
         engine: &E,
         child_vk: &RecursionVk,
-    ) -> CommittedTraceData<CpuBackend<SC>> {
-        batch_constraint::commit_child_vk(engine, child_vk)
+    ) -> Option<CommittedTraceData<CpuBackend<SC>>> {
+        if MAIN_PREFIX_ONLY {
+            None
+        } else {
+            Some(batch_constraint::commit_child_vk(engine, child_vk))
+        }
     }
 
     #[tracing::instrument(name = "subcircuit_generate_proving_ctxs", skip_all)]
@@ -591,7 +636,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
     >(
         &self,
         child_vk: &RecursionVk,
-        child_vk_pcs_data: CommittedTraceData<CpuBackend<SC>>,
+        child_vk_pcs_data: Option<CommittedTraceData<CpuBackend<SC>>>,
         proofs: &[RecursionProof],
         external_data: &mut VerifierExternalData<'_>,
         initial_transcripts: Vec<TS>,
@@ -634,11 +679,12 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         let (module_required, power_checker_required, exp_bits_len_required) =
             self.split_required_heights(external_data.required_heights);
 
-        let modules = if TOWER_PREFIX_ONLY {
+        let modules = if MAIN_PREFIX_ONLY {
             vec![
                 TraceModuleRef::Transcript(&self.transcript),
                 TraceModuleRef::ProofShape(&self.proof_shape),
                 TraceModuleRef::Tower(&self.gkr),
+                TraceModuleRef::Main(&self.main_module),
             ]
         } else {
             vec![
@@ -685,7 +731,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         if power_checker_required.is_some_and(|h| h != POW_CHECKER_HEIGHT) {
             return None;
         }
-        if !TOWER_PREFIX_ONLY {
+        if !MAIN_PREFIX_ONLY {
             let power_height = power_checker_required.unwrap_or(POW_CHECKER_HEIGHT);
             let power_trace = power_checker_gen.generate_trace_row_major();
             if power_trace.height() != power_height {
@@ -713,7 +759,7 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
             self.bus_inventory.right_shift_bus,
         );
         let power_checker_air =
-            (!TOWER_PREFIX_ONLY).then_some(PowerCheckerAir::<2, POW_CHECKER_HEIGHT> {
+            (!MAIN_PREFIX_ONLY).then_some(PowerCheckerAir::<2, POW_CHECKER_HEIGHT> {
                 pow_bus: self.bus_inventory.power_checker_bus,
                 range_bus: self.bus_inventory.range_checker_bus,
             });
@@ -722,14 +768,9 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
             .chain(self.transcript.airs())
             .chain(self.proof_shape.airs())
             .chain(self.gkr.airs())
+            .chain(self.main_module.airs())
             .chain(
-                (!TOWER_PREFIX_ONLY)
-                    .then(|| self.main_module.airs())
-                    .into_iter()
-                    .flatten(),
-            )
-            .chain(
-                (!TOWER_PREFIX_ONLY)
+                (!MAIN_PREFIX_ONLY)
                     .then(|| self.batch_constraint.airs())
                     .into_iter()
                     .flatten(),

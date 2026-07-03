@@ -54,6 +54,7 @@ impl<SC: StarkProtocolConfig<F = F>, S: AggregationSubCircuit> Circuit<SC> for I
         };
 
         let verifier_pvs_air = Arc::new(verifier::VerifierPvsAir {
+            transcript_bus,
             public_values_bus,
             // cached_commit_bus,
             pvs_air_consistency_bus,

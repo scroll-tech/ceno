@@ -1,11 +1,14 @@
 use core::borrow::{Borrow, BorrowMut};
 
+use ceno_zkvm::structs::VK_DIGEST_LEN;
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
     prover::AirProvingContext,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{
+    BabyBearPoseidon2Config, D_EF, DIGEST_SIZE, F,
+};
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
@@ -125,6 +128,7 @@ fn collect_rows(
         .enumerate()
         .flat_map(|(proof_idx, (proof, preflight))| {
             let mut tidx = TranscriptLabel::Riscv.field_len()
+                + VK_DIGEST_LEN * D_EF
                 + child_vk
                     .circuit_vks
                     .values()

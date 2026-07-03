@@ -1086,16 +1086,16 @@ pub struct ZKVMVerifyingKey<
 /// Number of extension-field elements squeezed from the digest sponge.
 pub const VK_DIGEST_LEN: usize = 2;
 
-/// Convert bytes into base-field elements using ≤ 3-byte chunks.
-fn bytes_to_felts_safe<F: FieldAlgebra>(bytes: &[u8]) -> Vec<F> {
-    bytes
-        .chunks(3)
-        .map(|chunk| {
-            let mut arr = [0u8; 4];
-            arr[..chunk.len()].copy_from_slice(chunk);
-            F::from_u32(u32::from_le_bytes(arr))
-        })
-        .collect()
+fn observe_bytes_safe<F, C>(challenger: &mut C, bytes: &[u8])
+where
+    F: FieldAlgebra,
+    C: CanObserve<F>,
+{
+    for chunk in bytes.chunks(3) {
+        let mut arr = [0u8; 4];
+        arr[..chunk.len()].copy_from_slice(chunk);
+        challenger.observe(F::from_u32(u32::from_le_bytes(arr)));
+    }
 }
 
 /// Hash the supplied VK preimage into `VK_DIGEST_LEN` extension elements.
@@ -1128,7 +1128,7 @@ where
     .expect("vk digest serialization is infallible for a valid VK");
 
     let mut sponge = DefaultChallenger::<E::BaseField>::new_poseidon_default();
-    sponge.observe_slice(&bytes_to_felts_safe::<E::BaseField>(&bytes));
+    observe_bytes_safe::<E::BaseField, _>(&mut sponge, &bytes);
     std::array::from_fn(|_| sponge.sample_algebra_element())
 }
 

@@ -4,7 +4,7 @@ use itertools::fold;
 use openvm_circuit_primitives::{
     SubAir,
     encoder::Encoder,
-    utils::{and, not, or},
+    utils::{and, not},
 };
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
@@ -29,7 +29,7 @@ use crate::{
         AirMetadata,
         bus::{
             AirShapeProperty, ProofShapePermutationBus, ProofShapePermutationMessage,
-            StartingTidxBus, StartingTidxMessage,
+            StartingTidxBus,
         },
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
@@ -54,6 +54,8 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
 
     // First possible transcript index of the current AIR.
     pub starting_tidx: F,
+    // Fork-local transcript index where the tower verifier starts for this AIR.
+    pub tower_tidx: F,
     // First trunk transcript index used by the fork-merge phase.
     pub fork_start_tidx: F,
     // Fork id assigned by native chip-proof iteration order.
@@ -128,7 +130,6 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub fork_final_sample_bus: ForkFinalSampleBus,
     pub n_lift_bus: NLiftBus,
-    pub tower_prefix_only: bool,
 }
 
 impl<F, const NUM_LIMBS: usize, const LIMB_BITS: usize> BaseAir<F>
@@ -337,22 +338,6 @@ where
         // TRANSCRIPT OBSERVATIONS
         ///////////////////////////////////////////////////////////////////////////////////////////
 
-        let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
-
-        self.starting_tidx_bus.receive(
-            builder,
-            local.proof_idx,
-            StartingTidxMessage {
-                air_idx: air_idx.clone() * local.is_valid
-                    + AB::Expr::from_usize(self.per_air.len()) * local.is_last,
-                tidx: local.starting_tidx.into(),
-            },
-            or(
-                local.is_last,
-                and(local.is_valid, not::<AB::Expr>(is_first_idx)),
-            ) * AB::Expr::from_bool(!self.tower_prefix_only),
-        );
-
         // All active proof-shape rows for a proof agree on the trunk fork-merge
         // start. The value is also constrained by the trunk TranscriptBus
         // receives below; it is not the same concept as proof-shape post_tidx.
@@ -376,17 +361,6 @@ where
                 local.is_present,
             );
         }
-
-        // constrain next air tid
-        self.starting_tidx_bus.send(
-            builder,
-            local.proof_idx,
-            StartingTidxMessage {
-                air_idx: air_idx.clone() + AB::F::ONE,
-                tidx: next.starting_tidx.into(),
-            },
-            local.is_valid * AB::Expr::from_bool(!self.tower_prefix_only),
-        );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // SNAPSHOT STATE CONTINUITY (forked transcript)
@@ -508,7 +482,7 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // AIR SHAPE LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let downstream_enabled = AB::Expr::from_bool(!self.tower_prefix_only);
+        let downstream_enabled = AB::Expr::from_bool(!crate::system::MAIN_PREFIX_ONLY);
 
         self.air_shape_bus.add_key_with_lookups(
             builder,
@@ -620,9 +594,7 @@ where
                 n_abs: n.clone(),
                 n_sign_bit: AB::Expr::ZERO,
             },
-            local.is_present
-                * (local.num_air_id_lookups + AB::F::ONE)
-                * AB::Expr::from_bool(!self.tower_prefix_only),
+            local.is_present * (local.num_air_id_lookups + AB::F::ONE) * downstream_enabled.clone(),
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -654,7 +626,7 @@ where
             },
             local.is_present
                 * (num_witin + num_structural_witin + num_fixed)
-                * AB::Expr::from_bool(!self.tower_prefix_only),
+                * downstream_enabled.clone(),
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -725,17 +697,9 @@ where
             builder,
             local.proof_idx,
             TowerModuleMessage {
-                idx: if self.tower_prefix_only {
-                    local.sorted_idx.into()
-                } else {
-                    air_idx.clone()
-                },
-                tidx: local.starting_tidx.into(),
-                n_logup: if self.tower_prefix_only {
-                    local.tower_n_logup.into()
-                } else {
-                    n
-                },
+                idx: local.sorted_idx.into(),
+                tidx: local.tower_tidx.into(),
+                n_logup: local.tower_n_logup.into(),
             },
             local.is_present * local.is_valid,
         );

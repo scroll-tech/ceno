@@ -77,6 +77,7 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
         let (verifier_ctx, poseidon2_inputs) = super::verifier::generate_proving_ctx(
+            child_vk,
             proofs,
             proofs_type,
             child_is_app,

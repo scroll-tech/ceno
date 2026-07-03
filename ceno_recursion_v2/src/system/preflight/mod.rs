@@ -84,6 +84,29 @@ pub struct TraceVData {
 #[derive(Clone, Debug, Default)]
 pub struct MainPreflight {
     pub chips: Vec<ChipTranscriptRange>,
+    pub transcript_start: usize,
+    pub transcript_end: usize,
+    pub final_claims: Vec<MainFinalClaimRecord>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainTranscriptRecord {
+    pub proof_idx: usize,
+    pub fork_id: usize,
+    pub is_fork: bool,
+    pub tidx: usize,
+    pub value: F,
+    pub is_sample: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainFinalClaimRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub contribution: EF,
+    pub acc_in: EF,
+    pub acc_out: EF,
+    pub expected: EF,
 }
 
 #[derive(Clone, Debug, Default)]
