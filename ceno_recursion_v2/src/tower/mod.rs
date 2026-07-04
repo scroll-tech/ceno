@@ -282,6 +282,7 @@ pub(crate) struct TowerTranscriptSchedule {
     pub(crate) alpha_logup: EF,
     pub(crate) beta: EF,
     pub(crate) lambdas: Vec<EF>,
+    pub(crate) final_alpha: EF,
     pub(crate) mus: Vec<EF>,
     pub(crate) ris: Vec<EF>,
 }
@@ -575,6 +576,7 @@ fn build_chip_records(
         tidx: tidx + tower_transcript_len::ALPHA_BETA_LEN,
         layer_claims: Vec::with_capacity(layer_count),
         lambdas: vec![EF::ZERO; layer_count],
+        final_alpha: schedule.final_alpha,
         eq_at_r_primes: vec![EF::ZERO; layer_count],
         read_counts: vec![1; layer_count],
         write_counts: vec![1; layer_count],
@@ -1650,12 +1652,19 @@ where
         let mu = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         mus.push(mu);
     }
+    let final_alpha = if layer_count > 0 {
+        transcript_observe_label(ts, b"combine subset evals");
+        FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts)
+    } else {
+        EF::ZERO
+    };
 
     let _ = read_count;
     TowerTranscriptSchedule {
         alpha_logup,
         beta,
         lambdas,
+        final_alpha,
         mus,
         ris,
     }

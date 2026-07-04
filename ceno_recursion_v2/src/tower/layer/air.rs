@@ -49,6 +49,8 @@ pub struct TowerLayerCols<T> {
 
     /// Sampled batching challenge
     pub lambda: [T; D_EF],
+    /// Native tower samples one final batching challenge after the last merge.
+    pub final_alpha: [T; D_EF],
     /// Challenge inherited from previous layer
     pub lambda_prime: [T; D_EF],
     /// Reduction point
@@ -509,7 +511,7 @@ where
             local.proof_idx,
             TowerLayerOutputMessage {
                 idx: local.idx.into(),
-                tidx: tidx_end,
+                tidx: tidx_end + is_last.clone() * AB::Expr::from_usize(ALPHA_LEN),
                 layer_idx_end: local.layer_idx.into(),
                 input_layer_claim: folded_claim.map(Into::into),
                 lambda: local.lambda.map(Into::into),
@@ -576,7 +578,7 @@ where
                 sumcheck_round: local.layer_idx + AB::Expr::ONE,
                 challenge: local.mu.map(Into::into),
             },
-            local.is_enabled * (AB::Expr::ONE - is_last) * is_not_dummy.clone(),
+            local.is_enabled * (AB::Expr::ONE - is_last.clone()) * is_not_dummy.clone(),
         );
 
         ///////////////////////////////////////////////////////////////////////
@@ -697,6 +699,33 @@ where
                     is_sample: AB::Expr::ONE,
                 },
                 local.is_enabled * is_not_dummy.clone(),
+            );
+        }
+        let final_alpha_label_tidx = tidx + AB::Expr::from_usize(D_EF);
+        for (offset, value) in LABEL_COMBINE_FIELDS.into_iter().enumerate() {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: final_alpha_label_tidx.clone() + AB::Expr::from_usize(offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                is_last.clone() * is_not_dummy.clone(),
+            );
+        }
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: final_alpha_label_tidx.clone() + AB::Expr::from_usize(LABEL_COMBINE + i),
+                    value: local.final_alpha[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                is_last.clone() * is_not_dummy.clone(),
             );
         }
     }

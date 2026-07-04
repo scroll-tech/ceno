@@ -236,7 +236,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         // layers_cumulative(n) =
         //   n*(SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN)
         //   + n*(n+1)/2*ROUND_LEN
-        //   + (n-1)*ALPHA_LEN, for n > 0.
+        //   + n*ALPHA_LEN, for n > 0, including native's final post-merge alpha.
         let read_active_layers = local.read_tower_vars - local.has_read_out;
         let write_active_layers = local.write_tower_vars - local.has_write_out;
         let logup_active_layers = local.logup_tower_vars - local.has_logup_out;
@@ -248,7 +248,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         let round_span = num_layers.clone()
             * (num_layers.clone() + AB::Expr::ONE)
             * AB::Expr::from_usize(ROUND_LEN / 2);
-        let alpha_span = (num_layers.clone() - AB::Expr::ONE) * AB::Expr::from_usize(ALPHA_LEN);
+        let alpha_span = num_layers.clone() * AB::Expr::from_usize(ALPHA_LEN);
         let tidx_after_gkr_layers = tidx_after_alpha_beta.clone()
             + has_interactions.clone() * (fixed_span + round_span + alpha_span + claim_span);
         // 1. TowerLayerInputBus

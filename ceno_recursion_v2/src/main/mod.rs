@@ -12,7 +12,6 @@ use std::{iter, sync::Arc};
 use eyre::{Result, bail, eyre};
 use ff_ext::ExtensionField;
 use itertools::{Either, Itertools, chain};
-use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
     Expression, StructuralWitIn,
     StructuralWitInType::{
@@ -22,7 +21,6 @@ use multilinear_extensions::{
     },
     util::ceil_log2,
     utils::eval_by_expr_with_instance,
-    virtual_poly::VPAuxInfo,
 };
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
@@ -32,8 +30,7 @@ use openvm_stark_backend::{
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, F};
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
-use sumcheck::{structs::IOPVerifierState, util::extrapolate_uni_poly};
-use transcript::{BasicTranscript, Transcript};
+use sumcheck::util::extrapolate_uni_poly;
 use witness::next_pow2_instance_padding;
 
 use self::{
@@ -46,7 +43,7 @@ use crate::{
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, MainEvalRecord,
         MainFinalClaimRecord, MainFrontloadTermRecord, MainTowerPointEqRecord, Preflight,
-        RecursionField, RecursionPcs, RecursionProof, RecursionVk, TraceGenModule, child_vk_digest,
+        RecursionField, RecursionProof, RecursionVk, TraceGenModule,
     },
     tower::{
         TowerInputRecord, build_tower_input_records, build_tower_main_point_records,
@@ -241,10 +238,20 @@ impl MainModule {
                 .filter(|record| record.proof_idx == proof_idx)
                 .flat_map(|record| record.tidx..record.tidx + D_EF)
                 .collect::<std::collections::BTreeSet<_>>();
+            let global_challenge_tidxs = global_sumcheck_records
+                .iter()
+                .filter(|record| record.proof_idx == proof_idx)
+                .flat_map(|record| {
+                    record
+                        .rounds
+                        .iter()
+                        .flat_map(|round| round.challenge_tidx..round.challenge_tidx + D_EF)
+                })
+                .collect::<std::collections::BTreeSet<_>>();
             let values = preflight.transcript.values();
             let samples = preflight.transcript.samples();
             for tidx in preflight.main.transcript_start..preflight.main.transcript_end {
-                if eval_tidxs.contains(&tidx) {
+                if eval_tidxs.contains(&tidx) || global_challenge_tidxs.contains(&tidx) {
                     continue;
                 }
                 transcript_records.push(crate::system::MainTranscriptRecord {
@@ -436,7 +443,7 @@ fn main_tidx_from_tower_input(record: &TowerInputRecord) -> usize {
     let fixed_span =
         num_layers * (tower_transcript_len::SUMCHECK_INIT_LEN + tower_transcript_len::MERGE_LEN);
     let round_span = num_layers * (num_layers + 1) * (tower_transcript_len::ROUND_LEN / 2);
-    let alpha_span = num_layers.saturating_sub(1) * tower_transcript_len::ALPHA_LEN;
+    let alpha_span = num_layers * tower_transcript_len::ALPHA_LEN;
     tidx_after_alpha_beta + fixed_span + round_span + alpha_span + claim_span
 }
 
@@ -665,23 +672,24 @@ where
         );
     }
 
-    let _openvm_alpha_pows = sample_challenge_pows(ts, total_exprs, b"combine subset evals");
-    let (_openvm_global_in_point, _openvm_expected_evaluation, challenge_tidxs) =
-        replay_main_sumcheck(
-            ts,
-            main_proof.claimed_sum,
-            &main_proof.proof.proof,
-            max_num_variables,
-            max_degree,
-        )?;
+    let alpha_pows = sample_challenge_pows(ts, total_exprs, b"combine subset evals");
+    let (global_in_point, expected_evaluation, challenge_tidxs) = replay_main_sumcheck(
+        ts,
+        main_proof.claimed_sum,
+        &main_proof.proof.proof,
+        max_num_variables,
+        max_degree,
+    )?;
 
     let eval_tidx_start = ts.len();
     for eval in &main_proof.proof.evals {
         ts.observe_ext(*eval);
     }
 
-    let (pcs_challenges, alpha_pows, global_in_point, expected_evaluation) =
-        native_main_claim_inputs(child_vk, proof, total_exprs, max_num_variables, max_degree)?;
+    let pcs_challenges = [
+        preflight.vm_pvs.lookup_challenge_alpha,
+        preflight.vm_pvs.lookup_challenge_beta,
+    ];
     let mut eval_records =
         build_main_eval_records(&layers, &main_proof.proof.evals, eval_tidx_start);
     let tower_point_eqs = build_main_tower_point_eq_records(&layers, &global_in_point);
@@ -808,266 +816,6 @@ fn build_global_sumcheck_record(
         expected: expected_evaluation,
         rounds,
     })
-}
-
-fn native_main_claim_inputs(
-    child_vk: &RecursionVk,
-    proof: &RecursionProof,
-    total_exprs: usize,
-    max_num_variables: usize,
-    max_degree: usize,
-) -> Result<(
-    [RecursionField; 2],
-    Vec<RecursionField>,
-    Vec<RecursionField>,
-    RecursionField,
-)> {
-    let mut transcript = BasicTranscript::<RecursionField>::new(b"riscv");
-    transcript.append_field_element_exts(&child_vk_digest(child_vk));
-
-    for (_, circuit_vk) in child_vk.circuit_vks.iter() {
-        for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
-            transcript.append_field_element(
-                &proof
-                    .public_values
-                    .query_by_index::<RecursionField>(instance_value.0),
-            );
-        }
-    }
-
-    if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
-        RecursionPcs::write_commitment(fixed_commit, &mut transcript)
-            .map_err(|err| eyre!("native fixed commitment replay failed: {err:?}"))?;
-    }
-    if let Some(fixed_commit) = child_vk.fixed_no_omc_init_commit.as_ref() {
-        RecursionPcs::write_commitment(fixed_commit, &mut transcript)
-            .map_err(|err| eyre!("native fixed no-omc commitment replay failed: {err:?}"))?;
-    }
-    RecursionPcs::write_commitment(&proof.witin_commit, &mut transcript)
-        .map_err(|err| eyre!("native witness commitment replay failed: {err:?}"))?;
-
-    let challenges = [
-        transcript.read_challenge().elements,
-        transcript.read_challenge().elements,
-    ];
-    let mut forked_transcripts =
-        vec![BasicTranscript::<RecursionField>::new(b"fork"); proof.chip_proofs.len()];
-
-    for (fork_idx, ((chip_idx, chip_proof), fork_transcript)) in proof
-        .chip_proofs
-        .iter()
-        .zip_eq(forked_transcripts.iter_mut())
-        .enumerate()
-    {
-        let Some(name) = child_vk.circuit_index_to_name.get(chip_idx) else {
-            bail!("missing circuit name for chip index {chip_idx}");
-        };
-        let circuit_vk = child_vk
-            .circuit_vks
-            .get(name)
-            .ok_or_else(|| eyre!("missing circuit vk for {name}"))?;
-        if proof.public_values.shard_id > 0 && circuit_vk.get_cs().with_omc_init_only() {
-            continue;
-        }
-
-        fork_transcript.append_field_element_ext(&challenges[0]);
-        fork_transcript.append_field_element_ext(&challenges[1]);
-        fork_transcript.append_field_element(&F::from_usize(fork_idx));
-        fork_transcript.append_field_element(&F::from_u64(*chip_idx as u64));
-        for num_instance in &chip_proof.num_instances {
-            fork_transcript.append_field_element(&F::from_usize(*num_instance));
-        }
-
-        let (_, num_var_with_rotation) = native_tower_num_variables(circuit_vk, chip_proof);
-        native_record_gkr_transcript(fork_transcript, circuit_vk, chip_proof)?;
-        let composed_cs = circuit_vk.get_cs();
-        if composed_cs.has_ecc_ops() {
-            let ecc_proof = chip_proof
-                .ecc_proof
-                .as_ref()
-                .ok_or_else(|| eyre!("{name} missing ecc proof"))?;
-            native_replay_ecc_transcript(fork_transcript, ecc_proof);
-        }
-
-        let gkr_circuit = composed_cs
-            .gkr_circuit
-            .as_ref()
-            .ok_or_else(|| eyre!("{name} missing gkr circuit in vk"))?;
-        let first_layer = gkr_circuit
-            .layers
-            .first()
-            .ok_or_else(|| eyre!("{name} empty gkr circuit layers"))?;
-        if !first_layer.rotation_exprs.1.is_empty() {
-            let rotation_proof = chip_proof
-                .rotation_proof
-                .as_ref()
-                .ok_or_else(|| eyre!("{name} missing rotation proof"))?;
-            native_replay_rotation_transcript(
-                fork_transcript,
-                rotation_proof,
-                first_layer.rotation_exprs.1.len(),
-                num_var_with_rotation,
-            )?;
-        }
-    }
-
-    for mut fork_transcript in forked_transcripts {
-        let sample = fork_transcript.sample_vec(1)[0];
-        transcript.append_field_element_ext(&sample);
-    }
-
-    let alpha_pows = sumcheck::util::get_challenge_pows(total_exprs, &mut transcript);
-    let subclaim = IOPVerifierState::verify(
-        proof.main_constraint_proof.claimed_sum,
-        &proof.main_constraint_proof.proof.proof,
-        &VPAuxInfo {
-            max_degree,
-            max_num_variables,
-            phantom: std::marker::PhantomData,
-        },
-        &mut transcript,
-    );
-    let global_in_point = subclaim
-        .point
-        .into_iter()
-        .map(|challenge| challenge.elements)
-        .collect_vec();
-    transcript.append_field_element_exts(&proof.main_constraint_proof.proof.evals);
-    Ok((
-        challenges,
-        alpha_pows,
-        global_in_point,
-        subclaim.expected_evaluation,
-    ))
-}
-
-fn native_record_gkr_transcript(
-    ts: &mut BasicTranscript<RecursionField>,
-    circuit_vk: &ceno_zkvm::structs::VerifyingKey<RecursionField>,
-    chip_proof: &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
-) -> Result<()> {
-    for eval in chip_proof
-        .r_out_evals
-        .iter()
-        .chain(chip_proof.w_out_evals.iter())
-        .chain(chip_proof.lk_out_evals.iter())
-        .flatten()
-    {
-        ts.append_field_element_ext(eval);
-    }
-
-    let (tower_num_variables, _) = native_tower_num_variables(circuit_vk, chip_proof);
-    ceno_zkvm::scheme::verifier::TowerVerify::verify(
-        chip_proof
-            .r_out_evals
-            .iter()
-            .cloned()
-            .chain(chip_proof.w_out_evals.iter().cloned())
-            .collect_vec(),
-        chip_proof.lk_out_evals.clone(),
-        &chip_proof.tower_proof,
-        tower_num_variables,
-        2,
-        ts,
-    )
-    .map(|_| ())
-    .map_err(|err| eyre!("native tower transcript replay failed: {err:?}"))
-}
-
-fn native_replay_ecc_transcript(
-    ts: &mut BasicTranscript<RecursionField>,
-    ecc_proof: &ceno_zkvm::structs::EccQuarkProof<RecursionField>,
-) {
-    let num_vars = ceil_log2(next_pow2_instance_padding(ecc_proof.num_instances));
-    let _ = ts.sample_and_append_vec(b"ecc", num_vars);
-    let _ = ts.sample_and_append_challenge_pows(
-        7 * ceno_zkvm::scheme::constants::SEPTIC_EXTENSION_DEGREE,
-        b"ecc_alpha",
-    );
-    let _ = IOPVerifierState::verify(
-        RecursionField::ZERO,
-        &ecc_proof.zerocheck_proof,
-        &VPAuxInfo {
-            max_degree: 3,
-            max_num_variables: num_vars,
-            phantom: std::marker::PhantomData,
-        },
-        ts,
-    );
-}
-
-fn native_replay_rotation_transcript(
-    ts: &mut BasicTranscript<RecursionField>,
-    rotation_proof: &gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof<RecursionField>,
-    num_rotations: usize,
-    num_var_with_rotation: usize,
-) -> Result<()> {
-    if rotation_proof.evals.len() != num_rotations * 3 {
-        bail!(
-            "rotation eval length mismatch: {} != {}",
-            rotation_proof.evals.len(),
-            num_rotations * 3
-        );
-    }
-    let _ = sumcheck::util::get_challenge_pows(num_rotations, ts);
-    let _ = IOPVerifierState::verify(
-        RecursionField::ZERO,
-        &rotation_proof.proof,
-        &VPAuxInfo {
-            max_degree: 2,
-            max_num_variables: num_var_with_rotation,
-            phantom: std::marker::PhantomData,
-        },
-        ts,
-    );
-    ts.append_field_element_exts(&rotation_proof.evals);
-    Ok(())
-}
-
-fn native_tower_num_variables(
-    circuit_vk: &ceno_zkvm::structs::VerifyingKey<RecursionField>,
-    chip_proof: &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
-) -> (Vec<usize>, usize) {
-    let composed_cs = circuit_vk.get_cs();
-    let cs = &composed_cs.zkvm_v1_css;
-    let num_instances = chip_proof.num_instances.iter().sum();
-    let r_counts_per_instance = cs.r_expressions.len() + cs.r_table_expressions.len();
-    let w_counts_per_instance = cs.w_expressions.len() + cs.w_table_expressions.len();
-    let lk_counts_per_instance = cs.lk_expressions.len() + cs.lk_table_expressions.len();
-    let num_batched = r_counts_per_instance + w_counts_per_instance + lk_counts_per_instance;
-    let mut log2_num_instances = ceil_log2(next_pow2_instance_padding(num_instances));
-    if composed_cs.has_ecc_ops() {
-        log2_num_instances += 1;
-    }
-    let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
-    let grouped_tower_shape = chip_proof.r_out_evals.len()
-        == usize::from(r_counts_per_instance > 0)
-        && chip_proof.w_out_evals.len() == usize::from(w_counts_per_instance > 0)
-        && chip_proof.lk_out_evals.len() == usize::from(lk_counts_per_instance > 0);
-    let tower_num_variables = if grouped_tower_shape {
-        let group_num_vars =
-            |op_count: usize| num_var_with_rotation + ceil_log2(op_count.next_power_of_two());
-        chip_proof
-            .r_out_evals
-            .iter()
-            .map(|_| group_num_vars(r_counts_per_instance))
-            .chain(
-                chip_proof
-                    .w_out_evals
-                    .iter()
-                    .map(|_| group_num_vars(w_counts_per_instance)),
-            )
-            .chain(
-                chip_proof
-                    .lk_out_evals
-                    .iter()
-                    .map(|_| group_num_vars(lk_counts_per_instance)),
-            )
-            .collect_vec()
-    } else {
-        vec![num_var_with_rotation; num_batched]
-    };
-    (tower_num_variables, num_var_with_rotation)
 }
 
 fn build_main_eval_records(

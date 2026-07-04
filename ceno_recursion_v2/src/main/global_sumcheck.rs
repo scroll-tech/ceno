@@ -15,7 +15,10 @@ use recursion_circuit::{
 use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
-    bus::{MainGlobalClaimBus, MainGlobalClaimMessage, MainGlobalPointBus, MainGlobalPointMessage},
+    bus::{
+        MainGlobalClaimBus, MainGlobalClaimMessage, MainGlobalPointBus, MainGlobalPointMessage,
+        TranscriptBus, TranscriptBusMessage,
+    },
     system::MainGlobalSumcheckRecord,
     tracegen::RowMajorChip,
 };
@@ -42,6 +45,7 @@ pub struct MainGlobalSumcheckCols<T> {
 }
 
 pub struct MainGlobalSumcheckAir {
+    pub transcript_bus: TranscriptBus,
     pub global_claim_bus: MainGlobalClaimBus,
     pub global_point_bus: MainGlobalPointBus,
 }
@@ -125,6 +129,19 @@ where
             local.claim_out,
             local.expected,
         );
+
+        for i in 0..D_EF {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: local.challenge_tidx + AB::Expr::from_usize(i),
+                    value: local.challenge[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_enabled * (AB::Expr::ONE - local.is_dummy),
+            );
+        }
 
         self.global_claim_bus.send(
             builder,

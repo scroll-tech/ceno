@@ -76,10 +76,7 @@ impl PrecomputedTranscript {
             if k + 1 < schedule.lambdas.len() {
                 challenges.push_back(schedule.lambdas[k + 1]);
             } else {
-                // Native still samples the next alpha after the final merge.
-                // TODO(recursion-v2): record and constrain this final unused
-                // challenge in the tower schedule instead of using a sentinel.
-                challenges.push_back(RecursionField::ZERO);
+                challenges.push_back(schedule.final_alpha);
             }
         }
         Self { challenges }

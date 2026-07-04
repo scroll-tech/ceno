@@ -82,6 +82,7 @@ pub struct TowerLayerRecord {
     pub tidx: usize,
     pub layer_claims: Vec<[EF; 4]>,
     pub lambdas: Vec<EF>,
+    pub final_alpha: EF,
     pub eq_at_r_primes: Vec<EF>,
     pub read_counts: Vec<usize>,
     pub write_counts: Vec<usize>,
@@ -305,6 +306,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.layer_idx = F::ZERO;
                     cols.tidx = F::from_usize(record.tidx);
                     cols.lambda = [F::ZERO; D_EF];
+                    cols.final_alpha = [F::ZERO; D_EF];
                     let mut lambda_prime_one = [F::ZERO; D_EF];
                     lambda_prime_one[0] = F::ONE;
                     cols.lambda_prime = lambda_prime_one;
@@ -360,6 +362,11 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.tidx = F::from_usize(record.layer_tidx(layer_idx));
                     cols.lambda = record
                         .lambda_at(layer_idx)
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    cols.final_alpha = record
+                        .final_alpha
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();

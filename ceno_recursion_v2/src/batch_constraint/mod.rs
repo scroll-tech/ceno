@@ -71,6 +71,7 @@ impl AirModule for BatchConstraintModule {
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
         vec![
             Arc::new(MainGlobalSumcheckAir {
+                transcript_bus: self.transcript_bus,
                 global_claim_bus: self.global_claim_bus,
                 global_point_bus: self.global_point_bus,
             }) as AirRef<_>,
