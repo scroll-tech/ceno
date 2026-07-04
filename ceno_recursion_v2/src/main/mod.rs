@@ -1,19 +1,27 @@
 mod air;
-mod eval_absorb;
-mod final_claim;
-mod frontload;
-mod global_sumcheck;
-mod tower_point;
+pub(crate) mod eval_absorb;
+pub(crate) mod final_claim;
+pub(crate) mod frontload;
+pub(crate) mod global_sumcheck;
+pub(crate) mod tower_point;
 mod trace;
 mod transcript_bind;
 
 use std::{iter, sync::Arc};
 
 use eyre::{Result, bail, eyre};
+use ff_ext::ExtensionField;
 use itertools::{Either, Itertools, chain};
 use mpcs::PolynomialCommitmentScheme;
 use multilinear_extensions::{
-    Expression, monomial::Term, util::ceil_log2, utils::eval_by_expr_with_instance,
+    Expression, StructuralWitIn,
+    StructuralWitInType::{
+        Empty, EqualDistanceDynamicSequence, EqualDistanceSequence,
+        InnerRepeatingIncrementalSequence, OuterRepeatingIncrementalSequence,
+        StackedConstantSequence, StackedIncrementalSequence,
+    },
+    util::ceil_log2,
+    utils::eval_by_expr_with_instance,
     virtual_poly::VPAuxInfo,
 };
 use openvm_cpu_backend::CpuBackend;
@@ -30,19 +38,11 @@ use witness::next_pow2_instance_padding;
 
 use self::{
     air::MainAir,
-    eval_absorb::{MainEvalAbsorbAir, MainEvalAbsorbTraceGenerator},
-    final_claim::{MainFinalClaimAir, MainFinalClaimTraceGenerator},
-    frontload::{MainFrontloadTermAir, MainFrontloadTermTraceGenerator},
-    global_sumcheck::{MainGlobalSumcheckAir, MainGlobalSumcheckTraceGenerator},
-    tower_point::{MainTowerPointEqAir, MainTowerPointEqTraceGenerator},
     trace::{MainRecord, MainTraceGenerator},
     transcript_bind::{MainTranscriptBindAir, MainTranscriptBindTraceGenerator},
 };
 use crate::{
-    bus::{
-        ForkedTranscriptBus, MainBus, MainContributionBus, MainEvalBus, MainExpressionClaimBus,
-        MainGlobalClaimBus, MainGlobalPointBus, TowerMainPointBus, TranscriptBus,
-    },
+    bus::{ForkedTranscriptBus, MainBus, MainExpressionClaimBus, TranscriptBus},
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, MainEvalRecord,
         MainFinalClaimRecord, MainFrontloadTermRecord, MainTowerPointEqRecord, Preflight,
@@ -62,11 +62,6 @@ pub use air::MainCols;
 pub struct MainModule {
     main_bus: MainBus,
     expression_claim_bus: MainExpressionClaimBus,
-    global_claim_bus: MainGlobalClaimBus,
-    global_point_bus: MainGlobalPointBus,
-    eval_bus: MainEvalBus,
-    contribution_bus: MainContributionBus,
-    tower_point_bus: TowerMainPointBus,
     transcript_bus: TranscriptBus,
     forked_transcript_bus: ForkedTranscriptBus,
 }
@@ -76,40 +71,21 @@ impl MainModule {
         let _ = b;
         let main_bus = bus_inventory.main_bus;
         let expression_claim_bus = bus_inventory.main_expression_claim_bus;
-        let global_claim_bus = bus_inventory.main_global_claim_bus;
-        let global_point_bus = bus_inventory.main_global_point_bus;
-        let eval_bus = bus_inventory.main_eval_bus;
-        let contribution_bus = bus_inventory.main_contribution_bus;
-        let tower_point_bus = bus_inventory.tower_main_point_bus;
         let transcript_bus = bus_inventory.transcript_bus;
         let forked_transcript_bus = bus_inventory.forked_transcript_bus;
         Self {
             main_bus,
             expression_claim_bus,
-            global_claim_bus,
-            global_point_bus,
-            eval_bus,
-            contribution_bus,
-            tower_point_bus,
             transcript_bus,
             forked_transcript_bus,
         }
     }
 
-    fn collect_records(
-        &self,
+    pub(crate) fn collect_records(
         child_vk: &RecursionVk,
         proofs: &[RecursionProof],
         preflights: &[Preflight],
-    ) -> Result<(
-        Vec<MainRecord>,
-        Vec<crate::system::MainGlobalSumcheckRecord>,
-        Vec<MainEvalRecord>,
-        Vec<MainTowerPointEqRecord>,
-        Vec<MainFrontloadTermRecord>,
-        Vec<MainFinalClaimRecord>,
-        Vec<crate::system::MainTranscriptRecord>,
-    )> {
+    ) -> Result<MainCollectedRecords> {
         if proofs.len() != preflights.len() {
             bail!(
                 "proof/preflight length mismatch ({} proofs vs {} preflights)",
@@ -310,7 +286,7 @@ impl MainModule {
             transcript_records.push(crate::system::MainTranscriptRecord::default());
         }
 
-        Ok((
+        Ok(MainCollectedRecords {
             main_records,
             global_sumcheck_records,
             eval_records,
@@ -318,47 +294,36 @@ impl MainModule {
             frontload_term_records,
             final_claim_records,
             transcript_records,
-        ))
+        })
     }
+}
+
+pub(crate) struct MainCollectedRecords {
+    pub(crate) main_records: Vec<MainRecord>,
+    pub(crate) global_sumcheck_records: Vec<crate::system::MainGlobalSumcheckRecord>,
+    pub(crate) eval_records: Vec<MainEvalRecord>,
+    pub(crate) tower_point_eq_records: Vec<MainTowerPointEqRecord>,
+    pub(crate) frontload_term_records: Vec<MainFrontloadTermRecord>,
+    pub(crate) final_claim_records: Vec<MainFinalClaimRecord>,
+    pub(crate) transcript_records: Vec<crate::system::MainTranscriptRecord>,
 }
 
 impl AirModule for MainModule {
     fn num_airs(&self) -> usize {
-        7
+        2
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
         let main_air = MainAir {
             main_bus: self.main_bus,
             expression_claim_bus: self.expression_claim_bus,
-            send_expression_claim: !crate::system::MAIN_PREFIX_ONLY,
+            send_expression_claim: false,
         };
         vec![
             Arc::new(main_air) as AirRef<_>,
             Arc::new(MainTranscriptBindAir {
                 transcript_bus: self.transcript_bus,
                 forked_transcript_bus: self.forked_transcript_bus,
-            }) as AirRef<_>,
-            Arc::new(MainGlobalSumcheckAir {
-                global_claim_bus: self.global_claim_bus,
-                global_point_bus: self.global_point_bus,
-            }) as AirRef<_>,
-            Arc::new(MainEvalAbsorbAir {
-                transcript_bus: self.transcript_bus,
-                eval_bus: self.eval_bus,
-            }) as AirRef<_>,
-            Arc::new(MainTowerPointEqAir {
-                global_point_bus: self.global_point_bus,
-                tower_point_bus: self.tower_point_bus,
-            }) as AirRef<_>,
-            Arc::new(MainFrontloadTermAir {
-                eval_bus: self.eval_bus,
-                global_point_bus: self.global_point_bus,
-                contribution_bus: self.contribution_bus,
-            }) as AirRef<_>,
-            Arc::new(MainFinalClaimAir {
-                global_claim_bus: self.global_claim_bus,
-                contribution_bus: self.contribution_bus,
             }) as AirRef<_>,
         ]
     }
@@ -398,48 +363,23 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         _ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
-        let (
-            mut main_records,
-            mut global_sumcheck_records,
-            mut eval_records,
-            mut tower_point_eq_records,
-            mut frontload_term_records,
-            mut final_claim_records,
-            mut transcript_records,
-        ) = self.collect_records(child_vk, proofs, preflights).ok()?;
+        let mut records = Self::collect_records(child_vk, proofs, preflights).ok()?;
+        let MainCollectedRecords {
+            ref mut main_records,
+            global_sumcheck_records: _,
+            eval_records: _,
+            tower_point_eq_records: _,
+            frontload_term_records: _,
+            final_claim_records: _,
+            ref mut transcript_records,
+        } = records;
         main_records.sort_by_key(|record| (record.proof_idx, record.idx));
-        global_sumcheck_records.sort_by_key(|record| record.proof_idx);
-        eval_records.sort_by_key(|record| (record.proof_idx, record.idx, record.eval_idx));
-        tower_point_eq_records
-            .sort_by_key(|record| (record.proof_idx, record.idx, record.round_idx));
-        frontload_term_records.sort_by_key(|record| {
-            (
-                record.proof_idx,
-                record.idx,
-                record.term_idx,
-                record.step_idx,
-            )
-        });
-        final_claim_records.sort_by_key(|record| (record.proof_idx, record.idx));
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
         let ctx = MainTraceCtx {
             main_records: &main_records,
-            global_sumcheck_records: &global_sumcheck_records,
-            eval_records: &eval_records,
-            tower_point_eq_records: &tower_point_eq_records,
-            frontload_term_records: &frontload_term_records,
-            final_claim_records: &final_claim_records,
             transcript_records: &transcript_records,
         };
-        let chips = [
-            MainModuleChip::Main,
-            MainModuleChip::TranscriptBind,
-            MainModuleChip::GlobalSumcheck,
-            MainModuleChip::EvalAbsorb,
-            MainModuleChip::TowerPointEq,
-            MainModuleChip::FrontloadTerm,
-            MainModuleChip::FinalClaim,
-        ];
+        let chips = [MainModuleChip::Main, MainModuleChip::TranscriptBind];
         let span = tracing::Span::current();
         let contexts = chips
             .into_iter()
@@ -459,22 +399,12 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
 struct MainTraceCtx<'a> {
     main_records: &'a [MainRecord],
-    global_sumcheck_records: &'a [crate::system::MainGlobalSumcheckRecord],
-    eval_records: &'a [MainEvalRecord],
-    tower_point_eq_records: &'a [MainTowerPointEqRecord],
-    frontload_term_records: &'a [MainFrontloadTermRecord],
-    final_claim_records: &'a [MainFinalClaimRecord],
     transcript_records: &'a [crate::system::MainTranscriptRecord],
 }
 
 enum MainModuleChip {
     Main,
     TranscriptBind,
-    GlobalSumcheck,
-    EvalAbsorb,
-    TowerPointEq,
-    FrontloadTerm,
-    FinalClaim,
 }
 
 impl RowMajorChip<F> for MainModuleChip {
@@ -491,17 +421,6 @@ impl RowMajorChip<F> for MainModuleChip {
             }
             MainModuleChip::TranscriptBind => MainTranscriptBindTraceGenerator
                 .generate_trace(&ctx.transcript_records, required_height),
-            MainModuleChip::GlobalSumcheck => MainGlobalSumcheckTraceGenerator
-                .generate_trace(&ctx.global_sumcheck_records, required_height),
-            MainModuleChip::EvalAbsorb => {
-                MainEvalAbsorbTraceGenerator.generate_trace(&ctx.eval_records, required_height)
-            }
-            MainModuleChip::TowerPointEq => MainTowerPointEqTraceGenerator
-                .generate_trace(&ctx.tower_point_eq_records, required_height),
-            MainModuleChip::FrontloadTerm => MainFrontloadTermTraceGenerator
-                .generate_trace(&ctx.frontload_term_records, required_height),
-            MainModuleChip::FinalClaim => MainFinalClaimTraceGenerator
-                .generate_trace(&ctx.final_claim_records, required_height),
         }
     }
 }
@@ -696,8 +615,9 @@ where
             .collect_vec();
 
         if chip_proof.ecc_proof.is_some() {
-            transcript_observe_label(ts, b"ecc_gkr_bridge_r");
-            let _ = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+            bail!(
+                "recursion-v2 batch main constraints do not yet constrain ecc_gkr_bridge_r claims"
+            );
         }
 
         let eval_len = layer.n_witin + layer.n_fixed + layer.n_structural_witin;
@@ -746,13 +666,14 @@ where
     }
 
     let _openvm_alpha_pows = sample_challenge_pows(ts, total_exprs, b"combine subset evals");
-    let (_openvm_global_in_point, _openvm_expected_evaluation) = replay_main_sumcheck(
-        ts,
-        main_proof.claimed_sum,
-        &main_proof.proof.proof,
-        max_num_variables,
-        max_degree,
-    )?;
+    let (_openvm_global_in_point, _openvm_expected_evaluation, challenge_tidxs) =
+        replay_main_sumcheck(
+            ts,
+            main_proof.claimed_sum,
+            &main_proof.proof.proof,
+            max_num_variables,
+            max_degree,
+        )?;
 
     let eval_tidx_start = ts.len();
     for eval in &main_proof.proof.evals {
@@ -802,6 +723,7 @@ where
             main_proof.claimed_sum,
             &main_proof.proof.proof,
             &global_in_point,
+            &challenge_tidxs,
             expected_evaluation,
             &global_point_lookup_counts,
         )?);
@@ -817,6 +739,7 @@ fn build_global_sumcheck_record(
     claimed_sum: RecursionField,
     proof: &sumcheck::structs::IOPProof<RecursionField>,
     global_in_point: &[RecursionField],
+    challenge_tidxs: &[usize],
     expected_evaluation: RecursionField,
     point_lookup_counts: &[usize],
 ) -> Result<crate::system::MainGlobalSumcheckRecord> {
@@ -827,12 +750,20 @@ fn build_global_sumcheck_record(
             global_in_point.len()
         );
     }
+    if proof.proofs.len() != challenge_tidxs.len() {
+        bail!(
+            "main global sumcheck proof/challenge-tidx length mismatch: {} != {}",
+            proof.proofs.len(),
+            challenge_tidxs.len()
+        );
+    }
     let mut claim = claimed_sum;
     let mut rounds = Vec::with_capacity(proof.proofs.len());
-    for (round_idx, (prover_msg, challenge)) in proof
+    for (round_idx, ((prover_msg, challenge), challenge_tidx)) in proof
         .proofs
         .iter()
         .zip_eq(global_in_point.iter().copied())
+        .zip_eq(challenge_tidxs.iter().copied())
         .enumerate()
     {
         if prover_msg.evaluations.len() > 4 {
@@ -862,6 +793,7 @@ fn build_global_sumcheck_record(
         rounds.push(crate::system::MainGlobalSumcheckRoundRecord {
             evaluations,
             challenge,
+            challenge_tidx,
             claim_in: claim,
             claim_out,
             point_lookup_count: point_lookup_counts.get(round_idx).copied().unwrap_or(0),
@@ -1198,6 +1130,7 @@ fn build_final_claim_records(
     let mut records = Vec::with_capacity(layers.len());
     for (idx, layer) in layers.iter().enumerate() {
         let layer_evals = &main_evals[layer.eval_start..layer.eval_start + layer.eval_len];
+        validate_direct_structural_evals(layer, layer_evals, global_in_point)?;
         let main_sumcheck_challenges = chain!(
             pcs_challenges.iter().copied(),
             alpha_pows[layer.alpha_start..layer.alpha_start + layer.layer.exprs.len()]
@@ -1205,11 +1138,6 @@ fn build_final_claim_records(
                 .copied()
         )
         .collect_vec();
-        let terms = layer
-            .layer
-            .main_sumcheck_expression_monomial_terms
-            .as_ref()
-            .ok_or_else(|| eyre!("missing main sumcheck monomial terms"))?;
         let contribution = build_frontload_term_records_for_layer(
             idx,
             layer,
@@ -1217,9 +1145,23 @@ fn build_final_claim_records(
             &layer.pi,
             &main_sumcheck_challenges,
             global_in_point,
-            terms,
             &mut frontload_records,
-        );
+        )?;
+        if let Some(terms) = layer.layer.main_sumcheck_expression_monomial_terms.as_ref() {
+            let monomial_contribution = eval_batched_main_frontload_terms_oracle(
+                layer_evals,
+                &layer.pi,
+                &main_sumcheck_challenges,
+                global_in_point,
+                layer.num_var_with_rotation,
+                terms,
+            );
+            if contribution != monomial_contribution {
+                bail!(
+                    "layer expr contribution mismatch at chip {idx}: {monomial_contribution} != {contribution}"
+                );
+            }
+        }
         let acc_in = acc;
         acc += contribution;
         records.push(MainFinalClaimRecord {
@@ -1234,6 +1176,65 @@ fn build_final_claim_records(
     Ok((acc, frontload_records, records))
 }
 
+fn validate_direct_structural_evals(
+    layer: &MainReplayLayer<'_>,
+    layer_evals: &[RecursionField],
+    global_in_point: &[RecursionField],
+) -> Result<()> {
+    let structural_witin_offset = layer.layer.n_witin + layer.layer.n_fixed;
+    let in_point = &global_in_point[..layer.num_var_with_rotation];
+    for StructuralWitIn { id, witin_type } in &layer.layer.structural_witins {
+        let wit_id = *id as usize + structural_witin_offset;
+        let Some(actual_eval) = layer_evals.get(wit_id).copied() else {
+            bail!("main structural witin index {wit_id} out of range");
+        };
+        let expected_eval = match witin_type {
+            EqualDistanceSequence {
+                offset,
+                multi_factor,
+                descending,
+                ..
+            } => gkr_iop::utils::eval_wellform_address_vec(
+                *offset as u64,
+                *multi_factor as u64,
+                in_point,
+                *descending,
+            ),
+            EqualDistanceDynamicSequence {
+                offset_instance_id,
+                multi_factor,
+                descending,
+                ..
+            } => {
+                let offset = layer.pi[*offset_instance_id as usize].to_canonical_u64();
+                gkr_iop::utils::eval_wellform_address_vec(
+                    offset,
+                    *multi_factor as u64,
+                    in_point,
+                    *descending,
+                )
+            }
+            StackedIncrementalSequence { .. } => {
+                gkr_iop::utils::eval_stacked_wellform_address_vec(in_point)
+            }
+            StackedConstantSequence { .. } => gkr_iop::utils::eval_stacked_constant_vec(in_point),
+            InnerRepeatingIncrementalSequence { k, .. } => {
+                gkr_iop::utils::eval_inner_repeated_incremental_vec(*k as u64, in_point)
+            }
+            OuterRepeatingIncrementalSequence { k, .. } => {
+                gkr_iop::utils::eval_outer_repeated_incremental_vec(*k as u64, in_point)
+            }
+            Empty => continue,
+        };
+        if actual_eval != expected_eval {
+            bail!(
+                "main structural witin mismatch wit_id={wit_id} expected={expected_eval} got={actual_eval}"
+            );
+        }
+    }
+    Ok(())
+}
+
 fn build_frontload_term_records_for_layer(
     idx: usize,
     layer: &MainReplayLayer<'_>,
@@ -1241,67 +1242,368 @@ fn build_frontload_term_records_for_layer(
     pi: &[RecursionField],
     challenges: &[RecursionField],
     global_in_point: &[RecursionField],
-    terms: &[Term<Expression<RecursionField>, Expression<RecursionField>>],
     records: &mut Vec<MainFrontloadTermRecord>,
-) -> RecursionField {
+) -> Result<RecursionField> {
     let tail_start = layer.num_var_with_rotation;
     let tail_point = &global_in_point[tail_start..];
-    let mut chip_acc = RecursionField::ZERO;
+    let expr = layer
+        .layer
+        .main_sumcheck_expression
+        .as_ref()
+        .ok_or_else(|| eyre!("missing main sumcheck expression"))?;
+    let mut row_idx = 0usize;
+    let mut node_idx = 0usize;
+    let folded_value = emit_main_expr_row(
+        idx,
+        expr,
+        layer_evals,
+        pi,
+        challenges,
+        tail_start,
+        tail_point,
+        records,
+        &mut row_idx,
+        &mut node_idx,
+    )?;
 
-    for (term_idx, term) in terms.iter().enumerate() {
-        let scalar = eval_by_expr_with_instance(&[], &[], &[], pi, challenges, &term.scalar);
-        let scalar = either_to_ext(scalar);
-        let product_wit_ids = term.product.iter().map(|expr| {
-            let Expression::WitIn(wit_id) = expr else {
-                panic!("main monomial product must be converted to WitIn")
-            };
-            *wit_id as usize
-        });
+    records.push(MainFrontloadTermRecord {
+        proof_idx: 0,
+        idx,
+        row_idx,
+        node_idx,
+        eval_idx: 0,
+        has_eval_factor: false,
+        instance_idx: 0,
+        challenge_idx: 0,
+        global_round_idx: 0,
+        has_global_factor: false,
+        is_wit: false,
+        is_const: false,
+        is_instance: false,
+        is_challenge: false,
+        is_add: false,
+        is_sub: false,
+        is_neg: false,
+        is_mul: false,
+        is_fold: true,
+        is_tail: false,
+        constraint_idx: 0,
+        alpha: RecursionField::ONE,
+        arg0: folded_value,
+        arg1: RecursionField::ZERO,
+        value: folded_value,
+        chip_acc_in: RecursionField::ZERO,
+        chip_acc_out: folded_value,
+        is_last_chip_step: true,
+    });
 
-        let mut factors = vec![(scalar, None, None)];
-        for wit_id in product_wit_ids {
-            factors.push((layer_evals[wit_id], Some(wit_id), None));
-            for (tail_offset, value) in tail_point.iter().copied().enumerate() {
-                factors.push((value, None, Some(tail_start + tail_offset)));
-            }
+    Ok(folded_value)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_main_expr_row(
+    idx: usize,
+    expr: &Expression<RecursionField>,
+    layer_evals: &[RecursionField],
+    pi: &[RecursionField],
+    challenges: &[RecursionField],
+    tail_start: usize,
+    tail_point: &[RecursionField],
+    records: &mut Vec<MainFrontloadTermRecord>,
+    row_idx: &mut usize,
+    node_idx: &mut usize,
+) -> Result<RecursionField> {
+    let this_node = *node_idx;
+    *node_idx += 1;
+    let mut record = MainFrontloadTermRecord {
+        proof_idx: 0,
+        idx,
+        row_idx: *row_idx,
+        node_idx: this_node,
+        eval_idx: 0,
+        has_eval_factor: false,
+        instance_idx: 0,
+        challenge_idx: 0,
+        global_round_idx: 0,
+        has_global_factor: false,
+        is_wit: false,
+        is_const: false,
+        is_instance: false,
+        is_challenge: false,
+        is_add: false,
+        is_sub: false,
+        is_neg: false,
+        is_mul: false,
+        is_fold: false,
+        is_tail: false,
+        constraint_idx: 0,
+        alpha: RecursionField::ZERO,
+        arg0: RecursionField::ZERO,
+        arg1: RecursionField::ZERO,
+        value: RecursionField::ZERO,
+        chip_acc_in: RecursionField::ZERO,
+        chip_acc_out: RecursionField::ZERO,
+        is_last_chip_step: false,
+    };
+
+    let value = match expr {
+        Expression::WitIn(wit_id) => {
+            let eval_idx = *wit_id as usize;
+            let value = *layer_evals
+                .get(eval_idx)
+                .ok_or_else(|| eyre!("main expr wit index {eval_idx} out of range"))?;
+            record.is_wit = true;
+            record.has_eval_factor = true;
+            record.eval_idx = eval_idx;
+            record.arg0 = value;
+            value
         }
-
-        let mut term_acc = RecursionField::ONE;
-        for (step_idx, (factor, eval_idx, global_round_idx)) in factors.iter().copied().enumerate()
-        {
-            let term_acc_in = term_acc;
-            term_acc *= factor;
-            let is_last_step = step_idx + 1 == factors.len();
-            let chip_acc_in = chip_acc;
-            let chip_acc_out = if is_last_step {
-                chip_acc + term_acc
-            } else {
-                chip_acc
-            };
+        Expression::StructuralWitIn(wit_id, _) => {
+            let eval_idx = *wit_id as usize;
+            let value = *layer_evals
+                .get(eval_idx)
+                .ok_or_else(|| eyre!("main expr structural wit index {eval_idx} out of range"))?;
+            record.is_wit = true;
+            record.has_eval_factor = true;
+            record.eval_idx = eval_idx;
+            record.arg0 = value;
+            value
+        }
+        Expression::Fixed(fixed) => {
+            let eval_idx = fixed.0;
+            let value = *layer_evals
+                .get(eval_idx)
+                .ok_or_else(|| eyre!("main expr fixed index {eval_idx} out of range"))?;
+            record.is_wit = true;
+            record.has_eval_factor = true;
+            record.eval_idx = eval_idx;
+            record.arg0 = value;
+            value
+        }
+        Expression::Instance(instance) | Expression::InstanceScalar(instance) => {
+            let value = *pi
+                .get(instance.0)
+                .ok_or_else(|| eyre!("main expr instance index {} out of range", instance.0))?;
+            record.is_instance = true;
+            record.instance_idx = instance.0;
+            record.arg0 = value;
+            value
+        }
+        Expression::Constant(value) => {
+            let value = either_to_ext(*value);
+            record.is_const = true;
+            record.arg0 = value;
+            value
+        }
+        Expression::Challenge(ch_id, pow, scalar, offset) => {
+            let challenge_idx = *ch_id as usize;
+            let challenge = *challenges
+                .get(challenge_idx)
+                .ok_or_else(|| eyre!("main expr challenge index {challenge_idx} out of range"))?;
+            let value = challenge.exp_u64(*pow as u64) * *scalar + *offset;
+            record.is_challenge = true;
+            record.challenge_idx = challenge_idx;
+            record.arg0 = value;
+            value
+        }
+        Expression::Sum(left, right) => {
+            let left = emit_main_expr_row(
+                idx,
+                left,
+                layer_evals,
+                pi,
+                challenges,
+                tail_start,
+                tail_point,
+                records,
+                row_idx,
+                node_idx,
+            )?;
+            let right = emit_main_expr_row(
+                idx,
+                right,
+                layer_evals,
+                pi,
+                challenges,
+                tail_start,
+                tail_point,
+                records,
+                row_idx,
+                node_idx,
+            )?;
+            record.is_add = true;
+            record.arg0 = left;
+            record.arg1 = right;
+            left + right
+        }
+        Expression::Product(left, right) => {
+            let left = emit_main_expr_row(
+                idx,
+                left,
+                layer_evals,
+                pi,
+                challenges,
+                tail_start,
+                tail_point,
+                records,
+                row_idx,
+                node_idx,
+            )?;
+            let right = emit_main_expr_row(
+                idx,
+                right,
+                layer_evals,
+                pi,
+                challenges,
+                tail_start,
+                tail_point,
+                records,
+                row_idx,
+                node_idx,
+            )?;
+            record.is_mul = true;
+            record.arg0 = left;
+            record.arg1 = right;
+            left * right
+        }
+        Expression::ScaledSum(x, a, b) => {
+            let x = emit_main_expr_row(
+                idx,
+                x,
+                layer_evals,
+                pi,
+                challenges,
+                tail_start,
+                tail_point,
+                records,
+                row_idx,
+                node_idx,
+            )?;
+            let a = emit_main_expr_row(
+                idx,
+                a,
+                layer_evals,
+                pi,
+                challenges,
+                tail_start,
+                tail_point,
+                records,
+                row_idx,
+                node_idx,
+            )?;
+            let b = emit_main_expr_row(
+                idx,
+                b,
+                layer_evals,
+                pi,
+                challenges,
+                tail_start,
+                tail_point,
+                records,
+                row_idx,
+                node_idx,
+            )?;
+            let mul_node = *node_idx;
+            *node_idx += 1;
             records.push(MainFrontloadTermRecord {
                 proof_idx: 0,
                 idx,
-                term_idx,
-                step_idx,
-                is_first_step: step_idx == 0,
-                is_last_step,
-                eval_idx: eval_idx.unwrap_or(0),
-                has_eval_factor: eval_idx.is_some(),
-                global_round_idx: global_round_idx.unwrap_or(0),
-                has_global_factor: global_round_idx.is_some(),
-                factor,
-                term_acc_in,
-                term_acc_out: term_acc,
-                chip_acc_in,
-                chip_acc_out,
+                row_idx: *row_idx,
+                node_idx: mul_node,
+                is_mul: true,
+                arg0: a,
+                arg1: x,
+                value: a * x,
+                ..MainFrontloadTermRecord::default()
             });
-            if is_last_step {
-                chip_acc = chip_acc_out;
+            *row_idx += 1;
+            record.is_add = true;
+            record.arg0 = a * x;
+            record.arg1 = b;
+            a * x + b
+        }
+    };
+
+    let should_emit_wit_tail = record.is_wit;
+    record.value = value;
+    record.chip_acc_out = record.chip_acc_in;
+    records.push(record);
+    *row_idx += 1;
+    if should_emit_wit_tail {
+        Ok(emit_main_expr_wit_tail_rows(
+            idx, value, tail_start, tail_point, records, row_idx, node_idx,
+        ))
+    } else {
+        Ok(value)
+    }
+}
+
+fn emit_main_expr_wit_tail_rows(
+    idx: usize,
+    mut acc: RecursionField,
+    tail_start: usize,
+    tail_point: &[RecursionField],
+    records: &mut Vec<MainFrontloadTermRecord>,
+    row_idx: &mut usize,
+    node_idx: &mut usize,
+) -> RecursionField {
+    for (tail_offset, tail_value) in tail_point.iter().copied().enumerate() {
+        let next = acc * tail_value;
+        records.push(MainFrontloadTermRecord {
+            proof_idx: 0,
+            idx,
+            row_idx: *row_idx,
+            node_idx: *node_idx,
+            global_round_idx: tail_start + tail_offset,
+            has_global_factor: true,
+            is_tail: true,
+            arg0: tail_value,
+            arg1: acc,
+            value: next,
+            chip_acc_out: next,
+            ..MainFrontloadTermRecord::default()
+        });
+        *row_idx += 1;
+        *node_idx += 1;
+        acc = next;
+    }
+    acc
+}
+
+fn eval_batched_main_frontload_terms_oracle(
+    layer_evals: &[RecursionField],
+    pi: &[RecursionField],
+    challenges: &[RecursionField],
+    global_in_point: &[RecursionField],
+    num_var_with_rotation: usize,
+    terms: &[multilinear_extensions::monomial::Term<
+        Expression<RecursionField>,
+        Expression<RecursionField>,
+    >],
+) -> RecursionField {
+    let tail_point = &global_in_point[num_var_with_rotation..];
+    let mut acc = RecursionField::ZERO;
+    for term in terms {
+        let mut value = either_to_ext(eval_by_expr_with_instance(
+            &[],
+            &[],
+            &[],
+            pi,
+            challenges,
+            &term.scalar,
+        ));
+        for expr in &term.product {
+            let Expression::WitIn(wit_id) = expr else {
+                panic!("main monomial product must be converted to WitIn")
+            };
+            value *= layer_evals[*wit_id as usize];
+            for tail in tail_point {
+                value *= *tail;
             }
         }
+        acc += value;
     }
-
-    chip_acc
+    acc
 }
 
 fn either_to_ext(
@@ -1330,17 +1632,19 @@ fn replay_main_sumcheck<TS>(
     proof: &sumcheck::structs::IOPProof<RecursionField>,
     max_num_variables: usize,
     max_degree: usize,
-) -> Result<(Vec<RecursionField>, RecursionField)>
+) -> Result<(Vec<RecursionField>, RecursionField, Vec<usize>)>
 where
-    TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config>
+        + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
 {
     if max_num_variables == 0 {
-        return Ok((vec![], claimed_sum));
+        return Ok((vec![], claimed_sum, vec![]));
     }
 
     transcript_observe_label(ts, &max_num_variables.to_le_bytes());
     transcript_observe_label(ts, &max_degree.to_le_bytes());
     let mut challenges = Vec::with_capacity(max_num_variables);
+    let mut challenge_tidxs = Vec::with_capacity(max_num_variables);
     let mut expected = claimed_sum;
     for round in 0..max_num_variables {
         let prover_msg = proof
@@ -1357,10 +1661,12 @@ where
             ts.observe_ext(*eval);
         }
         transcript_observe_label(ts, b"Internal round");
+        let challenge_tidx = ts.len();
         let challenge = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
         let eval_0 = expected - prover_msg.evaluations[0];
         expected = extrapolate_uni_poly(eval_0, &prover_msg.evaluations, challenge);
         challenges.push(challenge);
+        challenge_tidxs.push(challenge_tidx);
     }
-    Ok((challenges, expected))
+    Ok((challenges, expected, challenge_tidxs))
 }

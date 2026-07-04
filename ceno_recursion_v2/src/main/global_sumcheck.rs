@@ -30,6 +30,7 @@ pub struct MainGlobalSumcheckCols<T> {
     pub is_dummy: T,
     pub round: T,
     pub point_lookup_count: T,
+    pub challenge_tidx: T,
     pub ev1: [T; D_EF],
     pub ev2: [T; D_EF],
     pub ev3: [T; D_EF],
@@ -245,6 +246,8 @@ impl RowMajorChip<F> for MainGlobalSumcheckTraceGenerator {
                 cols.round = F::from_usize(round_idx);
                 cols.point_lookup_count =
                     F::from_usize(round.map(|round| round.point_lookup_count).unwrap_or(0));
+                cols.challenge_tidx =
+                    F::from_usize(round.map(|round| round.challenge_tidx).unwrap_or(0));
 
                 let evs = round
                     .map(|round| round.evaluations)

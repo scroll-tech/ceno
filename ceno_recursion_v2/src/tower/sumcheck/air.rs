@@ -447,10 +447,7 @@ where
                 idx: local.round + AB::Expr::ONE,
                 xi: local.challenge.map(Into::into),
             },
-            local.is_enabled
-                * local.is_last_layer
-                * is_not_dummy.clone()
-                * AB::Expr::from_bool(!crate::system::MAIN_PREFIX_ONLY),
+            local.is_enabled * local.is_last_layer * is_not_dummy.clone() * AB::Expr::ZERO,
         );
     }
 }

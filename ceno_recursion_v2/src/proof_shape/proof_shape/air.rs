@@ -482,7 +482,7 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // AIR SHAPE LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let downstream_enabled = AB::Expr::from_bool(!crate::system::MAIN_PREFIX_ONLY);
+        let downstream_enabled = AB::Expr::ZERO;
 
         self.air_shape_bus.add_key_with_lookups(
             builder,
@@ -601,16 +601,22 @@ where
         // LIFTED HEIGHTS LOOKUP + STACKING COMMITMENTS
         ///////////////////////////////////////////////////////////////////////////////////////////
 
-        let _raw_height_1 = fold(
+        let raw_height_1 = fold(
             local.height_1_limbs.iter().enumerate(),
             AB::Expr::ZERO,
             |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
         );
-        let _raw_height_2 = fold(
+        let raw_height_2 = fold(
             local.height_2_limbs.iter().enumerate(),
             AB::Expr::ZERO,
             |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
         );
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.height_1, raw_height_1);
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.height_2, raw_height_2);
         let combined_height = local.height_1 + local.height_2;
 
         self.lifted_heights_bus.add_key_with_lookups(

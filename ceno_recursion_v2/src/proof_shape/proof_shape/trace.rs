@@ -37,10 +37,12 @@ fn decompose_usize<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
 
 fn two_instance_heights_from_chip_proof(instance: &impl BorrowNumInstances) -> (usize, usize) {
     let num_instances = instance.borrow_num_instances();
-    (
-        num_instances.first().copied().unwrap_or(0),
-        num_instances.get(1).copied().unwrap_or(0),
-    )
+    assert_eq!(
+        num_instances.len(),
+        2,
+        "recursion-v2 currently supports exactly two num_instances entries per chip"
+    );
+    (num_instances[0], num_instances[1])
 }
 
 fn tower_shape_max(metadata: &AirMetadata, log_height: usize) -> (usize, bool, bool, bool) {
