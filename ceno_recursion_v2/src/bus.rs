@@ -159,10 +159,24 @@ define_typed_per_proof_permutation_bus!(MainSelectorResultBus, MainSelectorResul
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainSelectorPointMessage<T> {
+    pub idx: T,
+    pub air_idx: T,
+    pub selector_idx: T,
+    pub source_kind: T,
+    pub round_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(MainSelectorPointBus, MainSelectorPointMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct MainSelectorShapeMessage<T> {
     pub air_idx: T,
     pub selector_idx: T,
     pub kind: T,
+    pub point_source: T,
     pub eval_idx: T,
     pub ctx_offset: T,
     pub ctx_num_instances: T,
@@ -195,4 +209,4 @@ pub struct TowerMainPointMessage<T> {
     pub value: [T; D_EF],
 }
 
-define_typed_per_proof_permutation_bus!(TowerMainPointBus, TowerMainPointMessage);
+define_typed_per_proof_lookup_bus!(TowerMainPointBus, TowerMainPointMessage);

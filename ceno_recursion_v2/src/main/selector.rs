@@ -12,12 +12,17 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirPresenceBus, AirPresenceBusMessage, MainEvalBus, MainEvalMessage, MainGlobalPointBus,
-        MainGlobalPointMessage, MainSelectorResultBus, MainSelectorResultMessage,
-        MainSelectorShapeBus, MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
-        MainSelectorSparseIndexShapeMessage,
+        AirPresenceBus, AirPresenceBusMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
+        MainEvalBus, MainEvalMessage, MainGlobalPointBus, MainGlobalPointMessage,
+        MainSelectorPointBus, MainSelectorPointMessage, MainSelectorResultBus,
+        MainSelectorResultMessage, MainSelectorShapeBus, MainSelectorShapeMessage,
+        MainSelectorSparseIndexShapeBus, MainSelectorSparseIndexShapeMessage, TowerMainPointBus,
+        TowerMainPointMessage,
     },
-    system::{MainSelectorEvalRecord, MainSelectorKind, RecursionField},
+    system::{
+        MainSelectorEvalRecord, MainSelectorKind, MainSelectorPointDeriveKind,
+        MainSelectorPointRecord, MainSelectorPointSourceKind, RecursionField,
+    },
     tracegen::RowMajorChip,
 };
 
@@ -39,10 +44,12 @@ pub struct MainSelectorFormulaCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
+    pub tower_idx: T,
     pub air_idx: T,
     pub selector_idx: T,
     pub eval_idx: T,
     pub kind: T,
+    pub source_kind: T,
     pub is_whole: T,
     pub is_prefix: T,
     pub is_ordered_sparse: T,
@@ -98,8 +105,43 @@ pub struct MainSelectorEvalCols<T> {
     pub value: [T; D_EF],
 }
 
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
+pub struct MainSelectorPointCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub idx: T,
+    pub tower_idx: T,
+    pub air_idx: T,
+    pub selector_idx: T,
+    pub round_idx: T,
+    pub source_kind: T,
+    pub is_tower_main: T,
+    pub is_rotation_left: T,
+    pub is_rotation_right: T,
+    pub is_rotation_origin: T,
+    pub is_ecc_xy: T,
+    pub is_ecc_slope: T,
+    pub is_ecc_x3y3: T,
+    pub lookup_count: T,
+    pub fork_id: T,
+    pub has_transcript: T,
+    pub transcript_tidx: T,
+    pub has_source: T,
+    pub source_selector_idx: T,
+    pub source_source_kind: T,
+    pub source_round_idx: T,
+    pub source_value: [T; D_EF],
+    pub derive_identity: T,
+    pub derive_one_minus: T,
+    pub derive_zero: T,
+    pub derive_one: T,
+    pub value: [T; D_EF],
+}
+
 pub struct MainSelectorFormulaAir {
     pub global_point_bus: MainGlobalPointBus,
+    pub selector_point_bus: MainSelectorPointBus,
     pub air_presence_bus: AirPresenceBus,
     pub selector_result_bus: MainSelectorResultBus,
     pub selector_shape_bus: MainSelectorShapeBus,
@@ -230,6 +272,7 @@ where
                 air_idx: local.air_idx.into(),
                 selector_idx: local.selector_idx.into(),
                 kind: local.kind.into(),
+                point_source: local.source_kind.into(),
                 eval_idx: local.eval_idx.into(),
                 ctx_offset: local.ctx_offset.into(),
                 ctx_num_instances: local.ctx_num_instances.into(),
@@ -269,6 +312,22 @@ where
             MainGlobalPointMessage {
                 round_idx: local.round_idx.into(),
                 value: local.lhs_point.map(Into::into),
+            },
+            local.is_enabled
+                * (local.is_eq_product_step * local.point_active
+                    + local.is_quark_step
+                    + local.is_eq_lte_step),
+        );
+        self.selector_point_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            MainSelectorPointMessage {
+                idx: local.idx.into(),
+                air_idx: local.air_idx.into(),
+                selector_idx: local.selector_idx.into(),
+                source_kind: local.source_kind.into(),
+                round_idx: local.round_idx.into(),
+                value: local.rhs_point.map(Into::into),
             },
             local.is_enabled
                 * (local.is_eq_product_step * local.point_active
@@ -502,6 +561,11 @@ where
             local.acc_out,
             local.value.clone().map(Into::into),
         );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_final_step),
+            local.acc_in,
+            local.value.clone().map(Into::into),
+        );
         let same_selector_continuation =
             local.is_enabled * next.is_enabled * (AB::Expr::ONE - next.is_shape_step);
         builder
@@ -696,6 +760,140 @@ pub struct MainSelectorEvalAir {
     pub selector_result_bus: MainSelectorResultBus,
 }
 
+pub struct MainSelectorPointAir {
+    pub selector_point_bus: MainSelectorPointBus,
+    pub tower_point_bus: TowerMainPointBus,
+    pub forked_transcript_bus: ForkedTranscriptBus,
+}
+
+impl<F: Field> BaseAir<F> for MainSelectorPointAir {
+    fn width(&self) -> usize {
+        MainSelectorPointCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for MainSelectorPointAir {}
+impl<F: Field> PartitionedBaseAir<F> for MainSelectorPointAir {}
+
+impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let local: &MainSelectorPointCols<AB::Var> = (*local_row).borrow();
+
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_tower_main);
+        builder.assert_bool(local.is_rotation_left);
+        builder.assert_bool(local.is_rotation_right);
+        builder.assert_bool(local.is_rotation_origin);
+        builder.assert_bool(local.is_ecc_xy);
+        builder.assert_bool(local.is_ecc_slope);
+        builder.assert_bool(local.is_ecc_x3y3);
+        builder.assert_bool(local.has_transcript);
+        builder.assert_bool(local.has_source);
+        builder.assert_bool(local.derive_identity);
+        builder.assert_bool(local.derive_one_minus);
+        builder.assert_bool(local.derive_zero);
+        builder.assert_bool(local.derive_one);
+        builder.when(local.is_enabled).assert_one(
+            local.is_tower_main
+                + local.is_rotation_left
+                + local.is_rotation_right
+                + local.is_rotation_origin
+                + local.is_ecc_xy
+                + local.is_ecc_slope
+                + local.is_ecc_x3y3,
+        );
+        builder.when(local.is_enabled).assert_eq(
+            local.source_kind,
+            local.is_rotation_left * AB::Expr::from_usize(1)
+                + local.is_rotation_right * AB::Expr::from_usize(2)
+                + local.is_rotation_origin * AB::Expr::from_usize(3)
+                + local.is_ecc_xy * AB::Expr::from_usize(4)
+                + local.is_ecc_slope * AB::Expr::from_usize(5)
+                + local.is_ecc_x3y3 * AB::Expr::from_usize(6),
+        );
+        builder
+            .when(local.has_transcript)
+            .assert_one(local.is_rotation_origin + local.is_ecc_xy);
+        builder.when(local.has_source).assert_one(
+            local.is_rotation_left + local.is_rotation_right + local.is_ecc_xy + local.is_ecc_slope,
+        );
+        builder
+            .when(local.is_tower_main + local.is_rotation_origin + local.is_ecc_x3y3)
+            .assert_zero(local.has_source);
+        builder
+            .when(
+                local.is_tower_main
+                    + local.is_rotation_left
+                    + local.is_rotation_right
+                    + local.is_ecc_slope
+                    + local.is_ecc_x3y3,
+            )
+            .assert_zero(local.has_transcript);
+        builder.when(local.is_enabled).assert_one(
+            local.derive_identity + local.derive_one_minus + local.derive_zero + local.derive_one,
+        );
+        self.tower_point_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            TowerMainPointMessage {
+                idx: local.tower_idx.into(),
+                round_idx: local.round_idx.into(),
+                value: local.value.map(Into::into),
+            },
+            local.is_enabled * local.is_tower_main,
+        );
+        self.selector_point_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            MainSelectorPointMessage {
+                idx: local.idx.into(),
+                air_idx: local.air_idx.into(),
+                selector_idx: local.source_selector_idx.into(),
+                source_kind: local.source_source_kind.into(),
+                round_idx: local.source_round_idx.into(),
+                value: local.source_value.map(Into::into),
+            },
+            local.is_enabled * local.has_source,
+        );
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.transcript_tidx + AB::Expr::from_usize(i),
+                    value: local.value[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_enabled * local.has_transcript,
+            );
+        }
+        for i in 0..D_EF {
+            let expected = local.derive_identity * local.source_value[i]
+                + local.derive_one_minus * (AB::Expr::ONE - local.source_value[i])
+                + local.derive_one;
+            builder
+                .when(local.is_enabled * (local.has_source + local.derive_zero + local.derive_one))
+                .assert_eq(local.value[i], expected);
+        }
+        self.selector_point_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            MainSelectorPointMessage {
+                idx: local.idx.into(),
+                air_idx: local.air_idx.into(),
+                selector_idx: local.selector_idx.into(),
+                source_kind: local.source_kind.into(),
+                round_idx: local.round_idx.into(),
+                value: local.value.map(Into::into),
+            },
+            local.is_enabled * local.lookup_count,
+        );
+    }
+}
+
 impl<F: Field> BaseAir<F> for MainSelectorEvalAir {
     fn width(&self) -> usize {
         MainSelectorEvalCols::<F>::width()
@@ -797,6 +995,7 @@ where
 
 pub struct MainSelectorFormulaTraceGenerator;
 pub struct MainSelectorEvalTraceGenerator;
+pub struct MainSelectorPointTraceGenerator;
 
 impl RowMajorChip<F> for MainSelectorFormulaTraceGenerator {
     type Ctx<'a> = &'a [MainSelectorEvalRecord];
@@ -820,6 +1019,18 @@ impl RowMajorChip<F> for MainSelectorEvalTraceGenerator {
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>> {
         generate_selector_trace(records, required_height, fill_eval_cols)
+    }
+}
+
+impl RowMajorChip<F> for MainSelectorPointTraceGenerator {
+    type Ctx<'a> = &'a [MainSelectorPointRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        generate_selector_trace(records, required_height, fill_point_cols)
     }
 }
 
@@ -873,6 +1084,61 @@ impl SelectorColumnAccess<F> for MainSelectorEvalCols<F> {
     fn from_bytes(slice: &mut [F]) -> &mut Self {
         slice.borrow_mut()
     }
+}
+
+impl SelectorColumnAccess<F> for MainSelectorPointCols<F> {
+    fn width() -> usize {
+        MainSelectorPointCols::<F>::width()
+    }
+
+    fn from_bytes(slice: &mut [F]) -> &mut Self {
+        slice.borrow_mut()
+    }
+}
+
+fn fill_point_cols(record: &MainSelectorPointRecord, cols: &mut MainSelectorPointCols<F>) {
+    cols.is_enabled = F::ONE;
+    cols.proof_idx = F::from_usize(record.proof_idx);
+    cols.idx = F::from_usize(record.idx);
+    cols.tower_idx = F::from_usize(record.tower_idx);
+    cols.air_idx = F::from_usize(record.air_idx);
+    cols.selector_idx = F::from_usize(record.selector_idx);
+    cols.round_idx = F::from_usize(record.round_idx);
+    cols.source_kind = F::from_usize(selector_point_source_code(record.source_kind));
+    cols.is_tower_main = F::from_bool(record.source_kind == MainSelectorPointSourceKind::TowerMain);
+    cols.is_rotation_left =
+        F::from_bool(record.source_kind == MainSelectorPointSourceKind::RotationLeft);
+    cols.is_rotation_right =
+        F::from_bool(record.source_kind == MainSelectorPointSourceKind::RotationRight);
+    cols.is_rotation_origin =
+        F::from_bool(record.source_kind == MainSelectorPointSourceKind::RotationOrigin);
+    cols.is_ecc_xy = F::from_bool(record.source_kind == MainSelectorPointSourceKind::EccXY);
+    cols.is_ecc_slope = F::from_bool(record.source_kind == MainSelectorPointSourceKind::EccSlope);
+    cols.is_ecc_x3y3 = F::from_bool(record.source_kind == MainSelectorPointSourceKind::EccX3Y3);
+    cols.lookup_count = F::from_usize(record.lookup_count);
+    cols.fork_id = F::from_usize(record.fork_id);
+    cols.has_transcript = F::from_bool(record.has_transcript);
+    cols.transcript_tidx = F::from_usize(record.transcript_tidx);
+    cols.has_source = F::from_bool(record.has_source);
+    cols.source_selector_idx = F::from_usize(record.source_selector_idx);
+    cols.source_source_kind = F::from_usize(selector_point_source_code(record.source_source_kind));
+    cols.source_round_idx = F::from_usize(record.source_round_idx);
+    cols.source_value = record
+        .source_value
+        .as_basis_coefficients_slice()
+        .try_into()
+        .unwrap();
+    cols.derive_identity =
+        F::from_bool(record.derive_kind == MainSelectorPointDeriveKind::Identity);
+    cols.derive_one_minus =
+        F::from_bool(record.derive_kind == MainSelectorPointDeriveKind::OneMinus);
+    cols.derive_zero = F::from_bool(record.derive_kind == MainSelectorPointDeriveKind::Zero);
+    cols.derive_one = F::from_bool(record.derive_kind == MainSelectorPointDeriveKind::One);
+    cols.value = record
+        .value
+        .as_basis_coefficients_slice()
+        .try_into()
+        .unwrap();
 }
 
 fn fill_eval_cols(record: &MainSelectorEvalRecord, cols: &mut MainSelectorEvalCols<F>) {
@@ -1144,6 +1410,29 @@ pub(crate) fn selector_formula_global_point_lookups(
         })
         .map(|row| (row.record.proof_idx, row.round_idx))
         .collect()
+}
+
+pub(crate) fn selector_formula_point_lookup_counts(
+    records: &[MainSelectorEvalRecord],
+) -> std::collections::BTreeMap<(usize, usize, usize, usize, usize), usize> {
+    let mut counts = std::collections::BTreeMap::new();
+    for row in build_formula_rows(records).into_iter().filter(|row| {
+        row.record.has_eval
+            && ((row.step_kind == STEP_EQ_PRODUCT && row.point_active)
+                || row.step_kind == STEP_QUARK
+                || row.step_kind == STEP_EQ_LTE)
+    }) {
+        *counts
+            .entry((
+                row.record.proof_idx,
+                row.record.idx,
+                row.record.air_idx,
+                row.record.selector_idx,
+                row.round_idx,
+            ))
+            .or_default() += 1;
+    }
+    counts
 }
 
 fn accumulate_row(
@@ -1451,6 +1740,7 @@ fn fill_formula_cols(row: &FormulaRow<'_>, cols: &mut MainSelectorFormulaCols<F>
     cols.selector_idx = F::from_usize(record.selector_idx);
     cols.eval_idx = F::from_usize(record.eval_idx);
     cols.kind = F::from_usize(selector_kind_code(record.kind));
+    cols.source_kind = F::from_usize(selector_point_source_code(record.point_source));
     cols.is_whole = F::from_bool(record.kind == MainSelectorKind::Whole);
     cols.is_prefix = F::from_bool(record.kind == MainSelectorKind::Prefix);
     cols.is_ordered_sparse = F::from_bool(record.kind == MainSelectorKind::OrderedSparse);
@@ -1521,6 +1811,18 @@ fn selector_kind_code(kind: MainSelectorKind) -> usize {
         MainSelectorKind::Prefix => 1,
         MainSelectorKind::OrderedSparse => 2,
         MainSelectorKind::QuarkBinaryTreeLessThan => 3,
+    }
+}
+
+pub(crate) fn selector_point_source_code(kind: MainSelectorPointSourceKind) -> usize {
+    match kind {
+        MainSelectorPointSourceKind::TowerMain => 0,
+        MainSelectorPointSourceKind::RotationLeft => 1,
+        MainSelectorPointSourceKind::RotationRight => 2,
+        MainSelectorPointSourceKind::RotationOrigin => 3,
+        MainSelectorPointSourceKind::EccXY => 4,
+        MainSelectorPointSourceKind::EccSlope => 5,
+        MainSelectorPointSourceKind::EccX3Y3 => 6,
     }
 }
 
@@ -1615,6 +1917,7 @@ mod tests {
         MainSelectorEvalRecord {
             proof_idx: 0,
             idx: 7,
+            tower_idx: 7,
             air_idx: 11,
             selector_idx: 13,
             has_eval: true,
@@ -1627,7 +1930,9 @@ mod tests {
             sparse_indices,
             in_point,
             out_point,
+            point_source: MainSelectorPointSourceKind::TowerMain,
             value,
+            ..Default::default()
         }
     }
 
@@ -1727,6 +2032,7 @@ mod tests {
         let mut record = MainSelectorEvalRecord {
             proof_idx: 0,
             idx: 7,
+            tower_idx: 7,
             air_idx: 11,
             selector_idx: 13,
             has_eval: false,
@@ -1739,7 +2045,9 @@ mod tests {
             sparse_indices: vec![0, 2],
             in_point: Vec::new(),
             out_point: Vec::new(),
+            point_source: MainSelectorPointSourceKind::TowerMain,
             value: RecursionField::ZERO,
+            ..Default::default()
         };
         let rows = build_formula_rows(core::slice::from_ref(&record));
         assert!(rows.iter().any(|row| row.step_kind == STEP_SHAPE));

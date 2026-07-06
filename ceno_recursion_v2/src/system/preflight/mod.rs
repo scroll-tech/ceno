@@ -89,6 +89,7 @@ pub struct MainPreflight {
     pub global_sumchecks: Vec<MainGlobalSumcheckRecord>,
     pub evals: Vec<MainEvalRecord>,
     pub selector_evals: Vec<MainSelectorEvalRecord>,
+    pub selector_points: Vec<MainSelectorPointRecord>,
     pub tower_point_eqs: Vec<MainTowerPointEqRecord>,
     pub frontload_terms: Vec<MainFrontloadTermRecord>,
     pub final_claims: Vec<MainFinalClaimRecord>,
@@ -133,10 +134,32 @@ pub enum MainSelectorKind {
     QuarkBinaryTreeLessThan,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MainSelectorPointSourceKind {
+    #[default]
+    TowerMain,
+    RotationLeft,
+    RotationRight,
+    RotationOrigin,
+    EccXY,
+    EccSlope,
+    EccX3Y3,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MainSelectorPointDeriveKind {
+    #[default]
+    Identity,
+    OneMinus,
+    Zero,
+    One,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct MainSelectorEvalRecord {
     pub proof_idx: usize,
     pub idx: usize,
+    pub tower_idx: usize,
     pub air_idx: usize,
     pub selector_idx: usize,
     pub has_eval: bool,
@@ -149,7 +172,37 @@ pub struct MainSelectorEvalRecord {
     pub sparse_indices: Vec<usize>,
     pub in_point: Vec<RecursionField>,
     pub out_point: Vec<RecursionField>,
+    pub point_source: MainSelectorPointSourceKind,
+    pub fork_id: usize,
+    pub rotation_cyclic_group_log2: usize,
+    pub rotation_origin_selector_idx: Option<usize>,
+    pub rotation_origin_tidxs: Vec<usize>,
+    pub ecc_sample_tidx: Option<usize>,
+    pub ecc_xy_selector_idx: Option<usize>,
+    pub ecc_x3y3_selector_idx: Option<usize>,
     pub value: EF,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainSelectorPointRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub tower_idx: usize,
+    pub air_idx: usize,
+    pub selector_idx: usize,
+    pub round_idx: usize,
+    pub value: EF,
+    pub source_kind: MainSelectorPointSourceKind,
+    pub lookup_count: usize,
+    pub fork_id: usize,
+    pub has_transcript: bool,
+    pub transcript_tidx: usize,
+    pub has_source: bool,
+    pub source_selector_idx: usize,
+    pub source_source_kind: MainSelectorPointSourceKind,
+    pub source_round_idx: usize,
+    pub source_value: EF,
+    pub derive_kind: MainSelectorPointDeriveKind,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -201,6 +254,7 @@ pub struct TowerMainPointRecord {
     pub idx: usize,
     pub round_idx: usize,
     pub value: EF,
+    pub lookup_count: usize,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -247,6 +301,7 @@ pub struct RotationReplayClaims {
     pub left_point: Vec<RecursionField>,
     pub right_point: Vec<RecursionField>,
     pub origin_point: Vec<RecursionField>,
+    pub origin_tidxs: Vec<usize>,
     pub left_evals: Vec<RecursionField>,
     pub right_evals: Vec<RecursionField>,
     pub target_evals: Vec<RecursionField>,

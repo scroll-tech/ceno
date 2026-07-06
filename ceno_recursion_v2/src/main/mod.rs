@@ -40,7 +40,8 @@ use self::{
     selector::{
         MAX_SELECTOR_POINT_VARS, MAX_SELECTOR_SPARSE_INDICES, MainSelectorEvalAir,
         MainSelectorEvalTraceGenerator, MainSelectorFormulaAir, MainSelectorFormulaTraceGenerator,
-        selector_formula_global_point_lookups,
+        MainSelectorPointAir, MainSelectorPointTraceGenerator,
+        selector_formula_global_point_lookups, selector_formula_point_lookup_counts,
     },
     trace::{MainRecord, MainTraceGenerator},
     transcript_bind::{MainTranscriptBindAir, MainTranscriptBindTraceGenerator},
@@ -48,12 +49,13 @@ use self::{
 use crate::{
     bus::{
         AirPresenceBus, ForkedTranscriptBus, MainBus, MainEvalBus, MainExpressionClaimBus,
-        MainGlobalPointBus, MainSelectorResultBus, MainSelectorShapeBus,
-        MainSelectorSparseIndexShapeBus, TranscriptBus,
+        MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
+        MainSelectorSparseIndexShapeBus, TowerMainPointBus, TranscriptBus,
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, MainEvalRecord,
         MainFinalClaimRecord, MainFrontloadTermRecord, MainSelectorEvalRecord, MainSelectorKind,
+        MainSelectorPointDeriveKind, MainSelectorPointRecord, MainSelectorPointSourceKind,
         MainTowerPointEqRecord, Preflight, RecursionField, RecursionProof, RecursionVk,
         RotationReplayClaims, TraceGenModule,
     },
@@ -76,9 +78,11 @@ pub struct MainModule {
     air_presence_bus: AirPresenceBus,
     main_global_point_bus: MainGlobalPointBus,
     main_eval_bus: MainEvalBus,
+    main_selector_point_bus: MainSelectorPointBus,
     main_selector_result_bus: MainSelectorResultBus,
     main_selector_shape_bus: MainSelectorShapeBus,
     main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
+    tower_main_point_bus: TowerMainPointBus,
 }
 
 impl MainModule {
@@ -91,10 +95,12 @@ impl MainModule {
         let air_presence_bus = bus_inventory.air_presence_bus;
         let main_global_point_bus = bus_inventory.main_global_point_bus;
         let main_eval_bus = bus_inventory.main_eval_bus;
+        let main_selector_point_bus = bus_inventory.main_selector_point_bus;
         let main_selector_result_bus = bus_inventory.main_selector_result_bus;
         let main_selector_shape_bus = bus_inventory.main_selector_shape_bus;
         let main_selector_sparse_index_shape_bus =
             bus_inventory.main_selector_sparse_index_shape_bus;
+        let tower_main_point_bus = bus_inventory.tower_main_point_bus;
         Self {
             main_bus,
             expression_claim_bus,
@@ -103,9 +109,11 @@ impl MainModule {
             air_presence_bus,
             main_global_point_bus,
             main_eval_bus,
+            main_selector_point_bus,
             main_selector_result_bus,
             main_selector_shape_bus,
             main_selector_sparse_index_shape_bus,
+            tower_main_point_bus,
         }
     }
 
@@ -274,6 +282,35 @@ impl MainModule {
                 .copied()
                 .unwrap_or(0);
         }
+        let tower_idx_by_air = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, preflight)| {
+                let sorted_idx_by_chip: std::collections::BTreeMap<usize, usize> = preflight
+                    .proof_shape
+                    .sorted_trace_vdata
+                    .iter()
+                    .enumerate()
+                    .map(|(sorted_idx, (chip_idx, _))| (*chip_idx, sorted_idx))
+                    .collect();
+                let mut entries = preflight.gkr.chips.iter().collect_vec();
+                entries.sort_by_key(|entry| {
+                    (
+                        sorted_idx_by_chip
+                            .get(&entry.chip_idx)
+                            .copied()
+                            .unwrap_or(usize::MAX),
+                        entry.chip_idx,
+                    )
+                });
+                entries
+                    .into_iter()
+                    .enumerate()
+                    .map(move |(tower_idx, entry)| ((proof_idx, entry.chip_idx), tower_idx))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let selector_point_records =
+            build_main_selector_point_records(&selector_eval_records, &tower_idx_by_air);
         for global in &mut global_sumcheck_records {
             for (round_idx, round) in global.rounds.iter_mut().enumerate() {
                 round.point_lookup_count = global_lookup_counts
@@ -331,6 +368,19 @@ impl MainModule {
                 });
             }
         }
+        let selector_point_fork_tidxs = selector_point_records
+            .iter()
+            .filter(|record| record.has_transcript)
+            .flat_map(|record| {
+                (0..D_EF).map(move |offset| {
+                    (
+                        record.proof_idx,
+                        record.fork_id,
+                        record.transcript_tidx + offset,
+                    )
+                })
+            })
+            .collect::<std::collections::BTreeSet<_>>();
         for input in tower_input_records
             .iter()
             .filter(|record| record.n_logup != 0)
@@ -346,6 +396,9 @@ impl MainModule {
             let tail_start = main_tidx_from_tower_input(input);
             let tail_end = fork.log.len().saturating_sub(D_EF);
             for tidx in tail_start..tail_end {
+                if selector_point_fork_tidxs.contains(&(input.proof_idx, input.fork_id, tidx)) {
+                    continue;
+                }
                 transcript_records.push(crate::system::MainTranscriptRecord {
                     proof_idx: input.proof_idx,
                     fork_id: input.fork_id,
@@ -365,6 +418,7 @@ impl MainModule {
             global_sumcheck_records,
             eval_records,
             selector_eval_records,
+            selector_point_records,
             tower_point_eq_records,
             frontload_term_records,
             final_claim_records,
@@ -378,6 +432,7 @@ pub(crate) struct MainCollectedRecords {
     pub(crate) global_sumcheck_records: Vec<crate::system::MainGlobalSumcheckRecord>,
     pub(crate) eval_records: Vec<MainEvalRecord>,
     pub(crate) selector_eval_records: Vec<MainSelectorEvalRecord>,
+    pub(crate) selector_point_records: Vec<MainSelectorPointRecord>,
     pub(crate) tower_point_eq_records: Vec<MainTowerPointEqRecord>,
     pub(crate) frontload_term_records: Vec<MainFrontloadTermRecord>,
     pub(crate) final_claim_records: Vec<MainFinalClaimRecord>,
@@ -386,7 +441,7 @@ pub(crate) struct MainCollectedRecords {
 
 impl AirModule for MainModule {
     fn num_airs(&self) -> usize {
-        4
+        5
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -401,8 +456,14 @@ impl AirModule for MainModule {
                 transcript_bus: self.transcript_bus,
                 forked_transcript_bus: self.forked_transcript_bus,
             }) as AirRef<_>,
+            Arc::new(MainSelectorPointAir {
+                selector_point_bus: self.main_selector_point_bus,
+                tower_point_bus: self.tower_main_point_bus,
+                forked_transcript_bus: self.forked_transcript_bus,
+            }) as AirRef<_>,
             Arc::new(MainSelectorFormulaAir {
                 global_point_bus: self.main_global_point_bus,
+                selector_point_bus: self.main_selector_point_bus,
                 air_presence_bus: self.air_presence_bus,
                 selector_result_bus: self.main_selector_result_bus,
                 selector_shape_bus: self.main_selector_shape_bus,
@@ -456,6 +517,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             global_sumcheck_records: _,
             eval_records: _,
             ref mut selector_eval_records,
+            ref mut selector_point_records,
             tower_point_eq_records: _,
             frontload_term_records: _,
             final_claim_records: _,
@@ -470,15 +532,26 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 record.selector_idx,
             )
         });
+        selector_point_records.sort_by_key(|record| {
+            (
+                record.proof_idx,
+                record.idx,
+                record.air_idx,
+                record.selector_idx,
+                record.round_idx,
+            )
+        });
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
         let ctx = MainTraceCtx {
             main_records: &main_records,
             selector_eval_records: &selector_eval_records,
+            selector_point_records: &selector_point_records,
             transcript_records: &transcript_records,
         };
         let chips = [
             MainModuleChip::Main,
             MainModuleChip::TranscriptBind,
+            MainModuleChip::SelectorPoint,
             MainModuleChip::SelectorFormula,
             MainModuleChip::SelectorEval,
         ];
@@ -502,12 +575,14 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 struct MainTraceCtx<'a> {
     main_records: &'a [MainRecord],
     selector_eval_records: &'a [MainSelectorEvalRecord],
+    selector_point_records: &'a [MainSelectorPointRecord],
     transcript_records: &'a [crate::system::MainTranscriptRecord],
 }
 
 enum MainModuleChip {
     Main,
     TranscriptBind,
+    SelectorPoint,
     SelectorFormula,
     SelectorEval,
 }
@@ -526,6 +601,8 @@ impl RowMajorChip<F> for MainModuleChip {
             }
             MainModuleChip::TranscriptBind => MainTranscriptBindTraceGenerator
                 .generate_trace(&ctx.transcript_records, required_height),
+            MainModuleChip::SelectorPoint => MainSelectorPointTraceGenerator
+                .generate_trace(&ctx.selector_point_records, required_height),
             MainModuleChip::SelectorFormula => MainSelectorFormulaTraceGenerator
                 .generate_trace(&ctx.selector_eval_records, required_height),
             MainModuleChip::SelectorEval => MainSelectorEvalTraceGenerator
@@ -631,7 +708,7 @@ where
         sample_challenge_pows(ts, num_rotations, b"combine subset evals")
     )
     .collect_vec();
-    let (origin_point, expected_evaluation, _) = replay_main_sumcheck(
+    let (origin_point, expected_evaluation, origin_tidxs) = replay_main_sumcheck(
         ts,
         RecursionField::ZERO,
         &rotation_proof.proof,
@@ -693,6 +770,7 @@ where
         left_point,
         right_point,
         origin_point,
+        origin_tidxs,
         left_evals,
         right_evals,
         target_evals,
@@ -710,16 +788,45 @@ where
         .collect()
 }
 
+fn sample_vec_with_tidxs<TS>(
+    ts: &mut TS,
+    label: &[u8],
+    len: usize,
+) -> (Vec<RecursionField>, Vec<usize>)
+where
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config>
+        + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
+{
+    transcript_observe_label(ts, label);
+    let mut values = Vec::with_capacity(len);
+    let mut tidxs = Vec::with_capacity(len);
+    for _ in 0..len {
+        tidxs.push(ts.len());
+        values.push(FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(
+            ts,
+        ));
+    }
+    (values, tidxs)
+}
+
 struct MainReplayLayer<'a> {
     air_idx: usize,
+    fork_id: usize,
     layer: &'a gkr_iop::gkr::layer::Layer<RecursionField>,
     eval_and_dedup_points: Vec<(Vec<RecursionField>, Option<Vec<RecursionField>>)>,
+    selector_point_sources: Vec<MainSelectorPointSourceKind>,
     selector_ctxs: Vec<gkr_iop::selector::SelectorContext>,
     eval_start: usize,
     eval_len: usize,
     alpha_start: usize,
     num_var_with_rotation: usize,
     pi: Vec<RecursionField>,
+    rotation_cyclic_group_log2: usize,
+    rotation_origin_selector_idx: Option<usize>,
+    rotation_origin_tidxs: Vec<usize>,
+    ecc_sample_tidx: Option<usize>,
+    ecc_xy_selector_idx: Option<usize>,
+    ecc_x3y3_selector_idx: Option<usize>,
 }
 
 fn replay_batched_main_preflight<TS>(
@@ -806,6 +913,13 @@ where
             chip_proof.num_instances,
             num_var_with_rotation,
         )?;
+        let mut rotation_origin_selector_idx = None;
+        let mut rotation_origin_tidxs = Vec::new();
+        let mut ecc_sample_tidx = None;
+        let mut ecc_xy_selector_idx = None;
+        let mut ecc_x3y3_selector_idx = None;
+        let mut selector_point_sources =
+            vec![MainSelectorPointSourceKind::TowerMain; layer.out_sel_and_eval_exprs.len()];
         let mut out_evals =
             vec![PointAndEval::new(rt_main, RecursionField::ZERO); gkr_circuit.n_evaluations];
         if chip_proof.main_out_evals.len() > gkr_circuit.n_evaluations {
@@ -829,6 +943,11 @@ where
             else {
                 bail!("rotation claims expected but selectors are missing");
             };
+            rotation_origin_selector_idx = Some(point_group_idx);
+            rotation_origin_tidxs = rotation_claims.origin_tidxs.clone();
+            selector_point_sources[left_group_idx] = MainSelectorPointSourceKind::RotationLeft;
+            selector_point_sources[right_group_idx] = MainSelectorPointSourceKind::RotationRight;
+            selector_point_sources[point_group_idx] = MainSelectorPointSourceKind::RotationOrigin;
             assign_group_evals(
                 &mut out_evals,
                 &layer.out_sel_and_eval_exprs[left_group_idx].1,
@@ -862,8 +981,18 @@ where
             else {
                 bail!("ecc bridge claims expected but selectors are missing");
             };
+            selector_point_sources[x_group_idx] = MainSelectorPointSourceKind::EccXY;
+            selector_point_sources[y_group_idx] = MainSelectorPointSourceKind::EccXY;
+            selector_point_sources[slope_group_idx] = MainSelectorPointSourceKind::EccSlope;
+            selector_point_sources[x3_group_idx] = MainSelectorPointSourceKind::EccX3Y3;
+            selector_point_sources[y3_group_idx] = MainSelectorPointSourceKind::EccX3Y3;
+            ecc_xy_selector_idx = Some(x_group_idx);
+            ecc_x3y3_selector_idx = Some(x3_group_idx);
 
-            let sample_r = sample_vec(ts, b"ecc_gkr_bridge_r", 1)[0];
+            let (sample_r_values, sample_r_tidxs) =
+                sample_vec_with_tidxs(ts, b"ecc_gkr_bridge_r", 1);
+            let sample_r = sample_r_values[0];
+            ecc_sample_tidx = Some(sample_r_tidxs[0]);
             let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation)?;
             assign_group_evals(
                 &mut out_evals,
@@ -928,14 +1057,22 @@ where
         max_degree = max_degree.max(layer.max_expr_degree + 1);
         layers.push(MainReplayLayer {
             air_idx: *chip_idx,
+            fork_id: tower_record.fork_idx,
             layer,
             eval_and_dedup_points,
+            selector_point_sources,
             selector_ctxs,
             eval_start: total_evals,
             eval_len,
             alpha_start: total_exprs,
             num_var_with_rotation,
             pi,
+            rotation_cyclic_group_log2: layer.rotation_cyclic_group_log2,
+            rotation_origin_selector_idx,
+            rotation_origin_tidxs,
+            ecc_sample_tidx,
+            ecc_xy_selector_idx,
+            ecc_x3y3_selector_idx,
         });
         total_evals += eval_len;
         total_exprs += layer.exprs.len();
@@ -1420,6 +1557,257 @@ fn build_main_eval_records(
     records
 }
 
+fn build_main_selector_point_records(
+    selector_evals: &[MainSelectorEvalRecord],
+    tower_idx_by_air: &std::collections::BTreeMap<(usize, usize), usize>,
+) -> Vec<MainSelectorPointRecord> {
+    let lookup_counts = selector_formula_point_lookup_counts(selector_evals);
+    let mut records = Vec::new();
+    for record in selector_evals {
+        if !record.has_eval {
+            continue;
+        }
+        for (round_idx, value) in record.out_point.iter().copied().enumerate() {
+            let lookup_count = lookup_counts
+                .get(&(
+                    record.proof_idx,
+                    record.idx,
+                    record.air_idx,
+                    record.selector_idx,
+                    round_idx,
+                ))
+                .copied()
+                .unwrap_or(0);
+            records.push(MainSelectorPointRecord {
+                proof_idx: record.proof_idx,
+                idx: record.idx,
+                tower_idx: tower_idx_by_air
+                    .get(&(record.proof_idx, record.air_idx))
+                    .copied()
+                    .unwrap_or(record.tower_idx),
+                air_idx: record.air_idx,
+                selector_idx: record.selector_idx,
+                round_idx,
+                value,
+                source_kind: record.point_source,
+                lookup_count,
+                fork_id: record.fork_id,
+                has_transcript: false,
+                transcript_tidx: 0,
+                has_source: false,
+                source_selector_idx: 0,
+                source_source_kind: MainSelectorPointSourceKind::TowerMain,
+                source_round_idx: 0,
+                source_value: RecursionField::ZERO,
+                derive_kind: MainSelectorPointDeriveKind::Identity,
+            });
+        }
+    }
+    let values_by_key = records
+        .iter()
+        .map(|record| {
+            (
+                (
+                    record.proof_idx,
+                    record.idx,
+                    record.air_idx,
+                    record.selector_idx,
+                    record.round_idx,
+                ),
+                record.value,
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let evals_by_key = selector_evals
+        .iter()
+        .map(|record| {
+            (
+                (
+                    record.proof_idx,
+                    record.idx,
+                    record.air_idx,
+                    record.selector_idx,
+                ),
+                record,
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut source_lookups = Vec::new();
+    for point in &mut records {
+        let Some(eval) = evals_by_key.get(&(
+            point.proof_idx,
+            point.idx,
+            point.air_idx,
+            point.selector_idx,
+        )) else {
+            continue;
+        };
+        match point.source_kind {
+            MainSelectorPointSourceKind::TowerMain => {}
+            MainSelectorPointSourceKind::RotationOrigin => {
+                if let Some(tidx) = eval.rotation_origin_tidxs.get(point.round_idx).copied() {
+                    point.has_transcript = true;
+                    point.transcript_tidx = tidx;
+                }
+            }
+            MainSelectorPointSourceKind::RotationLeft
+            | MainSelectorPointSourceKind::RotationRight => {
+                let Some(origin_selector_idx) = eval.rotation_origin_selector_idx else {
+                    continue;
+                };
+                let g = eval.rotation_cyclic_group_log2;
+                let (derive_kind, source_round_idx) =
+                    rotation_point_source(point.source_kind, g, point.round_idx);
+                point.derive_kind = derive_kind;
+                if matches!(
+                    derive_kind,
+                    MainSelectorPointDeriveKind::Identity | MainSelectorPointDeriveKind::OneMinus
+                ) {
+                    point.has_source = true;
+                    point.source_selector_idx = origin_selector_idx;
+                    point.source_source_kind = MainSelectorPointSourceKind::RotationOrigin;
+                    point.source_round_idx = source_round_idx;
+                    if let Some(value) = values_by_key.get(&(
+                        point.proof_idx,
+                        point.idx,
+                        point.air_idx,
+                        origin_selector_idx,
+                        source_round_idx,
+                    )) {
+                        point.source_value = *value;
+                        source_lookups.push((
+                            point.proof_idx,
+                            point.idx,
+                            point.air_idx,
+                            origin_selector_idx,
+                            source_round_idx,
+                        ));
+                    }
+                }
+            }
+            MainSelectorPointSourceKind::EccXY => {
+                if point.round_idx == 0 {
+                    if let Some(tidx) = eval.ecc_sample_tidx {
+                        point.has_transcript = true;
+                        point.transcript_tidx = tidx;
+                    }
+                } else if let Some(source_selector_idx) = eval.ecc_x3y3_selector_idx {
+                    point.has_source = true;
+                    point.source_selector_idx = source_selector_idx;
+                    point.source_source_kind = MainSelectorPointSourceKind::EccX3Y3;
+                    point.source_round_idx = point.round_idx - 1;
+                    if let Some(value) = values_by_key.get(&(
+                        point.proof_idx,
+                        point.idx,
+                        point.air_idx,
+                        source_selector_idx,
+                        point.source_round_idx,
+                    )) {
+                        point.source_value = *value;
+                        source_lookups.push((
+                            point.proof_idx,
+                            point.idx,
+                            point.air_idx,
+                            source_selector_idx,
+                            point.source_round_idx,
+                        ));
+                    }
+                }
+            }
+            MainSelectorPointSourceKind::EccSlope => {
+                if point.round_idx + 1 == eval.out_point.len() {
+                    if let Some(source_selector_idx) = eval.ecc_xy_selector_idx {
+                        point.has_source = true;
+                        point.source_selector_idx = source_selector_idx;
+                        point.source_source_kind = MainSelectorPointSourceKind::EccXY;
+                        point.source_round_idx = 0;
+                    }
+                } else if let Some(source_selector_idx) = eval.ecc_x3y3_selector_idx {
+                    point.has_source = true;
+                    point.source_selector_idx = source_selector_idx;
+                    point.source_source_kind = MainSelectorPointSourceKind::EccX3Y3;
+                    point.source_round_idx = point.round_idx;
+                }
+                if point.has_source {
+                    if let Some(value) = values_by_key.get(&(
+                        point.proof_idx,
+                        point.idx,
+                        point.air_idx,
+                        point.source_selector_idx,
+                        point.source_round_idx,
+                    )) {
+                        point.source_value = *value;
+                        source_lookups.push((
+                            point.proof_idx,
+                            point.idx,
+                            point.air_idx,
+                            point.source_selector_idx,
+                            point.source_round_idx,
+                        ));
+                    }
+                }
+            }
+            MainSelectorPointSourceKind::EccX3Y3 => {
+                if point.round_idx + 1 == eval.out_point.len() {
+                    point.derive_kind = MainSelectorPointDeriveKind::One;
+                }
+            }
+        }
+    }
+    let mut record_idx_by_key = records
+        .iter()
+        .enumerate()
+        .map(|(idx, record)| {
+            (
+                (
+                    record.proof_idx,
+                    record.idx,
+                    record.air_idx,
+                    record.selector_idx,
+                    record.round_idx,
+                ),
+                idx,
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    for key in source_lookups {
+        if let Some(idx) = record_idx_by_key.remove(&key) {
+            records[idx].lookup_count += 1;
+            record_idx_by_key.insert(key, idx);
+        }
+    }
+    records.retain(|record| record.lookup_count != 0);
+    records
+}
+
+fn rotation_point_source(
+    source_kind: MainSelectorPointSourceKind,
+    rotation_cyclic_group_log2: usize,
+    round_idx: usize,
+) -> (MainSelectorPointDeriveKind, usize) {
+    match (source_kind, rotation_cyclic_group_log2, round_idx) {
+        (MainSelectorPointSourceKind::RotationLeft, _, 0) => (MainSelectorPointDeriveKind::Zero, 0),
+        (MainSelectorPointSourceKind::RotationLeft, g, round) if round < g => {
+            (MainSelectorPointDeriveKind::Identity, round - 1)
+        }
+        (MainSelectorPointSourceKind::RotationLeft, _, round) => {
+            (MainSelectorPointDeriveKind::Identity, round)
+        }
+        (MainSelectorPointSourceKind::RotationRight, _, 0) => (MainSelectorPointDeriveKind::One, 0),
+        (MainSelectorPointSourceKind::RotationRight, 5, 2)
+        | (MainSelectorPointSourceKind::RotationRight, 6, 1) => {
+            (MainSelectorPointDeriveKind::OneMinus, round_idx - 1)
+        }
+        (MainSelectorPointSourceKind::RotationRight, g, round) if round < g => {
+            (MainSelectorPointDeriveKind::Identity, round - 1)
+        }
+        (MainSelectorPointSourceKind::RotationRight, _, round) => {
+            (MainSelectorPointDeriveKind::Identity, round)
+        }
+        _ => (MainSelectorPointDeriveKind::Identity, round_idx),
+    }
+}
+
 fn build_main_tower_point_eq_records(
     layers: &[MainReplayLayer<'_>],
     global_in_point: &[RecursionField],
@@ -1486,6 +1874,7 @@ fn build_main_selector_eval_records(
                 records.push(MainSelectorEvalRecord {
                     proof_idx: 0,
                     idx,
+                    tower_idx: 0,
                     air_idx: layer.air_idx,
                     selector_idx,
                     has_eval: false,
@@ -1498,6 +1887,14 @@ fn build_main_selector_eval_records(
                     sparse_indices,
                     in_point: Vec::new(),
                     out_point: Vec::new(),
+                    point_source: layer.selector_point_sources[selector_idx],
+                    fork_id: layer.fork_id,
+                    rotation_cyclic_group_log2: layer.rotation_cyclic_group_log2,
+                    rotation_origin_selector_idx: layer.rotation_origin_selector_idx,
+                    rotation_origin_tidxs: layer.rotation_origin_tidxs.clone(),
+                    ecc_sample_tidx: layer.ecc_sample_tidx,
+                    ecc_xy_selector_idx: layer.ecc_xy_selector_idx,
+                    ecc_x3y3_selector_idx: layer.ecc_x3y3_selector_idx,
                     value: RecursionField::ZERO,
                 });
                 continue;
@@ -1516,6 +1913,7 @@ fn build_main_selector_eval_records(
                 records.push(MainSelectorEvalRecord {
                     proof_idx: 0,
                     idx,
+                    tower_idx: 0,
                     air_idx: layer.air_idx,
                     selector_idx,
                     has_eval: false,
@@ -1528,6 +1926,14 @@ fn build_main_selector_eval_records(
                     sparse_indices,
                     in_point: Vec::new(),
                     out_point: Vec::new(),
+                    point_source: layer.selector_point_sources[selector_idx],
+                    fork_id: layer.fork_id,
+                    rotation_cyclic_group_log2: layer.rotation_cyclic_group_log2,
+                    rotation_origin_selector_idx: layer.rotation_origin_selector_idx,
+                    rotation_origin_tidxs: layer.rotation_origin_tidxs.clone(),
+                    ecc_sample_tidx: layer.ecc_sample_tidx,
+                    ecc_xy_selector_idx: layer.ecc_xy_selector_idx,
+                    ecc_x3y3_selector_idx: layer.ecc_x3y3_selector_idx,
                     value: RecursionField::ZERO,
                 });
                 continue;
@@ -1552,6 +1958,7 @@ fn build_main_selector_eval_records(
             records.push(MainSelectorEvalRecord {
                 proof_idx: 0,
                 idx,
+                tower_idx: 0,
                 air_idx: layer.air_idx,
                 selector_idx,
                 has_eval: true,
@@ -1564,6 +1971,14 @@ fn build_main_selector_eval_records(
                 sparse_indices,
                 in_point: in_point.clone(),
                 out_point: out_point.clone(),
+                point_source: layer.selector_point_sources[selector_idx],
+                fork_id: layer.fork_id,
+                rotation_cyclic_group_log2: layer.rotation_cyclic_group_log2,
+                rotation_origin_selector_idx: layer.rotation_origin_selector_idx,
+                rotation_origin_tidxs: layer.rotation_origin_tidxs.clone(),
+                ecc_sample_tidx: layer.ecc_sample_tidx,
+                ecc_xy_selector_idx: layer.ecc_xy_selector_idx,
+                ecc_x3y3_selector_idx: layer.ecc_x3y3_selector_idx,
                 value: expected_eval,
             });
         }

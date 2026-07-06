@@ -22,6 +22,7 @@ pub struct TowerMainPointCols<T> {
     pub proof_idx: T,
     pub idx: T,
     pub round_idx: T,
+    pub lookup_count: T,
     pub value: [T; D_EF],
 }
 
@@ -45,7 +46,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerMainPointAir {
         let local: &TowerMainPointCols<AB::Var> = (*local_row).borrow();
 
         builder.assert_bool(local.is_enabled);
-        self.tower_point_bus.send(
+        self.tower_point_bus.add_key_with_lookups(
             builder,
             local.proof_idx,
             TowerMainPointMessage {
@@ -53,7 +54,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerMainPointAir {
                 round_idx: local.round_idx.into(),
                 value: local.value.map(Into::into),
             },
-            local.is_enabled,
+            local.is_enabled * local.lookup_count,
         );
     }
 }
@@ -86,6 +87,7 @@ impl RowMajorChip<F> for TowerMainPointTraceGenerator {
             cols.proof_idx = F::from_usize(record.proof_idx);
             cols.idx = F::from_usize(record.idx);
             cols.round_idx = F::from_usize(record.round_idx);
+            cols.lookup_count = F::from_usize(record.lookup_count);
             cols.value = record
                 .value
                 .as_basis_coefficients_slice()

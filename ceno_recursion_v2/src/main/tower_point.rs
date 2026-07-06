@@ -63,7 +63,7 @@ where
             },
             local.is_enabled,
         );
-        self.tower_point_bus.receive(
+        self.tower_point_bus.lookup_key(
             builder,
             local.proof_idx,
             TowerMainPointMessage {

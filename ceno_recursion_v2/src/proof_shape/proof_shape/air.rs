@@ -294,6 +294,7 @@ where
                         air_idx: AB::Expr::from_usize(i),
                         selector_idx: AB::Expr::from_usize(selector.selector_idx),
                         kind: AB::Expr::from_usize(selector.kind),
+                        point_source: AB::Expr::from_usize(selector.point_source),
                         eval_idx: AB::Expr::from_usize(selector.eval_idx),
                         ctx_offset,
                         ctx_num_instances,

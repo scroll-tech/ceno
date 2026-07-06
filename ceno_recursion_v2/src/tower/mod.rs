@@ -64,9 +64,11 @@ use strum::EnumCount;
 use tracing::error;
 
 use crate::{
+    main::selector::selector_formula_point_lookup_counts,
     system::{
-        AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, Preflight, RecursionField,
-        RecursionProof, RecursionVk, TowerChipTranscriptRange, TraceGenModule,
+        AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, MainSelectorPointSourceKind,
+        Preflight, RecursionField, RecursionProof, RecursionVk, TowerChipTranscriptRange,
+        TraceGenModule,
     },
     tower::{
         alpha_pow::{TowerAlphaPowAir, TowerAlphaPowTraceGenerator},
@@ -825,6 +827,7 @@ fn build_chip_records(
                 idx,
                 round_idx,
                 value,
+                lookup_count: 1,
             })
             .collect()
     };
@@ -1267,6 +1270,44 @@ pub(crate) fn build_gkr_blob(
                 entry.chip_idx,
             )
         });
+        let tower_idx_by_chip = sorted_pf_entries
+            .iter()
+            .enumerate()
+            .map(|(tower_idx, entry)| (entry.chip_idx, tower_idx))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let mut selector_eval_records = preflight.main.selector_evals.clone();
+        for record in &mut selector_eval_records {
+            record.proof_idx = proof_idx;
+        }
+        let selector_point_lookup_counts =
+            selector_formula_point_lookup_counts(&selector_eval_records);
+        let mut selector_tower_point_counts =
+            std::collections::BTreeMap::<(usize, usize), usize>::new();
+        for record in &selector_eval_records {
+            if record.point_source != MainSelectorPointSourceKind::TowerMain {
+                continue;
+            }
+            let Some(tower_idx) = tower_idx_by_chip.get(&record.air_idx).copied() else {
+                continue;
+            };
+            for round_idx in 0..record.out_point.len() {
+                let count = selector_point_lookup_counts
+                    .get(&(
+                        record.proof_idx,
+                        record.idx,
+                        record.air_idx,
+                        record.selector_idx,
+                        round_idx,
+                    ))
+                    .copied()
+                    .unwrap_or(0);
+                if count != 0 {
+                    *selector_tower_point_counts
+                        .entry((tower_idx, round_idx))
+                        .or_default() += 1;
+                }
+            }
+        }
         for (entry_idx, pf_entry) in sorted_pf_entries.into_iter().enumerate() {
             let chip_idx = pf_entry.chip_idx;
             let chip_proof = proof
@@ -1302,7 +1343,7 @@ pub(crate) fn build_gkr_blob(
                 tower_record,
                 sumcheck_record,
                 mus_record,
-                chip_main_point_records,
+                mut chip_main_point_records,
                 q0_claim,
             ) = build_chip_records(
                 proof_idx,
@@ -1317,6 +1358,12 @@ pub(crate) fn build_gkr_blob(
                 tower_air_tidx,
                 fork_final_sample_tidx,
             )?;
+            for record in &mut chip_main_point_records {
+                record.lookup_count += selector_tower_point_counts
+                    .get(&(idx, record.round_idx))
+                    .copied()
+                    .unwrap_or(0);
+            }
             if std::env::var_os("CENO_REC_V2_DEBUG_TOWER").is_some() {
                 let out_eval_span = tower_air_tidx.saturating_sub(pf_entry.tidx);
                 let compact_layer_span = (0..shape_record.max_layer_count)

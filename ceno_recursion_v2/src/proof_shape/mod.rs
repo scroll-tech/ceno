@@ -64,6 +64,7 @@ pub struct AirMetadata {
 pub struct SelectorMetadata {
     selector_idx: usize,
     kind: usize,
+    point_source: usize,
     eval_idx: usize,
     context_mode: SelectorContextMode,
     ordered_sparse_num_vars: usize,
@@ -295,6 +296,19 @@ fn selector_metadata_from_circuit(
         .first()
         .ok_or_else(|| eyre!("empty gkr circuit layer"))?;
     let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, circuit)?;
+    let mut point_sources = vec![0usize; first_layer.out_sel_and_eval_exprs.len()];
+    if let Some([left, right, origin]) = first_layer.rotation_selector_group_indices() {
+        point_sources[left] = 1;
+        point_sources[right] = 2;
+        point_sources[origin] = 3;
+    }
+    if let Some([x, y, slope, x3, y3]) = first_layer.ecc_bridge_group_indices() {
+        point_sources[x] = 4;
+        point_sources[y] = 4;
+        point_sources[slope] = 5;
+        point_sources[x3] = 6;
+        point_sources[y3] = 6;
+    }
     let cs = &composed_cs.zkvm_v1_css;
     let distinct_rw_selectors =
         cs.r_selector.is_some() && cs.w_selector.is_some() && cs.r_selector != cs.w_selector;
@@ -325,6 +339,7 @@ fn selector_metadata_from_circuit(
             Ok(SelectorMetadata {
                 selector_idx,
                 kind,
+                point_source: point_sources[selector_idx],
                 eval_idx: first_layer.n_witin + first_layer.n_fixed + wit_id as usize,
                 context_mode,
                 ordered_sparse_num_vars,

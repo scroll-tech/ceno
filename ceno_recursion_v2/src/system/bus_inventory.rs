@@ -13,10 +13,10 @@ use crate::bus::{
     FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
     LiftedHeightsBus as LocalLiftedHeightsBus, LookupChallengeBus, MainBus, MainContributionBus,
     MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus, MainGlobalPointBus,
-    MainSelectorResultBus, MainSelectorShapeBus, MainSelectorSparseIndexShapeBus,
-    MainSumcheckInputBus, MainSumcheckOutputBus, NLiftBus as LocalNLiftBus,
-    PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus, TowerModuleBus,
-    TranscriptBus as LocalTranscriptBus,
+    MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
+    MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
+    NLiftBus as LocalNLiftBus, PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus,
+    TowerModuleBus, TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
@@ -46,6 +46,7 @@ pub struct BusInventory {
     pub main_global_point_bus: MainGlobalPointBus,
     pub main_eval_bus: MainEvalBus,
     pub main_contribution_bus: MainContributionBus,
+    pub main_selector_point_bus: MainSelectorPointBus,
     pub main_selector_result_bus: MainSelectorResultBus,
     pub main_selector_shape_bus: MainSelectorShapeBus,
     pub main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
@@ -91,6 +92,7 @@ impl BusInventory {
         let main_global_point_bus = MainGlobalPointBus::new(b.new_bus_idx());
         let main_eval_bus = MainEvalBus::new(b.new_bus_idx());
         let main_contribution_bus = MainContributionBus::new(b.new_bus_idx());
+        let main_selector_point_bus = MainSelectorPointBus::new(b.new_bus_idx());
         let main_selector_result_bus = MainSelectorResultBus::new(b.new_bus_idx());
         let main_selector_shape_bus = MainSelectorShapeBus::new(b.new_bus_idx());
         let main_selector_sparse_index_shape_bus =
@@ -129,6 +131,7 @@ impl BusInventory {
             main_global_point_bus,
             main_eval_bus,
             main_contribution_bus,
+            main_selector_point_bus,
             main_selector_result_bus,
             main_selector_shape_bus,
             main_selector_sparse_index_shape_bus,

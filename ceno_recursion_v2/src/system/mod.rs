@@ -7,6 +7,7 @@ pub use preflight::{
     BatchConstraintPreflight, ChipTranscriptRange, ForkTranscriptLog, MainEvalRecord,
     MainFinalClaimRecord, MainFrontloadTermRecord, MainGlobalSumcheckRecord,
     MainGlobalSumcheckRoundRecord, MainPreflight, MainSelectorEvalRecord, MainSelectorKind,
+    MainSelectorPointDeriveKind, MainSelectorPointRecord, MainSelectorPointSourceKind,
     MainTowerPointEqRecord, MainTranscriptRecord, Preflight, ProofShapePreflight,
     RotationReplayClaims, TowerChipTranscriptRange, TowerMainPointRecord, TowerPreflight,
     TraceVData,
