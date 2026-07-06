@@ -40,6 +40,7 @@ use self::{
     selector::{
         MAX_SELECTOR_POINT_VARS, MAX_SELECTOR_SPARSE_INDICES, MainSelectorEvalAir,
         MainSelectorEvalTraceGenerator, MainSelectorFormulaAir, MainSelectorFormulaTraceGenerator,
+        selector_formula_global_point_lookups,
     },
     trace::{MainRecord, MainTraceGenerator},
     transcript_bind::{MainTranscriptBindAir, MainTranscriptBindTraceGenerator},
@@ -244,15 +245,11 @@ impl MainModule {
                     .or_default() += 1;
             }
         }
-        for record in &selector_eval_records {
-            if !record.has_eval {
-                continue;
-            }
-            for round_idx in 0..record.ctx_num_vars.min(selector::MAX_SELECTOR_POINT_VARS) {
-                *global_lookup_counts
-                    .entry((record.proof_idx, round_idx))
-                    .or_default() += 1;
-            }
+        for (proof_idx, round_idx) in selector_formula_global_point_lookups(&selector_eval_records)
+        {
+            *global_lookup_counts
+                .entry((proof_idx, round_idx))
+                .or_default() += 1;
         }
         let mut eval_lookup_counts =
             std::collections::BTreeMap::<(usize, usize, usize), usize>::new();
@@ -1017,13 +1014,8 @@ where
             global_point_lookup_counts[record.global_round_idx] += 1;
         }
     }
-    for record in &selector_evals {
-        if !record.has_eval {
-            continue;
-        }
-        for round_idx in 0..record.ctx_num_vars.min(MAX_SELECTOR_POINT_VARS) {
-            global_point_lookup_counts[round_idx] += 1;
-        }
+    for (_, round_idx) in selector_formula_global_point_lookups(&selector_evals) {
+        global_point_lookup_counts[round_idx] += 1;
     }
     let mut eval_lookup_counts = vec![0usize; main_proof.proof.evals.len()];
     for record in &frontload_terms {
