@@ -13,8 +13,9 @@ use crate::bus::{
     ForkedTranscriptBus as LocalForkedTranscriptBus,
     FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
     LiftedHeightsBus as LocalLiftedHeightsBus, LookupChallengeBus, MainBus, MainContributionBus,
-    MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus, MainGlobalPointBus,
-    MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
+    MainEccRtChallengeBus, MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus,
+    MainEccRtSumcheckFinalBus, MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus,
+    MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
     NLiftBus as LocalNLiftBus, PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus,
     TowerModuleBus, TranscriptBus as LocalTranscriptBus,
@@ -51,6 +52,10 @@ pub struct BusInventory {
     pub main_selector_result_bus: MainSelectorResultBus,
     pub main_selector_shape_bus: MainSelectorShapeBus,
     pub main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
+    pub main_ecc_rt_challenge_bus: MainEccRtChallengeBus,
+    pub main_ecc_rt_sumcheck_final_bus: MainEccRtSumcheckFinalBus,
+    pub main_ecc_rt_equation_totals_bus: MainEccRtEquationTotalsBus,
+    pub main_ecc_rt_quark_final_bus: MainEccRtQuarkFinalBus,
     pub ecc_rt_bus: EccRtBus,
     pub tower_main_point_bus: TowerMainPointBus,
     pub right_shift_bus: RightShiftBus,
@@ -99,6 +104,10 @@ impl BusInventory {
         let main_selector_shape_bus = MainSelectorShapeBus::new(b.new_bus_idx());
         let main_selector_sparse_index_shape_bus =
             MainSelectorSparseIndexShapeBus::new(b.new_bus_idx());
+        let main_ecc_rt_challenge_bus = MainEccRtChallengeBus::new(b.new_bus_idx());
+        let main_ecc_rt_sumcheck_final_bus = MainEccRtSumcheckFinalBus::new(b.new_bus_idx());
+        let main_ecc_rt_equation_totals_bus = MainEccRtEquationTotalsBus::new(b.new_bus_idx());
+        let main_ecc_rt_quark_final_bus = MainEccRtQuarkFinalBus::new(b.new_bus_idx());
         let ecc_rt_bus = EccRtBus::new(b.new_bus_idx());
         let tower_main_point_bus = TowerMainPointBus::new(b.new_bus_idx());
 
@@ -138,6 +147,10 @@ impl BusInventory {
             main_selector_result_bus,
             main_selector_shape_bus,
             main_selector_sparse_index_shape_bus,
+            main_ecc_rt_challenge_bus,
+            main_ecc_rt_sumcheck_final_bus,
+            main_ecc_rt_equation_totals_bus,
+            main_ecc_rt_quark_final_bus,
             ecc_rt_bus,
             tower_main_point_bus,
             right_shift_bus,

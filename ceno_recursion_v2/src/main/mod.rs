@@ -38,29 +38,34 @@ use witness::next_pow2_instance_padding;
 
 use self::{
     air::MainAir,
+    ecc_rt::{
+        MainEccRtAir, MainEccRtChallengeAir, MainEccRtChallengeTraceGenerator,
+        MainEccRtEquationAir, MainEccRtEquationTraceGenerator, MainEccRtQuarkAir,
+        MainEccRtQuarkTraceGenerator, MainEccRtSumcheckAir, MainEccRtSumcheckTraceGenerator,
+        MainEccRtTraceGenerator,
+    },
     selector::{
         MAX_SELECTOR_POINT_VARS, MAX_SELECTOR_SPARSE_INDICES, MainSelectorEvalAir,
         MainSelectorEvalTraceGenerator, MainSelectorFormulaAir, MainSelectorFormulaTraceGenerator,
         MainSelectorPointAir, MainSelectorPointTraceGenerator,
         selector_formula_global_point_lookups, selector_formula_point_lookup_counts,
     },
-    ecc_rt::{MainEccRtAir, MainEccRtTraceGenerator},
     trace::{MainRecord, MainTraceGenerator},
     transcript_bind::{MainTranscriptBindAir, MainTranscriptBindTraceGenerator},
 };
 use crate::{
     bus::{
-        AirPresenceBus, EccRtBus, ForkedTranscriptBus, MainBus, MainEvalBus, MainExpressionClaimBus,
-        MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
-        MainSelectorSparseIndexShapeBus, TowerMainPointBus, TranscriptBus,
+        AirPresenceBus, EccRtBus, ForkedTranscriptBus, MainBus, MainEccRtChallengeBus,
+        MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus, MainEccRtSumcheckFinalBus, MainEvalBus,
+        MainExpressionClaimBus, MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus,
+        MainSelectorShapeBus, MainSelectorSparseIndexShapeBus, TowerMainPointBus, TranscriptBus,
     },
     system::{
-        AirModule, BusIndexManager, BusInventory, EccReplayClaims, GlobalCtxCpu,
-        MainEccRtRecord, MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord,
-        MainSelectorEvalRecord, MainSelectorKind, MainSelectorPointDeriveKind,
-        MainSelectorPointRecord, MainSelectorPointSourceKind, MainTowerPointEqRecord, Preflight,
-        RecursionField, RecursionProof, RecursionVk,
-        RotationReplayClaims, TraceGenModule,
+        AirModule, BusIndexManager, BusInventory, EccReplayClaims, GlobalCtxCpu, MainEccRtRecord,
+        MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord, MainSelectorEvalRecord,
+        MainSelectorKind, MainSelectorPointDeriveKind, MainSelectorPointRecord,
+        MainSelectorPointSourceKind, MainTowerPointEqRecord, Preflight, RecursionField,
+        RecursionProof, RecursionVk, RotationReplayClaims, TraceGenModule,
     },
     tower::{
         TowerInputRecord, TowerReplayResult, build_tower_input_records,
@@ -85,6 +90,10 @@ pub struct MainModule {
     main_selector_result_bus: MainSelectorResultBus,
     main_selector_shape_bus: MainSelectorShapeBus,
     main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
+    main_ecc_rt_challenge_bus: MainEccRtChallengeBus,
+    main_ecc_rt_sumcheck_final_bus: MainEccRtSumcheckFinalBus,
+    main_ecc_rt_equation_totals_bus: MainEccRtEquationTotalsBus,
+    main_ecc_rt_quark_final_bus: MainEccRtQuarkFinalBus,
     ecc_rt_bus: EccRtBus,
     tower_main_point_bus: TowerMainPointBus,
 }
@@ -104,6 +113,10 @@ impl MainModule {
         let main_selector_shape_bus = bus_inventory.main_selector_shape_bus;
         let main_selector_sparse_index_shape_bus =
             bus_inventory.main_selector_sparse_index_shape_bus;
+        let main_ecc_rt_challenge_bus = bus_inventory.main_ecc_rt_challenge_bus;
+        let main_ecc_rt_sumcheck_final_bus = bus_inventory.main_ecc_rt_sumcheck_final_bus;
+        let main_ecc_rt_equation_totals_bus = bus_inventory.main_ecc_rt_equation_totals_bus;
+        let main_ecc_rt_quark_final_bus = bus_inventory.main_ecc_rt_quark_final_bus;
         let ecc_rt_bus = bus_inventory.ecc_rt_bus;
         let tower_main_point_bus = bus_inventory.tower_main_point_bus;
         Self {
@@ -118,6 +131,10 @@ impl MainModule {
             main_selector_result_bus,
             main_selector_shape_bus,
             main_selector_sparse_index_shape_bus,
+            main_ecc_rt_challenge_bus,
+            main_ecc_rt_sumcheck_final_bus,
+            main_ecc_rt_equation_totals_bus,
+            main_ecc_rt_quark_final_bus,
             ecc_rt_bus,
             tower_main_point_bus,
         }
@@ -393,18 +410,13 @@ impl MainModule {
                 })
             })
             .chain(ecc_rt_records.iter().flat_map(|record| {
-                (0..D_EF)
-                    .flat_map(move |offset| {
-                        [
-                            (record.proof_idx, record.fork_id, record.tidx + offset),
-                            (record.proof_idx, record.fork_id, record.out_tidx + offset),
-                            (
-                                record.proof_idx,
-                                record.fork_id,
-                                record.alpha_tidx + offset,
-                            ),
-                        ]
-                    })
+                (0..D_EF).flat_map(move |offset| {
+                    [
+                        (record.proof_idx, record.fork_id, record.tidx + offset),
+                        (record.proof_idx, record.fork_id, record.out_tidx + offset),
+                        (record.proof_idx, record.fork_id, record.alpha_tidx + offset),
+                    ]
+                })
             }))
             .collect::<std::collections::BTreeSet<_>>();
         for input in tower_input_records
@@ -469,7 +481,7 @@ pub(crate) struct MainCollectedRecords {
 
 impl AirModule for MainModule {
     fn num_airs(&self) -> usize {
-        6
+        10
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -484,9 +496,28 @@ impl AirModule for MainModule {
                 transcript_bus: self.transcript_bus,
                 forked_transcript_bus: self.forked_transcript_bus,
             }) as AirRef<_>,
-            Arc::new(MainEccRtAir {
+            Arc::new(MainEccRtChallengeAir {
                 forked_transcript_bus: self.forked_transcript_bus,
                 ecc_rt_bus: self.ecc_rt_bus,
+                challenge_bus: self.main_ecc_rt_challenge_bus,
+            }) as AirRef<_>,
+            Arc::new(MainEccRtEquationAir {
+                challenge_bus: self.main_ecc_rt_challenge_bus,
+                equation_totals_bus: self.main_ecc_rt_equation_totals_bus,
+            }) as AirRef<_>,
+            Arc::new(MainEccRtSumcheckAir {
+                challenge_bus: self.main_ecc_rt_challenge_bus,
+                sumcheck_final_bus: self.main_ecc_rt_sumcheck_final_bus,
+            }) as AirRef<_>,
+            Arc::new(MainEccRtQuarkAir {
+                challenge_bus: self.main_ecc_rt_challenge_bus,
+                quark_final_bus: self.main_ecc_rt_quark_final_bus,
+            }) as AirRef<_>,
+            Arc::new(MainEccRtAir {
+                challenge_bus: self.main_ecc_rt_challenge_bus,
+                sumcheck_final_bus: self.main_ecc_rt_sumcheck_final_bus,
+                equation_totals_bus: self.main_ecc_rt_equation_totals_bus,
+                quark_final_bus: self.main_ecc_rt_quark_final_bus,
             }) as AirRef<_>,
             Arc::new(MainSelectorPointAir {
                 selector_point_bus: self.main_selector_point_bus,
@@ -575,14 +606,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 record.round_idx,
             )
         });
-        ecc_rt_records.sort_by_key(|record| {
-            (
-                record.proof_idx,
-                record.idx,
-                record.round_idx,
-                record.tidx,
-            )
-        });
+        ecc_rt_records
+            .sort_by_key(|record| (record.proof_idx, record.idx, record.round_idx, record.tidx));
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
         let ctx = MainTraceCtx {
             main_records: &main_records,
@@ -594,6 +619,10 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         let chips = [
             MainModuleChip::Main,
             MainModuleChip::TranscriptBind,
+            MainModuleChip::EccRtChallenge,
+            MainModuleChip::EccRtEquation,
+            MainModuleChip::EccRtSumcheck,
+            MainModuleChip::EccRtQuark,
             MainModuleChip::EccRt,
             MainModuleChip::SelectorPoint,
             MainModuleChip::SelectorFormula,
@@ -627,6 +656,10 @@ struct MainTraceCtx<'a> {
 enum MainModuleChip {
     Main,
     TranscriptBind,
+    EccRtChallenge,
+    EccRtEquation,
+    EccRtSumcheck,
+    EccRtQuark,
     EccRt,
     SelectorPoint,
     SelectorFormula,
@@ -647,6 +680,17 @@ impl RowMajorChip<F> for MainModuleChip {
             }
             MainModuleChip::TranscriptBind => MainTranscriptBindTraceGenerator
                 .generate_trace(&ctx.transcript_records, required_height),
+            MainModuleChip::EccRtChallenge => MainEccRtChallengeTraceGenerator
+                .generate_trace(&ctx.ecc_rt_records, required_height),
+            MainModuleChip::EccRtEquation => {
+                MainEccRtEquationTraceGenerator.generate_trace(&ctx.ecc_rt_records, required_height)
+            }
+            MainModuleChip::EccRtSumcheck => {
+                MainEccRtSumcheckTraceGenerator.generate_trace(&ctx.ecc_rt_records, required_height)
+            }
+            MainModuleChip::EccRtQuark => {
+                MainEccRtQuarkTraceGenerator.generate_trace(&ctx.ecc_rt_records, required_height)
+            }
             MainModuleChip::EccRt => {
                 MainEccRtTraceGenerator.generate_trace(&ctx.ecc_rt_records, required_height)
             }
@@ -1870,15 +1914,18 @@ fn build_main_ecc_rt_records(
     tower_idx_by_air: &std::collections::BTreeMap<(usize, usize), usize>,
     selector_point_records: &[MainSelectorPointRecord],
 ) -> Vec<MainEccRtRecord> {
-    let lookup_counts = selector_point_records.iter().filter(|record| record.has_ecc_rt).fold(
-        std::collections::BTreeMap::<(usize, usize, usize), usize>::new(),
-        |mut counts, record| {
-            *counts
-                .entry((record.proof_idx, record.idx, record.round_idx))
-                .or_default() += 1;
-            counts
-        },
-    );
+    let lookup_counts = selector_point_records
+        .iter()
+        .filter(|record| record.has_ecc_rt)
+        .fold(
+            std::collections::BTreeMap::<(usize, usize, usize), usize>::new(),
+            |mut counts, record| {
+                *counts
+                    .entry((record.proof_idx, record.idx, record.round_idx))
+                    .or_default() += 1;
+                counts
+            },
+        );
     let mut records = Vec::new();
     for (proof_idx, preflight) in preflights.iter().enumerate() {
         let Some(proof) = proofs.get(proof_idx) else {
@@ -1952,8 +1999,18 @@ fn build_main_ecc_rt_records(
             let y3 = to_septic(42);
             let sum_x = core::array::from_fn(|i| RecursionField::from(ecc_proof.sum.x.0[i]));
             let sum_y = core::array::from_fn(|i| RecursionField::from(ecc_proof.sum.y.0[i]));
-            let (add_eval, bypass_eval, export_eval) =
-                native_ecc_equation_evals(&s0, &x0, &y0, &x1, &y1, &x3, &y3, &sum_x, &sum_y, &alpha_pows);
+            let (add_eval, bypass_eval, export_eval) = native_ecc_equation_evals(
+                &s0,
+                &x0,
+                &y0,
+                &x1,
+                &y1,
+                &x3,
+                &y3,
+                &sum_x,
+                &sum_y,
+                &alpha_pows,
+            );
 
             let mut layer_ns = (0..num_vars)
                 .scan(ecc_proof.num_instances, |n_instance, _| {
@@ -1981,11 +2038,8 @@ fn build_main_ecc_rt_records(
                     }
                 }
                 let claim_in = claim;
-                let claim_out = extrapolate_uni_poly(
-                    claim - round_evals[0],
-                    &round_evals,
-                    rt[round_idx],
-                );
+                let claim_out =
+                    extrapolate_uni_poly(claim - round_evals[0], &round_evals, rt[round_idx]);
                 claim = claim_out;
 
                 let eq_in = eq_acc;
@@ -2012,11 +2066,7 @@ fn build_main_ecc_rt_records(
                 } else if round_idx == 0 {
                     RecursionField::ONE
                 } else {
-                    native_eq_lte(
-                        prefix_count - 1,
-                        &out_rt[..round_idx],
-                        &rt[..round_idx],
-                    )
+                    native_eq_lte(prefix_count - 1, &out_rt[..round_idx], &rt[..round_idx])
                 };
                 let lte_witness = build_lte_witness(prefix_count, round_idx, &out_rt, &rt);
                 let quark_in = quark_acc;
@@ -2120,12 +2170,17 @@ fn build_lte_witness(
     for i in 0..32 {
         if active[i] {
             let same_one = out_point[i] * rt_point[i];
-            let same_zero = (RecursionField::ONE - out_point[i]) * (RecursionField::ONE - rt_point[i]);
+            let same_zero =
+                (RecursionField::ONE - out_point[i]) * (RecursionField::ONE - rt_point[i]);
             let same_any = same_one + same_zero;
             let equal_choice = if bits[i] { same_one } else { same_zero };
             prefix_acc[i + 1] = prefix_acc[i] * equal_choice;
-            less_acc[i + 1] =
-                less_acc[i] * same_any + if bits[i] { prefix_acc[i] * same_zero } else { RecursionField::ZERO };
+            less_acc[i + 1] = less_acc[i] * same_any
+                + if bits[i] {
+                    prefix_acc[i] * same_zero
+                } else {
+                    RecursionField::ZERO
+                };
         } else {
             prefix_acc[i + 1] = prefix_acc[i];
             less_acc[i + 1] = less_acc[i];
@@ -2192,13 +2247,10 @@ fn native_ecc_equation_evals(
         let v3 = s0[i] * (x0[i] - x3[i]) - (y0[i] + y3[i]);
         let v4 = x3[i] - x0[i];
         let v5 = y3[i] - y0[i];
-        add_eval += v1 * alpha_pows[i]
-            + v2 * alpha_pows[7 + i]
-            + v3 * alpha_pows[14 + i];
+        add_eval += v1 * alpha_pows[i] + v2 * alpha_pows[7 + i] + v3 * alpha_pows[14 + i];
         bypass_eval += v4 * alpha_pows[21 + i] + v5 * alpha_pows[28 + i];
         export_eval +=
-            (x3[i] - sum_x[i]) * alpha_pows[35 + i]
-                + (y3[i] - sum_y[i]) * alpha_pows[42 + i];
+            (x3[i] - sum_x[i]) * alpha_pows[35 + i] + (y3[i] - sum_y[i]) * alpha_pows[42 + i];
     }
     (add_eval, bypass_eval, export_eval)
 }

@@ -180,6 +180,60 @@ pub struct EccRtMessage<T> {
 
 define_typed_per_proof_lookup_bus!(EccRtBus, EccRtMessage);
 
+#[repr(u8)]
+#[derive(Debug, Clone, Copy)]
+pub enum MainEccRtChallengeKind {
+    Rt = 0,
+    OutRt = 1,
+    Alpha = 2,
+}
+
+impl MainEccRtChallengeKind {
+    pub const fn as_usize(self) -> usize {
+        self as usize
+    }
+}
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainEccRtChallengeMessage<T> {
+    pub idx: T,
+    pub round_idx: T,
+    pub kind: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(MainEccRtChallengeBus, MainEccRtChallengeMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainEccRtSumcheckFinalMessage<T> {
+    pub idx: T,
+    pub claim: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(MainEccRtSumcheckFinalBus, MainEccRtSumcheckFinalMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainEccRtEquationTotalsMessage<T> {
+    pub idx: T,
+    pub add_eval: [T; D_EF],
+    pub bypass_eval: [T; D_EF],
+    pub export_eval: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(MainEccRtEquationTotalsBus, MainEccRtEquationTotalsMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct MainEccRtQuarkFinalMessage<T> {
+    pub idx: T,
+    pub quark_out: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(MainEccRtQuarkFinalBus, MainEccRtQuarkFinalMessage);
+
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct MainSelectorShapeMessage<T> {
