@@ -178,6 +178,7 @@ pub struct MainSelectorEvalRecord {
     pub rotation_origin_selector_idx: Option<usize>,
     pub rotation_origin_tidxs: Vec<usize>,
     pub ecc_sample_tidx: Option<usize>,
+    pub ecc_rt_tidxs: Vec<usize>,
     pub ecc_xy_selector_idx: Option<usize>,
     pub ecc_x3y3_selector_idx: Option<usize>,
     pub value: EF,
@@ -197,12 +198,24 @@ pub struct MainSelectorPointRecord {
     pub fork_id: usize,
     pub has_transcript: bool,
     pub transcript_tidx: usize,
+    pub has_ecc_rt: bool,
     pub has_source: bool,
     pub source_selector_idx: usize,
     pub source_source_kind: MainSelectorPointSourceKind,
     pub source_round_idx: usize,
     pub source_value: EF,
     pub derive_kind: MainSelectorPointDeriveKind,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainEccRtRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub fork_id: usize,
+    pub round_idx: usize,
+    pub tidx: usize,
+    pub value: EF,
+    pub lookup_count: usize,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -294,6 +307,12 @@ pub struct TowerChipTranscriptRange {
     pub fork_idx: usize,
     pub tower_replay: TowerReplayResult,
     pub rotation_replay: Option<RotationReplayClaims>,
+    pub ecc_replay: Option<EccReplayClaims>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct EccReplayClaims {
+    pub rt_tidxs: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Default)]

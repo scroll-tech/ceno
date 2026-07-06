@@ -8,8 +8,9 @@ use recursion_circuit::{
 };
 
 use crate::bus::{
-    CachedCommitBus as LocalCachedCommitBus, ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus,
-    ForkFinalSampleBus, ForkedTranscriptBus as LocalForkedTranscriptBus,
+    CachedCommitBus as LocalCachedCommitBus, EccRtBus,
+    ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus, ForkFinalSampleBus,
+    ForkedTranscriptBus as LocalForkedTranscriptBus,
     FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
     LiftedHeightsBus as LocalLiftedHeightsBus, LookupChallengeBus, MainBus, MainContributionBus,
     MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus, MainGlobalPointBus,
@@ -50,6 +51,7 @@ pub struct BusInventory {
     pub main_selector_result_bus: MainSelectorResultBus,
     pub main_selector_shape_bus: MainSelectorShapeBus,
     pub main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
+    pub ecc_rt_bus: EccRtBus,
     pub tower_main_point_bus: TowerMainPointBus,
     pub right_shift_bus: RightShiftBus,
     pub xi_randomness_bus: XiRandomnessBus,
@@ -97,6 +99,7 @@ impl BusInventory {
         let main_selector_shape_bus = MainSelectorShapeBus::new(b.new_bus_idx());
         let main_selector_sparse_index_shape_bus =
             MainSelectorSparseIndexShapeBus::new(b.new_bus_idx());
+        let ecc_rt_bus = EccRtBus::new(b.new_bus_idx());
         let tower_main_point_bus = TowerMainPointBus::new(b.new_bus_idx());
 
         let cached_commit_bus = LocalCachedCommitBus::new(b.new_bus_idx());
@@ -135,6 +138,7 @@ impl BusInventory {
             main_selector_result_bus,
             main_selector_shape_bus,
             main_selector_sparse_index_shape_bus,
+            ecc_rt_bus,
             tower_main_point_bus,
             right_shift_bus,
             xi_randomness_bus,

@@ -4,11 +4,12 @@ mod types;
 
 pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
-    BatchConstraintPreflight, ChipTranscriptRange, ForkTranscriptLog, MainEvalRecord,
-    MainFinalClaimRecord, MainFrontloadTermRecord, MainGlobalSumcheckRecord,
-    MainGlobalSumcheckRoundRecord, MainPreflight, MainSelectorEvalRecord, MainSelectorKind,
-    MainSelectorPointDeriveKind, MainSelectorPointRecord, MainSelectorPointSourceKind,
-    MainTowerPointEqRecord, MainTranscriptRecord, Preflight, ProofShapePreflight,
+    BatchConstraintPreflight, ChipTranscriptRange, EccReplayClaims, ForkTranscriptLog,
+    MainEccRtRecord, MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord,
+    MainGlobalSumcheckRecord, MainGlobalSumcheckRoundRecord, MainPreflight,
+    MainSelectorEvalRecord, MainSelectorKind, MainSelectorPointDeriveKind,
+    MainSelectorPointRecord, MainSelectorPointSourceKind, MainTowerPointEqRecord,
+    MainTranscriptRecord, Preflight, ProofShapePreflight,
     RotationReplayClaims, TowerChipTranscriptRange, TowerMainPointRecord, TowerPreflight,
     TraceVData,
 };
@@ -464,7 +465,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             let tower_tidx = fs.len();
             let tower_replay =
                 crate::tower::record_and_replay_tower_preflight(fs, child_vk, chip_idx, chip_proof);
-            let rotation_replay = crate::main::replay_chip_pre_main_tail_transcript(
+            let (rotation_replay, ecc_replay) = crate::main::replay_chip_pre_main_tail_transcript(
                 fs,
                 child_vk,
                 chip_idx,
@@ -481,6 +482,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 fork_idx: fork_id,
                 tower_replay,
                 rotation_replay,
+                ecc_replay,
             });
         }
 

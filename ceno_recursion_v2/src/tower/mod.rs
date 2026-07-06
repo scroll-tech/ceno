@@ -328,6 +328,7 @@ impl TowerModule {
                 fork_idx: 0, // unused in forked flow
                 tower_replay,
                 rotation_replay: None,
+                ecc_replay: None,
             });
         }
     }

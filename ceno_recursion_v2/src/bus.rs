@@ -172,6 +172,16 @@ define_typed_per_proof_lookup_bus!(MainSelectorPointBus, MainSelectorPointMessag
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct EccRtMessage<T> {
+    pub idx: T,
+    pub round_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(EccRtBus, EccRtMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct MainSelectorShapeMessage<T> {
     pub air_idx: T,
     pub selector_idx: T,

@@ -12,8 +12,9 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirPresenceBus, AirPresenceBusMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
-        MainEvalBus, MainEvalMessage, MainGlobalPointBus, MainGlobalPointMessage,
+        AirPresenceBus, AirPresenceBusMessage, EccRtBus, EccRtMessage, ForkedTranscriptBus,
+        ForkedTranscriptBusMessage, MainEvalBus, MainEvalMessage, MainGlobalPointBus,
+        MainGlobalPointMessage,
         MainSelectorPointBus, MainSelectorPointMessage, MainSelectorResultBus,
         MainSelectorResultMessage, MainSelectorShapeBus, MainSelectorShapeMessage,
         MainSelectorSparseIndexShapeBus, MainSelectorSparseIndexShapeMessage, TowerMainPointBus,
@@ -127,6 +128,7 @@ pub struct MainSelectorPointCols<T> {
     pub fork_id: T,
     pub has_transcript: T,
     pub transcript_tidx: T,
+    pub has_ecc_rt: T,
     pub has_source: T,
     pub source_selector_idx: T,
     pub source_source_kind: T,
@@ -764,6 +766,7 @@ pub struct MainSelectorPointAir {
     pub selector_point_bus: MainSelectorPointBus,
     pub tower_point_bus: TowerMainPointBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
+    pub ecc_rt_bus: EccRtBus,
 }
 
 impl<F: Field> BaseAir<F> for MainSelectorPointAir {
@@ -790,6 +793,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
         builder.assert_bool(local.is_ecc_slope);
         builder.assert_bool(local.is_ecc_x3y3);
         builder.assert_bool(local.has_transcript);
+        builder.assert_bool(local.has_ecc_rt);
         builder.assert_bool(local.has_source);
         builder.assert_bool(local.derive_identity);
         builder.assert_bool(local.derive_one_minus);
@@ -816,11 +820,19 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
         builder
             .when(local.has_transcript)
             .assert_one(local.is_rotation_origin + local.is_ecc_xy);
+        builder.when(local.has_ecc_rt).assert_one(local.is_ecc_x3y3);
         builder.when(local.has_source).assert_one(
-            local.is_rotation_left + local.is_rotation_right + local.is_ecc_xy + local.is_ecc_slope,
+            local.is_rotation_left
+                + local.is_rotation_right
+                + local.is_ecc_xy
+                + local.is_ecc_slope
+                + local.is_ecc_x3y3,
         );
         builder
-            .when(local.is_tower_main + local.is_rotation_origin + local.is_ecc_x3y3)
+            .when(local.is_tower_main + local.is_rotation_origin)
+            .assert_zero(local.has_source);
+        builder
+            .when(local.has_ecc_rt)
             .assert_zero(local.has_source);
         builder
             .when(
@@ -831,6 +843,16 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
                     + local.is_ecc_x3y3,
             )
             .assert_zero(local.has_transcript);
+        builder
+            .when(
+                local.is_tower_main
+                    + local.is_rotation_left
+                    + local.is_rotation_right
+                    + local.is_rotation_origin
+                    + local.is_ecc_xy
+                    + local.is_ecc_slope,
+            )
+            .assert_zero(local.has_ecc_rt);
         builder.when(local.is_enabled).assert_one(
             local.derive_identity + local.derive_one_minus + local.derive_zero + local.derive_one,
         );
@@ -870,6 +892,16 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
                 local.is_enabled * local.has_transcript,
             );
         }
+        self.ecc_rt_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            EccRtMessage {
+                idx: local.idx.into(),
+                round_idx: local.round_idx.into(),
+                value: local.value.map(Into::into),
+            },
+            local.is_enabled * local.has_ecc_rt,
+        );
         for i in 0..D_EF {
             let expected = local.derive_identity * local.source_value[i]
                 + local.derive_one_minus * (AB::Expr::ONE - local.source_value[i])
@@ -1119,6 +1151,7 @@ fn fill_point_cols(record: &MainSelectorPointRecord, cols: &mut MainSelectorPoin
     cols.fork_id = F::from_usize(record.fork_id);
     cols.has_transcript = F::from_bool(record.has_transcript);
     cols.transcript_tidx = F::from_usize(record.transcript_tidx);
+    cols.has_ecc_rt = F::from_bool(record.has_ecc_rt);
     cols.has_source = F::from_bool(record.has_source);
     cols.source_selector_idx = F::from_usize(record.source_selector_idx);
     cols.source_source_kind = F::from_usize(selector_point_source_code(record.source_source_kind));
