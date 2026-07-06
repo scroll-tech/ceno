@@ -85,6 +85,7 @@ pub struct TowerLayerCols<T> {
     pub write_weight: [T; D_EF],
     pub logup_p_weight: [T; D_EF],
     pub logup_q_weight: [T; D_EF],
+    pub weighted_prime_fold: [T; D_EF],
 
     /// Received from TowerLayerSumcheckAir
     pub eq_at_r_prime: [T; D_EF],
@@ -540,21 +541,13 @@ where
         );
         // 3. TowerSumcheckOutputBus
         // 3a. Receive sumcheck results
-        let weighted_prime_fold = ext_field_add::<AB::Expr>(
-            ext_field_add::<AB::Expr>(
-                ext_field_multiply::<AB::Expr>(local.read_weight, local.read_claim_prime),
-                ext_field_multiply::<AB::Expr>(local.write_weight, local.write_claim_prime),
-            ),
-            ext_field_add::<AB::Expr>(
-                ext_field_multiply::<AB::Expr>(local.logup_p_weight, logup_p_cross),
-                ext_field_multiply::<AB::Expr>(local.logup_q_weight, logup_q_cross),
-            ),
-        );
         let expected_sumcheck_claim_out =
-            ext_field_multiply::<AB::Expr>(weighted_prime_fold, local.eq_at_r_prime);
-        let _ = expected_sumcheck_claim_out;
-        // TODO(recursion-v2): re-enable the native tower expected-evaluation
-        // equality here once the full tower transcript/replay oracle is wired.
+            ext_field_multiply::<AB::Expr>(local.weighted_prime_fold, local.eq_at_r_prime);
+        assert_array_eq(
+            &mut builder.when(enabled_not_dummy.clone()),
+            local.sumcheck_claim_out,
+            expected_sumcheck_claim_out,
+        );
         self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,

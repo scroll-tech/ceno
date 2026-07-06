@@ -2,7 +2,7 @@ use core::borrow::BorrowMut;
 
 use openvm_stark_backend::p3_maybe_rayon::prelude::*;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::TowerLayerCols;
@@ -15,10 +15,7 @@ fn ef_one() -> EF {
     EF::ONE
 }
 
-fn weight_bases(
-    record: &TowerLayerRecord,
-    layer_idx: usize,
-) -> ([F; D_EF], [F; D_EF], [F; D_EF], [F; D_EF]) {
+fn weight_values(record: &TowerLayerRecord, layer_idx: usize) -> (EF, EF, EF, EF) {
     let alpha = record.lambda_at(layer_idx);
     let mut pow = ef_one();
     let has_read = record.read_counts.iter().any(|&count| count != 0);
@@ -52,6 +49,15 @@ fn weight_bases(
     } else {
         (EF::ZERO, EF::ZERO)
     };
+    (read_weight, write_weight, logup_p_weight, logup_q_weight)
+}
+
+fn weight_bases(
+    record: &TowerLayerRecord,
+    layer_idx: usize,
+) -> ([F; D_EF], [F; D_EF], [F; D_EF], [F; D_EF]) {
+    let (read_weight, write_weight, logup_p_weight, logup_q_weight) =
+        weight_values(record, layer_idx);
     (
         read_weight
             .as_basis_coefficients_slice()
@@ -338,6 +344,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.write_weight = [F::ZERO; D_EF];
                     cols.logup_p_weight = [F::ZERO; D_EF];
                     cols.logup_q_weight = [F::ZERO; D_EF];
+                    cols.weighted_prime_fold = [F::ZERO; D_EF];
                     cols.eq_at_r_prime = [F::ZERO; D_EF];
                     cols.r0_claim.copy_from_slice(q0_basis);
                     cols.w0_claim.copy_from_slice(q0_basis);
@@ -477,8 +484,18 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.write_weight = write_weight;
                     cols.logup_p_weight = logup_p_weight;
                     cols.logup_q_weight = logup_q_weight;
-                    cols.eq_at_r_prime = record
-                        .eq_at(layer_idx)
+                    let eq_at_r_prime = record.eq_at(layer_idx);
+                    cols.eq_at_r_prime = eq_at_r_prime
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    let weighted_prime_fold = record
+                        .sumcheck_claim_outs
+                        .get(layer_idx)
+                        .copied()
+                        .unwrap_or(EF::ZERO)
+                        * eq_at_r_prime.inverse();
+                    cols.weighted_prime_fold = weighted_prime_fold
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();

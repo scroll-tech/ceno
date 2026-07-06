@@ -248,24 +248,29 @@ mod prover_integration {
         .map(|air| air.name().to_string())
         .collect::<Vec<_>>();
         air_names.sort_unstable();
-        assert!(
-            air_names
-                .iter()
-                .any(|name| name.contains("SymbolicExpressionAir")),
-            "SymbolicExpressionAir missing from recursion v2 verifier"
-        );
-        assert!(
-            air_names
-                .iter()
-                .any(|name| name.contains("ConstraintsFoldingAir")),
-            "ConstraintsFoldingAir missing from recursion v2 verifier"
-        );
-        assert!(
-            air_names
-                .iter()
-                .any(|name| name.contains("ExpressionClaimAir")),
-            "ExpressionClaimAir missing from recursion v2 verifier"
-        );
+        let batch_main_airs = [
+            "MainGlobalSumcheckAir",
+            "MainEvalAbsorbAir",
+            "MainTowerPointEqAir",
+            "MainFrontloadTermAir",
+            "MainFinalClaimAir",
+        ];
+        for air in batch_main_airs {
+            assert!(
+                air_names.iter().any(|name| name.contains(air)),
+                "{air} missing from recursion v2 verifier"
+            );
+        }
+        for removed_air in [
+            "SymbolicExpressionAir",
+            "ConstraintsFoldingAir",
+            "ExpressionClaimAir",
+        ] {
+            assert!(
+                !air_names.iter().any(|name| name.contains(removed_air)),
+                "{removed_air} should not be registered in recursion v2 verifier"
+            );
+        }
 
         println!("registered recursion v2 airs={}", air_names.len());
         Ok(())
