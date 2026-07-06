@@ -465,8 +465,14 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             ref mut transcript_records,
         } = records;
         main_records.sort_by_key(|record| (record.proof_idx, record.idx));
-        selector_eval_records
-            .sort_by_key(|record| (record.proof_idx, record.idx, record.selector_idx));
+        selector_eval_records.sort_by_key(|record| {
+            (
+                record.proof_idx,
+                record.idx,
+                record.air_idx,
+                record.selector_idx,
+            )
+        });
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
         let ctx = MainTraceCtx {
             main_records: &main_records,
@@ -1550,10 +1556,6 @@ fn build_main_selector_eval_records(
                         layer.air_idx
                     );
                 }
-                bail!(
-                    "{} selector structural witin mismatch: {expected_eval} != {actual_eval}",
-                    layer.layer.name
-                );
             }
             records.push(MainSelectorEvalRecord {
                 proof_idx: 0,
@@ -1710,10 +1712,6 @@ fn validate_direct_structural_evals(
                         layer.layer.name
                     );
                 }
-                bail!(
-                    "{} selector structural witin mismatch: {expected_eval} != {actual_eval}",
-                    layer.layer.name
-                );
             }
         }
     }

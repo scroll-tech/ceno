@@ -29,6 +29,8 @@ const STEP_EQ_PRODUCT: usize = 1;
 const STEP_SPARSE_INDEX: usize = 2;
 const STEP_ACCUMULATE: usize = 3;
 const STEP_FINAL: usize = 4;
+const STEP_MULTIPLY: usize = 5;
+const STEP_QUARK: usize = 6;
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
@@ -56,6 +58,11 @@ pub struct MainSelectorFormulaCols<T> {
     pub is_sparse_index_step: T,
     pub is_accumulate_step: T,
     pub is_final_step: T,
+    pub is_multiply_step: T,
+    pub is_quark_step: T,
+    pub is_first_quark_step: T,
+    pub is_last_quark_step: T,
+    pub carry_accumulator: T,
     pub round_idx: T,
     pub sparse_pos: T,
     pub sparse_index: T,
@@ -105,8 +112,12 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local_row = main.row_slice(0).expect("main row exists");
+        let (local_row, next_row) = (
+            main.row_slice(0).expect("main row exists"),
+            main.row_slice(1).expect("main row exists"),
+        );
         let local: &MainSelectorFormulaCols<AB::Var> = (*local_row).borrow();
+        let next: &MainSelectorFormulaCols<AB::Var> = (*next_row).borrow();
 
         builder.assert_bool(local.is_enabled);
         builder.assert_bool(local.is_whole);
@@ -118,7 +129,16 @@ where
         builder.assert_bool(local.is_sparse_index_step);
         builder.assert_bool(local.is_accumulate_step);
         builder.assert_bool(local.is_final_step);
+        builder.assert_bool(local.is_multiply_step);
+        builder.assert_bool(local.is_quark_step);
+        builder.assert_bool(local.is_first_quark_step);
+        builder.assert_bool(local.is_last_quark_step);
+        builder.assert_bool(local.carry_accumulator);
         builder.assert_bool(local.point_active);
+        builder
+            .when_transition()
+            .when_ne(local.is_enabled, AB::Expr::ONE)
+            .assert_zero(next.is_enabled);
         builder.when(local.is_enabled).assert_one(
             local.is_whole
                 + local.is_prefix
@@ -130,7 +150,9 @@ where
                 + local.is_eq_product_step
                 + local.is_sparse_index_step
                 + local.is_accumulate_step
-                + local.is_final_step,
+                + local.is_final_step
+                + local.is_multiply_step
+                + local.is_quark_step,
         );
         builder.when(local.is_enabled).assert_eq(
             local.kind,
@@ -143,8 +165,25 @@ where
             local.is_eq_product_step * AB::Expr::from_usize(STEP_EQ_PRODUCT)
                 + local.is_sparse_index_step * AB::Expr::from_usize(STEP_SPARSE_INDEX)
                 + local.is_accumulate_step * AB::Expr::from_usize(STEP_ACCUMULATE)
-                + local.is_final_step * AB::Expr::from_usize(STEP_FINAL),
+                + local.is_final_step * AB::Expr::from_usize(STEP_FINAL)
+                + local.is_multiply_step * AB::Expr::from_usize(STEP_MULTIPLY)
+                + local.is_quark_step * AB::Expr::from_usize(STEP_QUARK),
         );
+        builder
+            .when(local.carry_accumulator)
+            .assert_one(local.is_enabled);
+        builder.when(local.carry_accumulator).assert_one(
+            local.is_eq_product_step
+                + local.is_accumulate_step
+                + local.is_multiply_step
+                + local.is_quark_step,
+        );
+        builder
+            .when(local.is_first_quark_step)
+            .assert_one(local.is_quark_step);
+        builder
+            .when(local.is_last_quark_step)
+            .assert_one(local.is_quark_step);
 
         self.selector_shape_bus.receive(
             builder,
@@ -193,7 +232,8 @@ where
                 round_idx: local.round_idx.into(),
                 value: local.lhs_point.map(Into::into),
             },
-            local.is_enabled * local.is_eq_product_step * local.point_active,
+            local.is_enabled
+                * (local.is_eq_product_step * local.point_active + local.is_quark_step),
         );
         let expected_factor = eq_factor::<AB>(local.rhs_point.clone(), local.lhs_point.clone());
         assert_array_eq(
@@ -226,11 +266,144 @@ where
             local.acc_out,
             sum,
         );
+        let multiply_product = ext_mul::<AB::Expr>(
+            local.acc_in.clone().map(Into::into),
+            local.factor.clone().map(Into::into),
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_multiply_step),
+            local.acc_out,
+            multiply_product,
+        );
+        builder
+            .when(local.is_enabled * local.is_quark_step)
+            .assert_eq(
+                local.sparse_index,
+                local.sparse_index_bits_value * AB::Expr::from_usize(2) + local.point_active,
+            );
+        builder
+            .when(local.is_enabled * local.is_first_quark_step)
+            .assert_zero(local.step_idx);
+        builder
+            .when(local.is_enabled * local.is_first_quark_step)
+            .assert_zero(local.round_idx);
+        builder
+            .when(local.is_enabled * local.is_first_quark_step)
+            .assert_zero(
+                local.sparse_index_bits_value * (local.sparse_index_bits_value - AB::Expr::ONE),
+            );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first_quark_step),
+            local.acc_in,
+            [AB::Expr::ZERO; D_EF],
+        );
+        builder
+            .when(local.is_enabled * local.is_last_quark_step)
+            .assert_eq(local.sparse_index, local.ctx_num_instances);
+        let quark_zero_factor = ext_mul::<AB::Expr>(
+            ext_one_minus(local.rhs_point.clone().map(Into::into)),
+            ext_one_minus(local.lhs_point.clone().map(Into::into)),
+        );
+        let quark_one_factor = ext_mul::<AB::Expr>(
+            local.rhs_point.clone().map(Into::into),
+            local.lhs_point.clone().map(Into::into),
+        );
+        let quark_lhs =
+            ext_mul::<AB::Expr>(quark_zero_factor, local.factor.clone().map(Into::into));
+        let quark_rhs = ext_mul::<AB::Expr>(quark_one_factor, local.acc_in.clone().map(Into::into));
+        let quark_out = ext_add::<AB::Expr>(quark_lhs, quark_rhs);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_quark_step),
+            local.acc_out,
+            quark_out,
+        );
         assert_array_eq(
             &mut builder.when(local.is_enabled * local.is_final_step),
             local.acc_out,
             local.value.clone().map(Into::into),
         );
+        let same_selector_continuation =
+            local.is_enabled * next.is_enabled * (AB::Expr::ONE - next.is_shape_step);
+        builder
+            .when_transition()
+            .when(same_selector_continuation.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when_transition()
+            .when(same_selector_continuation.clone())
+            .assert_eq(next.idx, local.idx);
+        builder
+            .when_transition()
+            .when(same_selector_continuation.clone())
+            .assert_eq(next.air_idx, local.air_idx);
+        builder
+            .when_transition()
+            .when(same_selector_continuation.clone())
+            .assert_eq(next.selector_idx, local.selector_idx);
+        builder
+            .when_transition()
+            .when(same_selector_continuation.clone())
+            .assert_eq(next.eval_idx, local.eval_idx);
+        builder
+            .when_transition()
+            .when(same_selector_continuation.clone())
+            .assert_eq(next.kind, local.kind);
+        assert_array_eq(
+            &mut builder.when_transition().when(local.carry_accumulator),
+            local.acc_out,
+            next.acc_in,
+        );
+        builder
+            .when_transition()
+            .when(local.is_eq_product_step * next.is_eq_product_step)
+            .assert_one(local.carry_accumulator);
+        builder
+            .when_transition()
+            .when(local.is_eq_product_step * next.is_final_step * local.is_whole)
+            .assert_one(local.carry_accumulator);
+        builder
+            .when_transition()
+            .when(local.is_accumulate_step * next.is_accumulate_step)
+            .assert_one(local.carry_accumulator);
+        builder
+            .when_transition()
+            .when(local.is_accumulate_step * next.is_multiply_step)
+            .assert_one(local.carry_accumulator);
+        builder
+            .when_transition()
+            .when(local.is_accumulate_step * next.is_final_step)
+            .assert_one(local.carry_accumulator);
+        builder
+            .when_transition()
+            .when(local.is_multiply_step * next.is_final_step)
+            .assert_one(local.carry_accumulator);
+        builder
+            .when_transition()
+            .when(local.is_quark_step * next.is_quark_step)
+            .assert_one(local.carry_accumulator);
+        builder
+            .when_transition()
+            .when(local.is_quark_step * next.is_quark_step)
+            .assert_eq(next.step_idx, local.step_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(local.is_quark_step * next.is_quark_step)
+            .assert_eq(next.round_idx, local.round_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(local.is_quark_step * next.is_quark_step)
+            .assert_eq(
+                next.sparse_index,
+                local.sparse_index * AB::Expr::from_usize(2) - next.point_active,
+            );
+        builder
+            .when_transition()
+            .when(local.is_quark_step * next.is_final_step)
+            .assert_one(local.carry_accumulator);
+        builder
+            .when_transition()
+            .when(local.is_enabled * local.is_final_step)
+            .assert_zero(next.is_enabled * (AB::Expr::ONE - next.is_shape_step));
 
         self.selector_result_bus.send(
             builder,
@@ -441,6 +614,8 @@ struct FormulaRow<'a> {
     sparse_pos: usize,
     sparse_index: usize,
     sparse_index_bits_value: usize,
+    quark_is_first: bool,
+    quark_is_last: bool,
     point_active: bool,
     lhs_point: RecursionField,
     rhs_point: RecursionField,
@@ -465,6 +640,8 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
             sparse_pos: 0,
             sparse_index: 0,
             sparse_index_bits_value: 0,
+            quark_is_first: false,
+            quark_is_last: false,
             point_active: false,
             lhs_point: zero,
             rhs_point: zero,
@@ -482,6 +659,8 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
                 sparse_pos,
                 sparse_index,
                 sparse_index_bits_value: sparse_index,
+                quark_is_first: false,
+                quark_is_last: false,
                 point_active: false,
                 lhs_point: zero,
                 rhs_point: zero,
@@ -543,25 +722,16 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
                     &record.in_point[subgroup_vars..],
                 );
                 let value = subgroup_acc * tail_eval;
-                rows.push(accumulate_row(
+                rows.push(multiply_row(
                     record,
                     record.sparse_indices.len(),
-                    zero,
-                    value,
+                    subgroup_acc,
+                    tail_eval,
                     value,
                 ));
                 value
             }
-            MainSelectorKind::QuarkBinaryTreeLessThan => {
-                let _ = push_eq_product_rows(&mut rows, record, 0, record.ctx_num_vars, one, true);
-                let value = native_quark_binary_tree_lte(
-                    record.ctx_num_instances,
-                    &record.out_point,
-                    &record.in_point,
-                );
-                rows.push(accumulate_row(record, 0, zero, value, value));
-                value
-            }
+            MainSelectorKind::QuarkBinaryTreeLessThan => push_quark_rows(&mut rows, record),
         };
         rows.push(FormulaRow {
             record,
@@ -571,6 +741,8 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
             sparse_pos: 0,
             sparse_index: 0,
             sparse_index_bits_value: 0,
+            quark_is_first: false,
+            quark_is_last: false,
             point_active: false,
             lhs_point: zero,
             rhs_point: zero,
@@ -597,6 +769,8 @@ fn accumulate_row(
         sparse_pos: step_idx,
         sparse_index: 0,
         sparse_index_bits_value: 0,
+        quark_is_first: false,
+        quark_is_last: false,
         point_active: false,
         lhs_point: RecursionField::ZERO,
         rhs_point: RecursionField::ZERO,
@@ -604,6 +778,93 @@ fn accumulate_row(
         acc_in,
         acc_out,
     }
+}
+
+fn multiply_row(
+    record: &MainSelectorEvalRecord,
+    step_idx: usize,
+    acc_in: RecursionField,
+    factor: RecursionField,
+    acc_out: RecursionField,
+) -> FormulaRow<'_> {
+    FormulaRow {
+        record,
+        step_kind: STEP_MULTIPLY,
+        step_idx,
+        round_idx: 0,
+        sparse_pos: step_idx,
+        sparse_index: 0,
+        sparse_index_bits_value: 0,
+        quark_is_first: false,
+        quark_is_last: false,
+        point_active: false,
+        lhs_point: RecursionField::ZERO,
+        rhs_point: RecursionField::ZERO,
+        factor,
+        acc_in,
+        acc_out,
+    }
+}
+
+fn push_quark_rows<'a>(
+    rows: &mut Vec<FormulaRow<'a>>,
+    record: &'a MainSelectorEvalRecord,
+) -> RecursionField {
+    assert!(record.ctx_num_instances > 0);
+    assert!(!record.out_point.is_empty());
+    assert_eq!(record.out_point.len(), record.in_point.len());
+
+    let mut layer_ns = (0..record.out_point.len())
+        .scan(record.ctx_num_instances, |n_instance, _| {
+            let current = *n_instance;
+            *n_instance = (*n_instance).div_ceil(2);
+            Some(current)
+        })
+        .collect::<Vec<_>>();
+    layer_ns.reverse();
+
+    let zero = RecursionField::ZERO;
+    let one = RecursionField::ONE;
+    let mut acc = zero;
+    for (i, layer_n) in layer_ns.iter().copied().enumerate() {
+        let prefix_count = layer_n / 2;
+        let parity = layer_n % 2;
+        let lhs = record.in_point[i];
+        let rhs = record.out_point[i];
+        let factor = if prefix_count == 0 {
+            zero
+        } else if i == 0 {
+            one
+        } else {
+            native_eq_lte(
+                prefix_count - 1,
+                &record.out_point[..i],
+                &record.in_point[..i],
+            )
+        };
+        let zero_factor = (one - rhs) * (one - lhs);
+        let one_factor = rhs * lhs;
+        let acc_in = acc;
+        acc = zero_factor * factor + one_factor * acc;
+        rows.push(FormulaRow {
+            record,
+            step_kind: STEP_QUARK,
+            step_idx: i,
+            round_idx: i,
+            sparse_pos: 0,
+            sparse_index: layer_n,
+            sparse_index_bits_value: prefix_count,
+            quark_is_first: i == 0,
+            quark_is_last: i + 1 == layer_ns.len(),
+            point_active: parity == 1,
+            lhs_point: lhs,
+            rhs_point: rhs,
+            factor,
+            acc_in,
+            acc_out: acc,
+        });
+    }
+    acc
 }
 
 fn push_eq_product_rows<'a>(
@@ -630,6 +891,8 @@ fn push_eq_product_rows<'a>(
             sparse_pos: 0,
             sparse_index: 0,
             sparse_index_bits_value: 0,
+            quark_is_first: false,
+            quark_is_last: false,
             point_active,
             lhs_point: lhs,
             rhs_point: rhs,
@@ -667,6 +930,17 @@ fn fill_formula_cols(row: &FormulaRow<'_>, cols: &mut MainSelectorFormulaCols<F>
     cols.is_sparse_index_step = F::from_bool(row.step_kind == STEP_SPARSE_INDEX);
     cols.is_accumulate_step = F::from_bool(row.step_kind == STEP_ACCUMULATE);
     cols.is_final_step = F::from_bool(row.step_kind == STEP_FINAL);
+    cols.is_multiply_step = F::from_bool(row.step_kind == STEP_MULTIPLY);
+    cols.is_quark_step = F::from_bool(row.step_kind == STEP_QUARK);
+    cols.is_first_quark_step = F::from_bool(row.quark_is_first);
+    cols.is_last_quark_step = F::from_bool(row.quark_is_last);
+    cols.carry_accumulator = F::from_bool(match row.step_kind {
+        STEP_EQ_PRODUCT => {
+            row.record.kind == MainSelectorKind::Whole || row.step_idx + 1 < row.record.ctx_num_vars
+        }
+        STEP_ACCUMULATE | STEP_MULTIPLY | STEP_QUARK => true,
+        _ => false,
+    });
     cols.round_idx = F::from_usize(row.round_idx);
     cols.sparse_pos = F::from_usize(row.sparse_pos);
     cols.sparse_index = F::from_usize(row.sparse_index);
@@ -759,44 +1033,6 @@ fn native_eq_lte(
         ans *= RecursionField::ONE - *value;
     }
     ans
-}
-
-fn native_quark_binary_tree_lte(
-    num_instances: usize,
-    out_point: &[RecursionField],
-    in_point: &[RecursionField],
-) -> RecursionField {
-    assert!(num_instances > 0);
-    assert!(!out_point.is_empty());
-    assert_eq!(out_point.len(), in_point.len());
-
-    let mut prefix_one_seq = (0..out_point.len())
-        .scan(num_instances, |n_instance, _| {
-            let cur = *n_instance / 2;
-            *n_instance = (*n_instance).div_ceil(2);
-            Some(cur)
-        })
-        .collect::<Vec<_>>();
-    prefix_one_seq.reverse();
-
-    let mut res = if prefix_one_seq[0] == 0 {
-        RecursionField::ZERO
-    } else {
-        (RecursionField::ONE - out_point[0]) * (RecursionField::ONE - in_point[0])
-    };
-    for i in 1..out_point.len() {
-        let num_prefix_one_lhs = prefix_one_seq[i];
-        let lhs_res = if num_prefix_one_lhs == 0 {
-            RecursionField::ZERO
-        } else {
-            (RecursionField::ONE - out_point[i])
-                * (RecursionField::ONE - in_point[i])
-                * native_eq_lte(num_prefix_one_lhs - 1, &out_point[..i], &in_point[..i])
-        };
-        let rhs_res = out_point[i] * in_point[i] * res;
-        res = lhs_res + rhs_res;
-    }
-    res
 }
 
 #[cfg(test)]
