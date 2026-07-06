@@ -13,6 +13,7 @@ pub struct TowerInputRecord {
     pub idx: usize,
     pub fork_id: usize,
     pub tidx: usize,
+    pub fork_final_sample_tidx: usize,
     pub n_logup: usize,
     pub alpha_logup: EF,
     pub beta: EF,
@@ -84,6 +85,7 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
             cols.fork_id = F::from_usize(record.fork_id);
 
             cols.tidx = F::from_usize(record.tidx);
+            cols.fork_final_sample_tidx = F::from_usize(record.fork_final_sample_tidx);
 
             cols.n_logup = F::from_usize(record.n_logup);
             IsZeroSubAir.generate_subrow(

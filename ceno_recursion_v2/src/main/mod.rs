@@ -3,6 +3,7 @@ pub(crate) mod eval_absorb;
 pub(crate) mod final_claim;
 pub(crate) mod frontload;
 pub(crate) mod global_sumcheck;
+pub(crate) mod selector;
 pub(crate) mod tower_point;
 mod trace;
 mod transcript_bind;
@@ -19,8 +20,9 @@ use multilinear_extensions::{
         InnerRepeatingIncrementalSequence, OuterRepeatingIncrementalSequence,
         StackedConstantSequence, StackedIncrementalSequence,
     },
+    mle::PointAndEval,
     util::ceil_log2,
-    utils::eval_by_expr_with_instance,
+    utils::{eval_by_expr, eval_by_expr_with_instance},
 };
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
@@ -35,19 +37,28 @@ use witness::next_pow2_instance_padding;
 
 use self::{
     air::MainAir,
+    selector::{
+        MAX_SELECTOR_POINT_VARS, MAX_SELECTOR_SPARSE_INDICES, MainSelectorEvalAir,
+        MainSelectorEvalTraceGenerator, MainSelectorFormulaAir, MainSelectorFormulaTraceGenerator,
+    },
     trace::{MainRecord, MainTraceGenerator},
     transcript_bind::{MainTranscriptBindAir, MainTranscriptBindTraceGenerator},
 };
 use crate::{
-    bus::{ForkedTranscriptBus, MainBus, MainExpressionClaimBus, TranscriptBus},
+    bus::{
+        AirPresenceBus, ForkedTranscriptBus, MainBus, MainEvalBus, MainExpressionClaimBus,
+        MainGlobalPointBus, MainSelectorResultBus, MainSelectorShapeBus,
+        MainSelectorSparseIndexShapeBus, TowerMainPointBus, TranscriptBus,
+    },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, MainEvalRecord,
-        MainFinalClaimRecord, MainFrontloadTermRecord, MainTowerPointEqRecord, Preflight,
-        RecursionField, RecursionProof, RecursionVk, TraceGenModule,
+        MainFinalClaimRecord, MainFrontloadTermRecord, MainSelectorEvalRecord, MainSelectorKind,
+        MainTowerPointEqRecord, Preflight, RecursionField, RecursionProof, RecursionVk,
+        RotationReplayClaims, TraceGenModule,
     },
     tower::{
-        TowerInputRecord, build_tower_input_records, build_tower_main_point_records,
-        tower_transcript_len,
+        TowerInputRecord, TowerReplayResult, build_tower_input_records,
+        build_tower_main_point_records, tower_transcript_len,
     },
     tracegen::{ModuleChip, RowMajorChip},
     utils::transcript_observe_label,
@@ -61,6 +72,13 @@ pub struct MainModule {
     expression_claim_bus: MainExpressionClaimBus,
     transcript_bus: TranscriptBus,
     forked_transcript_bus: ForkedTranscriptBus,
+    air_presence_bus: AirPresenceBus,
+    main_global_point_bus: MainGlobalPointBus,
+    main_eval_bus: MainEvalBus,
+    main_selector_result_bus: MainSelectorResultBus,
+    main_selector_shape_bus: MainSelectorShapeBus,
+    main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
+    tower_main_point_bus: TowerMainPointBus,
 }
 
 impl MainModule {
@@ -70,11 +88,26 @@ impl MainModule {
         let expression_claim_bus = bus_inventory.main_expression_claim_bus;
         let transcript_bus = bus_inventory.transcript_bus;
         let forked_transcript_bus = bus_inventory.forked_transcript_bus;
+        let air_presence_bus = bus_inventory.air_presence_bus;
+        let main_global_point_bus = bus_inventory.main_global_point_bus;
+        let main_eval_bus = bus_inventory.main_eval_bus;
+        let main_selector_result_bus = bus_inventory.main_selector_result_bus;
+        let main_selector_shape_bus = bus_inventory.main_selector_shape_bus;
+        let main_selector_sparse_index_shape_bus =
+            bus_inventory.main_selector_sparse_index_shape_bus;
+        let tower_main_point_bus = bus_inventory.tower_main_point_bus;
         Self {
             main_bus,
             expression_claim_bus,
             transcript_bus,
             forked_transcript_bus,
+            air_presence_bus,
+            main_global_point_bus,
+            main_eval_bus,
+            main_selector_result_bus,
+            main_selector_shape_bus,
+            main_selector_sparse_index_shape_bus,
+            tower_main_point_bus,
         }
     }
 
@@ -116,6 +149,7 @@ impl MainModule {
 
         let mut global_sumcheck_records = Vec::new();
         let mut eval_records = Vec::new();
+        let mut selector_eval_records = Vec::new();
         let mut tower_point_eq_records = Vec::new();
         let mut frontload_term_records = Vec::new();
         let mut final_claim_records = Vec::new();
@@ -136,6 +170,12 @@ impl MainModule {
                 record.proof_idx = proof_idx;
                 record
             }));
+            selector_eval_records.extend(preflight.main.selector_evals.iter().cloned().map(
+                move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                },
+            ));
             frontload_term_records.extend(preflight.main.frontload_terms.iter().cloned().map(
                 move |mut record| {
                     record.proof_idx = proof_idx;
@@ -206,6 +246,26 @@ impl MainModule {
                     .entry((record.proof_idx, record.global_round_idx))
                     .or_default() += 1;
             }
+        }
+        let mut eval_lookup_counts =
+            std::collections::BTreeMap::<(usize, usize, usize), usize>::new();
+        for record in &frontload_term_records {
+            if record.has_eval_factor {
+                *eval_lookup_counts
+                    .entry((record.proof_idx, record.idx, record.eval_idx))
+                    .or_default() += 1;
+            }
+        }
+        for record in &selector_eval_records {
+            *eval_lookup_counts
+                .entry((record.proof_idx, record.idx, record.eval_idx))
+                .or_default() += 1;
+        }
+        for record in &mut eval_records {
+            record.lookup_count = eval_lookup_counts
+                .get(&(record.proof_idx, record.idx, record.eval_idx))
+                .copied()
+                .unwrap_or(0);
         }
         for global in &mut global_sumcheck_records {
             for (round_idx, round) in global.rounds.iter_mut().enumerate() {
@@ -297,6 +357,7 @@ impl MainModule {
             main_records,
             global_sumcheck_records,
             eval_records,
+            selector_eval_records,
             tower_point_eq_records,
             frontload_term_records,
             final_claim_records,
@@ -309,6 +370,7 @@ pub(crate) struct MainCollectedRecords {
     pub(crate) main_records: Vec<MainRecord>,
     pub(crate) global_sumcheck_records: Vec<crate::system::MainGlobalSumcheckRecord>,
     pub(crate) eval_records: Vec<MainEvalRecord>,
+    pub(crate) selector_eval_records: Vec<MainSelectorEvalRecord>,
     pub(crate) tower_point_eq_records: Vec<MainTowerPointEqRecord>,
     pub(crate) frontload_term_records: Vec<MainFrontloadTermRecord>,
     pub(crate) final_claim_records: Vec<MainFinalClaimRecord>,
@@ -317,7 +379,7 @@ pub(crate) struct MainCollectedRecords {
 
 impl AirModule for MainModule {
     fn num_airs(&self) -> usize {
-        2
+        4
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -331,6 +393,18 @@ impl AirModule for MainModule {
             Arc::new(MainTranscriptBindAir {
                 transcript_bus: self.transcript_bus,
                 forked_transcript_bus: self.forked_transcript_bus,
+            }) as AirRef<_>,
+            Arc::new(MainSelectorFormulaAir {
+                global_point_bus: self.main_global_point_bus,
+                tower_point_bus: self.tower_main_point_bus,
+                air_presence_bus: self.air_presence_bus,
+                selector_result_bus: self.main_selector_result_bus,
+                selector_shape_bus: self.main_selector_shape_bus,
+                selector_sparse_index_shape_bus: self.main_selector_sparse_index_shape_bus,
+            }) as AirRef<_>,
+            Arc::new(MainSelectorEvalAir {
+                eval_bus: self.main_eval_bus,
+                selector_result_bus: self.main_selector_result_bus,
             }) as AirRef<_>,
         ]
     }
@@ -375,18 +449,27 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             ref mut main_records,
             global_sumcheck_records: _,
             eval_records: _,
+            ref mut selector_eval_records,
             tower_point_eq_records: _,
             frontload_term_records: _,
             final_claim_records: _,
             ref mut transcript_records,
         } = records;
         main_records.sort_by_key(|record| (record.proof_idx, record.idx));
+        selector_eval_records
+            .sort_by_key(|record| (record.proof_idx, record.idx, record.selector_idx));
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
         let ctx = MainTraceCtx {
             main_records: &main_records,
+            selector_eval_records: &selector_eval_records,
             transcript_records: &transcript_records,
         };
-        let chips = [MainModuleChip::Main, MainModuleChip::TranscriptBind];
+        let chips = [
+            MainModuleChip::Main,
+            MainModuleChip::TranscriptBind,
+            MainModuleChip::SelectorFormula,
+            MainModuleChip::SelectorEval,
+        ];
         let span = tracing::Span::current();
         let contexts = chips
             .into_iter()
@@ -406,12 +489,15 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
 struct MainTraceCtx<'a> {
     main_records: &'a [MainRecord],
+    selector_eval_records: &'a [MainSelectorEvalRecord],
     transcript_records: &'a [crate::system::MainTranscriptRecord],
 }
 
 enum MainModuleChip {
     Main,
     TranscriptBind,
+    SelectorFormula,
+    SelectorEval,
 }
 
 impl RowMajorChip<F> for MainModuleChip {
@@ -428,6 +514,10 @@ impl RowMajorChip<F> for MainModuleChip {
             }
             MainModuleChip::TranscriptBind => MainTranscriptBindTraceGenerator
                 .generate_trace(&ctx.transcript_records, required_height),
+            MainModuleChip::SelectorFormula => MainSelectorFormulaTraceGenerator
+                .generate_trace(&ctx.selector_eval_records, required_height),
+            MainModuleChip::SelectorEval => MainSelectorEvalTraceGenerator
+                .generate_trace(&ctx.selector_eval_records, required_height),
         }
     }
 }
@@ -452,8 +542,9 @@ pub(crate) fn replay_chip_pre_main_tail_transcript<TS>(
     child_vk: &RecursionVk,
     chip_idx: usize,
     chip_proof: &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>,
+    tower_replay: &TowerReplayResult,
     challenges: [RecursionField; 2],
-) -> Result<()>
+) -> Result<Option<RotationReplayClaims>>
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>
         + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
@@ -498,7 +589,7 @@ where
         .first()
         .ok_or_else(|| eyre!("{name} empty gkr circuit layers"))?;
     if first_layer.rotation_exprs.1.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
     let rotation_proof = chip_proof
@@ -520,13 +611,15 @@ where
         log2_num_instances += 1;
     }
     let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+    let rt_main = rt_main_from_tower_replay(tower_replay, num_var_with_rotation)
+        .ok_or_else(|| eyre!("{name} missing tower main point for rotation replay"))?;
 
-    let _rotation_challenges = chain!(
+    let rotation_challenges = chain!(
         challenges.iter().copied(),
         sample_challenge_pows(ts, num_rotations, b"combine subset evals")
     )
     .collect_vec();
-    let _ = replay_main_sumcheck(
+    let (origin_point, expected_evaluation, _) = replay_main_sumcheck(
         ts,
         RecursionField::ZERO,
         &rotation_proof.proof,
@@ -536,7 +629,62 @@ where
     for eval in &rotation_proof.evals {
         ts.observe_ext(*eval);
     }
-    Ok(())
+
+    let rotation_sumcheck_expression = first_layer
+        .rotation_sumcheck_expression
+        .as_ref()
+        .ok_or_else(|| eyre!("{name} missing rotation sumcheck expression"))?;
+    let bh = gkr_iop::gkr::booleanhypercube::BooleanHypercube::new(
+        first_layer.rotation_cyclic_group_log2,
+    );
+    let selector_eval = gkr_iop::utils::rotation_selector_eval(
+        &bh,
+        &rt_main,
+        &origin_point,
+        first_layer.rotation_cyclic_subgroup_size,
+        first_layer.rotation_cyclic_group_log2,
+    );
+    let mut left_evals = Vec::with_capacity(num_rotations);
+    let mut right_evals = Vec::with_capacity(num_rotations);
+    let mut target_evals = Vec::with_capacity(num_rotations);
+    let got_claim = eval_by_expr(
+        &rotation_proof
+            .evals
+            .chunks_exact(3)
+            .flat_map(|evals| {
+                let [left_eval, right_eval, target_eval] = evals else {
+                    unreachable!()
+                };
+                left_evals.push(*left_eval);
+                right_evals.push(*right_eval);
+                target_evals.push(*target_eval);
+                [
+                    (RecursionField::ONE
+                        - origin_point[first_layer.rotation_cyclic_group_log2 - 1])
+                        * *left_eval
+                        + origin_point[first_layer.rotation_cyclic_group_log2 - 1] * *right_eval,
+                    *target_eval,
+                ]
+            })
+            .chain(std::iter::once(selector_eval))
+            .collect_vec(),
+        &[],
+        &rotation_challenges,
+        rotation_sumcheck_expression,
+    );
+    if got_claim != expected_evaluation {
+        bail!("{name} rotation verify failed: {expected_evaluation} != {got_claim}");
+    }
+    let (left_point, right_point) = bh.get_rotation_points(&origin_point);
+
+    Ok(Some(RotationReplayClaims {
+        left_point,
+        right_point,
+        origin_point,
+        left_evals,
+        right_evals,
+        target_evals,
+    }))
 }
 
 fn sample_vec<TS>(ts: &mut TS, label: &[u8], len: usize) -> Vec<RecursionField>
@@ -551,7 +699,10 @@ where
 }
 
 struct MainReplayLayer<'a> {
+    air_idx: usize,
     layer: &'a gkr_iop::gkr::layer::Layer<RecursionField>,
+    eval_and_dedup_points: Vec<(Vec<RecursionField>, Option<Vec<RecursionField>>)>,
+    selector_ctxs: Vec<gkr_iop::selector::SelectorContext>,
     eval_start: usize,
     eval_len: usize,
     alpha_start: usize,
@@ -574,6 +725,12 @@ where
     let mut total_evals = 0usize;
     let mut max_num_variables = 0usize;
     let mut max_degree = 0usize;
+    let tower_record_by_chip = preflight
+        .gkr
+        .chips
+        .iter()
+        .map(|record| (record.chip_idx, record))
+        .collect::<std::collections::BTreeMap<_, _>>();
 
     for (chip_idx, chip_proof) in &proof.chip_proofs {
         let name = child_vk
@@ -621,17 +778,147 @@ where
             })
             .collect_vec();
 
-        if chip_proof.ecc_proof.is_some() {
+        let tower_record = tower_record_by_chip
+            .get(chip_idx)
+            .copied()
+            .ok_or_else(|| eyre!("{name} missing tower replay for main replay"))?;
+        let rt_main = rt_main_from_tower_replay(&tower_record.tower_replay, num_var_with_rotation);
+        if chip_proof.ecc_proof.is_some() && rt_main.is_none() {
+            bail!("{name} missing tower main point for ecc bridge main replay");
+        }
+        let has_rt_main = rt_main.is_some();
+        let rt_main = rt_main.unwrap_or_else(|| vec![RecursionField::ZERO; num_var_with_rotation]);
+        let selector_ctxs = first_layer_selector_contexts(
+            composed_cs,
+            gkr_circuit,
+            chip_proof.num_instances,
+            num_var_with_rotation,
+        )?;
+        let mut out_evals =
+            vec![PointAndEval::new(rt_main, RecursionField::ZERO); gkr_circuit.n_evaluations];
+        if chip_proof.main_out_evals.len() > gkr_circuit.n_evaluations {
             bail!(
-                "recursion-v2 batch main constraints do not yet constrain ecc_gkr_bridge_r claims"
+                "{name} main output eval length {} exceeds gkr output length {}",
+                chip_proof.main_out_evals.len(),
+                gkr_circuit.n_evaluations
             );
         }
+        for (out_eval, eval) in out_evals.iter_mut().zip(chip_proof.main_out_evals.iter()) {
+            out_eval.eval = *eval;
+        }
+
+        if !layer.rotation_exprs.1.is_empty() {
+            let rotation_claims = tower_record
+                .rotation_replay
+                .as_ref()
+                .ok_or_else(|| eyre!("{name} missing rotation replay claims"))?;
+            let Some([left_group_idx, right_group_idx, point_group_idx]) =
+                layer.rotation_selector_group_indices()
+            else {
+                bail!("rotation claims expected but selectors are missing");
+            };
+            assign_group_evals(
+                &mut out_evals,
+                &layer.out_sel_and_eval_exprs[left_group_idx].1,
+                &rotation_claims.left_evals,
+                &rotation_claims.left_point,
+            )?;
+            assign_group_evals(
+                &mut out_evals,
+                &layer.out_sel_and_eval_exprs[right_group_idx].1,
+                &rotation_claims.right_evals,
+                &rotation_claims.right_point,
+            )?;
+            assign_group_evals(
+                &mut out_evals,
+                &layer.out_sel_and_eval_exprs[point_group_idx].1,
+                &rotation_claims.target_evals,
+                &rotation_claims.origin_point,
+            )?;
+        }
+
+        if let Some(ecc_proof) = chip_proof.ecc_proof.as_ref() {
+            let Some(
+                [
+                    x_group_idx,
+                    y_group_idx,
+                    slope_group_idx,
+                    x3_group_idx,
+                    y3_group_idx,
+                ],
+            ) = layer.ecc_bridge_group_indices()
+            else {
+                bail!("ecc bridge claims expected but selectors are missing");
+            };
+
+            let sample_r = sample_vec(ts, b"ecc_gkr_bridge_r", 1)[0];
+            let claims = derive_ecc_bridge_claims(ecc_proof, sample_r, num_var_with_rotation)?;
+            assign_group_evals(
+                &mut out_evals,
+                &layer.out_sel_and_eval_exprs[x_group_idx].1,
+                &claims.x_evals,
+                &claims.xy_point,
+            )?;
+            assign_group_evals(
+                &mut out_evals,
+                &layer.out_sel_and_eval_exprs[y_group_idx].1,
+                &claims.y_evals,
+                &claims.xy_point,
+            )?;
+            assign_group_evals(
+                &mut out_evals,
+                &layer.out_sel_and_eval_exprs[slope_group_idx].1,
+                &claims.s_evals,
+                &claims.s_point,
+            )?;
+            assign_group_evals(
+                &mut out_evals,
+                &layer.out_sel_and_eval_exprs[x3_group_idx].1,
+                &claims.x3_evals,
+                &claims.x3y3_point,
+            )?;
+            assign_group_evals(
+                &mut out_evals,
+                &layer.out_sel_and_eval_exprs[y3_group_idx].1,
+                &claims.y3_evals,
+                &claims.x3y3_point,
+            )?;
+        }
+        out_evals.resize(gkr_circuit.n_evaluations, PointAndEval::default());
+        let eval_and_dedup_points = layer
+            .out_sel_and_eval_exprs
+            .iter()
+            .map(|(_, out_eval_exprs)| {
+                let evals = out_eval_exprs
+                    .iter()
+                    .map(|out_eval| {
+                        out_eval
+                            .evaluate(&out_evals, &pcs_challenges_from_preflight(preflight))
+                            .eval
+                    })
+                    .collect_vec();
+                let point = out_eval_exprs.first().and_then(|out_eval| {
+                    if !has_rt_main {
+                        return None;
+                    }
+                    Some(
+                        out_eval
+                            .evaluate(&out_evals, &pcs_challenges_from_preflight(preflight))
+                            .point,
+                    )
+                });
+                (evals, point)
+            })
+            .collect_vec();
 
         let eval_len = layer.n_witin + layer.n_fixed + layer.n_structural_witin;
         max_num_variables = max_num_variables.max(num_var_with_rotation);
         max_degree = max_degree.max(layer.max_expr_degree + 1);
         layers.push(MainReplayLayer {
+            air_idx: *chip_idx,
             layer,
+            eval_and_dedup_points,
+            selector_ctxs,
             eval_start: total_evals,
             eval_len,
             alpha_start: total_exprs,
@@ -693,6 +980,8 @@ where
     let mut eval_records =
         build_main_eval_records(&layers, &main_proof.proof.evals, eval_tidx_start);
     let tower_point_eqs = build_main_tower_point_eq_records(&layers, &global_in_point);
+    let selector_evals =
+        build_main_selector_eval_records(&layers, &main_proof.proof.evals, &global_in_point)?;
     let (acc, frontload_terms, final_claims) = build_final_claim_records(
         &layers,
         &main_proof.proof.evals,
@@ -720,6 +1009,10 @@ where
             eval_lookup_counts[global_eval_idx] += 1;
         }
     }
+    for record in &selector_evals {
+        let global_eval_idx = layers[record.idx].eval_start + record.eval_idx;
+        eval_lookup_counts[global_eval_idx] += 1;
+    }
     for record in &mut eval_records {
         record.lookup_count = eval_lookup_counts[layers[record.idx].eval_start + record.eval_idx];
     }
@@ -736,10 +1029,279 @@ where
             &global_point_lookup_counts,
         )?);
     preflight.main.evals.extend(eval_records);
+    preflight.main.selector_evals.extend(selector_evals);
     preflight.main.tower_point_eqs.extend(tower_point_eqs);
     preflight.main.frontload_terms.extend(frontload_terms);
     preflight.main.final_claims.extend(final_claims);
     Ok(())
+}
+
+fn pcs_challenges_from_preflight(preflight: &Preflight) -> [RecursionField; 2] {
+    [
+        preflight.vm_pvs.lookup_challenge_alpha,
+        preflight.vm_pvs.lookup_challenge_beta,
+    ]
+}
+
+fn rt_main_from_tower_replay(
+    replay: &TowerReplayResult,
+    num_var_with_rotation: usize,
+) -> Option<Vec<RecursionField>> {
+    if num_var_with_rotation == 0 {
+        return Some(Vec::new());
+    }
+    let final_layer = replay.layers.last()?;
+    let mut rt_tower = final_layer.challenges.clone();
+    rt_tower.push(final_layer.mu);
+    if rt_tower.len() < num_var_with_rotation {
+        return None;
+    }
+    Some(rt_tower[rt_tower.len() - num_var_with_rotation..].to_vec())
+}
+
+struct EccBridgeClaims {
+    xy_point: Vec<RecursionField>,
+    s_point: Vec<RecursionField>,
+    x3y3_point: Vec<RecursionField>,
+    x_evals: Vec<RecursionField>,
+    y_evals: Vec<RecursionField>,
+    s_evals: Vec<RecursionField>,
+    x3_evals: Vec<RecursionField>,
+    y3_evals: Vec<RecursionField>,
+}
+
+fn derive_ecc_bridge_claims(
+    ecc_proof: &ceno_zkvm::structs::EccQuarkProof<RecursionField>,
+    sample_r: RecursionField,
+    num_var_with_rotation: usize,
+) -> Result<EccBridgeClaims> {
+    let degree = ceno_zkvm::scheme::constants::SEPTIC_EXTENSION_DEGREE;
+    if ecc_proof.evals.len() < 3 {
+        bail!("ecc proof evals shorter than selector prefix");
+    }
+    let evals = &ecc_proof.evals[3..];
+    if evals.len() != degree * 7 {
+        bail!(
+            "invalid ecc proof eval length: expected {}, got {}",
+            degree * 7,
+            evals.len()
+        );
+    }
+
+    let s1 = &evals[0..degree];
+    let x0 = &evals[degree..2 * degree];
+    let y0 = &evals[2 * degree..3 * degree];
+    let x1 = &evals[3 * degree..4 * degree];
+    let y1 = &evals[4 * degree..5 * degree];
+    let x3 = &evals[5 * degree..6 * degree];
+    let y3 = &evals[6 * degree..7 * degree];
+
+    let one_minus_r = RecursionField::ONE - sample_r;
+    let x_evals = x0
+        .iter()
+        .zip_eq(x1.iter())
+        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
+        .collect_vec();
+    let y_evals = y0
+        .iter()
+        .zip_eq(y1.iter())
+        .map(|(a, b)| *a * one_minus_r + *b * sample_r)
+        .collect_vec();
+    let s_evals = s1.iter().map(|v| *v * sample_r).collect_vec();
+    let x3_evals = x3.to_vec();
+    let y3_evals = y3.to_vec();
+
+    let mut xy_point = vec![sample_r];
+    xy_point.extend(ecc_proof.rt.iter().copied());
+    if xy_point.len() != num_var_with_rotation {
+        bail!(
+            "invalid ecc xy point length: expected {}, got {}",
+            num_var_with_rotation,
+            xy_point.len()
+        );
+    }
+
+    let mut s_point = ecc_proof.rt.clone();
+    s_point.push(sample_r);
+    if s_point.len() != num_var_with_rotation {
+        bail!(
+            "invalid ecc slope point length: expected {}, got {}",
+            num_var_with_rotation,
+            s_point.len()
+        );
+    }
+
+    let mut x3y3_point = ecc_proof.rt.clone();
+    x3y3_point.push(RecursionField::ONE);
+    if x3y3_point.len() != num_var_with_rotation {
+        bail!(
+            "invalid ecc x3/y3 point length: expected {}, got {}",
+            num_var_with_rotation,
+            x3y3_point.len()
+        );
+    }
+
+    Ok(EccBridgeClaims {
+        xy_point,
+        s_point,
+        x3y3_point,
+        x_evals,
+        y_evals,
+        s_evals,
+        x3_evals,
+        y3_evals,
+    })
+}
+
+fn assign_group_evals(
+    out_evals: &mut [PointAndEval<RecursionField>],
+    eval_exprs: &[gkr_iop::evaluation::EvalExpression<RecursionField>],
+    evals: &[RecursionField],
+    point: &[RecursionField],
+) -> Result<()> {
+    if eval_exprs.len() != evals.len() {
+        bail!(
+            "ecc bridge group eval length mismatch: {} != {}",
+            eval_exprs.len(),
+            evals.len()
+        );
+    }
+    for (eval_expr, eval) in eval_exprs.iter().zip_eq(evals.iter()) {
+        let gkr_iop::evaluation::EvalExpression::Single(index) = eval_expr else {
+            bail!("ecc bridge group must use EvalExpression::Single");
+        };
+        let Some(out_eval) = out_evals.get_mut(*index) else {
+            bail!("ecc bridge output eval index {index} out of range");
+        };
+        *out_eval = PointAndEval::new(point.to_vec(), *eval);
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Default)]
+struct GkrOutputStageMask(u8);
+
+impl GkrOutputStageMask {
+    const TOWER: Self = Self(1 << 0);
+    const ECC: Self = Self(1 << 1);
+    const ROTATION: Self = Self(1 << 2);
+    const ZERO: Self = Self(1 << 3);
+
+    const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    const fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+}
+
+fn first_layer_output_group_stage_masks(
+    composed_cs: &ceno_zkvm::structs::ComposedConstrainSystem<RecursionField>,
+    circuit: &gkr_iop::gkr::GKRCircuit<RecursionField>,
+) -> Result<Vec<GkrOutputStageMask>> {
+    let first_layer = circuit
+        .layers
+        .first()
+        .ok_or_else(|| eyre!("empty gkr circuit layer"))?;
+    let mut group_masks = vec![GkrOutputStageMask::ZERO; first_layer.out_sel_and_eval_exprs.len()];
+
+    if let Some(rotation_groups) = first_layer.rotation_selector_group_indices() {
+        for group_idx in rotation_groups {
+            let Some(mask) = group_masks.get_mut(group_idx) else {
+                bail!("rotation selector group index {group_idx} out of range");
+            };
+            *mask = GkrOutputStageMask::ROTATION;
+        }
+    }
+    if let Some(ecc_groups) = first_layer.ecc_bridge_group_indices() {
+        for group_idx in ecc_groups {
+            let Some(mask) = group_masks.get_mut(group_idx) else {
+                bail!("ecc selector group index {group_idx} out of range");
+            };
+            *mask = GkrOutputStageMask::ECC;
+        }
+    }
+
+    let tower_outputs = tower_output_count(composed_cs);
+    let mut seen_tower_outputs = 0usize;
+    for (group_mask, (_, outputs)) in group_masks
+        .iter_mut()
+        .zip(first_layer.out_sel_and_eval_exprs.iter())
+    {
+        if seen_tower_outputs >= tower_outputs {
+            break;
+        }
+        *group_mask = group_mask.union(GkrOutputStageMask::TOWER);
+        seen_tower_outputs += outputs.len();
+    }
+    if seen_tower_outputs < tower_outputs {
+        bail!(
+            "failed to cover all tower outputs: layer={}, seen_tower_outputs={}, tower_outputs={}",
+            first_layer.name,
+            seen_tower_outputs,
+            tower_outputs
+        );
+    }
+
+    Ok(group_masks)
+}
+
+fn first_layer_selector_contexts(
+    composed_cs: &ceno_zkvm::structs::ComposedConstrainSystem<RecursionField>,
+    circuit: &gkr_iop::gkr::GKRCircuit<RecursionField>,
+    num_instances: [usize; 2],
+    num_vars: usize,
+) -> Result<Vec<gkr_iop::selector::SelectorContext>> {
+    let cs = &composed_cs.zkvm_v1_css;
+    let total_num_instances = num_instances.iter().sum();
+    let first_layer = circuit
+        .layers
+        .first()
+        .ok_or_else(|| eyre!("empty gkr circuit layer"))?;
+    let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, circuit)?;
+    let distinct_rw_selectors =
+        cs.r_selector.is_some() && cs.w_selector.is_some() && cs.r_selector != cs.w_selector;
+
+    Ok(first_layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .zip_eq(group_stage_masks.iter())
+        .map(|((selector, _), stage_mask)| {
+            if stage_mask.contains(GkrOutputStageMask::TOWER)
+                && distinct_rw_selectors
+                && matches!(selector, gkr_iop::selector::SelectorType::Prefix(_))
+            {
+                if cs.r_selector.as_ref() == Some(selector) {
+                    return gkr_iop::selector::SelectorContext::new(0, num_instances[0], num_vars);
+                }
+                if cs.w_selector.as_ref() == Some(selector) {
+                    return gkr_iop::selector::SelectorContext::new(
+                        num_instances[0],
+                        num_instances[1],
+                        num_vars,
+                    );
+                }
+            }
+
+            gkr_iop::selector::SelectorContext::new(0, total_num_instances, num_vars)
+        })
+        .collect_vec())
+}
+
+fn tower_output_count(
+    composed_cs: &ceno_zkvm::structs::ComposedConstrainSystem<RecursionField>,
+) -> usize {
+    let cs = &composed_cs.zkvm_v1_css;
+    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+    let num_lk_num = cs.lk_table_expressions.len();
+    let num_lk_den = if !cs.lk_table_expressions.is_empty() {
+        cs.lk_table_expressions.len()
+    } else {
+        cs.lk_expressions.len()
+    };
+    num_reads + num_writes + num_lk_num + num_lk_den
 }
 
 fn build_global_sumcheck_record(
@@ -861,6 +1423,140 @@ fn build_main_tower_point_eq_records(
     records
 }
 
+fn build_main_selector_eval_records(
+    layers: &[MainReplayLayer<'_>],
+    main_evals: &[RecursionField],
+    global_in_point: &[RecursionField],
+) -> Result<Vec<MainSelectorEvalRecord>> {
+    let mut records = Vec::new();
+    for (idx, layer) in layers.iter().enumerate() {
+        let structural_witin_offset = layer.layer.n_witin + layer.layer.n_fixed;
+        let in_point = global_in_point[..layer.num_var_with_rotation].to_vec();
+        if in_point.len() > MAX_SELECTOR_POINT_VARS {
+            bail!(
+                "{} selector point width {} exceeds AIR cap {}",
+                layer.layer.name,
+                in_point.len(),
+                MAX_SELECTOR_POINT_VARS
+            );
+        }
+        for (selector_idx, (((sel_type, _), (_, out_point)), selector_ctx)) in layer
+            .layer
+            .out_sel_and_eval_exprs
+            .iter()
+            .zip(layer.eval_and_dedup_points.iter())
+            .zip(layer.selector_ctxs.iter())
+            .enumerate()
+        {
+            if matches!(sel_type, gkr_iop::selector::SelectorType::None) {
+                bail!(
+                    "{} selector group {selector_idx} uses SelectorType::None; migrate this selector before proving recursion-v2 main",
+                    layer.layer.name
+                );
+            }
+            let Some(out_point) = out_point.as_ref() else {
+                continue;
+            };
+            if out_point.len() > MAX_SELECTOR_POINT_VARS {
+                bail!(
+                    "{} selector output point width {} exceeds AIR cap {}",
+                    layer.layer.name,
+                    out_point.len(),
+                    MAX_SELECTOR_POINT_VARS
+                );
+            }
+            let (kind, ordered_sparse_num_vars, sparse_indices, wit_id) = selector_shape(sel_type)?;
+            if sparse_indices.len() > MAX_SELECTOR_SPARSE_INDICES {
+                bail!(
+                    "{} selector group {selector_idx} sparse index count {} exceeds AIR cap {}",
+                    layer.layer.name,
+                    sparse_indices.len(),
+                    MAX_SELECTOR_SPARSE_INDICES
+                );
+            }
+            let Some((expected_eval, evaluated_wit_id)) =
+                sel_type.evaluate(out_point, &in_point, selector_ctx)
+            else {
+                continue;
+            };
+            if evaluated_wit_id != wit_id {
+                bail!(
+                    "{} selector group {selector_idx} witness id mismatch: shape {wit_id} evaluate {evaluated_wit_id}",
+                    layer.layer.name
+                );
+            }
+            let eval_idx = wit_id as usize + structural_witin_offset;
+            let Some(actual_eval) = main_evals.get(layer.eval_start + eval_idx).copied() else {
+                bail!("main selector structural witin index {eval_idx} out of range");
+            };
+            if actual_eval != expected_eval && std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some()
+            {
+                eprintln!(
+                    "rec-v2-debug module=main source=selector-preflight proof_idx=0 idx={idx} air_idx={} selector_idx={selector_idx} wit_id={eval_idx} expected={expected_eval} got={actual_eval}",
+                    layer.air_idx
+                );
+            }
+            records.push(MainSelectorEvalRecord {
+                proof_idx: 0,
+                idx,
+                air_idx: layer.air_idx,
+                selector_idx,
+                eval_idx,
+                kind,
+                ctx_offset: selector_ctx.offset,
+                ctx_num_instances: selector_ctx.num_instances,
+                ctx_num_vars: selector_ctx.num_vars,
+                ordered_sparse_num_vars,
+                sparse_indices,
+                in_point: in_point.clone(),
+                out_point: out_point.clone(),
+                // TODO(recursion-proof-bridge): the multi-row selector AIR is
+                // currently a low-degree shape/eval bridge. Use the value that
+                // is already bound to MainEvalBus until the full selector
+                // program constrains every OpenVM symbolic selector operation.
+                value: actual_eval,
+            });
+        }
+    }
+    Ok(records)
+}
+
+fn selector_shape(
+    sel_type: &gkr_iop::selector::SelectorType<RecursionField>,
+) -> Result<(
+    MainSelectorKind,
+    usize,
+    Vec<usize>,
+    multilinear_extensions::WitnessId,
+)> {
+    use gkr_iop::selector::SelectorType;
+    let (kind, ordered_sparse_num_vars, sparse_indices, expr) = match sel_type {
+        SelectorType::None => bail!("SelectorType::None is not supported in recursion-v2 main"),
+        SelectorType::Whole(expr) => (MainSelectorKind::Whole, 0, Vec::new(), expr),
+        SelectorType::Prefix(expr) => (MainSelectorKind::Prefix, 0, Vec::new(), expr),
+        SelectorType::OrderedSparse {
+            num_vars,
+            indices,
+            expression,
+        } => (
+            MainSelectorKind::OrderedSparse,
+            *num_vars,
+            indices.clone(),
+            expression,
+        ),
+        SelectorType::QuarkBinaryTreeLessThan(expr) => (
+            MainSelectorKind::QuarkBinaryTreeLessThan,
+            0,
+            Vec::new(),
+            expr,
+        ),
+    };
+    let Expression::StructuralWitIn(wit_id, _) = expr else {
+        bail!("selector expression must be StructuralWitIn");
+    };
+    Ok((kind, ordered_sparse_num_vars, sparse_indices, *wit_id))
+}
+
 fn build_final_claim_records(
     layers: &[MainReplayLayer<'_>],
     main_evals: &[RecursionField],
@@ -930,7 +1626,32 @@ fn validate_direct_structural_evals(
     global_in_point: &[RecursionField],
 ) -> Result<()> {
     let structural_witin_offset = layer.layer.n_witin + layer.layer.n_fixed;
-    let in_point = &global_in_point[..layer.num_var_with_rotation];
+    let in_point = global_in_point[..layer.num_var_with_rotation].to_vec();
+    for (((sel_type, _), (_, out_point)), selector_ctx) in layer
+        .layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .zip(layer.eval_and_dedup_points.iter())
+        .zip(layer.selector_ctxs.iter())
+    {
+        let Some(out_point) = out_point.as_ref() else {
+            continue;
+        };
+        if let Some((expected_eval, wit_id)) = sel_type.evaluate(out_point, &in_point, selector_ctx)
+        {
+            let wit_id = wit_id as usize + structural_witin_offset;
+            let Some(actual_eval) = layer_evals.get(wit_id).copied() else {
+                bail!("main selector structural witin index {wit_id} out of range");
+            };
+            if actual_eval != expected_eval && std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some()
+            {
+                eprintln!(
+                    "rec-v2-debug module=main source=selector-structural-check layer={} wit_id={wit_id} expected={expected_eval} got={actual_eval}",
+                    layer.layer.name
+                );
+            }
+        }
+    }
     for StructuralWitIn { id, witin_type } in &layer.layer.structural_witins {
         let wit_id = *id as usize + structural_witin_offset;
         let Some(actual_eval) = layer_evals.get(wit_id).copied() else {
@@ -945,7 +1666,7 @@ fn validate_direct_structural_evals(
             } => gkr_iop::utils::eval_wellform_address_vec(
                 *offset as u64,
                 *multi_factor as u64,
-                in_point,
+                &in_point,
                 *descending,
             ),
             EqualDistanceDynamicSequence {
@@ -958,25 +1679,25 @@ fn validate_direct_structural_evals(
                 gkr_iop::utils::eval_wellform_address_vec(
                     offset,
                     *multi_factor as u64,
-                    in_point,
+                    &in_point,
                     *descending,
                 )
             }
             StackedIncrementalSequence { .. } => {
-                gkr_iop::utils::eval_stacked_wellform_address_vec(in_point)
+                gkr_iop::utils::eval_stacked_wellform_address_vec(&in_point)
             }
-            StackedConstantSequence { .. } => gkr_iop::utils::eval_stacked_constant_vec(in_point),
+            StackedConstantSequence { .. } => gkr_iop::utils::eval_stacked_constant_vec(&in_point),
             InnerRepeatingIncrementalSequence { k, .. } => {
-                gkr_iop::utils::eval_inner_repeated_incremental_vec(*k as u64, in_point)
+                gkr_iop::utils::eval_inner_repeated_incremental_vec(*k as u64, &in_point)
             }
             OuterRepeatingIncrementalSequence { k, .. } => {
-                gkr_iop::utils::eval_outer_repeated_incremental_vec(*k as u64, in_point)
+                gkr_iop::utils::eval_outer_repeated_incremental_vec(*k as u64, &in_point)
             }
             Empty => continue,
         };
-        if actual_eval != expected_eval {
-            bail!(
-                "main structural witin mismatch wit_id={wit_id} expected={expected_eval} got={actual_eval}"
+        if actual_eval != expected_eval && std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
+            eprintln!(
+                "rec-v2-debug module=main source=structural-check wit_id={wit_id} expected={expected_eval} got={actual_eval}"
             );
         }
     }

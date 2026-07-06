@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use ceno_zkvm::structs::VK_DIGEST_LEN;
+use eyre::{Result, bail, eyre};
 use itertools::Itertools;
+use multilinear_extensions::Expression;
 use openvm_circuit_primitives::encoder::Encoder;
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::{
@@ -21,7 +23,7 @@ use crate::{
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, POW_CHECKER_HEIGHT, Preflight,
-        RecursionProof, RecursionVk, TraceGenModule, TraceVData,
+        RecursionField, RecursionProof, RecursionVk, TraceGenModule, TraceVData,
     },
     tracegen::{ModuleChip, RowMajorChip},
     utils::TranscriptLabel,
@@ -55,6 +57,24 @@ pub struct AirMetadata {
     read_op_vars: usize,
     write_op_vars: usize,
     logup_op_vars: usize,
+    selectors: Vec<SelectorMetadata>,
+}
+
+#[derive(Clone)]
+pub struct SelectorMetadata {
+    selector_idx: usize,
+    kind: usize,
+    eval_idx: usize,
+    context_mode: SelectorContextMode,
+    ordered_sparse_num_vars: usize,
+    sparse_indices: Vec<usize>,
+}
+
+#[derive(Clone, Copy)]
+enum SelectorContextMode {
+    Total,
+    Read,
+    Write,
 }
 
 pub struct ProofShapeModule {
@@ -230,6 +250,16 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
                     )
                 })
                 .unwrap_or((0, 0, 0, 0, 0, 0, 0, 0, 0));
+            let selectors = child_vk
+                .circuit_index_to_name
+                .get(&idx)
+                .and_then(|name| child_vk.circuit_vks.get(name))
+                .map(|circuit_vk| selector_metadata_from_circuit(circuit_vk.get_cs()))
+                .transpose()
+                .unwrap_or_else(|err| {
+                    panic!("failed to extract selector metadata for air {idx}: {err}")
+                })
+                .unwrap_or_default();
             let num_read_count = usize::from(raw_read_count > 0);
             let num_write_count = usize::from(raw_write_count > 0);
             let num_logup_count = usize::from(raw_logup_count > 0);
@@ -248,9 +278,165 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
                 read_op_vars: grouped_op_vars(raw_read_count),
                 write_op_vars: grouped_op_vars(raw_write_count),
                 logup_op_vars: grouped_op_vars(raw_logup_count),
+                selectors,
             }
         })
         .collect_vec()
+}
+
+fn selector_metadata_from_circuit(
+    composed_cs: &ceno_zkvm::structs::ComposedConstrainSystem<RecursionField>,
+) -> Result<Vec<SelectorMetadata>> {
+    let Some(circuit) = composed_cs.gkr_circuit.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let first_layer = circuit
+        .layers
+        .first()
+        .ok_or_else(|| eyre!("empty gkr circuit layer"))?;
+    let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, circuit)?;
+    let cs = &composed_cs.zkvm_v1_css;
+    let distinct_rw_selectors =
+        cs.r_selector.is_some() && cs.w_selector.is_some() && cs.r_selector != cs.w_selector;
+
+    first_layer
+        .out_sel_and_eval_exprs
+        .iter()
+        .zip_eq(group_stage_masks.iter())
+        .enumerate()
+        .map(|(selector_idx, ((selector, _), stage_mask))| {
+            let (kind, ordered_sparse_num_vars, sparse_indices, wit_id) =
+                selector_shape_metadata(selector)?;
+            let context_mode = if stage_mask.contains(GkrOutputStageMask::TOWER)
+                && distinct_rw_selectors
+                && matches!(selector, gkr_iop::selector::SelectorType::Prefix(_))
+            {
+                if cs.r_selector.as_ref() == Some(selector) {
+                    SelectorContextMode::Read
+                } else if cs.w_selector.as_ref() == Some(selector) {
+                    SelectorContextMode::Write
+                } else {
+                    SelectorContextMode::Total
+                }
+            } else {
+                SelectorContextMode::Total
+            };
+
+            Ok(SelectorMetadata {
+                selector_idx,
+                kind,
+                eval_idx: first_layer.n_witin + first_layer.n_fixed + wit_id as usize,
+                context_mode,
+                ordered_sparse_num_vars,
+                sparse_indices,
+            })
+        })
+        .collect()
+}
+
+fn selector_shape_metadata(
+    selector: &gkr_iop::selector::SelectorType<RecursionField>,
+) -> Result<(usize, usize, Vec<usize>, multilinear_extensions::WitnessId)> {
+    use gkr_iop::selector::SelectorType;
+    let (kind, ordered_sparse_num_vars, sparse_indices, expr) = match selector {
+        SelectorType::None => bail!("SelectorType::None is not supported in recursion-v2 main"),
+        SelectorType::Whole(expr) => (0, 0, Vec::new(), expr),
+        SelectorType::Prefix(expr) => (1, 0, Vec::new(), expr),
+        SelectorType::OrderedSparse {
+            num_vars,
+            indices,
+            expression,
+        } => (2, *num_vars, indices.clone(), expression),
+        SelectorType::QuarkBinaryTreeLessThan(expr) => (3, 0, Vec::new(), expr),
+    };
+    let Expression::StructuralWitIn(wit_id, _) = expr else {
+        bail!("selector expression must be StructuralWitIn");
+    };
+    Ok((kind, ordered_sparse_num_vars, sparse_indices, *wit_id))
+}
+
+#[derive(Clone, Copy, Default)]
+struct GkrOutputStageMask(u8);
+
+impl GkrOutputStageMask {
+    const TOWER: Self = Self(1 << 0);
+    const ECC: Self = Self(1 << 1);
+    const ROTATION: Self = Self(1 << 2);
+    const ZERO: Self = Self(1 << 3);
+
+    const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    const fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+}
+
+fn first_layer_output_group_stage_masks(
+    composed_cs: &ceno_zkvm::structs::ComposedConstrainSystem<RecursionField>,
+    circuit: &gkr_iop::gkr::GKRCircuit<RecursionField>,
+) -> Result<Vec<GkrOutputStageMask>> {
+    let first_layer = circuit
+        .layers
+        .first()
+        .ok_or_else(|| eyre!("empty gkr circuit layer"))?;
+    let mut group_masks = vec![GkrOutputStageMask::ZERO; first_layer.out_sel_and_eval_exprs.len()];
+
+    if let Some(rotation_groups) = first_layer.rotation_selector_group_indices() {
+        for group_idx in rotation_groups {
+            let Some(mask) = group_masks.get_mut(group_idx) else {
+                bail!("rotation selector group index {group_idx} out of range");
+            };
+            *mask = GkrOutputStageMask::ROTATION;
+        }
+    }
+    if let Some(ecc_groups) = first_layer.ecc_bridge_group_indices() {
+        for group_idx in ecc_groups {
+            let Some(mask) = group_masks.get_mut(group_idx) else {
+                bail!("ecc selector group index {group_idx} out of range");
+            };
+            *mask = GkrOutputStageMask::ECC;
+        }
+    }
+
+    let tower_outputs = tower_output_count(composed_cs);
+    let mut seen_tower_outputs = 0usize;
+    for (group_mask, (_, outputs)) in group_masks
+        .iter_mut()
+        .zip(first_layer.out_sel_and_eval_exprs.iter())
+    {
+        if seen_tower_outputs >= tower_outputs {
+            break;
+        }
+        *group_mask = group_mask.union(GkrOutputStageMask::TOWER);
+        seen_tower_outputs += outputs.len();
+    }
+    if seen_tower_outputs < tower_outputs {
+        bail!(
+            "failed to cover all tower outputs: layer={}, seen_tower_outputs={}, tower_outputs={}",
+            first_layer.name,
+            seen_tower_outputs,
+            tower_outputs
+        );
+    }
+
+    Ok(group_masks)
+}
+
+fn tower_output_count(
+    composed_cs: &ceno_zkvm::structs::ComposedConstrainSystem<RecursionField>,
+) -> usize {
+    let cs = &composed_cs.zkvm_v1_css;
+    let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
+    let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
+    let num_lk_num = cs.lk_table_expressions.len();
+    let num_lk_den = if !cs.lk_table_expressions.is_empty() {
+        cs.lk_table_expressions.len()
+    } else {
+        cs.lk_expressions.len()
+    };
+    num_reads + num_writes + num_lk_num + num_lk_den
 }
 
 impl AirModule for ProofShapeModule {
@@ -269,6 +455,7 @@ impl AirModule for ProofShapeModule {
             fraction_folder_input_bus: self.bus_inventory.fraction_folder_input_bus,
             expression_claim_n_max_bus: self.bus_inventory.expression_claim_n_max_bus,
             tower_module_bus: self.bus_inventory.tower_module_bus,
+            air_presence_bus: self.bus_inventory.air_presence_bus,
             air_shape_bus: self.bus_inventory.air_shape_bus,
             hyperdim_bus: self.bus_inventory.hyperdim_bus,
             lifted_heights_bus: self.bus_inventory.lifted_heights_bus,
@@ -276,6 +463,10 @@ impl AirModule for ProofShapeModule {
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             fork_final_sample_bus: self.bus_inventory.fork_final_sample_bus,
             n_lift_bus: self.bus_inventory.n_lift_bus,
+            main_selector_shape_bus: self.bus_inventory.main_selector_shape_bus,
+            main_selector_sparse_index_shape_bus: self
+                .bus_inventory
+                .main_selector_sparse_index_shape_bus,
         };
         let pvs_air = PublicValuesAir {
             public_values_bus: self.bus_inventory.public_values_bus,

@@ -17,16 +17,18 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirShapeBus, AirShapeBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
-        ForkFinalSampleBus, ForkFinalSampleMessage, ForkedTranscriptBus,
-        ForkedTranscriptBusMessage, FractionFolderInputBus, FractionFolderInputMessage,
-        HyperdimBus, HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage,
-        LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage, NLiftBus, NLiftMessage,
-        TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
+        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage,
+        ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage, ForkFinalSampleBus,
+        ForkFinalSampleMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
+        FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage,
+        LiftedHeightsBus, LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind,
+        LookupChallengeMessage, MainSelectorShapeBus, MainSelectorShapeMessage,
+        MainSelectorSparseIndexShapeBus, MainSelectorSparseIndexShapeMessage, NLiftBus,
+        NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
-        AirMetadata,
+        AirMetadata, SelectorContextMode,
         bus::{
             AirShapeProperty, ProofShapePermutationBus, ProofShapePermutationMessage,
             StartingTidxBus,
@@ -121,6 +123,7 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
 
     // Inter-module buses
     pub tower_module_bus: TowerModuleBus,
+    pub air_presence_bus: AirPresenceBus,
     pub air_shape_bus: AirShapeBus,
     pub expression_claim_n_max_bus: ExpressionClaimNMaxBus,
     pub fraction_folder_input_bus: FractionFolderInputBus,
@@ -130,6 +133,8 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub fork_final_sample_bus: ForkFinalSampleBus,
     pub n_lift_bus: NLiftBus,
+    pub main_selector_shape_bus: MainSelectorShapeBus,
+    pub main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
 }
 
 impl<F, const NUM_LIMBS: usize, const LIMB_BITS: usize> BaseAir<F>
@@ -258,6 +263,62 @@ where
             read_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.read_op_vars);
             write_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.write_op_vars);
             logup_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.logup_op_vars);
+
+            let selector_enabled = local.is_present * local.is_valid * is_current_air.clone();
+            for selector in &air_data.selectors {
+                self.air_presence_bus.add_key_with_lookups(
+                    builder,
+                    local.proof_idx,
+                    AirPresenceBusMessage {
+                        air_idx: AB::Expr::from_usize(i),
+                        is_present: AB::Expr::ONE,
+                    },
+                    selector_enabled.clone(),
+                );
+                let height_1: AB::Expr = local.height_1.into();
+                let height_2: AB::Expr = local.height_2.into();
+                let (ctx_offset, ctx_num_instances) = match selector.context_mode {
+                    SelectorContextMode::Total => {
+                        (AB::Expr::ZERO, height_1.clone() + height_2.clone())
+                    }
+                    SelectorContextMode::Read => (AB::Expr::ZERO, height_1.clone()),
+                    SelectorContextMode::Write => (height_1.clone(), height_2.clone()),
+                };
+                let ctx_num_vars = n.clone()
+                    + AB::Expr::from_usize(air_data.rotation_vars)
+                    + AB::Expr::from_usize(air_data.ecc_extra_vars);
+                self.main_selector_shape_bus.send(
+                    builder,
+                    local.proof_idx,
+                    MainSelectorShapeMessage {
+                        air_idx: AB::Expr::from_usize(i),
+                        selector_idx: AB::Expr::from_usize(selector.selector_idx),
+                        kind: AB::Expr::from_usize(selector.kind),
+                        eval_idx: AB::Expr::from_usize(selector.eval_idx),
+                        ctx_offset,
+                        ctx_num_instances,
+                        ctx_num_vars,
+                        ordered_sparse_num_vars: AB::Expr::from_usize(
+                            selector.ordered_sparse_num_vars,
+                        ),
+                        num_sparse_indices: AB::Expr::from_usize(selector.sparse_indices.len()),
+                    },
+                    selector_enabled.clone(),
+                );
+                for (sparse_pos, sparse_index) in selector.sparse_indices.iter().enumerate() {
+                    self.main_selector_sparse_index_shape_bus.send(
+                        builder,
+                        local.proof_idx,
+                        MainSelectorSparseIndexShapeMessage {
+                            air_idx: AB::Expr::from_usize(i),
+                            selector_idx: AB::Expr::from_usize(selector.selector_idx),
+                            sparse_pos: AB::Expr::from_usize(sparse_pos),
+                            sparse_index: AB::Expr::from_usize(*sparse_index),
+                        },
+                        selector_enabled.clone(),
+                    );
+                }
+            }
         }
 
         ///////////////////////////////////////////////////////////////////////////////////////////

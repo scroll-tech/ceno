@@ -3,9 +3,13 @@ use std::sync::Arc;
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
-    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory, prover::AirProvingContext,
+    AirRef, BaseAirWithPublicValues, FiatShamirTranscript, PartitionedBaseAir, StarkProtocolConfig,
+    TranscriptHistory, prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::F;
+use p3_air::{Air, AirBuilder, BaseAir};
+use p3_field::{Field, PrimeCharacteristicRing};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::{
     main::{
@@ -65,7 +69,7 @@ impl BatchConstraintModule {
 
 impl AirModule for BatchConstraintModule {
     fn num_airs(&self) -> usize {
-        5
+        8
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -92,6 +96,12 @@ impl AirModule for BatchConstraintModule {
                 global_claim_bus: self.global_claim_bus,
                 contribution_bus: self.contribution_bus,
             }) as AirRef<_>,
+            // TODO(recursion-proof-bridge): replace these deterministic placeholders
+            // with the OpenVM cached/batch-constraint AIRs once PCS/cached-commit
+            // replay is fully migrated.
+            Arc::new(SymbolicExpressionAir) as AirRef<_>,
+            Arc::new(ConstraintsFoldingAir) as AirRef<_>,
+            Arc::new(ExpressionClaimAir) as AirRef<_>,
         ]
     }
 }
@@ -134,6 +144,9 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             BatchConstraintModuleChip::TowerPointEq,
             BatchConstraintModuleChip::FrontloadTerm,
             BatchConstraintModuleChip::FinalClaim,
+            BatchConstraintModuleChip::SymbolicExpression,
+            BatchConstraintModuleChip::ConstraintsFolding,
+            BatchConstraintModuleChip::ExpressionClaim,
         ];
         chips
             .into_iter()
@@ -158,6 +171,9 @@ enum BatchConstraintModuleChip {
     TowerPointEq,
     FrontloadTerm,
     FinalClaim,
+    SymbolicExpression,
+    ConstraintsFolding,
+    ExpressionClaim,
 }
 
 impl RowMajorChip<F> for BatchConstraintModuleChip {
@@ -188,6 +204,61 @@ impl RowMajorChip<F> for BatchConstraintModuleChip {
                 ),
             BatchConstraintModuleChip::FinalClaim => MainFinalClaimTraceGenerator
                 .generate_trace(&ctx.records.final_claim_records.as_slice(), required_height),
+            BatchConstraintModuleChip::SymbolicExpression
+            | BatchConstraintModuleChip::ConstraintsFolding
+            | BatchConstraintModuleChip::ExpressionClaim => {
+                PlaceholderTraceGenerator.generate_trace(&(), required_height)
+            }
         }
+    }
+}
+
+pub struct SymbolicExpressionAir;
+pub struct ConstraintsFoldingAir;
+pub struct ExpressionClaimAir;
+
+macro_rules! impl_placeholder_air {
+    ($air:ty) => {
+        impl<F: Field> BaseAir<F> for $air {
+            fn width(&self) -> usize {
+                1
+            }
+        }
+
+        impl<F: Field> BaseAirWithPublicValues<F> for $air {}
+        impl<F: Field> PartitionedBaseAir<F> for $air {}
+
+        impl<AB: AirBuilder> Air<AB> for $air
+        where
+            AB::F: Field,
+        {
+            fn eval(&self, builder: &mut AB) {
+                let main = builder.main();
+                let local_row = main.row_slice(0).expect("main row exists");
+                builder.assert_zero(local_row[0].clone());
+            }
+        }
+    };
+}
+
+impl_placeholder_air!(SymbolicExpressionAir);
+impl_placeholder_air!(ConstraintsFoldingAir);
+impl_placeholder_air!(ExpressionClaimAir);
+
+struct PlaceholderTraceGenerator;
+
+impl RowMajorChip<F> for PlaceholderTraceGenerator {
+    type Ctx<'a> = ();
+
+    fn generate_trace(
+        &self,
+        _ctx: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let height = required_height.unwrap_or(1);
+        if height == 0 {
+            return None;
+        }
+        Some(RowMajorMatrix::new(vec![F::ZERO; height], 1))
     }
 }

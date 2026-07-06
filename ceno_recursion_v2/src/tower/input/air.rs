@@ -53,6 +53,7 @@ pub struct TowerInputCols<T> {
 
     /// Transcript index
     pub tidx: T,
+    pub fork_final_sample_tidx: T,
 
     pub r0_claim: [T; D_EF],
     pub w0_claim: [T; D_EF],
@@ -311,7 +312,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.proof_idx,
             ForkFinalSampleMessage {
                 fork_id: local.fork_id.into(),
-                tidx: tidx_after_gkr_layers.clone(),
+                tidx: local.fork_final_sample_tidx.into(),
             },
             local.is_enabled * has_tower_transcript.clone(),
         );

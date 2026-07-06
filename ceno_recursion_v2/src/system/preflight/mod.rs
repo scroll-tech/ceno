@@ -2,7 +2,7 @@ use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::TranscriptLog;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
 
-use crate::tower::TowerReplayResult;
+use crate::{system::RecursionField, tower::TowerReplayResult};
 
 /// Placeholder types mirroring upstream recursion preflight records.
 /// These will be populated with real transcript metadata once the
@@ -88,6 +88,7 @@ pub struct MainPreflight {
     pub transcript_end: usize,
     pub global_sumchecks: Vec<MainGlobalSumcheckRecord>,
     pub evals: Vec<MainEvalRecord>,
+    pub selector_evals: Vec<MainSelectorEvalRecord>,
     pub tower_point_eqs: Vec<MainTowerPointEqRecord>,
     pub frontload_terms: Vec<MainFrontloadTermRecord>,
     pub final_claims: Vec<MainFinalClaimRecord>,
@@ -121,6 +122,33 @@ pub struct MainEvalRecord {
     pub tidx: usize,
     pub value: EF,
     pub lookup_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MainSelectorKind {
+    #[default]
+    Whole,
+    Prefix,
+    OrderedSparse,
+    QuarkBinaryTreeLessThan,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct MainSelectorEvalRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub air_idx: usize,
+    pub selector_idx: usize,
+    pub eval_idx: usize,
+    pub kind: MainSelectorKind,
+    pub ctx_offset: usize,
+    pub ctx_num_instances: usize,
+    pub ctx_num_vars: usize,
+    pub ordered_sparse_num_vars: usize,
+    pub sparse_indices: Vec<usize>,
+    pub in_point: Vec<RecursionField>,
+    pub out_point: Vec<RecursionField>,
+    pub value: EF,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -210,6 +238,17 @@ pub struct TowerChipTranscriptRange {
     /// Index into `Preflight::fork_transcripts`.
     pub fork_idx: usize,
     pub tower_replay: TowerReplayResult,
+    pub rotation_replay: Option<RotationReplayClaims>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RotationReplayClaims {
+    pub left_point: Vec<RecursionField>,
+    pub right_point: Vec<RecursionField>,
+    pub origin_point: Vec<RecursionField>,
+    pub left_evals: Vec<RecursionField>,
+    pub right_evals: Vec<RecursionField>,
+    pub target_evals: Vec<RecursionField>,
 }
 
 #[derive(Clone, Debug, Default)]

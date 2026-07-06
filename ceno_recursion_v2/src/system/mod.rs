@@ -6,8 +6,9 @@ pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
     BatchConstraintPreflight, ChipTranscriptRange, ForkTranscriptLog, MainEvalRecord,
     MainFinalClaimRecord, MainFrontloadTermRecord, MainGlobalSumcheckRecord,
-    MainGlobalSumcheckRoundRecord, MainPreflight, MainTowerPointEqRecord, MainTranscriptRecord,
-    Preflight, ProofShapePreflight, TowerChipTranscriptRange, TowerMainPointRecord, TowerPreflight,
+    MainGlobalSumcheckRoundRecord, MainPreflight, MainSelectorEvalRecord, MainSelectorKind,
+    MainTowerPointEqRecord, MainTranscriptRecord, Preflight, ProofShapePreflight,
+    RotationReplayClaims, TowerChipTranscriptRange, TowerMainPointRecord, TowerPreflight,
     TraceVData,
 };
 pub use recursion_circuit::system::{
@@ -58,8 +59,8 @@ use tracing::Span;
 pub const POW_CHECKER_HEIGHT: usize = 32;
 
 const HARDCODED_CHILD_VK_DIGEST_LIMBS: [[u32; D_EF]; VK_DIGEST_LEN] = [
-    [1350452481, 1461358323, 1407156150, 479708697],
-    [950211392, 849237334, 1264246426, 771730644],
+    [1913846913, 1134794404, 302722344, 1619176295],
+    [604679097, 1699744227, 1924255980, 872496957],
 ];
 
 fn hardcoded_child_vk_digest() -> [RecursionField; VK_DIGEST_LEN] {
@@ -462,11 +463,12 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             let tower_tidx = fs.len();
             let tower_replay =
                 crate::tower::record_and_replay_tower_preflight(fs, child_vk, chip_idx, chip_proof);
-            crate::main::replay_chip_pre_main_tail_transcript(
+            let rotation_replay = crate::main::replay_chip_pre_main_tail_transcript(
                 fs,
                 child_vk,
                 chip_idx,
                 chip_proof,
+                &tower_replay,
                 [alpha_ext, beta_ext],
             )
             .unwrap_or_else(|err| panic!("failed to replay pre-main transcript tail: {err}"));
@@ -477,6 +479,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
                 tidx: tower_tidx,
                 fork_idx: fork_id,
                 tower_replay,
+                rotation_replay,
             });
         }
 

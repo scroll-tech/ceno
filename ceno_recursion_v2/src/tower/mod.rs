@@ -325,6 +325,7 @@ impl TowerModule {
                 tidx,
                 fork_idx: 0, // unused in forked flow
                 tower_replay,
+                rotation_replay: None,
             });
         }
     }
@@ -509,6 +510,7 @@ fn build_chip_records(
     replay: &TowerReplayResult,
     schedule: &TowerTranscriptSchedule,
     tidx: usize,
+    fork_final_sample_tidx: usize,
 ) -> Result<(
     TowerShapeRecord,
     TowerInputRecord,
@@ -849,6 +851,7 @@ fn build_chip_records(
         idx,
         fork_id,
         tidx,
+        fork_final_sample_tidx,
         n_logup: layer_count,
         alpha_logup: schedule.alpha_logup,
         beta: schedule.beta,
@@ -967,6 +970,7 @@ fn build_chip_input_record(
     circuit_vk: &VerifyingKey<RecursionField>,
     schedule: &TowerTranscriptSchedule,
     tidx: usize,
+    fork_final_sample_tidx: usize,
 ) -> Result<TowerInputRecord> {
     let shape_record = build_tower_shape_record(proof_idx, idx, idx, chip_proof, circuit_vk);
     let layer_count = shape_record.max_layer_count;
@@ -1120,6 +1124,7 @@ fn build_chip_input_record(
         idx,
         fork_id,
         tidx,
+        fork_final_sample_tidx,
         n_logup: layer_count,
         alpha_logup: schedule.alpha_logup,
         beta: schedule.beta,
@@ -1286,6 +1291,10 @@ pub(crate) fn build_gkr_blob(
             // by 0 or 1 within each proof_idx group).
             let idx = entry_idx;
             let tower_air_tidx = tower_pre_alpha_tidx(chip_proof, pf_entry.tidx);
+            let fork_final_sample_tidx = preflight
+                .fork_log(pf_entry.fork_idx)
+                .len()
+                .saturating_sub(D_EF);
             let (
                 shape_record,
                 chip_input_record,
@@ -1306,6 +1315,7 @@ pub(crate) fn build_gkr_blob(
                 replay,
                 schedule,
                 tower_air_tidx,
+                fork_final_sample_tidx,
             )?;
             if std::env::var_os("CENO_REC_V2_DEBUG_TOWER").is_some() {
                 let out_eval_span = tower_air_tidx.saturating_sub(pf_entry.tidx);
@@ -1463,6 +1473,10 @@ pub(crate) fn build_tower_input_records(
             let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
                 .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_idx}"))?;
             let tower_air_tidx = tower_pre_alpha_tidx(chip_proof, pf_entry.tidx);
+            let fork_final_sample_tidx = preflight
+                .fork_log(pf_entry.fork_idx)
+                .len()
+                .saturating_sub(D_EF);
             input_records.push(build_chip_input_record(
                 proof_idx,
                 entry_idx,
@@ -1471,6 +1485,7 @@ pub(crate) fn build_tower_input_records(
                 circuit_vk,
                 &transcript_schedule,
                 tower_air_tidx,
+                fork_final_sample_tidx,
             )?);
         }
     }
