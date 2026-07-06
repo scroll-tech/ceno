@@ -317,8 +317,12 @@ impl MainModule {
             .collect::<std::collections::BTreeMap<_, _>>();
         let selector_point_records =
             build_main_selector_point_records(&selector_eval_records, &tower_idx_by_air);
-        let ecc_rt_records =
-            build_main_ecc_rt_records(preflights, &tower_idx_by_air, &selector_point_records);
+        let ecc_rt_records = build_main_ecc_rt_records(
+            proofs,
+            preflights,
+            &tower_idx_by_air,
+            &selector_point_records,
+        );
         for global in &mut global_sumcheck_records {
             for (round_idx, round) in global.rounds.iter_mut().enumerate() {
                 round.point_lookup_count = global_lookup_counts
@@ -389,13 +393,18 @@ impl MainModule {
                 })
             })
             .chain(ecc_rt_records.iter().flat_map(|record| {
-                (0..D_EF).map(move |offset| {
-                    (
-                        record.proof_idx,
-                        record.fork_id,
-                        record.tidx + offset,
-                    )
-                })
+                (0..D_EF)
+                    .flat_map(move |offset| {
+                        [
+                            (record.proof_idx, record.fork_id, record.tidx + offset),
+                            (record.proof_idx, record.fork_id, record.out_tidx + offset),
+                            (
+                                record.proof_idx,
+                                record.fork_id,
+                                record.alpha_tidx + offset,
+                            ),
+                        ]
+                    })
             }))
             .collect::<std::collections::BTreeSet<_>>();
         for input in tower_input_records
@@ -695,8 +704,8 @@ where
             .as_ref()
             .ok_or_else(|| eyre!("{name} missing ecc proof"))?;
         let num_vars = ceil_log2(next_pow2_instance_padding(ecc_proof.num_instances));
-        sample_vec(ts, b"ecc", num_vars);
-        let _alpha_pows = sample_challenge_pows(
+        let (_, out_rt_tidxs) = sample_vec_with_tidxs(ts, b"ecc", num_vars);
+        let (_, alpha_tidx) = sample_challenge_pows_with_tidx(
             ts,
             7 * ceno_zkvm::scheme::constants::SEPTIC_EXTENSION_DEGREE,
             b"ecc_alpha",
@@ -708,7 +717,11 @@ where
             num_vars,
             3,
         )?;
-        ecc_replay = Some(EccReplayClaims { rt_tidxs });
+        ecc_replay = Some(EccReplayClaims {
+            out_rt_tidxs,
+            alpha_tidx,
+            rt_tidxs,
+        });
     }
 
     let gkr_circuit = composed_cs
@@ -820,17 +833,6 @@ where
         }),
         ecc_replay,
     ))
-}
-
-fn sample_vec<TS>(ts: &mut TS, label: &[u8], len: usize) -> Vec<RecursionField>
-where
-    TS: FiatShamirTranscript<BabyBearPoseidon2Config>
-        + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
-{
-    transcript_observe_label(ts, label);
-    (0..len)
-        .map(|_| FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts))
-        .collect()
 }
 
 fn sample_vec_with_tidxs<TS>(
@@ -1863,6 +1865,7 @@ fn build_main_selector_point_records(
 }
 
 fn build_main_ecc_rt_records(
+    proofs: &[RecursionProof],
     preflights: &[Preflight],
     tower_idx_by_air: &std::collections::BTreeMap<(usize, usize), usize>,
     selector_point_records: &[MainSelectorPointRecord],
@@ -1878,8 +1881,18 @@ fn build_main_ecc_rt_records(
     );
     let mut records = Vec::new();
     for (proof_idx, preflight) in preflights.iter().enumerate() {
+        let Some(proof) = proofs.get(proof_idx) else {
+            continue;
+        };
         for chip in &preflight.gkr.chips {
             let Some(ecc_replay) = chip.ecc_replay.as_ref() else {
+                continue;
+            };
+            let Some(ecc_proof) = proof
+                .chip_proofs
+                .get(&chip.chip_idx)
+                .and_then(|chip_proof| chip_proof.ecc_proof.as_ref())
+            else {
                 continue;
             };
             let Some(idx) = tower_idx_by_air.get(&(proof_idx, chip.chip_idx)).copied() else {
@@ -1889,7 +1902,129 @@ fn build_main_ecc_rt_records(
                 continue;
             };
             let fork_values = fork.log.values();
+            let num_vars = ecc_replay.rt_tidxs.len();
+            if num_vars == 0 {
+                continue;
+            }
+            let out_rt = ecc_replay
+                .out_rt_tidxs
+                .iter()
+                .map(|tidx| {
+                    fork_values
+                        .get(*tidx..*tidx + D_EF)
+                        .and_then(RecursionField::from_basis_coefficients_slice)
+                        .unwrap_or(RecursionField::ZERO)
+                })
+                .collect_vec();
+            let rt = ecc_replay
+                .rt_tidxs
+                .iter()
+                .map(|tidx| {
+                    fork_values
+                        .get(*tidx..*tidx + D_EF)
+                        .and_then(RecursionField::from_basis_coefficients_slice)
+                        .unwrap_or(RecursionField::ZERO)
+                })
+                .collect_vec();
+            let alpha = fork_values
+                .get(ecc_replay.alpha_tidx..ecc_replay.alpha_tidx + D_EF)
+                .and_then(RecursionField::from_basis_coefficients_slice)
+                .unwrap_or(RecursionField::ZERO);
+            let mut alpha_pows = [RecursionField::ZERO; 49];
+            let mut pow = RecursionField::ONE;
+            for dst in &mut alpha_pows {
+                *dst = pow;
+                pow *= alpha;
+            }
+            if ecc_proof.evals.len() < 52 {
+                continue;
+            }
+            let evals = &ecc_proof.evals[3..];
+            let to_septic = |start: usize| -> [RecursionField; 7] {
+                core::array::from_fn(|i| evals[start + i])
+            };
+            let s0 = to_septic(0);
+            let x0 = to_septic(7);
+            let y0 = to_septic(14);
+            let x1 = to_septic(21);
+            let y1 = to_septic(28);
+            let x3 = to_septic(35);
+            let y3 = to_septic(42);
+            let sum_x = core::array::from_fn(|i| RecursionField::from(ecc_proof.sum.x.0[i]));
+            let sum_y = core::array::from_fn(|i| RecursionField::from(ecc_proof.sum.y.0[i]));
+            let (add_eval, bypass_eval, export_eval) =
+                native_ecc_equation_evals(&s0, &x0, &y0, &x1, &y1, &x3, &y3, &sum_x, &sum_y, &alpha_pows);
+
+            let mut layer_ns = (0..num_vars)
+                .scan(ecc_proof.num_instances, |n_instance, _| {
+                    let current = *n_instance;
+                    *n_instance = (*n_instance).div_ceil(2);
+                    Some(current)
+                })
+                .collect_vec();
+            layer_ns.reverse();
+            let mut claim = RecursionField::ZERO;
+            let mut eq_acc = RecursionField::ONE;
+            let mut last_acc = RecursionField::ONE;
+            let mut export_out_acc = RecursionField::ONE;
+            let mut export_rt_acc = RecursionField::ONE;
+            let mut quark_acc = RecursionField::ZERO;
             for (round_idx, tidx) in ecc_replay.rt_tidxs.iter().copied().enumerate() {
+                let prover_msg = ecc_proof.zerocheck_proof.proofs.get(round_idx);
+                let mut round_evals = [RecursionField::ZERO; 3];
+                if let Some(prover_msg) = prover_msg {
+                    for (dst, src) in round_evals
+                        .iter_mut()
+                        .zip(prover_msg.evaluations.iter().copied())
+                    {
+                        *dst = src;
+                    }
+                }
+                let claim_in = claim;
+                let claim_out = extrapolate_uni_poly(
+                    claim - round_evals[0],
+                    &round_evals,
+                    rt[round_idx],
+                );
+                claim = claim_out;
+
+                let eq_in = eq_acc;
+                eq_acc *= eq_binary_factor(out_rt[round_idx], rt[round_idx]);
+                let last_in = last_acc;
+                last_acc *= out_rt[round_idx] * rt[round_idx];
+                let export_out_in = export_out_acc;
+                export_out_acc *= if round_idx == 0 {
+                    RecursionField::ONE - out_rt[round_idx]
+                } else {
+                    out_rt[round_idx]
+                };
+                let export_rt_in = export_rt_acc;
+                export_rt_acc *= if round_idx == 0 {
+                    RecursionField::ONE - rt[round_idx]
+                } else {
+                    rt[round_idx]
+                };
+
+                let layer_n = layer_ns[round_idx];
+                let prefix_count = layer_n / 2;
+                let quark_factor = if prefix_count == 0 {
+                    RecursionField::ZERO
+                } else if round_idx == 0 {
+                    RecursionField::ONE
+                } else {
+                    native_eq_lte(
+                        prefix_count - 1,
+                        &out_rt[..round_idx],
+                        &rt[..round_idx],
+                    )
+                };
+                let lte_witness = build_lte_witness(prefix_count, round_idx, &out_rt, &rt);
+                let quark_in = quark_acc;
+                quark_acc = (RecursionField::ONE - out_rt[round_idx])
+                    * (RecursionField::ONE - rt[round_idx])
+                    * quark_factor
+                    + out_rt[round_idx] * rt[round_idx] * quark_acc;
+
                 let value = fork_values
                     .get(tidx..tidx + D_EF)
                     .and_then(RecursionField::from_basis_coefficients_slice)
@@ -1899,8 +2034,55 @@ fn build_main_ecc_rt_records(
                     idx,
                     fork_id: chip.fork_idx,
                     round_idx,
+                    is_first: round_idx == 0,
+                    is_last: round_idx + 1 == ecc_replay.rt_tidxs.len(),
                     tidx,
+                    out_tidx: ecc_replay.out_rt_tidxs.get(round_idx).copied().unwrap_or(0),
+                    alpha_tidx: ecc_replay.alpha_tidx,
                     value,
+                    out_value: out_rt[round_idx],
+                    alpha,
+                    alpha_pows,
+                    ev1: round_evals[0],
+                    ev2: round_evals[1],
+                    ev3: round_evals[2],
+                    claim_in,
+                    claim_out,
+                    sel_add: ecc_proof.evals[0],
+                    sel_bypass: ecc_proof.evals[1],
+                    sel_export: ecc_proof.evals[2],
+                    s0,
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    x3,
+                    y3,
+                    sum_x,
+                    sum_y,
+                    eq_in,
+                    eq_out: eq_acc,
+                    last_in,
+                    last_out: last_acc,
+                    export_out_in,
+                    export_out_out: export_out_acc,
+                    export_rt_in,
+                    export_rt_out: export_rt_acc,
+                    quark_in,
+                    quark_factor,
+                    quark_out: quark_acc,
+                    add_eval,
+                    bypass_eval,
+                    export_eval,
+                    lte_out_point: lte_witness.out_point,
+                    lte_rt_point: lte_witness.rt_point,
+                    lte_prefix_acc: lte_witness.prefix_acc,
+                    lte_less_acc: lte_witness.less_acc,
+                    lte_bits: lte_witness.bits,
+                    lte_active: lte_witness.active,
+                    quark_prefix_count: prefix_count,
+                    quark_layer_n: layer_n,
+                    quark_parity: layer_n % 2 == 1,
                     lookup_count: lookup_counts
                         .get(&(proof_idx, idx, round_idx))
                         .copied()
@@ -1910,6 +2092,115 @@ fn build_main_ecc_rt_records(
         }
     }
     records
+}
+
+struct EccLteWitness {
+    out_point: [RecursionField; 32],
+    rt_point: [RecursionField; 32],
+    prefix_acc: [RecursionField; 33],
+    less_acc: [RecursionField; 33],
+    bits: [bool; 32],
+    active: [bool; 32],
+}
+
+fn build_lte_witness(
+    prefix_count: usize,
+    round_idx: usize,
+    out_rt: &[RecursionField],
+    rt: &[RecursionField],
+) -> EccLteWitness {
+    let max_idx = prefix_count.saturating_sub(1);
+    let out_point = core::array::from_fn(|i| out_rt.get(i).copied().unwrap_or_default());
+    let rt_point = core::array::from_fn(|i| rt.get(i).copied().unwrap_or_default());
+    let bits = core::array::from_fn(|i| i < round_idx && ((max_idx >> i) & 1) == 1);
+    let active = core::array::from_fn(|i| i < round_idx);
+    let mut prefix_acc = [RecursionField::ZERO; 33];
+    let mut less_acc = [RecursionField::ZERO; 33];
+    prefix_acc[0] = RecursionField::ONE;
+    for i in 0..32 {
+        if active[i] {
+            let same_one = out_point[i] * rt_point[i];
+            let same_zero = (RecursionField::ONE - out_point[i]) * (RecursionField::ONE - rt_point[i]);
+            let same_any = same_one + same_zero;
+            let equal_choice = if bits[i] { same_one } else { same_zero };
+            prefix_acc[i + 1] = prefix_acc[i] * equal_choice;
+            less_acc[i + 1] =
+                less_acc[i] * same_any + if bits[i] { prefix_acc[i] * same_zero } else { RecursionField::ZERO };
+        } else {
+            prefix_acc[i + 1] = prefix_acc[i];
+            less_acc[i + 1] = less_acc[i];
+        }
+    }
+    EccLteWitness {
+        out_point,
+        rt_point,
+        prefix_acc,
+        less_acc,
+        bits,
+        active,
+    }
+}
+
+fn eq_binary_factor(a: RecursionField, b: RecursionField) -> RecursionField {
+    a * b + (RecursionField::ONE - a) * (RecursionField::ONE - b)
+}
+
+fn native_eq_lte(max_idx: usize, a: &[RecursionField], b: &[RecursionField]) -> RecursionField {
+    let mut running_product = Vec::with_capacity(b.len() + 1);
+    running_product.push(RecursionField::ONE);
+    for i in 0..b.len() {
+        running_product.push(running_product[i] * eq_binary_factor(a[i], b[i]));
+    }
+    let mut running_product2 = vec![RecursionField::ZERO; b.len() + 1];
+    running_product2[b.len()] = RecursionField::ONE;
+    for i in (0..b.len()).rev() {
+        let bit = RecursionField::from_usize((max_idx >> i) & 1);
+        running_product2[i] = running_product2[i + 1]
+            * (a[i] * b[i] * bit
+                + (RecursionField::ONE - a[i])
+                    * (RecursionField::ONE - b[i])
+                    * (RecursionField::ONE - bit));
+    }
+    let mut ans = running_product[b.len()];
+    for i in 0..b.len() {
+        if ((max_idx >> i) & 1) == 0 {
+            ans -= running_product[i] * running_product2[i + 1] * a[i] * b[i];
+        }
+    }
+    ans
+}
+
+#[allow(clippy::too_many_arguments)]
+fn native_ecc_equation_evals(
+    s0: &[RecursionField; 7],
+    x0: &[RecursionField; 7],
+    y0: &[RecursionField; 7],
+    x1: &[RecursionField; 7],
+    y1: &[RecursionField; 7],
+    x3: &[RecursionField; 7],
+    y3: &[RecursionField; 7],
+    sum_x: &[RecursionField; 7],
+    sum_y: &[RecursionField; 7],
+    alpha_pows: &[RecursionField; 49],
+) -> (RecursionField, RecursionField, RecursionField) {
+    let mut add_eval = RecursionField::ZERO;
+    let mut bypass_eval = RecursionField::ZERO;
+    let mut export_eval = RecursionField::ZERO;
+    for i in 0..7 {
+        let v1 = s0[i] * (x0[i] - x1[i]) - (y0[i] - y1[i]);
+        let v2 = s0[i] * s0[i] - x0[i] - x1[i] - x3[i];
+        let v3 = s0[i] * (x0[i] - x3[i]) - (y0[i] + y3[i]);
+        let v4 = x3[i] - x0[i];
+        let v5 = y3[i] - y0[i];
+        add_eval += v1 * alpha_pows[i]
+            + v2 * alpha_pows[7 + i]
+            + v3 * alpha_pows[14 + i];
+        bypass_eval += v4 * alpha_pows[21 + i] + v5 * alpha_pows[28 + i];
+        export_eval +=
+            (x3[i] - sum_x[i]) * alpha_pows[35 + i]
+                + (y3[i] - sum_y[i]) * alpha_pows[42 + i];
+    }
+    (add_eval, bypass_eval, export_eval)
 }
 
 fn rotation_point_source(
@@ -2641,6 +2932,24 @@ where
     iter::successors(Some(RecursionField::ONE), move |prev| Some(*prev * alpha))
         .take(size)
         .collect()
+}
+
+fn sample_challenge_pows_with_tidx<TS>(
+    ts: &mut TS,
+    size: usize,
+    label: &[u8],
+) -> (Vec<RecursionField>, usize)
+where
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config>
+        + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
+{
+    transcript_observe_label(ts, label);
+    let tidx = ts.len();
+    let alpha = FiatShamirTranscript::<BabyBearPoseidon2Config>::sample_ext(ts);
+    let pows = iter::successors(Some(RecursionField::ONE), move |prev| Some(*prev * alpha))
+        .take(size)
+        .collect();
+    (pows, tidx)
 }
 
 fn replay_main_sumcheck<TS>(
