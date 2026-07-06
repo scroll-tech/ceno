@@ -139,6 +139,7 @@ pub struct MainSelectorEvalRecord {
     pub idx: usize,
     pub air_idx: usize,
     pub selector_idx: usize,
+    pub has_eval: bool,
     pub eval_idx: usize,
     pub kind: MainSelectorKind,
     pub ctx_offset: usize,

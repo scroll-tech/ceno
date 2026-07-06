@@ -15,7 +15,7 @@ use crate::{
         AirPresenceBus, AirPresenceBusMessage, MainEvalBus, MainEvalMessage, MainGlobalPointBus,
         MainGlobalPointMessage, MainSelectorResultBus, MainSelectorResultMessage,
         MainSelectorShapeBus, MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
-        MainSelectorSparseIndexShapeMessage, TowerMainPointBus, TowerMainPointMessage,
+        MainSelectorSparseIndexShapeMessage,
     },
     system::{MainSelectorEvalRecord, MainSelectorKind, RecursionField},
     tracegen::RowMajorChip,
@@ -81,7 +81,6 @@ pub struct MainSelectorEvalCols<T> {
 
 pub struct MainSelectorFormulaAir {
     pub global_point_bus: MainGlobalPointBus,
-    pub tower_point_bus: TowerMainPointBus,
     pub air_presence_bus: AirPresenceBus,
     pub selector_result_bus: MainSelectorResultBus,
     pub selector_shape_bus: MainSelectorShapeBus,
@@ -196,17 +195,6 @@ where
             },
             local.is_enabled * local.is_eq_product_step * local.point_active,
         );
-        self.tower_point_bus.receive(
-            builder,
-            local.proof_idx,
-            TowerMainPointMessage {
-                idx: local.idx.into(),
-                round_idx: local.round_idx.into(),
-                value: local.rhs_point.map(Into::into),
-            },
-            local.is_enabled * local.is_eq_product_step * local.point_active,
-        );
-
         let expected_factor = eq_factor::<AB>(local.rhs_point.clone(), local.lhs_point.clone());
         assert_array_eq(
             &mut builder.when(local.is_enabled * local.is_eq_product_step * local.point_active),
@@ -433,7 +421,7 @@ impl SelectorColumnAccess<F> for MainSelectorEvalCols<F> {
 }
 
 fn fill_eval_cols(record: &MainSelectorEvalRecord, cols: &mut MainSelectorEvalCols<F>) {
-    cols.is_enabled = F::ONE;
+    cols.is_enabled = F::from_bool(record.has_eval);
     cols.proof_idx = F::from_usize(record.proof_idx);
     cols.idx = F::from_usize(record.idx);
     cols.eval_idx = F::from_usize(record.eval_idx);
@@ -485,30 +473,6 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
             acc_out: zero,
         });
 
-        let mut acc = one;
-        for i in 0..record.ctx_num_vars.min(MAX_SELECTOR_POINT_VARS) {
-            let lhs = record.in_point.get(i).copied().unwrap_or(zero);
-            let rhs = record.out_point.get(i).copied().unwrap_or(zero);
-            let factor = native_eq_factor(rhs, lhs);
-            let acc_in = acc;
-            acc *= factor;
-            rows.push(FormulaRow {
-                record,
-                step_kind: STEP_EQ_PRODUCT,
-                step_idx: i,
-                round_idx: i,
-                sparse_pos: 0,
-                sparse_index: 0,
-                sparse_index_bits_value: 0,
-                point_active: true,
-                lhs_point: lhs,
-                rhs_point: rhs,
-                factor,
-                acc_in,
-                acc_out: acc,
-            });
-        }
-
         for (sparse_pos, sparse_index) in record.sparse_indices.iter().copied().enumerate() {
             rows.push(FormulaRow {
                 record,
@@ -527,21 +491,78 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
             });
         }
 
-        rows.push(FormulaRow {
-            record,
-            step_kind: STEP_ACCUMULATE,
-            step_idx: 0,
-            round_idx: 0,
-            sparse_pos: 0,
-            sparse_index: 0,
-            sparse_index_bits_value: 0,
-            point_active: false,
-            lhs_point: zero,
-            rhs_point: zero,
-            factor: record.value,
-            acc_in: zero,
-            acc_out: record.value,
-        });
+        if !record.has_eval {
+            continue;
+        }
+
+        let computed_value = match record.kind {
+            MainSelectorKind::Whole => {
+                let acc =
+                    push_eq_product_rows(&mut rows, record, 0, record.ctx_num_vars, one, true);
+                acc
+            }
+            MainSelectorKind::Prefix => {
+                let _ = push_eq_product_rows(&mut rows, record, 0, record.ctx_num_vars, one, true);
+                let end = record.ctx_offset + record.ctx_num_instances;
+                let end_eval = if end == 0 {
+                    zero
+                } else {
+                    native_eq_lte(end - 1, &record.out_point, &record.in_point)
+                };
+                let start_eval = if record.ctx_offset == 0 {
+                    zero
+                } else {
+                    native_eq_lte(record.ctx_offset - 1, &record.out_point, &record.in_point)
+                };
+                let value = end_eval - start_eval;
+                rows.push(accumulate_row(record, 0, end_eval, -start_eval, value));
+                value
+            }
+            MainSelectorKind::OrderedSparse => {
+                let _ = push_eq_product_rows(&mut rows, record, 0, record.ctx_num_vars, one, true);
+                let subgroup_vars = record.ordered_sparse_num_vars;
+                let out_subgroup_eq = native_eq_vec(&record.out_point[..subgroup_vars]);
+                let in_subgroup_eq = native_eq_vec(&record.in_point[..subgroup_vars]);
+                let mut subgroup_acc = zero;
+                for (sparse_pos, sparse_index) in record.sparse_indices.iter().copied().enumerate()
+                {
+                    let term = out_subgroup_eq[sparse_index] * in_subgroup_eq[sparse_index];
+                    let acc_in = subgroup_acc;
+                    subgroup_acc += term;
+                    rows.push(accumulate_row(
+                        record,
+                        sparse_pos,
+                        acc_in,
+                        term,
+                        subgroup_acc,
+                    ));
+                }
+                let tail_eval = native_eq_lte(
+                    record.ctx_num_instances - 1,
+                    &record.out_point[subgroup_vars..],
+                    &record.in_point[subgroup_vars..],
+                );
+                let value = subgroup_acc * tail_eval;
+                rows.push(accumulate_row(
+                    record,
+                    record.sparse_indices.len(),
+                    zero,
+                    value,
+                    value,
+                ));
+                value
+            }
+            MainSelectorKind::QuarkBinaryTreeLessThan => {
+                let _ = push_eq_product_rows(&mut rows, record, 0, record.ctx_num_vars, one, true);
+                let value = native_quark_binary_tree_lte(
+                    record.ctx_num_instances,
+                    &record.out_point,
+                    &record.in_point,
+                );
+                rows.push(accumulate_row(record, 0, zero, value, value));
+                value
+            }
+        };
         rows.push(FormulaRow {
             record,
             step_kind: STEP_FINAL,
@@ -554,11 +575,70 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
             lhs_point: zero,
             rhs_point: zero,
             factor: one,
-            acc_in: record.value,
-            acc_out: record.value,
+            acc_in: computed_value,
+            acc_out: computed_value,
         });
     }
     rows
+}
+
+fn accumulate_row(
+    record: &MainSelectorEvalRecord,
+    step_idx: usize,
+    acc_in: RecursionField,
+    factor: RecursionField,
+    acc_out: RecursionField,
+) -> FormulaRow<'_> {
+    FormulaRow {
+        record,
+        step_kind: STEP_ACCUMULATE,
+        step_idx,
+        round_idx: 0,
+        sparse_pos: step_idx,
+        sparse_index: 0,
+        sparse_index_bits_value: 0,
+        point_active: false,
+        lhs_point: RecursionField::ZERO,
+        rhs_point: RecursionField::ZERO,
+        factor,
+        acc_in,
+        acc_out,
+    }
+}
+
+fn push_eq_product_rows<'a>(
+    rows: &mut Vec<FormulaRow<'a>>,
+    record: &'a MainSelectorEvalRecord,
+    start_round_idx: usize,
+    len: usize,
+    mut acc: RecursionField,
+    point_active: bool,
+) -> RecursionField {
+    let zero = RecursionField::ZERO;
+    for i in 0..len.min(MAX_SELECTOR_POINT_VARS) {
+        let point_idx = start_round_idx + i;
+        let lhs = record.in_point.get(point_idx).copied().unwrap_or(zero);
+        let rhs = record.out_point.get(point_idx).copied().unwrap_or(zero);
+        let factor = native_eq_factor(rhs, lhs);
+        let acc_in = acc;
+        acc *= factor;
+        rows.push(FormulaRow {
+            record,
+            step_kind: STEP_EQ_PRODUCT,
+            step_idx: point_idx,
+            round_idx: point_idx,
+            sparse_pos: 0,
+            sparse_index: 0,
+            sparse_index_bits_value: 0,
+            point_active,
+            lhs_point: lhs,
+            rhs_point: rhs,
+            factor,
+            acc_in,
+            acc_out: acc,
+        });
+    }
+    acc
 }
 
 fn fill_formula_cols(row: &FormulaRow<'_>, cols: &mut MainSelectorFormulaCols<F>) {
@@ -627,4 +707,273 @@ fn selector_kind_code(kind: MainSelectorKind) -> usize {
 
 fn native_eq_factor(out: RecursionField, input: RecursionField) -> RecursionField {
     out * input + (RecursionField::ONE - out) * (RecursionField::ONE - input)
+}
+
+fn native_eq_vec(point: &[RecursionField]) -> Vec<RecursionField> {
+    let mut eq = vec![RecursionField::ONE];
+    for &value in point.iter().rev() {
+        let mut next = Vec::with_capacity(eq.len() * 2);
+        for prev in eq {
+            next.push(prev * (RecursionField::ONE - value));
+            next.push(prev * value);
+        }
+        eq = next;
+    }
+    eq
+}
+
+fn native_eq_lte(
+    max_idx: usize,
+    out_point: &[RecursionField],
+    in_point: &[RecursionField],
+) -> RecursionField {
+    assert!(out_point.len() >= in_point.len());
+    let mut running_product = Vec::with_capacity(in_point.len() + 1);
+    running_product.push(RecursionField::ONE);
+    for i in 0..in_point.len() {
+        running_product.push(running_product[i] * native_eq_factor(out_point[i], in_point[i]));
+    }
+
+    let mut running_product2 = vec![RecursionField::ZERO; in_point.len() + 1];
+    running_product2[in_point.len()] = RecursionField::ONE;
+    for i in (0..in_point.len()).rev() {
+        let bit = if ((max_idx >> i) & 1) == 1 {
+            RecursionField::ONE
+        } else {
+            RecursionField::ZERO
+        };
+        running_product2[i] = running_product2[i + 1]
+            * (out_point[i] * in_point[i] * bit
+                + (RecursionField::ONE - out_point[i])
+                    * (RecursionField::ONE - in_point[i])
+                    * (RecursionField::ONE - bit));
+    }
+
+    let mut ans = running_product[in_point.len()];
+    for i in 0..in_point.len() {
+        if ((max_idx >> i) & 1) == 0 {
+            ans -= running_product[i] * running_product2[i + 1] * out_point[i] * in_point[i];
+        }
+    }
+    for value in out_point.iter().skip(in_point.len()) {
+        ans *= RecursionField::ONE - *value;
+    }
+    ans
+}
+
+fn native_quark_binary_tree_lte(
+    num_instances: usize,
+    out_point: &[RecursionField],
+    in_point: &[RecursionField],
+) -> RecursionField {
+    assert!(num_instances > 0);
+    assert!(!out_point.is_empty());
+    assert_eq!(out_point.len(), in_point.len());
+
+    let mut prefix_one_seq = (0..out_point.len())
+        .scan(num_instances, |n_instance, _| {
+            let cur = *n_instance / 2;
+            *n_instance = (*n_instance).div_ceil(2);
+            Some(cur)
+        })
+        .collect::<Vec<_>>();
+    prefix_one_seq.reverse();
+
+    let mut res = if prefix_one_seq[0] == 0 {
+        RecursionField::ZERO
+    } else {
+        (RecursionField::ONE - out_point[0]) * (RecursionField::ONE - in_point[0])
+    };
+    for i in 1..out_point.len() {
+        let num_prefix_one_lhs = prefix_one_seq[i];
+        let lhs_res = if num_prefix_one_lhs == 0 {
+            RecursionField::ZERO
+        } else {
+            (RecursionField::ONE - out_point[i])
+                * (RecursionField::ONE - in_point[i])
+                * native_eq_lte(num_prefix_one_lhs - 1, &out_point[..i], &in_point[..i])
+        };
+        let rhs_res = out_point[i] * in_point[i] * res;
+        res = lhs_res + rhs_res;
+    }
+    res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gkr_iop::selector::{SelectorContext, SelectorType};
+    use multilinear_extensions::{
+        Expression, StructuralWitIn, StructuralWitInType, ToExpr, WitnessId,
+    };
+
+    fn structural_expr(wit_id: WitnessId) -> Expression<RecursionField> {
+        StructuralWitIn {
+            id: wit_id,
+            witin_type: StructuralWitInType::Empty,
+        }
+        .expr()
+    }
+
+    fn point(values: &[usize]) -> Vec<RecursionField> {
+        values
+            .iter()
+            .map(|&value| RecursionField::from_usize(value))
+            .collect()
+    }
+
+    fn record(
+        kind: MainSelectorKind,
+        ctx: &SelectorContext,
+        ordered_sparse_num_vars: usize,
+        sparse_indices: Vec<usize>,
+        out_point: Vec<RecursionField>,
+        in_point: Vec<RecursionField>,
+        value: RecursionField,
+    ) -> MainSelectorEvalRecord {
+        MainSelectorEvalRecord {
+            proof_idx: 0,
+            idx: 7,
+            air_idx: 11,
+            selector_idx: 13,
+            has_eval: true,
+            eval_idx: 17,
+            kind,
+            ctx_offset: ctx.offset,
+            ctx_num_instances: ctx.num_instances,
+            ctx_num_vars: ctx.num_vars,
+            ordered_sparse_num_vars,
+            sparse_indices,
+            in_point,
+            out_point,
+            value,
+        }
+    }
+
+    fn formula_final_value(record: &MainSelectorEvalRecord) -> RecursionField {
+        build_formula_rows(core::slice::from_ref(record))
+            .into_iter()
+            .find(|row| row.step_kind == STEP_FINAL)
+            .map(|row| row.acc_out)
+            .expect("active selector has final row")
+    }
+
+    fn assert_matches_native(
+        selector: SelectorType<RecursionField>,
+        kind: MainSelectorKind,
+        ctx: SelectorContext,
+        ordered_sparse_num_vars: usize,
+        sparse_indices: Vec<usize>,
+        out_point: Vec<RecursionField>,
+        in_point: Vec<RecursionField>,
+    ) {
+        let (expected, _) = selector.evaluate(&out_point, &in_point, &ctx).unwrap();
+        let record = record(
+            kind,
+            &ctx,
+            ordered_sparse_num_vars,
+            sparse_indices,
+            out_point,
+            in_point,
+            expected,
+        );
+        assert_eq!(formula_final_value(&record), expected);
+    }
+
+    #[test]
+    fn selector_formula_rows_match_native_whole() {
+        let ctx = SelectorContext::new(0, 8, 3);
+        assert_matches_native(
+            SelectorType::Whole(structural_expr(0)),
+            MainSelectorKind::Whole,
+            ctx,
+            0,
+            Vec::new(),
+            point(&[2, 3, 4]),
+            point(&[5, 6, 7]),
+        );
+    }
+
+    #[test]
+    fn selector_formula_rows_match_native_prefix() {
+        let ctx = SelectorContext::new(2, 5, 3);
+        assert_matches_native(
+            SelectorType::Prefix(structural_expr(0)),
+            MainSelectorKind::Prefix,
+            ctx,
+            0,
+            Vec::new(),
+            point(&[2, 3, 4]),
+            point(&[5, 6, 7]),
+        );
+    }
+
+    #[test]
+    fn selector_formula_rows_match_native_ordered_sparse() {
+        let ctx = SelectorContext::new(0, 3, 4);
+        let sparse_indices = vec![0, 2, 3];
+        assert_matches_native(
+            SelectorType::OrderedSparse {
+                num_vars: 2,
+                indices: sparse_indices.clone(),
+                expression: structural_expr(0),
+            },
+            MainSelectorKind::OrderedSparse,
+            ctx,
+            2,
+            sparse_indices,
+            point(&[2, 3, 4, 5]),
+            point(&[6, 7, 8, 9]),
+        );
+    }
+
+    #[test]
+    fn selector_formula_rows_match_native_quark_binary_tree_less_than() {
+        let ctx = SelectorContext::new(0, 5, 3);
+        assert_matches_native(
+            SelectorType::QuarkBinaryTreeLessThan(structural_expr(0)),
+            MainSelectorKind::QuarkBinaryTreeLessThan,
+            ctx,
+            0,
+            Vec::new(),
+            point(&[2, 3, 4]),
+            point(&[5, 6, 7]),
+        );
+    }
+
+    #[test]
+    fn inactive_selector_rows_do_not_emit_final_result() {
+        let mut record = MainSelectorEvalRecord {
+            proof_idx: 0,
+            idx: 7,
+            air_idx: 11,
+            selector_idx: 13,
+            has_eval: false,
+            eval_idx: 17,
+            kind: MainSelectorKind::OrderedSparse,
+            ctx_offset: 0,
+            ctx_num_instances: 3,
+            ctx_num_vars: 4,
+            ordered_sparse_num_vars: 2,
+            sparse_indices: vec![0, 2],
+            in_point: Vec::new(),
+            out_point: Vec::new(),
+            value: RecursionField::ZERO,
+        };
+        let rows = build_formula_rows(core::slice::from_ref(&record));
+        assert!(rows.iter().any(|row| row.step_kind == STEP_SHAPE));
+        assert_eq!(
+            rows.iter()
+                .filter(|row| row.step_kind == STEP_SPARSE_INDEX)
+                .count(),
+            2
+        );
+        assert!(rows.iter().all(|row| row.step_kind != STEP_FINAL));
+
+        record.has_eval = true;
+        record.in_point = point(&[1, 2, 3, 4]);
+        record.out_point = point(&[5, 6, 7, 8]);
+        let rows = build_formula_rows(core::slice::from_ref(&record));
+        assert!(rows.iter().any(|row| row.step_kind == STEP_FINAL));
+    }
 }

@@ -48,7 +48,7 @@ use crate::{
     bus::{
         AirPresenceBus, ForkedTranscriptBus, MainBus, MainEvalBus, MainExpressionClaimBus,
         MainGlobalPointBus, MainSelectorResultBus, MainSelectorShapeBus,
-        MainSelectorSparseIndexShapeBus, TowerMainPointBus, TranscriptBus,
+        MainSelectorSparseIndexShapeBus, TranscriptBus,
     },
     system::{
         AirModule, BusIndexManager, BusInventory, GlobalCtxCpu, MainEvalRecord,
@@ -78,7 +78,6 @@ pub struct MainModule {
     main_selector_result_bus: MainSelectorResultBus,
     main_selector_shape_bus: MainSelectorShapeBus,
     main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
-    tower_main_point_bus: TowerMainPointBus,
 }
 
 impl MainModule {
@@ -95,7 +94,6 @@ impl MainModule {
         let main_selector_shape_bus = bus_inventory.main_selector_shape_bus;
         let main_selector_sparse_index_shape_bus =
             bus_inventory.main_selector_sparse_index_shape_bus;
-        let tower_main_point_bus = bus_inventory.tower_main_point_bus;
         Self {
             main_bus,
             expression_claim_bus,
@@ -107,7 +105,6 @@ impl MainModule {
             main_selector_result_bus,
             main_selector_shape_bus,
             main_selector_sparse_index_shape_bus,
-            tower_main_point_bus,
         }
     }
 
@@ -247,6 +244,16 @@ impl MainModule {
                     .or_default() += 1;
             }
         }
+        for record in &selector_eval_records {
+            if !record.has_eval {
+                continue;
+            }
+            for round_idx in 0..record.ctx_num_vars.min(selector::MAX_SELECTOR_POINT_VARS) {
+                *global_lookup_counts
+                    .entry((record.proof_idx, round_idx))
+                    .or_default() += 1;
+            }
+        }
         let mut eval_lookup_counts =
             std::collections::BTreeMap::<(usize, usize, usize), usize>::new();
         for record in &frontload_term_records {
@@ -257,6 +264,9 @@ impl MainModule {
             }
         }
         for record in &selector_eval_records {
+            if !record.has_eval {
+                continue;
+            }
             *eval_lookup_counts
                 .entry((record.proof_idx, record.idx, record.eval_idx))
                 .or_default() += 1;
@@ -396,7 +406,6 @@ impl AirModule for MainModule {
             }) as AirRef<_>,
             Arc::new(MainSelectorFormulaAir {
                 global_point_bus: self.main_global_point_bus,
-                tower_point_bus: self.tower_main_point_bus,
                 air_presence_bus: self.air_presence_bus,
                 selector_result_bus: self.main_selector_result_bus,
                 selector_shape_bus: self.main_selector_shape_bus,
@@ -1002,6 +1011,14 @@ where
             global_point_lookup_counts[record.global_round_idx] += 1;
         }
     }
+    for record in &selector_evals {
+        if !record.has_eval {
+            continue;
+        }
+        for round_idx in 0..record.ctx_num_vars.min(MAX_SELECTOR_POINT_VARS) {
+            global_point_lookup_counts[round_idx] += 1;
+        }
+    }
     let mut eval_lookup_counts = vec![0usize; main_proof.proof.evals.len()];
     for record in &frontload_terms {
         if record.has_eval_factor {
@@ -1010,6 +1027,9 @@ where
         }
     }
     for record in &selector_evals {
+        if !record.has_eval {
+            continue;
+        }
         let global_eval_idx = layers[record.idx].eval_start + record.eval_idx;
         eval_lookup_counts[global_eval_idx] += 1;
     }
@@ -1454,7 +1474,34 @@ fn build_main_selector_eval_records(
                     layer.layer.name
                 );
             }
+            let (kind, ordered_sparse_num_vars, sparse_indices, wit_id) = selector_shape(sel_type)?;
+            if sparse_indices.len() > MAX_SELECTOR_SPARSE_INDICES {
+                bail!(
+                    "{} selector group {selector_idx} sparse index count {} exceeds AIR cap {}",
+                    layer.layer.name,
+                    sparse_indices.len(),
+                    MAX_SELECTOR_SPARSE_INDICES
+                );
+            }
+            let eval_idx = wit_id as usize + structural_witin_offset;
             let Some(out_point) = out_point.as_ref() else {
+                records.push(MainSelectorEvalRecord {
+                    proof_idx: 0,
+                    idx,
+                    air_idx: layer.air_idx,
+                    selector_idx,
+                    has_eval: false,
+                    eval_idx,
+                    kind,
+                    ctx_offset: selector_ctx.offset,
+                    ctx_num_instances: selector_ctx.num_instances,
+                    ctx_num_vars: selector_ctx.num_vars,
+                    ordered_sparse_num_vars,
+                    sparse_indices,
+                    in_point: Vec::new(),
+                    out_point: Vec::new(),
+                    value: RecursionField::ZERO,
+                });
                 continue;
             };
             if out_point.len() > MAX_SELECTOR_POINT_VARS {
@@ -1465,18 +1512,26 @@ fn build_main_selector_eval_records(
                     MAX_SELECTOR_POINT_VARS
                 );
             }
-            let (kind, ordered_sparse_num_vars, sparse_indices, wit_id) = selector_shape(sel_type)?;
-            if sparse_indices.len() > MAX_SELECTOR_SPARSE_INDICES {
-                bail!(
-                    "{} selector group {selector_idx} sparse index count {} exceeds AIR cap {}",
-                    layer.layer.name,
-                    sparse_indices.len(),
-                    MAX_SELECTOR_SPARSE_INDICES
-                );
-            }
             let Some((expected_eval, evaluated_wit_id)) =
                 sel_type.evaluate(out_point, &in_point, selector_ctx)
             else {
+                records.push(MainSelectorEvalRecord {
+                    proof_idx: 0,
+                    idx,
+                    air_idx: layer.air_idx,
+                    selector_idx,
+                    has_eval: false,
+                    eval_idx,
+                    kind,
+                    ctx_offset: selector_ctx.offset,
+                    ctx_num_instances: selector_ctx.num_instances,
+                    ctx_num_vars: selector_ctx.num_vars,
+                    ordered_sparse_num_vars,
+                    sparse_indices,
+                    in_point: Vec::new(),
+                    out_point: Vec::new(),
+                    value: RecursionField::ZERO,
+                });
                 continue;
             };
             if evaluated_wit_id != wit_id {
@@ -1485,15 +1540,19 @@ fn build_main_selector_eval_records(
                     layer.layer.name
                 );
             }
-            let eval_idx = wit_id as usize + structural_witin_offset;
             let Some(actual_eval) = main_evals.get(layer.eval_start + eval_idx).copied() else {
                 bail!("main selector structural witin index {eval_idx} out of range");
             };
-            if actual_eval != expected_eval && std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some()
-            {
-                eprintln!(
-                    "rec-v2-debug module=main source=selector-preflight proof_idx=0 idx={idx} air_idx={} selector_idx={selector_idx} wit_id={eval_idx} expected={expected_eval} got={actual_eval}",
-                    layer.air_idx
+            if actual_eval != expected_eval {
+                if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
+                    eprintln!(
+                        "rec-v2-debug module=main source=selector-preflight proof_idx=0 idx={idx} air_idx={} selector_idx={selector_idx} wit_id={eval_idx} expected={expected_eval} got={actual_eval}",
+                        layer.air_idx
+                    );
+                }
+                bail!(
+                    "{} selector structural witin mismatch: {expected_eval} != {actual_eval}",
+                    layer.layer.name
                 );
             }
             records.push(MainSelectorEvalRecord {
@@ -1501,6 +1560,7 @@ fn build_main_selector_eval_records(
                 idx,
                 air_idx: layer.air_idx,
                 selector_idx,
+                has_eval: true,
                 eval_idx,
                 kind,
                 ctx_offset: selector_ctx.offset,
@@ -1510,11 +1570,7 @@ fn build_main_selector_eval_records(
                 sparse_indices,
                 in_point: in_point.clone(),
                 out_point: out_point.clone(),
-                // TODO(recursion-proof-bridge): the multi-row selector AIR is
-                // currently a low-degree shape/eval bridge. Use the value that
-                // is already bound to MainEvalBus until the full selector
-                // program constrains every OpenVM symbolic selector operation.
-                value: actual_eval,
+                value: expected_eval,
             });
         }
     }
@@ -1582,6 +1638,11 @@ fn build_final_claim_records(
                 .copied()
         )
         .collect_vec();
+        let terms = layer
+            .layer
+            .main_sumcheck_expression_monomial_terms
+            .as_ref()
+            .ok_or_else(|| eyre!("missing main sumcheck expression monomial terms"))?;
         let contribution = build_frontload_term_records_for_layer(
             idx,
             layer,
@@ -1589,22 +1650,21 @@ fn build_final_claim_records(
             &layer.pi,
             &main_sumcheck_challenges,
             global_in_point,
+            terms,
             &mut frontload_records,
         )?;
-        if let Some(terms) = layer.layer.main_sumcheck_expression_monomial_terms.as_ref() {
-            let monomial_contribution = eval_batched_main_frontload_terms_oracle(
-                layer_evals,
-                &layer.pi,
-                &main_sumcheck_challenges,
-                global_in_point,
-                layer.num_var_with_rotation,
-                terms,
+        let monomial_contribution = eval_batched_main_frontload_terms_oracle(
+            layer_evals,
+            &layer.pi,
+            &main_sumcheck_challenges,
+            global_in_point,
+            layer.num_var_with_rotation,
+            terms,
+        );
+        if contribution != monomial_contribution {
+            bail!(
+                "layer monomial contribution mismatch at chip {idx}: {monomial_contribution} != {contribution}"
             );
-            if contribution != monomial_contribution {
-                bail!(
-                    "layer expr contribution mismatch at chip {idx}: {monomial_contribution} != {contribution}"
-                );
-            }
         }
         let acc_in = acc;
         acc += contribution;
@@ -1643,10 +1703,15 @@ fn validate_direct_structural_evals(
             let Some(actual_eval) = layer_evals.get(wit_id).copied() else {
                 bail!("main selector structural witin index {wit_id} out of range");
             };
-            if actual_eval != expected_eval && std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some()
-            {
-                eprintln!(
-                    "rec-v2-debug module=main source=selector-structural-check layer={} wit_id={wit_id} expected={expected_eval} got={actual_eval}",
+            if actual_eval != expected_eval {
+                if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
+                    eprintln!(
+                        "rec-v2-debug module=main source=selector-structural-check layer={} wit_id={wit_id} expected={expected_eval} got={actual_eval}",
+                        layer.layer.name
+                    );
+                }
+                bail!(
+                    "{} selector structural witin mismatch: {expected_eval} != {actual_eval}",
                     layer.layer.name
                 );
             }
@@ -1695,9 +1760,15 @@ fn validate_direct_structural_evals(
             }
             Empty => continue,
         };
-        if actual_eval != expected_eval && std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
-            eprintln!(
-                "rec-v2-debug module=main source=structural-check wit_id={wit_id} expected={expected_eval} got={actual_eval}"
+        if actual_eval != expected_eval {
+            if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
+                eprintln!(
+                    "rec-v2-debug module=main source=structural-check wit_id={wit_id} expected={expected_eval} got={actual_eval}"
+                );
+            }
+            bail!(
+                "{} structural witin mismatch: {expected_eval} != {actual_eval}",
+                layer.layer.name
             );
         }
     }
@@ -1711,73 +1782,114 @@ fn build_frontload_term_records_for_layer(
     pi: &[RecursionField],
     challenges: &[RecursionField],
     global_in_point: &[RecursionField],
+    terms: &[multilinear_extensions::monomial::Term<
+        Expression<RecursionField>,
+        Expression<RecursionField>,
+    >],
     records: &mut Vec<MainFrontloadTermRecord>,
 ) -> Result<RecursionField> {
     let tail_start = layer.num_var_with_rotation;
     let tail_point = &global_in_point[tail_start..];
-    let expr = layer
-        .layer
-        .main_sumcheck_expression
-        .as_ref()
-        .ok_or_else(|| eyre!("missing main sumcheck expression"))?;
     let mut row_idx = 0usize;
     let mut node_idx = 0usize;
-    let folded_value = emit_main_expr_row(
-        idx,
-        expr,
-        layer_evals,
-        pi,
-        challenges,
-        tail_start,
-        tail_point,
-        records,
-        &mut row_idx,
-        &mut node_idx,
-    )?;
+    let mut layer_acc = RecursionField::ZERO;
 
-    records.push(MainFrontloadTermRecord {
-        proof_idx: 0,
-        idx,
-        row_idx,
-        node_idx,
-        eval_idx: 0,
-        has_eval_factor: false,
-        instance_idx: 0,
-        challenge_idx: 0,
-        global_round_idx: 0,
-        has_global_factor: false,
-        is_wit: false,
-        is_const: false,
-        is_instance: false,
-        is_challenge: false,
-        is_add: false,
-        is_sub: false,
-        is_neg: false,
-        is_mul: false,
-        is_fold: true,
-        is_tail: false,
-        constraint_idx: 0,
-        alpha: RecursionField::ONE,
-        arg0: folded_value,
-        arg1: RecursionField::ZERO,
-        value: folded_value,
-        chip_acc_in: RecursionField::ZERO,
-        chip_acc_out: folded_value,
-        is_last_chip_step: true,
-    });
+    for (term_idx, term) in terms.iter().enumerate() {
+        let mut term_value = emit_scalar_expr_row(
+            idx,
+            term_idx,
+            &term.scalar,
+            pi,
+            challenges,
+            records,
+            &mut row_idx,
+            &mut node_idx,
+        )?;
 
-    Ok(folded_value)
+        for expr in &term.product {
+            let Expression::WitIn(wit_id) = expr else {
+                bail!("main monomial product must be converted to WitIn");
+            };
+            let eval_idx = *wit_id as usize;
+            let raw_eval = *layer_evals
+                .get(eval_idx)
+                .ok_or_else(|| eyre!("main monomial wit index {eval_idx} out of range"))?;
+            let weighted_eval = emit_monomial_wit_factor_rows(
+                idx,
+                term_idx,
+                eval_idx,
+                raw_eval,
+                tail_start,
+                tail_point,
+                records,
+                &mut row_idx,
+                &mut node_idx,
+            );
+            let next = term_value * weighted_eval;
+            records.push(MainFrontloadTermRecord {
+                proof_idx: 0,
+                idx,
+                row_idx,
+                node_idx,
+                is_mul: true,
+                constraint_idx: term_idx,
+                arg0: term_value,
+                arg1: weighted_eval,
+                value: next,
+                ..MainFrontloadTermRecord::default()
+            });
+            row_idx += 1;
+            node_idx += 1;
+            term_value = next;
+        }
+
+        let next_acc = layer_acc + term_value;
+        records.push(MainFrontloadTermRecord {
+            proof_idx: 0,
+            idx,
+            row_idx,
+            node_idx,
+            is_fold: true,
+            constraint_idx: term_idx,
+            alpha: RecursionField::ONE,
+            arg0: term_value,
+            value: next_acc,
+            chip_acc_in: layer_acc,
+            chip_acc_out: next_acc,
+            is_last_chip_step: term_idx + 1 == terms.len(),
+            ..MainFrontloadTermRecord::default()
+        });
+        row_idx += 1;
+        node_idx += 1;
+        layer_acc = next_acc;
+    }
+
+    if terms.is_empty() {
+        records.push(MainFrontloadTermRecord {
+            proof_idx: 0,
+            idx,
+            row_idx,
+            node_idx,
+            is_fold: true,
+            alpha: RecursionField::ONE,
+            arg0: RecursionField::ZERO,
+            value: RecursionField::ZERO,
+            chip_acc_in: RecursionField::ZERO,
+            chip_acc_out: RecursionField::ZERO,
+            is_last_chip_step: true,
+            ..MainFrontloadTermRecord::default()
+        });
+    }
+
+    Ok(layer_acc)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn emit_main_expr_row(
+fn emit_scalar_expr_row(
     idx: usize,
+    term_idx: usize,
     expr: &Expression<RecursionField>,
-    layer_evals: &[RecursionField],
     pi: &[RecursionField],
     challenges: &[RecursionField],
-    tail_start: usize,
-    tail_point: &[RecursionField],
     records: &mut Vec<MainFrontloadTermRecord>,
     row_idx: &mut usize,
     node_idx: &mut usize,
@@ -1789,72 +1901,20 @@ fn emit_main_expr_row(
         idx,
         row_idx: *row_idx,
         node_idx: this_node,
-        eval_idx: 0,
-        has_eval_factor: false,
-        instance_idx: 0,
-        challenge_idx: 0,
-        global_round_idx: 0,
-        has_global_factor: false,
-        is_wit: false,
-        is_const: false,
-        is_instance: false,
-        is_challenge: false,
-        is_add: false,
-        is_sub: false,
-        is_neg: false,
-        is_mul: false,
-        is_fold: false,
-        is_tail: false,
-        constraint_idx: 0,
-        alpha: RecursionField::ZERO,
-        arg0: RecursionField::ZERO,
-        arg1: RecursionField::ZERO,
-        value: RecursionField::ZERO,
-        chip_acc_in: RecursionField::ZERO,
-        chip_acc_out: RecursionField::ZERO,
-        is_last_chip_step: false,
+        constraint_idx: term_idx,
+        ..MainFrontloadTermRecord::default()
     };
 
     let value = match expr {
-        Expression::WitIn(wit_id) => {
-            let eval_idx = *wit_id as usize;
-            let value = *layer_evals
-                .get(eval_idx)
-                .ok_or_else(|| eyre!("main expr wit index {eval_idx} out of range"))?;
-            record.is_wit = true;
-            record.has_eval_factor = true;
-            record.eval_idx = eval_idx;
-            record.arg0 = value;
-            value
-        }
-        Expression::StructuralWitIn(wit_id, _) => {
-            let eval_idx = *wit_id as usize;
-            let value = *layer_evals
-                .get(eval_idx)
-                .ok_or_else(|| eyre!("main expr structural wit index {eval_idx} out of range"))?;
-            record.is_wit = true;
-            record.has_eval_factor = true;
-            record.eval_idx = eval_idx;
-            record.arg0 = value;
-            value
-        }
-        Expression::Fixed(fixed) => {
-            let eval_idx = fixed.0;
-            let value = *layer_evals
-                .get(eval_idx)
-                .ok_or_else(|| eyre!("main expr fixed index {eval_idx} out of range"))?;
-            record.is_wit = true;
-            record.has_eval_factor = true;
-            record.eval_idx = eval_idx;
-            record.arg0 = value;
-            value
+        Expression::WitIn(_) | Expression::StructuralWitIn(_, _) | Expression::Fixed(_) => {
+            bail!("main monomial scalar must not contain witness-backed expressions")
         }
         Expression::Instance(instance) | Expression::InstanceScalar(instance) => {
             let value = *pi
-                .get(instance.0)
-                .ok_or_else(|| eyre!("main expr instance index {} out of range", instance.0))?;
+                .get(instance.0 as usize)
+                .ok_or_else(|| eyre!("main scalar instance index {} out of range", instance.0))?;
             record.is_instance = true;
-            record.instance_idx = instance.0;
+            record.instance_idx = instance.0 as usize;
             record.arg0 = value;
             value
         }
@@ -1868,7 +1928,7 @@ fn emit_main_expr_row(
             let challenge_idx = *ch_id as usize;
             let challenge = *challenges
                 .get(challenge_idx)
-                .ok_or_else(|| eyre!("main expr challenge index {challenge_idx} out of range"))?;
+                .ok_or_else(|| eyre!("main scalar challenge index {challenge_idx} out of range"))?;
             let value = challenge.exp_u64(*pow as u64) * *scalar + *offset;
             record.is_challenge = true;
             record.challenge_idx = challenge_idx;
@@ -1876,29 +1936,11 @@ fn emit_main_expr_row(
             value
         }
         Expression::Sum(left, right) => {
-            let left = emit_main_expr_row(
-                idx,
-                left,
-                layer_evals,
-                pi,
-                challenges,
-                tail_start,
-                tail_point,
-                records,
-                row_idx,
-                node_idx,
+            let left = emit_scalar_expr_row(
+                idx, term_idx, left, pi, challenges, records, row_idx, node_idx,
             )?;
-            let right = emit_main_expr_row(
-                idx,
-                right,
-                layer_evals,
-                pi,
-                challenges,
-                tail_start,
-                tail_point,
-                records,
-                row_idx,
-                node_idx,
+            let right = emit_scalar_expr_row(
+                idx, term_idx, right, pi, challenges, records, row_idx, node_idx,
             )?;
             record.is_add = true;
             record.arg0 = left;
@@ -1906,29 +1948,11 @@ fn emit_main_expr_row(
             left + right
         }
         Expression::Product(left, right) => {
-            let left = emit_main_expr_row(
-                idx,
-                left,
-                layer_evals,
-                pi,
-                challenges,
-                tail_start,
-                tail_point,
-                records,
-                row_idx,
-                node_idx,
+            let left = emit_scalar_expr_row(
+                idx, term_idx, left, pi, challenges, records, row_idx, node_idx,
             )?;
-            let right = emit_main_expr_row(
-                idx,
-                right,
-                layer_evals,
-                pi,
-                challenges,
-                tail_start,
-                tail_point,
-                records,
-                row_idx,
-                node_idx,
+            let right = emit_scalar_expr_row(
+                idx, term_idx, right, pi, challenges, records, row_idx, node_idx,
             )?;
             record.is_mul = true;
             record.arg0 = left;
@@ -1936,42 +1960,12 @@ fn emit_main_expr_row(
             left * right
         }
         Expression::ScaledSum(x, a, b) => {
-            let x = emit_main_expr_row(
-                idx,
-                x,
-                layer_evals,
-                pi,
-                challenges,
-                tail_start,
-                tail_point,
-                records,
-                row_idx,
-                node_idx,
-            )?;
-            let a = emit_main_expr_row(
-                idx,
-                a,
-                layer_evals,
-                pi,
-                challenges,
-                tail_start,
-                tail_point,
-                records,
-                row_idx,
-                node_idx,
-            )?;
-            let b = emit_main_expr_row(
-                idx,
-                b,
-                layer_evals,
-                pi,
-                challenges,
-                tail_start,
-                tail_point,
-                records,
-                row_idx,
-                node_idx,
-            )?;
+            let x =
+                emit_scalar_expr_row(idx, term_idx, x, pi, challenges, records, row_idx, node_idx)?;
+            let a =
+                emit_scalar_expr_row(idx, term_idx, a, pi, challenges, records, row_idx, node_idx)?;
+            let b =
+                emit_scalar_expr_row(idx, term_idx, b, pi, challenges, records, row_idx, node_idx)?;
             let mul_node = *node_idx;
             *node_idx += 1;
             records.push(MainFrontloadTermRecord {
@@ -1980,6 +1974,7 @@ fn emit_main_expr_row(
                 row_idx: *row_idx,
                 node_idx: mul_node,
                 is_mul: true,
+                constraint_idx: term_idx,
                 arg0: a,
                 arg1: x,
                 value: a * x,
@@ -1993,22 +1988,18 @@ fn emit_main_expr_row(
         }
     };
 
-    let should_emit_wit_tail = record.is_wit;
     record.value = value;
     record.chip_acc_out = record.chip_acc_in;
     records.push(record);
     *row_idx += 1;
-    if should_emit_wit_tail {
-        Ok(emit_main_expr_wit_tail_rows(
-            idx, value, tail_start, tail_point, records, row_idx, node_idx,
-        ))
-    } else {
-        Ok(value)
-    }
+    Ok(value)
 }
 
-fn emit_main_expr_wit_tail_rows(
+#[allow(clippy::too_many_arguments)]
+fn emit_monomial_wit_factor_rows(
     idx: usize,
+    term_idx: usize,
+    eval_idx: usize,
     mut acc: RecursionField,
     tail_start: usize,
     tail_point: &[RecursionField],
@@ -2016,6 +2007,22 @@ fn emit_main_expr_wit_tail_rows(
     row_idx: &mut usize,
     node_idx: &mut usize,
 ) -> RecursionField {
+    records.push(MainFrontloadTermRecord {
+        proof_idx: 0,
+        idx,
+        row_idx: *row_idx,
+        node_idx: *node_idx,
+        eval_idx,
+        has_eval_factor: true,
+        is_wit: true,
+        constraint_idx: term_idx,
+        arg0: acc,
+        value: acc,
+        ..MainFrontloadTermRecord::default()
+    });
+    *row_idx += 1;
+    *node_idx += 1;
+
     for (tail_offset, tail_value) in tail_point.iter().copied().enumerate() {
         let next = acc * tail_value;
         records.push(MainFrontloadTermRecord {
@@ -2026,6 +2033,7 @@ fn emit_main_expr_wit_tail_rows(
             global_round_idx: tail_start + tail_offset,
             has_global_factor: true,
             is_tail: true,
+            constraint_idx: term_idx,
             arg0: tail_value,
             arg1: acc,
             value: next,
