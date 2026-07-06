@@ -2,7 +2,7 @@ use core::borrow::BorrowMut;
 
 use openvm_stark_backend::p3_maybe_rayon::prelude::*;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
-use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 
 use super::TowerLayerCols;
@@ -15,7 +15,7 @@ fn ef_one() -> EF {
     EF::ONE
 }
 
-fn weight_values(record: &TowerLayerRecord, layer_idx: usize) -> (EF, EF, EF, EF) {
+pub(crate) fn weight_values(record: &TowerLayerRecord, layer_idx: usize) -> (EF, EF, EF, EF) {
     let alpha = record.lambda_at(layer_idx);
     let mut pow = ef_one();
     let has_read = record.read_counts.iter().any(|&count| count != 0);
@@ -76,6 +76,52 @@ fn weight_bases(
             .try_into()
             .unwrap(),
     )
+}
+
+pub(crate) fn weighted_prime_fold_for_layer(
+    record: &TowerLayerRecord,
+    tower: &TowerTowerEvalRecord,
+    layer_idx: usize,
+) -> EF {
+    let (read_weight, write_weight, logup_p_weight, logup_q_weight) =
+        weight_values(record, layer_idx);
+    let read_prime = if record.read_active_at(layer_idx) {
+        record
+            .read_prime_claims
+            .get(layer_idx)
+            .copied()
+            .unwrap_or(EF::ZERO)
+    } else {
+        EF::ZERO
+    };
+    let write_prime = if record.write_active_at(layer_idx) {
+        record
+            .write_prime_claims
+            .get(layer_idx)
+            .copied()
+            .unwrap_or(EF::ZERO)
+    } else {
+        EF::ZERO
+    };
+    let (logup_p_cross, logup_q_cross) = if record.logup_active_at(layer_idx) {
+        let logup_quad = tower
+            .logup_layers
+            .get(layer_idx)
+            .and_then(|rows| rows.first())
+            .copied()
+            .unwrap_or([EF::ZERO; 4]);
+        (
+            logup_quad[0] * logup_quad[3] + logup_quad[1] * logup_quad[2],
+            logup_quad[2] * logup_quad[3],
+        )
+    } else {
+        (EF::ZERO, EF::ZERO)
+    };
+
+    read_weight * read_prime
+        + write_weight * write_prime
+        + logup_p_weight * logup_p_cross
+        + logup_q_weight * logup_q_cross
 }
 
 /// Minimal record for parallel tower layer trace generation
@@ -489,12 +535,8 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
-                    let weighted_prime_fold = record
-                        .sumcheck_claim_outs
-                        .get(layer_idx)
-                        .copied()
-                        .unwrap_or(EF::ZERO)
-                        * eq_at_r_prime.inverse();
+                    let weighted_prime_fold =
+                        weighted_prime_fold_for_layer(record, tower, layer_idx);
                     cols.weighted_prime_fold = weighted_prime_fold
                         .as_basis_coefficients_slice()
                         .try_into()

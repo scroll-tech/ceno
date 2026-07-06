@@ -1406,6 +1406,24 @@ impl TowerVerify {
             transcript,
         );
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
+        if std::env::var_os("CENO_REC_V2_DEBUG_TOWER").is_some() {
+            let alpha_pows_str = alpha_pows
+                .iter()
+                .map(|value| format!("{value}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            let beta_str = initial_rt
+                .iter()
+                .map(|value| format!("{value}"))
+                .collect::<Vec<_>>()
+                .join(",");
+            eprintln!(
+                "rec-v2-debug module=tower source=native proof_idx=0 key=alpha_pows value=[{alpha_pows_str}]"
+            );
+            eprintln!(
+                "rec-v2-debug module=tower source=native proof_idx=0 key=beta value=[{beta_str}]"
+            );
+        }
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])
         // out_j[rt] := (logup_p{j}[rt])
@@ -1552,13 +1570,13 @@ impl TowerVerify {
                     round,
                 );
 
-                let expected_evaluation: E = (0..num_prod_spec)
+                let weighted_prime_fold: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
                         // prod'[b] = prod[0,b] * prod[1,b]
                         // prod'[out_rt] = \sum_b eq(out_rt,b) * prod'[b] = \sum_b eq(out_rt,b) * prod[0,b] * prod[1,b]
-                        eq * *alpha
+                        *alpha
                             * if round < *max_round - 1 { tower_proofs.prod_specs_eval[spec_index][round].iter().copied().product() } else {
                             E::ZERO
                         }
@@ -1573,7 +1591,7 @@ impl TowerVerify {
                         // logup_p'[out_rt] = \sum_b eq(out_rt,b) * (logup_p[0,b] * logup_q[1,b] + logup_p[1,b] * logup_q[0,b])
                         // logup_q'[out_rt] = \sum_b eq(out_rt,b) * logup_q[0,b] * logup_q[1,b]
                         let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
-                        eq * if round < *max_round - 1 {
+                        if round < *max_round - 1 {
                             let evals = &tower_proofs.logup_specs_eval[spec_index][round];
                             let (p1, p2, q1, q2) =
                                 (evals[0], evals[1], evals[2], evals[3]);
@@ -1584,6 +1602,28 @@ impl TowerVerify {
                         }
                     })
                     .sum::<E>();
+                let expected_evaluation = eq * weighted_prime_fold;
+
+                if std::env::var_os("CENO_REC_V2_DEBUG_TOWER").is_some() {
+                    let alpha_pows_str = alpha_pows
+                        .iter()
+                        .map(|value| format!("{value}"))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    eprintln!(
+                        "rec-v2-debug module=tower source=native proof_idx=0 layer_idx={round} key=alpha_pows value=[{alpha_pows_str}]"
+                    );
+                    for (round_idx, challenge) in sumcheck_claim.point.iter().enumerate() {
+                        eprintln!(
+                            "rec-v2-debug module=tower source=native proof_idx=0 layer_idx={round} round_idx={round_idx} key=ri value={}",
+                            challenge.elements
+                        );
+                    }
+                    eprintln!(
+                        "rec-v2-debug module=tower source=native proof_idx=0 layer_idx={round} key=tower_checkpoint eq={eq} sumcheck_claim_out={} weighted_prime_fold={weighted_prime_fold} expected_sumcheck_claim_out={expected_evaluation}",
+                        sumcheck_claim.expected_evaluation,
+                    );
+                }
 
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
                     return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));

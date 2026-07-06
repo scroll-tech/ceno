@@ -77,7 +77,10 @@ use crate::{
             TowerShapeBus,
         },
         input::{TowerInputAir, TowerInputTraceGenerator},
-        layer::{TowerLayerAir, TowerLayerRecord, TowerLayerTraceGenerator},
+        layer::{
+            TowerLayerAir, TowerLayerRecord, TowerLayerTraceGenerator, weight_values,
+            weighted_prime_fold_for_layer,
+        },
         main_point::{TowerMainPointAir, TowerMainPointTraceGenerator},
         shape::{
             TowerActivityAir, TowerActivityTraceGenerator, TowerShapeAir, TowerShapeRecord,
@@ -420,19 +423,20 @@ pub(crate) fn record_and_replay_tower_preflight<TS>(
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
-    let schedule = record_gkr_transcript(ts, chip_idx, chip_proof);
     match circuit_vk_for_idx(child_vk, chip_idx) {
-        Some(circuit_vk) => match replay_tower_proof_precomputed(chip_proof, circuit_vk, &schedule)
-        {
-            Ok(replay) => replay,
-            Err(err) => {
-                error!(
-                    ?err,
-                    chip_idx, "failed to replay tower proof during preflight"
-                );
-                TowerReplayResult::default()
+        Some(circuit_vk) => {
+            let schedule = record_gkr_transcript(ts, circuit_vk, chip_proof);
+            match replay_tower_proof_precomputed(chip_proof, circuit_vk, &schedule) {
+                Ok(replay) => replay,
+                Err(err) => {
+                    error!(
+                        ?err,
+                        chip_idx, "failed to replay tower proof during preflight"
+                    );
+                    TowerReplayResult::default()
+                }
             }
-        },
+        }
         None => TowerReplayResult::default(),
     }
 }
@@ -499,6 +503,39 @@ fn build_tower_shape_record(
         max_tower_vars,
         max_layer_count: max_tower_vars.saturating_sub(1),
     }
+}
+
+fn tower_num_variables(
+    chip_proof: &ZKVMChipProof<RecursionField>,
+    circuit_vk: &VerifyingKey<RecursionField>,
+) -> Vec<usize> {
+    let cs = &circuit_vk.cs;
+    let num_instances: usize = chip_proof.num_instances.iter().copied().sum();
+    let next_pow2_instance = next_pow2_instance_padding(num_instances);
+    let mut num_var_with_rotation = next_pow2_instance.ilog2() as usize;
+    if cs.has_ecc_ops() {
+        num_var_with_rotation += 1;
+    }
+    num_var_with_rotation += cs.rotation_vars().unwrap_or(0);
+
+    let group_num_vars = |op_count: usize| num_var_with_rotation + grouped_op_vars(op_count);
+    chip_proof
+        .r_out_evals
+        .iter()
+        .map(|_| group_num_vars(cs.num_reads()))
+        .chain(
+            chip_proof
+                .w_out_evals
+                .iter()
+                .map(|_| group_num_vars(cs.num_writes())),
+        )
+        .chain(
+            chip_proof
+                .lk_out_evals
+                .iter()
+                .map(|_| group_num_vars(cs.num_lks())),
+        )
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1321,10 +1358,9 @@ pub(crate) fn build_gkr_blob(
                 let fork_log = preflight.fork_log(pf_entry.fork_idx);
                 ReadOnlyTranscript::new(fork_log, pf_entry.tidx)
             };
-            let transcript_schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
-
             let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
                 .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_idx}"))?;
+            let transcript_schedule = record_gkr_transcript(&mut ts, circuit_vk, chip_proof);
 
             let replay = &pf_entry.tower_replay;
             let schedule = &transcript_schedule;
@@ -1410,6 +1446,92 @@ pub(crate) fn build_gkr_blob(
                     chip_input_record.has_logup_out,
                     chip_input_record.n_logup,
                 );
+                let alpha_pows = [
+                    EF::ONE,
+                    schedule.alpha_logup,
+                    schedule.alpha_logup * schedule.alpha_logup,
+                    schedule.alpha_logup * schedule.alpha_logup * schedule.alpha_logup,
+                ];
+                eprintln!(
+                    "rec-v2-debug module=tower source=trace proof_idx={proof_idx} fork_id={} chip_idx={} key=alpha_pows value={alpha_pows:?}",
+                    pf_entry.fork_idx, chip_idx,
+                );
+                eprintln!(
+                    "rec-v2-debug module=tower source=trace proof_idx={proof_idx} fork_id={} chip_idx={} key=beta value={:?}",
+                    pf_entry.fork_idx, chip_idx, schedule.beta,
+                );
+                for layer_idx in 0..layer_record.layer_count() {
+                    let weighted_prime_fold =
+                        weighted_prime_fold_for_layer(&layer_record, &tower_record, layer_idx);
+                    let sumcheck_claim_out = layer_record
+                        .sumcheck_claim_outs
+                        .get(layer_idx)
+                        .copied()
+                        .unwrap_or(EF::ZERO);
+                    let eq = layer_record
+                        .eq_at_r_primes
+                        .get(layer_idx)
+                        .copied()
+                        .unwrap_or(EF::ZERO);
+                    let replay_eq = replay
+                        .layers
+                        .get(layer_idx)
+                        .map(|layer| layer.eq_at_r)
+                        .unwrap_or(EF::ZERO);
+                    let mu = mus_record.get(layer_idx).copied().unwrap_or(EF::ZERO);
+                    let (read_weight, write_weight, logup_p_weight, logup_q_weight) =
+                        weight_values(&layer_record, layer_idx);
+                    let read_prime = layer_record
+                        .read_prime_claims
+                        .get(layer_idx)
+                        .copied()
+                        .unwrap_or(EF::ZERO);
+                    let write_prime = layer_record
+                        .write_prime_claims
+                        .get(layer_idx)
+                        .copied()
+                        .unwrap_or(EF::ZERO);
+                    let logup_quad = tower_record
+                        .logup_layers
+                        .get(layer_idx)
+                        .and_then(|rows| rows.first())
+                        .copied()
+                        .unwrap_or([EF::ZERO; 4]);
+                    let logup_p_cross =
+                        logup_quad[0] * logup_quad[3] + logup_quad[1] * logup_quad[2];
+                    let logup_q_cross = logup_quad[2] * logup_quad[3];
+                    eprintln!(
+                        "rec-v2-debug module=tower source=trace proof_idx={proof_idx} fork_id={} chip_idx={} layer_idx={layer_idx} key=tower_checkpoint lambda={:?} lambda_prime={:?} mu={mu:?} eq={eq:?} sumcheck_claim_out={sumcheck_claim_out:?} weighted_prime_fold={weighted_prime_fold:?} expected_sumcheck_claim_out={:?} active=({},{},{}) weights=({read_weight:?},{write_weight:?},{logup_p_weight:?},{logup_q_weight:?}) primes=({read_prime:?},{write_prime:?},{logup_p_cross:?},{logup_q_cross:?})",
+                        pf_entry.fork_idx,
+                        chip_idx,
+                        layer_record.lambda_at(layer_idx),
+                        layer_record.lambda_prime_at(layer_idx),
+                        weighted_prime_fold * eq,
+                        layer_record.read_active_at(layer_idx),
+                        layer_record.write_active_at(layer_idx),
+                        layer_record.logup_active_at(layer_idx),
+                    );
+                    if replay_eq != eq {
+                        eprintln!(
+                            "rec-v2-debug module=tower source=trace proof_idx={proof_idx} fork_id={} chip_idx={} layer_idx={layer_idx} key=eq_mismatch replay_eq={replay_eq:?} recomputed_eq={eq:?} replay_expected_sumcheck_claim_out={:?}",
+                            pf_entry.fork_idx,
+                            chip_idx,
+                            weighted_prime_fold * replay_eq,
+                        );
+                    }
+                    let round_start = layer_idx * (layer_idx + 1) / 2;
+                    for round_idx in 0..=layer_idx {
+                        let ri = sumcheck_record
+                            .ris
+                            .get(round_start + round_idx)
+                            .copied()
+                            .unwrap_or(EF::ZERO);
+                        eprintln!(
+                            "rec-v2-debug module=tower source=trace proof_idx={proof_idx} fork_id={} chip_idx={} layer_idx={layer_idx} round_idx={round_idx} key=ri value={ri:?}",
+                            pf_entry.fork_idx, chip_idx,
+                        );
+                    }
+                }
             }
 
             input_records.push(chip_input_record);
@@ -1517,9 +1639,9 @@ pub(crate) fn build_tower_input_records(
                 let fork_log = preflight.fork_log(pf_entry.fork_idx);
                 ReadOnlyTranscript::new(fork_log, pf_entry.tidx)
             };
-            let transcript_schedule = record_gkr_transcript(&mut ts, chip_idx, chip_proof);
             let circuit_vk = circuit_vk_for_idx(child_vk, chip_idx)
                 .ok_or_else(|| eyre::eyre!("missing circuit verifying key for index {chip_idx}"))?;
+            let transcript_schedule = record_gkr_transcript(&mut ts, circuit_vk, chip_proof);
             let tower_air_tidx = tower_pre_alpha_tidx(chip_proof, pf_entry.tidx);
             let fork_final_sample_tidx = preflight
                 .fork_log(pf_entry.fork_idx)
@@ -1624,7 +1746,7 @@ pub(crate) fn collect_tower_range_checks(
 
 pub(crate) fn record_gkr_transcript<TS>(
     ts: &mut TS,
-    _chip_idx: usize,
+    circuit_vk: &VerifyingKey<RecursionField>,
     chip_proof: &ZKVMChipProof<RecursionField>,
 ) -> TowerTranscriptSchedule
 where
@@ -1658,15 +1780,14 @@ where
     // Reconstruct the transcript events consumed by tower-related AIRs.
     // This keeps preflight transcript history aligned with TowerLayer/Sumcheck/
     // ProdClaim/LogupClaim transcript bus interactions.
-    let read_count = chip_proof.r_out_evals.len();
-    let layer_count = chip_proof
-        .tower_proof
-        .logup_specs_eval
+    let num_variables = tower_num_variables(chip_proof, circuit_vk);
+    let num_prod_spec = chip_proof.r_out_evals.len() + chip_proof.w_out_evals.len();
+    let layer_count = num_variables
         .iter()
-        .map(Vec::len)
-        .chain(chip_proof.tower_proof.prod_specs_eval.iter().map(Vec::len))
+        .copied()
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        .saturating_sub(1);
 
     let log2_num_fanin: usize = 1; // ceil_log2(NUM_FANIN=2) = 1
 
@@ -1708,7 +1829,7 @@ where
             }
         }
 
-        observe_active_tower_eval_round(ts, chip_proof, layer_idx);
+        observe_active_tower_eval_round(ts, chip_proof, &num_variables, num_prod_spec, layer_idx);
 
         // Mirror native: sample_and_append_vec(b"merge", log2_num_fanin)
         transcript_observe_label(ts, b"merge");
@@ -1722,7 +1843,6 @@ where
         EF::ZERO
     };
 
-    let _ = read_count;
     TowerTranscriptSchedule {
         alpha_logup,
         beta,
@@ -1736,21 +1856,39 @@ where
 fn observe_active_tower_eval_round<TS>(
     ts: &mut TS,
     chip_proof: &ZKVMChipProof<RecursionField>,
+    num_variables: &[usize],
+    num_prod_spec: usize,
     round: usize,
 ) where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,
 {
-    for spec_rounds in &chip_proof.tower_proof.prod_specs_eval {
-        if let Some(evals) = spec_rounds.get(round) {
-            for eval in evals {
-                ts.observe_ext(*eval);
+    for (spec_idx, spec_rounds) in chip_proof.tower_proof.prod_specs_eval.iter().enumerate() {
+        if round
+            < num_variables
+                .get(spec_idx)
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(1)
+        {
+            if let Some(evals) = spec_rounds.get(round) {
+                for eval in evals {
+                    ts.observe_ext(*eval);
+                }
             }
         }
     }
-    for spec_rounds in &chip_proof.tower_proof.logup_specs_eval {
-        if let Some(evals) = spec_rounds.get(round) {
-            for eval in evals {
-                ts.observe_ext(*eval);
+    for (spec_idx, spec_rounds) in chip_proof.tower_proof.logup_specs_eval.iter().enumerate() {
+        if round
+            < num_variables
+                .get(num_prod_spec + spec_idx)
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(1)
+        {
+            if let Some(evals) = spec_rounds.get(round) {
+                for eval in evals {
+                    ts.observe_ext(*eval);
+                }
             }
         }
     }

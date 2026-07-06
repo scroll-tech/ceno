@@ -364,6 +364,21 @@ where
                 ext_field_multiply::<AB::Expr>(local.logup_q_weight, local.logup_q_xi),
             ),
         );
+        let weighted_prime_fold = ext_field_add::<AB::Expr>(
+            ext_field_add::<AB::Expr>(
+                ext_field_multiply::<AB::Expr>(local.read_weight, local.read_claim_prime),
+                ext_field_multiply::<AB::Expr>(local.write_weight, local.write_claim_prime),
+            ),
+            ext_field_add::<AB::Expr>(
+                ext_field_multiply::<AB::Expr>(local.logup_p_weight, logup_p_cross.clone()),
+                ext_field_multiply::<AB::Expr>(local.logup_q_weight, logup_q_cross.clone()),
+            ),
+        );
+        assert_array_eq(
+            &mut builder.when(enabled_not_dummy.clone()),
+            local.weighted_prime_fold,
+            weighted_prime_fold,
+        );
         assert_zeros(
             &mut builder.when(AB::Expr::ONE - local.read_active),
             local.read_weight.map(Into::into),
