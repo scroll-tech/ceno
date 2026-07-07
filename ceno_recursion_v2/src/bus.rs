@@ -476,3 +476,22 @@ pub struct PcsJaggedAssistHMessage<T> {
 }
 
 define_typed_per_proof_lookup_bus!(PcsJaggedAssistHBus, PcsJaggedAssistHMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsJaggedAssistQMessage<T> {
+    pub round_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(PcsJaggedAssistQBus, PcsJaggedAssistQMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsCommitHeightMessage<T> {
+    pub commitment_kind: T,
+    pub height_idx: T,
+    pub value: T,
+}
+
+define_typed_per_proof_lookup_bus!(PcsCommitHeightBus, PcsCommitHeightMessage);

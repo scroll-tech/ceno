@@ -464,6 +464,7 @@ mod prover_integration {
             "PcsEqProductAir",
             "PcsSuffixProductAir",
             "PcsJaggedAssistHAir",
+            "PcsJaggedAssistQAir",
         ] {
             assert!(
                 air_names.iter().any(|name| name.contains(air)),

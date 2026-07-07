@@ -18,12 +18,12 @@ use crate::bus::{
     MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
     NLiftBus as LocalNLiftBus, PcsBaseInputOpeningBus, PcsBasefoldEvalBus, PcsBasefoldQueryBus,
-    PcsBatchAlphaBus, PcsBatchCoeffBus, PcsCommitPhaseLeafBus, PcsCommitmentRootBus,
-    PcsEqProductBus, PcsFinalMessageBus, PcsFoldChallengeBus, PcsJaggedAssistHBus,
-    PcsJaggedFEvalBus, PcsOpeningEvalBus, PcsQuerySampleBus, PcsSuffixProductBus,
-    PcsSumcheckInputBus, PcsSumcheckOutputBus, PcsTranscriptExtBus,
-    PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus, TowerModuleBus,
-    TranscriptBus as LocalTranscriptBus,
+    PcsBatchAlphaBus, PcsBatchCoeffBus, PcsCommitHeightBus, PcsCommitPhaseLeafBus,
+    PcsCommitmentRootBus, PcsEqProductBus, PcsFinalMessageBus, PcsFoldChallengeBus,
+    PcsJaggedAssistHBus, PcsJaggedAssistQBus, PcsJaggedFEvalBus, PcsOpeningEvalBus,
+    PcsQuerySampleBus, PcsSuffixProductBus, PcsSumcheckInputBus, PcsSumcheckOutputBus,
+    PcsTranscriptExtBus, PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus,
+    TowerModuleBus, TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
@@ -87,6 +87,8 @@ pub struct BusInventory {
     pub pcs_eq_product_bus: PcsEqProductBus,
     pub pcs_suffix_product_bus: PcsSuffixProductBus,
     pub pcs_jagged_assist_h_bus: PcsJaggedAssistHBus,
+    pub pcs_jagged_assist_q_bus: PcsJaggedAssistQBus,
+    pub pcs_commit_height_bus: PcsCommitHeightBus,
 }
 
 impl BusInventory {
@@ -157,6 +159,8 @@ impl BusInventory {
         let pcs_eq_product_bus = PcsEqProductBus::new(b.new_bus_idx());
         let pcs_suffix_product_bus = PcsSuffixProductBus::new(b.new_bus_idx());
         let pcs_jagged_assist_h_bus = PcsJaggedAssistHBus::new(b.new_bus_idx());
+        let pcs_jagged_assist_q_bus = PcsJaggedAssistQBus::new(b.new_bus_idx());
+        let pcs_commit_height_bus = PcsCommitHeightBus::new(b.new_bus_idx());
 
         Self {
             transcript_bus,
@@ -218,6 +222,8 @@ impl BusInventory {
             pcs_eq_product_bus,
             pcs_suffix_product_bus,
             pcs_jagged_assist_h_bus,
+            pcs_jagged_assist_q_bus,
+            pcs_commit_height_bus,
         }
     }
 }

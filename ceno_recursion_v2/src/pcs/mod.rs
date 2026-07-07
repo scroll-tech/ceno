@@ -45,12 +45,13 @@ use crate::{
         PcsBaseInputOpeningBus, PcsBaseInputOpeningMessage, PcsBasefoldEvalBus,
         PcsBasefoldEvalMessage, PcsBasefoldQueryBus, PcsBasefoldQueryMessage,
         PcsBasefoldQueryStage, PcsBatchAlphaBus, PcsBatchAlphaMessage, PcsBatchCoeffBus,
-        PcsBatchCoeffMessage, PcsCommitPhaseLeafBus, PcsCommitPhaseLeafMessage,
-        PcsCommitmentRootBus, PcsCommitmentRootMessage, PcsEqProductBus, PcsEqProductMessage,
-        PcsFinalMessageBus, PcsFinalMessageMessage, PcsFoldChallengeBus, PcsFoldChallengeMessage,
-        PcsJaggedAssistHBus, PcsJaggedAssistHMessage, PcsJaggedFEvalBus, PcsJaggedFEvalMessage,
-        PcsOpeningEvalBus, PcsOpeningEvalMessage, PcsQuerySampleBus, PcsQuerySampleMessage,
-        PcsSuffixProductBus, PcsSuffixProductMessage, PcsSumcheckInputBus, PcsSumcheckInputMessage,
+        PcsBatchCoeffMessage, PcsCommitHeightBus, PcsCommitHeightMessage, PcsCommitPhaseLeafBus,
+        PcsCommitPhaseLeafMessage, PcsCommitmentRootBus, PcsCommitmentRootMessage, PcsEqProductBus,
+        PcsEqProductMessage, PcsFinalMessageBus, PcsFinalMessageMessage, PcsFoldChallengeBus,
+        PcsFoldChallengeMessage, PcsJaggedAssistHBus, PcsJaggedAssistHMessage, PcsJaggedAssistQBus,
+        PcsJaggedAssistQMessage, PcsJaggedFEvalBus, PcsJaggedFEvalMessage, PcsOpeningEvalBus,
+        PcsOpeningEvalMessage, PcsQuerySampleBus, PcsQuerySampleMessage, PcsSuffixProductBus,
+        PcsSuffixProductMessage, PcsSumcheckInputBus, PcsSumcheckInputMessage,
         PcsSumcheckOutputBus, PcsSumcheckOutputMessage, PcsTranscriptExtBus,
         PcsTranscriptExtMessage, TranscriptBus, TranscriptBusMessage,
     },
@@ -61,8 +62,8 @@ use crate::{
         PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord,
         PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord, PcsEqProductKind, PcsEqProductRecord,
         PcsEqProductSource, PcsJaggedAssistHRecord, PcsJaggedAssistInputRecord,
-        PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord, PcsOpeningCommitKind,
-        PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSuffixProductRecord,
+        PcsJaggedAssistQRecord, PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord,
+        PcsOpeningCommitKind, PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSuffixProductRecord,
         PcsSumcheckInputRecord, PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight,
         RecursionField, RecursionPcs, RecursionProof, RecursionVk, TraceGenModule,
     },
@@ -99,6 +100,8 @@ pub struct PcsModule {
     eq_product_bus: PcsEqProductBus,
     suffix_product_bus: PcsSuffixProductBus,
     jagged_assist_h_bus: PcsJaggedAssistHBus,
+    jagged_assist_q_bus: PcsJaggedAssistQBus,
+    commit_height_bus: PcsCommitHeightBus,
     merkle_verify_bus: MerkleVerifyBus,
     poseidon2_permute_bus: Poseidon2PermuteBus,
     poseidon2_compress_bus: Poseidon2CompressBus,
@@ -164,6 +167,15 @@ fn push_eq_product_records(
             bit_idx,
             is_first: bit_idx == 0,
             is_last: bit_idx + 1 == point.len(),
+            lookup_count: if bit_idx + 1 == point.len() {
+                if kind == PcsEqProductKind::JaggedClaim {
+                    2
+                } else {
+                    1
+                }
+            } else {
+                0
+            },
             point_tidx: point_tidx_base + bit_idx * D_EF,
             sumcheck_idx,
             point_round: point_round_base + bit_idx,
@@ -321,6 +333,88 @@ fn push_jagged_assist_h_records(
     val[0]
 }
 
+fn push_jagged_assist_q_records(
+    preflight: &mut Preflight,
+    round_idx: usize,
+    commitment_kind: usize,
+    assist_point: &[RecursionField],
+    eq_col: &[RecursionField],
+    cumulative_heights: &[usize],
+    n_robp: usize,
+) -> RecursionField {
+    let sumcheck_idx = round_idx * 2 + 1;
+    let num_polys = cumulative_heights.len() - 1;
+    let mut q_acc = RecursionField::ZERO;
+    for term_idx in 0..num_polys {
+        let mut term_acc = eq_col[term_idx];
+        let mut c_acc = 0usize;
+        let mut d_acc = 0usize;
+        for step_idx in 0..n_robp {
+            let c_bit = ((cumulative_heights[term_idx] >> step_idx) & 1) == 1;
+            let d_bit = ((cumulative_heights[term_idx + 1] >> step_idx) & 1) == 1;
+            let bit_pow2 = 1usize << step_idx;
+            let c_acc_in = c_acc;
+            let d_acc_in = d_acc;
+            if c_bit {
+                c_acc += bit_pow2;
+            }
+            if d_bit {
+                d_acc += bit_pow2;
+            }
+            let rho_star_c = assist_point[2 * step_idx];
+            let rho_star_d = assist_point[2 * step_idx + 1];
+            let c_factor = if c_bit {
+                rho_star_c
+            } else {
+                RecursionField::ONE - rho_star_c
+            };
+            let d_factor = if d_bit {
+                rho_star_d
+            } else {
+                RecursionField::ONE - rho_star_d
+            };
+            let term_acc_in = term_acc;
+            term_acc *= c_factor * d_factor;
+            let q_acc_in = q_acc;
+            let is_last_step = step_idx + 1 == n_robp;
+            if is_last_step {
+                q_acc += term_acc;
+            }
+            preflight.pcs.jagged_assist_q.push(PcsJaggedAssistQRecord {
+                proof_idx: 0,
+                round_idx,
+                sumcheck_idx,
+                commitment_kind,
+                term_idx,
+                step_idx,
+                robp_idx: step_idx,
+                is_first: term_idx == 0 && step_idx == 0,
+                is_last: term_idx + 1 == num_polys && is_last_step,
+                is_first_step: step_idx == 0,
+                is_last_step,
+                term_is_last: term_idx + 1 == num_polys,
+                eq_col: eq_col[term_idx],
+                t_lo: cumulative_heights[term_idx],
+                t_hi: cumulative_heights[term_idx + 1],
+                c_bit,
+                d_bit,
+                bit_pow2,
+                c_acc_in,
+                c_acc_out: c_acc,
+                d_acc_in,
+                d_acc_out: d_acc,
+                rho_star_c,
+                rho_star_d,
+                term_acc_in,
+                term_acc_out: term_acc,
+                q_acc_in,
+                q_acc_out: q_acc,
+            });
+        }
+    }
+    q_acc
+}
+
 impl PcsModule {
     pub fn new(bus_inventory: crate::system::BusInventory) -> Self {
         Self {
@@ -345,6 +439,8 @@ impl PcsModule {
             eq_product_bus: bus_inventory.pcs_eq_product_bus,
             suffix_product_bus: bus_inventory.pcs_suffix_product_bus,
             jagged_assist_h_bus: bus_inventory.pcs_jagged_assist_h_bus,
+            jagged_assist_q_bus: bus_inventory.pcs_jagged_assist_q_bus,
+            commit_height_bus: bus_inventory.pcs_commit_height_bus,
             merkle_verify_bus: bus_inventory.merkle_verify_bus,
             poseidon2_permute_bus: bus_inventory.poseidon2_permute_bus,
             poseidon2_compress_bus: bus_inventory.poseidon2_compress_bus,
@@ -393,7 +489,7 @@ impl PcsModule {
                 )
             })
             .collect_vec();
-        rounds.push((proof.witin_commit.clone(), witin_openings));
+        rounds.push((2usize, proof.witin_commit.clone(), witin_openings));
 
         let fixed_openings = preflight
             .pcs
@@ -412,10 +508,10 @@ impl PcsModule {
             .collect_vec();
         if proof.public_values.shard_id == 0 {
             if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
-                rounds.push((fixed_commit.clone(), fixed_openings));
+                rounds.push((0usize, fixed_commit.clone(), fixed_openings));
             }
         } else if let Some(fixed_commit) = child_vk.fixed_no_omc_init_commit.as_ref() {
-            rounds.push((fixed_commit.clone(), fixed_openings));
+            rounds.push((1usize, fixed_commit.clone(), fixed_openings));
         }
 
         if rounds.len() != proof.opening_proof.rounds.len() {
@@ -427,7 +523,7 @@ impl PcsModule {
         }
 
         let mut inner_rounds = Vec::with_capacity(rounds.len());
-        for (round_idx, ((comm, openings), round_proof)) in rounds
+        for (round_idx, ((commitment_kind, comm, openings), round_proof)) in rounds
             .into_iter()
             .zip(proof.opening_proof.rounds.iter())
             .enumerate()
@@ -466,6 +562,7 @@ impl PcsModule {
             let (point, evals) = flatten_padded_openings_as_native(&poly_heights, openings)?;
             let inner = self.replay_jagged_round(
                 round_idx,
+                commitment_kind,
                 &comm,
                 &point,
                 &evals,
@@ -499,6 +596,7 @@ impl PcsModule {
     fn replay_jagged_round<TS>(
         &self,
         round_idx: usize,
+        commitment_kind: usize,
         comm: &<RecursionPcs as mpcs::PolynomialCommitmentScheme<RecursionField>>::Commitment,
         point: &[RecursionField],
         evals: &[RecursionField],
@@ -816,7 +914,7 @@ impl PcsModule {
                 if let Some(record) = preflight.pcs.sumcheck_rounds.iter_mut().find(|record| {
                     record.idx == assist_sumcheck_idx && record.round == assist_round
                 }) {
-                    record.fold_challenge_lookup_count += 1;
+                    record.fold_challenge_lookup_count += 1 + num_polys;
                 }
             }
         }
@@ -826,8 +924,20 @@ impl PcsModule {
         if h_at_rho_star != native_h_at_rho_star {
             bail!("jagged assist h replay mismatch");
         }
-        let q_at_rho_star =
+        let q_at_rho_star = push_jagged_assist_q_records(
+            preflight,
+            round_idx,
+            commitment_kind,
+            &assist_point,
+            &eq_col,
+            &comm.cumulative_heights,
+            n_robp,
+        );
+        let native_q_at_rho_star =
             compute_q_at_assist_point(&assist_point, &eq_col, &comm.cumulative_heights, n_robp);
+        if q_at_rho_star != native_q_at_rho_star {
+            bail!("jagged assist q replay mismatch");
+        }
         if std::env::var("CENO_REC_V2_DEBUG_PCS").as_deref() == Ok("1") {
             eprintln!(
                 "rec-v2-debug module=pcs source=preflight proof_idx=0 round_idx={round_idx} key=jagged_assist h_at_rho_star={:?} q_at_rho_star={:?} assist_product={:?} assist_expected={:?}",
@@ -1077,7 +1187,7 @@ impl PcsModule {
 
 impl AirModule for PcsModule {
     fn num_airs(&self) -> usize {
-        24
+        25
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -1125,6 +1235,12 @@ impl AirModule for PcsModule {
                 main_global_point_bus: self.main_global_point_bus,
                 fold_challenge_bus: self.fold_challenge_bus,
                 jagged_assist_h_bus: self.jagged_assist_h_bus,
+            }) as AirRef<_>,
+            Arc::new(PcsJaggedAssistQAir {
+                fold_challenge_bus: self.fold_challenge_bus,
+                eq_product_bus: self.eq_product_bus,
+                commit_height_bus: self.commit_height_bus,
+                jagged_assist_q_bus: self.jagged_assist_q_bus,
             }) as AirRef<_>,
             Arc::new(PcsBasefoldQueryIndexAir {
                 query_sample_bus: self.query_sample_bus,
@@ -1192,6 +1308,7 @@ impl AirModule for PcsModule {
             Arc::new(PcsJaggedAssistAir {
                 sumcheck_output_bus: self.sumcheck_output_bus,
                 jagged_assist_h_bus: self.jagged_assist_h_bus,
+                jagged_assist_q_bus: self.jagged_assist_q_bus,
             }) as AirRef<_>,
             Arc::new(PcsBasefoldFinalClaimAir {
                 sumcheck_output_bus: self.sumcheck_output_bus,
@@ -1205,8 +1322,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
     fn generate_proving_ctxs(
         &self,
-        _child_vk: &RecursionVk,
-        _proofs: &[RecursionProof],
+        child_vk: &RecursionVk,
+        proofs: &[RecursionProof],
         preflights: &[Preflight],
         _ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
@@ -1313,6 +1430,28 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             })
             .collect_vec();
         jagged_assist_h.sort_by_key(|record| (record.proof_idx, record.round_idx, record.step_idx));
+        let mut jagged_assist_q = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, p)| {
+                p.pcs
+                    .jagged_assist_q
+                    .iter()
+                    .cloned()
+                    .map(move |mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+            })
+            .collect_vec();
+        jagged_assist_q.sort_by_key(|record| {
+            (
+                record.proof_idx,
+                record.round_idx,
+                record.term_idx,
+                record.step_idx,
+            )
+        });
         let mut basefold_initial_claims = preflights
             .iter()
             .enumerate()
@@ -1690,8 +1829,16 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 .iter()
                 .filter(|record| record.is_first)
                 .count();
-            let eq_product_sends = eq_products.iter().filter(|record| record.is_last).count();
-            let eq_product_receives = jagged_claims.len() + jagged_q_evals.len();
+            let eq_product_sends = eq_products
+                .iter()
+                .map(|record| record.lookup_count)
+                .sum::<usize>();
+            let eq_product_receives = jagged_claims.len()
+                + jagged_q_evals.len()
+                + jagged_assist_q
+                    .iter()
+                    .filter(|record| record.is_first_step)
+                    .count();
             let suffix_product_sends = suffix_products
                 .iter()
                 .filter(|record| record.is_last)
@@ -1702,8 +1849,13 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 .filter(|record| record.is_last)
                 .count();
             let jagged_assist_h_receives = jagged_assists.len();
+            let jagged_assist_q_sends = jagged_assist_q
+                .iter()
+                .filter(|record| record.is_last)
+                .count();
+            let jagged_assist_q_receives = jagged_assists.len();
             eprintln!(
-                "rec-v2-debug module=pcs source=trace key=bus_counts opening_eval_send={} opening_eval_recv={} eq_product_send={} eq_product_recv={} suffix_product_send={} suffix_product_recv={} jagged_assist_h_send={} jagged_assist_h_recv={} basefold_eval_send={} basefold_eval_recv={} jagged_f_send={} jagged_f_recv={} batch_coeff_send={} batch_coeff_recv={} final_message_send={} final_message_recv={} query_sample_send={} query_sample_recv={} sumcheck_input_send={} sumcheck_input_recv={} sumcheck_output_send={} sumcheck_output_recv={} commitment_root_send={} commitment_root_recv={} base_input_opening_send={} base_input_opening_recv={} basefold_query_send={} basefold_query_recv={} commit_phase_leaf_send={} commit_phase_leaf_recv={}",
+                "rec-v2-debug module=pcs source=trace key=bus_counts opening_eval_send={} opening_eval_recv={} eq_product_send={} eq_product_recv={} suffix_product_send={} suffix_product_recv={} jagged_assist_h_send={} jagged_assist_h_recv={} jagged_assist_q_send={} jagged_assist_q_recv={} basefold_eval_send={} basefold_eval_recv={} jagged_f_send={} jagged_f_recv={} batch_coeff_send={} batch_coeff_recv={} final_message_send={} final_message_recv={} query_sample_send={} query_sample_recv={} sumcheck_input_send={} sumcheck_input_recv={} sumcheck_output_send={} sumcheck_output_recv={} commitment_root_send={} commitment_root_recv={} base_input_opening_send={} base_input_opening_recv={} basefold_query_send={} basefold_query_recv={} commit_phase_leaf_send={} commit_phase_leaf_recv={}",
                 opening_evals.len(),
                 jagged_claims.len(),
                 eq_product_sends,
@@ -1712,6 +1864,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 suffix_product_receives,
                 jagged_assist_h_sends,
                 jagged_assist_h_receives,
+                jagged_assist_q_sends,
+                jagged_assist_q_receives,
                 basefold_eval_sends,
                 basefold_initial_claims.len() + jagged_q_evals.len(),
                 jagged_f_sends,
@@ -1803,7 +1957,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                             record.acc_out
                         )
                     ))
-                    .or_default() += 1;
+                    .or_default() += record.lookup_count as isize;
             }
             for record in &jagged_claims {
                 *eq_product_map
@@ -1829,6 +1983,20 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                             record.round_idx,
                             record.term_idx,
                             record.eq_rho_col
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            for record in jagged_assist_q.iter().filter(|record| record.is_first_step) {
+                *eq_product_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            PcsEqProductKind::JaggedClaim.as_usize(),
+                            record.round_idx,
+                            record.term_idx,
+                            record.eq_col
                         )
                     ))
                     .or_default() -= 1;
@@ -1882,6 +2050,167 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                     .or_default() -= 1;
             }
             report_map("jagged_assist_h", &jagged_assist_h_map);
+
+            let mut jagged_assist_q_map = std::collections::BTreeMap::<String, isize>::new();
+            for record in jagged_assist_q.iter().filter(|record| record.is_last) {
+                *jagged_assist_q_map
+                    .entry(format!(
+                        "{:?}",
+                        (record.proof_idx, record.round_idx, record.q_acc_out)
+                    ))
+                    .or_default() += 1;
+            }
+            for record in &jagged_assists {
+                *jagged_assist_q_map
+                    .entry(format!(
+                        "{:?}",
+                        (record.proof_idx, record.round_idx, record.q_at_rho_star)
+                    ))
+                    .or_default() -= 1;
+            }
+            report_map("jagged_assist_q", &jagged_assist_q_map);
+
+            let mut fold_challenge_map = std::collections::BTreeMap::<String, isize>::new();
+            for record in &sumcheck_rounds {
+                *fold_challenge_map
+                    .entry(format!(
+                        "{:?}",
+                        (record.proof_idx, record.idx, record.round, record.challenge)
+                    ))
+                    .or_default() += record.fold_challenge_lookup_count as isize;
+            }
+            for record in basefold_commit_phase_queries.iter() {
+                *fold_challenge_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            8_000_000usize,
+                            record.round,
+                            record.challenge
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            for record in eq_products
+                .iter()
+                .filter(|record| record.source == PcsEqProductSource::FoldChallenge)
+            {
+                *fold_challenge_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.sumcheck_idx,
+                            record.point_round,
+                            record.point
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            for record in &jagged_assist_h {
+                if record.has_rho {
+                    *fold_challenge_map
+                        .entry(format!(
+                            "{:?}",
+                            (
+                                record.proof_idx,
+                                record.round_idx * 2,
+                                record.robp_idx,
+                                record.rho
+                            )
+                        ))
+                        .or_default() -= 1;
+                }
+                for (round, challenge) in [
+                    (2 * record.robp_idx, record.rho_star_c),
+                    (2 * record.robp_idx + 1, record.rho_star_d),
+                ] {
+                    *fold_challenge_map
+                        .entry(format!(
+                            "{:?}",
+                            (record.proof_idx, record.sumcheck_idx, round, challenge)
+                        ))
+                        .or_default() -= 1;
+                }
+            }
+            for record in &jagged_assist_q {
+                for (round, challenge) in [
+                    (2 * record.robp_idx, record.rho_star_c),
+                    (2 * record.robp_idx + 1, record.rho_star_d),
+                ] {
+                    *fold_challenge_map
+                        .entry(format!(
+                            "{:?}",
+                            (record.proof_idx, record.sumcheck_idx, round, challenge)
+                        ))
+                        .or_default() -= 1;
+                }
+            }
+            report_map("fold_challenge", &fold_challenge_map);
+
+            let mut commit_height_map = std::collections::BTreeMap::<String, isize>::new();
+            for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
+                let mut lookup_counts = std::collections::BTreeMap::<(usize, usize), usize>::new();
+                for record in preflight
+                    .pcs
+                    .jagged_assist_q
+                    .iter()
+                    .filter(|record| record.is_first_step)
+                {
+                    *lookup_counts
+                        .entry((record.commitment_kind, record.term_idx))
+                        .or_default() += 1;
+                    *lookup_counts
+                        .entry((record.commitment_kind, record.term_idx + 1))
+                        .or_default() += 1;
+                }
+                let mut push_heights = |commitment_kind: usize, heights: &[usize]| {
+                    for (height_idx, &height) in heights.iter().enumerate() {
+                        *commit_height_map
+                            .entry(format!(
+                                "{:?}",
+                                (
+                                    proof_idx,
+                                    commitment_kind,
+                                    height_idx,
+                                    F::from_usize(height)
+                                )
+                            ))
+                            .or_default() += lookup_counts
+                            .get(&(commitment_kind, height_idx))
+                            .copied()
+                            .unwrap_or_default()
+                            as isize;
+                    }
+                };
+                if let Some(commitment) = child_vk.fixed_commit.as_ref() {
+                    push_heights(0, &commitment.cumulative_heights);
+                }
+                if let Some(commitment) = child_vk.fixed_no_omc_init_commit.as_ref() {
+                    push_heights(1, &commitment.cumulative_heights);
+                }
+                push_heights(2, &proof.witin_commit.cumulative_heights);
+            }
+            for record in jagged_assist_q.iter().filter(|record| record.is_first_step) {
+                for (height_idx, value) in [
+                    (record.term_idx, record.t_lo),
+                    (record.term_idx + 1, record.t_hi),
+                ] {
+                    *commit_height_map
+                        .entry(format!(
+                            "{:?}",
+                            (
+                                record.proof_idx,
+                                record.commitment_kind,
+                                height_idx,
+                                F::from_usize(value)
+                            )
+                        ))
+                        .or_default() -= 1;
+                }
+            }
+            report_map("commit_height", &commit_height_map);
 
             let mut basefold_eval_map = std::collections::BTreeMap::<String, isize>::new();
             for record in transcript_values
@@ -2034,6 +2363,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             eq_products: &eq_products,
             suffix_products: &suffix_products,
             jagged_assist_h: &jagged_assist_h,
+            jagged_assist_q: &jagged_assist_q,
             jagged_claims: &jagged_claims,
             sumcheck_inputs: &sumcheck_inputs,
             sumcheck_rounds: &sumcheck_rounds,
@@ -2053,6 +2383,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             PcsModuleChip::EqProduct,
             PcsModuleChip::SuffixProduct,
             PcsModuleChip::JaggedAssistH,
+            PcsModuleChip::JaggedAssistQ,
             PcsModuleChip::BasefoldQueryIndex,
             PcsModuleChip::BasefoldQueryOpen,
             PcsModuleChip::BasefoldCommitPhaseQuery,
@@ -2704,6 +3035,7 @@ pub struct PcsEqProductCols<T> {
     pub bit_idx: T,
     pub is_first: T,
     pub is_last: T,
+    pub lookup_count: T,
     pub point_tidx: T,
     pub sumcheck_idx: T,
     pub point_round: T,
@@ -2748,6 +3080,9 @@ where
         builder.assert_bool(local.is_first);
         builder.assert_bool(local.is_last);
         builder.assert_bool(local.index_bit);
+        builder
+            .when(local.is_enabled * (AB::Expr::ONE - local.is_last))
+            .assert_zero(local.lookup_count);
 
         builder
             .when(local.is_enabled * local.is_first)
@@ -2867,7 +3202,7 @@ where
                 term_idx: local.term_idx.into(),
                 value: local.acc_out.map(Into::into),
             },
-            local.is_enabled * local.is_last,
+            local.is_enabled * local.lookup_count,
         );
     }
 }
@@ -3326,6 +3661,305 @@ where
             PcsJaggedAssistHMessage {
                 round_idx: local.round_idx.into(),
                 value: local.val_out[0].map(Into::into),
+            },
+            local.is_enabled * local.is_last,
+        );
+    }
+}
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
+pub struct PcsJaggedAssistQCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub round_idx: T,
+    pub sumcheck_idx: T,
+    pub commitment_kind: T,
+    pub term_idx: T,
+    pub step_idx: T,
+    pub robp_idx: T,
+    pub is_first: T,
+    pub is_last: T,
+    pub is_first_step: T,
+    pub is_last_step: T,
+    pub term_is_last: T,
+    pub eq_col: [T; D_EF],
+    pub t_lo: T,
+    pub t_hi: T,
+    pub c_bit: T,
+    pub d_bit: T,
+    pub bit_pow2: T,
+    pub c_acc_in: T,
+    pub c_acc_out: T,
+    pub d_acc_in: T,
+    pub d_acc_out: T,
+    pub rho_star_c: [T; D_EF],
+    pub rho_star_d: [T; D_EF],
+    pub term_acc_in: [T; D_EF],
+    pub term_acc_out: [T; D_EF],
+    pub q_acc_in: [T; D_EF],
+    pub q_acc_out: [T; D_EF],
+}
+
+pub struct PcsJaggedAssistQAir {
+    pub fold_challenge_bus: PcsFoldChallengeBus,
+    pub eq_product_bus: PcsEqProductBus,
+    pub commit_height_bus: PcsCommitHeightBus,
+    pub jagged_assist_q_bus: PcsJaggedAssistQBus,
+}
+
+impl<F: Field> BaseAir<F> for PcsJaggedAssistQAir {
+    fn width(&self) -> usize {
+        PcsJaggedAssistQCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for PcsJaggedAssistQAir {}
+impl<F: Field> PartitionedBaseAir<F> for PcsJaggedAssistQAir {}
+
+impl<AB> Air<AB> for PcsJaggedAssistQAir
+where
+    AB: AirBuilder + InteractionBuilder,
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let next_row = main.row_slice(1).expect("next row exists");
+        let local: &PcsJaggedAssistQCols<AB::Var> = (*local_row).borrow();
+        let next: &PcsJaggedAssistQCols<AB::Var> = (*next_row).borrow();
+
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_first);
+        builder.assert_bool(local.is_last);
+        builder.assert_bool(local.is_first_step);
+        builder.assert_bool(local.is_last_step);
+        builder.assert_bool(local.term_is_last);
+        builder.assert_bool(local.c_bit);
+        builder.assert_bool(local.d_bit);
+        builder.when(local.is_enabled).assert_eq(
+            local.sumcheck_idx,
+            local.round_idx + local.round_idx + AB::Expr::ONE,
+        );
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.is_last, local.is_last_step * local.term_is_last);
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_zero(local.term_idx);
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_zero(local.step_idx);
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_zero(local.robp_idx);
+        let zero_ext = core::array::from_fn(|_| AB::Expr::ZERO);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.q_acc_in,
+            zero_ext.clone(),
+        );
+        builder
+            .when(local.is_enabled * local.is_first_step)
+            .assert_zero(local.step_idx);
+        builder
+            .when(local.is_enabled * local.is_first_step)
+            .assert_zero(local.robp_idx);
+        builder
+            .when(local.is_enabled * local.is_first_step)
+            .assert_one(local.bit_pow2);
+        builder
+            .when(local.is_enabled * local.is_first_step)
+            .assert_zero(local.c_acc_in);
+        builder
+            .when(local.is_enabled * local.is_first_step)
+            .assert_zero(local.d_acc_in);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first_step),
+            local.term_acc_in,
+            local.eq_col,
+        );
+
+        let expected_c_acc = local.c_acc_in + local.c_bit * local.bit_pow2;
+        let expected_d_acc = local.d_acc_in + local.d_bit * local.bit_pow2;
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.c_acc_out, expected_c_acc);
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.d_acc_out, expected_d_acc);
+        builder
+            .when(local.is_enabled * local.is_last_step)
+            .assert_eq(local.c_acc_out, local.t_lo);
+        builder
+            .when(local.is_enabled * local.is_last_step)
+            .assert_eq(local.d_acc_out, local.t_hi);
+
+        let ext_factor = |bit: AB::Var, point: [AB::Var; D_EF]| -> [AB::Expr; D_EF] {
+            core::array::from_fn(|i| {
+                let point_limb = point[i].into();
+                let one_minus = if i == 0 {
+                    AB::Expr::ONE - point_limb.clone()
+                } else {
+                    -point_limb.clone()
+                };
+                bit * point_limb + (AB::Expr::ONE - bit) * one_minus
+            })
+        };
+        let c_factor = ext_factor(local.c_bit, local.rho_star_c);
+        let d_factor = ext_factor(local.d_bit, local.rho_star_d);
+        let factor: [AB::Expr; D_EF] =
+            recursion_circuit::utils::ext_field_multiply(c_factor, d_factor);
+        let expected_term_acc: [AB::Expr; D_EF] =
+            recursion_circuit::utils::ext_field_multiply(local.term_acc_in, factor);
+        assert_array_eq(builder, local.term_acc_out, expected_term_acc);
+
+        let q_delta = local.term_acc_out.map(|limb| local.is_last_step * limb);
+        let expected_q_acc = ext_add::<AB::Expr>(local.q_acc_in, q_delta);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.q_acc_out,
+            expected_q_acc,
+        );
+
+        let continues = local.is_enabled * (AB::Expr::ONE - local.is_last);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_one(next.is_enabled);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.round_idx, local.round_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.sumcheck_idx, local.sumcheck_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.commitment_kind, local.commitment_kind);
+
+        let same_term = continues.clone() * (AB::Expr::ONE - local.is_last_step);
+        builder
+            .when_transition()
+            .when(same_term.clone())
+            .assert_eq(next.term_idx, local.term_idx);
+        builder
+            .when_transition()
+            .when(same_term.clone())
+            .assert_eq(next.step_idx, local.step_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(same_term.clone())
+            .assert_eq(next.robp_idx, local.robp_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(same_term.clone())
+            .assert_eq(next.bit_pow2, local.bit_pow2 * AB::Expr::TWO);
+        builder
+            .when_transition()
+            .when(same_term.clone())
+            .assert_eq(next.c_acc_in, local.c_acc_out);
+        builder
+            .when_transition()
+            .when(same_term.clone())
+            .assert_eq(next.d_acc_in, local.d_acc_out);
+        builder
+            .when_transition()
+            .when(same_term.clone())
+            .assert_eq(next.t_lo, local.t_lo);
+        builder
+            .when_transition()
+            .when(same_term.clone())
+            .assert_eq(next.t_hi, local.t_hi);
+        assert_array_eq(
+            &mut builder.when_transition().when(same_term.clone()),
+            next.term_acc_in,
+            local.term_acc_out,
+        );
+        assert_array_eq(
+            &mut builder.when_transition().when(same_term),
+            next.q_acc_in,
+            local.q_acc_out,
+        );
+
+        let next_term = continues * local.is_last_step;
+        builder
+            .when_transition()
+            .when(next_term.clone())
+            .assert_eq(next.term_idx, local.term_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(next_term.clone())
+            .assert_one(next.is_first_step);
+        assert_array_eq(
+            &mut builder.when_transition().when(next_term),
+            next.q_acc_in,
+            local.q_acc_out,
+        );
+
+        self.eq_product_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsEqProductMessage {
+                kind: AB::Expr::from_usize(PcsEqProductKind::JaggedClaim.as_usize()),
+                round_idx: local.round_idx.into(),
+                term_idx: local.term_idx.into(),
+                value: local.eq_col.map(Into::into),
+            },
+            local.is_enabled * local.is_first_step,
+        );
+        self.commit_height_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsCommitHeightMessage {
+                commitment_kind: local.commitment_kind.into(),
+                height_idx: local.term_idx.into(),
+                value: local.t_lo.into(),
+            },
+            local.is_enabled * local.is_first_step,
+        );
+        self.commit_height_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsCommitHeightMessage {
+                commitment_kind: local.commitment_kind.into(),
+                height_idx: (local.term_idx + AB::Expr::ONE).into(),
+                value: local.t_hi.into(),
+            },
+            local.is_enabled * local.is_first_step,
+        );
+        self.fold_challenge_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsFoldChallengeMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                round: (local.robp_idx + local.robp_idx).into(),
+                challenge: local.rho_star_c.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.fold_challenge_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsFoldChallengeMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE).into(),
+                challenge: local.rho_star_d.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.jagged_assist_q_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            PcsJaggedAssistQMessage {
+                round_idx: local.round_idx.into(),
+                value: local.q_acc_out.map(Into::into),
             },
             local.is_enabled * local.is_last,
         );
@@ -4705,6 +5339,7 @@ pub struct PcsJaggedAssistCols<T> {
 pub struct PcsJaggedAssistAir {
     pub sumcheck_output_bus: PcsSumcheckOutputBus,
     pub jagged_assist_h_bus: PcsJaggedAssistHBus,
+    pub jagged_assist_q_bus: PcsJaggedAssistQBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsJaggedAssistAir {
@@ -4748,6 +5383,15 @@ where
             PcsJaggedAssistHMessage {
                 round_idx: local.round_idx.into(),
                 value: local.h_at_rho_star.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.jagged_assist_q_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsJaggedAssistQMessage {
+                round_idx: local.round_idx.into(),
+                value: local.q_at_rho_star.map(Into::into),
             },
             local.is_enabled,
         );
@@ -4815,6 +5459,7 @@ struct PcsTraceCtx<'a> {
     eq_products: &'a [PcsEqProductRecord],
     suffix_products: &'a [PcsSuffixProductRecord],
     jagged_assist_h: &'a [PcsJaggedAssistHRecord],
+    jagged_assist_q: &'a [PcsJaggedAssistQRecord],
     basefold_query_indices: &'a [PcsBasefoldQueryIndexRecord],
     basefold_query_opens: &'a [PcsBasefoldQueryOpenRecord],
     basefold_commit_phase_queries: &'a [PcsBasefoldCommitPhaseQueryRecord],
@@ -4842,6 +5487,7 @@ enum PcsModuleChip {
     EqProduct,
     SuffixProduct,
     JaggedAssistH,
+    JaggedAssistQ,
     BasefoldQueryIndex,
     BasefoldQueryOpen,
     BasefoldCommitPhaseQuery,
@@ -4892,6 +5538,9 @@ impl RowMajorChip<F> for PcsModuleChip {
             PcsModuleChip::JaggedAssistH => {
                 PcsJaggedAssistHTraceGenerator.generate_trace(&ctx.jagged_assist_h, required_height)
             }
+            PcsModuleChip::JaggedAssistQ => {
+                PcsJaggedAssistQTraceGenerator.generate_trace(&ctx.jagged_assist_q, required_height)
+            }
             PcsModuleChip::BasefoldQueryIndex => PcsBasefoldQueryIndexTraceGenerator
                 .generate_trace(&ctx.basefold_query_indices, required_height),
             PcsModuleChip::BasefoldQueryOpen => PcsBasefoldQueryOpenTraceGenerator
@@ -4940,6 +5589,7 @@ struct PcsOpeningEvalTraceGenerator;
 struct PcsEqProductTraceGenerator;
 struct PcsSuffixProductTraceGenerator;
 struct PcsJaggedAssistHTraceGenerator;
+struct PcsJaggedAssistQTraceGenerator;
 struct PcsBasefoldQueryIndexTraceGenerator;
 struct PcsBasefoldQueryOpenTraceGenerator;
 struct PcsBasefoldCommitPhaseQueryTraceGenerator;
@@ -5187,6 +5837,7 @@ impl RowMajorChip<F> for PcsEqProductTraceGenerator {
             cols.bit_idx = F::from_usize(record.bit_idx);
             cols.is_first = F::from_bool(record.is_first);
             cols.is_last = F::from_bool(record.is_last);
+            cols.lookup_count = F::from_usize(record.lookup_count);
             cols.point_tidx = F::from_usize(record.point_tidx);
             cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
             cols.point_round = F::from_usize(record.point_round);
@@ -5263,6 +5914,54 @@ impl RowMajorChip<F> for PcsJaggedAssistHTraceGenerator {
             cols.rho_star_d = ext_limbs(record.rho_star_d);
             cols.val_in = record.val_in.map(ext_limbs);
             cols.val_out = record.val_out.map(ext_limbs);
+        }
+        Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+impl RowMajorChip<F> for PcsJaggedAssistQTraceGenerator {
+    type Ctx<'a> = &'a [PcsJaggedAssistQRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let width = PcsJaggedAssistQCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let mut trace = vec![F::ZERO; height * width];
+        for (row_idx, record) in records.iter().enumerate() {
+            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
+            let cols: &mut PcsJaggedAssistQCols<F> = row.borrow_mut();
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.round_idx = F::from_usize(record.round_idx);
+            cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+            cols.commitment_kind = F::from_usize(record.commitment_kind);
+            cols.term_idx = F::from_usize(record.term_idx);
+            cols.step_idx = F::from_usize(record.step_idx);
+            cols.robp_idx = F::from_usize(record.robp_idx);
+            cols.is_first = F::from_bool(record.is_first);
+            cols.is_last = F::from_bool(record.is_last);
+            cols.is_first_step = F::from_bool(record.is_first_step);
+            cols.is_last_step = F::from_bool(record.is_last_step);
+            cols.term_is_last = F::from_bool(record.term_is_last);
+            cols.eq_col = ext_limbs(record.eq_col);
+            cols.t_lo = F::from_usize(record.t_lo);
+            cols.t_hi = F::from_usize(record.t_hi);
+            cols.c_bit = F::from_bool(record.c_bit);
+            cols.d_bit = F::from_bool(record.d_bit);
+            cols.bit_pow2 = F::from_usize(record.bit_pow2);
+            cols.c_acc_in = F::from_usize(record.c_acc_in);
+            cols.c_acc_out = F::from_usize(record.c_acc_out);
+            cols.d_acc_in = F::from_usize(record.d_acc_in);
+            cols.d_acc_out = F::from_usize(record.d_acc_out);
+            cols.rho_star_c = ext_limbs(record.rho_star_c);
+            cols.rho_star_d = ext_limbs(record.rho_star_d);
+            cols.term_acc_in = ext_limbs(record.term_acc_in);
+            cols.term_acc_out = ext_limbs(record.term_acc_out);
+            cols.q_acc_in = ext_limbs(record.q_acc_in);
+            cols.q_acc_out = ext_limbs(record.q_acc_out);
         }
         Some(RowMajorMatrix::new(trace, width))
     }

@@ -14,11 +14,12 @@ pub use preflight::{
     PcsBasefoldQueryIndexRecord, PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord,
     PcsCommitPhaseLeafHashRecord, PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord,
     PcsEqProductKind, PcsEqProductRecord, PcsEqProductSource, PcsJaggedAssistHRecord,
-    PcsJaggedAssistInputRecord, PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord,
-    PcsOpeningClaimRecord, PcsOpeningCommitKind, PcsOpeningEvalRecord, PcsOpeningPointRecord,
-    PcsPreflight, PcsSuffixProductRecord, PcsSumcheckInputRecord, PcsSumcheckRoundRecord,
-    PcsTranscriptValueRecord, Preflight, ProofShapePreflight, RotationReplayClaims,
-    TowerChipTranscriptRange, TowerMainPointRecord, TowerPreflight, TraceVData,
+    PcsJaggedAssistInputRecord, PcsJaggedAssistQRecord, PcsJaggedAssistRecord,
+    PcsJaggedClaimRecord, PcsJaggedQEvalRecord, PcsOpeningClaimRecord, PcsOpeningCommitKind,
+    PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsPreflight, PcsSuffixProductRecord,
+    PcsSumcheckInputRecord, PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight,
+    ProofShapePreflight, RotationReplayClaims, TowerChipTranscriptRange, TowerMainPointRecord,
+    TowerPreflight, TraceVData,
 };
 pub use recursion_circuit::system::{
     AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule, VerifierConfig,
