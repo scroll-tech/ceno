@@ -1,10 +1,6 @@
 use ceno_zkvm::instructions::riscv::constants::PUBIO_DIGEST_U16_LIMBS;
-use openvm_stark_backend::{FiatShamirTranscript, TranscriptHistory};
-use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
-use p3_field::PrimeCharacteristicRing;
+use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 use stark_recursion_circuit_derive::AlignedBorrow;
-
-use crate::system::{Preflight, RecursionField, RecursionProof, RecursionVk};
 
 mod air;
 mod trace;
@@ -35,56 +31,3 @@ pub struct VmPvs<F> {
 
 pub use air::*;
 pub use trace::*;
-
-#[tracing::instrument(level = "trace", skip_all)]
-pub fn run_preflight<TS>(
-    child_vk: &RecursionVk,
-    proof: &RecursionProof,
-    preflight: &mut Preflight,
-    ts: &mut TS,
-) where
-    TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
-{
-    let vk_digest = child_vk.compute_digest();
-    for elem in vk_digest {
-        ts.observe_ext(elem);
-    }
-
-    // Observe public values in canonical circuit-instance order first.
-    for (_, circuit_vk) in child_vk.circuit_vks.iter() {
-        for instance_value in circuit_vk.get_cs().zkvm_v1_css.instance.iter() {
-            ts.observe(
-                proof
-                    .public_values
-                    .query_by_index::<RecursionField>(instance_value.0),
-            );
-        }
-    }
-
-    if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
-        for elem in fixed_commit.commit.clone().into_iter() {
-            ts.observe(elem);
-        }
-        ts.observe(F::from_u64(fixed_commit.log2_max_codeword_size as u64));
-    }
-
-    if let Some(fixed_no_omc) = child_vk.fixed_no_omc_init_commit.as_ref() {
-        for elem in fixed_no_omc.commit.clone().into_iter() {
-            ts.observe(elem);
-        }
-        ts.observe(F::from_u64(fixed_no_omc.log2_max_codeword_size as u64));
-    }
-
-    let witin = &proof.witin_commit;
-    for elem in witin.commit.clone().into_iter() {
-        ts.observe(elem);
-    }
-    ts.observe(F::from_u64(witin.log2_max_codeword_size as u64));
-
-    let alpha_ext = ts.sample_ext();
-    let beta_ext = ts.sample_ext();
-    preflight.vm_pvs.lookup_challenge_alpha = alpha_ext;
-    preflight.vm_pvs.lookup_challenge_beta = beta_ext;
-    preflight.vm_pvs.lookup_challenge_alpha_lookup_count = 0;
-    preflight.vm_pvs.lookup_challenge_beta_lookup_count = 0;
-}

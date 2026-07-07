@@ -12,7 +12,7 @@ use ceno_zkvm::structs::VK_DIGEST_LEN;
 use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 
 use crate::{
-    bus::{PublicValuesBus, PublicValuesBusMessage, TranscriptBus},
+    bus::{PublicValuesBus, PublicValuesBusMessage, TranscriptBus, TranscriptBusMessage},
     proof_shape::bus::NumPublicValuesBus,
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     utils::TranscriptLabel,
@@ -116,6 +116,8 @@ where
         when_same_air.assert_eq(next.pv_idx, local.pv_idx + AB::Expr::ONE);
         when_same_air.assert_eq(next.tidx, local.tidx + AB::Expr::ONE);
 
+        // VmPvsAir remains active outside the system module and consumes verifier public values
+        // through this bus.
         self.public_values_bus.send(
             builder,
             local.proof_idx,
@@ -128,7 +130,16 @@ where
         );
         let _ = self.continuations_enabled;
 
-        // VmPvsAir owns the verifier transcript prefix, including these public values.
-        let _ = &self.transcript_bus;
+        // Public values are the per-AIR portion of the verifier transcript prefix.
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: local.tidx.into(),
+                value: local.value.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_valid,
+        );
     }
 }

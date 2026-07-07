@@ -2,8 +2,8 @@ use core::borrow::Borrow;
 
 use crate::{
     bus::{
-        MainBus, MainMessage, TowerModuleBus, TowerModuleMessage, TowerRootClaimBus,
-        TowerRootClaimMessage, TranscriptBus,
+        MainBus, TowerModuleBus, TowerModuleMessage, TowerRootClaimBus, TowerRootClaimMessage,
+        TranscriptBus,
     },
     tower::bus::{
         TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus, TowerLayerOutputMessage,
@@ -398,16 +398,10 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.is_enabled,
         );
 
-        self.main_bus.send(
-            builder,
-            local.proof_idx,
-            MainMessage {
-                chip_idx: local.chip_idx.into(),
-                tidx: local.final_tidx.into(),
-                claim: local.input_layer_claim.map(Into::into),
-            },
-            local.is_enabled * has_interactions.clone(),
-        );
+        // TODO(recursive-circuit-incremental): re-enable the MainBus export
+        // once MainModule is active and can consume Tower input-layer claims.
+        // self.main_bus.send(...);
+        let _ = &self.main_bus;
 
         let root_lambda_label_tidx = local.tidx + out_eval_span;
         for (i, value) in LABEL_COMBINE_VALUES.iter().enumerate() {

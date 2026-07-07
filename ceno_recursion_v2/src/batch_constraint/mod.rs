@@ -189,6 +189,7 @@ impl BatchConstraintModule {
         ]
     }
 
+    #[allow(dead_code)]
     pub(crate) fn generate_placeholder_proving_ctxs<SC: StarkProtocolConfig<F = F>>(
         &self,
         cached_symbolic_expr_trace: CommittedTraceData<CpuBackend<SC>>,

@@ -89,7 +89,6 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
                 let mut sponge = initial_transcript.clone();
                 let mut preflight = Preflight::default();
                 super::verifier::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
-                super::vm_pvs::run_preflight(child_vk, proof, &mut preflight, &mut sponge);
                 (preflight, sponge)
             })
             .unzip();

@@ -58,14 +58,16 @@ fi
 TEST_ENV=(
     "CENO_RECURSION_V2_FIXTURE_DIR=$FIXTURE_DIR"
     "RUST_MIN_STACK=33554432"
+    "RUST_BACKTRACE=${RUST_BACKTRACE:-1}"
 )
-if [[ -n "${CENO_RECURSION_V2_DEBUG_CONSTRAINTS:-}" ]]; then
-    echo "[test] explicit debug constraints enabled"
-    TEST_ENV+=("CENO_RECURSION_V2_DEBUG_CONSTRAINTS=$CENO_RECURSION_V2_DEBUG_CONSTRAINTS")
+DEBUG_CONSTRAINTS="${CENO_RECURSION_V2_DEBUG_CONSTRAINTS:-1}"
+if [[ "$DEBUG_CONSTRAINTS" != "0" ]]; then
+    echo "[test] debug constraints enabled (set CENO_RECURSION_V2_DEBUG_CONSTRAINTS=0 to disable)"
+    TEST_ENV+=("CENO_RECURSION_V2_DEBUG_CONSTRAINTS=$DEBUG_CONSTRAINTS")
 fi
 
 if env "${TEST_ENV[@]}" cargo test --release \
-        'continuation::tests::prover_integration::agg_prover_single_shard' \
+        'continuation::tests::prover_integration::agg_prover_two_shards' \
         -- --nocapture 2>&1 | tee "$TEST_LOG"; then
     if [[ "$REMOVE_TEST_LOG" == "1" ]]; then
         rm -f "$TEST_LOG"
@@ -73,7 +75,7 @@ if env "${TEST_ENV[@]}" cargo test --release \
 else
     status=$?
     echo ""
-    echo "[test] bus balance failure summary:"
+    echo "[test] debug failure summary:"
     python3 "$BUS_FAILURE_GROUPER" "$TEST_LOG" || true
     echo ""
     echo "[test] full failing log: $TEST_LOG"

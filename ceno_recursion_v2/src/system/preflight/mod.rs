@@ -18,7 +18,6 @@ pub struct Preflight {
     pub main: MainPreflight,
     pub gkr: TowerPreflight,
     pub batch_constraint: BatchConstraintPreflight,
-    pub vm_pvs: VmPvsPreflight,
 }
 
 impl Preflight {
@@ -67,14 +66,6 @@ pub struct ProofShapePreflight {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct VmPvsPreflight {
-    pub lookup_challenge_alpha: EF,
-    pub lookup_challenge_beta: EF,
-    pub lookup_challenge_alpha_lookup_count: usize,
-    pub lookup_challenge_beta_lookup_count: usize,
-}
-
-#[derive(Clone, Debug, Default)]
 pub struct TraceVData {
     pub log_height: usize,
 }
@@ -97,6 +88,8 @@ pub struct TowerChipTranscriptRange {
     pub num_layers: usize,
     /// Fork-local tidx (position within the fork's transcript log).
     pub tidx: usize,
+    /// Fork-local tidx immediately after this tower transcript span.
+    pub tidx_end: usize,
     /// Index into `Preflight::fork_transcripts`.
     pub fork_idx: usize,
     pub tower_replay: TowerReplayResult,

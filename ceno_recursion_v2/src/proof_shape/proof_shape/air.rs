@@ -1,5 +1,6 @@
 use std::{borrow::Borrow, sync::Arc};
 
+use ceno_zkvm::structs::VK_DIGEST_LEN;
 use itertools::fold;
 use openvm_circuit_primitives::{
     SubAir,
@@ -9,7 +10,7 @@ use openvm_circuit_primitives::{
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
-use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, DIGEST_SIZE};
 use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::Matrix;
@@ -17,11 +18,10 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirShapeBus, AirShapeBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
-        ForkedTranscriptBus, ForkedTranscriptBusMessage, FractionFolderInputBus,
-        FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage, LiftedHeightsBus,
-        LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage,
-        NLiftBus, NLiftMessage, TowerModuleBus, TowerModuleMessage, TowerRootClaimBus,
+        AirShapeBus, AirShapeBusMessage, ExpressionClaimNMaxBus, ForkedTranscriptBus,
+        ForkedTranscriptBusMessage, FractionFolderInputBus, HyperdimBus, HyperdimBusMessage,
+        LiftedHeightsBus, LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind,
+        LookupChallengeMessage, NLiftBus, TowerModuleBus, TowerModuleMessage, TowerRootClaimBus,
         TowerRootClaimMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
@@ -88,6 +88,13 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     /// forking). Constrained to be identical across all rows within a proof.
     pub lookup_challenge_alpha: [F; D_EF],
     pub lookup_challenge_beta: [F; D_EF],
+    pub vk_digest: [[F; D_EF]; VK_DIGEST_LEN],
+    pub fixed_commit: [F; DIGEST_SIZE],
+    pub fixed_commit_log2_max_codeword_size: F,
+    pub fixed_no_omc_init_commit: [F; DIGEST_SIZE],
+    pub fixed_no_omc_init_commit_log2_max_codeword_size: F,
+    pub witness_commit: [F; DIGEST_SIZE],
+    pub witness_commit_log2_max_codeword_size: F,
     /// Fork-local tidx of the final fork sample merged back into the trunk transcript.
     pub fork_sample_tidx: F,
     /// Trunk tidx where this fork's final sample is observed during merge.
@@ -112,6 +119,8 @@ pub struct ProofShapeVarCols<'a, F> {
 pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     // Parameters derived from vk
     pub per_air: Vec<AirMetadata>,
+    pub has_fixed_commit: bool,
+    pub has_fixed_no_omc_init_commit: bool,
 
     // Primitives
     pub idx_encoder: Arc<Encoder>,
@@ -314,7 +323,7 @@ where
                     word_idx: AB::Expr::from_usize(i),
                     value: local.lookup_challenge_alpha[i].into(),
                 },
-                AB::Expr::ZERO,
+                local.is_present * local.is_valid,
             );
         }
         for i in 0..D_EF {
@@ -326,13 +335,156 @@ where
                     word_idx: AB::Expr::from_usize(i),
                     value: local.lookup_challenge_beta[i].into(),
                 },
-                AB::Expr::ZERO,
+                local.is_present * local.is_valid,
             );
         }
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // TRANSCRIPT OBSERVATIONS
         ///////////////////////////////////////////////////////////////////////////////////////////
+
+        // The RISC-V label is observed before proof-shape preflight starts, but proof-shape owns
+        // the verifier transcript prefix that follows it.
+        for (tidx, value) in [(0usize, 1668508018u32), (1usize, 118u32)] {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: AB::Expr::from_usize(tidx),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_last,
+            );
+        }
+
+        let mut prefix_tidx = TranscriptLabel::Riscv.field_len();
+        for digest in local.vk_digest {
+            self.transcript_bus.observe_ext(
+                builder,
+                local.proof_idx,
+                AB::Expr::from_usize(prefix_tidx),
+                digest,
+                local.is_last,
+            );
+            prefix_tidx += D_EF;
+        }
+
+        let num_public_values = self
+            .per_air
+            .iter()
+            .map(|air_data| air_data.num_public_values)
+            .sum::<usize>();
+        prefix_tidx += num_public_values;
+
+        if self.has_fixed_commit {
+            for (didx, value) in local.fixed_commit.iter().enumerate() {
+                self.transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    TranscriptBusMessage {
+                        tidx: AB::Expr::from_usize(prefix_tidx + didx),
+                        value: (*value).into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_last,
+                );
+            }
+            prefix_tidx += DIGEST_SIZE;
+            self.transcript_bus.observe(
+                builder,
+                local.proof_idx,
+                AB::Expr::from_usize(prefix_tidx),
+                local.fixed_commit_log2_max_codeword_size,
+                local.is_last,
+            );
+            prefix_tidx += 1;
+        }
+
+        if self.has_fixed_no_omc_init_commit {
+            for (didx, value) in local.fixed_no_omc_init_commit.iter().enumerate() {
+                self.transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    TranscriptBusMessage {
+                        tidx: AB::Expr::from_usize(prefix_tidx + didx),
+                        value: (*value).into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_last,
+                );
+            }
+            prefix_tidx += DIGEST_SIZE;
+            self.transcript_bus.observe(
+                builder,
+                local.proof_idx,
+                AB::Expr::from_usize(prefix_tidx),
+                local.fixed_no_omc_init_commit_log2_max_codeword_size,
+                local.is_last,
+            );
+            prefix_tidx += 1;
+        }
+
+        for (didx, value) in local.witness_commit.iter().enumerate() {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: AB::Expr::from_usize(prefix_tidx + didx),
+                    value: (*value).into(),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_last,
+            );
+        }
+        prefix_tidx += DIGEST_SIZE;
+        self.transcript_bus.observe(
+            builder,
+            local.proof_idx,
+            AB::Expr::from_usize(prefix_tidx),
+            local.witness_commit_log2_max_codeword_size,
+            local.is_last,
+        );
+        prefix_tidx += 1;
+
+        self.transcript_bus.sample_ext(
+            builder,
+            local.proof_idx,
+            AB::Expr::from_usize(prefix_tidx),
+            local.lookup_challenge_alpha,
+            local.is_last,
+        );
+        prefix_tidx += D_EF;
+        self.transcript_bus.sample_ext(
+            builder,
+            local.proof_idx,
+            AB::Expr::from_usize(prefix_tidx),
+            local.lookup_challenge_beta,
+            local.is_last,
+        );
+
+        for i in 0..D_EF {
+            self.lookup_challenge_bus.add_key_with_lookups(
+                builder,
+                local.proof_idx,
+                LookupChallengeMessage {
+                    kind: AB::Expr::from_usize(LookupChallengeKind::Alpha.as_usize()),
+                    word_idx: AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_alpha[i].into(),
+                },
+                local.is_last * local.num_present,
+            );
+            self.lookup_challenge_bus.add_key_with_lookups(
+                builder,
+                local.proof_idx,
+                LookupChallengeMessage {
+                    kind: AB::Expr::from_usize(LookupChallengeKind::Beta.as_usize()),
+                    word_idx: AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_beta[i].into(),
+                },
+                local.is_last * local.num_present,
+            );
+        }
 
         self.starting_tidx_bus.receive(
             builder,
@@ -661,36 +813,17 @@ where
             local.is_present * local.is_valid,
         );
 
-        // Send n_max value to expression claim air
-        self.expression_claim_n_max_bus.send(
-            builder,
-            local.proof_idx,
-            ExpressionClaimNMaxMessage {
-                n_max: local.n_max.into(),
-            },
-            AB::Expr::ZERO,
+        // TODO(recursive-circuit-incremental): re-enable these exports once
+        // BatchConstraintModule is active and can consume them:
+        // - ExpressionClaimNMaxBus(n_max)
+        // - NLiftBus(air_idx, n_lift)
+        // - FractionFolderInputBus(num_present_airs)
+        let _ = (
+            &self.expression_claim_n_max_bus,
+            &self.n_lift_bus,
+            &self.fraction_folder_input_bus,
         );
-
-        // Send n_lift to constraint folding air
-        self.n_lift_bus.send(
-            builder,
-            local.proof_idx,
-            NLiftMessage {
-                air_idx: air_idx,
-                n_lift: local.log_height.into(),
-            },
-            AB::Expr::ZERO,
-        );
-
-        // Send count of present airs to fraction folder air
-        self.fraction_folder_input_bus.send(
-            builder,
-            local.proof_idx,
-            FractionFolderInputMessage {
-                num_present_airs: local.num_present,
-            },
-            AB::Expr::ZERO,
-        );
+        let _ = air_idx;
     }
 }
 
