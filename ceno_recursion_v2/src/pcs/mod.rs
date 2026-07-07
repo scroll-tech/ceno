@@ -9,10 +9,7 @@ use mpcs::{
     basefold::BasefoldSpec,
     jagged::{compute_q_at_assist_point, evaluate_g},
 };
-use multilinear_extensions::{
-    util::ceil_log2,
-    virtual_poly::{build_eq_x_r_vec, eq_eval},
-};
+use multilinear_extensions::{util::ceil_log2, virtual_poly::build_eq_x_r_vec};
 use openvm_circuit_primitives::utils::assert_array_eq;
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
@@ -43,27 +40,29 @@ use crate::{
     bus::{
         MainEvalBus, MainEvalMessage, MainGlobalPointBus, MainGlobalPointMessage,
         PcsBaseInputOpeningBus, PcsBaseInputOpeningMessage, PcsBasefoldEvalBus,
-        PcsBasefoldEvalMessage, PcsBasefoldQueryBus, PcsBasefoldQueryMessage,
-        PcsBasefoldQueryStage, PcsBatchAlphaBus, PcsBatchAlphaMessage, PcsBatchCoeffBus,
-        PcsBatchCoeffMessage, PcsCommitHeightBus, PcsCommitHeightMessage, PcsCommitPhaseLeafBus,
-        PcsCommitPhaseLeafMessage, PcsCommitmentRootBus, PcsCommitmentRootMessage, PcsEqProductBus,
-        PcsEqProductMessage, PcsFinalMessageBus, PcsFinalMessageMessage, PcsFoldChallengeBus,
-        PcsFoldChallengeMessage, PcsJaggedAssistHBus, PcsJaggedAssistHMessage, PcsJaggedAssistQBus,
-        PcsJaggedAssistQMessage, PcsJaggedFEvalBus, PcsJaggedFEvalMessage, PcsOpeningEvalBus,
-        PcsOpeningEvalMessage, PcsQuerySampleBus, PcsQuerySampleMessage, PcsSuffixProductBus,
-        PcsSuffixProductMessage, PcsSumcheckInputBus, PcsSumcheckInputMessage,
-        PcsSumcheckOutputBus, PcsSumcheckOutputMessage, PcsTranscriptExtBus,
-        PcsTranscriptExtMessage, TranscriptBus, TranscriptBusMessage,
+        PcsBasefoldEvalMessage, PcsBasefoldFinalExpectedBus, PcsBasefoldFinalExpectedMessage,
+        PcsBasefoldQueryBus, PcsBasefoldQueryMessage, PcsBasefoldQueryStage, PcsBatchAlphaBus,
+        PcsBatchAlphaMessage, PcsBatchCoeffBus, PcsBatchCoeffMessage, PcsCommitHeightBus,
+        PcsCommitHeightMessage, PcsCommitPhaseLeafBus, PcsCommitPhaseLeafMessage,
+        PcsCommitmentRootBus, PcsCommitmentRootMessage, PcsEqProductBus, PcsEqProductMessage,
+        PcsFinalMessageBus, PcsFinalMessageMessage, PcsFoldChallengeBus, PcsFoldChallengeMessage,
+        PcsJaggedAssistHBus, PcsJaggedAssistHMessage, PcsJaggedAssistQBus, PcsJaggedAssistQMessage,
+        PcsJaggedFEvalBus, PcsJaggedFEvalMessage, PcsOpeningEvalBus, PcsOpeningEvalMessage,
+        PcsQuerySampleBus, PcsQuerySampleMessage, PcsSuffixProductBus, PcsSuffixProductMessage,
+        PcsSumcheckInputBus, PcsSumcheckInputMessage, PcsSumcheckOutputBus,
+        PcsSumcheckOutputMessage, PcsTranscriptExtBus, PcsTranscriptExtMessage, TranscriptBus,
+        TranscriptBusMessage,
     },
     system::{
         AirModule, GlobalCtxCpu, PcsBaseInputLeafHashRecord, PcsBaseInputMerkleRecord,
         PcsBasefoldCommitPhaseQueryRecord, PcsBasefoldFinalClaimRecord,
-        PcsBasefoldFinalCodewordRecord, PcsBasefoldInitialClaimRecord, PcsBasefoldQueryIndexRecord,
-        PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord,
-        PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord, PcsEqProductKind, PcsEqProductRecord,
-        PcsEqProductSource, PcsJaggedAssistHRecord, PcsJaggedAssistInputRecord,
-        PcsJaggedAssistQRecord, PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord,
-        PcsOpeningCommitKind, PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSuffixProductRecord,
+        PcsBasefoldFinalCodewordRecord, PcsBasefoldFinalExpectedRecord,
+        PcsBasefoldInitialClaimRecord, PcsBasefoldQueryIndexRecord, PcsBasefoldQueryOpenRecord,
+        PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord, PcsCommitPhaseMerkleRecord,
+        PcsCommitmentRootRecord, PcsEqProductKind, PcsEqProductRecord, PcsEqProductSource,
+        PcsJaggedAssistHRecord, PcsJaggedAssistInputRecord, PcsJaggedAssistQRecord,
+        PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord, PcsOpeningCommitKind,
+        PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSuffixProductRecord,
         PcsSumcheckInputRecord, PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight,
         RecursionField, RecursionPcs, RecursionProof, RecursionVk, TraceGenModule,
     },
@@ -84,6 +83,7 @@ pub struct PcsModule {
     main_eval_bus: MainEvalBus,
     basefold_query_bus: PcsBasefoldQueryBus,
     basefold_eval_bus: PcsBasefoldEvalBus,
+    basefold_final_expected_bus: PcsBasefoldFinalExpectedBus,
     transcript_ext_bus: PcsTranscriptExtBus,
     base_input_opening_bus: PcsBaseInputOpeningBus,
     final_message_bus: PcsFinalMessageBus,
@@ -415,6 +415,109 @@ fn push_jagged_assist_q_records(
     q_acc
 }
 
+fn push_basefold_final_expected_records(
+    preflight: &mut Preflight,
+    rounds: &[BasefoldRound],
+    final_message: &[Vec<RecursionField>],
+    fold_challenges: &[RecursionField],
+    basecode_log: usize,
+    final_tidx: usize,
+) -> Result<RecursionField> {
+    let sumcheck_idx = 8_000_000;
+    let mut acc = RecursionField::ZERO;
+    let mut term_idx = preflight.pcs.basefold_final_expected.len();
+    let mut flat_message_idx = 0usize;
+    for (message_row, point) in final_message.iter().zip(
+        rounds
+            .iter()
+            .flat_map(|(_, point_evals)| point_evals.iter())
+            .filter(|(_, (point, _))| point.len() >= basecode_log)
+            .map(|(_, (point, _))| point),
+    ) {
+        let num_vars_evaluated = point.len() - basecode_log;
+        if num_vars_evaluated > fold_challenges.len() {
+            bail!("basefold final expected point exceeds fold challenge count");
+        }
+        for (elem_idx, final_value) in message_row.iter().copied().enumerate() {
+            let element_tidx = final_tidx + flat_message_idx * D_EF;
+            let mut coeff = RecursionField::ONE;
+            let start_term_idx = term_idx;
+            let factor_count = num_vars_evaluated + basecode_log;
+            for factor_idx in 0..factor_count {
+                let is_prefix = factor_idx < num_vars_evaluated;
+                let point_value = point[factor_idx];
+                let (has_challenge, challenge_round, challenge, bit_value, factor) = if is_prefix {
+                    let challenge_round = fold_challenges.len() - num_vars_evaluated + factor_idx;
+                    let challenge = fold_challenges[challenge_round];
+                    if let Some(record) = preflight.pcs.sumcheck_rounds.iter_mut().find(|record| {
+                        record.idx == sumcheck_idx && record.round == challenge_round
+                    }) {
+                        record.fold_challenge_lookup_count += 1;
+                    }
+                    let xi_yi = point_value * challenge;
+                    (
+                        true,
+                        challenge_round,
+                        challenge,
+                        false,
+                        xi_yi + xi_yi - point_value - challenge + RecursionField::ONE,
+                    )
+                } else {
+                    let bit_idx = factor_idx - num_vars_evaluated;
+                    let bit_value = ((elem_idx >> bit_idx) & 1) == 1;
+                    (
+                        false,
+                        0,
+                        RecursionField::ZERO,
+                        bit_value,
+                        if bit_value {
+                            point_value
+                        } else {
+                            RecursionField::ONE - point_value
+                        },
+                    )
+                };
+                let coeff_in = coeff;
+                coeff *= factor;
+                let is_elem_last = factor_idx + 1 == factor_count;
+                let acc_in = acc;
+                if is_elem_last {
+                    acc += coeff * final_value;
+                }
+                preflight
+                    .pcs
+                    .basefold_final_expected
+                    .push(PcsBasefoldFinalExpectedRecord {
+                        proof_idx: 0,
+                        sumcheck_idx,
+                        term_idx,
+                        final_tidx: element_tidx,
+                        is_first: term_idx == 0,
+                        is_last: false,
+                        is_elem_first: term_idx == start_term_idx,
+                        is_elem_last,
+                        has_challenge,
+                        challenge_round,
+                        point_value,
+                        bit_value,
+                        challenge,
+                        final_value,
+                        coeff_in,
+                        coeff_out: coeff,
+                        acc_in,
+                        acc_out: acc,
+                    });
+                term_idx += 1;
+            }
+            flat_message_idx += 1;
+        }
+    }
+    if let Some(last) = preflight.pcs.basefold_final_expected.last_mut() {
+        last.is_last = true;
+    }
+    Ok(acc)
+}
+
 impl PcsModule {
     pub fn new(bus_inventory: crate::system::BusInventory) -> Self {
         Self {
@@ -423,6 +526,7 @@ impl PcsModule {
             main_eval_bus: bus_inventory.main_eval_bus,
             basefold_query_bus: bus_inventory.pcs_basefold_query_bus,
             basefold_eval_bus: bus_inventory.pcs_basefold_eval_bus,
+            basefold_final_expected_bus: bus_inventory.pcs_basefold_final_expected_bus,
             transcript_ext_bus: bus_inventory.pcs_transcript_ext_bus,
             base_input_opening_bus: bus_inventory.pcs_base_input_opening_bus,
             final_message_bus: bus_inventory.pcs_final_message_bus,
@@ -1147,31 +1251,14 @@ impl PcsModule {
             max_num_var,
             final_tidx,
         )?;
-        let final_expected = proof
-            .final_message
-            .iter()
-            .zip(
-                rounds
-                    .iter()
-                    .flat_map(|(_, point_evals)| point_evals.iter())
-                    .filter(|(_, (point, _))| point.len() >= basecode_log)
-                    .map(|(_, (point, _))| point),
-            )
-            .map(|(final_message, point)| {
-                let num_vars_evaluated = point.len() - basecode_log;
-                let coeff = eq_eval(
-                    &point[..num_vars_evaluated],
-                    &fold_challenges[fold_challenges.len() - num_vars_evaluated..],
-                );
-                let eq = build_eq_x_r_vec(&point[num_vars_evaluated..]);
-                final_message
-                    .iter()
-                    .copied()
-                    .zip(eq.into_iter().map(|e| e * coeff))
-                    .map(|(a, b)| a * b)
-                    .sum::<RecursionField>()
-            })
-            .sum::<RecursionField>();
+        let final_expected = push_basefold_final_expected_records(
+            preflight,
+            rounds,
+            &proof.final_message,
+            &fold_challenges,
+            basecode_log,
+            final_tidx,
+        )?;
         preflight
             .pcs
             .basefold_final_claims
@@ -1187,7 +1274,7 @@ impl PcsModule {
 
 impl AirModule for PcsModule {
     fn num_airs(&self) -> usize {
-        25
+        26
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -1270,7 +1357,7 @@ impl AirModule for PcsModule {
                 transcript_ext_bus: self.transcript_ext_bus,
                 jagged_f_eval_bus: self.jagged_f_eval_bus,
                 final_message_lookup_count:
-                    <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries(),
+                    <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries() + 1,
             }) as AirRef<_>,
             Arc::new(PcsBasefoldInitialClaimAir {
                 basefold_eval_bus: self.basefold_eval_bus,
@@ -1310,8 +1397,14 @@ impl AirModule for PcsModule {
                 jagged_assist_h_bus: self.jagged_assist_h_bus,
                 jagged_assist_q_bus: self.jagged_assist_q_bus,
             }) as AirRef<_>,
+            Arc::new(PcsBasefoldFinalExpectedAir {
+                fold_challenge_bus: self.fold_challenge_bus,
+                final_message_bus: self.final_message_bus,
+                final_expected_bus: self.basefold_final_expected_bus,
+            }) as AirRef<_>,
             Arc::new(PcsBasefoldFinalClaimAir {
                 sumcheck_output_bus: self.sumcheck_output_bus,
+                final_expected_bus: self.basefold_final_expected_bus,
             }) as AirRef<_>,
         ]
     }
@@ -1528,6 +1621,22 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             })
             .collect_vec();
         jagged_assists.sort_by_key(|record| (record.proof_idx, record.round_idx));
+        let mut basefold_final_expected = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, p)| {
+                p.pcs
+                    .basefold_final_expected
+                    .iter()
+                    .cloned()
+                    .map(move |mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+            })
+            .collect_vec();
+        basefold_final_expected
+            .sort_by_key(|record| (record.proof_idx, record.sumcheck_idx, record.term_idx));
         let mut basefold_final_claims = preflights
             .iter()
             .enumerate()
@@ -1765,7 +1874,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 .iter()
                 .filter(|record| record.is_final_message)
                 .count()
-                * <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries();
+                * (<BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries() + 1);
             let query_sample_sends = transcript_values
                 .iter()
                 .filter(|record| record.is_query_sample)
@@ -1873,7 +1982,11 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 batch_coeff_sends,
                 basefold_initial_claims.len() + basefold_query_opens.len(),
                 final_message_sends,
-                basefold_final_codeword.len(),
+                basefold_final_codeword.len()
+                    + basefold_final_expected
+                        .iter()
+                        .filter(|record| record.is_elem_last)
+                        .count(),
                 query_sample_sends,
                 basefold_query_indices.len(),
                 sumcheck_input_sends,
@@ -2147,6 +2260,22 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                         .or_default() -= 1;
                 }
             }
+            for record in basefold_final_expected
+                .iter()
+                .filter(|record| record.has_challenge)
+            {
+                *fold_challenge_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.sumcheck_idx,
+                            record.challenge_round,
+                            record.challenge
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
             report_map("fold_challenge", &fold_challenge_map);
 
             let mut commit_height_map = std::collections::BTreeMap::<String, isize>::new();
@@ -2370,6 +2499,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             batch_coeffs: &batch_coeffs,
             jagged_q_evals: &jagged_q_evals,
             jagged_assists: &jagged_assists,
+            basefold_final_expected: &basefold_final_expected,
             basefold_final_claims: &basefold_final_claims,
         };
         [
@@ -2397,6 +2527,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             PcsModuleChip::BatchCoeff,
             PcsModuleChip::JaggedQEval,
             PcsModuleChip::JaggedAssist,
+            PcsModuleChip::BasefoldFinalExpected,
             PcsModuleChip::BasefoldFinalClaim,
         ]
         .into_iter()
@@ -5400,6 +5531,182 @@ where
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
+pub struct PcsBasefoldFinalExpectedCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub sumcheck_idx: T,
+    pub term_idx: T,
+    pub final_tidx: T,
+    pub is_first: T,
+    pub is_last: T,
+    pub is_elem_first: T,
+    pub is_elem_last: T,
+    pub has_challenge: T,
+    pub challenge_round: T,
+    pub point_value: [T; D_EF],
+    pub bit_value: T,
+    pub challenge: [T; D_EF],
+    pub final_value: [T; D_EF],
+    pub coeff_in: [T; D_EF],
+    pub coeff_out: [T; D_EF],
+    pub acc_in: [T; D_EF],
+    pub acc_out: [T; D_EF],
+}
+
+pub struct PcsBasefoldFinalExpectedAir {
+    pub fold_challenge_bus: PcsFoldChallengeBus,
+    pub final_message_bus: PcsFinalMessageBus,
+    pub final_expected_bus: PcsBasefoldFinalExpectedBus,
+}
+
+impl<F: Field> BaseAir<F> for PcsBasefoldFinalExpectedAir {
+    fn width(&self) -> usize {
+        PcsBasefoldFinalExpectedCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for PcsBasefoldFinalExpectedAir {}
+impl<F: Field> PartitionedBaseAir<F> for PcsBasefoldFinalExpectedAir {}
+
+impl<AB> Air<AB> for PcsBasefoldFinalExpectedAir
+where
+    AB: AirBuilder + InteractionBuilder,
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let next_row = main.row_slice(1).expect("next row exists");
+        let local: &PcsBasefoldFinalExpectedCols<AB::Var> = (*local_row).borrow();
+        let next: &PcsBasefoldFinalExpectedCols<AB::Var> = (*next_row).borrow();
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_first);
+        builder.assert_bool(local.is_last);
+        builder.assert_bool(local.is_elem_first);
+        builder.assert_bool(local.is_elem_last);
+        builder.assert_bool(local.has_challenge);
+        builder.assert_bool(local.bit_value);
+
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.acc_in,
+            [AB::Expr::ZERO; D_EF],
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_elem_first),
+            local.coeff_in,
+            [
+                AB::Expr::ONE,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+            ],
+        );
+
+        self.fold_challenge_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsFoldChallengeMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                round: local.challenge_round.into(),
+                challenge: local.challenge.map(Into::into),
+            },
+            local.is_enabled * local.has_challenge,
+        );
+
+        let point = local.point_value.map(Into::into);
+        let challenge = local.challenge.map(Into::into);
+        let xi_yi: [AB::Expr; D_EF] =
+            recursion_circuit::utils::ext_field_multiply(point.clone(), challenge.clone());
+        let prefix_factor: [AB::Expr; D_EF] = core::array::from_fn(|i| {
+            xi_yi[i].clone() + xi_yi[i].clone() - point[i].clone() - challenge[i].clone()
+                + if i == 0 {
+                    AB::Expr::ONE
+                } else {
+                    AB::Expr::ZERO
+                }
+        });
+        let suffix_one_minus: [AB::Expr; D_EF] = ext_sub(
+            [
+                AB::Expr::ONE,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+            ],
+            point.clone(),
+        );
+        let suffix_factor: [AB::Expr; D_EF] = core::array::from_fn(|i| {
+            local.bit_value.into() * point[i].clone()
+                + (AB::Expr::ONE - local.bit_value.into()) * suffix_one_minus[i].clone()
+        });
+        let factor: [AB::Expr; D_EF] = core::array::from_fn(|i| {
+            local.has_challenge.into() * prefix_factor[i].clone()
+                + (AB::Expr::ONE - local.has_challenge.into()) * suffix_factor[i].clone()
+        });
+        let coeff_out = recursion_circuit::utils::ext_field_multiply(local.coeff_in, factor);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.coeff_out,
+            coeff_out,
+        );
+
+        self.final_message_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsFinalMessageMessage {
+                tidx: local.final_tidx.into(),
+                value: local.final_value.map(Into::into),
+            },
+            local.is_enabled * local.is_elem_last,
+        );
+        let contribution =
+            recursion_circuit::utils::ext_field_multiply(local.coeff_out, local.final_value);
+        let expected_acc: [AB::Expr; D_EF] = core::array::from_fn(|i| {
+            local.acc_in[i].into() + local.is_elem_last.into() * contribution[i].clone()
+        });
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.acc_out,
+            expected_acc,
+        );
+
+        let continue_selector = local.is_enabled * (AB::Expr::ONE - local.is_last.into());
+        builder
+            .when(continue_selector.clone())
+            .assert_one(next.is_enabled);
+        builder
+            .when(continue_selector.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when(continue_selector.clone())
+            .assert_eq(next.sumcheck_idx, local.sumcheck_idx);
+        builder
+            .when(continue_selector.clone())
+            .assert_eq(next.term_idx, local.term_idx + AB::Expr::ONE);
+        assert_array_eq(
+            &mut builder.when(continue_selector.clone()),
+            next.acc_in,
+            local.acc_out.map(Into::into),
+        );
+        assert_array_eq(
+            &mut builder.when(continue_selector * (AB::Expr::ONE - next.is_elem_first.into())),
+            next.coeff_in,
+            local.coeff_out.map(Into::into),
+        );
+        self.final_expected_bus.send(
+            builder,
+            local.proof_idx,
+            PcsBasefoldFinalExpectedMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                expected: local.acc_out.map(Into::into),
+            },
+            local.is_enabled * local.is_last,
+        );
+    }
+}
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
 pub struct PcsBasefoldFinalClaimCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
@@ -5410,6 +5717,7 @@ pub struct PcsBasefoldFinalClaimCols<T> {
 
 pub struct PcsBasefoldFinalClaimAir {
     pub sumcheck_output_bus: PcsSumcheckOutputBus,
+    pub final_expected_bus: PcsBasefoldFinalExpectedBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsBasefoldFinalClaimAir {
@@ -5445,6 +5753,15 @@ where
             },
             local.is_enabled,
         );
+        self.final_expected_bus.receive(
+            builder,
+            local.proof_idx,
+            PcsBasefoldFinalExpectedMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                expected: local.expected.map(Into::into),
+            },
+            local.is_enabled,
+        );
     }
 }
 
@@ -5473,6 +5790,7 @@ struct PcsTraceCtx<'a> {
     batch_coeffs: &'a [PcsBatchCoeffRecord],
     jagged_q_evals: &'a [PcsJaggedQEvalRecord],
     jagged_assists: &'a [PcsJaggedAssistRecord],
+    basefold_final_expected: &'a [PcsBasefoldFinalExpectedRecord],
     basefold_final_claims: &'a [PcsBasefoldFinalClaimRecord],
 }
 
@@ -5501,6 +5819,7 @@ enum PcsModuleChip {
     BatchCoeff,
     JaggedQEval,
     JaggedAssist,
+    BasefoldFinalExpected,
     BasefoldFinalClaim,
 }
 
@@ -5573,6 +5892,8 @@ impl RowMajorChip<F> for PcsModuleChip {
             PcsModuleChip::JaggedAssist => {
                 PcsJaggedAssistTraceGenerator.generate_trace(&ctx.jagged_assists, required_height)
             }
+            PcsModuleChip::BasefoldFinalExpected => PcsBasefoldFinalExpectedTraceGenerator
+                .generate_trace(&ctx.basefold_final_expected, required_height),
             PcsModuleChip::BasefoldFinalClaim => PcsBasefoldFinalClaimTraceGenerator
                 .generate_trace(&ctx.basefold_final_claims, required_height),
         }
@@ -5590,6 +5911,7 @@ struct PcsEqProductTraceGenerator;
 struct PcsSuffixProductTraceGenerator;
 struct PcsJaggedAssistHTraceGenerator;
 struct PcsJaggedAssistQTraceGenerator;
+struct PcsBasefoldFinalExpectedTraceGenerator;
 struct PcsBasefoldQueryIndexTraceGenerator;
 struct PcsBasefoldQueryOpenTraceGenerator;
 struct PcsBasefoldCommitPhaseQueryTraceGenerator;
@@ -6092,6 +6414,44 @@ impl RowMajorChip<F> for PcsBasefoldFinalCodewordTraceGenerator {
             cols.acc_in = ext_limbs(record.acc_in);
             cols.acc_out = ext_limbs(record.acc_out);
             cols.folded = ext_limbs(record.folded);
+        }
+        Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+impl RowMajorChip<F> for PcsBasefoldFinalExpectedTraceGenerator {
+    type Ctx<'a> = &'a [PcsBasefoldFinalExpectedRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let width = PcsBasefoldFinalExpectedCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let mut trace = vec![F::ZERO; height * width];
+        for (row_idx, record) in records.iter().enumerate() {
+            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
+            let cols: &mut PcsBasefoldFinalExpectedCols<F> = row.borrow_mut();
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+            cols.term_idx = F::from_usize(record.term_idx);
+            cols.final_tidx = F::from_usize(record.final_tidx);
+            cols.is_first = F::from_bool(record.is_first);
+            cols.is_last = F::from_bool(record.is_last);
+            cols.is_elem_first = F::from_bool(record.is_elem_first);
+            cols.is_elem_last = F::from_bool(record.is_elem_last);
+            cols.has_challenge = F::from_bool(record.has_challenge);
+            cols.challenge_round = F::from_usize(record.challenge_round);
+            cols.point_value = ext_limbs(record.point_value);
+            cols.bit_value = F::from_bool(record.bit_value);
+            cols.challenge = ext_limbs(record.challenge);
+            cols.final_value = ext_limbs(record.final_value);
+            cols.coeff_in = ext_limbs(record.coeff_in);
+            cols.coeff_out = ext_limbs(record.coeff_out);
+            cols.acc_in = ext_limbs(record.acc_in);
+            cols.acc_out = ext_limbs(record.acc_out);
         }
         Some(RowMajorMatrix::new(trace, width))
     }

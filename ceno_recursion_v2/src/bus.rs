@@ -382,6 +382,18 @@ define_typed_per_proof_permutation_bus!(PcsSumcheckOutputBus, PcsSumcheckOutputM
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsBasefoldFinalExpectedMessage<T> {
+    pub sumcheck_idx: T,
+    pub expected: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(
+    PcsBasefoldFinalExpectedBus,
+    PcsBasefoldFinalExpectedMessage
+);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct PcsFoldChallengeMessage<T> {
     pub sumcheck_idx: T,
     pub round: T,
