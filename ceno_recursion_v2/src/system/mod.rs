@@ -26,6 +26,8 @@ pub use recursion_circuit::system::{
     VerifierExternalData,
 };
 mod bus_inventory;
+#[cfg(all(test, feature = "cuda"))]
+mod cuda_tracegen_tests;
 pub mod utils;
 
 pub use bus_inventory::BusInventory;
@@ -306,6 +308,206 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::Pcs(module) => {
                 module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
             }
+        }
+    }
+}
+
+#[cfg(feature = "cuda")]
+mod cuda_tracegen {
+    use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
+
+    use super::*;
+    use crate::cuda::{GlobalCtxGpu, PreflightGpu, ProofGpu, VerifyingKeyGpu};
+
+    impl<'a> TraceModuleRef<'a> {
+        #[allow(clippy::too_many_arguments)]
+        #[tracing::instrument(name = "wrapper.generate_proving_ctxs", level = "trace", skip_all)]
+        fn generate_gpu_ctxs(
+            self,
+            child_vk: &VerifyingKeyGpu,
+            proofs: &[ProofGpu],
+            preflights: &[PreflightGpu],
+            pow_checker_gen: &Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
+            exp_bits_len_gen: &ExpBitsLenTraceGenerator,
+            external_data: &VerifierExternalData<'_>,
+            required_heights: Option<&[usize]>,
+        ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
+            match self {
+                TraceModuleRef::Transcript(module) => module.generate_proving_ctxs(
+                    child_vk,
+                    proofs,
+                    preflights,
+                    &(
+                        external_data.poseidon2_permute_inputs.as_slice(),
+                        external_data.poseidon2_compress_inputs.as_slice(),
+                    ),
+                    required_heights,
+                ),
+                TraceModuleRef::ProofShape(module) => {
+                    let mut range_check_inputs = external_data.range_check_inputs.to_vec();
+                    let proofs_cpu = proofs
+                        .iter()
+                        .map(|proof| proof.cpu.clone())
+                        .collect::<Vec<_>>();
+                    let preflights_cpu = preflights
+                        .iter()
+                        .map(|preflight| preflight.cpu.clone())
+                        .collect::<Vec<_>>();
+                    range_check_inputs.extend(
+                        crate::tower::collect_tower_range_checks(
+                            &child_vk.cpu,
+                            &proofs_cpu,
+                            &preflights_cpu,
+                        )
+                        .ok()?,
+                    );
+                    module.generate_proving_ctxs(
+                        child_vk,
+                        proofs,
+                        preflights,
+                        &(pow_checker_gen.clone(), range_check_inputs.as_slice()),
+                        required_heights,
+                    )
+                }
+                TraceModuleRef::Tower(module) => module.generate_proving_ctxs(
+                    child_vk,
+                    proofs,
+                    preflights,
+                    exp_bits_len_gen,
+                    required_heights,
+                ),
+                TraceModuleRef::Main(module) => module.generate_proving_ctxs(
+                    child_vk,
+                    proofs,
+                    preflights,
+                    &(),
+                    required_heights,
+                ),
+                TraceModuleRef::BatchConstraint(module) => module.generate_proving_ctxs(
+                    child_vk,
+                    proofs,
+                    preflights,
+                    &(),
+                    required_heights,
+                ),
+            }
+        }
+    }
+
+    impl<const MAX_NUM_PROOFS: usize> VerifierTraceGen<GpuBackend, BabyBearPoseidon2Config>
+        for VerifierSubCircuit<MAX_NUM_PROOFS>
+    {
+        fn new(child_vk: Arc<RecursionVk>, config: VerifierConfig) -> Self {
+            Self::new_with_options(child_vk, config)
+        }
+
+        fn commit_child_vk<E: StarkEngine<SC = BabyBearPoseidon2Config, PB = GpuBackend>>(
+            &self,
+            engine: &E,
+            child_vk: &RecursionVk,
+        ) -> Option<CommittedTraceData<GpuBackend>> {
+            let _ = (self, engine, child_vk);
+            None
+        }
+
+        #[tracing::instrument(name = "subcircuit_generate_proving_ctxs", skip_all)]
+        fn generate_proving_ctxs<
+            TS: FiatShamirTranscript<BabyBearPoseidon2Config>
+                + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>
+                + From<Poseidon2BabyBear<POSEIDON2_WIDTH>>,
+        >(
+            &self,
+            child_vk: &RecursionVk,
+            child_vk_pcs_data: Option<CommittedTraceData<GpuBackend>>,
+            proofs: &[RecursionProof],
+            external_data: &mut VerifierExternalData<'_>,
+            initial_transcripts: Vec<TS>,
+        ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
+            let _ = child_vk_pcs_data;
+            debug_assert!(proofs.len() <= MAX_NUM_PROOFS);
+            if initial_transcripts.len() != proofs.len() {
+                return None;
+            }
+
+            let span = Span::current();
+            let preflights_cpu = std::thread::scope(|s| {
+                let handles: Vec<_> = proofs
+                    .iter()
+                    .zip(initial_transcripts)
+                    .map(|(zk_proof, sponge)| {
+                        let span = span.clone();
+                        s.spawn(move || {
+                            let _guard = span.enter();
+                            self.run_preflight(sponge, child_vk, zk_proof)
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap())
+                    .collect::<Vec<_>>()
+            });
+
+            if let Some(final_transcript_state) = &mut external_data.final_transcript_state {
+                final_transcript_state.fill(F::ZERO);
+            }
+
+            let child_vk_gpu = VerifyingKeyGpu::new(child_vk);
+            let proofs_gpu = proofs
+                .iter()
+                .map(|proof| ProofGpu::new(child_vk, proof))
+                .collect::<Vec<_>>();
+            let preflights_gpu = proofs
+                .iter()
+                .zip(preflights_cpu.iter())
+                .map(|(proof, preflight)| PreflightGpu::new(child_vk, proof, preflight))
+                .collect::<Vec<_>>();
+
+            let power_checker_gen =
+                Arc::new(PowerCheckerCpuTraceGenerator::<2, POW_CHECKER_HEIGHT>::default());
+            let exp_bits_len_gen = ExpBitsLenTraceGenerator::default();
+
+            let (module_required, power_checker_required, exp_bits_len_required) =
+                self.split_required_heights(external_data.required_heights);
+            let modules = vec![
+                TraceModuleRef::Transcript(&self.transcript),
+                TraceModuleRef::ProofShape(&self.proof_shape),
+                TraceModuleRef::Tower(&self.gkr),
+                TraceModuleRef::Main(&self.main_module),
+                TraceModuleRef::BatchConstraint(&self.batch_constraint),
+            ];
+
+            let mut ctxs_by_module = Vec::with_capacity(modules.len());
+            for (module, required_heights) in modules.into_iter().zip(module_required) {
+                let Some(module_ctxs) = module.generate_gpu_ctxs(
+                    &child_vk_gpu,
+                    &proofs_gpu,
+                    &preflights_gpu,
+                    &power_checker_gen,
+                    &exp_bits_len_gen,
+                    external_data,
+                    required_heights,
+                ) else {
+                    tracing::debug!(
+                        module = module.name(),
+                        "module GPU trace generation returned no contexts"
+                    );
+                    return None;
+                };
+                ctxs_by_module.push(module_ctxs);
+            }
+
+            let mut ctx_per_trace = ctxs_by_module.into_iter().flatten().collect::<Vec<_>>();
+            if power_checker_required.is_some_and(|h| h != POW_CHECKER_HEIGHT) {
+                return None;
+            }
+            let _ = power_checker_required;
+
+            let exp_bits_trace = exp_bits_len_gen.generate_trace_row_major(exp_bits_len_required)?;
+            ctx_per_trace.push(AirProvingContext::simple_no_pis(
+                transport_matrix_h2d_row(&exp_bits_trace).ok()?,
+            ));
+            Some(ctx_per_trace)
         }
     }
 }

@@ -191,3 +191,74 @@ impl RowMajorChip<F> for BatchConstraintModuleChip {
         }
     }
 }
+
+#[cfg(feature = "cuda")]
+mod cuda_tracegen {
+    use openvm_cuda_backend::GpuBackend;
+
+    use super::*;
+    use crate::{
+        cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
+        tracegen::cuda::generate_gpu_proving_ctx,
+    };
+
+    impl TraceGenModule<GlobalCtxGpu, GpuBackend> for BatchConstraintModule {
+        type ModuleSpecificCtx<'a> = ();
+
+        #[tracing::instrument(skip_all)]
+        fn generate_proving_ctxs(
+            &self,
+            child_vk: &VerifyingKeyGpu,
+            proofs: &[ProofGpu],
+            preflights: &[PreflightGpu],
+            _ctx: &Self::ModuleSpecificCtx<'_>,
+            required_heights: Option<&[usize]>,
+        ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
+            let proofs_cpu = proofs
+                .iter()
+                .map(|proof| proof.cpu.clone())
+                .collect::<Vec<_>>();
+            let preflights_cpu = preflights
+                .iter()
+                .map(|preflight| preflight.cpu.clone())
+                .collect::<Vec<_>>();
+            let mut records =
+                MainModule::collect_records(&child_vk.cpu, &proofs_cpu, &preflights_cpu).ok()?;
+            records
+                .global_sumcheck_records
+                .sort_by_key(|record| record.proof_idx);
+            records
+                .eval_records
+                .sort_by_key(|record| (record.proof_idx, record.idx, record.eval_idx));
+            records
+                .tower_point_eq_records
+                .sort_by_key(|record| (record.proof_idx, record.idx, record.round_idx));
+            records
+                .frontload_term_records
+                .sort_by_key(|record| (record.proof_idx, record.idx, record.row_idx));
+            records
+                .final_claim_records
+                .sort_by_key(|record| (record.proof_idx, record.idx));
+
+            let ctx = BatchConstraintTraceCtx { records: &records };
+            let chips = [
+                BatchConstraintModuleChip::GlobalSumcheck,
+                BatchConstraintModuleChip::EvalAbsorb,
+                BatchConstraintModuleChip::TowerPointEq,
+                BatchConstraintModuleChip::FrontloadTerm,
+                BatchConstraintModuleChip::FinalClaim,
+            ];
+            chips
+                .iter()
+                .enumerate()
+                .map(|(idx, chip)| {
+                    generate_gpu_proving_ctx(
+                        chip,
+                        &ctx,
+                        required_heights.and_then(|heights| heights.get(idx).copied()),
+                    )
+                })
+                .collect()
+        }
+    }
+}

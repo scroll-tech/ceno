@@ -606,15 +606,19 @@ impl RowMajorChip<F> for ProofShapeModuleChip {
 
 #[cfg(feature = "cuda")]
 mod cuda_tracegen {
-    use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix};
+    use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
 
     use super::*;
     use crate::cuda::{
         GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu,
     };
+    use recursion_circuit::primitives::range::RangeCheckerCpuTraceGenerator;
 
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for ProofShapeModule {
-        type ModuleSpecificCtx<'a> = ();
+        type ModuleSpecificCtx<'a> = (
+            Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
+            &'a [usize],
+        );
 
         #[tracing::instrument(skip_all)]
         fn generate_proving_ctxs(
@@ -622,32 +626,53 @@ mod cuda_tracegen {
             child_vk: &VerifyingKeyGpu,
             proofs: &[ProofGpu],
             preflights: &[PreflightGpu],
-            _ctx: &<Self as TraceGenModule<GlobalCtxGpu, GpuBackend>>::ModuleSpecificCtx<'_>,
+            ctx: &<Self as TraceGenModule<GlobalCtxGpu, GpuBackend>>::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
-            let _ = (child_vk, proofs, preflights);
-            let widths = self.placeholder_air_widths();
-            let air_count = required_heights
-                .map(|heights| heights.len())
-                .unwrap_or_else(|| self.num_airs());
-            Some(
-                (0..air_count)
-                    .map(|idx| {
-                        let height = required_heights
-                            .and_then(|heights| heights.get(idx).copied())
-                            .unwrap_or(1);
-                        let width = widths.get(idx).copied().unwrap_or(1);
-                        zero_gpu_ctx(height, width)
-                    })
-                    .collect(),
-            )
-        }
-    }
+            let pow_checker = &ctx.0;
+            let external_range_checks = ctx.1;
+            let proofs_cpu = proofs
+                .iter()
+                .map(|proof| proof.cpu.clone())
+                .collect::<Vec<_>>();
+            let preflights_cpu = preflights
+                .iter()
+                .map(|preflight| preflight.cpu.clone())
+                .collect::<Vec<_>>();
 
-    fn zero_gpu_ctx(height: usize, width: usize) -> AirProvingContext<GpuBackend> {
-        let rows = height.max(1);
-        let cols = width.max(1);
-        let trace = DeviceMatrix::with_capacity(rows, cols);
-        AirProvingContext::simple_no_pis(trace)
+            let range_checker = Arc::new(RangeCheckerCpuTraceGenerator::<8>::default());
+            let proof_shape = proof_shape::ProofShapeChip::<4, 8>::new(
+                self.idx_encoder.clone(),
+                Arc::new(self.per_air.clone()),
+                range_checker.clone(),
+                pow_checker.clone(),
+            );
+            let chips = [
+                ProofShapeModuleChip::ProofShape(proof_shape),
+                ProofShapeModuleChip::PublicValues,
+            ];
+            let cpu_ctx = (&child_vk.cpu, proofs_cpu.as_slice(), preflights_cpu.as_slice());
+            let mut ctxs = chips
+                .iter()
+                .map(|chip| {
+                    let trace = chip.generate_trace(
+                        &cpu_ctx,
+                        required_heights.and_then(|heights| heights.get(chip.index()).copied()),
+                    )?;
+                    Some(AirProvingContext::simple_no_pis(
+                        transport_matrix_h2d_row(&trace).ok()?,
+                    ))
+                })
+                .collect::<Option<Vec<_>>>()?;
+
+            for &value in external_range_checks {
+                range_checker.add_count(value);
+            }
+            let range_trace = range_checker.generate_trace_row_major();
+            ctxs.push(AirProvingContext::simple_no_pis(
+                transport_matrix_h2d_row(&range_trace).ok()?,
+            ));
+            Some(ctxs)
+        }
     }
 }
