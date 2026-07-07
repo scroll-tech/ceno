@@ -42,21 +42,24 @@ use sumcheck::util::extrapolate_uni_poly;
 use crate::{
     bus::{
         MainEvalBus, MainEvalMessage, MainGlobalPointBus, MainGlobalPointMessage,
-        PcsBaseInputOpeningBus, PcsBaseInputOpeningMessage, PcsBasefoldQueryBus,
-        PcsBasefoldQueryMessage, PcsBasefoldQueryStage, PcsBatchAlphaBus, PcsBatchAlphaMessage,
-        PcsBatchCoeffBus, PcsBatchCoeffMessage, PcsCommitPhaseLeafBus, PcsCommitPhaseLeafMessage,
+        PcsBaseInputOpeningBus, PcsBaseInputOpeningMessage, PcsBasefoldEvalBus,
+        PcsBasefoldEvalMessage, PcsBasefoldQueryBus, PcsBasefoldQueryMessage,
+        PcsBasefoldQueryStage, PcsBatchAlphaBus, PcsBatchAlphaMessage, PcsBatchCoeffBus,
+        PcsBatchCoeffMessage, PcsCommitPhaseLeafBus, PcsCommitPhaseLeafMessage,
         PcsCommitmentRootBus, PcsCommitmentRootMessage, PcsFinalMessageBus, PcsFinalMessageMessage,
         PcsFoldChallengeBus, PcsFoldChallengeMessage, PcsQuerySampleBus, PcsQuerySampleMessage,
-        PcsSumcheckClaimBus, PcsSumcheckClaimMessage, TranscriptBus, TranscriptBusMessage,
+        PcsSumcheckInputBus, PcsSumcheckInputMessage, PcsSumcheckOutputBus,
+        PcsSumcheckOutputMessage, TranscriptBus, TranscriptBusMessage,
     },
     system::{
         AirModule, GlobalCtxCpu, PcsBaseInputLeafHashRecord, PcsBaseInputMerkleRecord,
         PcsBasefoldCommitPhaseQueryRecord, PcsBasefoldFinalClaimRecord,
-        PcsBasefoldFinalCodewordRecord, PcsBasefoldQueryIndexRecord, PcsBasefoldQueryOpenRecord,
-        PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord, PcsCommitPhaseMerkleRecord,
-        PcsCommitmentRootRecord, PcsJaggedAssistRecord, PcsJaggedQEvalRecord, PcsOpeningEvalRecord,
-        PcsOpeningPointRecord, PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight,
-        RecursionField, RecursionPcs, RecursionProof, RecursionVk, TraceGenModule,
+        PcsBasefoldFinalCodewordRecord, PcsBasefoldInitialClaimRecord, PcsBasefoldQueryIndexRecord,
+        PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord,
+        PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord, PcsJaggedAssistRecord,
+        PcsJaggedQEvalRecord, PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSumcheckInputRecord,
+        PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight, RecursionField, RecursionPcs,
+        RecursionProof, RecursionVk, TraceGenModule,
     },
     tracegen::{ModuleChip, RowMajorChip},
     utils::digests_to_poseidon2_input,
@@ -74,12 +77,14 @@ pub struct PcsModule {
     main_global_point_bus: MainGlobalPointBus,
     main_eval_bus: MainEvalBus,
     basefold_query_bus: PcsBasefoldQueryBus,
+    basefold_eval_bus: PcsBasefoldEvalBus,
     base_input_opening_bus: PcsBaseInputOpeningBus,
     final_message_bus: PcsFinalMessageBus,
     query_sample_bus: PcsQuerySampleBus,
     commitment_root_bus: PcsCommitmentRootBus,
     commit_phase_leaf_bus: PcsCommitPhaseLeafBus,
-    sumcheck_claim_bus: PcsSumcheckClaimBus,
+    sumcheck_input_bus: PcsSumcheckInputBus,
+    sumcheck_output_bus: PcsSumcheckOutputBus,
     fold_challenge_bus: PcsFoldChallengeBus,
     batch_coeff_bus: PcsBatchCoeffBus,
     batch_alpha_bus: PcsBatchAlphaBus,
@@ -104,6 +109,13 @@ pub(crate) fn collect_pcs_range_checks(preflights: &[Preflight]) -> Vec<usize> {
         .collect()
 }
 
+type BasefoldOpeningEvals = Vec<(RecursionField, usize)>;
+type BasefoldOpening = (usize, (Vec<RecursionField>, BasefoldOpeningEvals));
+type BasefoldRound = (
+    mpcs::basefold::BasefoldCommitment<RecursionField>,
+    Vec<BasefoldOpening>,
+);
+
 impl PcsModule {
     pub fn new(bus_inventory: crate::system::BusInventory) -> Self {
         Self {
@@ -111,12 +123,14 @@ impl PcsModule {
             main_global_point_bus: bus_inventory.main_global_point_bus,
             main_eval_bus: bus_inventory.main_eval_bus,
             basefold_query_bus: bus_inventory.pcs_basefold_query_bus,
+            basefold_eval_bus: bus_inventory.pcs_basefold_eval_bus,
             base_input_opening_bus: bus_inventory.pcs_base_input_opening_bus,
             final_message_bus: bus_inventory.pcs_final_message_bus,
             query_sample_bus: bus_inventory.pcs_query_sample_bus,
             commitment_root_bus: bus_inventory.pcs_commitment_root_bus,
             commit_phase_leaf_bus: bus_inventory.pcs_commit_phase_leaf_bus,
-            sumcheck_claim_bus: bus_inventory.pcs_sumcheck_claim_bus,
+            sumcheck_input_bus: bus_inventory.pcs_sumcheck_input_bus,
+            sumcheck_output_bus: bus_inventory.pcs_sumcheck_output_bus,
             fold_challenge_bus: bus_inventory.pcs_fold_challenge_bus,
             batch_coeff_bus: bus_inventory.pcs_batch_coeff_bus,
             batch_alpha_bus: bus_inventory.pcs_batch_alpha_bus,
@@ -262,7 +276,7 @@ impl PcsModule {
         ts: &mut TS,
     ) -> Result<(
         mpcs::basefold::BasefoldCommitment<RecursionField>,
-        Vec<(usize, (Vec<RecursionField>, Vec<RecursionField>))>,
+        Vec<BasefoldOpening>,
     )>
     where
         TS: FiatShamirTranscript<BabyBearPoseidon2Config>
@@ -295,6 +309,7 @@ impl PcsModule {
                     is_final_message: false,
                     is_query_sample: false,
                     is_batch_alpha: false,
+                    is_basefold_eval: false,
                 });
         }
         let num_col_vars = ceil_log2(num_polys).max(1);
@@ -356,6 +371,7 @@ impl PcsModule {
                     is_final_message: false,
                     is_query_sample: false,
                     is_batch_alpha: false,
+                    is_basefold_eval: true,
                 });
         }
         let f_tidx = ts.len();
@@ -373,6 +389,7 @@ impl PcsModule {
                 is_final_message: false,
                 is_query_sample: false,
                 is_batch_alpha: false,
+                is_basefold_eval: false,
             });
         preflight.pcs.jagged_q_evals.push(PcsJaggedQEvalRecord {
             proof_idx: 0,
@@ -412,16 +429,13 @@ impl PcsModule {
 
         Ok((
             comm.inner.clone(),
-            inner_verify_openings_for_col_evals(log_h, rho_row, &proof.col_evals),
+            inner_verify_openings_for_col_evals(log_h, rho_row, &proof.col_evals, col_tidx),
         ))
     }
 
     fn replay_basefold<TS>(
         &self,
-        rounds: &[(
-            mpcs::basefold::BasefoldCommitment<RecursionField>,
-            Vec<(usize, (Vec<RecursionField>, Vec<RecursionField>))>,
-        )],
+        rounds: &[BasefoldRound],
         proof: &mpcs::basefold::structure::BasefoldProof<RecursionField>,
         preflight: &mut Preflight,
         ts: &mut TS,
@@ -454,23 +468,47 @@ impl PcsModule {
         if sumcheck_messages.len() != num_rounds || proof.commits.len() != num_rounds {
             bail!("basefold round count mismatch");
         }
-        let mut batch_coeffs_iter = batch_coeffs.iter();
+        let mut batch_coeffs_iter = batch_coeffs.iter().copied().enumerate();
         let mut expected_sum = RecursionField::ZERO;
+        let mut term_idx = 0usize;
         for (_, openings) in rounds {
             for (num_var, (_, evals)) in openings
                 .iter()
                 .filter(|(num_var, _)| *num_var >= basecode_log)
             {
-                expected_sum += evals
-                    .iter()
-                    .zip(batch_coeffs_iter.by_ref().take(evals.len()))
-                    .map(|(eval, coeff)| {
-                        *coeff
-                            * *eval
-                            * RecursionField::from(F::from_usize(1 << (max_num_var - num_var)))
-                    })
-                    .sum::<RecursionField>();
+                let scale = RecursionField::from(F::from_usize(1 << (max_num_var - num_var)));
+                for (eval, eval_tidx) in evals {
+                    let (global_coeff_idx, coeff) = batch_coeffs_iter
+                        .next()
+                        .ok_or_else(|| eyre::eyre!("basefold missing batch coefficient"))?;
+                    if let Some(record) = preflight.pcs.batch_coeffs.get_mut(global_coeff_idx) {
+                        record.lookup_count += 1;
+                    }
+                    let acc_in = expected_sum;
+                    expected_sum += coeff * *eval * scale;
+                    preflight
+                        .pcs
+                        .basefold_initial_claims
+                        .push(PcsBasefoldInitialClaimRecord {
+                            proof_idx: 0,
+                            sumcheck_idx: 8_000_000,
+                            term_idx,
+                            is_first: term_idx == 0,
+                            is_last: false,
+                            global_coeff_idx,
+                            eval_tidx: *eval_tidx,
+                            eval: *eval,
+                            coeff,
+                            scale,
+                            acc_in,
+                            acc_out: expected_sum,
+                        });
+                    term_idx += 1;
+                }
             }
+        }
+        if let Some(last) = preflight.pcs.basefold_initial_claims.last_mut() {
+            last.is_last = true;
         }
 
         let mut fold_challenges = Vec::with_capacity(num_rounds);
@@ -505,7 +543,6 @@ impl PcsModule {
                 claim_in: current_claim,
                 claim_out,
                 challenge,
-                expected: RecursionField::ZERO,
                 fold_challenge_lookup_count:
                     <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries(),
             });
@@ -516,10 +553,6 @@ impl PcsModule {
                 preflight,
                 3_700_000 + round * 100,
             );
-        }
-        let basefold_sumcheck_start = preflight.pcs.sumcheck_rounds.len() - num_rounds;
-        for record in &mut preflight.pcs.sumcheck_rounds[basefold_sumcheck_start..] {
-            record.expected = current_claim;
         }
         let final_tidx = ts.len();
         for value in proof.final_message.iter().flatten().copied() {
@@ -539,6 +572,7 @@ impl PcsModule {
                     is_final_message: true,
                     is_query_sample: false,
                     is_batch_alpha: false,
+                    is_basefold_eval: false,
                 });
         }
         let pow_bits = child_pow_bits();
@@ -622,7 +656,7 @@ impl PcsModule {
 
 impl AirModule for PcsModule {
     fn num_airs(&self) -> usize {
-        17
+        19
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -680,28 +714,36 @@ impl AirModule for PcsModule {
                 final_message_bus: self.final_message_bus,
                 query_sample_bus: self.query_sample_bus,
                 batch_alpha_bus: self.batch_alpha_bus,
+                basefold_eval_bus: self.basefold_eval_bus,
                 final_message_lookup_count:
                     <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries(),
             }) as AirRef<_>,
+            Arc::new(PcsBasefoldInitialClaimAir {
+                basefold_eval_bus: self.basefold_eval_bus,
+                batch_coeff_bus: self.batch_coeff_bus,
+                sumcheck_input_bus: self.sumcheck_input_bus,
+            }) as AirRef<_>,
+            Arc::new(PcsSumcheckInputAir {
+                sumcheck_input_bus: self.sumcheck_input_bus,
+            }) as AirRef<_>,
             Arc::new(PcsSumcheckAir {
+                sumcheck_input_bus: self.sumcheck_input_bus,
                 transcript_bus: self.transcript_bus,
-                sumcheck_claim_bus: self.sumcheck_claim_bus,
+                sumcheck_output_bus: self.sumcheck_output_bus,
                 fold_challenge_bus: self.fold_challenge_bus,
             }) as AirRef<_>,
             Arc::new(PcsBatchCoeffAir {
                 batch_alpha_bus: self.batch_alpha_bus,
                 batch_coeff_bus: self.batch_coeff_bus,
-                coeff_lookup_count:
-                    <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries(),
             }) as AirRef<_>,
             Arc::new(PcsJaggedQEvalAir {
-                sumcheck_claim_bus: self.sumcheck_claim_bus,
+                sumcheck_output_bus: self.sumcheck_output_bus,
             }) as AirRef<_>,
             Arc::new(PcsJaggedAssistAir {
-                sumcheck_claim_bus: self.sumcheck_claim_bus,
+                sumcheck_output_bus: self.sumcheck_output_bus,
             }) as AirRef<_>,
             Arc::new(PcsBasefoldFinalClaimAir {
-                sumcheck_claim_bus: self.sumcheck_claim_bus,
+                sumcheck_output_bus: self.sumcheck_output_bus,
             }) as AirRef<_>,
         ]
     }
@@ -748,6 +790,37 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             })
             .collect_vec();
         sumcheck_rounds.sort_by_key(|record| (record.proof_idx, record.idx, record.round));
+        let mut sumcheck_inputs = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, p)| {
+                p.pcs
+                    .sumcheck_inputs
+                    .iter()
+                    .cloned()
+                    .map(move |mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+            })
+            .collect_vec();
+        sumcheck_inputs.sort_by_key(|record| (record.proof_idx, record.idx));
+        let mut basefold_initial_claims = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, p)| {
+                p.pcs
+                    .basefold_initial_claims
+                    .iter()
+                    .cloned()
+                    .map(move |mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+            })
+            .collect_vec();
+        basefold_initial_claims
+            .sort_by_key(|record| (record.proof_idx, record.sumcheck_idx, record.term_idx));
         let mut batch_coeffs = preflights
             .iter()
             .enumerate()
@@ -1015,6 +1088,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             basefold_commit_phase_queries: &basefold_commit_phase_queries,
             basefold_final_codeword: &basefold_final_codeword,
             transcript_values: &transcript_values,
+            basefold_initial_claims: &basefold_initial_claims,
+            sumcheck_inputs: &sumcheck_inputs,
             sumcheck_rounds: &sumcheck_rounds,
             batch_coeffs: &batch_coeffs,
             jagged_q_evals: &jagged_q_evals,
@@ -1034,6 +1109,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             PcsModuleChip::BasefoldCommitPhaseQuery,
             PcsModuleChip::BasefoldFinalCodeword,
             PcsModuleChip::TranscriptValues,
+            PcsModuleChip::BasefoldInitialClaim,
+            PcsModuleChip::SumcheckInput,
             PcsModuleChip::Sumcheck,
             PcsModuleChip::BatchCoeff,
             PcsModuleChip::JaggedQEval,
@@ -2109,6 +2186,7 @@ pub struct PcsTranscriptValueCols<T> {
     pub is_final_message: T,
     pub is_query_sample: T,
     pub is_batch_alpha: T,
+    pub is_basefold_eval: T,
     pub value: [T; D_EF],
 }
 
@@ -2117,6 +2195,7 @@ pub struct PcsTranscriptValueAir {
     pub final_message_bus: PcsFinalMessageBus,
     pub query_sample_bus: PcsQuerySampleBus,
     pub batch_alpha_bus: PcsBatchAlphaBus,
+    pub basefold_eval_bus: PcsBasefoldEvalBus,
     pub final_message_lookup_count: usize,
 }
 
@@ -2140,6 +2219,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsTranscriptValueAir {
         builder.assert_bool(local.is_final_message);
         builder.assert_bool(local.is_query_sample);
         builder.assert_bool(local.is_batch_alpha);
+        builder.assert_bool(local.is_basefold_eval);
         builder
             .when(local.is_final_message)
             .assert_one(local.is_enabled);
@@ -2210,6 +2290,15 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsTranscriptValueAir {
             },
             local.is_enabled * local.is_batch_alpha,
         );
+        self.basefold_eval_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            PcsBasefoldEvalMessage {
+                tidx: local.tidx.into(),
+                value: local.value.map(Into::into),
+            },
+            local.is_enabled * local.is_basefold_eval,
+        );
     }
 }
 
@@ -2230,12 +2319,12 @@ pub struct PcsSumcheckCols<T> {
     pub claim_in: [T; D_EF],
     pub claim_out: [T; D_EF],
     pub challenge: [T; D_EF],
-    pub expected: [T; D_EF],
 }
 
 pub struct PcsSumcheckAir {
+    pub sumcheck_input_bus: PcsSumcheckInputBus,
     pub transcript_bus: TranscriptBus,
-    pub sumcheck_claim_bus: PcsSumcheckClaimBus,
+    pub sumcheck_output_bus: PcsSumcheckOutputBus,
     pub fold_challenge_bus: PcsFoldChallengeBus,
 }
 
@@ -2280,6 +2369,15 @@ where
             local.claim_out,
             next.claim_in,
         );
+        self.sumcheck_input_bus.receive(
+            builder,
+            local.proof_idx,
+            PcsSumcheckInputMessage {
+                idx: local.idx.into(),
+                claim: local.claim_in.map(Into::into),
+            },
+            local.is_enabled * local.is_first,
+        );
 
         let ev0 = ext_sub(local.claim_in, local.ev1);
         let claim_out = interpolate_quad_at_012(ev0, local.ev1, local.ev2, local.challenge);
@@ -2288,15 +2386,10 @@ where
             local.claim_out,
             claim_out,
         );
-        assert_array_eq(
-            &mut builder.when(local.is_enabled * local.is_last),
-            local.claim_out,
-            local.expected,
-        );
-        self.sumcheck_claim_bus.send(
+        self.sumcheck_output_bus.send(
             builder,
             local.proof_idx,
-            PcsSumcheckClaimMessage {
+            PcsSumcheckOutputMessage {
                 idx: local.idx.into(),
                 claim: local.claim_out.map(Into::into),
             },
@@ -2350,11 +2443,170 @@ where
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
+pub struct PcsBasefoldInitialClaimCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub sumcheck_idx: T,
+    pub term_idx: T,
+    pub is_first: T,
+    pub is_last: T,
+    pub global_coeff_idx: T,
+    pub eval_tidx: T,
+    pub eval: [T; D_EF],
+    pub coeff: [T; D_EF],
+    pub scale: [T; D_EF],
+    pub acc_in: [T; D_EF],
+    pub acc_out: [T; D_EF],
+}
+
+pub struct PcsBasefoldInitialClaimAir {
+    pub basefold_eval_bus: PcsBasefoldEvalBus,
+    pub batch_coeff_bus: PcsBatchCoeffBus,
+    pub sumcheck_input_bus: PcsSumcheckInputBus,
+}
+
+impl<F: Field> BaseAir<F> for PcsBasefoldInitialClaimAir {
+    fn width(&self) -> usize {
+        PcsBasefoldInitialClaimCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for PcsBasefoldInitialClaimAir {}
+impl<F: Field> PartitionedBaseAir<F> for PcsBasefoldInitialClaimAir {}
+
+impl<AB> Air<AB> for PcsBasefoldInitialClaimAir
+where
+    AB: AirBuilder + InteractionBuilder,
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let next_row = main.row_slice(1).expect("next row exists");
+        let local: &PcsBasefoldInitialClaimCols<AB::Var> = (*local_row).borrow();
+        let next: &PcsBasefoldInitialClaimCols<AB::Var> = (*next_row).borrow();
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_first);
+        builder.assert_bool(local.is_last);
+        let zero = core::array::from_fn(|_| AB::Expr::ZERO);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.acc_in,
+            zero,
+        );
+
+        let continues = local.is_enabled * (AB::Expr::ONE - local.is_last);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_one(next.is_enabled);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.sumcheck_idx, local.sumcheck_idx);
+        builder
+            .when_transition()
+            .when(continues)
+            .assert_eq(next.term_idx, local.term_idx + AB::Expr::ONE);
+        assert_array_eq(
+            &mut builder
+                .when_transition()
+                .when(local.is_enabled * (AB::Expr::ONE - local.is_last)),
+            next.acc_in,
+            local.acc_out,
+        );
+
+        let coeff_eval = recursion_circuit::utils::ext_field_multiply(local.coeff, local.eval);
+        let term = recursion_circuit::utils::ext_field_multiply(coeff_eval, local.scale);
+        let expected_acc = ext_add(local.acc_in, term);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.acc_out,
+            expected_acc,
+        );
+
+        self.batch_coeff_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsBatchCoeffMessage {
+                global_coeff_idx: local.global_coeff_idx.into(),
+                coeff: local.coeff.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.basefold_eval_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsBasefoldEvalMessage {
+                tidx: local.eval_tidx.into(),
+                value: local.eval.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.sumcheck_input_bus.send(
+            builder,
+            local.proof_idx,
+            PcsSumcheckInputMessage {
+                idx: local.sumcheck_idx.into(),
+                claim: local.acc_out.map(Into::into),
+            },
+            local.is_enabled * local.is_last,
+        );
+    }
+}
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
+pub struct PcsSumcheckInputCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub idx: T,
+    pub claim: [T; D_EF],
+}
+
+pub struct PcsSumcheckInputAir {
+    pub sumcheck_input_bus: PcsSumcheckInputBus,
+}
+
+impl<F: Field> BaseAir<F> for PcsSumcheckInputAir {
+    fn width(&self) -> usize {
+        PcsSumcheckInputCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for PcsSumcheckInputAir {}
+impl<F: Field> PartitionedBaseAir<F> for PcsSumcheckInputAir {}
+
+impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsSumcheckInputAir {
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let local: &PcsSumcheckInputCols<AB::Var> = (*local_row).borrow();
+        builder.assert_bool(local.is_enabled);
+        self.sumcheck_input_bus.send(
+            builder,
+            local.proof_idx,
+            PcsSumcheckInputMessage {
+                idx: local.idx.into(),
+                claim: local.claim.map(Into::into),
+            },
+            local.is_enabled,
+        );
+    }
+}
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
 pub struct PcsBatchCoeffCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub global_coeff_idx: T,
     pub alpha_tidx: T,
+    pub lookup_count: T,
     pub is_first: T,
     pub is_last: T,
     pub alpha: [T; D_EF],
@@ -2365,7 +2617,6 @@ pub struct PcsBatchCoeffCols<T> {
 pub struct PcsBatchCoeffAir {
     pub batch_alpha_bus: PcsBatchAlphaBus,
     pub batch_coeff_bus: PcsBatchCoeffBus,
-    pub coeff_lookup_count: usize,
 }
 
 impl<F: Field> BaseAir<F> for PcsBatchCoeffAir {
@@ -2459,7 +2710,7 @@ where
                 global_coeff_idx: local.global_coeff_idx.into(),
                 coeff: local.coeff.map(Into::into),
             },
-            local.is_enabled * AB::Expr::from_usize(self.coeff_lookup_count),
+            local.is_enabled * local.lookup_count,
         );
     }
 }
@@ -2477,7 +2728,7 @@ pub struct PcsJaggedQEvalCols<T> {
 }
 
 pub struct PcsJaggedQEvalAir {
-    pub sumcheck_claim_bus: PcsSumcheckClaimBus,
+    pub sumcheck_output_bus: PcsSumcheckOutputBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsJaggedQEvalAir {
@@ -2505,10 +2756,10 @@ where
             product,
             local.sumcheck_final,
         );
-        self.sumcheck_claim_bus.receive(
+        self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
-            PcsSumcheckClaimMessage {
+            PcsSumcheckOutputMessage {
                 idx: local.sumcheck_idx.into(),
                 claim: local.sumcheck_final.map(Into::into),
             },
@@ -2530,7 +2781,7 @@ pub struct PcsJaggedAssistCols<T> {
 }
 
 pub struct PcsJaggedAssistAir {
-    pub sumcheck_claim_bus: PcsSumcheckClaimBus,
+    pub sumcheck_output_bus: PcsSumcheckOutputBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsJaggedAssistAir {
@@ -2559,10 +2810,10 @@ where
             product,
             local.sumcheck_final,
         );
-        self.sumcheck_claim_bus.receive(
+        self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
-            PcsSumcheckClaimMessage {
+            PcsSumcheckOutputMessage {
                 idx: local.sumcheck_idx.into(),
                 claim: local.sumcheck_final.map(Into::into),
             },
@@ -2582,7 +2833,7 @@ pub struct PcsBasefoldFinalClaimCols<T> {
 }
 
 pub struct PcsBasefoldFinalClaimAir {
-    pub sumcheck_claim_bus: PcsSumcheckClaimBus,
+    pub sumcheck_output_bus: PcsSumcheckOutputBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsBasefoldFinalClaimAir {
@@ -2609,10 +2860,10 @@ where
             local.final_claim,
             local.expected,
         );
-        self.sumcheck_claim_bus.receive(
+        self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
-            PcsSumcheckClaimMessage {
+            PcsSumcheckOutputMessage {
                 idx: local.sumcheck_idx.into(),
                 claim: local.final_claim.map(Into::into),
             },
@@ -2634,6 +2885,8 @@ struct PcsTraceCtx<'a> {
     basefold_commit_phase_queries: &'a [PcsBasefoldCommitPhaseQueryRecord],
     basefold_final_codeword: &'a [PcsBasefoldFinalCodewordRecord],
     transcript_values: &'a [PcsTranscriptValueRecord],
+    basefold_initial_claims: &'a [PcsBasefoldInitialClaimRecord],
+    sumcheck_inputs: &'a [PcsSumcheckInputRecord],
     sumcheck_rounds: &'a [PcsSumcheckRoundRecord],
     batch_coeffs: &'a [PcsBatchCoeffRecord],
     jagged_q_evals: &'a [PcsJaggedQEvalRecord],
@@ -2654,6 +2907,8 @@ enum PcsModuleChip {
     BasefoldCommitPhaseQuery,
     BasefoldFinalCodeword,
     TranscriptValues,
+    BasefoldInitialClaim,
+    SumcheckInput,
     Sumcheck,
     BatchCoeff,
     JaggedQEval,
@@ -2696,6 +2951,11 @@ impl RowMajorChip<F> for PcsModuleChip {
                 .generate_trace(&ctx.basefold_final_codeword, required_height),
             PcsModuleChip::TranscriptValues => PcsTranscriptValueTraceGenerator
                 .generate_trace(&ctx.transcript_values, required_height),
+            PcsModuleChip::BasefoldInitialClaim => PcsBasefoldInitialClaimTraceGenerator
+                .generate_trace(&ctx.basefold_initial_claims, required_height),
+            PcsModuleChip::SumcheckInput => {
+                PcsSumcheckInputTraceGenerator.generate_trace(&ctx.sumcheck_inputs, required_height)
+            }
             PcsModuleChip::Sumcheck => {
                 PcsSumcheckTraceGenerator.generate_trace(&ctx.sumcheck_rounds, required_height)
             }
@@ -2726,6 +2986,8 @@ struct PcsBasefoldQueryOpenTraceGenerator;
 struct PcsBasefoldCommitPhaseQueryTraceGenerator;
 struct PcsBasefoldFinalCodewordTraceGenerator;
 struct PcsTranscriptValueTraceGenerator;
+struct PcsBasefoldInitialClaimTraceGenerator;
+struct PcsSumcheckInputTraceGenerator;
 struct PcsSumcheckTraceGenerator;
 struct PcsBatchCoeffTraceGenerator;
 struct PcsJaggedQEvalTraceGenerator;
@@ -3093,7 +3355,63 @@ impl RowMajorChip<F> for PcsTranscriptValueTraceGenerator {
             cols.is_final_message = F::from_bool(record.is_final_message);
             cols.is_query_sample = F::from_bool(record.is_query_sample);
             cols.is_batch_alpha = F::from_bool(record.is_batch_alpha);
+            cols.is_basefold_eval = F::from_bool(record.is_basefold_eval);
             cols.value = ext_limbs(record.value);
+        }
+        Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+impl RowMajorChip<F> for PcsBasefoldInitialClaimTraceGenerator {
+    type Ctx<'a> = &'a [PcsBasefoldInitialClaimRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let width = PcsBasefoldInitialClaimCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let mut trace = vec![F::ZERO; height * width];
+        for (row_idx, record) in records.iter().enumerate() {
+            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
+            let cols: &mut PcsBasefoldInitialClaimCols<F> = row.borrow_mut();
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+            cols.term_idx = F::from_usize(record.term_idx);
+            cols.is_first = F::from_bool(record.is_first);
+            cols.is_last = F::from_bool(record.is_last);
+            cols.global_coeff_idx = F::from_usize(record.global_coeff_idx);
+            cols.eval_tidx = F::from_usize(record.eval_tidx);
+            cols.eval = ext_limbs(record.eval);
+            cols.coeff = ext_limbs(record.coeff);
+            cols.scale = ext_limbs(record.scale);
+            cols.acc_in = ext_limbs(record.acc_in);
+            cols.acc_out = ext_limbs(record.acc_out);
+        }
+        Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+impl RowMajorChip<F> for PcsSumcheckInputTraceGenerator {
+    type Ctx<'a> = &'a [PcsSumcheckInputRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let width = PcsSumcheckInputCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let mut trace = vec![F::ZERO; height * width];
+        for (row_idx, record) in records.iter().enumerate() {
+            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
+            let cols: &mut PcsSumcheckInputCols<F> = row.borrow_mut();
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.idx = F::from_usize(record.idx);
+            cols.claim = ext_limbs(record.claim);
         }
         Some(RowMajorMatrix::new(trace, width))
     }
@@ -3127,7 +3445,6 @@ impl RowMajorChip<F> for PcsSumcheckTraceGenerator {
             cols.claim_in = ext_limbs(record.claim_in);
             cols.claim_out = ext_limbs(record.claim_out);
             cols.challenge = ext_limbs(record.challenge);
-            cols.expected = ext_limbs(record.expected);
         }
         Some(RowMajorMatrix::new(trace, width))
     }
@@ -3151,6 +3468,7 @@ impl RowMajorChip<F> for PcsBatchCoeffTraceGenerator {
             cols.proof_idx = F::from_usize(record.proof_idx);
             cols.global_coeff_idx = F::from_usize(record.global_coeff_idx);
             cols.alpha_tidx = F::from_usize(record.alpha_tidx);
+            cols.lookup_count = F::from_usize(record.lookup_count);
             cols.is_first = F::from_bool(record.is_first);
             cols.is_last = F::from_bool(record.is_last);
             cols.alpha = ext_limbs(record.alpha);
@@ -3270,6 +3588,11 @@ where
     );
     let mut claim = claimed_sum;
     let mut challenges = Vec::with_capacity(num_variables);
+    preflight.pcs.sumcheck_inputs.push(PcsSumcheckInputRecord {
+        proof_idx,
+        idx,
+        claim: claimed_sum,
+    });
     for round in 0..num_variables {
         let msg = &proof.proofs[round];
         if msg.evaluations.len() != 2 {
@@ -3305,14 +3628,9 @@ where
             claim_in: claim,
             claim_out,
             challenge,
-            expected: RecursionField::ZERO,
             fold_challenge_lookup_count: 0,
         });
         claim = claim_out;
-    }
-    let start = preflight.pcs.sumcheck_rounds.len() - num_variables;
-    for record in &mut preflight.pcs.sumcheck_rounds[start..] {
-        record.expected = claim;
     }
     Ok((challenges, claim))
 }
@@ -3377,19 +3695,31 @@ fn inner_verify_openings_for_col_evals(
     log_h: usize,
     rho_row: &[RecursionField],
     col_evals: &[RecursionField],
-) -> Vec<(usize, (Vec<RecursionField>, Vec<RecursionField>))> {
+    col_tidx: usize,
+) -> Vec<BasefoldOpening> {
     col_evals
         .chunks(8)
-        .map(|evals| (log_h, (rho_row.to_vec(), evals.to_vec())))
+        .enumerate()
+        .map(|(chunk_idx, evals)| {
+            (
+                log_h,
+                (
+                    rho_row.to_vec(),
+                    evals
+                        .iter()
+                        .copied()
+                        .enumerate()
+                        .map(|(idx, eval)| (eval, col_tidx + (chunk_idx * 8 + idx) * D_EF))
+                        .collect(),
+                ),
+            )
+        })
         .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
 fn record_basefold_query_checks(
-    rounds: &[(
-        mpcs::basefold::BasefoldCommitment<RecursionField>,
-        Vec<(usize, (Vec<RecursionField>, Vec<RecursionField>))>,
-    )],
+    rounds: &[BasefoldRound],
     proof: &mpcs::basefold::structure::BasefoldProof<RecursionField>,
     preflight: &mut Preflight,
     batch_coeffs: &[RecursionField],
@@ -3676,7 +4006,7 @@ fn record_base_input_mmcs(
     query_idx: usize,
     opening_idx: usize,
     reduced_index: usize,
-    openings: &[(usize, (Vec<RecursionField>, Vec<RecursionField>))],
+    openings: &[BasefoldOpening],
     opened_values: &[Vec<F>],
     proof: &[[F; DIGEST_SIZE]],
     preflight: &mut Preflight,
@@ -3920,6 +4250,7 @@ where
                     is_final_message: false,
                     is_query_sample: false,
                     is_batch_alpha: false,
+                    is_basefold_eval: false,
                 });
             value
         })
@@ -3953,6 +4284,7 @@ where
             is_final_message: false,
             is_query_sample: false,
             is_batch_alpha: true,
+            is_basefold_eval: false,
         });
     let mut out = Vec::with_capacity(size);
     let mut acc = RecursionField::ONE;
@@ -3966,6 +4298,7 @@ where
             alpha,
             coeff: acc,
             next_coeff,
+            lookup_count: <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries(),
             is_first: global_coeff_idx == 0,
             is_last: global_coeff_idx + 1 == size,
         });
@@ -4000,6 +4333,7 @@ fn observe_label_with_records<TS>(
                 is_final_message: false,
                 is_query_sample: false,
                 is_batch_alpha: false,
+                is_basefold_eval: false,
             });
     }
 }
@@ -4029,6 +4363,7 @@ where
             is_final_message: false,
             is_query_sample: false,
             is_batch_alpha: false,
+            is_basefold_eval: false,
         });
     sample_bits_with_record(ts, bits, preflight, 6_000_001, false).query_value == 0
 }
@@ -4068,6 +4403,7 @@ where
             is_final_message: false,
             is_query_sample,
             is_batch_alpha: false,
+            is_basefold_eval: false,
         });
     let raw = value.as_canonical_u64() as usize;
     let mask = (1usize << bits) - 1;
@@ -4111,6 +4447,7 @@ where
                 is_final_message: false,
                 is_query_sample: false,
                 is_batch_alpha: false,
+                is_basefold_eval: false,
             });
     }
 }

@@ -364,6 +364,24 @@ define_typed_per_proof_permutation_bus!(PcsSumcheckClaimBus, PcsSumcheckClaimMes
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsSumcheckInputMessage<T> {
+    pub idx: T,
+    pub claim: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(PcsSumcheckInputBus, PcsSumcheckInputMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsSumcheckOutputMessage<T> {
+    pub idx: T,
+    pub claim: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(PcsSumcheckOutputBus, PcsSumcheckOutputMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct PcsFoldChallengeMessage<T> {
     pub sumcheck_idx: T,
     pub round: T,
@@ -389,3 +407,12 @@ pub struct PcsBatchAlphaMessage<T> {
 }
 
 define_typed_per_proof_lookup_bus!(PcsBatchAlphaBus, PcsBatchAlphaMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsBasefoldEvalMessage<T> {
+    pub tidx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(PcsBasefoldEvalBus, PcsBasefoldEvalMessage);

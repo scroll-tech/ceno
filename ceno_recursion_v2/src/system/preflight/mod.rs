@@ -108,6 +108,8 @@ pub struct PcsPreflight {
     pub basefold_final_codeword: Vec<PcsBasefoldFinalCodewordRecord>,
     pub transcript_values: Vec<PcsTranscriptValueRecord>,
     pub sumcheck_rounds: Vec<PcsSumcheckRoundRecord>,
+    pub sumcheck_inputs: Vec<PcsSumcheckInputRecord>,
+    pub basefold_initial_claims: Vec<PcsBasefoldInitialClaimRecord>,
     pub batch_coeffs: Vec<PcsBatchCoeffRecord>,
     pub jagged_q_evals: Vec<PcsJaggedQEvalRecord>,
     pub jagged_assists: Vec<PcsJaggedAssistRecord>,
@@ -314,6 +316,7 @@ pub struct PcsTranscriptValueRecord {
     pub is_final_message: bool,
     pub is_query_sample: bool,
     pub is_batch_alpha: bool,
+    pub is_basefold_eval: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -330,8 +333,30 @@ pub struct PcsSumcheckRoundRecord {
     pub claim_in: RecursionField,
     pub claim_out: RecursionField,
     pub challenge: RecursionField,
-    pub expected: RecursionField,
     pub fold_challenge_lookup_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsSumcheckInputRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub claim: RecursionField,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsBasefoldInitialClaimRecord {
+    pub proof_idx: usize,
+    pub sumcheck_idx: usize,
+    pub term_idx: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub global_coeff_idx: usize,
+    pub eval_tidx: usize,
+    pub eval: RecursionField,
+    pub coeff: RecursionField,
+    pub scale: RecursionField,
+    pub acc_in: RecursionField,
+    pub acc_out: RecursionField,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -342,6 +367,7 @@ pub struct PcsBatchCoeffRecord {
     pub alpha: RecursionField,
     pub coeff: RecursionField,
     pub next_coeff: RecursionField,
+    pub lookup_count: usize,
     pub is_first: bool,
     pub is_last: bool,
 }
