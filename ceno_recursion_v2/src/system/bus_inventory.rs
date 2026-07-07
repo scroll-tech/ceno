@@ -17,8 +17,11 @@ use crate::bus::{
     MainEccRtSumcheckFinalBus, MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus,
     MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
-    NLiftBus as LocalNLiftBus, PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus,
-    TowerModuleBus, TranscriptBus as LocalTranscriptBus,
+    NLiftBus as LocalNLiftBus, PcsBaseInputOpeningBus, PcsBasefoldQueryBus, PcsBatchAlphaBus,
+    PcsBatchCoeffBus, PcsCommitPhaseLeafBus, PcsCommitmentRootBus, PcsFinalMessageBus,
+    PcsFoldChallengeBus, PcsQuerySampleBus, PcsSumcheckClaimBus,
+    PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus, TowerModuleBus,
+    TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
@@ -64,6 +67,16 @@ pub struct BusInventory {
     pub forked_transcript_bus: LocalForkedTranscriptBus,
     pub fork_final_sample_bus: ForkFinalSampleBus,
     pub lookup_challenge_bus: LookupChallengeBus,
+    pub pcs_basefold_query_bus: PcsBasefoldQueryBus,
+    pub pcs_base_input_opening_bus: PcsBaseInputOpeningBus,
+    pub pcs_final_message_bus: PcsFinalMessageBus,
+    pub pcs_query_sample_bus: PcsQuerySampleBus,
+    pub pcs_commitment_root_bus: PcsCommitmentRootBus,
+    pub pcs_commit_phase_leaf_bus: PcsCommitPhaseLeafBus,
+    pub pcs_sumcheck_claim_bus: PcsSumcheckClaimBus,
+    pub pcs_fold_challenge_bus: PcsFoldChallengeBus,
+    pub pcs_batch_coeff_bus: PcsBatchCoeffBus,
+    pub pcs_batch_alpha_bus: PcsBatchAlphaBus,
 }
 
 impl BusInventory {
@@ -116,6 +129,16 @@ impl BusInventory {
         let forked_transcript_bus = LocalForkedTranscriptBus::new(b.new_bus_idx());
         let fork_final_sample_bus = ForkFinalSampleBus::new(b.new_bus_idx());
         let lookup_challenge_bus = LookupChallengeBus::new(b.new_bus_idx());
+        let pcs_basefold_query_bus = PcsBasefoldQueryBus::new(b.new_bus_idx());
+        let pcs_base_input_opening_bus = PcsBaseInputOpeningBus::new(b.new_bus_idx());
+        let pcs_final_message_bus = PcsFinalMessageBus::new(b.new_bus_idx());
+        let pcs_query_sample_bus = PcsQuerySampleBus::new(b.new_bus_idx());
+        let pcs_commitment_root_bus = PcsCommitmentRootBus::new(b.new_bus_idx());
+        let pcs_commit_phase_leaf_bus = PcsCommitPhaseLeafBus::new(b.new_bus_idx());
+        let pcs_sumcheck_claim_bus = PcsSumcheckClaimBus::new(b.new_bus_idx());
+        let pcs_fold_challenge_bus = PcsFoldChallengeBus::new(b.new_bus_idx());
+        let pcs_batch_coeff_bus = PcsBatchCoeffBus::new(b.new_bus_idx());
+        let pcs_batch_alpha_bus = PcsBatchAlphaBus::new(b.new_bus_idx());
 
         Self {
             transcript_bus,
@@ -159,6 +182,16 @@ impl BusInventory {
             forked_transcript_bus,
             fork_final_sample_bus,
             lookup_challenge_bus,
+            pcs_basefold_query_bus,
+            pcs_base_input_opening_bus,
+            pcs_final_message_bus,
+            pcs_query_sample_bus,
+            pcs_commitment_root_bus,
+            pcs_commit_phase_leaf_bus,
+            pcs_sumcheck_claim_bus,
+            pcs_fold_challenge_bus,
+            pcs_batch_coeff_bus,
+            pcs_batch_alpha_bus,
         }
     }
 }

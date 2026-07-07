@@ -1,6 +1,6 @@
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::TranscriptLog;
-use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, DIGEST_SIZE, EF, F};
 use p3_field::PrimeCharacteristicRing;
 
 use crate::{system::RecursionField, tower::TowerReplayResult};
@@ -19,6 +19,7 @@ pub struct Preflight {
     pub main: MainPreflight,
     pub gkr: TowerPreflight,
     pub batch_constraint: BatchConstraintPreflight,
+    pub pcs: PcsPreflight,
     pub vm_pvs: VmPvsPreflight,
 }
 
@@ -94,6 +95,283 @@ pub struct MainPreflight {
     pub tower_point_eqs: Vec<MainTowerPointEqRecord>,
     pub frontload_terms: Vec<MainFrontloadTermRecord>,
     pub final_claims: Vec<MainFinalClaimRecord>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsPreflight {
+    pub opening_claims: Vec<PcsOpeningClaimRecord>,
+    pub opening_points: Vec<PcsOpeningPointRecord>,
+    pub opening_evals: Vec<PcsOpeningEvalRecord>,
+    pub basefold_query_indices: Vec<PcsBasefoldQueryIndexRecord>,
+    pub basefold_query_opens: Vec<PcsBasefoldQueryOpenRecord>,
+    pub basefold_commit_phase_queries: Vec<PcsBasefoldCommitPhaseQueryRecord>,
+    pub basefold_final_codeword: Vec<PcsBasefoldFinalCodewordRecord>,
+    pub transcript_values: Vec<PcsTranscriptValueRecord>,
+    pub sumcheck_rounds: Vec<PcsSumcheckRoundRecord>,
+    pub batch_coeffs: Vec<PcsBatchCoeffRecord>,
+    pub jagged_q_evals: Vec<PcsJaggedQEvalRecord>,
+    pub jagged_assists: Vec<PcsJaggedAssistRecord>,
+    pub basefold_final_claims: Vec<PcsBasefoldFinalClaimRecord>,
+    pub commitment_roots: Vec<PcsCommitmentRootRecord>,
+    pub base_input_leaf_hashes: Vec<PcsBaseInputLeafHashRecord>,
+    pub base_input_merkle_rows: Vec<PcsBaseInputMerkleRecord>,
+    pub commit_phase_leaf_hashes: Vec<PcsCommitPhaseLeafHashRecord>,
+    pub commit_phase_merkle_rows: Vec<PcsCommitPhaseMerkleRecord>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsOpeningClaimRecord {
+    pub input_opening_point: Vec<RecursionField>,
+    pub wits_in_evals: Vec<RecursionField>,
+    pub fixed_in_evals: Vec<RecursionField>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsOpeningPointRecord {
+    pub proof_idx: usize,
+    pub opening_idx: usize,
+    pub coord_idx: usize,
+    pub global_round_idx: usize,
+    pub value: RecursionField,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcsOpeningCommitKind {
+    Witin,
+    Fixed,
+}
+
+impl PcsOpeningCommitKind {
+    pub const fn as_usize(self) -> usize {
+        match self {
+            Self::Witin => 0,
+            Self::Fixed => 1,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsOpeningEvalRecord {
+    pub proof_idx: usize,
+    pub opening_idx: usize,
+    pub commit_kind: PcsOpeningCommitKind,
+    pub eval_idx: usize,
+    pub main_idx: usize,
+    pub main_eval_idx: usize,
+    pub value: RecursionField,
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsBasefoldQueryIndexRecord {
+    pub proof_idx: usize,
+    pub query_idx: usize,
+    pub sample_tidx: usize,
+    pub query_bits: usize,
+    pub sampled_value: RecursionField,
+    pub query_value: usize,
+    pub high_value: usize,
+    pub query_bytes: [u8; 4],
+    pub high_bytes: [u8; 4],
+    pub query_bit_selectors: [bool; 32],
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsBasefoldQueryOpenRecord {
+    pub proof_idx: usize,
+    pub query_idx: usize,
+    pub opening_idx: usize,
+    pub reduced_index: usize,
+    pub global_coeff_idx: usize,
+    pub value_idx: usize,
+    pub elem_idx: usize,
+    pub log2_height: usize,
+    pub is_last_for_height: bool,
+    pub coeff: RecursionField,
+    pub opened_value: RecursionField,
+    pub acc_in: RecursionField,
+    pub acc_out: RecursionField,
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsBaseInputLeafHashRecord {
+    pub proof_idx: usize,
+    pub query_idx: usize,
+    pub opening_idx: usize,
+    pub block_idx: usize,
+    pub log2_height: usize,
+    pub reduced_index: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub value_is_present: [bool; 8],
+    pub value_idx: [usize; 8],
+    pub elem_idx: [usize; 8],
+    pub values: [RecursionField; 8],
+    pub state_in: [F; POSEIDON2_WIDTH],
+    pub input: [F; POSEIDON2_WIDTH],
+    pub output_state: [F; POSEIDON2_WIDTH],
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsBaseInputMerkleRecord {
+    pub proof_idx: usize,
+    pub query_idx: usize,
+    pub opening_idx: usize,
+    pub step: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub idx_in: usize,
+    pub idx_bit: usize,
+    pub idx_out: usize,
+    pub current: [F; DIGEST_SIZE],
+    pub sibling: [F; DIGEST_SIZE],
+    pub left: [F; DIGEST_SIZE],
+    pub right: [F; DIGEST_SIZE],
+    pub output: [F; DIGEST_SIZE],
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsBasefoldCommitPhaseQueryRecord {
+    pub proof_idx: usize,
+    pub query_idx: usize,
+    pub round: usize,
+    pub query_value: usize,
+    pub idx_in: usize,
+    pub idx_out: usize,
+    pub log2_height: usize,
+    pub is_first: bool,
+    pub has_reduced_opening: bool,
+    pub reduced_opening: RecursionField,
+    pub folded_idx: usize,
+    pub folded_in: RecursionField,
+    pub sibling_value: RecursionField,
+    pub challenge: RecursionField,
+    pub coeff: RecursionField,
+    pub folded_out: RecursionField,
+    pub is_last: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsCommitmentRootRecord {
+    pub proof_idx: usize,
+    pub commit_major: usize,
+    pub commit_minor: usize,
+    pub root: [F; DIGEST_SIZE],
+    pub lookup_count: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsCommitPhaseLeafHashRecord {
+    pub proof_idx: usize,
+    pub query_idx: usize,
+    pub round: usize,
+    pub leaf_idx: usize,
+    pub left: RecursionField,
+    pub right: RecursionField,
+    pub input: [F; POSEIDON2_WIDTH],
+    pub output_state: [F; POSEIDON2_WIDTH],
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsCommitPhaseMerkleRecord {
+    pub proof_idx: usize,
+    pub query_idx: usize,
+    pub round: usize,
+    pub step: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub idx_in: usize,
+    pub idx_bit: usize,
+    pub idx_out: usize,
+    pub current: [F; DIGEST_SIZE],
+    pub sibling: [F; DIGEST_SIZE],
+    pub left: [F; DIGEST_SIZE],
+    pub right: [F; DIGEST_SIZE],
+    pub output: [F; DIGEST_SIZE],
+}
+
+#[derive(Clone, Debug)]
+pub struct PcsBasefoldFinalCodewordRecord {
+    pub proof_idx: usize,
+    pub query_idx: usize,
+    pub elem_idx: usize,
+    pub final_tidx: usize,
+    pub final_value: RecursionField,
+    pub coeff: RecursionField,
+    pub acc_in: RecursionField,
+    pub acc_out: RecursionField,
+    pub folded: RecursionField,
+    pub is_last: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsTranscriptValueRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub tidx: usize,
+    pub value: RecursionField,
+    pub is_sample: bool,
+    pub is_ext: bool,
+    pub is_final_message: bool,
+    pub is_query_sample: bool,
+    pub is_batch_alpha: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsSumcheckRoundRecord {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub round: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub ev_tidx: usize,
+    pub challenge_tidx: usize,
+    pub ev1: RecursionField,
+    pub ev2: RecursionField,
+    pub claim_in: RecursionField,
+    pub claim_out: RecursionField,
+    pub challenge: RecursionField,
+    pub expected: RecursionField,
+    pub fold_challenge_lookup_count: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsBatchCoeffRecord {
+    pub proof_idx: usize,
+    pub global_coeff_idx: usize,
+    pub alpha_tidx: usize,
+    pub alpha: RecursionField,
+    pub coeff: RecursionField,
+    pub next_coeff: RecursionField,
+    pub is_first: bool,
+    pub is_last: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsJaggedQEvalRecord {
+    pub proof_idx: usize,
+    pub round_idx: usize,
+    pub sumcheck_idx: usize,
+    pub q_eval: RecursionField,
+    pub f_at_rho: RecursionField,
+    pub sumcheck_final: RecursionField,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsJaggedAssistRecord {
+    pub proof_idx: usize,
+    pub round_idx: usize,
+    pub sumcheck_idx: usize,
+    pub h_at_rho_star: RecursionField,
+    pub q_at_rho_star: RecursionField,
+    pub sumcheck_final: RecursionField,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsBasefoldFinalClaimRecord {
+    pub proof_idx: usize,
+    pub sumcheck_idx: usize,
+    pub final_claim: RecursionField,
+    pub expected: RecursionField,
 }
 
 #[derive(Clone, Debug, Default)]

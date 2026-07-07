@@ -6,12 +6,17 @@ pub use crate::proof_shape::ProofShapeModule;
 pub use preflight::{
     BatchConstraintPreflight, ChipTranscriptRange, EccReplayClaims, ForkTranscriptLog,
     MainEccRtRecord, MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord,
-    MainGlobalSumcheckRecord, MainGlobalSumcheckRoundRecord, MainPreflight,
-    MainSelectorEvalRecord, MainSelectorKind, MainSelectorPointDeriveKind,
-    MainSelectorPointRecord, MainSelectorPointSourceKind, MainTowerPointEqRecord,
-    MainTranscriptRecord, Preflight, ProofShapePreflight,
-    RotationReplayClaims, TowerChipTranscriptRange, TowerMainPointRecord, TowerPreflight,
-    TraceVData,
+    MainGlobalSumcheckRecord, MainGlobalSumcheckRoundRecord, MainPreflight, MainSelectorEvalRecord,
+    MainSelectorKind, MainSelectorPointDeriveKind, MainSelectorPointRecord,
+    MainSelectorPointSourceKind, MainTowerPointEqRecord, MainTranscriptRecord,
+    PcsBaseInputLeafHashRecord, PcsBaseInputMerkleRecord, PcsBasefoldCommitPhaseQueryRecord,
+    PcsBasefoldFinalClaimRecord, PcsBasefoldFinalCodewordRecord, PcsBasefoldQueryIndexRecord,
+    PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord,
+    PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord, PcsJaggedAssistRecord,
+    PcsJaggedQEvalRecord, PcsOpeningClaimRecord, PcsOpeningCommitKind, PcsOpeningEvalRecord,
+    PcsOpeningPointRecord, PcsPreflight, PcsSumcheckRoundRecord, PcsTranscriptValueRecord,
+    Preflight, ProofShapePreflight, RotationReplayClaims, TowerChipTranscriptRange,
+    TowerMainPointRecord, TowerPreflight, TraceVData,
 };
 pub use recursion_circuit::system::{
     AirModule, BusIndexManager, GlobalTraceGenCtx, TraceGenModule, VerifierConfig,
@@ -34,6 +39,7 @@ use std::{
 use crate::{
     batch_constraint::BatchConstraintModule,
     main::MainModule,
+    pcs::PcsModule,
     tower::TowerModule,
     transcript::TranscriptModule,
     utils::{TranscriptLabel, transcript_observe_label},
@@ -186,6 +192,7 @@ pub struct VerifierSubCircuit<const MAX_NUM_PROOFS: usize> {
     pub(crate) gkr: TowerModule,
     #[allow(dead_code)]
     pub(crate) batch_constraint: BatchConstraintModule,
+    pub(crate) pcs: PcsModule,
 }
 
 #[derive(Copy, Clone)]
@@ -196,6 +203,7 @@ enum TraceModuleRef<'a> {
     Tower(&'a TowerModule),
     #[allow(dead_code)]
     BatchConstraint(&'a BatchConstraintModule),
+    Pcs(&'a PcsModule),
 }
 
 impl<'a> TraceModuleRef<'a> {
@@ -206,6 +214,7 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::Main(_) => "Main",
             TraceModuleRef::Tower(_) => "Tower",
             TraceModuleRef::BatchConstraint(_) => "BatchConstraint",
+            TraceModuleRef::Pcs(_) => "Pcs",
         }
     }
 
@@ -230,6 +239,7 @@ impl<'a> TraceModuleRef<'a> {
             TraceModuleRef::BatchConstraint(module) => {
                 module.run_preflight(child_vk, proof, preflight, sponge)
             }
+            TraceModuleRef::Pcs(module) => module.run_preflight(child_vk, proof, preflight, sponge),
             TraceModuleRef::Transcript(_) | TraceModuleRef::ProofShape(_) => {
                 panic!(
                     "{} module does not participate in per-module preflight",
@@ -268,6 +278,7 @@ impl<'a> TraceModuleRef<'a> {
                 range_check_inputs.extend(
                     crate::tower::collect_tower_range_checks(child_vk, proofs, preflights).ok()?,
                 );
+                range_check_inputs.extend(crate::pcs::collect_pcs_range_checks(preflights));
                 module.generate_proving_ctxs(
                     child_vk,
                     proofs,
@@ -287,6 +298,9 @@ impl<'a> TraceModuleRef<'a> {
                 required_heights,
             ),
             TraceModuleRef::BatchConstraint(module) => {
+                module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
+            }
+            TraceModuleRef::Pcs(module) => {
                 module.generate_proving_ctxs(child_vk, proofs, preflights, &(), required_heights)
             }
         }
@@ -338,6 +352,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         );
         let batch_constraint =
             BatchConstraintModule::new(&mut bus_idx_manager, bus_inventory.clone(), MAX_NUM_PROOFS);
+        let pcs = PcsModule::new(bus_inventory.clone());
 
         VerifierSubCircuit {
             bus_inventory,
@@ -347,6 +362,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             main_module,
             gkr,
             batch_constraint,
+            pcs,
         }
     }
 
@@ -456,10 +472,16 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             // order from `build_chip_proof_list` (not proof-shape sorted order).
             // Fork IDs are normalized to 0-based indexing for forked
             // transcripts (fork_id in 0..num_forks).
-            fs.observe(F::from_usize(fork_id));
-            fs.observe(F::from_u64(chip_idx as u64));
+            FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(fs, F::from_usize(fork_id));
+            FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
+                fs,
+                F::from_u64(chip_idx as u64),
+            );
             for num_instance in chip_proof.num_instances {
-                fs.observe(F::from_usize(num_instance));
+                FiatShamirTranscript::<BabyBearPoseidon2Config>::observe(
+                    fs,
+                    F::from_usize(num_instance),
+                );
             }
 
             let tower_tidx = fs.len();
@@ -499,6 +521,9 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         // Phase 5: batch-constraint transcript replay on the trunk, after the
         // fork merge and before PCS opening verification.
         self.batch_constraint
+            .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
+
+        self.pcs
             .run_preflight(child_vk, proof, &mut preflight, &mut sponge);
 
         // The trunk log now contains pre-fork ops (0..fork_offset), merge ops
@@ -573,6 +598,7 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
             gkr_n,
             self.main_module.num_airs(),
             self.batch_constraint.num_airs(),
+            self.pcs.num_airs(),
         ];
 
         let Some(heights) = required_heights else {
@@ -673,6 +699,7 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             TraceModuleRef::Tower(&self.gkr),
             TraceModuleRef::Main(&self.main_module),
             TraceModuleRef::BatchConstraint(&self.batch_constraint),
+            TraceModuleRef::Pcs(&self.pcs),
         ];
 
         let span = Span::current();
@@ -738,6 +765,7 @@ impl<const MAX_NUM_PROOFS: usize> AggregationSubCircuit for VerifierSubCircuit<M
             .chain(self.gkr.airs())
             .chain(self.main_module.airs())
             .chain(self.batch_constraint.airs())
+            .chain(self.pcs.airs())
             .chain(power_checker_air.map(|air| Arc::new(air) as AirRef<_>))
             .chain([Arc::new(exp_bits_len_air) as AirRef<_>])
             .collect()
