@@ -19,9 +19,9 @@ use crate::bus::{
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
     NLiftBus as LocalNLiftBus, PcsBaseInputOpeningBus, PcsBasefoldEvalBus, PcsBasefoldQueryBus,
     PcsBatchAlphaBus, PcsBatchCoeffBus, PcsCommitPhaseLeafBus, PcsCommitmentRootBus,
-    PcsFinalMessageBus, PcsFoldChallengeBus, PcsQuerySampleBus, PcsSumcheckInputBus,
-    PcsSumcheckOutputBus, PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus,
-    TowerModuleBus, TranscriptBus as LocalTranscriptBus,
+    PcsFinalMessageBus, PcsFoldChallengeBus, PcsJaggedFEvalBus, PcsQuerySampleBus,
+    PcsSumcheckInputBus, PcsSumcheckOutputBus, PublicValuesBus as LocalPublicValuesBus,
+    TowerMainPointBus, TowerModuleBus, TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
@@ -79,6 +79,7 @@ pub struct BusInventory {
     pub pcs_fold_challenge_bus: PcsFoldChallengeBus,
     pub pcs_batch_coeff_bus: PcsBatchCoeffBus,
     pub pcs_batch_alpha_bus: PcsBatchAlphaBus,
+    pub pcs_jagged_f_eval_bus: PcsJaggedFEvalBus,
 }
 
 impl BusInventory {
@@ -143,6 +144,7 @@ impl BusInventory {
         let pcs_fold_challenge_bus = PcsFoldChallengeBus::new(b.new_bus_idx());
         let pcs_batch_coeff_bus = PcsBatchCoeffBus::new(b.new_bus_idx());
         let pcs_batch_alpha_bus = PcsBatchAlphaBus::new(b.new_bus_idx());
+        let pcs_jagged_f_eval_bus = PcsJaggedFEvalBus::new(b.new_bus_idx());
 
         Self {
             transcript_bus,
@@ -198,6 +200,7 @@ impl BusInventory {
             pcs_fold_challenge_bus,
             pcs_batch_coeff_bus,
             pcs_batch_alpha_bus,
+            pcs_jagged_f_eval_bus,
         }
     }
 }

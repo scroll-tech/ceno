@@ -416,3 +416,13 @@ pub struct PcsBasefoldEvalMessage<T> {
 }
 
 define_typed_per_proof_lookup_bus!(PcsBasefoldEvalBus, PcsBasefoldEvalMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsJaggedFEvalMessage<T> {
+    pub sumcheck_idx: T,
+    pub tidx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(PcsJaggedFEvalBus, PcsJaggedFEvalMessage);

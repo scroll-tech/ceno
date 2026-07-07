@@ -110,6 +110,7 @@ pub struct PcsPreflight {
     pub sumcheck_rounds: Vec<PcsSumcheckRoundRecord>,
     pub sumcheck_inputs: Vec<PcsSumcheckInputRecord>,
     pub basefold_initial_claims: Vec<PcsBasefoldInitialClaimRecord>,
+    pub jagged_assist_inputs: Vec<PcsJaggedAssistInputRecord>,
     pub batch_coeffs: Vec<PcsBatchCoeffRecord>,
     pub jagged_q_evals: Vec<PcsJaggedQEvalRecord>,
     pub jagged_assists: Vec<PcsJaggedAssistRecord>,
@@ -317,6 +318,7 @@ pub struct PcsTranscriptValueRecord {
     pub is_query_sample: bool,
     pub is_batch_alpha: bool,
     pub is_basefold_eval: bool,
+    pub is_jagged_f_at_rho: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -357,6 +359,15 @@ pub struct PcsBasefoldInitialClaimRecord {
     pub scale: RecursionField,
     pub acc_in: RecursionField,
     pub acc_out: RecursionField,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsJaggedAssistInputRecord {
+    pub proof_idx: usize,
+    pub round_idx: usize,
+    pub sumcheck_idx: usize,
+    pub f_tidx: usize,
+    pub f_at_rho: RecursionField,
 }
 
 #[derive(Clone, Debug, Default)]
