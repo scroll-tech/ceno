@@ -311,12 +311,13 @@ pub struct PcsBasefoldFinalCodewordRecord {
     pub query_idx: usize,
     pub elem_idx: usize,
     pub final_tidx: usize,
+    pub is_first: bool,
+    pub is_last: bool,
     pub final_value: RecursionField,
     pub coeff: RecursionField,
     pub acc_in: RecursionField,
     pub acc_out: RecursionField,
     pub folded: RecursionField,
-    pub is_last: bool,
 }
 
 #[derive(Clone, Debug, Default)]

@@ -1913,7 +1913,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 .flat_map(|record| record.value_is_present)
                 .filter(|&is_present| is_present)
                 .count();
-            let basefold_query_sends = basefold_query_indices.len()
+            let basefold_query_sends = basefold_query_indices.len() * 2
                 + basefold_query_opens
                     .iter()
                     .filter(|record| record.is_last_for_height)
@@ -1933,6 +1933,10 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 + basefold_final_codeword
                     .iter()
                     .filter(|record| record.is_last)
+                    .count()
+                + basefold_final_codeword
+                    .iter()
+                    .filter(|record| record.is_first)
                     .count();
             let commit_phase_leaf_receives = commit_phase_merkle_rows
                 .iter()
@@ -2385,6 +2389,18 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                         )
                     ))
                     .or_default() += 1;
+                *basefold_query_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.query_idx,
+                            PcsBasefoldQueryStage::FinalCodewordStart.as_usize(),
+                            0usize,
+                            RecursionField::ZERO
+                        )
+                    ))
+                    .or_default() += 1;
             }
             for record in basefold_query_opens
                 .iter()
@@ -2467,6 +2483,23 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                             PcsBasefoldQueryStage::FinalFolded.as_usize(),
                             0usize,
                             record.folded
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            for record in basefold_final_codeword
+                .iter()
+                .filter(|record| record.is_first)
+            {
+                *basefold_query_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.query_idx,
+                            PcsBasefoldQueryStage::FinalCodewordStart.as_usize(),
+                            0usize,
+                            RecursionField::ZERO
                         )
                     ))
                     .or_default() -= 1;
@@ -4212,6 +4245,17 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsBasefoldQueryIndexAir {
             },
             local.is_enabled,
         );
+        self.basefold_query_bus.send(
+            builder,
+            local.proof_idx,
+            PcsBasefoldQueryMessage {
+                query_idx: local.query_idx.into(),
+                stage: AB::Expr::from_usize(PcsBasefoldQueryStage::FinalCodewordStart.as_usize()),
+                round: AB::Expr::ZERO,
+                value: [AB::Expr::ZERO; D_EF],
+            },
+            local.is_enabled,
+        );
     }
 }
 
@@ -4477,6 +4521,7 @@ pub struct PcsBasefoldFinalCodewordCols<T> {
     pub query_idx: T,
     pub elem_idx: T,
     pub final_tidx: T,
+    pub is_first: T,
     pub is_last: T,
     pub final_value: [T; D_EF],
     pub coeff: [T; D_EF],
@@ -4507,9 +4552,41 @@ where
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local_row = main.row_slice(0).expect("main row exists");
+        let next_row = main.row_slice(1).expect("next row exists");
         let local: &PcsBasefoldFinalCodewordCols<AB::Var> = (*local_row).borrow();
+        let next: &PcsBasefoldFinalCodewordCols<AB::Var> = (*next_row).borrow();
         builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_first);
         builder.assert_bool(local.is_last);
+        // BasefoldRSParams has basecode_log = 0, so the final codeword is
+        // reconstructed from one base-code coordinate with coefficient 1.
+        builder.when(local.is_enabled).assert_zero(local.elem_idx);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.coeff,
+            [
+                AB::Expr::ONE,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+                AB::Expr::ZERO,
+            ],
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.acc_in,
+            [AB::Expr::ZERO; D_EF],
+        );
+        self.basefold_query_bus.receive(
+            builder,
+            local.proof_idx,
+            PcsBasefoldQueryMessage {
+                query_idx: local.query_idx.into(),
+                stage: AB::Expr::from_usize(PcsBasefoldQueryStage::FinalCodewordStart.as_usize()),
+                round: AB::Expr::ZERO,
+                value: [AB::Expr::ZERO; D_EF],
+            },
+            local.is_enabled * local.is_first,
+        );
 
         self.final_message_bus.lookup_key(
             builder,
@@ -4528,6 +4605,25 @@ where
             &mut builder.when(local.is_enabled * local.is_last),
             local.acc_out,
             local.folded,
+        );
+        let continue_selector = local.is_enabled * (AB::Expr::ONE - local.is_last.into());
+        builder
+            .when(continue_selector.clone())
+            .assert_one(next.is_enabled);
+        builder
+            .when(continue_selector.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when(continue_selector.clone())
+            .assert_eq(next.query_idx, local.query_idx);
+        builder.when(continue_selector.clone()).assert_eq(
+            next.final_tidx,
+            local.final_tidx + AB::Expr::from_usize(D_EF),
+        );
+        assert_array_eq(
+            &mut builder.when(continue_selector),
+            next.acc_in,
+            local.acc_out.map(Into::into),
         );
         self.basefold_query_bus.receive(
             builder,
@@ -6408,6 +6504,7 @@ impl RowMajorChip<F> for PcsBasefoldFinalCodewordTraceGenerator {
             cols.query_idx = F::from_usize(record.query_idx);
             cols.elem_idx = F::from_usize(record.elem_idx);
             cols.final_tidx = F::from_usize(record.final_tidx);
+            cols.is_first = F::from_bool(record.is_first);
             cols.is_last = F::from_bool(record.is_last);
             cols.final_value = ext_limbs(record.final_value);
             cols.coeff = ext_limbs(record.coeff);
@@ -6931,6 +7028,9 @@ fn record_basefold_query_checks(
     let rate_log = <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_rate_log();
     let basecode_log =
         <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_basecode_msg_size_log();
+    if proof.final_message[0].len() != (1usize << basecode_log) {
+        bail!("basefold final message width does not match basecode size");
+    }
     let log2_max_codeword_size = max_num_var + rate_log;
     let rounds_len = max_num_var - basecode_log;
     if proof.query_opening_proof.len() != queries.len() {
@@ -7121,13 +7221,14 @@ fn record_basefold_query_checks(
                         query_idx,
                         elem_idx,
                         final_tidx: final_tidx + flat_idx * D_EF,
+                        is_first: flat_idx == 0,
+                        is_last: flat_idx + 1
+                            == proof.final_message.iter().map(Vec::len).sum::<usize>(),
                         final_value: value,
                         coeff,
                         acc_in,
                         acc_out: acc,
                         folded,
-                        is_last: flat_idx + 1
-                            == proof.final_message.iter().map(Vec::len).sum::<usize>(),
                     });
                 flat_idx += 1;
             }

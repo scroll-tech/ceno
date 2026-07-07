@@ -280,6 +280,7 @@ pub enum PcsBasefoldQueryStage {
     ReducedOpening = 0,
     FinalFolded = 1,
     QueryIndex = 2,
+    FinalCodewordStart = 3,
 }
 
 impl PcsBasefoldQueryStage {
