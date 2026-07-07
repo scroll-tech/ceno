@@ -163,7 +163,6 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         // When local and next are valid, enforce continuation consistency.
         let mut when_both_valid = builder.when(and(local.is_valid, not(local.is_last)));
         when_both_valid.assert_eq(local.child_pvs.end_pc, next.child_pvs.init_pc);
-        when_both_valid.assert_eq(local.child_pvs.end_cycle, next.child_pvs.init_cycle);
         when_both_valid.assert_eq(
             local.child_pvs.shard_id + AB::Expr::ONE,
             next.child_pvs.shard_id,
@@ -392,29 +391,31 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             exit_code,
         );
 
-        // constrain static per-proof public values
+        // The aggregate VM public values are first-shard init/static values plus last-shard
+        // exit/end values. Per-shard values are still constrained row-locally through the
+        // public-values and transcript buses above.
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.shard_id, shard_id);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.heap_start_addr, heap_start_addr);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.heap_shard_len, heap_shard_len);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.hint_start_addr, hint_start_addr);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.hint_shard_len, hint_shard_len);
         assert_array_eq(
-            &mut builder.when(local.is_valid),
+            &mut builder.when_first_row(),
             local.child_pvs.public_io,
             public_io,
         );
         assert_array_eq(
-            &mut builder.when(local.is_valid),
+            &mut builder.when_first_row(),
             local.child_pvs.shard_rw_sum,
             shard_rw_sum,
         );
@@ -426,10 +427,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             fixed_commit,
         );
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.init_pc, init_pc);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.init_cycle, init_cycle);
         assert_array_eq(
             &mut builder.when(local.is_valid),
@@ -437,7 +438,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             fixed_no_omc_init_commit,
         );
         assert_array_eq(
-            &mut builder.when(local.is_valid),
+            &mut builder.when_first_row(),
             local.child_pvs.witness_commit,
             witness_commit,
         );

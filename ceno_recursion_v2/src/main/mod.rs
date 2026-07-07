@@ -410,10 +410,22 @@ impl MainModule {
                         .flat_map(|round| round.challenge_tidx..round.challenge_tidx + D_EF)
                 })
                 .collect::<std::collections::BTreeSet<_>>();
+            let semantic_trunk_tidxs = selector_point_records
+                .iter()
+                .filter(|record| {
+                    record.proof_idx == proof_idx
+                        && record.has_transcript
+                        && record.source_kind == MainSelectorPointSourceKind::EccXY
+                })
+                .flat_map(|record| record.transcript_tidx..record.transcript_tidx + D_EF)
+                .collect::<std::collections::BTreeSet<_>>();
             let values = preflight.transcript.values();
             let samples = preflight.transcript.samples();
             for tidx in preflight.main.transcript_start..preflight.main.transcript_end {
-                if eval_tidxs.contains(&tidx) || global_challenge_tidxs.contains(&tidx) {
+                if eval_tidxs.contains(&tidx)
+                    || global_challenge_tidxs.contains(&tidx)
+                    || semantic_trunk_tidxs.contains(&tidx)
+                {
                     continue;
                 }
                 transcript_records.push(crate::system::MainTranscriptRecord {
@@ -428,7 +440,10 @@ impl MainModule {
         }
         let semantic_fork_tidxs = selector_point_records
             .iter()
-            .filter(|record| record.has_transcript)
+            .filter(|record| {
+                record.has_transcript
+                    && record.source_kind == MainSelectorPointSourceKind::RotationOrigin
+            })
             .flat_map(|record| {
                 (0..D_EF).map(move |offset| {
                     (
@@ -551,6 +566,7 @@ impl AirModule for MainModule {
             Arc::new(MainSelectorPointAir {
                 selector_point_bus: self.main_selector_point_bus,
                 tower_point_bus: self.tower_main_point_bus,
+                transcript_bus: self.transcript_bus,
                 forked_transcript_bus: self.forked_transcript_bus,
                 ecc_rt_bus: self.ecc_rt_bus,
             }) as AirRef<_>,
@@ -1879,7 +1895,33 @@ fn build_main_selector_point_records(
             }
             MainSelectorPointSourceKind::EccXY => {
                 if point.round_idx == 0 {
-                    if let Some(tidx) = eval.ecc_sample_tidx {
+                    if Some(point.selector_idx) == eval.ecc_xy_selector_idx {
+                        if let Some(tidx) = eval.ecc_sample_tidx {
+                            point.has_transcript = true;
+                            point.transcript_tidx = tidx;
+                        }
+                    } else if let Some(source_selector_idx) = eval.ecc_xy_selector_idx {
+                        point.has_source = true;
+                        point.source_selector_idx = source_selector_idx;
+                        point.source_source_kind = MainSelectorPointSourceKind::EccXY;
+                        point.source_round_idx = 0;
+                        if let Some(value) = values_by_key.get(&(
+                            point.proof_idx,
+                            point.idx,
+                            point.air_idx,
+                            source_selector_idx,
+                            point.source_round_idx,
+                        )) {
+                            point.source_value = *value;
+                            source_lookups.push((
+                                point.proof_idx,
+                                point.idx,
+                                point.air_idx,
+                                source_selector_idx,
+                                point.source_round_idx,
+                            ));
+                        }
+                    } else if let Some(tidx) = eval.ecc_sample_tidx {
                         point.has_transcript = true;
                         point.transcript_tidx = tidx;
                     }
@@ -2012,7 +2054,7 @@ fn build_main_ecc_rt_records(
             std::collections::BTreeMap::<(usize, usize, usize), usize>::new(),
             |mut counts, record| {
                 *counts
-                    .entry((record.proof_idx, record.idx, record.round_idx))
+                    .entry((record.proof_idx, record.tower_idx, record.round_idx))
                     .or_default() += 1;
                 counts
             },
@@ -2175,6 +2217,7 @@ fn build_main_ecc_rt_records(
                     idx,
                     fork_id: chip.fork_idx,
                     round_idx,
+                    num_rounds: ecc_replay.rt_tidxs.len(),
                     is_first: round_idx == 0,
                     is_last: round_idx + 1 == ecc_replay.rt_tidxs.len(),
                     tidx,
@@ -2257,24 +2300,24 @@ fn build_lte_witness(
     let active = core::array::from_fn(|i| i < round_idx);
     let mut prefix_acc = [RecursionField::ZERO; 33];
     let mut less_acc = [RecursionField::ZERO; 33];
-    prefix_acc[0] = RecursionField::ONE;
-    for i in 0..32 {
+    prefix_acc[32] = RecursionField::ONE;
+    for i in (0..32).rev() {
         if active[i] {
             let same_one = out_point[i] * rt_point[i];
             let same_zero =
                 (RecursionField::ONE - out_point[i]) * (RecursionField::ONE - rt_point[i]);
             let same_any = same_one + same_zero;
             let equal_choice = if bits[i] { same_one } else { same_zero };
-            prefix_acc[i + 1] = prefix_acc[i] * equal_choice;
-            less_acc[i + 1] = less_acc[i] * same_any
+            prefix_acc[i] = prefix_acc[i + 1] * equal_choice;
+            less_acc[i] = less_acc[i + 1] * same_any
                 + if bits[i] {
-                    prefix_acc[i] * same_zero
+                    prefix_acc[i + 1] * same_zero
                 } else {
                     RecursionField::ZERO
                 };
         } else {
-            prefix_acc[i + 1] = prefix_acc[i];
-            less_acc[i + 1] = less_acc[i];
+            prefix_acc[i] = prefix_acc[i + 1];
+            less_acc[i] = less_acc[i + 1];
         }
     }
     EccLteWitness {
@@ -2332,10 +2375,13 @@ fn native_ecc_equation_evals(
     let mut add_eval = RecursionField::ZERO;
     let mut bypass_eval = RecursionField::ZERO;
     let mut export_eval = RecursionField::ZERO;
+    let s0_x0_x1 = native_septic_mul(s0, &core::array::from_fn(|i| x0[i] - x1[i]));
+    let s0_squared = native_septic_mul(s0, s0);
+    let s0_x0_x3 = native_septic_mul(s0, &core::array::from_fn(|i| x0[i] - x3[i]));
     for i in 0..7 {
-        let v1 = s0[i] * (x0[i] - x1[i]) - (y0[i] - y1[i]);
-        let v2 = s0[i] * s0[i] - x0[i] - x1[i] - x3[i];
-        let v3 = s0[i] * (x0[i] - x3[i]) - (y0[i] + y3[i]);
+        let v1 = s0_x0_x1[i] - (y0[i] - y1[i]);
+        let v2 = s0_squared[i] - x0[i] - x1[i] - x3[i];
+        let v3 = s0_x0_x3[i] - (y0[i] + y3[i]);
         let v4 = x3[i] - x0[i];
         let v5 = y3[i] - y0[i];
         add_eval += v1 * alpha_pows[i] + v2 * alpha_pows[7 + i] + v3 * alpha_pows[14 + i];
@@ -2344,6 +2390,26 @@ fn native_ecc_equation_evals(
             (x3[i] - sum_x[i]) * alpha_pows[35 + i] + (y3[i] - sum_y[i]) * alpha_pows[42 + i];
     }
     (add_eval, bypass_eval, export_eval)
+}
+
+fn native_septic_mul(a: &[RecursionField; 7], b: &[RecursionField; 7]) -> [RecursionField; 7] {
+    let mut out = [RecursionField::ZERO; 7];
+    let two = RecursionField::from_usize(2);
+    let five = RecursionField::from_usize(5);
+    for i in 0..7 {
+        for j in 0..7 {
+            let term = a[i] * b[j];
+            let mut index = i + j;
+            if index < 7 {
+                out[index] += term;
+            } else {
+                index -= 7;
+                out[index] += five * term;
+                out[index + 1] += two * term;
+            }
+        }
+    }
+    out
 }
 
 fn rotation_point_source(

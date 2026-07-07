@@ -46,13 +46,13 @@ pub fn generate_proving_ctx(
 
     let mut trace = vec![F::ZERO; rows * width];
 
-    if rows > 0 {
-        let first_row = &mut trace[..width];
+    for proof_idx in 0..proofs.len().max(1) {
+        let row = &mut trace[proof_idx * width..(proof_idx + 1) * width];
         let base_width = VerifierPvsCols::<u8>::width();
-        let (base_row, def_row) = first_row.split_at_mut(base_width);
+        let (base_row, def_row) = row.split_at_mut(base_width);
 
         let cols: &mut VerifierPvsCols<F> = base_row.borrow_mut();
-        cols.proof_idx = F::ZERO;
+        cols.proof_idx = F::from_usize(proof_idx);
         cols.is_valid = F::ONE;
         cols.has_verifier_pvs = F::ZERO;
         for (dst, digest_elem) in cols.child_vk_digest.iter_mut().zip(child_vk_digest) {
@@ -61,7 +61,7 @@ pub fn generate_proving_ctx(
 
         if deferral_enabled {
             let def_cols: &mut VerifierDeferralCols<F> = def_row.borrow_mut();
-            def_cols.is_last = F::ONE;
+            def_cols.is_last = F::from_bool(proof_idx + 1 == proofs.len().max(1));
             def_cols.child_pvs.deferral_flag = F::ZERO;
         }
     }
