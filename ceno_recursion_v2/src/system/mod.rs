@@ -13,9 +13,10 @@ pub use preflight::{
     PcsBasefoldFinalClaimRecord, PcsBasefoldFinalCodewordRecord, PcsBasefoldInitialClaimRecord,
     PcsBasefoldQueryIndexRecord, PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord,
     PcsCommitPhaseLeafHashRecord, PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord,
-    PcsJaggedAssistInputRecord, PcsJaggedAssistRecord, PcsJaggedQEvalRecord, PcsOpeningClaimRecord,
-    PcsOpeningCommitKind, PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsPreflight,
-    PcsSumcheckInputRecord, PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight,
+    PcsJaggedAssistInputRecord, PcsJaggedAssistRecord, PcsJaggedClaimRecord,
+    PcsJaggedQEvalRecord, PcsOpeningClaimRecord, PcsOpeningCommitKind, PcsOpeningEvalRecord,
+    PcsOpeningPointRecord, PcsPreflight, PcsSumcheckInputRecord, PcsSumcheckRoundRecord,
+    PcsTranscriptValueRecord, Preflight,
     ProofShapePreflight, RotationReplayClaims, TowerChipTranscriptRange, TowerMainPointRecord,
     TowerPreflight, TraceVData,
 };

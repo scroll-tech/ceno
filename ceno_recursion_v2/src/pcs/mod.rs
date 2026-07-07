@@ -57,9 +57,10 @@ use crate::{
         PcsBasefoldFinalCodewordRecord, PcsBasefoldInitialClaimRecord, PcsBasefoldQueryIndexRecord,
         PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord,
         PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord, PcsJaggedAssistInputRecord,
-        PcsJaggedAssistRecord, PcsJaggedQEvalRecord, PcsOpeningEvalRecord, PcsOpeningPointRecord,
-        PcsSumcheckInputRecord, PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight,
-        RecursionField, RecursionPcs, RecursionProof, RecursionVk, TraceGenModule,
+        PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord, PcsOpeningCommitKind,
+        PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSumcheckInputRecord,
+        PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight, RecursionField, RecursionPcs,
+        RecursionProof, RecursionVk, TraceGenModule,
     },
     tracegen::{ModuleChip, RowMajorChip},
     utils::digests_to_poseidon2_input,
@@ -223,6 +224,18 @@ impl PcsModule {
             .zip(proof.opening_proof.rounds.iter())
             .enumerate()
         {
+            let commit_kind = if round_idx == 0 {
+                PcsOpeningCommitKind::Witin
+            } else {
+                PcsOpeningCommitKind::Fixed
+            };
+            let term_sources = preflight
+                .pcs
+                .opening_evals
+                .iter()
+                .filter(|record| record.commit_kind == commit_kind)
+                .map(|record| (record.main_idx, record.main_eval_idx))
+                .collect_vec();
             let poly_heights = comm
                 .cumulative_heights
                 .windows(2)
@@ -238,6 +251,7 @@ impl PcsModule {
                 &comm,
                 &point,
                 &evals,
+                &term_sources,
                 round_proof,
                 preflight,
                 ts,
@@ -270,6 +284,7 @@ impl PcsModule {
         comm: &<RecursionPcs as mpcs::PolynomialCommitmentScheme<RecursionField>>::Commitment,
         point: &[RecursionField],
         evals: &[RecursionField],
+        term_sources: &[(usize, usize)],
         proof: &mpcs::jagged::JaggedBatchOpenProof<
             RecursionField,
             mpcs::Basefold<RecursionField, BasefoldRSParams>,
@@ -287,6 +302,12 @@ impl PcsModule {
         let num_polys = comm.cumulative_heights.len() - 1;
         if evals.len() != num_polys {
             bail!("jagged eval count mismatch: {} != {num_polys}", evals.len());
+        }
+        if term_sources.len() != num_polys {
+            bail!(
+                "jagged eval source count mismatch: {} != {num_polys}",
+                term_sources.len()
+            );
         }
         let total_evals = *comm.cumulative_heights.last().unwrap_or(&0);
         let log_h = comm.reshape_log_height;
@@ -317,6 +338,7 @@ impl PcsModule {
         }
         let num_col_vars = ceil_log2(num_polys).max(1);
         observe_label_with_records(ts, b"z_col", preflight, round_idx * 1_000_000 + 4_000);
+        let z_col_tidx = ts.len();
         let z_col = sample_vec_with_records(
             ts,
             num_col_vars,
@@ -338,13 +360,38 @@ impl PcsModule {
                 eq_col[i] * tail_zero_prod[s_i] * evals[i]
             })
             .sum();
+        let mut acc = RecursionField::ZERO;
+        for i in 0..num_polys {
+            let h_i = comm.cumulative_heights[i + 1] - comm.cumulative_heights[i];
+            let s_i = ceil_log2(h_i);
+            let term = eq_col[i] * tail_zero_prod[s_i] * evals[i];
+            let acc_in = acc;
+            acc += term;
+            let (main_idx, main_eval_idx) = term_sources[i];
+            preflight.pcs.jagged_claims.push(PcsJaggedClaimRecord {
+                proof_idx: 0,
+                round_idx,
+                sumcheck_idx: round_idx * 2,
+                term_idx: i,
+                is_first: i == 0,
+                is_last: i + 1 == num_polys,
+                main_idx,
+                main_eval_idx,
+                eval: evals[i],
+                z_col_tidx,
+                eq_col: eq_col[i],
+                tail_zero: tail_zero_prod[s_i],
+                acc_in,
+                acc_out: acc,
+            });
+        }
         let (rho, expected) = replay_degree2_sumcheck(
             0,
             round_idx * 2,
             claimed_sum,
             &proof.sumcheck_proof,
             num_giga_vars,
-            true,
+            false,
             preflight,
             ts,
         )?;
@@ -675,7 +722,7 @@ impl PcsModule {
 
 impl AirModule for PcsModule {
     fn num_airs(&self) -> usize {
-        20
+        21
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -745,6 +792,9 @@ impl AirModule for PcsModule {
             }) as AirRef<_>,
             Arc::new(PcsJaggedAssistInputAir {
                 jagged_f_eval_bus: self.jagged_f_eval_bus,
+                sumcheck_input_bus: self.sumcheck_input_bus,
+            }) as AirRef<_>,
+            Arc::new(PcsJaggedClaimAir {
                 sumcheck_input_bus: self.sumcheck_input_bus,
             }) as AirRef<_>,
             Arc::new(PcsSumcheckInputAir {
@@ -860,6 +910,17 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             })
             .collect_vec();
         jagged_assist_inputs.sort_by_key(|record| (record.proof_idx, record.sumcheck_idx));
+        let mut jagged_claims = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, p)| {
+                p.pcs.jagged_claims.iter().cloned().map(move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                })
+            })
+            .collect_vec();
+        jagged_claims.sort_by_key(|record| (record.proof_idx, record.sumcheck_idx, record.term_idx));
         let mut batch_coeffs = preflights
             .iter()
             .enumerate()
@@ -1129,6 +1190,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             transcript_values: &transcript_values,
             basefold_initial_claims: &basefold_initial_claims,
             jagged_assist_inputs: &jagged_assist_inputs,
+            jagged_claims: &jagged_claims,
             sumcheck_inputs: &sumcheck_inputs,
             sumcheck_rounds: &sumcheck_rounds,
             batch_coeffs: &batch_coeffs,
@@ -1151,6 +1213,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             PcsModuleChip::TranscriptValues,
             PcsModuleChip::BasefoldInitialClaim,
             PcsModuleChip::JaggedAssistInput,
+            PcsModuleChip::JaggedClaim,
             PcsModuleChip::SumcheckInput,
             PcsModuleChip::Sumcheck,
             PcsModuleChip::BatchCoeff,
@@ -2672,6 +2735,118 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsJaggedAssistInputAir {
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
+pub struct PcsJaggedClaimCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub round_idx: T,
+    pub sumcheck_idx: T,
+    pub term_idx: T,
+    pub is_first: T,
+    pub is_last: T,
+    pub main_idx: T,
+    pub main_eval_idx: T,
+    pub z_col_tidx: T,
+    pub eval: [T; D_EF],
+    pub eq_col: [T; D_EF],
+    pub tail_zero: [T; D_EF],
+    pub acc_in: [T; D_EF],
+    pub acc_out: [T; D_EF],
+}
+
+pub struct PcsJaggedClaimAir {
+    pub sumcheck_input_bus: PcsSumcheckInputBus,
+}
+
+impl<F: Field> BaseAir<F> for PcsJaggedClaimAir {
+    fn width(&self) -> usize {
+        PcsJaggedClaimCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for PcsJaggedClaimAir {}
+impl<F: Field> PartitionedBaseAir<F> for PcsJaggedClaimAir {}
+
+impl<AB> Air<AB> for PcsJaggedClaimAir
+where
+    AB: AirBuilder + InteractionBuilder,
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let next_row = main.row_slice(1).expect("next row exists");
+        let local: &PcsJaggedClaimCols<AB::Var> = (*local_row).borrow();
+        let next: &PcsJaggedClaimCols<AB::Var> = (*next_row).borrow();
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_first);
+        builder.assert_bool(local.is_last);
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.sumcheck_idx, local.round_idx + local.round_idx);
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_zero(local.term_idx);
+        let zero = core::array::from_fn(|_| AB::Expr::ZERO);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.acc_in,
+            zero,
+        );
+
+        let continues = local.is_enabled * (AB::Expr::ONE - local.is_last);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_one(next.is_enabled);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.round_idx, local.round_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.sumcheck_idx, local.sumcheck_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.term_idx, local.term_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.z_col_tidx, local.z_col_tidx);
+        assert_array_eq(
+            &mut builder.when_transition().when(continues),
+            next.acc_in,
+            local.acc_out,
+        );
+
+        let opened_eval = recursion_circuit::utils::ext_field_multiply(local.tail_zero, local.eval);
+        let term = recursion_circuit::utils::ext_field_multiply(local.eq_col, opened_eval.clone());
+        let expected_acc = ext_add(local.acc_in, term);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.acc_out,
+            expected_acc,
+        );
+
+        self.sumcheck_input_bus.send(
+            builder,
+            local.proof_idx,
+            PcsSumcheckInputMessage {
+                idx: local.sumcheck_idx.into(),
+                claim: local.acc_out.map(Into::into),
+            },
+            local.is_enabled * local.is_last,
+        );
+    }
+}
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
 pub struct PcsSumcheckInputCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
@@ -2998,6 +3173,7 @@ struct PcsTraceCtx<'a> {
     transcript_values: &'a [PcsTranscriptValueRecord],
     basefold_initial_claims: &'a [PcsBasefoldInitialClaimRecord],
     jagged_assist_inputs: &'a [PcsJaggedAssistInputRecord],
+    jagged_claims: &'a [PcsJaggedClaimRecord],
     sumcheck_inputs: &'a [PcsSumcheckInputRecord],
     sumcheck_rounds: &'a [PcsSumcheckRoundRecord],
     batch_coeffs: &'a [PcsBatchCoeffRecord],
@@ -3021,6 +3197,7 @@ enum PcsModuleChip {
     TranscriptValues,
     BasefoldInitialClaim,
     JaggedAssistInput,
+    JaggedClaim,
     SumcheckInput,
     Sumcheck,
     BatchCoeff,
@@ -3068,6 +3245,9 @@ impl RowMajorChip<F> for PcsModuleChip {
                 .generate_trace(&ctx.basefold_initial_claims, required_height),
             PcsModuleChip::JaggedAssistInput => PcsJaggedAssistInputTraceGenerator
                 .generate_trace(&ctx.jagged_assist_inputs, required_height),
+            PcsModuleChip::JaggedClaim => {
+                PcsJaggedClaimTraceGenerator.generate_trace(&ctx.jagged_claims, required_height)
+            }
             PcsModuleChip::SumcheckInput => {
                 PcsSumcheckInputTraceGenerator.generate_trace(&ctx.sumcheck_inputs, required_height)
             }
@@ -3103,6 +3283,7 @@ struct PcsBasefoldFinalCodewordTraceGenerator;
 struct PcsTranscriptValueTraceGenerator;
 struct PcsBasefoldInitialClaimTraceGenerator;
 struct PcsJaggedAssistInputTraceGenerator;
+struct PcsJaggedClaimTraceGenerator;
 struct PcsSumcheckInputTraceGenerator;
 struct PcsSumcheckTraceGenerator;
 struct PcsBatchCoeffTraceGenerator;
@@ -3531,6 +3712,40 @@ impl RowMajorChip<F> for PcsJaggedAssistInputTraceGenerator {
             cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
             cols.f_tidx = F::from_usize(record.f_tidx);
             cols.f_at_rho = ext_limbs(record.f_at_rho);
+        }
+        Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+impl RowMajorChip<F> for PcsJaggedClaimTraceGenerator {
+    type Ctx<'a> = &'a [PcsJaggedClaimRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let width = PcsJaggedClaimCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let mut trace = vec![F::ZERO; height * width];
+        for (row_idx, record) in records.iter().enumerate() {
+            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
+            let cols: &mut PcsJaggedClaimCols<F> = row.borrow_mut();
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.round_idx = F::from_usize(record.round_idx);
+            cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+            cols.term_idx = F::from_usize(record.term_idx);
+            cols.is_first = F::from_bool(record.is_first);
+            cols.is_last = F::from_bool(record.is_last);
+            cols.main_idx = F::from_usize(record.main_idx);
+            cols.main_eval_idx = F::from_usize(record.main_eval_idx);
+            cols.z_col_tidx = F::from_usize(record.z_col_tidx);
+            cols.eval = ext_limbs(record.eval);
+            cols.eq_col = ext_limbs(record.eq_col);
+            cols.tail_zero = ext_limbs(record.tail_zero);
+            cols.acc_in = ext_limbs(record.acc_in);
+            cols.acc_out = ext_limbs(record.acc_out);
         }
         Some(RowMajorMatrix::new(trace, width))
     }
