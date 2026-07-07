@@ -41,28 +41,28 @@ use crate::{
         MainEvalBus, MainEvalMessage, MainGlobalPointBus, MainGlobalPointMessage,
         PcsBaseInputOpeningBus, PcsBaseInputOpeningMessage, PcsBasefoldEvalBus,
         PcsBasefoldEvalMessage, PcsBasefoldFinalExpectedBus, PcsBasefoldFinalExpectedMessage,
-        PcsBasefoldQueryBus, PcsBasefoldQueryMessage, PcsBasefoldQueryStage, PcsBatchAlphaBus,
-        PcsBatchAlphaMessage, PcsBatchCoeffBus, PcsBatchCoeffMessage, PcsCommitHeightBus,
-        PcsCommitHeightMessage, PcsCommitPhaseLeafBus, PcsCommitPhaseLeafMessage,
-        PcsCommitmentRootBus, PcsCommitmentRootMessage, PcsEqProductBus, PcsEqProductMessage,
-        PcsFinalMessageBus, PcsFinalMessageMessage, PcsFoldChallengeBus, PcsFoldChallengeMessage,
-        PcsJaggedAssistHBus, PcsJaggedAssistHMessage, PcsJaggedAssistQBus, PcsJaggedAssistQMessage,
-        PcsJaggedFEvalBus, PcsJaggedFEvalMessage, PcsOpeningEvalBus, PcsOpeningEvalMessage,
-        PcsQuerySampleBus, PcsQuerySampleMessage, PcsSuffixProductBus, PcsSuffixProductMessage,
-        PcsSumcheckInputBus, PcsSumcheckInputMessage, PcsSumcheckOutputBus,
-        PcsSumcheckOutputMessage, PcsTranscriptExtBus, PcsTranscriptExtMessage, TranscriptBus,
-        TranscriptBusMessage,
+        PcsBasefoldFinalPointBus, PcsBasefoldFinalPointMessage, PcsBasefoldQueryBus,
+        PcsBasefoldQueryMessage, PcsBasefoldQueryStage, PcsBatchAlphaBus, PcsBatchAlphaMessage,
+        PcsBatchCoeffBus, PcsBatchCoeffMessage, PcsCommitHeightBus, PcsCommitHeightMessage,
+        PcsCommitPhaseLeafBus, PcsCommitPhaseLeafMessage, PcsCommitmentRootBus,
+        PcsCommitmentRootMessage, PcsEqProductBus, PcsEqProductMessage, PcsFinalMessageBus,
+        PcsFinalMessageMessage, PcsFoldChallengeBus, PcsFoldChallengeMessage, PcsJaggedAssistHBus,
+        PcsJaggedAssistHMessage, PcsJaggedAssistQBus, PcsJaggedAssistQMessage, PcsJaggedFEvalBus,
+        PcsJaggedFEvalMessage, PcsOpeningEvalBus, PcsOpeningEvalMessage, PcsQuerySampleBus,
+        PcsQuerySampleMessage, PcsSuffixProductBus, PcsSuffixProductMessage, PcsSumcheckInputBus,
+        PcsSumcheckInputMessage, PcsSumcheckOutputBus, PcsSumcheckOutputMessage,
+        PcsTranscriptExtBus, PcsTranscriptExtMessage, TranscriptBus, TranscriptBusMessage,
     },
     system::{
         AirModule, GlobalCtxCpu, PcsBaseInputLeafHashRecord, PcsBaseInputMerkleRecord,
         PcsBasefoldCommitPhaseQueryRecord, PcsBasefoldFinalClaimRecord,
         PcsBasefoldFinalCodewordRecord, PcsBasefoldFinalExpectedRecord,
-        PcsBasefoldInitialClaimRecord, PcsBasefoldQueryIndexRecord, PcsBasefoldQueryOpenRecord,
-        PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord, PcsCommitPhaseMerkleRecord,
-        PcsCommitmentRootRecord, PcsEqProductKind, PcsEqProductRecord, PcsEqProductSource,
-        PcsJaggedAssistHRecord, PcsJaggedAssistInputRecord, PcsJaggedAssistQRecord,
-        PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord, PcsOpeningCommitKind,
-        PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSuffixProductRecord,
+        PcsBasefoldFinalPointRecord, PcsBasefoldInitialClaimRecord, PcsBasefoldQueryIndexRecord,
+        PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord,
+        PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord, PcsEqProductKind, PcsEqProductRecord,
+        PcsEqProductSource, PcsJaggedAssistHRecord, PcsJaggedAssistInputRecord,
+        PcsJaggedAssistQRecord, PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord,
+        PcsOpeningCommitKind, PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSuffixProductRecord,
         PcsSumcheckInputRecord, PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight,
         RecursionField, RecursionPcs, RecursionProof, RecursionVk, TraceGenModule,
     },
@@ -84,6 +84,7 @@ pub struct PcsModule {
     basefold_query_bus: PcsBasefoldQueryBus,
     basefold_eval_bus: PcsBasefoldEvalBus,
     basefold_final_expected_bus: PcsBasefoldFinalExpectedBus,
+    basefold_final_point_bus: PcsBasefoldFinalPointBus,
     transcript_ext_bus: PcsTranscriptExtBus,
     base_input_opening_bus: PcsBaseInputOpeningBus,
     final_message_bus: PcsFinalMessageBus,
@@ -130,6 +131,15 @@ type BasefoldRound = (
     Vec<BasefoldOpening>,
 );
 type JaggedTermSource = (usize, usize, PcsOpeningCommitKind, usize, usize, usize);
+
+fn ensure_supported_basecode_log(basecode_log: usize) -> Result<()> {
+    if basecode_log != 0 {
+        bail!(
+            "unsupported basefold basecode_log {basecode_log}; only basecode_log == 0 is supported"
+        );
+    }
+    Ok(())
+}
 
 fn push_eq_product_records(
     preflight: &mut Preflight,
@@ -427,13 +437,57 @@ fn push_basefold_final_expected_records(
     let mut acc = RecursionField::ZERO;
     let mut term_idx = preflight.pcs.basefold_final_expected.len();
     let mut flat_message_idx = 0usize;
-    for (message_row, point) in final_message.iter().zip(
-        rounds
-            .iter()
-            .flat_map(|(_, point_evals)| point_evals.iter())
-            .filter(|(_, (point, _))| point.len() >= basecode_log)
-            .map(|(_, (point, _))| point),
-    ) {
+    for (point_idx, (round_idx, point)) in final_message
+        .iter()
+        .zip(
+            rounds
+                .iter()
+                .enumerate()
+                .flat_map(|(round_idx, (_, point_evals))| {
+                    point_evals
+                        .iter()
+                        .map(move |(_, (point, _))| (round_idx, point))
+                })
+                .filter(|(_, point)| point.len() >= basecode_log),
+        )
+        .map(|(_, point)| point)
+        .enumerate()
+    {
+        for (coord_idx, &value) in point.iter().enumerate() {
+            let source_sumcheck_idx = round_idx * 2;
+            if let Some(record) = preflight
+                .pcs
+                .sumcheck_rounds
+                .iter_mut()
+                .find(|record| record.idx == source_sumcheck_idx && record.round == coord_idx)
+            {
+                record.fold_challenge_lookup_count += 1;
+            }
+            preflight
+                .pcs
+                .basefold_final_points
+                .push(PcsBasefoldFinalPointRecord {
+                    proof_idx: 0,
+                    sumcheck_idx,
+                    point_idx,
+                    coord_idx,
+                    source_sumcheck_idx,
+                    source_round: coord_idx,
+                    value,
+                });
+        }
+    }
+    for (point_idx, (message_row, point)) in final_message
+        .iter()
+        .zip(
+            rounds
+                .iter()
+                .flat_map(|(_, point_evals)| point_evals.iter())
+                .filter(|(_, (point, _))| point.len() >= basecode_log)
+                .map(|(_, (point, _))| point),
+        )
+        .enumerate()
+    {
         let num_vars_evaluated = point.len() - basecode_log;
         if num_vars_evaluated > fold_challenges.len() {
             bail!("basefold final expected point exceeds fold challenge count");
@@ -491,6 +545,8 @@ fn push_basefold_final_expected_records(
                         proof_idx: 0,
                         sumcheck_idx,
                         term_idx,
+                        point_idx,
+                        coord_idx: factor_idx,
                         final_tidx: element_tidx,
                         is_first: term_idx == 0,
                         is_last: false,
@@ -527,6 +583,7 @@ impl PcsModule {
             basefold_query_bus: bus_inventory.pcs_basefold_query_bus,
             basefold_eval_bus: bus_inventory.pcs_basefold_eval_bus,
             basefold_final_expected_bus: bus_inventory.pcs_basefold_final_expected_bus,
+            basefold_final_point_bus: bus_inventory.pcs_basefold_final_point_bus,
             transcript_ext_bus: bus_inventory.pcs_transcript_ext_bus,
             base_input_opening_bus: bus_inventory.pcs_base_input_opening_bus,
             final_message_bus: bus_inventory.pcs_final_message_bus,
@@ -1093,6 +1150,7 @@ impl PcsModule {
             .max()
             .unwrap_or(0);
         let basecode_log = <BasefoldRSParams as mpcs::basefold::BasefoldSpec<RecursionField>>::get_basecode_msg_size_log();
+        ensure_supported_basecode_log(basecode_log)?;
         if max_num_var < basecode_log {
             return Ok(());
         }
@@ -1305,6 +1363,10 @@ impl AirModule for PcsModule {
             Arc::new(PcsOpeningPointAir {
                 main_global_point_bus: self.main_global_point_bus,
             }) as AirRef<_>,
+            Arc::new(PcsBasefoldFinalPointAir {
+                fold_challenge_bus: self.fold_challenge_bus,
+                final_point_bus: self.basefold_final_point_bus,
+            }) as AirRef<_>,
             Arc::new(PcsOpeningEvalAir {
                 main_eval_bus: self.main_eval_bus,
                 opening_eval_bus: self.opening_eval_bus,
@@ -1400,6 +1462,7 @@ impl AirModule for PcsModule {
             Arc::new(PcsBasefoldFinalExpectedAir {
                 fold_challenge_bus: self.fold_challenge_bus,
                 final_message_bus: self.final_message_bus,
+                final_point_bus: self.basefold_final_point_bus,
                 final_expected_bus: self.basefold_final_expected_bus,
             }) as AirRef<_>,
             Arc::new(PcsBasefoldFinalClaimAir {
@@ -1637,6 +1700,28 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             .collect_vec();
         basefold_final_expected
             .sort_by_key(|record| (record.proof_idx, record.sumcheck_idx, record.term_idx));
+        let mut basefold_final_points = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, p)| {
+                p.pcs
+                    .basefold_final_points
+                    .iter()
+                    .cloned()
+                    .map(move |mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+            })
+            .collect_vec();
+        basefold_final_points.sort_by_key(|record| {
+            (
+                record.proof_idx,
+                record.sumcheck_idx,
+                record.point_idx,
+                record.coord_idx,
+            )
+        });
         let mut basefold_final_claims = preflights
             .iter()
             .enumerate()
@@ -1967,8 +2052,10 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 .filter(|record| record.is_last)
                 .count();
             let jagged_assist_q_receives = jagged_assists.len();
+            let basefold_final_point_sends = basefold_final_points.len();
+            let basefold_final_point_receives = basefold_final_expected.len();
             eprintln!(
-                "rec-v2-debug module=pcs source=trace key=bus_counts opening_eval_send={} opening_eval_recv={} eq_product_send={} eq_product_recv={} suffix_product_send={} suffix_product_recv={} jagged_assist_h_send={} jagged_assist_h_recv={} jagged_assist_q_send={} jagged_assist_q_recv={} basefold_eval_send={} basefold_eval_recv={} jagged_f_send={} jagged_f_recv={} batch_coeff_send={} batch_coeff_recv={} final_message_send={} final_message_recv={} query_sample_send={} query_sample_recv={} sumcheck_input_send={} sumcheck_input_recv={} sumcheck_output_send={} sumcheck_output_recv={} commitment_root_send={} commitment_root_recv={} base_input_opening_send={} base_input_opening_recv={} basefold_query_send={} basefold_query_recv={} commit_phase_leaf_send={} commit_phase_leaf_recv={}",
+                "rec-v2-debug module=pcs source=trace key=bus_counts opening_eval_send={} opening_eval_recv={} eq_product_send={} eq_product_recv={} suffix_product_send={} suffix_product_recv={} jagged_assist_h_send={} jagged_assist_h_recv={} jagged_assist_q_send={} jagged_assist_q_recv={} basefold_final_point_send={} basefold_final_point_recv={} basefold_eval_send={} basefold_eval_recv={} jagged_f_send={} jagged_f_recv={} batch_coeff_send={} batch_coeff_recv={} final_message_send={} final_message_recv={} query_sample_send={} query_sample_recv={} sumcheck_input_send={} sumcheck_input_recv={} sumcheck_output_send={} sumcheck_output_recv={} commitment_root_send={} commitment_root_recv={} base_input_opening_send={} base_input_opening_recv={} basefold_query_send={} basefold_query_recv={} commit_phase_leaf_send={} commit_phase_leaf_recv={}",
                 opening_evals.len(),
                 jagged_claims.len(),
                 eq_product_sends,
@@ -1979,6 +2066,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 jagged_assist_h_receives,
                 jagged_assist_q_sends,
                 jagged_assist_q_receives,
+                basefold_final_point_sends,
+                basefold_final_point_receives,
                 basefold_eval_sends,
                 basefold_initial_claims.len() + jagged_q_evals.len(),
                 jagged_f_sends,
@@ -2280,7 +2369,51 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                     ))
                     .or_default() -= 1;
             }
+            for record in &basefold_final_points {
+                *fold_challenge_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.source_sumcheck_idx,
+                            record.source_round,
+                            record.value
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
             report_map("fold_challenge", &fold_challenge_map);
+
+            let mut basefold_final_point_map = std::collections::BTreeMap::<String, isize>::new();
+            for record in &basefold_final_points {
+                *basefold_final_point_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.sumcheck_idx,
+                            record.point_idx,
+                            record.coord_idx,
+                            record.value
+                        )
+                    ))
+                    .or_default() += 1;
+            }
+            for record in &basefold_final_expected {
+                *basefold_final_point_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.sumcheck_idx,
+                            record.point_idx,
+                            record.coord_idx,
+                            record.point_value
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            report_map("basefold_final_point", &basefold_final_point_map);
 
             let mut commit_height_map = std::collections::BTreeMap::<String, isize>::new();
             for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
@@ -2514,6 +2647,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             commit_phase_leaf_hashes: &commit_phase_leaf_hashes,
             commit_phase_merkle_rows: &commit_phase_merkle_rows,
             opening_points: &opening_points,
+            basefold_final_points: &basefold_final_points,
             opening_evals: &opening_evals,
             basefold_query_indices: &basefold_query_indices,
             basefold_query_opens: &basefold_query_opens,
@@ -2542,6 +2676,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             PcsModuleChip::CommitPhaseLeafHash,
             PcsModuleChip::CommitPhaseMerkle,
             PcsModuleChip::OpeningPoint,
+            PcsModuleChip::BasefoldFinalPoint,
             PcsModuleChip::OpeningEval,
             PcsModuleChip::EqProduct,
             PcsModuleChip::SuffixProduct,
@@ -3122,6 +3257,63 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsOpeningPointAir {
             local.proof_idx,
             MainGlobalPointMessage {
                 round_idx: local.global_round_idx.into(),
+                value: local.value.map(Into::into),
+            },
+            local.is_enabled,
+        );
+    }
+}
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
+pub struct PcsBasefoldFinalPointCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub sumcheck_idx: T,
+    pub point_idx: T,
+    pub coord_idx: T,
+    pub source_sumcheck_idx: T,
+    pub source_round: T,
+    pub value: [T; D_EF],
+}
+
+pub struct PcsBasefoldFinalPointAir {
+    pub fold_challenge_bus: PcsFoldChallengeBus,
+    pub final_point_bus: PcsBasefoldFinalPointBus,
+}
+
+impl<F: Field> BaseAir<F> for PcsBasefoldFinalPointAir {
+    fn width(&self) -> usize {
+        PcsBasefoldFinalPointCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for PcsBasefoldFinalPointAir {}
+impl<F: Field> PartitionedBaseAir<F> for PcsBasefoldFinalPointAir {}
+
+impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsBasefoldFinalPointAir {
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let local: &PcsBasefoldFinalPointCols<AB::Var> = (*local_row).borrow();
+        builder.assert_bool(local.is_enabled);
+        self.fold_challenge_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsFoldChallengeMessage {
+                sumcheck_idx: local.source_sumcheck_idx.into(),
+                round: local.source_round.into(),
+                challenge: local.value.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.final_point_bus.send(
+            builder,
+            local.proof_idx,
+            PcsBasefoldFinalPointMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                point_idx: local.point_idx.into(),
+                coord_idx: local.coord_idx.into(),
                 value: local.value.map(Into::into),
             },
             local.is_enabled,
@@ -5632,6 +5824,8 @@ pub struct PcsBasefoldFinalExpectedCols<T> {
     pub proof_idx: T,
     pub sumcheck_idx: T,
     pub term_idx: T,
+    pub point_idx: T,
+    pub coord_idx: T,
     pub final_tidx: T,
     pub is_first: T,
     pub is_last: T,
@@ -5652,6 +5846,7 @@ pub struct PcsBasefoldFinalExpectedCols<T> {
 pub struct PcsBasefoldFinalExpectedAir {
     pub fold_challenge_bus: PcsFoldChallengeBus,
     pub final_message_bus: PcsFinalMessageBus,
+    pub final_point_bus: PcsBasefoldFinalPointBus,
     pub final_expected_bus: PcsBasefoldFinalExpectedBus,
 }
 
@@ -5708,6 +5903,17 @@ where
                 challenge: local.challenge.map(Into::into),
             },
             local.is_enabled * local.has_challenge,
+        );
+        self.final_point_bus.receive(
+            builder,
+            local.proof_idx,
+            PcsBasefoldFinalPointMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                point_idx: local.point_idx.into(),
+                coord_idx: local.coord_idx.into(),
+                value: local.point_value.map(Into::into),
+            },
+            local.is_enabled,
         );
 
         let point = local.point_value.map(Into::into);
@@ -5868,6 +6074,7 @@ struct PcsTraceCtx<'a> {
     commit_phase_leaf_hashes: &'a [PcsCommitPhaseLeafHashRecord],
     commit_phase_merkle_rows: &'a [PcsCommitPhaseMerkleRecord],
     opening_points: &'a [PcsOpeningPointRecord],
+    basefold_final_points: &'a [PcsBasefoldFinalPointRecord],
     opening_evals: &'a [PcsOpeningEvalRecord],
     eq_products: &'a [PcsEqProductRecord],
     suffix_products: &'a [PcsSuffixProductRecord],
@@ -5897,6 +6104,7 @@ enum PcsModuleChip {
     CommitPhaseLeafHash,
     CommitPhaseMerkle,
     OpeningPoint,
+    BasefoldFinalPoint,
     OpeningEval,
     EqProduct,
     SuffixProduct,
@@ -5941,6 +6149,8 @@ impl RowMajorChip<F> for PcsModuleChip {
             PcsModuleChip::OpeningPoint => {
                 PcsOpeningPointTraceGenerator.generate_trace(&ctx.opening_points, required_height)
             }
+            PcsModuleChip::BasefoldFinalPoint => PcsBasefoldFinalPointTraceGenerator
+                .generate_trace(&ctx.basefold_final_points, required_height),
             PcsModuleChip::OpeningEval => {
                 PcsOpeningEvalTraceGenerator.generate_trace(&ctx.opening_evals, required_height)
             }
@@ -5997,6 +6207,7 @@ impl RowMajorChip<F> for PcsModuleChip {
 }
 
 struct PcsOpeningPointTraceGenerator;
+struct PcsBasefoldFinalPointTraceGenerator;
 struct PcsCommitmentRootTraceGenerator;
 struct PcsBaseInputLeafHashTraceGenerator;
 struct PcsBaseInputMerkleTraceGenerator;
@@ -6198,6 +6409,33 @@ impl RowMajorChip<F> for PcsOpeningPointTraceGenerator {
             cols.opening_idx = F::from_usize(record.opening_idx);
             cols.coord_idx = F::from_usize(record.coord_idx);
             cols.global_round_idx = F::from_usize(record.global_round_idx);
+            cols.value = ext_limbs(record.value);
+        }
+        Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+impl RowMajorChip<F> for PcsBasefoldFinalPointTraceGenerator {
+    type Ctx<'a> = &'a [PcsBasefoldFinalPointRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let width = PcsBasefoldFinalPointCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let mut trace = vec![F::ZERO; height * width];
+        for (row_idx, record) in records.iter().enumerate() {
+            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
+            let cols: &mut PcsBasefoldFinalPointCols<F> = row.borrow_mut();
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+            cols.point_idx = F::from_usize(record.point_idx);
+            cols.coord_idx = F::from_usize(record.coord_idx);
+            cols.source_sumcheck_idx = F::from_usize(record.source_sumcheck_idx);
+            cols.source_round = F::from_usize(record.source_round);
             cols.value = ext_limbs(record.value);
         }
         Some(RowMajorMatrix::new(trace, width))
@@ -6534,6 +6772,8 @@ impl RowMajorChip<F> for PcsBasefoldFinalExpectedTraceGenerator {
             cols.proof_idx = F::from_usize(record.proof_idx);
             cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
             cols.term_idx = F::from_usize(record.term_idx);
+            cols.point_idx = F::from_usize(record.point_idx);
+            cols.coord_idx = F::from_usize(record.coord_idx);
             cols.final_tidx = F::from_usize(record.final_tidx);
             cols.is_first = F::from_bool(record.is_first);
             cols.is_last = F::from_bool(record.is_last);
@@ -7028,6 +7268,7 @@ fn record_basefold_query_checks(
     let rate_log = <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_rate_log();
     let basecode_log =
         <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_basecode_msg_size_log();
+    ensure_supported_basecode_log(basecode_log)?;
     if proof.final_message[0].len() != (1usize << basecode_log) {
         bail!("basefold final message width does not match basecode size");
     }
@@ -7846,4 +8087,19 @@ where
             recursion_circuit::utils::ext_field_multiply::<FA>(x, x_minus_one),
         ),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn basefold_basecode_log_zero_is_only_supported_shape() {
+        ensure_supported_basecode_log(0).expect("basecode_log 0 should be supported");
+        let err = ensure_supported_basecode_log(1).expect_err("basecode_log > 0 must reject");
+        assert!(
+            err.to_string().contains("only basecode_log == 0"),
+            "unexpected error: {err}"
+        );
+    }
 }

@@ -18,11 +18,11 @@ use crate::bus::{
     MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
     NLiftBus as LocalNLiftBus, PcsBaseInputOpeningBus, PcsBasefoldEvalBus,
-    PcsBasefoldFinalExpectedBus, PcsBasefoldQueryBus, PcsBatchAlphaBus, PcsBatchCoeffBus,
-    PcsCommitHeightBus, PcsCommitPhaseLeafBus, PcsCommitmentRootBus, PcsEqProductBus,
-    PcsFinalMessageBus, PcsFoldChallengeBus, PcsJaggedAssistHBus, PcsJaggedAssistQBus,
-    PcsJaggedFEvalBus, PcsOpeningEvalBus, PcsQuerySampleBus, PcsSuffixProductBus,
-    PcsSumcheckInputBus, PcsSumcheckOutputBus, PcsTranscriptExtBus,
+    PcsBasefoldFinalExpectedBus, PcsBasefoldFinalPointBus, PcsBasefoldQueryBus, PcsBatchAlphaBus,
+    PcsBatchCoeffBus, PcsCommitHeightBus, PcsCommitPhaseLeafBus, PcsCommitmentRootBus,
+    PcsEqProductBus, PcsFinalMessageBus, PcsFoldChallengeBus, PcsJaggedAssistHBus,
+    PcsJaggedAssistQBus, PcsJaggedFEvalBus, PcsOpeningEvalBus, PcsQuerySampleBus,
+    PcsSuffixProductBus, PcsSumcheckInputBus, PcsSumcheckOutputBus, PcsTranscriptExtBus,
     PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus, TowerModuleBus,
     TranscriptBus as LocalTranscriptBus,
 };
@@ -73,6 +73,7 @@ pub struct BusInventory {
     pub pcs_basefold_query_bus: PcsBasefoldQueryBus,
     pub pcs_basefold_eval_bus: PcsBasefoldEvalBus,
     pub pcs_basefold_final_expected_bus: PcsBasefoldFinalExpectedBus,
+    pub pcs_basefold_final_point_bus: PcsBasefoldFinalPointBus,
     pub pcs_transcript_ext_bus: PcsTranscriptExtBus,
     pub pcs_base_input_opening_bus: PcsBaseInputOpeningBus,
     pub pcs_final_message_bus: PcsFinalMessageBus,
@@ -146,6 +147,7 @@ impl BusInventory {
         let pcs_basefold_query_bus = PcsBasefoldQueryBus::new(b.new_bus_idx());
         let pcs_basefold_eval_bus = PcsBasefoldEvalBus::new(b.new_bus_idx());
         let pcs_basefold_final_expected_bus = PcsBasefoldFinalExpectedBus::new(b.new_bus_idx());
+        let pcs_basefold_final_point_bus = PcsBasefoldFinalPointBus::new(b.new_bus_idx());
         let pcs_transcript_ext_bus = PcsTranscriptExtBus::new(b.new_bus_idx());
         let pcs_base_input_opening_bus = PcsBaseInputOpeningBus::new(b.new_bus_idx());
         let pcs_final_message_bus = PcsFinalMessageBus::new(b.new_bus_idx());
@@ -210,6 +212,7 @@ impl BusInventory {
             pcs_basefold_query_bus,
             pcs_basefold_eval_bus,
             pcs_basefold_final_expected_bus,
+            pcs_basefold_final_point_bus,
             pcs_transcript_ext_bus,
             pcs_base_input_opening_bus,
             pcs_final_message_bus,

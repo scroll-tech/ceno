@@ -119,6 +119,7 @@ pub struct PcsPreflight {
     pub batch_coeffs: Vec<PcsBatchCoeffRecord>,
     pub jagged_q_evals: Vec<PcsJaggedQEvalRecord>,
     pub jagged_assists: Vec<PcsJaggedAssistRecord>,
+    pub basefold_final_points: Vec<PcsBasefoldFinalPointRecord>,
     pub basefold_final_expected: Vec<PcsBasefoldFinalExpectedRecord>,
     pub basefold_final_claims: Vec<PcsBasefoldFinalClaimRecord>,
     pub commitment_roots: Vec<PcsCommitmentRootRecord>,
@@ -581,10 +582,23 @@ pub struct PcsBasefoldFinalClaimRecord {
 }
 
 #[derive(Clone, Debug, Default)]
+pub struct PcsBasefoldFinalPointRecord {
+    pub proof_idx: usize,
+    pub sumcheck_idx: usize,
+    pub point_idx: usize,
+    pub coord_idx: usize,
+    pub source_sumcheck_idx: usize,
+    pub source_round: usize,
+    pub value: RecursionField,
+}
+
+#[derive(Clone, Debug, Default)]
 pub struct PcsBasefoldFinalExpectedRecord {
     pub proof_idx: usize,
     pub sumcheck_idx: usize,
     pub term_idx: usize,
+    pub point_idx: usize,
+    pub coord_idx: usize,
     pub final_tidx: usize,
     pub is_first: bool,
     pub is_last: bool,
