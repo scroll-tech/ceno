@@ -109,6 +109,9 @@ pub struct PcsPreflight {
     pub transcript_values: Vec<PcsTranscriptValueRecord>,
     pub sumcheck_rounds: Vec<PcsSumcheckRoundRecord>,
     pub sumcheck_inputs: Vec<PcsSumcheckInputRecord>,
+    pub eq_products: Vec<PcsEqProductRecord>,
+    pub suffix_products: Vec<PcsSuffixProductRecord>,
+    pub jagged_assist_h: Vec<PcsJaggedAssistHRecord>,
     pub jagged_claims: Vec<PcsJaggedClaimRecord>,
     pub basefold_initial_claims: Vec<PcsBasefoldInitialClaimRecord>,
     pub jagged_assist_inputs: Vec<PcsJaggedAssistInputRecord>,
@@ -154,6 +157,12 @@ impl PcsOpeningCommitKind {
     }
 }
 
+impl Default for PcsOpeningCommitKind {
+    fn default() -> Self {
+        Self::Witin
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct PcsOpeningEvalRecord {
     pub proof_idx: usize,
@@ -163,6 +172,7 @@ pub struct PcsOpeningEvalRecord {
     pub main_idx: usize,
     pub main_eval_idx: usize,
     pub value: RecursionField,
+    pub raw_value: RecursionField,
 }
 
 #[derive(Clone, Debug)]
@@ -319,6 +329,7 @@ pub struct PcsTranscriptValueRecord {
     pub is_query_sample: bool,
     pub is_batch_alpha: bool,
     pub is_basefold_eval: bool,
+    pub transcript_ext_lookup_count: usize,
     pub is_jagged_f_at_rho: bool,
 }
 
@@ -346,6 +357,98 @@ pub struct PcsSumcheckInputRecord {
     pub claim: RecursionField,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcsEqProductKind {
+    JaggedClaim = 0,
+    JaggedQEval = 1,
+}
+
+impl PcsEqProductKind {
+    pub const fn as_usize(self) -> usize {
+        self as usize
+    }
+}
+
+impl Default for PcsEqProductKind {
+    fn default() -> Self {
+        Self::JaggedClaim
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcsEqProductSource {
+    Transcript = 0,
+    FoldChallenge = 1,
+}
+
+impl PcsEqProductSource {
+    pub const fn as_usize(self) -> usize {
+        self as usize
+    }
+}
+
+impl Default for PcsEqProductSource {
+    fn default() -> Self {
+        Self::Transcript
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsEqProductRecord {
+    pub proof_idx: usize,
+    pub kind: PcsEqProductKind,
+    pub source: PcsEqProductSource,
+    pub round_idx: usize,
+    pub term_idx: usize,
+    pub bit_idx: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub point_tidx: usize,
+    pub sumcheck_idx: usize,
+    pub point_round: usize,
+    pub index_bit: bool,
+    pub index_pow2: usize,
+    pub index_acc_in: usize,
+    pub index_acc_out: usize,
+    pub point: RecursionField,
+    pub acc_in: RecursionField,
+    pub acc_out: RecursionField,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsSuffixProductRecord {
+    pub proof_idx: usize,
+    pub round_idx: usize,
+    pub term_idx: usize,
+    pub coord_idx: usize,
+    pub step_idx: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub has_factor: bool,
+    pub point: RecursionField,
+    pub acc_in: RecursionField,
+    pub acc_out: RecursionField,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PcsJaggedAssistHRecord {
+    pub proof_idx: usize,
+    pub round_idx: usize,
+    pub sumcheck_idx: usize,
+    pub step_idx: usize,
+    pub robp_idx: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub has_z_row: bool,
+    pub has_rho: bool,
+    pub z_row: RecursionField,
+    pub rho: RecursionField,
+    pub rho_star_c: RecursionField,
+    pub rho_star_d: RecursionField,
+    pub val_in: [RecursionField; 4],
+    pub val_out: [RecursionField; 4],
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PcsJaggedClaimRecord {
     pub proof_idx: usize,
@@ -354,6 +457,9 @@ pub struct PcsJaggedClaimRecord {
     pub term_idx: usize,
     pub is_first: bool,
     pub is_last: bool,
+    pub opening_idx: usize,
+    pub commit_kind: PcsOpeningCommitKind,
+    pub eval_idx: usize,
     pub main_idx: usize,
     pub main_eval_idx: usize,
     pub eval: RecursionField,
@@ -407,6 +513,14 @@ pub struct PcsJaggedQEvalRecord {
     pub proof_idx: usize,
     pub round_idx: usize,
     pub sumcheck_idx: usize,
+    pub term_idx: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub col_tidx: usize,
+    pub col_eval: RecursionField,
+    pub eq_rho_col: RecursionField,
+    pub acc_in: RecursionField,
+    pub acc_out: RecursionField,
     pub q_eval: RecursionField,
     pub f_at_rho: RecursionField,
     pub sumcheck_final: RecursionField,

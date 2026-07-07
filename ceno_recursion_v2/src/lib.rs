@@ -6,6 +6,7 @@ pub mod bn254;
 pub mod circuit;
 pub mod continuation;
 pub mod main;
+pub mod pcs;
 pub mod proof_shape;
 pub mod system;
 pub mod tower;

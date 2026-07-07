@@ -14,11 +14,10 @@ use crate::{
     bus::{
         AirPresenceBus, AirPresenceBusMessage, EccRtBus, EccRtMessage, ForkedTranscriptBus,
         ForkedTranscriptBusMessage, MainEvalBus, MainEvalMessage, MainGlobalPointBus,
-        MainGlobalPointMessage,
-        MainSelectorPointBus, MainSelectorPointMessage, MainSelectorResultBus,
-        MainSelectorResultMessage, MainSelectorShapeBus, MainSelectorShapeMessage,
-        MainSelectorSparseIndexShapeBus, MainSelectorSparseIndexShapeMessage, TowerMainPointBus,
-        TowerMainPointMessage,
+        MainGlobalPointMessage, MainSelectorPointBus, MainSelectorPointMessage,
+        MainSelectorResultBus, MainSelectorResultMessage, MainSelectorShapeBus,
+        MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
+        MainSelectorSparseIndexShapeMessage, TowerMainPointBus, TowerMainPointMessage,
     },
     system::{
         MainSelectorEvalRecord, MainSelectorKind, MainSelectorPointDeriveKind,
@@ -831,9 +830,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
         builder
             .when(local.is_tower_main + local.is_rotation_origin)
             .assert_zero(local.has_source);
-        builder
-            .when(local.has_ecc_rt)
-            .assert_zero(local.has_source);
+        builder.when(local.has_ecc_rt).assert_zero(local.has_source);
         builder
             .when(
                 local.is_tower_main

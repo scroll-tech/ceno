@@ -4,18 +4,19 @@ mod prover_integration {
         continuation::prover::{AggProver, AggregationOptions},
         system::{
             AggregationSubCircuit, RecursionField, RecursionProof, RecursionVk, VerifierSubCircuit,
-            utils::test_system_params_zero_pow,
+            VerifierTraceGen, utils::test_system_params_zero_pow,
         },
     };
     use bincode;
-    use ceno_zkvm::{
-        scheme::{MainConstraintProof, PublicValues, ZKVMChipProof, ZKVMProof},
-        structs::ZKVMVerifyingKey,
-    };
+    use ceno_zkvm::scheme::{MainConstraintProof, PublicValues, ZKVMChipProof, ZKVMProof};
     use eyre::{Result, eyre};
     use ff_ext::GoldilocksExt2;
     use mpcs::{Basefold, BasefoldRSParams, Jagged, Whir, WhirDefaultSpec};
-    use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2CpuEngine, DuplexSponge};
+    use openvm_stark_sdk::config::baby_bear_poseidon2::{
+        BabyBearPoseidon2CpuEngine, DuplexSponge, DuplexSpongeRecorder, F,
+        default_duplex_sponge_recorder,
+    };
+    use p3_field::PrimeCharacteristicRing;
     use std::{
         collections::BTreeMap,
         io::Cursor,
@@ -222,6 +223,67 @@ mod prover_integration {
         Ok(())
     }
 
+    fn first_fixture_proof_and_vk() -> Result<Option<(ZkvmProof, ZkvmVk)>> {
+        let Some((proofs, child_vk)) = load_fixtures()? else {
+            return Ok(None);
+        };
+        Ok(Some((select_proofs(&proofs, 1)?.remove(0), child_vk)))
+    }
+
+    fn assert_recursion_pcs_rejects(child_vk: &ZkvmVk, proof: ZkvmProof) {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            const MAX_NUM_PROOFS: usize = 2;
+            let subcircuit = VerifierSubCircuit::<MAX_NUM_PROOFS>::new(Arc::new(child_vk.clone()));
+            let mut transcript = default_duplex_sponge_recorder();
+            crate::utils::transcript_observe_label(
+                &mut transcript,
+                crate::utils::TranscriptLabel::Riscv.as_bytes(),
+            );
+            <VerifierSubCircuit<MAX_NUM_PROOFS> as VerifierTraceGen<
+                openvm_cpu_backend::CpuBackend<continuations_v2::SC>,
+                continuations_v2::SC,
+            >>::generate_proving_ctxs_base::<DuplexSpongeRecorder>(
+                &subcircuit,
+                child_vk,
+                None,
+                &[proof],
+                transcript,
+            )
+        }));
+        assert!(
+            result.is_err(),
+            "mutated PCS proof unexpectedly generated recursion-v2 traces"
+        );
+    }
+
+    fn mutate_first_jagged_col_eval(proof: &mut ZkvmProof) {
+        proof.opening_proof.rounds[0].col_evals[0] += E::ONE;
+    }
+
+    fn mutate_first_jagged_assist_round_eval(proof: &mut ZkvmProof) {
+        proof.opening_proof.rounds[0].assist_proof.proofs[0].evaluations[0] += E::ONE;
+    }
+
+    fn mutate_last_jagged_assist_round_eval(proof: &mut ZkvmProof) {
+        let round = proof.opening_proof.rounds[0]
+            .assist_proof
+            .proofs
+            .last_mut()
+            .expect("fixture has assist sumcheck rounds");
+        round.evaluations[0] += E::ONE;
+    }
+
+    fn mutate_second_final_message_value(proof: &mut ZkvmProof) {
+        let row = proof
+            .opening_proof
+            .inner_proof
+            .final_message
+            .first_mut()
+            .expect("fixture has basefold final message rows");
+        let idx = usize::from(row.len() > 1);
+        row[idx] += E::ONE;
+    }
+
     #[test]
     fn agg_prover_single_shard() -> Result<()> {
         agg_prove_with_count(1)
@@ -230,6 +292,143 @@ mod prover_integration {
     #[test]
     fn agg_prover_two_shards() -> Result<()> {
         agg_prove_with_count(2)
+    }
+
+    #[test]
+    fn pcs_rejects_jagged_round_count_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        proof.opening_proof.rounds.clear();
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_jagged_claimed_sum_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        proof.opening_proof.rounds[0].sumcheck_proof.proofs[0].evaluations[0] += E::ONE;
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_jagged_subclaim_multiplication_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        proof.opening_proof.rounds[0].f_at_rho += E::ONE;
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_jagged_q_eval_col_eval_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        mutate_first_jagged_col_eval(&mut proof);
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_jagged_assist_final_check_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        mutate_first_jagged_assist_round_eval(&mut proof);
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_jagged_assist_operand_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        mutate_last_jagged_assist_round_eval(&mut proof);
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_basefold_final_claim_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        proof.opening_proof.inner_proof.final_message[0][0] += E::ONE;
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_basefold_final_codeword_folding_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        mutate_second_final_message_value(&mut proof);
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_basefold_merkle_query_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        proof.opening_proof.inner_proof.query_opening_proof[0].input_proofs[0].opened_values[0]
+            [0] += F::ONE;
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_basefold_base_sibling_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        proof.opening_proof.inner_proof.query_opening_proof[0].input_proofs[0].opening_proof[0]
+            [0] += F::ONE;
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_basefold_base_root_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        let mut root: [F; 8] = proof.witin_commit.inner.commit.into();
+        root[0] += F::ONE;
+        proof.witin_commit.inner.commit = root.into();
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_basefold_commit_phase_sibling_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        proof.opening_proof.inner_proof.query_opening_proof[0].commit_phase_openings[0]
+            .opening_proof[0][0] += F::ONE;
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
+    }
+
+    #[test]
+    fn pcs_rejects_basefold_commit_phase_root_mismatch() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        let mut root: [F; 8] = proof.opening_proof.inner_proof.commits[0].into();
+        root[0] += F::ONE;
+        proof.opening_proof.inner_proof.commits[0] = root.into();
+        assert_recursion_pcs_rejects(&child_vk, proof);
+        Ok(())
     }
 
     // ---- AIR registration test ----
@@ -256,6 +455,16 @@ mod prover_integration {
             "MainFinalClaimAir",
         ];
         for air in batch_main_airs {
+            assert!(
+                air_names.iter().any(|name| name.contains(air)),
+                "{air} missing from recursion v2 verifier"
+            );
+        }
+        for air in [
+            "PcsEqProductAir",
+            "PcsSuffixProductAir",
+            "PcsJaggedAssistHAir",
+        ] {
             assert!(
                 air_names.iter().any(|name| name.contains(air)),
                 "{air} missing from recursion v2 verifier"

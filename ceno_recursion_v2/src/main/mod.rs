@@ -64,8 +64,9 @@ use crate::{
         AirModule, BusIndexManager, BusInventory, EccReplayClaims, GlobalCtxCpu, MainEccRtRecord,
         MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord, MainSelectorEvalRecord,
         MainSelectorKind, MainSelectorPointDeriveKind, MainSelectorPointRecord,
-        MainSelectorPointSourceKind, MainTowerPointEqRecord, Preflight, RecursionField,
-        RecursionProof, RecursionVk, RotationReplayClaims, TraceGenModule,
+        MainSelectorPointSourceKind, MainTowerPointEqRecord, PcsOpeningClaimRecord,
+        PcsOpeningCommitKind, PcsOpeningEvalRecord, PcsOpeningPointRecord, Preflight,
+        RecursionField, RecursionProof, RecursionVk, RotationReplayClaims, TraceGenModule,
     },
     tower::{
         TowerInputRecord, TowerReplayResult, build_tower_input_records,
@@ -282,6 +283,27 @@ impl MainModule {
                 .entry((proof_idx, round_idx))
                 .or_default() += 1;
         }
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.pcs.opening_points {
+                *global_lookup_counts
+                    .entry((proof_idx, record.global_round_idx))
+                    .or_default() += 1;
+            }
+            for record in &preflight.pcs.suffix_products {
+                if record.has_factor {
+                    *global_lookup_counts
+                        .entry((proof_idx, record.coord_idx))
+                        .or_default() += 1;
+                }
+            }
+            for record in &preflight.pcs.jagged_assist_h {
+                if record.has_z_row {
+                    *global_lookup_counts
+                        .entry((proof_idx, record.robp_idx))
+                        .or_default() += 1;
+                }
+            }
+        }
         let mut eval_lookup_counts =
             std::collections::BTreeMap::<(usize, usize, usize), usize>::new();
         for record in &frontload_term_records {
@@ -298,6 +320,13 @@ impl MainModule {
             *eval_lookup_counts
                 .entry((record.proof_idx, record.idx, record.eval_idx))
                 .or_default() += 1;
+        }
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.pcs.opening_evals {
+                *eval_lookup_counts
+                    .entry((proof_idx, record.main_idx, record.main_eval_idx))
+                    .or_default() += 1;
+            }
         }
         for record in &mut eval_records {
             record.lookup_count = eval_lookup_counts
@@ -1242,7 +1271,38 @@ where
     if acc != expected_evaluation {
         bail!("main constraint claim mismatch: {expected_evaluation} != {acc}");
     }
+    preflight
+        .pcs
+        .opening_claims
+        .extend(layers.iter().map(|layer| {
+            let in_point = global_in_point[..layer.num_var_with_rotation].to_vec();
+            let layer_evals =
+                &main_proof.proof.evals[layer.eval_start..layer.eval_start + layer.eval_len];
+            PcsOpeningClaimRecord {
+                input_opening_point: in_point,
+                wits_in_evals: layer_evals[..layer.layer.n_witin].to_vec(),
+                fixed_in_evals: layer_evals
+                    [layer.layer.n_witin..layer.layer.n_witin + layer.layer.n_fixed]
+                    .to_vec(),
+            }
+        }));
     let mut global_point_lookup_counts = vec![0usize; global_in_point.len()];
+    for (opening_idx, layer) in layers.iter().enumerate() {
+        for (coord_idx, value) in global_in_point[..layer.num_var_with_rotation]
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            global_point_lookup_counts[coord_idx] += 1;
+            preflight.pcs.opening_points.push(PcsOpeningPointRecord {
+                proof_idx: 0,
+                opening_idx,
+                coord_idx,
+                global_round_idx: coord_idx,
+                value,
+            });
+        }
+    }
     for record in &tower_point_eqs {
         global_point_lookup_counts[record.round_idx] += 1;
     }
@@ -1255,6 +1315,37 @@ where
         global_point_lookup_counts[round_idx] += 1;
     }
     let mut eval_lookup_counts = vec![0usize; main_proof.proof.evals.len()];
+    for (opening_idx, layer) in layers.iter().enumerate() {
+        for eval_idx in 0..layer.layer.n_witin {
+            let global_eval_idx = layer.eval_start + eval_idx;
+            eval_lookup_counts[global_eval_idx] += 1;
+            preflight.pcs.opening_evals.push(PcsOpeningEvalRecord {
+                proof_idx: 0,
+                opening_idx,
+                commit_kind: PcsOpeningCommitKind::Witin,
+                eval_idx,
+                main_idx: opening_idx,
+                main_eval_idx: eval_idx,
+                value: main_proof.proof.evals[global_eval_idx],
+                raw_value: main_proof.proof.evals[global_eval_idx],
+            });
+        }
+        for eval_idx in 0..layer.layer.n_fixed {
+            let main_eval_idx = layer.layer.n_witin + eval_idx;
+            let global_eval_idx = layer.eval_start + main_eval_idx;
+            eval_lookup_counts[global_eval_idx] += 1;
+            preflight.pcs.opening_evals.push(PcsOpeningEvalRecord {
+                proof_idx: 0,
+                opening_idx,
+                commit_kind: PcsOpeningCommitKind::Fixed,
+                eval_idx,
+                main_idx: opening_idx,
+                main_eval_idx,
+                value: main_proof.proof.evals[global_eval_idx],
+                raw_value: main_proof.proof.evals[global_eval_idx],
+            });
+        }
+    }
     for record in &frontload_terms {
         if record.has_eval_factor {
             let global_eval_idx = layers[record.idx].eval_start + record.eval_idx;

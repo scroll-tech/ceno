@@ -63,6 +63,18 @@ cuda = [
 ]
 default = []
 
+[patch."https://github.com/scroll-tech/gkr-backend.git"]
+ff_ext = { path = "../../gkr-backend/crates/ff_ext" }
+mpcs = { path = "../../gkr-backend/crates/mpcs" }
+multilinear_extensions = { path = "../../gkr-backend/crates/multilinear_extensions" }
+p3 = { path = "../../gkr-backend/crates/p3" }
+poseidon = { path = "../../gkr-backend/crates/poseidon" }
+sp1-curves = { path = "../../gkr-backend/crates/curves" }
+sumcheck = { path = "../../gkr-backend/crates/sumcheck" }
+transcript = { path = "../../gkr-backend/crates/transcript" }
+whir = { path = "../../gkr-backend/crates/whir" }
+witness = { path = "../../gkr-backend/crates/witness" }
+
 # [patch."https://github.com/openvm-org/stark-backend.git"]
 # openvm-cpu-backend = { git = "https://github.com/hero78119/stark-backend.git", branch = "develop-v2", default-features = false }
 # openvm-cuda-backend = { git = "https://github.com/hero78119/stark-backend.git", branch = "develop-v2", optional = true }

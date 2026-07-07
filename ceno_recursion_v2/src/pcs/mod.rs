@@ -46,21 +46,25 @@ use crate::{
         PcsBasefoldEvalMessage, PcsBasefoldQueryBus, PcsBasefoldQueryMessage,
         PcsBasefoldQueryStage, PcsBatchAlphaBus, PcsBatchAlphaMessage, PcsBatchCoeffBus,
         PcsBatchCoeffMessage, PcsCommitPhaseLeafBus, PcsCommitPhaseLeafMessage,
-        PcsCommitmentRootBus, PcsCommitmentRootMessage, PcsFinalMessageBus, PcsFinalMessageMessage,
-        PcsFoldChallengeBus, PcsFoldChallengeMessage, PcsJaggedFEvalBus, PcsJaggedFEvalMessage,
-        PcsQuerySampleBus, PcsQuerySampleMessage, PcsSumcheckInputBus, PcsSumcheckInputMessage,
-        PcsSumcheckOutputBus, PcsSumcheckOutputMessage, TranscriptBus, TranscriptBusMessage,
+        PcsCommitmentRootBus, PcsCommitmentRootMessage, PcsEqProductBus, PcsEqProductMessage,
+        PcsFinalMessageBus, PcsFinalMessageMessage, PcsFoldChallengeBus, PcsFoldChallengeMessage,
+        PcsJaggedAssistHBus, PcsJaggedAssistHMessage, PcsJaggedFEvalBus, PcsJaggedFEvalMessage,
+        PcsOpeningEvalBus, PcsOpeningEvalMessage, PcsQuerySampleBus, PcsQuerySampleMessage,
+        PcsSuffixProductBus, PcsSuffixProductMessage, PcsSumcheckInputBus, PcsSumcheckInputMessage,
+        PcsSumcheckOutputBus, PcsSumcheckOutputMessage, PcsTranscriptExtBus,
+        PcsTranscriptExtMessage, TranscriptBus, TranscriptBusMessage,
     },
     system::{
         AirModule, GlobalCtxCpu, PcsBaseInputLeafHashRecord, PcsBaseInputMerkleRecord,
         PcsBasefoldCommitPhaseQueryRecord, PcsBasefoldFinalClaimRecord,
         PcsBasefoldFinalCodewordRecord, PcsBasefoldInitialClaimRecord, PcsBasefoldQueryIndexRecord,
         PcsBasefoldQueryOpenRecord, PcsBatchCoeffRecord, PcsCommitPhaseLeafHashRecord,
-        PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord, PcsJaggedAssistInputRecord,
+        PcsCommitPhaseMerkleRecord, PcsCommitmentRootRecord, PcsEqProductKind, PcsEqProductRecord,
+        PcsEqProductSource, PcsJaggedAssistHRecord, PcsJaggedAssistInputRecord,
         PcsJaggedAssistRecord, PcsJaggedClaimRecord, PcsJaggedQEvalRecord, PcsOpeningCommitKind,
-        PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSumcheckInputRecord,
-        PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight, RecursionField, RecursionPcs,
-        RecursionProof, RecursionVk, TraceGenModule,
+        PcsOpeningEvalRecord, PcsOpeningPointRecord, PcsSuffixProductRecord,
+        PcsSumcheckInputRecord, PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight,
+        RecursionField, RecursionPcs, RecursionProof, RecursionVk, TraceGenModule,
     },
     tracegen::{ModuleChip, RowMajorChip},
     utils::digests_to_poseidon2_input,
@@ -79,6 +83,7 @@ pub struct PcsModule {
     main_eval_bus: MainEvalBus,
     basefold_query_bus: PcsBasefoldQueryBus,
     basefold_eval_bus: PcsBasefoldEvalBus,
+    transcript_ext_bus: PcsTranscriptExtBus,
     base_input_opening_bus: PcsBaseInputOpeningBus,
     final_message_bus: PcsFinalMessageBus,
     query_sample_bus: PcsQuerySampleBus,
@@ -90,6 +95,10 @@ pub struct PcsModule {
     batch_coeff_bus: PcsBatchCoeffBus,
     batch_alpha_bus: PcsBatchAlphaBus,
     jagged_f_eval_bus: PcsJaggedFEvalBus,
+    opening_eval_bus: PcsOpeningEvalBus,
+    eq_product_bus: PcsEqProductBus,
+    suffix_product_bus: PcsSuffixProductBus,
+    jagged_assist_h_bus: PcsJaggedAssistHBus,
     merkle_verify_bus: MerkleVerifyBus,
     poseidon2_permute_bus: Poseidon2PermuteBus,
     poseidon2_compress_bus: Poseidon2CompressBus,
@@ -117,6 +126,200 @@ type BasefoldRound = (
     mpcs::basefold::BasefoldCommitment<RecursionField>,
     Vec<BasefoldOpening>,
 );
+type JaggedTermSource = (usize, usize, PcsOpeningCommitKind, usize, usize, usize);
+
+fn push_eq_product_records(
+    preflight: &mut Preflight,
+    kind: PcsEqProductKind,
+    source: PcsEqProductSource,
+    round_idx: usize,
+    term_idx: usize,
+    point: &[RecursionField],
+    point_tidx_base: usize,
+    sumcheck_idx: usize,
+    point_round_base: usize,
+) -> RecursionField {
+    let mut acc = RecursionField::ONE;
+    let mut index_acc = 0usize;
+    for (bit_idx, &point_value) in point.iter().enumerate() {
+        let index_bit = ((term_idx >> bit_idx) & 1) == 1;
+        let factor = if index_bit {
+            point_value
+        } else {
+            RecursionField::ONE - point_value
+        };
+        let acc_in = acc;
+        acc *= factor;
+        let index_acc_in = index_acc;
+        let index_pow2 = 1usize << bit_idx;
+        if index_bit {
+            index_acc += index_pow2;
+        }
+        preflight.pcs.eq_products.push(PcsEqProductRecord {
+            proof_idx: 0,
+            kind,
+            source,
+            round_idx,
+            term_idx,
+            bit_idx,
+            is_first: bit_idx == 0,
+            is_last: bit_idx + 1 == point.len(),
+            point_tidx: point_tidx_base + bit_idx * D_EF,
+            sumcheck_idx,
+            point_round: point_round_base + bit_idx,
+            index_bit,
+            index_pow2,
+            index_acc_in,
+            index_acc_out: index_acc,
+            point: point_value,
+            acc_in,
+            acc_out: acc,
+        });
+    }
+    acc
+}
+
+fn push_suffix_product_records(
+    preflight: &mut Preflight,
+    round_idx: usize,
+    term_idx: usize,
+    start_coord_idx: usize,
+    point: &[RecursionField],
+) -> RecursionField {
+    let mut acc = RecursionField::ONE;
+    let factor_count = point.len().saturating_sub(start_coord_idx);
+    let row_count = factor_count.max(1);
+    for step_idx in 0..row_count {
+        let has_factor = step_idx < factor_count;
+        let coord_idx = if has_factor {
+            start_coord_idx + step_idx
+        } else {
+            start_coord_idx
+        };
+        let point_value = point.get(coord_idx).copied().unwrap_or_default();
+        let acc_in = acc;
+        if has_factor {
+            acc *= RecursionField::ONE - point_value;
+        }
+        preflight.pcs.suffix_products.push(PcsSuffixProductRecord {
+            proof_idx: 0,
+            round_idx,
+            term_idx,
+            coord_idx,
+            step_idx,
+            is_first: step_idx == 0,
+            is_last: step_idx + 1 == row_count,
+            has_factor,
+            point: point_value,
+            acc_in,
+            acc_out: acc,
+        });
+    }
+    acc
+}
+
+fn jagged_transition_weights(
+    z1i: RecursionField,
+    z2i: RecursionField,
+    z3i: RecursionField,
+    z4i: RecursionField,
+) -> [(usize, usize, RecursionField, RecursionField, RecursionField); 4] {
+    let (nz1, nz2, nz3, nz4) = (
+        RecursionField::ONE - z1i,
+        RecursionField::ONE - z2i,
+        RecursionField::ONE - z3i,
+        RecursionField::ONE - z4i,
+    );
+    let ab00 = nz1 * nz2;
+    let ab01 = nz1 * z2i;
+    let ab10 = z1i * nz2;
+    let ab11 = z1i * z2i;
+    let cd00 = nz3 * nz4;
+    let cd01 = nz3 * z4i;
+    let cd10 = z3i * nz4;
+    let cd11 = z3i * z4i;
+    [
+        (
+            0,
+            0,
+            ab00 * cd00 + ab01 * cd11 + ab11 * cd01,
+            ab00 * cd01,
+            ab01 * cd10 + ab11 * cd00,
+        ),
+        (0, 1, ab10 * cd10, ab10 * cd11, RecursionField::ZERO),
+        (1, 0, ab01 * cd01, RecursionField::ZERO, ab01 * cd00),
+        (
+            1,
+            1,
+            ab00 * cd10 + ab10 * cd00 + ab11 * cd11,
+            ab00 * cd11 + ab10 * cd01,
+            ab11 * cd10,
+        ),
+    ]
+}
+
+fn jagged_backward_step(
+    z1i: RecursionField,
+    z2i: RecursionField,
+    z3i: RecursionField,
+    z4i: RecursionField,
+    val: [RecursionField; 4],
+) -> [RecursionField; 4] {
+    let mut new_val = [RecursionField::ZERO; 4];
+    for &(ci, co, w_same, w_lt1, w_lt0) in &jagged_transition_weights(z1i, z2i, z3i, z4i) {
+        let v0 = val[co * 2];
+        let v1 = val[co * 2 + 1];
+        new_val[ci * 2] += w_same * v0 + w_lt1 * v1 + w_lt0 * v0;
+        new_val[ci * 2 + 1] += w_same * v1 + w_lt1 * v1 + w_lt0 * v0;
+    }
+    new_val
+}
+
+fn push_jagged_assist_h_records(
+    preflight: &mut Preflight,
+    round_idx: usize,
+    point: &[RecursionField],
+    rho: &[RecursionField],
+    assist_point: &[RecursionField],
+    n_robp: usize,
+) -> RecursionField {
+    let sumcheck_idx = round_idx * 2 + 1;
+    let mut val = [
+        RecursionField::ZERO,
+        RecursionField::ONE,
+        RecursionField::ZERO,
+        RecursionField::ZERO,
+    ];
+    for step_idx in 0..n_robp {
+        let robp_idx = n_robp - 1 - step_idx;
+        let has_z_row = robp_idx < point.len();
+        let has_rho = robp_idx < rho.len();
+        let z_row = point.get(robp_idx).copied().unwrap_or_default();
+        let rho_value = rho.get(robp_idx).copied().unwrap_or_default();
+        let rho_star_c = assist_point[2 * robp_idx];
+        let rho_star_d = assist_point[2 * robp_idx + 1];
+        let val_in = val;
+        val = jagged_backward_step(z_row, rho_value, rho_star_c, rho_star_d, val);
+        preflight.pcs.jagged_assist_h.push(PcsJaggedAssistHRecord {
+            proof_idx: 0,
+            round_idx,
+            sumcheck_idx,
+            step_idx,
+            robp_idx,
+            is_first: step_idx == 0,
+            is_last: step_idx + 1 == n_robp,
+            has_z_row,
+            has_rho,
+            z_row,
+            rho: rho_value,
+            rho_star_c,
+            rho_star_d,
+            val_in,
+            val_out: val,
+        });
+    }
+    val[0]
+}
 
 impl PcsModule {
     pub fn new(bus_inventory: crate::system::BusInventory) -> Self {
@@ -126,6 +329,7 @@ impl PcsModule {
             main_eval_bus: bus_inventory.main_eval_bus,
             basefold_query_bus: bus_inventory.pcs_basefold_query_bus,
             basefold_eval_bus: bus_inventory.pcs_basefold_eval_bus,
+            transcript_ext_bus: bus_inventory.pcs_transcript_ext_bus,
             base_input_opening_bus: bus_inventory.pcs_base_input_opening_bus,
             final_message_bus: bus_inventory.pcs_final_message_bus,
             query_sample_bus: bus_inventory.pcs_query_sample_bus,
@@ -137,6 +341,10 @@ impl PcsModule {
             batch_coeff_bus: bus_inventory.pcs_batch_coeff_bus,
             batch_alpha_bus: bus_inventory.pcs_batch_alpha_bus,
             jagged_f_eval_bus: bus_inventory.pcs_jagged_f_eval_bus,
+            opening_eval_bus: bus_inventory.pcs_opening_eval_bus,
+            eq_product_bus: bus_inventory.pcs_eq_product_bus,
+            suffix_product_bus: bus_inventory.pcs_suffix_product_bus,
+            jagged_assist_h_bus: bus_inventory.pcs_jagged_assist_h_bus,
             merkle_verify_bus: bus_inventory.merkle_verify_bus,
             poseidon2_permute_bus: bus_inventory.poseidon2_permute_bus,
             poseidon2_compress_bus: bus_inventory.poseidon2_compress_bus,
@@ -233,8 +441,18 @@ impl PcsModule {
                 .pcs
                 .opening_evals
                 .iter()
-                .filter(|record| record.commit_kind == commit_kind)
-                .map(|record| (record.main_idx, record.main_eval_idx))
+                .enumerate()
+                .filter(|(_, record)| record.commit_kind == commit_kind)
+                .map(|(record_idx, record)| {
+                    (
+                        record_idx,
+                        record.opening_idx,
+                        record.commit_kind,
+                        record.eval_idx,
+                        record.main_idx,
+                        record.main_eval_idx,
+                    )
+                })
                 .collect_vec();
             let poly_heights = comm
                 .cumulative_heights
@@ -284,7 +502,7 @@ impl PcsModule {
         comm: &<RecursionPcs as mpcs::PolynomialCommitmentScheme<RecursionField>>::Commitment,
         point: &[RecursionField],
         evals: &[RecursionField],
-        term_sources: &[(usize, usize)],
+        term_sources: &[JaggedTermSource],
         proof: &mpcs::jagged::JaggedBatchOpenProof<
             RecursionField,
             mpcs::Basefold<RecursionField, BasefoldRSParams>,
@@ -333,6 +551,7 @@ impl PcsModule {
                     is_query_sample: false,
                     is_batch_alpha: false,
                     is_basefold_eval: false,
+                    transcript_ext_lookup_count: 0,
                     is_jagged_f_at_rho: false,
                 });
         }
@@ -346,6 +565,17 @@ impl PcsModule {
             0,
             round_idx * 1_000_000 + 5_000,
         );
+        for bit_idx in 0..num_col_vars {
+            let tidx = z_col_tidx + bit_idx * D_EF;
+            if let Some(record) = preflight
+                .pcs
+                .transcript_values
+                .iter_mut()
+                .find(|record| record.tidx == tidx)
+            {
+                record.transcript_ext_lookup_count += num_polys;
+            }
+        }
         let eq_col = build_eq_x_r_vec(&z_col);
 
         let max_s = point.len();
@@ -364,10 +594,43 @@ impl PcsModule {
         for i in 0..num_polys {
             let h_i = comm.cumulative_heights[i + 1] - comm.cumulative_heights[i];
             let s_i = ceil_log2(h_i);
+            let eq_product = push_eq_product_records(
+                preflight,
+                PcsEqProductKind::JaggedClaim,
+                PcsEqProductSource::Transcript,
+                round_idx,
+                i,
+                &z_col,
+                z_col_tidx,
+                round_idx * 2,
+                0,
+            );
+            let tail_product = push_suffix_product_records(preflight, round_idx, i, s_i, point);
+            if eq_product != eq_col[i] {
+                bail!("jagged eq product replay mismatch");
+            }
+            if tail_product != tail_zero_prod[s_i] {
+                bail!("jagged suffix product replay mismatch");
+            }
             let term = eq_col[i] * tail_zero_prod[s_i] * evals[i];
             let acc_in = acc;
             acc += term;
-            let (main_idx, main_eval_idx) = term_sources[i];
+            let (
+                opening_eval_record_idx,
+                opening_idx,
+                commit_kind,
+                eval_idx,
+                main_idx,
+                main_eval_idx,
+            ) = term_sources[i];
+            let raw_eval = tail_zero_prod[s_i] * evals[i];
+            preflight.pcs.opening_evals[opening_eval_record_idx].raw_value = raw_eval;
+            if std::env::var("CENO_REC_V2_DEBUG_PCS").as_deref() == Ok("1") {
+                eprintln!(
+                    "rec-v2-debug module=pcs source=preflight proof_idx=0 round_idx={round_idx} opening_idx={opening_idx} commit_kind={:?} eval_idx={eval_idx} main_idx={main_idx} main_eval_idx={main_eval_idx} term_idx={i} key=jagged_claim normalized_eval={:?} tail_zero={:?} raw_eval={:?} eq_col={:?} term={:?} acc_out={:?}",
+                    commit_kind, evals[i], tail_zero_prod[s_i], raw_eval, eq_col[i], term, acc
+                );
+            }
             preflight.pcs.jagged_claims.push(PcsJaggedClaimRecord {
                 proof_idx: 0,
                 round_idx,
@@ -375,6 +638,9 @@ impl PcsModule {
                 term_idx: i,
                 is_first: i == 0,
                 is_last: i + 1 == num_polys,
+                opening_idx,
+                commit_kind,
+                eval_idx,
                 main_idx,
                 main_eval_idx,
                 eval: evals[i],
@@ -405,6 +671,21 @@ impl PcsModule {
             .zip(&proof.col_evals)
             .map(|(e, v)| *e * *v)
             .sum::<RecursionField>();
+        if std::env::var("CENO_REC_V2_DEBUG_PCS").as_deref() == Ok("1") {
+            for (i, (eq, col_eval)) in eq_rho_col[..w].iter().zip(&proof.col_evals).enumerate() {
+                eprintln!(
+                    "rec-v2-debug module=pcs source=preflight proof_idx=0 round_idx={round_idx} col_idx={i} key=jagged_q_eval rho={:?} eq_rho_col={:?} col_eval={:?} q_term={:?}",
+                    rho,
+                    eq,
+                    col_eval,
+                    *eq * *col_eval
+                );
+            }
+            eprintln!(
+                "rec-v2-debug module=pcs source=preflight proof_idx=0 round_idx={round_idx} key=jagged_q_eval q_eval={:?} f_at_rho={:?} sumcheck_final={:?}",
+                q_eval, proof.f_at_rho, expected
+            );
+        }
 
         let col_tidx = ts.len();
         for (i, eval) in proof.col_evals.iter().copied().enumerate() {
@@ -423,8 +704,19 @@ impl PcsModule {
                     is_query_sample: false,
                     is_batch_alpha: false,
                     is_basefold_eval: true,
+                    transcript_ext_lookup_count: 0,
                     is_jagged_f_at_rho: false,
                 });
+        }
+        for bit_idx in 0..rho_col.len() {
+            if let Some(record) = preflight
+                .pcs
+                .sumcheck_rounds
+                .iter_mut()
+                .find(|record| record.idx == round_idx * 2 && record.round == log_h + bit_idx)
+            {
+                record.fold_challenge_lookup_count += w;
+            }
         }
         let f_tidx = ts.len();
         ts.observe_ext(proof.f_at_rho);
@@ -443,6 +735,7 @@ impl PcsModule {
                 is_query_sample: false,
                 is_batch_alpha: false,
                 is_basefold_eval: false,
+                transcript_ext_lookup_count: 0,
                 is_jagged_f_at_rho: true,
             });
         preflight
@@ -455,14 +748,43 @@ impl PcsModule {
                 f_tidx,
                 f_at_rho: proof.f_at_rho,
             });
-        preflight.pcs.jagged_q_evals.push(PcsJaggedQEvalRecord {
-            proof_idx: 0,
-            round_idx,
-            sumcheck_idx: round_idx * 2,
-            q_eval,
-            f_at_rho: proof.f_at_rho,
-            sumcheck_final: expected,
-        });
+        let mut q_acc = RecursionField::ZERO;
+        for (i, (&eq_rho_col, &col_eval)) in
+            eq_rho_col[..w].iter().zip(&proof.col_evals).enumerate()
+        {
+            let eq_product = push_eq_product_records(
+                preflight,
+                PcsEqProductKind::JaggedQEval,
+                PcsEqProductSource::FoldChallenge,
+                round_idx,
+                i,
+                rho_col,
+                0,
+                round_idx * 2,
+                log_h,
+            );
+            if eq_product != eq_rho_col {
+                bail!("jagged q-eval eq product replay mismatch");
+            }
+            let acc_in = q_acc;
+            q_acc += eq_rho_col * col_eval;
+            preflight.pcs.jagged_q_evals.push(PcsJaggedQEvalRecord {
+                proof_idx: 0,
+                round_idx,
+                sumcheck_idx: round_idx * 2,
+                term_idx: i,
+                is_first: i == 0,
+                is_last: i + 1 == w,
+                col_tidx: col_tidx + i * D_EF,
+                col_eval,
+                eq_rho_col,
+                acc_in,
+                acc_out: q_acc,
+                q_eval,
+                f_at_rho: proof.f_at_rho,
+                sumcheck_final: expected,
+            });
+        }
 
         let mut z_row_padded = point.to_vec();
         z_row_padded.resize(n_robp, RecursionField::ZERO);
@@ -480,9 +802,41 @@ impl PcsModule {
         )?;
         let rho_star_c = (0..n_robp).map(|i| assist_point[2 * i]).collect_vec();
         let rho_star_d = (0..n_robp).map(|i| assist_point[2 * i + 1]).collect_vec();
-        let h_at_rho_star = evaluate_g(&z_row_padded, &rho_padded, &rho_star_c, &rho_star_d);
+        for robp_idx in 0..n_robp {
+            if robp_idx < rho.len()
+                && let Some(record) = preflight
+                    .pcs
+                    .sumcheck_rounds
+                    .iter_mut()
+                    .find(|record| record.idx == round_idx * 2 && record.round == robp_idx)
+            {
+                record.fold_challenge_lookup_count += 1;
+            }
+            for assist_round in [2 * robp_idx, 2 * robp_idx + 1] {
+                if let Some(record) = preflight.pcs.sumcheck_rounds.iter_mut().find(|record| {
+                    record.idx == assist_sumcheck_idx && record.round == assist_round
+                }) {
+                    record.fold_challenge_lookup_count += 1;
+                }
+            }
+        }
+        let h_at_rho_star =
+            push_jagged_assist_h_records(preflight, round_idx, point, &rho, &assist_point, n_robp);
+        let native_h_at_rho_star = evaluate_g(&z_row_padded, &rho_padded, &rho_star_c, &rho_star_d);
+        if h_at_rho_star != native_h_at_rho_star {
+            bail!("jagged assist h replay mismatch");
+        }
         let q_at_rho_star =
             compute_q_at_assist_point(&assist_point, &eq_col, &comm.cumulative_heights, n_robp);
+        if std::env::var("CENO_REC_V2_DEBUG_PCS").as_deref() == Ok("1") {
+            eprintln!(
+                "rec-v2-debug module=pcs source=preflight proof_idx=0 round_idx={round_idx} key=jagged_assist h_at_rho_star={:?} q_at_rho_star={:?} assist_product={:?} assist_expected={:?}",
+                h_at_rho_star,
+                q_at_rho_star,
+                h_at_rho_star * q_at_rho_star,
+                assist_expected
+            );
+        }
         preflight.pcs.jagged_assists.push(PcsJaggedAssistRecord {
             proof_idx: 0,
             round_idx,
@@ -638,6 +992,7 @@ impl PcsModule {
                     is_query_sample: false,
                     is_batch_alpha: false,
                     is_basefold_eval: false,
+                    transcript_ext_lookup_count: 0,
                     is_jagged_f_at_rho: false,
                 });
         }
@@ -722,7 +1077,7 @@ impl PcsModule {
 
 impl AirModule for PcsModule {
     fn num_airs(&self) -> usize {
-        21
+        24
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -755,6 +1110,21 @@ impl AirModule for PcsModule {
             }) as AirRef<_>,
             Arc::new(PcsOpeningEvalAir {
                 main_eval_bus: self.main_eval_bus,
+                opening_eval_bus: self.opening_eval_bus,
+            }) as AirRef<_>,
+            Arc::new(PcsEqProductAir {
+                transcript_ext_bus: self.transcript_ext_bus,
+                fold_challenge_bus: self.fold_challenge_bus,
+                eq_product_bus: self.eq_product_bus,
+            }) as AirRef<_>,
+            Arc::new(PcsSuffixProductAir {
+                main_global_point_bus: self.main_global_point_bus,
+                suffix_product_bus: self.suffix_product_bus,
+            }) as AirRef<_>,
+            Arc::new(PcsJaggedAssistHAir {
+                main_global_point_bus: self.main_global_point_bus,
+                fold_challenge_bus: self.fold_challenge_bus,
+                jagged_assist_h_bus: self.jagged_assist_h_bus,
             }) as AirRef<_>,
             Arc::new(PcsBasefoldQueryIndexAir {
                 query_sample_bus: self.query_sample_bus,
@@ -781,6 +1151,7 @@ impl AirModule for PcsModule {
                 query_sample_bus: self.query_sample_bus,
                 batch_alpha_bus: self.batch_alpha_bus,
                 basefold_eval_bus: self.basefold_eval_bus,
+                transcript_ext_bus: self.transcript_ext_bus,
                 jagged_f_eval_bus: self.jagged_f_eval_bus,
                 final_message_lookup_count:
                     <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries(),
@@ -796,6 +1167,9 @@ impl AirModule for PcsModule {
             }) as AirRef<_>,
             Arc::new(PcsJaggedClaimAir {
                 sumcheck_input_bus: self.sumcheck_input_bus,
+                opening_eval_bus: self.opening_eval_bus,
+                eq_product_bus: self.eq_product_bus,
+                suffix_product_bus: self.suffix_product_bus,
             }) as AirRef<_>,
             Arc::new(PcsSumcheckInputAir {
                 sumcheck_input_bus: self.sumcheck_input_bus,
@@ -811,10 +1185,13 @@ impl AirModule for PcsModule {
                 batch_coeff_bus: self.batch_coeff_bus,
             }) as AirRef<_>,
             Arc::new(PcsJaggedQEvalAir {
+                basefold_eval_bus: self.basefold_eval_bus,
+                eq_product_bus: self.eq_product_bus,
                 sumcheck_output_bus: self.sumcheck_output_bus,
             }) as AirRef<_>,
             Arc::new(PcsJaggedAssistAir {
                 sumcheck_output_bus: self.sumcheck_output_bus,
+                jagged_assist_h_bus: self.jagged_assist_h_bus,
             }) as AirRef<_>,
             Arc::new(PcsBasefoldFinalClaimAir {
                 sumcheck_output_bus: self.sumcheck_output_bus,
@@ -879,6 +1256,63 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             })
             .collect_vec();
         sumcheck_inputs.sort_by_key(|record| (record.proof_idx, record.idx));
+        let mut eq_products = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, p)| {
+                p.pcs.eq_products.iter().cloned().map(move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                })
+            })
+            .collect_vec();
+        eq_products.sort_by_key(|record| {
+            (
+                record.proof_idx,
+                record.kind.as_usize(),
+                record.source.as_usize(),
+                record.round_idx,
+                record.term_idx,
+                record.bit_idx,
+            )
+        });
+        let mut suffix_products = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, p)| {
+                p.pcs
+                    .suffix_products
+                    .iter()
+                    .cloned()
+                    .map(move |mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+            })
+            .collect_vec();
+        suffix_products.sort_by_key(|record| {
+            (
+                record.proof_idx,
+                record.round_idx,
+                record.term_idx,
+                record.step_idx,
+            )
+        });
+        let mut jagged_assist_h = preflights
+            .iter()
+            .enumerate()
+            .flat_map(|(proof_idx, p)| {
+                p.pcs
+                    .jagged_assist_h
+                    .iter()
+                    .cloned()
+                    .map(move |mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+            })
+            .collect_vec();
+        jagged_assist_h.sort_by_key(|record| (record.proof_idx, record.round_idx, record.step_idx));
         let mut basefold_initial_claims = preflights
             .iter()
             .enumerate()
@@ -920,7 +1354,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 })
             })
             .collect_vec();
-        jagged_claims.sort_by_key(|record| (record.proof_idx, record.sumcheck_idx, record.term_idx));
+        jagged_claims
+            .sort_by_key(|record| (record.proof_idx, record.sumcheck_idx, record.term_idx));
         let mut batch_coeffs = preflights
             .iter()
             .enumerate()
@@ -942,7 +1377,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 })
             })
             .collect_vec();
-        jagged_q_evals.sort_by_key(|record| (record.proof_idx, record.round_idx));
+        jagged_q_evals.sort_by_key(|record| (record.proof_idx, record.round_idx, record.term_idx));
         let mut jagged_assists = preflights
             .iter()
             .enumerate()
@@ -1175,6 +1610,412 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             )
         });
 
+        if std::env::var("CENO_REC_V2_DEBUG_PCS_COUNTS").as_deref() == Ok("1")
+            || std::env::var("CENO_REC_V2_DEBUG_PCS").as_deref() == Ok("1")
+        {
+            let basefold_eval_sends = transcript_values
+                .iter()
+                .filter(|record| record.is_basefold_eval)
+                .count()
+                * 2;
+            let jagged_f_sends = transcript_values
+                .iter()
+                .filter(|record| record.is_jagged_f_at_rho)
+                .count();
+            let final_message_sends = transcript_values
+                .iter()
+                .filter(|record| record.is_final_message)
+                .count()
+                * <BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries();
+            let query_sample_sends = transcript_values
+                .iter()
+                .filter(|record| record.is_query_sample)
+                .count();
+            let batch_coeff_sends = batch_coeffs
+                .iter()
+                .map(|record| record.lookup_count)
+                .sum::<usize>();
+            let sumcheck_input_sends = sumcheck_inputs.len()
+                + jagged_assist_inputs.len()
+                + jagged_claims.iter().filter(|record| record.is_last).count()
+                + basefold_initial_claims
+                    .iter()
+                    .filter(|record| record.is_last)
+                    .count();
+            let sumcheck_output_receives = jagged_q_evals
+                .iter()
+                .filter(|record| record.is_last)
+                .count()
+                + jagged_assists.len()
+                + basefold_final_claims.len();
+            let commitment_root_sends = commitment_roots
+                .iter()
+                .map(|record| record.lookup_count)
+                .sum::<usize>();
+            let commitment_root_receives = base_input_merkle_rows
+                .iter()
+                .filter(|record| record.is_last)
+                .count()
+                + commit_phase_merkle_rows
+                    .iter()
+                    .filter(|record| record.is_last)
+                    .count();
+            let base_input_opening_receives = base_input_leaf_hashes
+                .iter()
+                .flat_map(|record| record.value_is_present)
+                .filter(|&is_present| is_present)
+                .count();
+            let basefold_query_sends = basefold_query_indices.len()
+                + basefold_query_opens
+                    .iter()
+                    .filter(|record| record.is_last_for_height)
+                    .count()
+                + basefold_commit_phase_queries
+                    .iter()
+                    .filter(|record| record.is_last)
+                    .count();
+            let basefold_query_receives = basefold_commit_phase_queries
+                .iter()
+                .filter(|record| record.is_first)
+                .count()
+                + basefold_commit_phase_queries
+                    .iter()
+                    .filter(|record| record.has_reduced_opening)
+                    .count()
+                + basefold_final_codeword
+                    .iter()
+                    .filter(|record| record.is_last)
+                    .count();
+            let commit_phase_leaf_receives = commit_phase_merkle_rows
+                .iter()
+                .filter(|record| record.is_first)
+                .count();
+            let eq_product_sends = eq_products.iter().filter(|record| record.is_last).count();
+            let eq_product_receives = jagged_claims.len() + jagged_q_evals.len();
+            let suffix_product_sends = suffix_products
+                .iter()
+                .filter(|record| record.is_last)
+                .count();
+            let suffix_product_receives = jagged_claims.len();
+            let jagged_assist_h_sends = jagged_assist_h
+                .iter()
+                .filter(|record| record.is_last)
+                .count();
+            let jagged_assist_h_receives = jagged_assists.len();
+            eprintln!(
+                "rec-v2-debug module=pcs source=trace key=bus_counts opening_eval_send={} opening_eval_recv={} eq_product_send={} eq_product_recv={} suffix_product_send={} suffix_product_recv={} jagged_assist_h_send={} jagged_assist_h_recv={} basefold_eval_send={} basefold_eval_recv={} jagged_f_send={} jagged_f_recv={} batch_coeff_send={} batch_coeff_recv={} final_message_send={} final_message_recv={} query_sample_send={} query_sample_recv={} sumcheck_input_send={} sumcheck_input_recv={} sumcheck_output_send={} sumcheck_output_recv={} commitment_root_send={} commitment_root_recv={} base_input_opening_send={} base_input_opening_recv={} basefold_query_send={} basefold_query_recv={} commit_phase_leaf_send={} commit_phase_leaf_recv={}",
+                opening_evals.len(),
+                jagged_claims.len(),
+                eq_product_sends,
+                eq_product_receives,
+                suffix_product_sends,
+                suffix_product_receives,
+                jagged_assist_h_sends,
+                jagged_assist_h_receives,
+                basefold_eval_sends,
+                basefold_initial_claims.len() + jagged_q_evals.len(),
+                jagged_f_sends,
+                jagged_assist_inputs.len(),
+                batch_coeff_sends,
+                basefold_initial_claims.len() + basefold_query_opens.len(),
+                final_message_sends,
+                basefold_final_codeword.len(),
+                query_sample_sends,
+                basefold_query_indices.len(),
+                sumcheck_input_sends,
+                sumcheck_rounds
+                    .iter()
+                    .filter(|record| record.is_first)
+                    .count(),
+                sumcheck_rounds
+                    .iter()
+                    .filter(|record| record.is_last)
+                    .count(),
+                sumcheck_output_receives,
+                commitment_root_sends,
+                commitment_root_receives,
+                basefold_query_opens.len(),
+                base_input_opening_receives,
+                basefold_query_sends,
+                basefold_query_receives,
+                commit_phase_leaf_hashes.len(),
+                commit_phase_leaf_receives,
+            );
+
+            let report_map = |name: &str, map: &std::collections::BTreeMap<String, isize>| {
+                let mismatches = map
+                    .iter()
+                    .filter(|(_, balance)| **balance != 0)
+                    .take(3)
+                    .collect_vec();
+                if !mismatches.is_empty() {
+                    eprintln!(
+                        "rec-v2-debug module=pcs source=trace key=bus_mismatch bus={} mismatches={} first={:?}",
+                        name,
+                        map.iter().filter(|(_, balance)| **balance != 0).count(),
+                        mismatches,
+                    );
+                }
+            };
+
+            let mut opening_eval_map = std::collections::BTreeMap::<String, isize>::new();
+            for record in &opening_evals {
+                *opening_eval_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.opening_idx,
+                            record.commit_kind.as_usize(),
+                            record.eval_idx,
+                            record.raw_value
+                        )
+                    ))
+                    .or_default() += 1;
+            }
+            for record in &jagged_claims {
+                let opened_eval = record.tail_zero * record.eval;
+                *opening_eval_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.opening_idx,
+                            record.commit_kind.as_usize(),
+                            record.eval_idx,
+                            opened_eval
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            report_map("opening_eval", &opening_eval_map);
+
+            let mut eq_product_map = std::collections::BTreeMap::<String, isize>::new();
+            for record in eq_products.iter().filter(|record| record.is_last) {
+                *eq_product_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.kind.as_usize(),
+                            record.round_idx,
+                            record.term_idx,
+                            record.acc_out
+                        )
+                    ))
+                    .or_default() += 1;
+            }
+            for record in &jagged_claims {
+                *eq_product_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            PcsEqProductKind::JaggedClaim.as_usize(),
+                            record.round_idx,
+                            record.term_idx,
+                            record.eq_col
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            for record in &jagged_q_evals {
+                *eq_product_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            PcsEqProductKind::JaggedQEval.as_usize(),
+                            record.round_idx,
+                            record.term_idx,
+                            record.eq_rho_col
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            report_map("eq_product", &eq_product_map);
+
+            let mut suffix_product_map = std::collections::BTreeMap::<String, isize>::new();
+            for record in suffix_products.iter().filter(|record| record.is_last) {
+                *suffix_product_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.round_idx,
+                            record.term_idx,
+                            record.acc_out
+                        )
+                    ))
+                    .or_default() += 1;
+            }
+            for record in &jagged_claims {
+                *suffix_product_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.round_idx,
+                            record.term_idx,
+                            record.tail_zero
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            report_map("suffix_product", &suffix_product_map);
+
+            let mut jagged_assist_h_map = std::collections::BTreeMap::<String, isize>::new();
+            for record in jagged_assist_h.iter().filter(|record| record.is_last) {
+                *jagged_assist_h_map
+                    .entry(format!(
+                        "{:?}",
+                        (record.proof_idx, record.round_idx, record.val_out[0])
+                    ))
+                    .or_default() += 1;
+            }
+            for record in &jagged_assists {
+                *jagged_assist_h_map
+                    .entry(format!(
+                        "{:?}",
+                        (record.proof_idx, record.round_idx, record.h_at_rho_star)
+                    ))
+                    .or_default() -= 1;
+            }
+            report_map("jagged_assist_h", &jagged_assist_h_map);
+
+            let mut basefold_eval_map = std::collections::BTreeMap::<String, isize>::new();
+            for record in transcript_values
+                .iter()
+                .filter(|record| record.is_basefold_eval)
+            {
+                *basefold_eval_map
+                    .entry(format!(
+                        "{:?}",
+                        (record.proof_idx, record.tidx, record.value)
+                    ))
+                    .or_default() += 2;
+            }
+            for record in &basefold_initial_claims {
+                *basefold_eval_map
+                    .entry(format!(
+                        "{:?}",
+                        (record.proof_idx, record.eval_tidx, record.eval)
+                    ))
+                    .or_default() -= 1;
+            }
+            for record in &jagged_q_evals {
+                *basefold_eval_map
+                    .entry(format!(
+                        "{:?}",
+                        (record.proof_idx, record.col_tidx, record.col_eval)
+                    ))
+                    .or_default() -= 1;
+            }
+            report_map("basefold_eval", &basefold_eval_map);
+
+            let mut basefold_query_map = std::collections::BTreeMap::<String, isize>::new();
+            for record in &basefold_query_indices {
+                *basefold_query_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.query_idx,
+                            PcsBasefoldQueryStage::QueryIndex.as_usize(),
+                            0usize,
+                            RecursionField::from(F::from_usize(record.query_value))
+                        )
+                    ))
+                    .or_default() += 1;
+            }
+            for record in basefold_query_opens
+                .iter()
+                .filter(|record| record.is_last_for_height)
+            {
+                *basefold_query_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.query_idx,
+                            PcsBasefoldQueryStage::ReducedOpening.as_usize(),
+                            record.log2_height,
+                            record.acc_out
+                        )
+                    ))
+                    .or_default() += 1;
+            }
+            for record in basefold_commit_phase_queries
+                .iter()
+                .filter(|record| record.is_last)
+            {
+                *basefold_query_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.query_idx,
+                            PcsBasefoldQueryStage::FinalFolded.as_usize(),
+                            0usize,
+                            record.folded_out
+                        )
+                    ))
+                    .or_default() += 1;
+            }
+            for record in basefold_commit_phase_queries
+                .iter()
+                .filter(|record| record.is_first)
+            {
+                *basefold_query_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.query_idx,
+                            PcsBasefoldQueryStage::QueryIndex.as_usize(),
+                            0usize,
+                            RecursionField::from(F::from_usize(record.query_value))
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            for record in basefold_commit_phase_queries
+                .iter()
+                .filter(|record| record.has_reduced_opening)
+            {
+                *basefold_query_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.query_idx,
+                            PcsBasefoldQueryStage::ReducedOpening.as_usize(),
+                            record.log2_height,
+                            record.reduced_opening
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            for record in basefold_final_codeword
+                .iter()
+                .filter(|record| record.is_last)
+            {
+                *basefold_query_map
+                    .entry(format!(
+                        "{:?}",
+                        (
+                            record.proof_idx,
+                            record.query_idx,
+                            PcsBasefoldQueryStage::FinalFolded.as_usize(),
+                            0usize,
+                            record.folded
+                        )
+                    ))
+                    .or_default() -= 1;
+            }
+            report_map("basefold_query", &basefold_query_map);
+        }
+
         let ctx = PcsTraceCtx {
             commitment_roots: &commitment_roots,
             base_input_leaf_hashes: &base_input_leaf_hashes,
@@ -1190,6 +2031,9 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             transcript_values: &transcript_values,
             basefold_initial_claims: &basefold_initial_claims,
             jagged_assist_inputs: &jagged_assist_inputs,
+            eq_products: &eq_products,
+            suffix_products: &suffix_products,
+            jagged_assist_h: &jagged_assist_h,
             jagged_claims: &jagged_claims,
             sumcheck_inputs: &sumcheck_inputs,
             sumcheck_rounds: &sumcheck_rounds,
@@ -1206,6 +2050,9 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             PcsModuleChip::CommitPhaseMerkle,
             PcsModuleChip::OpeningPoint,
             PcsModuleChip::OpeningEval,
+            PcsModuleChip::EqProduct,
+            PcsModuleChip::SuffixProduct,
+            PcsModuleChip::JaggedAssistH,
             PcsModuleChip::BasefoldQueryIndex,
             PcsModuleChip::BasefoldQueryOpen,
             PcsModuleChip::BasefoldCommitPhaseQuery,
@@ -1798,10 +2645,12 @@ pub struct PcsOpeningEvalCols<T> {
     pub main_idx: T,
     pub main_eval_idx: T,
     pub value: [T; D_EF],
+    pub raw_value: [T; D_EF],
 }
 
 pub struct PcsOpeningEvalAir {
     pub main_eval_bus: MainEvalBus,
+    pub opening_eval_bus: PcsOpeningEvalBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsOpeningEvalAir {
@@ -1828,6 +2677,657 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsOpeningEvalAir {
                 value: local.value.map(Into::into),
             },
             local.is_enabled,
+        );
+        self.opening_eval_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            PcsOpeningEvalMessage {
+                opening_idx: local.opening_idx.into(),
+                commit_kind: local.commit_kind.into(),
+                eval_idx: local.eval_idx.into(),
+                value: local.raw_value.map(Into::into),
+            },
+            local.is_enabled,
+        );
+    }
+}
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
+pub struct PcsEqProductCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub kind: T,
+    pub source: T,
+    pub round_idx: T,
+    pub term_idx: T,
+    pub bit_idx: T,
+    pub is_first: T,
+    pub is_last: T,
+    pub point_tidx: T,
+    pub sumcheck_idx: T,
+    pub point_round: T,
+    pub index_bit: T,
+    pub index_pow2: T,
+    pub index_acc_in: T,
+    pub index_acc_out: T,
+    pub point: [T; D_EF],
+    pub acc_in: [T; D_EF],
+    pub acc_out: [T; D_EF],
+}
+
+pub struct PcsEqProductAir {
+    pub transcript_ext_bus: PcsTranscriptExtBus,
+    pub fold_challenge_bus: PcsFoldChallengeBus,
+    pub eq_product_bus: PcsEqProductBus,
+}
+
+impl<F: Field> BaseAir<F> for PcsEqProductAir {
+    fn width(&self) -> usize {
+        PcsEqProductCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for PcsEqProductAir {}
+impl<F: Field> PartitionedBaseAir<F> for PcsEqProductAir {}
+
+impl<AB> Air<AB> for PcsEqProductAir
+where
+    AB: AirBuilder + InteractionBuilder,
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let next_row = main.row_slice(1).expect("next row exists");
+        let local: &PcsEqProductCols<AB::Var> = (*local_row).borrow();
+        let next: &PcsEqProductCols<AB::Var> = (*next_row).borrow();
+
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.source);
+        builder.assert_bool(local.is_first);
+        builder.assert_bool(local.is_last);
+        builder.assert_bool(local.index_bit);
+
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_zero(local.bit_idx);
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_one(local.index_pow2);
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_zero(local.index_acc_in);
+        let one = core::array::from_fn(|i| {
+            if i == 0 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            }
+        });
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.acc_in,
+            one.clone(),
+        );
+
+        let expected_index_acc = local.index_acc_in + local.index_bit * local.index_pow2;
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.index_acc_out, expected_index_acc);
+        builder
+            .when(local.is_enabled * local.is_last)
+            .assert_eq(local.index_acc_out, local.term_idx);
+
+        let factor = core::array::from_fn(|i| {
+            let point = local.point[i].into();
+            let one_minus_point = if i == 0 {
+                AB::Expr::ONE - point.clone()
+            } else {
+                -point.clone()
+            };
+            local.index_bit * point + (AB::Expr::ONE - local.index_bit) * one_minus_point
+        });
+        let expected_acc = recursion_circuit::utils::ext_field_multiply(local.acc_in, factor);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.acc_out,
+            expected_acc,
+        );
+
+        let continues = local.is_enabled * (AB::Expr::ONE - local.is_last);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_one(next.is_enabled);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.kind, local.kind);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.source, local.source);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.round_idx, local.round_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.term_idx, local.term_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.bit_idx, local.bit_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.index_pow2, local.index_pow2 * AB::Expr::TWO);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.index_acc_in, local.index_acc_out);
+        assert_array_eq(
+            &mut builder.when_transition().when(continues),
+            next.acc_in,
+            local.acc_out,
+        );
+
+        let is_transcript = AB::Expr::ONE - local.source;
+        self.transcript_ext_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsTranscriptExtMessage {
+                tidx: local.point_tidx.into(),
+                value: local.point.map(Into::into),
+            },
+            local.is_enabled * is_transcript,
+        );
+        self.fold_challenge_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsFoldChallengeMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                round: local.point_round.into(),
+                challenge: local.point.map(Into::into),
+            },
+            local.is_enabled * local.source,
+        );
+        self.eq_product_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            PcsEqProductMessage {
+                kind: local.kind.into(),
+                round_idx: local.round_idx.into(),
+                term_idx: local.term_idx.into(),
+                value: local.acc_out.map(Into::into),
+            },
+            local.is_enabled * local.is_last,
+        );
+    }
+}
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
+pub struct PcsSuffixProductCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub round_idx: T,
+    pub term_idx: T,
+    pub coord_idx: T,
+    pub step_idx: T,
+    pub is_first: T,
+    pub is_last: T,
+    pub has_factor: T,
+    pub point: [T; D_EF],
+    pub acc_in: [T; D_EF],
+    pub acc_out: [T; D_EF],
+}
+
+pub struct PcsSuffixProductAir {
+    pub main_global_point_bus: MainGlobalPointBus,
+    pub suffix_product_bus: PcsSuffixProductBus,
+}
+
+impl<F: Field> BaseAir<F> for PcsSuffixProductAir {
+    fn width(&self) -> usize {
+        PcsSuffixProductCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for PcsSuffixProductAir {}
+impl<F: Field> PartitionedBaseAir<F> for PcsSuffixProductAir {}
+
+impl<AB> Air<AB> for PcsSuffixProductAir
+where
+    AB: AirBuilder + InteractionBuilder,
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let next_row = main.row_slice(1).expect("next row exists");
+        let local: &PcsSuffixProductCols<AB::Var> = (*local_row).borrow();
+        let next: &PcsSuffixProductCols<AB::Var> = (*next_row).borrow();
+
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_first);
+        builder.assert_bool(local.is_last);
+        builder.assert_bool(local.has_factor);
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_zero(local.step_idx);
+        let one = core::array::from_fn(|i| {
+            if i == 0 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            }
+        });
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.acc_in,
+            one.clone(),
+        );
+
+        let factor = core::array::from_fn(|i| {
+            let point = local.point[i].into();
+            let one_minus_point = if i == 0 {
+                AB::Expr::ONE - point.clone()
+            } else {
+                -point.clone()
+            };
+            local.has_factor * one_minus_point + (AB::Expr::ONE - local.has_factor) * one[i].clone()
+        });
+        let expected_acc = recursion_circuit::utils::ext_field_multiply(local.acc_in, factor);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.acc_out,
+            expected_acc,
+        );
+
+        let continues = local.is_enabled * (AB::Expr::ONE - local.is_last);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_one(next.is_enabled);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.round_idx, local.round_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.term_idx, local.term_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.coord_idx, local.coord_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.step_idx, local.step_idx + AB::Expr::ONE);
+        assert_array_eq(
+            &mut builder.when_transition().when(continues),
+            next.acc_in,
+            local.acc_out,
+        );
+
+        self.main_global_point_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            MainGlobalPointMessage {
+                round_idx: local.coord_idx.into(),
+                value: local.point.map(Into::into),
+            },
+            local.is_enabled * local.has_factor,
+        );
+        self.suffix_product_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            PcsSuffixProductMessage {
+                round_idx: local.round_idx.into(),
+                term_idx: local.term_idx.into(),
+                value: local.acc_out.map(Into::into),
+            },
+            local.is_enabled * local.is_last,
+        );
+    }
+}
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug)]
+pub struct PcsJaggedAssistHCols<T> {
+    pub is_enabled: T,
+    pub proof_idx: T,
+    pub round_idx: T,
+    pub sumcheck_idx: T,
+    pub step_idx: T,
+    pub robp_idx: T,
+    pub is_first: T,
+    pub is_last: T,
+    pub has_z_row: T,
+    pub has_rho: T,
+    pub z_row: [T; D_EF],
+    pub rho: [T; D_EF],
+    pub rho_star_c: [T; D_EF],
+    pub rho_star_d: [T; D_EF],
+    pub val_in: [[T; D_EF]; 4],
+    pub val_out: [[T; D_EF]; 4],
+}
+
+pub struct PcsJaggedAssistHAir {
+    pub main_global_point_bus: MainGlobalPointBus,
+    pub fold_challenge_bus: PcsFoldChallengeBus,
+    pub jagged_assist_h_bus: PcsJaggedAssistHBus,
+}
+
+impl<F: Field> BaseAir<F> for PcsJaggedAssistHAir {
+    fn width(&self) -> usize {
+        PcsJaggedAssistHCols::<F>::width()
+    }
+}
+
+impl<F: Field> BaseAirWithPublicValues<F> for PcsJaggedAssistHAir {}
+impl<F: Field> PartitionedBaseAir<F> for PcsJaggedAssistHAir {}
+
+impl<AB> Air<AB> for PcsJaggedAssistHAir
+where
+    AB: AirBuilder + InteractionBuilder,
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local_row = main.row_slice(0).expect("main row exists");
+        let next_row = main.row_slice(1).expect("next row exists");
+        let local: &PcsJaggedAssistHCols<AB::Var> = (*local_row).borrow();
+        let next: &PcsJaggedAssistHCols<AB::Var> = (*next_row).borrow();
+
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_first);
+        builder.assert_bool(local.is_last);
+        builder.assert_bool(local.has_z_row);
+        builder.assert_bool(local.has_rho);
+        builder.when(local.is_enabled).assert_eq(
+            local.sumcheck_idx,
+            local.round_idx + local.round_idx + AB::Expr::ONE,
+        );
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_zero(local.step_idx);
+        let zero_ext = core::array::from_fn(|_| AB::Expr::ZERO);
+        let one_ext = core::array::from_fn(|i| {
+            if i == 0 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            }
+        });
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * (AB::Expr::ONE - local.has_z_row)),
+            local.z_row,
+            zero_ext.clone(),
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * (AB::Expr::ONE - local.has_rho)),
+            local.rho,
+            zero_ext.clone(),
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.val_in[0],
+            zero_ext.clone(),
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.val_in[1],
+            one_ext.clone(),
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.val_in[2],
+            zero_ext.clone(),
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.val_in[3],
+            zero_ext.clone(),
+        );
+
+        let one_minus = |x: [AB::Var; D_EF]| -> [AB::Expr; D_EF] {
+            core::array::from_fn(|i| {
+                let limb = x[i].into();
+                if i == 0 { AB::Expr::ONE - limb } else { -limb }
+            })
+        };
+        let z1 = local.z_row;
+        let z2 = local.rho;
+        let z3 = local.rho_star_c;
+        let z4 = local.rho_star_d;
+        let nz1 = one_minus(z1);
+        let nz2 = one_minus(z2);
+        let nz3 = one_minus(z3);
+        let nz4 = one_minus(z4);
+        let ab00: [AB::Expr; D_EF] =
+            recursion_circuit::utils::ext_field_multiply(nz1.clone(), nz2.clone());
+        let ab01: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(nz1.clone(), z2);
+        let ab10: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(z1, nz2.clone());
+        let ab11: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(z1, z2);
+        let cd00: [AB::Expr; D_EF] =
+            recursion_circuit::utils::ext_field_multiply(nz3.clone(), nz4.clone());
+        let cd01: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(nz3.clone(), z4);
+        let cd10: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(z3, nz4.clone());
+        let cd11: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(z3, z4);
+
+        let transitions: [(
+            usize,
+            usize,
+            [AB::Expr; D_EF],
+            [AB::Expr; D_EF],
+            [AB::Expr; D_EF],
+        ); 4] = [
+            (
+                0usize,
+                0usize,
+                ext_add::<AB::Expr>(
+                    ext_add::<AB::Expr>(
+                        recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                            ab00.clone(),
+                            cd00.clone(),
+                        ),
+                        recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                            ab01.clone(),
+                            cd11.clone(),
+                        ),
+                    ),
+                    recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                        ab11.clone(),
+                        cd01.clone(),
+                    ),
+                ),
+                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                    ab00.clone(),
+                    cd01.clone(),
+                ),
+                ext_add::<AB::Expr>(
+                    recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                        ab01.clone(),
+                        cd10.clone(),
+                    ),
+                    recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                        ab11.clone(),
+                        cd00.clone(),
+                    ),
+                ),
+            ),
+            (
+                0usize,
+                1usize,
+                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                    ab10.clone(),
+                    cd10.clone(),
+                ),
+                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                    ab10.clone(),
+                    cd11.clone(),
+                ),
+                zero_ext.clone(),
+            ),
+            (
+                1usize,
+                0usize,
+                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                    ab01.clone(),
+                    cd01.clone(),
+                ),
+                zero_ext.clone(),
+                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                    ab01.clone(),
+                    cd00.clone(),
+                ),
+            ),
+            (
+                1usize,
+                1usize,
+                ext_add::<AB::Expr>(
+                    ext_add::<AB::Expr>(
+                        recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                            ab00.clone(),
+                            cd10.clone(),
+                        ),
+                        recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                            ab10.clone(),
+                            cd00.clone(),
+                        ),
+                    ),
+                    recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                        ab11.clone(),
+                        cd11.clone(),
+                    ),
+                ),
+                ext_add::<AB::Expr>(
+                    recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab00, cd11),
+                    recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab10, cd01),
+                ),
+                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab11, cd10),
+            ),
+        ];
+        let mut expected: [[AB::Expr; D_EF]; 4] = core::array::from_fn(|_| zero_ext.clone());
+        for (ci, co, w_same, w_lt1, w_lt0) in transitions {
+            let v0 = local.val_in[co * 2];
+            let v1 = local.val_in[co * 2 + 1];
+            let same_v0 =
+                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(w_same.clone(), v0);
+            let lt1_v1 =
+                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(w_lt1.clone(), v1);
+            let lt0_v0 =
+                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(w_lt0.clone(), v0);
+            expected[ci * 2] = ext_add::<AB::Expr>(
+                expected[ci * 2].clone(),
+                ext_add::<AB::Expr>(same_v0, ext_add::<AB::Expr>(lt1_v1, lt0_v0)),
+            );
+
+            let same_v1 = recursion_circuit::utils::ext_field_multiply::<AB::Expr>(w_same, v1);
+            let lt1_v1 = recursion_circuit::utils::ext_field_multiply::<AB::Expr>(w_lt1, v1);
+            let lt0_v0 = recursion_circuit::utils::ext_field_multiply::<AB::Expr>(w_lt0, v0);
+            expected[ci * 2 + 1] = ext_add::<AB::Expr>(
+                expected[ci * 2 + 1].clone(),
+                ext_add::<AB::Expr>(same_v1, ext_add::<AB::Expr>(lt1_v1, lt0_v0)),
+            );
+        }
+        for (actual, expected) in local.val_out.into_iter().zip(expected) {
+            assert_array_eq(builder, actual, expected);
+        }
+
+        let continues = local.is_enabled * (AB::Expr::ONE - local.is_last);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_one(next.is_enabled);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.round_idx, local.round_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.sumcheck_idx, local.sumcheck_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.step_idx, local.step_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.robp_idx + AB::Expr::ONE, local.robp_idx);
+        for i in 0..4 {
+            assert_array_eq(
+                &mut builder.when_transition().when(continues.clone()),
+                next.val_in[i],
+                local.val_out[i],
+            );
+        }
+
+        self.main_global_point_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            MainGlobalPointMessage {
+                round_idx: local.robp_idx.into(),
+                value: local.z_row.map(Into::into),
+            },
+            local.is_enabled * local.has_z_row,
+        );
+        self.fold_challenge_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsFoldChallengeMessage {
+                sumcheck_idx: (local.round_idx + local.round_idx).into(),
+                round: local.robp_idx.into(),
+                challenge: local.rho.map(Into::into),
+            },
+            local.is_enabled * local.has_rho,
+        );
+        self.fold_challenge_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsFoldChallengeMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                round: (local.robp_idx + local.robp_idx).into(),
+                challenge: local.rho_star_c.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.fold_challenge_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsFoldChallengeMessage {
+                sumcheck_idx: local.sumcheck_idx.into(),
+                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE).into(),
+                challenge: local.rho_star_d.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.jagged_assist_h_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            PcsJaggedAssistHMessage {
+                round_idx: local.round_idx.into(),
+                value: local.val_out[0].map(Into::into),
+            },
+            local.is_enabled * local.is_last,
         );
     }
 }
@@ -2292,6 +3792,7 @@ pub struct PcsTranscriptValueCols<T> {
     pub is_batch_alpha: T,
     pub is_basefold_eval: T,
     pub is_jagged_f_at_rho: T,
+    pub transcript_ext_lookup_count: T,
     pub value: [T; D_EF],
 }
 
@@ -2301,6 +3802,7 @@ pub struct PcsTranscriptValueAir {
     pub query_sample_bus: PcsQuerySampleBus,
     pub batch_alpha_bus: PcsBatchAlphaBus,
     pub basefold_eval_bus: PcsBasefoldEvalBus,
+    pub transcript_ext_bus: PcsTranscriptExtBus,
     pub jagged_f_eval_bus: PcsJaggedFEvalBus,
     pub final_message_lookup_count: usize,
 }
@@ -2404,7 +3906,16 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for PcsTranscriptValueAir {
                 tidx: local.tidx.into(),
                 value: local.value.map(Into::into),
             },
-            local.is_enabled * local.is_basefold_eval,
+            local.is_enabled * local.is_basefold_eval * AB::Expr::from_usize(2),
+        );
+        self.transcript_ext_bus.add_key_with_lookups(
+            builder,
+            local.proof_idx,
+            PcsTranscriptExtMessage {
+                tidx: local.tidx.into(),
+                value: local.value.map(Into::into),
+            },
+            local.is_enabled * local.transcript_ext_lookup_count,
         );
         self.jagged_f_eval_bus.add_key_with_lookups(
             builder,
@@ -2743,6 +4254,9 @@ pub struct PcsJaggedClaimCols<T> {
     pub term_idx: T,
     pub is_first: T,
     pub is_last: T,
+    pub opening_idx: T,
+    pub commit_kind: T,
+    pub eval_idx: T,
     pub main_idx: T,
     pub main_eval_idx: T,
     pub z_col_tidx: T,
@@ -2755,6 +4269,9 @@ pub struct PcsJaggedClaimCols<T> {
 
 pub struct PcsJaggedClaimAir {
     pub sumcheck_input_bus: PcsSumcheckInputBus,
+    pub opening_eval_bus: PcsOpeningEvalBus,
+    pub eq_product_bus: PcsEqProductBus,
+    pub suffix_product_bus: PcsSuffixProductBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsJaggedClaimAir {
@@ -2841,6 +4358,38 @@ where
                 claim: local.acc_out.map(Into::into),
             },
             local.is_enabled * local.is_last,
+        );
+        self.eq_product_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsEqProductMessage {
+                kind: AB::Expr::from_usize(PcsEqProductKind::JaggedClaim.as_usize()),
+                round_idx: local.round_idx.into(),
+                term_idx: local.term_idx.into(),
+                value: local.eq_col.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.suffix_product_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsSuffixProductMessage {
+                round_idx: local.round_idx.into(),
+                term_idx: local.term_idx.into(),
+                value: local.tail_zero.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.opening_eval_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsOpeningEvalMessage {
+                opening_idx: local.opening_idx.into(),
+                commit_kind: local.commit_kind.into(),
+                eval_idx: local.eval_idx.into(),
+                value: opened_eval.map(Into::into),
+            },
+            local.is_enabled,
         );
     }
 }
@@ -3008,12 +4557,22 @@ pub struct PcsJaggedQEvalCols<T> {
     pub proof_idx: T,
     pub round_idx: T,
     pub sumcheck_idx: T,
+    pub term_idx: T,
+    pub is_first: T,
+    pub is_last: T,
+    pub col_tidx: T,
+    pub col_eval: [T; D_EF],
+    pub eq_rho_col: [T; D_EF],
+    pub acc_in: [T; D_EF],
+    pub acc_out: [T; D_EF],
     pub q_eval: [T; D_EF],
     pub f_at_rho: [T; D_EF],
     pub sumcheck_final: [T; D_EF],
 }
 
 pub struct PcsJaggedQEvalAir {
+    pub basefold_eval_bus: PcsBasefoldEvalBus,
+    pub eq_product_bus: PcsEqProductBus,
     pub sumcheck_output_bus: PcsSumcheckOutputBus,
 }
 
@@ -3034,11 +4593,88 @@ where
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
         let local_row = main.row_slice(0).expect("main row exists");
+        let next_row = main.row_slice(1).expect("next row exists");
         let local: &PcsJaggedQEvalCols<AB::Var> = (*local_row).borrow();
+        let next: &PcsJaggedQEvalCols<AB::Var> = (*next_row).borrow();
         builder.assert_bool(local.is_enabled);
-        let product = recursion_circuit::utils::ext_field_multiply(local.q_eval, local.f_at_rho);
+        builder.assert_bool(local.is_first);
+        builder.assert_bool(local.is_last);
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.sumcheck_idx, local.round_idx + local.round_idx);
+        builder
+            .when(local.is_enabled * local.is_first)
+            .assert_zero(local.term_idx);
+        let zero = core::array::from_fn(|_| AB::Expr::ZERO);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_first),
+            local.acc_in,
+            zero,
+        );
+
+        let term = recursion_circuit::utils::ext_field_multiply(local.eq_rho_col, local.col_eval);
+        let expected_acc = ext_add(local.acc_in, term);
         assert_array_eq(
             &mut builder.when(local.is_enabled),
+            local.acc_out,
+            expected_acc,
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_last),
+            local.q_eval,
+            local.acc_out,
+        );
+
+        let continues = local.is_enabled * (AB::Expr::ONE - local.is_last);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_one(next.is_enabled);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.proof_idx, local.proof_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.round_idx, local.round_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.sumcheck_idx, local.sumcheck_idx);
+        builder
+            .when_transition()
+            .when(continues.clone())
+            .assert_eq(next.term_idx, local.term_idx + AB::Expr::ONE);
+        assert_array_eq(
+            &mut builder.when_transition().when(continues),
+            next.acc_in,
+            local.acc_out,
+        );
+
+        self.basefold_eval_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsBasefoldEvalMessage {
+                tidx: local.col_tidx.into(),
+                value: local.col_eval.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.eq_product_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsEqProductMessage {
+                kind: AB::Expr::from_usize(PcsEqProductKind::JaggedQEval.as_usize()),
+                round_idx: local.round_idx.into(),
+                term_idx: local.term_idx.into(),
+                value: local.eq_rho_col.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        let product = recursion_circuit::utils::ext_field_multiply(local.acc_out, local.f_at_rho);
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * local.is_last),
             product,
             local.sumcheck_final,
         );
@@ -3049,7 +4685,7 @@ where
                 idx: local.sumcheck_idx.into(),
                 claim: local.sumcheck_final.map(Into::into),
             },
-            local.is_enabled,
+            local.is_enabled * local.is_last,
         );
     }
 }
@@ -3068,6 +4704,7 @@ pub struct PcsJaggedAssistCols<T> {
 
 pub struct PcsJaggedAssistAir {
     pub sumcheck_output_bus: PcsSumcheckOutputBus,
+    pub jagged_assist_h_bus: PcsJaggedAssistHBus,
 }
 
 impl<F: Field> BaseAir<F> for PcsJaggedAssistAir {
@@ -3102,6 +4739,15 @@ where
             PcsSumcheckOutputMessage {
                 idx: local.sumcheck_idx.into(),
                 claim: local.sumcheck_final.map(Into::into),
+            },
+            local.is_enabled,
+        );
+        self.jagged_assist_h_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PcsJaggedAssistHMessage {
+                round_idx: local.round_idx.into(),
+                value: local.h_at_rho_star.map(Into::into),
             },
             local.is_enabled,
         );
@@ -3166,6 +4812,9 @@ struct PcsTraceCtx<'a> {
     commit_phase_merkle_rows: &'a [PcsCommitPhaseMerkleRecord],
     opening_points: &'a [PcsOpeningPointRecord],
     opening_evals: &'a [PcsOpeningEvalRecord],
+    eq_products: &'a [PcsEqProductRecord],
+    suffix_products: &'a [PcsSuffixProductRecord],
+    jagged_assist_h: &'a [PcsJaggedAssistHRecord],
     basefold_query_indices: &'a [PcsBasefoldQueryIndexRecord],
     basefold_query_opens: &'a [PcsBasefoldQueryOpenRecord],
     basefold_commit_phase_queries: &'a [PcsBasefoldCommitPhaseQueryRecord],
@@ -3190,6 +4839,9 @@ enum PcsModuleChip {
     CommitPhaseMerkle,
     OpeningPoint,
     OpeningEval,
+    EqProduct,
+    SuffixProduct,
+    JaggedAssistH,
     BasefoldQueryIndex,
     BasefoldQueryOpen,
     BasefoldCommitPhaseQuery,
@@ -3230,6 +4882,15 @@ impl RowMajorChip<F> for PcsModuleChip {
             }
             PcsModuleChip::OpeningEval => {
                 PcsOpeningEvalTraceGenerator.generate_trace(&ctx.opening_evals, required_height)
+            }
+            PcsModuleChip::EqProduct => {
+                PcsEqProductTraceGenerator.generate_trace(&ctx.eq_products, required_height)
+            }
+            PcsModuleChip::SuffixProduct => {
+                PcsSuffixProductTraceGenerator.generate_trace(&ctx.suffix_products, required_height)
+            }
+            PcsModuleChip::JaggedAssistH => {
+                PcsJaggedAssistHTraceGenerator.generate_trace(&ctx.jagged_assist_h, required_height)
             }
             PcsModuleChip::BasefoldQueryIndex => PcsBasefoldQueryIndexTraceGenerator
                 .generate_trace(&ctx.basefold_query_indices, required_height),
@@ -3276,6 +4937,9 @@ struct PcsBaseInputMerkleTraceGenerator;
 struct PcsCommitPhaseLeafHashTraceGenerator;
 struct PcsCommitPhaseMerkleTraceGenerator;
 struct PcsOpeningEvalTraceGenerator;
+struct PcsEqProductTraceGenerator;
+struct PcsSuffixProductTraceGenerator;
+struct PcsJaggedAssistHTraceGenerator;
 struct PcsBasefoldQueryIndexTraceGenerator;
 struct PcsBasefoldQueryOpenTraceGenerator;
 struct PcsBasefoldCommitPhaseQueryTraceGenerator;
@@ -3494,6 +5158,111 @@ impl RowMajorChip<F> for PcsOpeningEvalTraceGenerator {
             cols.main_idx = F::from_usize(record.main_idx);
             cols.main_eval_idx = F::from_usize(record.main_eval_idx);
             cols.value = ext_limbs(record.value);
+            cols.raw_value = ext_limbs(record.raw_value);
+        }
+        Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+impl RowMajorChip<F> for PcsEqProductTraceGenerator {
+    type Ctx<'a> = &'a [PcsEqProductRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let width = PcsEqProductCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let mut trace = vec![F::ZERO; height * width];
+        for (row_idx, record) in records.iter().enumerate() {
+            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
+            let cols: &mut PcsEqProductCols<F> = row.borrow_mut();
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.kind = F::from_usize(record.kind.as_usize());
+            cols.source = F::from_usize(record.source.as_usize());
+            cols.round_idx = F::from_usize(record.round_idx);
+            cols.term_idx = F::from_usize(record.term_idx);
+            cols.bit_idx = F::from_usize(record.bit_idx);
+            cols.is_first = F::from_bool(record.is_first);
+            cols.is_last = F::from_bool(record.is_last);
+            cols.point_tidx = F::from_usize(record.point_tidx);
+            cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+            cols.point_round = F::from_usize(record.point_round);
+            cols.index_bit = F::from_bool(record.index_bit);
+            cols.index_pow2 = F::from_usize(record.index_pow2);
+            cols.index_acc_in = F::from_usize(record.index_acc_in);
+            cols.index_acc_out = F::from_usize(record.index_acc_out);
+            cols.point = ext_limbs(record.point);
+            cols.acc_in = ext_limbs(record.acc_in);
+            cols.acc_out = ext_limbs(record.acc_out);
+        }
+        Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+impl RowMajorChip<F> for PcsSuffixProductTraceGenerator {
+    type Ctx<'a> = &'a [PcsSuffixProductRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let width = PcsSuffixProductCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let mut trace = vec![F::ZERO; height * width];
+        for (row_idx, record) in records.iter().enumerate() {
+            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
+            let cols: &mut PcsSuffixProductCols<F> = row.borrow_mut();
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.round_idx = F::from_usize(record.round_idx);
+            cols.term_idx = F::from_usize(record.term_idx);
+            cols.coord_idx = F::from_usize(record.coord_idx);
+            cols.step_idx = F::from_usize(record.step_idx);
+            cols.is_first = F::from_bool(record.is_first);
+            cols.is_last = F::from_bool(record.is_last);
+            cols.has_factor = F::from_bool(record.has_factor);
+            cols.point = ext_limbs(record.point);
+            cols.acc_in = ext_limbs(record.acc_in);
+            cols.acc_out = ext_limbs(record.acc_out);
+        }
+        Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+impl RowMajorChip<F> for PcsJaggedAssistHTraceGenerator {
+    type Ctx<'a> = &'a [PcsJaggedAssistHRecord];
+
+    fn generate_trace(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<RowMajorMatrix<F>> {
+        let width = PcsJaggedAssistHCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let mut trace = vec![F::ZERO; height * width];
+        for (row_idx, record) in records.iter().enumerate() {
+            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
+            let cols: &mut PcsJaggedAssistHCols<F> = row.borrow_mut();
+            cols.is_enabled = F::ONE;
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.round_idx = F::from_usize(record.round_idx);
+            cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+            cols.step_idx = F::from_usize(record.step_idx);
+            cols.robp_idx = F::from_usize(record.robp_idx);
+            cols.is_first = F::from_bool(record.is_first);
+            cols.is_last = F::from_bool(record.is_last);
+            cols.has_z_row = F::from_bool(record.has_z_row);
+            cols.has_rho = F::from_bool(record.has_rho);
+            cols.z_row = ext_limbs(record.z_row);
+            cols.rho = ext_limbs(record.rho);
+            cols.rho_star_c = ext_limbs(record.rho_star_c);
+            cols.rho_star_d = ext_limbs(record.rho_star_d);
+            cols.val_in = record.val_in.map(ext_limbs);
+            cols.val_out = record.val_out.map(ext_limbs);
         }
         Some(RowMajorMatrix::new(trace, width))
     }
@@ -3654,6 +5423,7 @@ impl RowMajorChip<F> for PcsTranscriptValueTraceGenerator {
             cols.is_batch_alpha = F::from_bool(record.is_batch_alpha);
             cols.is_basefold_eval = F::from_bool(record.is_basefold_eval);
             cols.is_jagged_f_at_rho = F::from_bool(record.is_jagged_f_at_rho);
+            cols.transcript_ext_lookup_count = F::from_usize(record.transcript_ext_lookup_count);
             cols.value = ext_limbs(record.value);
         }
         Some(RowMajorMatrix::new(trace, width))
@@ -3738,6 +5508,9 @@ impl RowMajorChip<F> for PcsJaggedClaimTraceGenerator {
             cols.term_idx = F::from_usize(record.term_idx);
             cols.is_first = F::from_bool(record.is_first);
             cols.is_last = F::from_bool(record.is_last);
+            cols.opening_idx = F::from_usize(record.opening_idx);
+            cols.commit_kind = F::from_usize(record.commit_kind.as_usize());
+            cols.eval_idx = F::from_usize(record.eval_idx);
             cols.main_idx = F::from_usize(record.main_idx);
             cols.main_eval_idx = F::from_usize(record.main_eval_idx);
             cols.z_col_tidx = F::from_usize(record.z_col_tidx);
@@ -3854,6 +5627,14 @@ impl RowMajorChip<F> for PcsJaggedQEvalTraceGenerator {
             cols.proof_idx = F::from_usize(record.proof_idx);
             cols.round_idx = F::from_usize(record.round_idx);
             cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+            cols.term_idx = F::from_usize(record.term_idx);
+            cols.is_first = F::from_bool(record.is_first);
+            cols.is_last = F::from_bool(record.is_last);
+            cols.col_tidx = F::from_usize(record.col_tidx);
+            cols.col_eval = ext_limbs(record.col_eval);
+            cols.eq_rho_col = ext_limbs(record.eq_rho_col);
+            cols.acc_in = ext_limbs(record.acc_in);
+            cols.acc_out = ext_limbs(record.acc_out);
             cols.q_eval = ext_limbs(record.q_eval);
             cols.f_at_rho = ext_limbs(record.f_at_rho);
             cols.sumcheck_final = ext_limbs(record.sumcheck_final);
@@ -4611,6 +6392,7 @@ where
                     is_query_sample: false,
                     is_batch_alpha: false,
                     is_basefold_eval: false,
+                    transcript_ext_lookup_count: 0,
                     is_jagged_f_at_rho: false,
                 });
             value
@@ -4646,6 +6428,7 @@ where
             is_query_sample: false,
             is_batch_alpha: true,
             is_basefold_eval: false,
+            transcript_ext_lookup_count: 0,
             is_jagged_f_at_rho: false,
         });
     let mut out = Vec::with_capacity(size);
@@ -4696,6 +6479,7 @@ fn observe_label_with_records<TS>(
                 is_query_sample: false,
                 is_batch_alpha: false,
                 is_basefold_eval: false,
+                transcript_ext_lookup_count: 0,
                 is_jagged_f_at_rho: false,
             });
     }
@@ -4727,6 +6511,7 @@ where
             is_query_sample: false,
             is_batch_alpha: false,
             is_basefold_eval: false,
+            transcript_ext_lookup_count: 0,
             is_jagged_f_at_rho: false,
         });
     sample_bits_with_record(ts, bits, preflight, 6_000_001, false).query_value == 0
@@ -4768,6 +6553,7 @@ where
             is_query_sample,
             is_batch_alpha: false,
             is_basefold_eval: false,
+            transcript_ext_lookup_count: 0,
             is_jagged_f_at_rho: false,
         });
     let raw = value.as_canonical_u64() as usize;
@@ -4813,6 +6599,7 @@ where
                 is_query_sample: false,
                 is_batch_alpha: false,
                 is_basefold_eval: false,
+                transcript_ext_lookup_count: 0,
                 is_jagged_f_at_rho: false,
             });
     }

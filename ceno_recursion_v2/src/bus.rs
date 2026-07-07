@@ -419,6 +419,15 @@ define_typed_per_proof_lookup_bus!(PcsBasefoldEvalBus, PcsBasefoldEvalMessage);
 
 #[repr(C)]
 #[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsTranscriptExtMessage<T> {
+    pub tidx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(PcsTranscriptExtBus, PcsTranscriptExtMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
 pub struct PcsJaggedFEvalMessage<T> {
     pub sumcheck_idx: T,
     pub tidx: T,
@@ -426,3 +435,44 @@ pub struct PcsJaggedFEvalMessage<T> {
 }
 
 define_typed_per_proof_lookup_bus!(PcsJaggedFEvalBus, PcsJaggedFEvalMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsOpeningEvalMessage<T> {
+    pub opening_idx: T,
+    pub commit_kind: T,
+    pub eval_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(PcsOpeningEvalBus, PcsOpeningEvalMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsEqProductMessage<T> {
+    pub kind: T,
+    pub round_idx: T,
+    pub term_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(PcsEqProductBus, PcsEqProductMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsSuffixProductMessage<T> {
+    pub round_idx: T,
+    pub term_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(PcsSuffixProductBus, PcsSuffixProductMessage);
+
+#[repr(C)]
+#[derive(stark_recursion_circuit_derive::AlignedBorrow, Debug, Clone, Copy)]
+pub struct PcsJaggedAssistHMessage<T> {
+    pub round_idx: T,
+    pub value: [T; D_EF],
+}
+
+define_typed_per_proof_lookup_bus!(PcsJaggedAssistHBus, PcsJaggedAssistHMessage);

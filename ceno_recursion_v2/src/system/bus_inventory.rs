@@ -19,9 +19,11 @@ use crate::bus::{
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
     NLiftBus as LocalNLiftBus, PcsBaseInputOpeningBus, PcsBasefoldEvalBus, PcsBasefoldQueryBus,
     PcsBatchAlphaBus, PcsBatchCoeffBus, PcsCommitPhaseLeafBus, PcsCommitmentRootBus,
-    PcsFinalMessageBus, PcsFoldChallengeBus, PcsJaggedFEvalBus, PcsQuerySampleBus,
-    PcsSumcheckInputBus, PcsSumcheckOutputBus, PublicValuesBus as LocalPublicValuesBus,
-    TowerMainPointBus, TowerModuleBus, TranscriptBus as LocalTranscriptBus,
+    PcsEqProductBus, PcsFinalMessageBus, PcsFoldChallengeBus, PcsJaggedAssistHBus,
+    PcsJaggedFEvalBus, PcsOpeningEvalBus, PcsQuerySampleBus, PcsSuffixProductBus,
+    PcsSumcheckInputBus, PcsSumcheckOutputBus, PcsTranscriptExtBus,
+    PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus, TowerModuleBus,
+    TranscriptBus as LocalTranscriptBus,
 };
 
 #[derive(Clone, Debug)]
@@ -69,6 +71,7 @@ pub struct BusInventory {
     pub lookup_challenge_bus: LookupChallengeBus,
     pub pcs_basefold_query_bus: PcsBasefoldQueryBus,
     pub pcs_basefold_eval_bus: PcsBasefoldEvalBus,
+    pub pcs_transcript_ext_bus: PcsTranscriptExtBus,
     pub pcs_base_input_opening_bus: PcsBaseInputOpeningBus,
     pub pcs_final_message_bus: PcsFinalMessageBus,
     pub pcs_query_sample_bus: PcsQuerySampleBus,
@@ -80,6 +83,10 @@ pub struct BusInventory {
     pub pcs_batch_coeff_bus: PcsBatchCoeffBus,
     pub pcs_batch_alpha_bus: PcsBatchAlphaBus,
     pub pcs_jagged_f_eval_bus: PcsJaggedFEvalBus,
+    pub pcs_opening_eval_bus: PcsOpeningEvalBus,
+    pub pcs_eq_product_bus: PcsEqProductBus,
+    pub pcs_suffix_product_bus: PcsSuffixProductBus,
+    pub pcs_jagged_assist_h_bus: PcsJaggedAssistHBus,
 }
 
 impl BusInventory {
@@ -134,6 +141,7 @@ impl BusInventory {
         let lookup_challenge_bus = LookupChallengeBus::new(b.new_bus_idx());
         let pcs_basefold_query_bus = PcsBasefoldQueryBus::new(b.new_bus_idx());
         let pcs_basefold_eval_bus = PcsBasefoldEvalBus::new(b.new_bus_idx());
+        let pcs_transcript_ext_bus = PcsTranscriptExtBus::new(b.new_bus_idx());
         let pcs_base_input_opening_bus = PcsBaseInputOpeningBus::new(b.new_bus_idx());
         let pcs_final_message_bus = PcsFinalMessageBus::new(b.new_bus_idx());
         let pcs_query_sample_bus = PcsQuerySampleBus::new(b.new_bus_idx());
@@ -145,6 +153,10 @@ impl BusInventory {
         let pcs_batch_coeff_bus = PcsBatchCoeffBus::new(b.new_bus_idx());
         let pcs_batch_alpha_bus = PcsBatchAlphaBus::new(b.new_bus_idx());
         let pcs_jagged_f_eval_bus = PcsJaggedFEvalBus::new(b.new_bus_idx());
+        let pcs_opening_eval_bus = PcsOpeningEvalBus::new(b.new_bus_idx());
+        let pcs_eq_product_bus = PcsEqProductBus::new(b.new_bus_idx());
+        let pcs_suffix_product_bus = PcsSuffixProductBus::new(b.new_bus_idx());
+        let pcs_jagged_assist_h_bus = PcsJaggedAssistHBus::new(b.new_bus_idx());
 
         Self {
             transcript_bus,
@@ -190,6 +202,7 @@ impl BusInventory {
             lookup_challenge_bus,
             pcs_basefold_query_bus,
             pcs_basefold_eval_bus,
+            pcs_transcript_ext_bus,
             pcs_base_input_opening_bus,
             pcs_final_message_bus,
             pcs_query_sample_bus,
@@ -201,6 +214,10 @@ impl BusInventory {
             pcs_batch_coeff_bus,
             pcs_batch_alpha_bus,
             pcs_jagged_f_eval_bus,
+            pcs_opening_eval_bus,
+            pcs_eq_product_bus,
+            pcs_suffix_product_bus,
+            pcs_jagged_assist_h_bus,
         }
     }
 }
