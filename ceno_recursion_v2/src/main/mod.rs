@@ -844,14 +844,18 @@ where
         log2_num_instances += 1;
     }
     let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+    let final_tower_layer = tower_replay.layers.last();
     let rt_main = rt_main_from_tower_replay(tower_replay, num_var_with_rotation)
         .ok_or_else(|| eyre!("{name} missing tower main point for rotation replay"))?;
 
+    let (rotation_power_challenges, rotation_power_tidx) =
+        sample_challenge_pows_with_tidx(ts, num_rotations, b"combine subset evals");
     let rotation_challenges = chain!(
         challenges.iter().copied(),
-        sample_challenge_pows(ts, num_rotations, b"combine subset evals")
+        rotation_power_challenges.iter().copied()
     )
     .collect_vec();
+    let rotation_sumcheck_start_tidx = ts.len();
     let (origin_point, expected_evaluation, origin_tidxs) = replay_main_sumcheck(
         ts,
         RecursionField::ZERO,
@@ -905,6 +909,23 @@ where
         &rotation_challenges,
         rotation_sumcheck_expression,
     );
+    if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
+        eprintln!(
+            "rec-v2-debug module=main source=preflight key=rotation_inputs chip_idx={chip_idx} circuit={name} tower_layers={} final_tower_mu={:?} final_tower_challenges={:?} num_var_with_rotation={num_var_with_rotation} rt_main={rt_main:?} rotation_power_tidx={rotation_power_tidx} rotation_power_challenges={rotation_power_challenges:?} rotation_sumcheck_start_tidx={rotation_sumcheck_start_tidx} rotation_origin_tidxs={origin_tidxs:?} rotation_sumcheck_end_tidx={}",
+            tower_replay.layers.len(),
+            final_tower_layer.map(|layer| layer.mu),
+            final_tower_layer.map(|layer| layer.challenges.as_slice()),
+            ts.len(),
+        );
+        eprintln!(
+            "rec-v2-debug module=main source=preflight key=rotation_check chip_idx={chip_idx} circuit={name} num_instances={num_instances} log2_num_instances={log2_num_instances} num_var_with_rotation={num_var_with_rotation} rotation_vars={} rotation_cyclic_group_log2={} rotation_cyclic_subgroup_size={} num_rotations={} expected={expected_evaluation:?} got={got_claim:?} selector_eval={selector_eval:?} rt_main={rt_main:?} origin_point={origin_point:?} first_eval_triple={:?}",
+            composed_cs.rotation_vars().unwrap_or(0),
+            first_layer.rotation_cyclic_group_log2,
+            first_layer.rotation_cyclic_subgroup_size,
+            num_rotations,
+            rotation_proof.evals.get(0..3),
+        );
+    }
     if got_claim != expected_evaluation {
         bail!("{name} rotation verify failed: {expected_evaluation} != {got_claim}");
     }
