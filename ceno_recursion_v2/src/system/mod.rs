@@ -621,6 +621,68 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
         debug_assert_eq!(heights.len() - offset, 1);
         (per_module, None, Some(heights[offset]))
     }
+
+    #[cfg(test)]
+    pub(crate) fn test_run_preflight<TS>(
+        &self,
+        sponge: TS,
+        child_vk: &RecursionVk,
+        proof: &RecursionProof,
+    ) -> Preflight
+    where
+        TS: FiatShamirTranscript<BabyBearPoseidon2Config>
+            + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>
+            + From<Poseidon2BabyBear<POSEIDON2_WIDTH>>
+            + Clone,
+    {
+        self.run_preflight(sponge, child_vk, proof)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_generate_proving_ctxs_from_preflights<SC: StarkProtocolConfig<F = F>>(
+        &self,
+        child_vk: &RecursionVk,
+        proofs: &[RecursionProof],
+        preflights: &[Preflight],
+        external_data: &VerifierExternalData<'_>,
+    ) -> Vec<AirProvingContext<CpuBackend<SC>>> {
+        let power_checker_gen =
+            Arc::new(PowerCheckerCpuTraceGenerator::<2, POW_CHECKER_HEIGHT>::default());
+        let exp_bits_len_gen = ExpBitsLenTraceGenerator::default();
+        let module_required = vec![None; 6];
+        let modules = vec![
+            TraceModuleRef::Transcript(&self.transcript),
+            TraceModuleRef::ProofShape(&self.proof_shape),
+            TraceModuleRef::Tower(&self.gkr),
+            TraceModuleRef::Main(&self.main_module),
+            TraceModuleRef::BatchConstraint(&self.batch_constraint),
+            TraceModuleRef::Pcs(&self.pcs),
+        ];
+
+        let mut ctxs = modules
+            .into_iter()
+            .zip(module_required)
+            .flat_map(|(module, required_heights)| {
+                module
+                    .generate_cpu_ctxs(
+                        child_vk,
+                        proofs,
+                        preflights,
+                        &None,
+                        &power_checker_gen,
+                        &exp_bits_len_gen,
+                        external_data,
+                        required_heights,
+                    )
+                    .expect("test trace generation should succeed")
+            })
+            .collect::<Vec<_>>();
+        let exp_bits_trace = exp_bits_len_gen
+            .generate_trace_row_major(None)
+            .expect("exp bits trace should generate");
+        ctxs.push(AirProvingContext::simple_no_pis(exp_bits_trace));
+        ctxs
+    }
 }
 
 fn ef_to_limbs(value: EF) -> [F; D_EF] {
