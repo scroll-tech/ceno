@@ -1,15 +1,18 @@
 use std::borrow::Borrow;
 
+use ceno_zkvm::structs::VK_DIGEST_LEN;
 use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
 };
+use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, AirBuilderWithPublicValues, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::{
     bus::{
         Poseidon2CompressBus, Poseidon2CompressMessage, PublicValuesBus, PublicValuesBusMessage,
+        TranscriptBus, TranscriptBusMessage,
     },
     prelude::DIGEST_SIZE,
     utils::assert_zeros,
@@ -19,7 +22,7 @@ use verify_stark::pvs::{VERIFIER_PVS_AIR_ID, VerifierBasePvs, VerifierDefPvs, Vk
 
 use crate::{
     circuit::inner::bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
-    utils::digests_to_poseidon2_input,
+    utils::{TranscriptLabel, digests_to_poseidon2_input},
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -32,10 +35,12 @@ pub struct VerifierPvsCols<F> {
     pub proof_idx: F,
     pub is_valid: F,
     pub has_verifier_pvs: F,
+    pub child_vk_digest: [[F; D_EF]; VK_DIGEST_LEN],
     pub child_pvs: VerifierBasePvs<F>,
 }
 
 pub struct VerifierPvsAir {
+    pub transcript_bus: TranscriptBus,
     pub public_values_bus: PublicValuesBus,
     // pub cached_commit_bus: CachedCommitBus,
     pub pvs_air_consistency_bus: PvsAirConsistencyBus,
@@ -106,6 +111,23 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         builder
             .when(local.has_verifier_pvs)
             .assert_one(local.is_valid);
+
+        for (digest_idx, digest) in local.child_vk_digest.iter().enumerate() {
+            for (limb_idx, value) in digest.iter().enumerate() {
+                self.transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    TranscriptBusMessage {
+                        tidx: AB::Expr::from_usize(
+                            TranscriptLabel::Riscv.field_len() + digest_idx * D_EF + limb_idx,
+                        ),
+                        value: (*value).into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_valid,
+                );
+            }
+        }
 
         // We constrain the consistency of verifier-specific public values. We can determine
         // what layer a verifier is at using the has_verifier_pvs and internal_flag columns.

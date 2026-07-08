@@ -12,7 +12,6 @@ use crate::{
     bus::{PublicValuesBus, PublicValuesBusMessage, TranscriptBus, TranscriptBusMessage},
     proof_shape::bus::{NumPublicValuesBus, NumPublicValuesMessage},
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
-    utils::TranscriptLabel,
 };
 
 #[repr(C)]
@@ -36,6 +35,7 @@ pub struct PublicValuesAir {
     pub num_pvs_bus: NumPublicValuesBus,
     pub transcript_bus: TranscriptBus,
     pub(crate) continuations_enabled: bool,
+    pub public_values_start_tidx: usize,
 }
 
 impl<F> BaseAir<F> for PublicValuesAir {
@@ -90,12 +90,12 @@ where
             .assert_one(next.is_first_in_air);
 
         let is_same_air = local.is_valid * next.is_valid * not(next.is_first_in_air);
-        // TODO fix first tidx to be TranscriptLabel::Riscv.field_len()
-        // TODO fix comment as well
-        // first tidx happened here
         builder
             .when(local.is_valid * local.is_first_in_proof * local.is_first_in_air)
-            .assert_zero(local.tidx);
+            .assert_eq(
+                local.tidx,
+                AB::Expr::from_usize(self.public_values_start_tidx),
+            );
 
         // self.num_pvs_bus.receive(
         //     builder,
@@ -123,18 +123,7 @@ where
             },
             local.is_valid,
         );
-        if self.continuations_enabled {
-            self.public_values_bus.send(
-                builder,
-                local.proof_idx,
-                PublicValuesBusMessage {
-                    air_idx: local.air_idx,
-                    pv_idx: local.pv_idx,
-                    value: local.value,
-                },
-                local.is_valid,
-            );
-        }
+        let _ = self.continuations_enabled;
 
         // Receive transcript read of public values
         self.transcript_bus.receive(

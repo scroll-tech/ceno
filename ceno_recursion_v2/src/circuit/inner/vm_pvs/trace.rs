@@ -1,3 +1,7 @@
+use ceno_zkvm::{
+    instructions::riscv::constants::{LIMB_BITS, LIMB_MASK, PUBIO_DIGEST_U16_LIMBS, UINT_LIMBS},
+    structs::VK_DIGEST_LEN,
+};
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::prover::AirProvingContext;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
@@ -10,7 +14,7 @@ use std::borrow::BorrowMut;
 use crate::{
     circuit::inner::{
         ProofsType,
-        vm_pvs::{VmPvs, air::VmPvsCols},
+        vm_pvs::{VmPvs, air::VmPvsCols, recursion_commit_digest},
     },
     system::{Preflight, RecursionProof, RecursionVk},
 };
@@ -34,17 +38,12 @@ pub fn generate_proving_ctx(
     let width = VmPvsCols::<u8>::width() + (deferral_enabled as usize);
     let mut trace = vec![F::ZERO; rows * width];
 
-    let fixed_commit = extract_commit(
-        child_vk
-            .fixed_commit
-            .as_ref()
-            .map(|commitment| commitment.commit.clone()),
-    );
+    let fixed_commit = extract_commit(child_vk.fixed_commit.as_ref().map(recursion_commit_digest));
     let fixed_no_omc_init_commit = extract_commit(
         child_vk
             .fixed_no_omc_init_commit
             .as_ref()
-            .map(|commitment| commitment.commit.clone()),
+            .map(recursion_commit_digest),
     );
 
     for (row_idx, row) in trace.chunks_exact_mut(width).enumerate() {
@@ -58,8 +57,40 @@ pub fn generate_proving_ctx(
             cols.is_valid = F::ONE;
             cols.is_last = F::from_bool(row_idx + 1 == proofs.len());
             cols.has_verifier_pvs = F::ZERO;
+            cols.fixed_commit_present = F::from_bool(child_vk.fixed_commit.is_some());
+            cols.fixed_no_omc_init_commit_present =
+                F::from_bool(child_vk.fixed_no_omc_init_commit.is_some());
             cols.lookup_challenge_alpha = ef_to_limbs(preflight.vm_pvs.lookup_challenge_alpha);
             cols.lookup_challenge_beta = ef_to_limbs(preflight.vm_pvs.lookup_challenge_beta);
+            cols.lookup_challenge_alpha_tidx =
+                F::from_usize(preflight.vm_pvs.lookup_challenge_alpha_tidx);
+            cols.lookup_challenge_beta_tidx =
+                F::from_usize(preflight.vm_pvs.lookup_challenge_beta_tidx);
+            let (fixed_tidx, fixed_no_omc_tidx, witness_tidx) =
+                commitment_digest_tidxs(child_vk, proof);
+            cols.fixed_commit_tidx = F::from_usize(fixed_tidx);
+            cols.fixed_no_omc_init_commit_tidx = F::from_usize(fixed_no_omc_tidx);
+            cols.witness_commit_tidx = F::from_usize(witness_tidx);
+            let fixed_meta = child_vk
+                .fixed_commit
+                .as_ref()
+                .map(commit_fixed_metadata)
+                .unwrap_or_default();
+            cols.fixed_commit_log2_max_codeword_size = fixed_meta[0];
+            cols.fixed_commit_reshape_log_height = fixed_meta[1];
+            cols.fixed_commit_cumulative_heights_len = fixed_meta[2];
+            let fixed_no_omc_meta = child_vk
+                .fixed_no_omc_init_commit
+                .as_ref()
+                .map(commit_fixed_metadata)
+                .unwrap_or_default();
+            cols.fixed_no_omc_init_commit_log2_max_codeword_size = fixed_no_omc_meta[0];
+            cols.fixed_no_omc_init_commit_reshape_log_height = fixed_no_omc_meta[1];
+            cols.fixed_no_omc_init_commit_cumulative_heights_len = fixed_no_omc_meta[2];
+            let witness_meta = commit_fixed_metadata(&proof.witin_commit);
+            cols.witness_commit_log2_max_codeword_size = witness_meta[0];
+            cols.witness_commit_reshape_log_height = witness_meta[1];
+            cols.witness_commit_cumulative_heights_len = witness_meta[2];
             cols.lookup_challenge_alpha_lookup_count =
                 F::from_usize(preflight.vm_pvs.lookup_challenge_alpha_lookup_count);
             cols.lookup_challenge_beta_lookup_count =
@@ -98,7 +129,7 @@ fn build_vm_pvs(
     VmPvs {
         fixed_commit,
         fixed_no_omc_init_commit,
-        witness_commit: extract_commit(Some(proof.witin_commit.commit.clone())),
+        witness_commit: extract_commit(Some(recursion_commit_digest(&proof.witin_commit))),
         exit_code: split_u32_lo_hi(pv.exit_code),
         init_pc: F::from_u32(pv.init_pc),
         init_cycle: F::from_u64(pv.init_cycle),
@@ -109,7 +140,7 @@ fn build_vm_pvs(
         heap_shard_len: F::from_u32(pv.heap_shard_len),
         hint_start_addr: F::from_u32(pv.hint_start_addr),
         hint_shard_len: F::from_u32(pv.hint_shard_len),
-        public_io: split_u32_lo_hi(pv.public_io_digest[0]),
+        public_io: split_public_io_digest(pv.public_io_digest),
         shard_rw_sum: pv.shard_rw_sum.map(F::from_u32),
     }
 }
@@ -124,11 +155,57 @@ fn extract_commit(commit: Option<impl IntoIterator<Item = F>>) -> [F; DIGEST_SIZ
     out
 }
 
+fn commitment_digest_tidxs(
+    child_vk: &RecursionVk,
+    proof: &RecursionProof,
+) -> (usize, usize, usize) {
+    let mut tidx = crate::utils::TranscriptLabel::Riscv.field_len()
+        + VK_DIGEST_LEN * D_EF
+        + child_vk
+            .circuit_vks
+            .values()
+            .map(|circuit_vk| circuit_vk.get_cs().zkvm_v1_css.instance.len())
+            .sum::<usize>();
+
+    let fixed_tidx = tidx;
+    if let Some(commitment) = child_vk.fixed_commit.as_ref() {
+        tidx += commitment_transcript_len(commitment);
+    }
+
+    let fixed_no_omc_tidx = tidx;
+    if let Some(commitment) = child_vk.fixed_no_omc_init_commit.as_ref() {
+        tidx += commitment_transcript_len(commitment);
+    }
+
+    let witness_tidx = tidx;
+    (fixed_tidx, fixed_no_omc_tidx, witness_tidx)
+}
+
+fn commitment_transcript_len(commitment: &super::RecursionCommitment) -> usize {
+    DIGEST_SIZE + 3 + commitment.cumulative_heights.len()
+}
+
+fn commit_fixed_metadata(commitment: &super::RecursionCommitment) -> [F; 3] {
+    [
+        F::from_u64(commitment.inner.log2_max_codeword_size as u64),
+        F::from_u64(commitment.reshape_log_height as u64),
+        F::from_u64(commitment.cumulative_heights.len() as u64),
+    ]
+}
+
 fn split_u32_lo_hi(value: u32) -> [F; 2] {
     [
         F::from_u32(value & 0xffff),
         F::from_u32((value >> 16) & 0xffff),
     ]
+}
+
+fn split_public_io_digest(digest: [u32; 8]) -> [F; PUBIO_DIGEST_U16_LIMBS] {
+    core::array::from_fn(|digest_limb_idx| {
+        let word_idx = digest_limb_idx / UINT_LIMBS;
+        let limb_idx = digest_limb_idx % UINT_LIMBS;
+        F::from_u32((digest[word_idx] >> (limb_idx * LIMB_BITS)) & LIMB_MASK)
+    })
 }
 
 fn ef_to_limbs(value: EF) -> [F; D_EF] {

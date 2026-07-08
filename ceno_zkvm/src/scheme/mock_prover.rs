@@ -1499,6 +1499,18 @@ Hints:
             gs
         );
 
+        // part4 custom local buses
+        let (custom_rs, rs_grp_by_anno, custom_ws, ws_grp_by_anno, _) =
+            derive_ram_rws!(RAMType::Custom);
+        find_rw_mismatch!(
+            custom_rs,
+            rs_grp_by_anno,
+            custom_ws,
+            ws_grp_by_anno,
+            RAMType::Custom,
+            gs
+        );
+
         if num_rw_mismatch_errors > 0 {
             panic!("found {} r/w mismatch errors", num_rw_mismatch_errors);
         }

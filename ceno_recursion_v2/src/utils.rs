@@ -41,6 +41,21 @@ pub fn label_field_len(label: &[u8]) -> usize {
     <BabyBearExt4 as CenoExtensionField>::BaseField::bytes_to_field_elements(label).len()
 }
 
+pub const fn label_to_field_words<const N: usize>(label: &[u8]) -> [u32; N] {
+    assert!(label.len() <= N * 4);
+    let mut words = [0u32; N];
+    let mut i = 0;
+    while i < label.len() {
+        let word_idx = i / 4;
+        let byte_idx = i % 4;
+        words[word_idx] |= (label[i] as u32) << (8 * byte_idx);
+        i += 1;
+    }
+    words
+}
+
+pub const LABEL_FORK_FIELDS: [u32; 1] = label_to_field_words(b"fork");
+
 pub fn transcript_observe_label<TS>(transcript: &mut TS, label: &[u8])
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>,

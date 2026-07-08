@@ -13,8 +13,10 @@ use crate::{
         utils::{
             GkrOutputStageMask, assign_group_evals, derive_ecc_bridge_claims,
             extract_ecc_quark_witness_inputs, first_layer_output_group_stage_masks,
-            infer_tower_logup_witness, infer_tower_product_witness, split_rotation_evals,
+            first_layer_selector_contexts, infer_tower_logup_witness, infer_tower_product_witness,
+            interleaving_mles_to_mles, split_rotation_evals,
         },
+        verifier::eval_batched_main_frontload_terms,
     },
     structs::{ComposedConstrainSystem, EccQuarkProof, PointAndEval, TowerProofs},
 };
@@ -49,7 +51,7 @@ use std::{
 use sumcheck::{
     macros::{entered_span, exit_span},
     structs::{IOPProof, IOPProverMessage, IOPProverState},
-    util::{get_challenge_pows, optimal_sumcheck_threads},
+    util::{extrapolate_uni_poly, get_challenge_pows, optimal_sumcheck_threads},
 };
 use transcript::Transcript;
 use witness::next_pow2_instance_padding;
@@ -606,8 +608,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
     fn build_tower_witness<'a, 'b, 'c>(
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
-        input: &ProofInput<'a, CpuBackend<E, PCS>>,
+        _input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [ArcMultilinearExtension<'b, E>],
+        challenges: &[E; 2],
     ) -> (
         Vec<Vec<Vec<E>>>,
         Vec<TowerProverSpec<'c, CpuBackend<E, PCS>>>,
@@ -620,9 +623,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         let ComposedConstrainSystem {
             zkvm_v1_css: cs, ..
         } = composed_cs;
-        let num_var_with_rotation =
-            input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
-
         let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
         let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
         let mut offset = 0;
@@ -640,132 +640,109 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             &records[offset..][..cs.lk_expressions.len()]
         };
 
+        let active_rows = records
+            .first()
+            .map(|record| record.evaluations().len())
+            .unwrap_or(1);
+        let active_row_vars = ceil_log2(next_pow2_instance_padding(active_rows));
+        let group_num_vars =
+            |num_ops: usize| active_row_vars + ceil_log2(num_ops.next_power_of_two());
+
         // infer all tower witness after last layer
         let span = entered_span!("tower_witness_last_layer");
-        let mut r_set_last_layer = r_set_wit
-            .iter()
-            .chain(w_set_wit.iter())
-            .map(|wit| wit.as_view_chunks(NUM_FANIN))
-            .collect::<Vec<_>>();
-        let w_set_last_layer = r_set_last_layer.split_off(r_set_wit.len());
+        let r_set_last_layer = (!r_set_wit.is_empty())
+            .then(|| interleaving_mles_to_mles(r_set_wit, active_rows, NUM_FANIN, E::ONE));
+        let w_set_last_layer = (!w_set_wit.is_empty())
+            .then(|| interleaving_mles_to_mles(w_set_wit, active_rows, NUM_FANIN, E::ONE));
 
-        let mut lk_numerator_last_layer = lk_n_wit
-            .iter()
-            .chain(lk_d_wit.iter())
-            .map(|wit| wit.as_view_chunks(NUM_FANIN))
-            .collect::<Vec<_>>();
-        let lk_denominator_last_layer = lk_numerator_last_layer.split_off(lk_n_wit.len());
+        let lk_numerator_last_layer = (!lk_n_wit.is_empty())
+            .then(|| interleaving_mles_to_mles(lk_n_wit, active_rows, NUM_FANIN, challenges[0]));
+        let lk_denominator_last_layer = (!lk_d_wit.is_empty())
+            .then(|| interleaving_mles_to_mles(lk_d_wit, active_rows, NUM_FANIN, challenges[0]));
         exit_span!(span);
 
         let span = entered_span!("tower_tower_witness");
-        let r_wit_layers = r_set_last_layer
-            .into_iter()
-            .map(|last_layer| {
-                infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
-            })
-            .collect_vec();
-        let w_wit_layers = w_set_last_layer
-            .into_iter()
-            .map(|last_layer| {
-                infer_tower_product_witness(num_var_with_rotation, last_layer, NUM_FANIN)
-            })
-            .collect_vec();
-        let lk_wit_layers = if !lk_numerator_last_layer.is_empty() {
-            lk_numerator_last_layer
-                .into_iter()
-                .zip(lk_denominator_last_layer)
-                .map(|(lk_n, lk_d)| infer_tower_logup_witness(Some(lk_n), lk_d))
-                .collect_vec()
-        } else {
-            lk_denominator_last_layer
-                .into_iter()
-                .map(|lk_d| infer_tower_logup_witness(None, lk_d))
-                .collect_vec()
+        let r_wit_layers = r_set_last_layer.map(|last_layer| {
+            infer_tower_product_witness(group_num_vars(num_reads), last_layer, NUM_FANIN)
+        });
+        let w_wit_layers = w_set_last_layer.map(|last_layer| {
+            infer_tower_product_witness(group_num_vars(num_writes), last_layer, NUM_FANIN)
+        });
+        let lk_wit_layers = match (lk_numerator_last_layer, lk_denominator_last_layer) {
+            (Some(lk_n), Some(lk_d)) => Some(infer_tower_logup_witness(Some(lk_n), lk_d)),
+            (None, Some(lk_d)) => Some(infer_tower_logup_witness(None, lk_d)),
+            (None, None) => None,
+            (Some(_), None) => unreachable!("lookup numerator without denominator"),
         };
         exit_span!(span);
 
         if cfg!(test) {
             // sanity check
-            assert_eq!(r_wit_layers.len(), num_reads);
-            assert!(
-                r_wit_layers
-                    .iter()
-                    .zip(r_set_wit.iter()) // depth equals to num_vars
-                    .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
-            );
-            assert!(r_wit_layers.iter().all(|layers| {
-                layers.iter().enumerate().all(|(i, w)| {
+            if let Some(layers) = &r_wit_layers {
+                assert_eq!(layers.len(), group_num_vars(num_reads));
+                assert!(layers.iter().enumerate().all(|(i, w)| {
                     let expected_size = 1 << i;
                     w[0].evaluations().len() == expected_size
                         && w[1].evaluations().len() == expected_size
-                })
-            }));
+                }));
+            }
 
-            assert_eq!(w_wit_layers.len(), num_writes);
-            assert!(
-                w_wit_layers
-                    .iter()
-                    .zip(w_set_wit.iter()) // depth equals to num_vars
-                    .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
-            );
-            assert!(w_wit_layers.iter().all(|layers| {
-                layers.iter().enumerate().all(|(i, w)| {
+            if let Some(layers) = &w_wit_layers {
+                assert_eq!(layers.len(), group_num_vars(num_writes));
+                assert!(layers.iter().enumerate().all(|(i, w)| {
                     let expected_size = 1 << i;
                     w[0].evaluations().len() == expected_size
                         && w[1].evaluations().len() == expected_size
-                })
-            }));
+                }));
+            }
 
-            assert_eq!(
-                lk_wit_layers.len(),
-                cs.lk_table_expressions.len() + cs.lk_expressions.len()
-            );
-            assert!(
-                lk_wit_layers
-                    .iter()
-                    .zip(lk_n_wit.iter()) // depth equals to num_vars
-                    .all(|(layers, origin_mle)| layers.len() == origin_mle.num_vars())
-            );
-            assert!(lk_wit_layers.iter().all(|layers| {
-                layers.iter().enumerate().all(|(i, w)| {
+            if let Some(layers) = &lk_wit_layers {
+                assert_eq!(layers.len(), group_num_vars(lk_d_wit.len()));
+                assert!(layers.iter().enumerate().all(|(i, w)| {
                     let expected_size = 1 << i;
                     let (p1, p2, q1, q2) = (&w[0], &w[1], &w[2], &w[3]);
                     p1.evaluations().len() == expected_size
                         && p2.evaluations().len() == expected_size
                         && q1.evaluations().len() == expected_size
                         && q2.evaluations().len() == expected_size
-                })
-            }));
+                }));
+            }
         }
 
         // final evals for verifier
         let r_out_evals = r_wit_layers
-            .iter()
+            .as_ref()
             .map(|r_wit_layers| {
-                r_wit_layers[0]
-                    .iter()
-                    .map(|mle| mle.get_ext_field_vec()[0])
-                    .collect_vec()
+                vec![
+                    r_wit_layers[0]
+                        .iter()
+                        .map(|mle| mle.get_ext_field_vec()[0])
+                        .collect_vec(),
+                ]
             })
-            .collect_vec();
+            .unwrap_or_default();
         let w_out_evals = w_wit_layers
-            .iter()
+            .as_ref()
             .map(|w_wit_layers| {
-                w_wit_layers[0]
-                    .iter()
-                    .map(|mle| mle.get_ext_field_vec()[0])
-                    .collect_vec()
+                vec![
+                    w_wit_layers[0]
+                        .iter()
+                        .map(|mle| mle.get_ext_field_vec()[0])
+                        .collect_vec(),
+                ]
             })
-            .collect_vec();
+            .unwrap_or_default();
         let lk_out_evals = lk_wit_layers
-            .iter()
+            .as_ref()
             .map(|lk_wit_layers| {
-                lk_wit_layers[0]
-                    .iter()
-                    .map(|mle| mle.get_ext_field_vec()[0])
-                    .collect_vec()
+                vec![
+                    lk_wit_layers[0]
+                        .iter()
+                        .map(|mle| mle.get_ext_field_vec()[0])
+                        .collect_vec(),
+                ]
             })
-            .collect_vec();
+            .unwrap_or_default();
 
         let prod_specs = r_wit_layers
             .into_iter()
@@ -793,7 +770,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         composed_cs: &ComposedConstrainSystem<E>,
         input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [Arc<MultilinearExtension<'b, E>>],
-        _challenges: &[E; 2],
+        challenges: &[E; 2],
         transcript: &mut impl Transcript<E>,
     ) -> TowerRelationOutput<E>
     where
@@ -803,7 +780,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
         // First build tower witness
         let span = entered_span!("build_tower_witness", profiling_2 = true);
         let (mut out_evals, prod_specs, logup_specs) =
-            self.build_tower_witness(composed_cs, input, records);
+            self.build_tower_witness(composed_cs, input, records, challenges);
         exit_span!(span);
 
         // bind read/write/lookup out evals into transcript before deriving tower challenges
@@ -914,7 +891,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
             gkr_circuit,
         } = composed_cs;
 
-        let num_instances = input.num_instances();
         let log2_num_instances = input.log2_num_instances();
         let num_threads = optimal_sumcheck_threads(log2_num_instances);
         let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
@@ -924,38 +900,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> MainSumcheckProver<C
         };
         let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
         let group_stage_masks = first_layer_output_group_stage_masks(composed_cs, gkr_circuit);
-        let selector_ctxs = first_layer
-            .out_sel_and_eval_exprs
-            .iter()
-            .zip_eq(group_stage_masks.iter())
-            .map(|((selector, _), stage_mask)| {
-                if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty() {
-                    SelectorContext {
-                        offset: 0,
-                        num_instances,
-                        num_vars: num_var_with_rotation,
-                    }
-                } else if cs.r_selector.as_ref() == Some(selector) {
-                    SelectorContext {
-                        offset: 0,
-                        num_instances: input.num_instances[0],
-                        num_vars: num_var_with_rotation,
-                    }
-                } else if cs.w_selector.as_ref() == Some(selector) {
-                    SelectorContext {
-                        offset: input.num_instances[0],
-                        num_instances: input.num_instances[1],
-                        num_vars: num_var_with_rotation,
-                    }
-                } else {
-                    SelectorContext {
-                        offset: 0,
-                        num_instances,
-                        num_vars: num_var_with_rotation,
-                    }
-                }
-            })
-            .collect_vec();
+        let selector_ctxs = first_layer_selector_contexts(
+            composed_cs,
+            gkr_circuit,
+            input.num_instances,
+            num_var_with_rotation,
+        );
 
         let mut out_evals =
             vec![PointAndEval::new(rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
@@ -1121,6 +1071,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         if jobs.is_empty() {
             return Ok((
                 MainConstraintProof {
+                    claimed_sum: E::ZERO,
                     proof: gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof {
                         proof: IOPProof { proofs: vec![] },
                         evals: vec![],
@@ -1138,12 +1089,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         let mut max_degree = 0usize;
 
         for job in &jobs {
-            let ComposedConstrainSystem {
-                zkvm_v1_css: cs,
-                gkr_circuit,
-            } = job.cs;
+            let ComposedConstrainSystem { gkr_circuit, .. } = job.cs;
 
-            let num_instances = job.input.num_instances();
             let log2_num_instances = job.input.log2_num_instances();
             let num_var_with_rotation = log2_num_instances + job.cs.rotation_vars().unwrap_or(0);
             max_num_variables = max_num_variables.max(num_var_with_rotation);
@@ -1153,43 +1100,18 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             };
             let first_layer = gkr_circuit.layers.first().expect("empty gkr circuit layer");
             max_degree = max_degree.max(first_layer.max_expr_degree + 1);
-            let group_stage_masks = first_layer_output_group_stage_masks(job.cs, gkr_circuit);
-            let selector_ctxs = first_layer
-                .out_sel_and_eval_exprs
-                .iter()
-                .zip_eq(group_stage_masks.iter())
-                .map(|((selector, _), stage_mask)| {
-                    if !stage_mask.contains(GkrOutputStageMask::TOWER) || cs.ec_final_sum.is_empty()
-                    {
-                        SelectorContext {
-                            offset: 0,
-                            num_instances,
-                            num_vars: num_var_with_rotation,
-                        }
-                    } else if cs.r_selector.as_ref() == Some(selector) {
-                        SelectorContext {
-                            offset: 0,
-                            num_instances: job.input.num_instances[0],
-                            num_vars: num_var_with_rotation,
-                        }
-                    } else if cs.w_selector.as_ref() == Some(selector) {
-                        SelectorContext {
-                            offset: job.input.num_instances[0],
-                            num_instances: job.input.num_instances[1],
-                            num_vars: num_var_with_rotation,
-                        }
-                    } else {
-                        SelectorContext {
-                            offset: 0,
-                            num_instances,
-                            num_vars: num_var_with_rotation,
-                        }
-                    }
-                })
-                .collect_vec();
+            let selector_ctxs = first_layer_selector_contexts(
+                job.cs,
+                gkr_circuit,
+                job.input.num_instances,
+                num_var_with_rotation,
+            );
 
             let mut out_evals =
                 vec![PointAndEval::new(job.rt_tower.clone(), E::ZERO); gkr_circuit.n_evaluations];
+            for (out_eval, eval) in out_evals.iter_mut().zip(job.main_out_evals.iter()) {
+                out_eval.eval = *eval;
+            }
 
             if let Some(rotation) = job.rotation.as_ref() {
                 let Some([left_group_idx, right_group_idx, point_group_idx]) =
@@ -1416,6 +1338,29 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
         );
         let global_evals = prover_state.get_mle_flatten_final_evaluations();
         let global_rt = prover_state.collect_raw_challenges();
+        let mut final_claim = E::ZERO;
+        for chip in &chip_data {
+            let layer_evals = &global_evals[chip.mle_start..chip.mle_start + chip.num_mles];
+            let main_sumcheck_challenges = chain!(
+                jobs[0].challenges.iter().copied(),
+                alpha_pows[chip.alpha_start..chip.alpha_start + chip.layer.exprs.len()]
+                    .iter()
+                    .copied()
+            )
+            .collect_vec();
+            final_claim += eval_batched_main_frontload_terms(
+                layer_evals,
+                &chip.pi,
+                &main_sumcheck_challenges,
+                &global_rt,
+                chip.num_var_with_rotation,
+                chip.layer
+                    .main_sumcheck_expression_monomial_terms
+                    .as_ref()
+                    .unwrap(),
+            );
+        }
+        let claimed_sum = recover_sumcheck_claim_from_final(final_claim, &proof, &global_rt);
         transcript.append_field_element_exts(&global_evals);
         exit_span!(span);
 
@@ -1437,6 +1382,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         Ok((
             MainConstraintProof {
+                claimed_sum,
                 proof: gkr_iop::gkr::layer::sumcheck_layer::SumcheckLayerProof {
                     proof,
                     evals: global_evals,
@@ -1445,6 +1391,28 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             results,
         ))
     }
+}
+
+fn recover_sumcheck_claim_from_final<E: ExtensionField>(
+    final_claim: E,
+    proof: &IOPProof<E>,
+    challenges: &[E],
+) -> E {
+    proof
+        .proofs
+        .iter()
+        .zip(challenges)
+        .rev()
+        .fold(final_claim, |expected, (message, challenge)| {
+            let hidden_weight = extrapolate_uni_poly(
+                E::ONE,
+                &vec![E::ZERO; message.evaluations.len()],
+                *challenge,
+            );
+            let without_claim =
+                extrapolate_uni_poly(-message.evaluations[0], &message.evaluations, *challenge);
+            (expected - without_claim) * hidden_weight.inverse()
+        })
 }
 
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> OpeningProver<CpuBackend<E, PCS>>

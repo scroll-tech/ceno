@@ -6,20 +6,18 @@ use openvm_stark_backend::{
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::D_EF;
 use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::Field;
+use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir};
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::bus::{
-    MainBus, MainExpressionClaimBus, MainExpressionClaimMessage, MainMessage, MainSumcheckInputBus,
-    MainSumcheckInputMessage, MainSumcheckOutputBus, MainSumcheckOutputMessage,
-};
+use crate::bus::{MainBus, MainExpressionClaimBus, MainExpressionClaimMessage, MainMessage};
 
 #[repr(C)]
 #[derive(AlignedBorrow, Debug)]
 pub struct MainCols<T> {
     pub is_enabled: T,
+    pub is_present: T,
     pub proof_idx: T,
     pub idx: T,
     pub is_first_idx: T,
@@ -31,9 +29,8 @@ pub struct MainCols<T> {
 
 pub struct MainAir {
     pub main_bus: MainBus,
-    pub sumcheck_input_bus: MainSumcheckInputBus,
-    pub sumcheck_output_bus: MainSumcheckOutputBus,
     pub expression_claim_bus: MainExpressionClaimBus,
+    pub send_expression_claim: bool,
 }
 
 impl<F: Field> BaseAir<F> for MainAir {
@@ -55,8 +52,15 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
         let local: &MainCols<AB::Var> = (*local_row).borrow();
         let next: &MainCols<AB::Var> = (*next_row).borrow();
 
-        type LoopSubAir = NestedForLoopSubAir<2>;
-        LoopSubAir {}.eval(
+        builder.assert_bool(local.is_enabled);
+        builder.assert_bool(local.is_present);
+        builder.assert_bool(local.is_first);
+        builder.assert_bool(local.is_first_idx);
+        builder
+            .when(local.is_present)
+            .assert_one(local.is_enabled);
+
+        NestedForLoopSubAir::<2> {}.eval(
             builder,
             (
                 NestedForLoopIoCols {
@@ -74,7 +78,6 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
             ),
         );
 
-        let receive_mask = local.is_enabled * local.is_first;
         self.main_bus.receive(
             builder,
             local.proof_idx,
@@ -83,32 +86,11 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
                 tidx: local.tidx.into(),
                 claim: local.claim_in.map(Into::into),
             },
-            receive_mask,
-        );
-
-        self.sumcheck_input_bus.send(
-            builder,
-            local.proof_idx,
-            MainSumcheckInputMessage {
-                idx: local.idx.into(),
-                tidx: local.tidx.into(),
-                claim: local.claim_in.map(Into::into),
-            },
-            local.is_enabled,
-        );
-
-        self.sumcheck_output_bus.receive(
-            builder,
-            local.proof_idx,
-            MainSumcheckOutputMessage {
-                idx: local.idx.into(),
-                claim: local.claim_out.map(Into::into),
-            },
-            local.is_enabled,
+            local.is_present * local.is_first,
         );
 
         assert_array_eq(
-            &mut builder.when(local.is_enabled),
+            &mut builder.when(local.is_present),
             local.claim_in,
             local.claim_out,
         );
@@ -120,7 +102,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
                 idx: local.idx.into(),
                 claim: local.claim_out.map(Into::into),
             },
-            local.is_enabled * local.is_first,
+            local.is_present * local.is_first * AB::Expr::from_bool(self.send_expression_claim),
         );
     }
 }

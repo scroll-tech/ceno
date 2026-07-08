@@ -10,12 +10,20 @@ use p3_field::{Field, PrimeCharacteristicRing, extension::BinomiallyExtendable};
 use p3_matrix::Matrix;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::tower::bus::{
-    TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
-    TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
+use crate::{
+    bus::{ForkedTranscriptBus, ForkedTranscriptBusMessage},
+    tower::{
+        bus::{
+            TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
+            TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
+        },
+        tower_transcript_len::{
+            LABEL_INTERNAL_ROUND, LABEL_INTERNAL_ROUND_FIELDS, SUMCHECK_INIT_LEN,
+        },
+    },
 };
 use recursion_circuit::{
-    bus::{TranscriptBus, XiRandomnessBus, XiRandomnessMessage},
+    bus::{XiRandomnessBus, XiRandomnessMessage},
     utils::{
         assert_one_ext, ext_field_add, ext_field_multiply, ext_field_multiply_scalar,
         ext_field_one_minus, ext_field_subtract,
@@ -29,6 +37,7 @@ pub struct TowerLayerSumcheckCols<T> {
     pub is_enabled: T,
     pub proof_idx: T,
     pub idx: T,
+    pub fork_id: T,
     pub layer_idx: T,
     pub is_first_idx: T,
     pub is_first_layer: T,
@@ -72,7 +81,7 @@ pub struct TowerLayerSumcheckCols<T> {
 }
 
 pub struct TowerLayerSumcheckAir {
-    pub transcript_bus: TranscriptBus,
+    pub forked_transcript_bus: ForkedTranscriptBus,
     pub xi_randomness_bus: XiRandomnessBus,
     pub sumcheck_input_bus: TowerSumcheckInputBus,
     pub sumcheck_output_bus: TowerSumcheckOutputBus,
@@ -81,14 +90,14 @@ pub struct TowerLayerSumcheckAir {
 
 impl TowerLayerSumcheckAir {
     pub fn new(
-        transcript_bus: TranscriptBus,
+        forked_transcript_bus: ForkedTranscriptBus,
         xi_randomness_bus: XiRandomnessBus,
         sumcheck_input_bus: TowerSumcheckInputBus,
         sumcheck_output_bus: TowerSumcheckOutputBus,
         sumcheck_challenge_bus: TowerSumcheckChallengeBus,
     ) -> Self {
         Self {
-            transcript_bus,
+            forked_transcript_bus,
             xi_randomness_bus,
             sumcheck_input_bus,
             sumcheck_output_bus,
@@ -289,7 +298,7 @@ where
         );
 
         // Transcript index increment
-        use crate::tower::tower_transcript_len::ROUND_LEN;
+        use crate::tower::tower_transcript_len::{LABEL_INTERNAL_ROUND, ROUND_LEN};
         builder.when(is_transition_round.clone()).assert_eq(
             next.tidx,
             local.tidx.into() + AB::Expr::from_usize(ROUND_LEN),
@@ -350,7 +359,7 @@ where
             TowerSumcheckChallengeMessage {
                 idx: local.idx.into(),
                 layer_idx: local.layer_idx.into(),
-                sumcheck_round: local.round.into() + AB::Expr::ONE,
+                sumcheck_round: local.round.into(),
                 challenge: local.challenge.map(Into::into),
             },
             local.is_enabled * (AB::Expr::ONE - local.is_last_layer) * is_not_dummy.clone(),
@@ -360,27 +369,74 @@ where
         // External Interactions
         ///////////////////////////////////////////////////////////////////////
 
-        // 1. TranscriptBus
-        // 1a. Observe evaluations
-        let mut tidx = local.tidx.into();
-        for eval in [local.ev1, local.ev2, local.ev3].into_iter() {
-            self.transcript_bus.observe_ext(
+        // 1. ForkedTranscriptBus
+        // 1a. Observe sumcheck init labels on the first round of each layer.
+        let init_tidx = local.tidx - AB::Expr::from_usize(SUMCHECK_INIT_LEN);
+        for (offset, value) in [
+            (0usize, local.layer_idx.into()),
+            (1usize, AB::Expr::ZERO),
+            (2usize, AB::Expr::from_u32(3)),
+            (3usize, AB::Expr::ZERO),
+        ] {
+            self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
-                tidx.clone(),
-                eval,
-                local.is_enabled * is_not_dummy.clone(),
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: init_tidx.clone() + AB::Expr::from_usize(offset),
+                    value,
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_enabled * local.is_first_round * is_not_dummy.clone(),
             );
+        }
+
+        // 1b. Observe evaluations.
+        let mut tidx = local.tidx.into();
+        for eval in [local.ev1, local.ev2, local.ev3].into_iter() {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * is_not_dummy.clone(),
+                );
+            }
             tidx += AB::Expr::from_usize(D_EF);
         }
-        // 1b. Sample challenge `ri`
-        self.transcript_bus.sample_ext(
-            builder,
-            local.proof_idx,
-            tidx,
-            local.challenge,
-            local.is_enabled * is_not_dummy.clone(),
-        );
+        for (offset, value) in LABEL_INTERNAL_ROUND_FIELDS.into_iter().enumerate() {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: tidx.clone() + AB::Expr::from_usize(offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_enabled * is_not_dummy.clone(),
+            );
+        }
+        tidx += AB::Expr::from_usize(LABEL_INTERNAL_ROUND);
+        // 1c. Sample challenge `ri`.
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: tidx.clone() + AB::Expr::from_usize(i),
+                    value: local.challenge[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_enabled * is_not_dummy.clone(),
+            );
+        }
 
         // 2. XiRandomnessBus
         // 2a. Send last challenge
@@ -391,7 +447,7 @@ where
                 idx: local.round + AB::Expr::ONE,
                 xi: local.challenge.map(Into::into),
             },
-            local.is_enabled * local.is_last_layer * is_not_dummy.clone(),
+            local.is_enabled * local.is_last_layer * is_not_dummy.clone() * AB::Expr::ZERO,
         );
     }
 }

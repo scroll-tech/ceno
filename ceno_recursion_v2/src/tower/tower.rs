@@ -40,6 +40,7 @@ pub struct TowerReplayResult {
     pub layers: Vec<TowerLayerData>,
 }
 
+#[allow(dead_code)]
 pub fn replay_tower_proof(
     chip_proof: &ZKVMChipProof<RecursionField>,
     vk: &VerifyingKey<RecursionField>,
@@ -48,12 +49,10 @@ pub fn replay_tower_proof(
     build_tower_replay_result(chip_proof, vk, &mut transcript)
 }
 
-// ---------------------------------------------------------------------------
-// PrecomputedTranscript: feeds Poseidon2-derived challenges into replay logic
-// ---------------------------------------------------------------------------
-
-/// A transcript pre-loaded with challenge values from a Poseidon2 schedule.
-/// Observations are ignored; samples return pre-computed values in order.
+/// Transcript adapter backed by the tower transcript schedule prepared in
+/// preflight. The schedule must be generated in the same order as native
+/// `BasicTranscript`; this adapter intentionally ignores observations and
+/// returns the precomputed challenges consumed by tower replay.
 #[derive(Clone)]
 struct PrecomputedTranscript {
     challenges: VecDeque<RecursionField>,
@@ -62,15 +61,9 @@ struct PrecomputedTranscript {
 impl PrecomputedTranscript {
     fn from_schedule(schedule: &TowerTranscriptSchedule) -> Self {
         let mut challenges = VecDeque::new();
-        // 1. alpha (get_challenge_pows → sample_and_append_challenge → read_challenge)
         challenges.push_back(schedule.alpha_logup);
-        // 2. beta (sample_and_append_vec → sample_vec(1))
         challenges.push_back(schedule.beta);
 
-        // For each layer k:
-        //   IOPVerifierState::verify → (k+1) read_challenges (the ris)
-        //   sample_and_append_vec("merge",1) → 1 sample (mu)
-        //   get_challenge_pows → 1 read_challenge (lambda for next iteration)
         let num_layers = schedule.mus.len();
         let mut ri_offset = 0;
         for k in 0..num_layers {
@@ -80,12 +73,10 @@ impl PrecomputedTranscript {
             }
             ri_offset += n_ris;
             challenges.push_back(schedule.mus[k]);
-            // lambda for the next iteration
             if k + 1 < schedule.lambdas.len() {
                 challenges.push_back(schedule.lambdas[k + 1]);
             } else {
-                // Last round still samples lambda; use a dummy.
-                challenges.push_back(RecursionField::ZERO);
+                challenges.push_back(schedule.final_alpha);
             }
         }
         Self { challenges }
@@ -98,19 +89,21 @@ impl CanObserve<F> for PrecomputedTranscript {
 
 impl CanSampleBits<usize> for PrecomputedTranscript {
     fn sample_bits(&mut self, _bits: usize) -> usize {
-        unimplemented!("PrecomputedTranscript: sample_bits not expected")
+        unimplemented!("PrecomputedTranscript: sample_bits not expected in tower replay")
     }
 }
 
 impl GrindingChallenger for PrecomputedTranscript {
     type Witness = F;
+
     fn grind(&mut self, _bits: usize) -> F {
-        unimplemented!("PrecomputedTranscript: grind not expected")
+        unimplemented!("PrecomputedTranscript: grind not expected in tower replay")
     }
 }
 
 impl Transcript<RecursionField> for PrecomputedTranscript {
     fn append_field_elements(&mut self, _elements: &[F]) {}
+
     fn append_field_element_ext(&mut self, _element: &RecursionField) {}
 
     fn read_challenge(&mut self) -> Challenge<RecursionField> {
@@ -133,18 +126,19 @@ impl Transcript<RecursionField> for PrecomputedTranscript {
     }
 
     fn read_field_element_exts(&self) -> Vec<RecursionField> {
-        unimplemented!()
+        unimplemented!("PrecomputedTranscript: read_field_element_exts not expected")
     }
+
     fn read_field_element(&self) -> F {
-        unimplemented!()
+        unimplemented!("PrecomputedTranscript: read_field_element not expected")
     }
+
     fn send_challenge(&self, _challenge: RecursionField) {}
+
     fn commit_rolling(&mut self) {}
 }
 
-/// Replay the tower proof using Poseidon2-derived challenges from the schedule,
-/// so that eq_at_r / claim_in / mu / lambda match the native DuplexSponge verifier.
-pub fn replay_tower_proof_poseidon(
+pub fn replay_tower_proof_precomputed(
     chip_proof: &ZKVMChipProof<RecursionField>,
     vk: &VerifyingKey<RecursionField>,
     schedule: &TowerTranscriptSchedule,
@@ -171,10 +165,24 @@ fn build_tower_replay_result(
     let rotation_vars = cs.rotation_vars().unwrap_or(0);
     let num_var_with_rotation = log2_num_instances + rotation_vars;
 
-    let read_count = cs.num_reads();
-    let write_count = cs.num_writes();
-    let lookup_count = cs.num_lks();
-    let num_batched = read_count + write_count + lookup_count;
+    let raw_read_count = cs.num_reads();
+    let raw_write_count = cs.num_writes();
+    let raw_lookup_count = cs.num_lks();
+    let grouped_read_count = usize::from(raw_read_count > 0);
+    let grouped_write_count = usize::from(raw_write_count > 0);
+    let grouped_lookup_count = usize::from(raw_lookup_count > 0);
+    ensure!(
+        chip_proof.r_out_evals.len() == grouped_read_count
+            && chip_proof.w_out_evals.len() == grouped_write_count
+            && chip_proof.lk_out_evals.len() == grouped_lookup_count,
+        "recursion-v2 supports grouped tower shape only: proof ({}, {}, {}) != grouped ({}, {}, {})",
+        chip_proof.r_out_evals.len(),
+        chip_proof.w_out_evals.len(),
+        chip_proof.lk_out_evals.len(),
+        grouped_read_count,
+        grouped_write_count,
+        grouped_lookup_count,
+    );
 
     let prod_out_evals: Vec<Vec<RecursionField>> = chip_proof
         .r_out_evals
@@ -247,8 +255,49 @@ fn build_tower_replay_result(
 
     let mut point_and_eval = PointAndEval::new(initial_rt, initial_claim);
     let mut layers = Vec::new();
-    let max_num_variables = num_var_with_rotation;
-    let num_variables = vec![num_var_with_rotation; num_batched];
+    let group_num_vars =
+        |op_count: usize| num_var_with_rotation + ceil_log2(op_count.next_power_of_two());
+    let num_variables = chip_proof
+        .r_out_evals
+        .iter()
+        .map(|_| group_num_vars(raw_read_count))
+        .chain(
+            chip_proof
+                .w_out_evals
+                .iter()
+                .map(|_| group_num_vars(raw_write_count)),
+        )
+        .chain(
+            chip_proof
+                .lk_out_evals
+                .iter()
+                .map(|_| group_num_vars(raw_lookup_count)),
+        )
+        .collect::<Vec<_>>();
+    let Some(max_num_variables) = num_variables.iter().copied().max() else {
+        return Ok(TowerReplayResult { layers });
+    };
+    for (spec_idx, max_round) in num_variables
+        .iter()
+        .copied()
+        .take(num_prod_spec)
+        .enumerate()
+    {
+        ensure!(
+            tower_proof.prod_specs_eval[spec_idx].len() >= max_round.saturating_sub(1),
+            "prod spec {spec_idx} eval rounds {} < required {}",
+            tower_proof.prod_specs_eval[spec_idx].len(),
+            max_round.saturating_sub(1),
+        );
+    }
+    for (spec_idx, max_round) in num_variables[num_prod_spec..].iter().copied().enumerate() {
+        ensure!(
+            tower_proof.logup_specs_eval[spec_idx].len() >= max_round.saturating_sub(1),
+            "logup spec {spec_idx} eval rounds {} < required {}",
+            tower_proof.logup_specs_eval[spec_idx].len(),
+            max_round.saturating_sub(1),
+        );
+    }
 
     for round in 0..max_num_variables.saturating_sub(1) {
         let out_rt = point_and_eval.point.clone();
@@ -297,6 +346,7 @@ fn build_tower_replay_result(
             round,
             &rt_prime,
             &coeffs,
+            &num_variables,
             &mut prod_spec_point_n_eval,
             &mut logup_spec_p_point_n_eval,
             &mut logup_spec_q_point_n_eval,
@@ -374,12 +424,20 @@ fn update_point_evals(
     round: usize,
     rt_prime: &Point<RecursionField>,
     coeffs: &[RecursionField],
+    num_variables: &[usize],
     prod_point_eval: &mut [PointAndEval<RecursionField>],
     logup_p_point_eval: &mut [PointAndEval<RecursionField>],
     logup_q_point_eval: &mut [PointAndEval<RecursionField>],
 ) {
+    let num_prod_spec = prod_point_eval.len();
     for (spec_idx, point_eval) in prod_point_eval.iter_mut().enumerate() {
-        if round < tower_proof.prod_specs_eval[spec_idx].len() {
+        if round
+            < num_variables
+                .get(spec_idx)
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(1)
+        {
             let evals = &tower_proof.prod_specs_eval[spec_idx][round];
             let merged = izip!(evals.iter(), coeffs.iter())
                 .map(|(a, b)| *a * *b)
@@ -393,7 +451,13 @@ fn update_point_evals(
         .zip(logup_q_point_eval.iter_mut())
         .enumerate()
     {
-        if round < tower_proof.logup_specs_eval[spec_idx].len() {
+        if round
+            < num_variables
+                .get(num_prod_spec + spec_idx)
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(1)
+        {
             let evals = &tower_proof.logup_specs_eval[spec_idx][round];
             let (p_slice, q_slice) = evals.split_at(2);
             let merged_p = izip!(p_slice.iter(), coeffs.iter())
@@ -424,7 +488,7 @@ fn aggregate_next_eval(
         .zip(alpha_pows.iter())
         .zip(num_variables.iter())
     {
-        if round + 1 < *max_round {
+        if round + 1 < max_round.saturating_sub(1) {
             total += *alpha * point_eval.eval;
         }
     }
@@ -435,7 +499,7 @@ fn aggregate_next_eval(
         .zip(alpha_pows[num_prod_spec..].chunks(2))
         .zip(num_variables[num_prod_spec..].iter())
     {
-        if round + 1 < *max_round {
+        if round + 1 < max_round.saturating_sub(1) {
             total += alpha_chunk[0] * p_eval.eval + alpha_chunk[1] * q_eval.eval;
         }
     }

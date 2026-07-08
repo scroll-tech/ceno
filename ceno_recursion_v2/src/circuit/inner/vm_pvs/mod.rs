@@ -1,11 +1,13 @@
+use ceno_zkvm::instructions::riscv::constants::PUBIO_DIGEST_U16_LIMBS;
 use openvm_stark_backend::{FiatShamirTranscript, TranscriptHistory};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use p3_field::PrimeCharacteristicRing;
 use stark_recursion_circuit_derive::AlignedBorrow;
 
-use crate::system::{Preflight, RecursionField, RecursionProof, RecursionVk};
+use crate::system::{Preflight, RecursionField, RecursionPcs, RecursionProof, RecursionVk};
 
 mod air;
+mod metadata;
 mod trace;
 
 pub const SEPTIC_EXTENSION_DEGREE: usize = 7;
@@ -28,12 +30,35 @@ pub struct VmPvs<F> {
     pub heap_shard_len: F,
     pub hint_start_addr: F,
     pub hint_shard_len: F,
-    pub public_io: [F; 2],
+    pub public_io: [F; PUBIO_DIGEST_U16_LIMBS],
     pub shard_rw_sum: [F; 2 * SEPTIC_EXTENSION_DEGREE],
 }
 
 pub use air::*;
+pub use metadata::*;
 pub use trace::*;
+
+pub(crate) type RecursionCommitment =
+    <RecursionPcs as mpcs::PolynomialCommitmentScheme<RecursionField>>::Commitment;
+
+pub(crate) fn recursion_commit_digest(commitment: &RecursionCommitment) -> [F; DIGEST_SIZE] {
+    commitment.inner.commit.clone().into()
+}
+
+fn observe_recursion_commitment<TS>(commitment: &RecursionCommitment, ts: &mut TS)
+where
+    TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
+{
+    for elem in recursion_commit_digest(commitment) {
+        ts.observe(elem);
+    }
+    ts.observe(F::from_u64(commitment.inner.log2_max_codeword_size as u64));
+    ts.observe(F::from_u64(commitment.reshape_log_height as u64));
+    ts.observe(F::from_u64(commitment.cumulative_heights.len() as u64));
+    for height in &commitment.cumulative_heights {
+        ts.observe(F::from_u64(*height as u64));
+    }
+}
 
 #[tracing::instrument(level = "trace", skip_all)]
 pub fn run_preflight<TS>(
@@ -56,30 +81,23 @@ pub fn run_preflight<TS>(
     }
 
     if let Some(fixed_commit) = child_vk.fixed_commit.as_ref() {
-        for elem in fixed_commit.commit.clone().into_iter() {
-            ts.observe(elem);
-        }
-        ts.observe(F::from_u64(fixed_commit.log2_max_codeword_size as u64));
+        observe_recursion_commitment(fixed_commit, ts);
     }
 
     if let Some(fixed_no_omc) = child_vk.fixed_no_omc_init_commit.as_ref() {
-        for elem in fixed_no_omc.commit.clone().into_iter() {
-            ts.observe(elem);
-        }
-        ts.observe(F::from_u64(fixed_no_omc.log2_max_codeword_size as u64));
+        observe_recursion_commitment(fixed_no_omc, ts);
     }
 
-    let witin = &proof.witin_commit;
-    for elem in witin.commit.clone().into_iter() {
-        ts.observe(elem);
-    }
-    ts.observe(F::from_u64(witin.log2_max_codeword_size as u64));
+    observe_recursion_commitment(&proof.witin_commit, ts);
 
+    let alpha_tidx = ts.len();
     let alpha_ext = ts.sample_ext();
+    let beta_tidx = ts.len();
     let beta_ext = ts.sample_ext();
-    eprintln!("vm_pvs alpha {} beta {}", alpha_ext, beta_ext);
     preflight.vm_pvs.lookup_challenge_alpha = alpha_ext;
     preflight.vm_pvs.lookup_challenge_beta = beta_ext;
-    preflight.vm_pvs.lookup_challenge_alpha_lookup_count = 0;
-    preflight.vm_pvs.lookup_challenge_beta_lookup_count = 0;
+    preflight.vm_pvs.lookup_challenge_alpha_tidx = alpha_tidx;
+    preflight.vm_pvs.lookup_challenge_beta_tidx = beta_tidx;
+    preflight.vm_pvs.lookup_challenge_alpha_lookup_count = proof.chip_proofs.len();
+    preflight.vm_pvs.lookup_challenge_beta_lookup_count = proof.chip_proofs.len();
 }

@@ -4,7 +4,7 @@ use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
 use ceno_zkvm::instructions::riscv::constants::{
     END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, EXIT_PC, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
     HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBIO_DIGEST_IDX,
-    SHARD_ID_IDX, SHARD_RW_SUM_IDX,
+    PUBIO_DIGEST_U16_LIMBS, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
 };
 use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
@@ -21,7 +21,10 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage},
-    circuit::inner::{bus::PvsAirConsistencyBus, vm_pvs::VmPvs},
+    circuit::inner::{
+        bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
+        vm_pvs::VmPvs,
+    },
 };
 
 #[repr(C)]
@@ -31,8 +34,24 @@ pub struct VmPvsCols<F> {
     pub is_valid: F,
     pub is_last: F,
     pub has_verifier_pvs: F,
+    pub fixed_commit_present: F,
+    pub fixed_no_omc_init_commit_present: F,
     pub lookup_challenge_alpha: [F; D_EF],
     pub lookup_challenge_beta: [F; D_EF],
+    pub lookup_challenge_alpha_tidx: F,
+    pub lookup_challenge_beta_tidx: F,
+    pub fixed_commit_tidx: F,
+    pub fixed_no_omc_init_commit_tidx: F,
+    pub witness_commit_tidx: F,
+    pub fixed_commit_log2_max_codeword_size: F,
+    pub fixed_commit_reshape_log_height: F,
+    pub fixed_commit_cumulative_heights_len: F,
+    pub fixed_no_omc_init_commit_log2_max_codeword_size: F,
+    pub fixed_no_omc_init_commit_reshape_log_height: F,
+    pub fixed_no_omc_init_commit_cumulative_heights_len: F,
+    pub witness_commit_log2_max_codeword_size: F,
+    pub witness_commit_reshape_log_height: F,
+    pub witness_commit_cumulative_heights_len: F,
     pub lookup_challenge_alpha_lookup_count: F,
     pub lookup_challenge_beta_lookup_count: F,
     pub child_pvs: VmPvs<F>,
@@ -120,6 +139,8 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
 
         // constrain has_verifier_pvs, which will be compared with the other pv AIRs
         builder.assert_bool(local.has_verifier_pvs);
+        builder.assert_bool(local.fixed_commit_present);
+        builder.assert_bool(local.fixed_no_omc_init_commit_present);
         builder
             .when(local.has_verifier_pvs)
             .assert_one(local.is_valid);
@@ -142,7 +163,6 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         // When local and next are valid, enforce continuation consistency.
         let mut when_both_valid = builder.when(and(local.is_valid, not(local.is_last)));
         when_both_valid.assert_eq(local.child_pvs.end_pc, next.child_pvs.init_pc);
-        when_both_valid.assert_eq(local.child_pvs.end_cycle, next.child_pvs.init_cycle);
         when_both_valid.assert_eq(
             local.child_pvs.shard_id + AB::Expr::ONE,
             next.child_pvs.shard_id,
@@ -188,48 +208,116 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         //     local.is_valid * is_leaf,
         // );
 
-        // Commitments are observed after transcript-visible public values in preflight.
-        let start_tidx_after_public_value = VmPvs::<u8>::width() - 3 * DIGEST_SIZE;
+        // Domain separator observed before child public values.
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: AB::Expr::ZERO,
+                value: AB::Expr::from_u32(1_668_508_018),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_valid,
+        );
+        self.transcript_bus.receive(
+            builder,
+            local.proof_idx,
+            TranscriptBusMessage {
+                tidx: AB::Expr::ONE,
+                value: AB::Expr::from_u32(118),
+                is_sample: AB::Expr::ZERO,
+            },
+            local.is_valid,
+        );
+
         for (didx, value) in local.child_pvs.fixed_commit.iter().enumerate() {
             self.transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(start_tidx_after_public_value + didx),
+                    tidx: local.fixed_commit_tidx + AB::Expr::from_usize(didx),
                     value: (*value).into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_valid,
+                local.is_valid * local.fixed_commit_present,
             );
         }
+        receive_commit_fixed_metadata(
+            builder,
+            self.transcript_bus,
+            local.proof_idx,
+            local.fixed_commit_tidx,
+            local.fixed_commit_log2_max_codeword_size,
+            local.fixed_commit_reshape_log_height,
+            local.fixed_commit_cumulative_heights_len,
+            local.is_valid * local.fixed_commit_present,
+        );
         for (didx, value) in local.child_pvs.fixed_no_omc_init_commit.iter().enumerate() {
             self.transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(start_tidx_after_public_value + DIGEST_SIZE + didx),
+                    tidx: local.fixed_no_omc_init_commit_tidx + AB::Expr::from_usize(didx),
                     value: (*value).into(),
                     is_sample: AB::Expr::ZERO,
                 },
-                local.is_valid,
+                local.is_valid * local.fixed_no_omc_init_commit_present,
             );
         }
+        receive_commit_fixed_metadata(
+            builder,
+            self.transcript_bus,
+            local.proof_idx,
+            local.fixed_no_omc_init_commit_tidx,
+            local.fixed_no_omc_init_commit_log2_max_codeword_size,
+            local.fixed_no_omc_init_commit_reshape_log_height,
+            local.fixed_no_omc_init_commit_cumulative_heights_len,
+            local.is_valid * local.fixed_no_omc_init_commit_present,
+        );
         for (didx, value) in local.child_pvs.witness_commit.iter().enumerate() {
             self.transcript_bus.receive(
                 builder,
                 local.proof_idx,
                 TranscriptBusMessage {
-                    tidx: AB::Expr::from_usize(
-                        start_tidx_after_public_value + 2 * DIGEST_SIZE + didx,
-                    ),
+                    tidx: local.witness_commit_tidx + AB::Expr::from_usize(didx),
                     value: (*value).into(),
                     is_sample: AB::Expr::ZERO,
                 },
                 local.is_valid,
             );
         }
+        receive_commit_fixed_metadata(
+            builder,
+            self.transcript_bus,
+            local.proof_idx,
+            local.witness_commit_tidx,
+            local.witness_commit_log2_max_codeword_size,
+            local.witness_commit_reshape_log_height,
+            local.witness_commit_cumulative_heights_len,
+            local.is_valid.into(),
+        );
 
         for i in 0..D_EF {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: local.lookup_challenge_alpha_tidx + AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_alpha[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_valid,
+            );
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: local.lookup_challenge_beta_tidx + AB::Expr::from_usize(i),
+                    value: local.lookup_challenge_beta[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_valid,
+            );
             self.lookup_challenge_bus.add_key_with_lookups(
                 builder,
                 local.proof_idx,
@@ -253,15 +341,15 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         }
 
         // We look up proof metadata from VerifierPvsAir here to ensure consistency on each row.
-        // self.pvs_air_consistency_bus.lookup_key(
-        //     builder,
-        //     local.proof_idx,
-        //     PvsAirConsistencyMessage {
-        //         deferral_flag,
-        //         has_verifier_pvs: local.has_verifier_pvs.into(),
-        //     },
-        //     local.is_valid,
-        // );
+        self.pvs_air_consistency_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PvsAirConsistencyMessage {
+                deferral_flag,
+                has_verifier_pvs: local.has_verifier_pvs.into(),
+            },
+            local.is_valid,
+        );
 
         // Finally, constrain that this AIR's output public values are consistent with child_pvs.
         let &VmPvs::<_> {
@@ -303,29 +391,31 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             exit_code,
         );
 
-        // constrain static per-proof public values
+        // The aggregate VM public values are first-shard init/static values plus last-shard
+        // exit/end values. Per-shard values are still constrained row-locally through the
+        // public-values and transcript buses above.
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.shard_id, shard_id);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.heap_start_addr, heap_start_addr);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.heap_shard_len, heap_shard_len);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.hint_start_addr, hint_start_addr);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.hint_shard_len, hint_shard_len);
         assert_array_eq(
-            &mut builder.when(local.is_valid),
+            &mut builder.when_first_row(),
             local.child_pvs.public_io,
             public_io,
         );
         assert_array_eq(
-            &mut builder.when(local.is_valid),
+            &mut builder.when_first_row(),
             local.child_pvs.shard_rw_sum,
             shard_rw_sum,
         );
@@ -337,10 +427,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             fixed_commit,
         );
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.init_pc, init_pc);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.init_cycle, init_cycle);
         assert_array_eq(
             &mut builder.when(local.is_valid),
@@ -348,7 +438,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             fixed_no_omc_init_commit,
         );
         assert_array_eq(
-            &mut builder.when(local.is_valid),
+            &mut builder.when_first_row(),
             local.child_pvs.witness_commit,
             witness_commit,
         );
@@ -377,9 +467,41 @@ where
         {
             local.child_pvs.shard_rw_sum[idx - SHARD_RW_SUM_IDX].into()
         }
-        idx if idx == PUBIO_DIGEST_IDX => local.child_pvs.public_io[0].into(),
-        idx if idx == PUBIO_DIGEST_IDX + 1 => local.child_pvs.public_io[1].into(),
+        idx if (PUBIO_DIGEST_IDX..(PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS)).contains(&idx) => {
+            local.child_pvs.public_io[idx - PUBIO_DIGEST_IDX].into()
+        }
         _ => AB::Expr::ZERO,
+    }
+}
+
+fn receive_commit_fixed_metadata<AB: AirBuilder + InteractionBuilder>(
+    builder: &mut AB,
+    transcript_bus: TranscriptBus,
+    proof_idx: AB::Var,
+    commitment_tidx: AB::Var,
+    log2_max_codeword_size: AB::Var,
+    reshape_log_height: AB::Var,
+    cumulative_heights_len: AB::Var,
+    enabled: AB::Expr,
+) {
+    for (offset, value) in [
+        log2_max_codeword_size,
+        reshape_log_height,
+        cumulative_heights_len,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        transcript_bus.receive(
+            builder,
+            proof_idx,
+            TranscriptBusMessage {
+                tidx: commitment_tidx + AB::Expr::from_usize(DIGEST_SIZE + offset),
+                value: value.into(),
+                is_sample: AB::Expr::ZERO,
+            },
+            enabled.clone(),
+        );
     }
 }
 

@@ -1,9 +1,14 @@
 use core::borrow::Borrow;
 
 use crate::{
-    bus::{MainBus, MainMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus},
+    bus::{
+        ForkFinalSampleBus, ForkFinalSampleMessage, ForkedTranscriptBus,
+        ForkedTranscriptBusMessage, MainBus, MainMessage, TowerModuleBus, TowerModuleMessage,
+    },
     tower::bus::{
-        TowerLayerInputBus, TowerLayerInputMessage, TowerLayerOutputBus, TowerLayerOutputMessage,
+        TowerInputShapeBus, TowerInputShapeMessage, TowerLayerInputBus, TowerLayerInputMessage,
+        TowerLayerOutputBus, TowerLayerOutputMessage, TowerSumcheckChallengeBus,
+        TowerSumcheckChallengeMessage,
     },
 };
 use openvm_circuit_primitives::{
@@ -19,7 +24,7 @@ use p3_air::{Air, AirBuilder, BaseAir};
 use p3_field::{Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use recursion_circuit::{
-    subairs::proof_idx::{ProofIdxIoCols, ProofIdxSubAir},
+    subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
     utils::assert_zeros,
 };
 use stark_recursion_circuit_derive::AlignedBorrow;
@@ -32,6 +37,9 @@ pub struct TowerInputCols<T> {
 
     pub proof_idx: T,
     pub idx: T,
+    pub is_first_idx: T,
+    pub is_first: T,
+    pub fork_id: T,
 
     pub n_logup: T,
 
@@ -39,16 +47,40 @@ pub struct TowerInputCols<T> {
     /// n_logup = 0 <=> total_interactions = 0
     pub is_n_logup_zero: T,
     pub is_n_logup_zero_aux: IsZeroAuxCols<T>,
+    /// Zero iff this row has no forked tower transcript rows.
+    pub is_tower_transcript_zero: T,
+    pub is_tower_transcript_zero_aux: IsZeroAuxCols<T>,
 
     /// Transcript index
     pub tidx: T,
+    pub fork_final_sample_tidx: T,
 
     pub r0_claim: [T; D_EF],
     pub w0_claim: [T; D_EF],
     /// Root denominator claim
     pub q0_claim: [T; D_EF],
 
+    pub read_out_0: [T; D_EF],
+    pub read_out_1: [T; D_EF],
+    pub write_out_0: [T; D_EF],
+    pub write_out_1: [T; D_EF],
+    pub logup_out_0: [T; D_EF],
+    pub logup_out_1: [T; D_EF],
+    pub logup_out_2: [T; D_EF],
+    pub logup_out_3: [T; D_EF],
+    pub has_read_out: T,
+    pub has_write_out: T,
+    pub has_logup_out: T,
+    pub has_read: T,
+    pub has_write: T,
+    pub has_logup: T,
+    pub read_tower_vars: T,
+    pub write_tower_vars: T,
+    pub logup_tower_vars: T,
+    pub max_layer_count: T,
+
     pub alpha_logup: [T; D_EF],
+    pub beta: [T; D_EF],
 
     pub input_layer_claim: [T; D_EF],
     pub layer_output_lambda: [T; D_EF],
@@ -60,9 +92,13 @@ pub struct TowerInputAir {
     // Buses
     pub tower_module_bus: TowerModuleBus,
     pub main_bus: MainBus,
-    pub transcript_bus: TranscriptBus,
+    pub forked_transcript_bus: ForkedTranscriptBus,
+    pub fork_final_sample_bus: ForkFinalSampleBus,
+    pub input_shape_bus: TowerInputShapeBus,
     pub layer_input_bus: TowerLayerInputBus,
     pub layer_output_bus: TowerLayerOutputBus,
+    pub sumcheck_challenge_bus: TowerSumcheckChallengeBus,
+    pub send_main: bool,
 }
 
 impl<F: Field> BaseAir<F> for TowerInputAir {
@@ -88,21 +124,20 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         // Proof Index Constraints
         ///////////////////////////////////////////////////////////////////////
 
-        // This subair has the following constraints:
-        // 1. Boolean enabled flag
-        // 2. Disabled rows are followed by disabled rows
-        // 3. Proof index increments by exactly one between enabled rows
-        ProofIdxSubAir.eval(
+        type LoopSubAir = NestedForLoopSubAir<2>;
+        LoopSubAir {}.eval(
             builder,
             (
-                ProofIdxIoCols {
+                NestedForLoopIoCols {
                     is_enabled: local.is_enabled,
-                    proof_idx: local.proof_idx,
+                    counter: [local.proof_idx, local.idx],
+                    is_first: [local.is_first_idx, local.is_first],
                 }
                 .map_into(),
-                ProofIdxIoCols {
+                NestedForLoopIoCols {
                     is_enabled: next.is_enabled,
-                    proof_idx: next.proof_idx,
+                    counter: [next.proof_idx, next.idx],
+                    is_first: [next.is_first_idx, next.is_first],
                 }
                 .map_into(),
             ),
@@ -124,12 +159,52 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 local.is_n_logup_zero_aux.inv,
             ),
         );
+        builder.assert_bool(local.has_read_out);
+        builder.assert_bool(local.has_write_out);
+        builder.assert_bool(local.has_logup_out);
+        builder.assert_bool(local.has_read);
+        builder.assert_bool(local.has_write);
+        builder.assert_bool(local.has_logup);
 
         ///////////////////////////////////////////////////////////////////////
         // Output Constraints
         ///////////////////////////////////////////////////////////////////////
 
         let has_interactions = AB::Expr::ONE - local.is_n_logup_zero;
+        let tower_transcript_count = local.has_read_out
+            + local.has_write_out
+            + local.has_logup_out
+            + has_interactions.clone();
+        IsZeroSubAir.eval(
+            builder,
+            (
+                IsZeroIo::new(
+                    tower_transcript_count,
+                    local.is_tower_transcript_zero.into(),
+                    local.is_enabled.into(),
+                ),
+                local.is_tower_transcript_zero_aux.inv,
+            ),
+        );
+        let has_tower_transcript = AB::Expr::ONE - local.is_tower_transcript_zero;
+        let has_tower_out = AB::Expr::ONE
+            - (AB::Expr::ONE - local.has_read_out)
+                * (AB::Expr::ONE - local.has_write_out)
+                * (AB::Expr::ONE - local.has_logup_out);
+
+        builder
+            .when(local.is_enabled * has_tower_transcript.clone())
+            .assert_eq(local.has_read_out, local.has_read);
+        builder
+            .when(local.is_enabled * has_tower_transcript.clone())
+            .assert_eq(local.has_write_out, local.has_write);
+        builder
+            .when(local.is_enabled * has_tower_transcript.clone())
+            .assert_eq(local.has_logup_out, local.has_logup);
+        builder
+            .when(local.is_enabled * has_tower_transcript.clone())
+            .assert_eq(local.n_logup, local.max_layer_count);
+
         // Input layer claim defaults to zero when no interactions
         assert_zeros(
             &mut builder.when(not::<AB::Expr>(has_interactions.clone())),
@@ -152,20 +227,31 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
 
         // Add PoW (if any) and alpha label+sample, beta label+sample
         use crate::tower::tower_transcript_len::{
-            ALPHA_BETA_LEN, ALPHA_LEN, POST_SUMCHECK_LEN, ROUND_LEN, SUMCHECK_INIT_LEN,
+            ALPHA_BETA_LEN, ALPHA_LEN, LABEL_COMBINE, LABEL_COMBINE_FIELDS, LABEL_MERGE,
+            LABEL_PRODUCT_SUM, LABEL_PRODUCT_SUM_FIELDS, ROUND_LEN, SUMCHECK_INIT_LEN,
         };
         let tidx_after_alpha_beta = local.tidx + AB::Expr::from_usize(ALPHA_BETA_LEN);
         // Add GKR layers + Sumcheck.
-        // Total GKR span: n*(10n+25) - 13 for n>0.
-        // layers_cumulative(n) = 10n² + 25n - 13.
-        let gkr_inner = num_layers.clone() * AB::Expr::from_usize(ROUND_LEN / 2)
-            + AB::Expr::from_usize(
-                ALPHA_LEN + SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN - ROUND_LEN / 2,
-            );
+        // Layer 0 includes sumcheck init, one round, and post-sumcheck.
+        // Layer j>0 additionally samples lambda and has j+1 sumcheck rounds.
+        // layers_cumulative(n) =
+        //   n*(SUMCHECK_INIT_LEN + POST_SUMCHECK_LEN)
+        //   + n*(n+1)/2*ROUND_LEN
+        //   + n*ALPHA_LEN, for n > 0, including native's final post-merge alpha.
+        let read_active_layers = local.read_tower_vars - local.has_read_out;
+        let write_active_layers = local.write_tower_vars - local.has_write_out;
+        let logup_active_layers = local.logup_tower_vars - local.has_logup_out;
+        let claim_span = read_active_layers * AB::Expr::from_usize(2 * D_EF)
+            + write_active_layers * AB::Expr::from_usize(2 * D_EF)
+            + logup_active_layers * AB::Expr::from_usize(4 * D_EF);
+        let fixed_span =
+            num_layers.clone() * AB::Expr::from_usize(SUMCHECK_INIT_LEN + LABEL_MERGE + D_EF);
+        let round_span = num_layers.clone()
+            * (num_layers.clone() + AB::Expr::ONE)
+            * AB::Expr::from_usize(ROUND_LEN / 2);
+        let alpha_span = num_layers.clone() * AB::Expr::from_usize(ALPHA_LEN);
         let tidx_after_gkr_layers = tidx_after_alpha_beta.clone()
-            + has_interactions.clone()
-                * (num_layers.clone() * gkr_inner
-                    - AB::Expr::from_usize(ALPHA_LEN + SUMCHECK_INIT_LEN));
+            + has_interactions.clone() * (fixed_span + round_span + alpha_span + claim_span);
         // 1. TowerLayerInputBus
         // 1a. Send input to TowerLayerAir
         self.layer_input_bus.send(
@@ -195,6 +281,41 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             },
             local.is_enabled * has_interactions.clone(),
         );
+        self.sumcheck_challenge_bus.send(
+            builder,
+            local.proof_idx,
+            TowerSumcheckChallengeMessage {
+                idx: local.idx.into(),
+                layer_idx: AB::Expr::ZERO,
+                sumcheck_round: AB::Expr::ZERO,
+                challenge: local.beta.map(Into::into),
+            },
+            local.is_enabled * has_interactions.clone(),
+        );
+        self.input_shape_bus.receive(
+            builder,
+            local.proof_idx,
+            TowerInputShapeMessage {
+                idx: local.idx.into(),
+                has_read: local.has_read.into(),
+                has_write: local.has_write.into(),
+                has_logup: local.has_logup.into(),
+                read_tower_vars: local.read_tower_vars.into(),
+                write_tower_vars: local.write_tower_vars.into(),
+                logup_tower_vars: local.logup_tower_vars.into(),
+                max_layer_count: local.max_layer_count.into(),
+            },
+            local.is_enabled * has_tower_transcript.clone(),
+        );
+        self.fork_final_sample_bus.send(
+            builder,
+            local.proof_idx,
+            ForkFinalSampleMessage {
+                fork_id: local.fork_id.into(),
+                tidx: local.fork_final_sample_tidx.into(),
+            },
+            local.is_enabled * has_tower_transcript.clone(),
+        );
         ///////////////////////////////////////////////////////////////////////
         // External Interactions
         ///////////////////////////////////////////////////////////////////////
@@ -213,14 +334,119 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         );
 
         // 2. TranscriptBus
-        // 2a. Sample alpha_logup challenge
-        self.transcript_bus.sample_ext(
-            builder,
-            local.proof_idx,
-            local.tidx,
-            local.alpha_logup.map(Into::into),
-            local.is_enabled,
-        );
+        // 2a. Observe grouped tower out-evals before alpha/beta sampling.
+        let out_eval_start_tidx = local.tidx
+            - local.has_read_out * AB::Expr::from_usize(2 * D_EF)
+            - local.has_write_out * AB::Expr::from_usize(2 * D_EF)
+            - local.has_logup_out * AB::Expr::from_usize(4 * D_EF);
+        let mut out_eval_tidx = out_eval_start_tidx;
+        for eval in [local.read_out_0, local.read_out_1] {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: out_eval_tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * local.has_read_out,
+                );
+            }
+            out_eval_tidx += local.has_read_out * AB::Expr::from_usize(D_EF);
+        }
+        for eval in [local.write_out_0, local.write_out_1] {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: out_eval_tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * local.has_write_out,
+                );
+            }
+            out_eval_tidx += local.has_write_out * AB::Expr::from_usize(D_EF);
+        }
+        for eval in [
+            local.logup_out_0,
+            local.logup_out_1,
+            local.logup_out_2,
+            local.logup_out_3,
+        ] {
+            for i in 0..D_EF {
+                self.forked_transcript_bus.receive(
+                    builder,
+                    local.proof_idx,
+                    ForkedTranscriptBusMessage {
+                        fork_id: local.fork_id.into(),
+                        tidx: out_eval_tidx.clone() + AB::Expr::from_usize(i),
+                        value: eval[i].into(),
+                        is_sample: AB::Expr::ZERO,
+                    },
+                    local.is_enabled * local.has_logup_out,
+                );
+            }
+            out_eval_tidx += local.has_logup_out * AB::Expr::from_usize(D_EF);
+        }
+
+        // 2b. Observe labels and sample alpha_logup/beta challenges.
+        for (offset, value) in LABEL_COMBINE_FIELDS.into_iter().enumerate() {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_enabled * has_tower_out.clone(),
+            );
+        }
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(LABEL_COMBINE + i),
+                    value: local.alpha_logup[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_enabled * has_tower_out.clone(),
+            );
+        }
+        for (offset, value) in LABEL_PRODUCT_SUM_FIELDS.into_iter().enumerate() {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(ALPHA_LEN + offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                local.is_enabled * has_tower_out.clone(),
+            );
+        }
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: local.tidx + AB::Expr::from_usize(ALPHA_LEN + LABEL_PRODUCT_SUM + i),
+                    value: local.beta[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_enabled * has_tower_out.clone(),
+            );
+        }
         self.main_bus.send(
             builder,
             local.proof_idx,
@@ -229,7 +455,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
                 tidx: tidx_after_gkr_layers.clone(),
                 claim: local.input_layer_claim.map(Into::into),
             },
-            local.is_enabled * has_interactions,
+            local.is_enabled * has_interactions * AB::Expr::from_bool(self.send_main),
         );
     }
 }

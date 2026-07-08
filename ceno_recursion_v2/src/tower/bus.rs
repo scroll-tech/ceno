@@ -12,6 +12,52 @@ pub struct TowerXiSamplerMessage<T> {
 
 define_typed_per_proof_permutation_bus!(TowerXiSamplerBus, TowerXiSamplerMessage);
 
+#[repr(C)]
+#[derive(AlignedBorrow, Debug, Clone)]
+pub struct TowerShapeMessage<T> {
+    pub idx: T,
+    pub num_vars: T,
+    pub read_op_vars: T,
+    pub write_op_vars: T,
+    pub logup_op_vars: T,
+    pub has_read: T,
+    pub has_write: T,
+    pub has_logup: T,
+    pub read_tower_vars: T,
+    pub write_tower_vars: T,
+    pub logup_tower_vars: T,
+    pub max_tower_vars: T,
+    pub max_layer_count: T,
+}
+
+define_typed_per_proof_permutation_bus!(TowerShapeBus, TowerShapeMessage);
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug, Clone)]
+pub struct TowerInputShapeMessage<T> {
+    pub idx: T,
+    pub has_read: T,
+    pub has_write: T,
+    pub has_logup: T,
+    pub read_tower_vars: T,
+    pub write_tower_vars: T,
+    pub logup_tower_vars: T,
+    pub max_layer_count: T,
+}
+
+define_typed_per_proof_permutation_bus!(TowerInputShapeBus, TowerInputShapeMessage);
+
+#[repr(C)]
+#[derive(AlignedBorrow, Debug, Clone)]
+pub struct TowerActivityMessage<T> {
+    pub idx: T,
+    pub layer_idx: T,
+    pub kind: T,
+    pub active: T,
+}
+
+define_typed_per_proof_permutation_bus!(TowerActivityBus, TowerActivityMessage);
+
 /// Message sent from TowerInputAir to TowerLayerAir
 #[repr(C)]
 #[derive(AlignedBorrow, Debug, Clone)]
@@ -144,3 +190,16 @@ pub struct TowerSumcheckChallengeMessage<T> {
 }
 
 define_typed_per_proof_permutation_bus!(TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage);
+
+/// Message sent from TowerAlphaPowAir to TowerLayerAir.
+#[repr(C)]
+#[derive(AlignedBorrow, Debug, Clone)]
+pub struct TowerAlphaPowMessage<T> {
+    pub idx: T,
+    pub layer_idx: T,
+    pub slot_kind: T,
+    pub alpha: [T; D_EF],
+    pub weight: [T; D_EF],
+}
+
+define_typed_per_proof_permutation_bus!(TowerAlphaPowBus, TowerAlphaPowMessage);

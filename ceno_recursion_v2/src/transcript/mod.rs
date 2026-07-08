@@ -13,8 +13,12 @@ use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_symmetric::Permutation;
 
-use crate::system::{
-    AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
+use crate::{
+    system::{
+        AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk,
+        TraceGenModule,
+    },
+    utils::digests_to_poseidon2_input,
 };
 use recursion_circuit::transcript::poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols};
 
@@ -114,6 +118,7 @@ impl TranscriptModule {
             if i == 0 && is_fork_start {
                 cols.is_fork_start = F::ONE;
             }
+            cols.is_fork = F::from_bool(is_fork_start);
 
             let is_sample = log.samples()[tidx];
             cols.is_sample = F::from_bool(is_sample);
@@ -170,6 +175,7 @@ impl TranscriptModule {
     #[tracing::instrument(name = "generate_trace.transcript", level = "trace", skip_all)]
     fn build_transcript_trace(
         &self,
+        proofs: &[RecursionProof],
         preflights: &[Preflight],
         required_height: Option<usize>,
     ) -> Option<(RowMajorMatrix<F>, Vec<[F; POSEIDON2_WIDTH]>)> {
@@ -370,11 +376,41 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         };
 
         let (transcript_trace, mut poseidon2_perm_inputs) =
-            self.build_transcript_trace(preflights, required_transcript)?;
+            self.build_transcript_trace(proofs, preflights, required_transcript)?;
         let mut poseidon2_compress_inputs = Vec::new();
 
         poseidon2_perm_inputs.extend_from_slice(ctx.0);
         poseidon2_compress_inputs.extend_from_slice(ctx.1);
+        for preflight in preflights {
+            poseidon2_perm_inputs.extend(
+                preflight
+                    .pcs
+                    .base_input_leaf_hashes
+                    .iter()
+                    .map(|record| record.input),
+            );
+            poseidon2_perm_inputs.extend(
+                preflight
+                    .pcs
+                    .commit_phase_leaf_hashes
+                    .iter()
+                    .map(|record| record.input),
+            );
+            poseidon2_compress_inputs.extend(
+                preflight
+                    .pcs
+                    .base_input_merkle_rows
+                    .iter()
+                    .map(|record| digests_to_poseidon2_input(record.left, record.right)),
+            );
+            poseidon2_compress_inputs.extend(
+                preflight
+                    .pcs
+                    .commit_phase_merkle_rows
+                    .iter()
+                    .map(|record| digests_to_poseidon2_input(record.left, record.right)),
+            );
+        }
 
         let poseidon2_trace = {
             let (mut poseidon_states, poseidon_counts) =

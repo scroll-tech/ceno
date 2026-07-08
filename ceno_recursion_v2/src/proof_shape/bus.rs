@@ -33,12 +33,13 @@ define_typed_per_proof_permutation_bus!(NumPublicValuesBus, NumPublicValuesMessa
 #[repr(u8)]
 #[derive(Debug, Copy, Clone)]
 pub enum AirShapeProperty {
-    AirId,
-    NumInteractions,
-    NeedRot,
     NumRead,
     NumWrite,
     NumLk,
+    BaseTowerVars,
+    ReadOpVars,
+    WriteOpVars,
+    LogupOpVars,
 }
 
 impl AirShapeProperty {

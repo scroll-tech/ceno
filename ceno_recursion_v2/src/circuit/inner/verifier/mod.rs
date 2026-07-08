@@ -1,7 +1,7 @@
 use openvm_stark_backend::{FiatShamirTranscript, TranscriptHistory};
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 
-use crate::system::{Preflight, RecursionProof, RecursionVk};
+use crate::system::{Preflight, RecursionProof, RecursionVk, child_vk_digest};
 
 mod air;
 mod trace;
@@ -18,6 +18,8 @@ pub fn run_preflight<TS>(
 ) where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config> + TranscriptHistory,
 {
-    // Reserved verifier-owned preflight step. VmPvs currently owns transcript observations.
-    let _ = (child_vk, proof, ts);
+    for digest_elem in child_vk_digest(child_vk) {
+        ts.observe_ext(digest_elem);
+    }
+    let _ = proof;
 }

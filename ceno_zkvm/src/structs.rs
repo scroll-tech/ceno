@@ -5,8 +5,8 @@ use crate::{
     instructions::Instruction,
     scheme::septic_curve::SepticPoint,
     tables::{
-        ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamInput, ShardRamRecord,
-        TableCircuit,
+        ECPoint, MemFinalRecord, RMMCollections, ShardRamCircuit, ShardRamEcTreeCircuit,
+        ShardRamInput, ShardRamRecord, TableCircuit,
     },
     witness::LkMultiplicity,
 };
@@ -18,13 +18,10 @@ use gkr_iop::{
 };
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
-use multilinear_extensions::Instance;
+use multilinear_extensions::{Expression, Instance, ToExpr};
 use p3::field::PrimeCharacteristicRing as FieldAlgebra;
 use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
-use rayon::{
-    iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    prelude::ParallelSlice,
-};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
@@ -109,6 +106,19 @@ pub type ChallengeId = u16;
 pub type ROMType = LookupTable;
 
 pub type RAMType = gkr_iop::RAMType;
+
+#[derive(Clone, Debug, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(u16)]
+pub enum CustomRWTag {
+    KeccakState = 0,
+    ShardRamEcPoint = 1,
+}
+
+impl CustomRWTag {
+    pub fn expr<E: ExtensionField>(self) -> Expression<E> {
+        E::BaseField::from_u16(self as u16).expr()
+    }
+}
 
 pub type PointAndEval<F> = multilinear_extensions::mle::PointAndEval<F>;
 
@@ -560,6 +570,7 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
             &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
         ),
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
+        ec_tree_config: &<ShardRamEcTreeCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<(), ZKVMError> {
         use tracing::info_span;
 
@@ -567,7 +578,13 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         // Only when GPU witgen is enabled (otherwise witgen must not touch GPU).
         #[cfg(feature = "gpu")]
         if crate::instructions::gpu::config::is_gpu_witgen_enabled() {
-            let gpu_result = self.try_assign_shared_circuit_gpu(cs, shard_ctx, final_mem, config);
+            let gpu_result = self.try_assign_shared_circuit_gpu(
+                cs,
+                shard_ctx,
+                final_mem,
+                config,
+                ec_tree_config,
+            );
             match gpu_result {
                 Ok(true) => return Ok(()),
                 Ok(false) => {} /* GPU pipeline unavailable (no shared buffers), fall through to CPU */
@@ -700,39 +717,70 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         }
 
         assert!(self.combined_lk_mlt.is_none());
-        let cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let shard_ram_cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let ec_tree_cs = cs
+            .get_cs(&ShardRamEcTreeCircuit::<E>::name())
+            .expect("ShardRamEcTreeCircuit must be registered");
         let n_global = global_input.len();
         // `ShardRamCircuit::assign_instances` ignores the `multiplicity`
         // argument (its lookup contribution is derived externally above), so
         // an empty slice is sufficient here and matches the pre-finalize
         // ordering: `combined_lk_mlt` is intentionally `None` at this point.
         let lk_multiplicity = LkMultiplicity::default();
-        let circuit_inputs =
+        let (circuit_inputs, ec_tree_circuit_inputs) =
             info_span!("shard_ram_assign_instances", n = n_global).in_scope(|| {
-                global_input
-                    .par_chunks(shard_ctx.max_num_cross_shard_accesses)
-                    .map(|shard_accesses| {
-                        let mut lk_multiplicity = lk_multiplicity.clone();
-                        let witness = ShardRamCircuit::assign_instances_with_lk_multiplicities(
-                            config,
-                            cs.zkvm_v1_css.num_witin as usize,
-                            cs.zkvm_v1_css.num_structural_witin as usize,
-                            &mut lk_multiplicity,
-                            shard_accesses,
-                        )?;
-                        let num_reads = shard_accesses
-                            .par_iter()
-                            .filter(|access| access.record.is_to_write_set)
-                            .count();
-                        let num_writes = shard_accesses.len() - num_reads;
+                if global_input.is_empty() {
+                    return Ok::<(Vec<ChipInput<E>>, Vec<ChipInput<E>>), ZKVMError>((
+                        vec![],
+                        vec![],
+                    ));
+                }
 
-                        Ok(ChipInput::new(
-                            ShardRamCircuit::<E>::name(),
-                            witness,
-                            [num_reads, num_writes],
-                        ))
-                    })
-                    .collect::<Result<Vec<_>, ZKVMError>>()
+                let mut lk_multiplicity = lk_multiplicity.clone();
+                let witness = ShardRamCircuit::assign_instances_with_lk_multiplicities(
+                    config,
+                    shard_ram_cs.zkvm_v1_css.num_witin as usize,
+                    shard_ram_cs.zkvm_v1_css.num_structural_witin as usize,
+                    &mut lk_multiplicity,
+                    &global_input,
+                )?;
+                let num_reads = global_input
+                    .par_iter()
+                    .filter(|access| access.record.is_to_write_set)
+                    .count();
+                let num_writes = global_input.len() - num_reads;
+
+                let ec_tree_input = global_input
+                    .iter()
+                    .filter(|access| !access.record.is_to_write_set)
+                    .chain(
+                        global_input
+                            .iter()
+                            .filter(|access| access.record.is_to_write_set),
+                    )
+                    .cloned()
+                    .collect_vec();
+                let ec_tree_witness =
+                    ShardRamEcTreeCircuit::assign_instances_with_lk_multiplicities(
+                        ec_tree_config,
+                        ec_tree_cs.zkvm_v1_css.num_witin as usize,
+                        ec_tree_cs.zkvm_v1_css.num_structural_witin as usize,
+                        &mut LkMultiplicity::default(),
+                        &ec_tree_input,
+                    )?;
+
+                Ok((
+                    vec![ChipInput::new(
+                        ShardRamCircuit::<E>::name(),
+                        witness,
+                        [num_reads, num_writes],
+                    )],
+                    vec![ChipInput::new(
+                        ShardRamEcTreeCircuit::<E>::name(),
+                        ec_tree_witness,
+                        [num_writes, num_reads],
+                    )],
+                ))
             })?;
 
         assert!(
@@ -747,6 +795,11 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         assert!(
             self.witnesses
                 .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
+                .is_none()
+        );
+        assert!(
+            self.witnesses
+                .insert(ShardRamEcTreeCircuit::<E>::name(), ec_tree_circuit_inputs)
                 .is_none()
         );
 
@@ -768,24 +821,33 @@ impl<E: ExtensionField> ZKVMWitnesses<E> {
         shard_ctx: &ShardContext,
         final_mem: &[(&'static str, Option<Range<Addr>>, &[MemFinalRecord])],
         config: &<ShardRamCircuit<E> as TableCircuit<E>>::TableConfig,
+        ec_tree_config: &<ShardRamEcTreeCircuit<E> as TableCircuit<E>>::TableConfig,
     ) -> Result<bool, ZKVMError> {
         assert!(self.combined_lk_mlt.is_none());
-        let cs_inner = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
-        let num_witin = cs_inner.zkvm_v1_css.num_witin as usize;
-        let num_structural_witin = cs_inner.zkvm_v1_css.num_structural_witin as usize;
+        let shard_ram_cs = cs.get_cs(&ShardRamCircuit::<E>::name()).unwrap();
+        let ec_tree_cs = cs
+            .get_cs(&ShardRamEcTreeCircuit::<E>::name())
+            .expect("ShardRamEcTreeCircuit must be registered");
 
         match crate::instructions::gpu::chips::shard_ram::try_gpu_assign_shared_circuit::<E>(
             shard_ctx,
             final_mem,
             config,
-            num_witin,
-            num_structural_witin,
-            shard_ctx.max_num_cross_shard_accesses,
+            ec_tree_config,
+            shard_ram_cs.zkvm_v1_css.num_witin as usize,
+            shard_ram_cs.zkvm_v1_css.num_structural_witin as usize,
+            ec_tree_cs.zkvm_v1_css.num_witin as usize,
+            ec_tree_cs.zkvm_v1_css.num_structural_witin as usize,
         )? {
-            Some((circuit_inputs, lk_mlt)) => {
+            Some((circuit_inputs, ec_tree_circuit_inputs, lk_mlt)) => {
                 assert!(
                     self.witnesses
                         .insert(ShardRamCircuit::<E>::name(), circuit_inputs)
+                        .is_none()
+                );
+                assert!(
+                    self.witnesses
+                        .insert(ShardRamEcTreeCircuit::<E>::name(), ec_tree_circuit_inputs)
                         .is_none()
                 );
                 assert!(
@@ -1024,16 +1086,16 @@ pub struct ZKVMVerifyingKey<
 /// Number of extension-field elements squeezed from the digest sponge.
 pub const VK_DIGEST_LEN: usize = 2;
 
-/// Convert bytes into base-field elements using ≤ 3-byte chunks.
-fn bytes_to_felts_safe<F: FieldAlgebra>(bytes: &[u8]) -> Vec<F> {
-    bytes
-        .chunks(3)
-        .map(|chunk| {
-            let mut arr = [0u8; 4];
-            arr[..chunk.len()].copy_from_slice(chunk);
-            F::from_u32(u32::from_le_bytes(arr))
-        })
-        .collect()
+fn observe_bytes_safe<F, C>(challenger: &mut C, bytes: &[u8])
+where
+    F: FieldAlgebra,
+    C: CanObserve<F>,
+{
+    for chunk in bytes.chunks(3) {
+        let mut arr = [0u8; 4];
+        arr[..chunk.len()].copy_from_slice(chunk);
+        challenger.observe(F::from_u32(u32::from_le_bytes(arr)));
+    }
 }
 
 /// Hash the supplied VK preimage into `VK_DIGEST_LEN` extension elements.
@@ -1066,7 +1128,7 @@ where
     .expect("vk digest serialization is infallible for a valid VK");
 
     let mut sponge = DefaultChallenger::<E::BaseField>::new_poseidon_default();
-    sponge.observe_slice(&bytes_to_felts_safe::<E::BaseField>(&bytes));
+    observe_bytes_safe::<E::BaseField, _>(&mut sponge, &bytes);
     std::array::from_fn(|_| sponge.sample_algebra_element())
 }
 

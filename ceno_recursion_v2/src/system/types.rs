@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use ceno_zkvm::{scheme::ZKVMProof, structs::ZKVMVerifyingKey};
 use ff_ext::BabyBearExt4;
-use mpcs::{Basefold, BasefoldRSParams};
+use mpcs::{Basefold, BasefoldRSParams, Jagged};
 use openvm_stark_backend::{keygen::types::MultiStarkVerifyingKey, proof::Proof};
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 
 pub type RecursionField = BabyBearExt4;
-pub type RecursionPcs = Basefold<RecursionField, BasefoldRSParams>;
+pub type RecursionPcs = Jagged<Basefold<RecursionField, BasefoldRSParams>>;
 pub type RecursionVk = ZKVMVerifyingKey<RecursionField, RecursionPcs>;
 pub type RecursionProof = ZKVMProof<RecursionField, RecursionPcs>;
 

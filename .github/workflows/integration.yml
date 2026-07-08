@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   skip_check:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [ self-hosted, Linux, X64 ]
     outputs:
       should_skip: ${{ steps.skip_check.outputs.should_skip }}
@@ -29,7 +30,10 @@ jobs:
   integration:
     needs: [ skip_check ]
     if: |
-      github.event.pull_request.draft == false &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.draft == false) &&
       (github.event.action == 'ready_for_review' || needs.skip_check.outputs.should_skip != 'true')
 
     name: Integration testing
@@ -194,6 +198,12 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
           RUST_MIN_STACK: "33554432"
         run: bash ceno_recursion_v2/scripts/run_e2e_test.sh
+
+      #      - name: Run aggregation e2e
+      #        env:
+      #          RUSTFLAGS: "-C opt-level=3"
+      #        run: |
+      #          cargo run --release --package ceno_recursion --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Install cargo make
         run: |

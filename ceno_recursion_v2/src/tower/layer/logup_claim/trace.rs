@@ -98,7 +98,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                     cols.acc_sum = [F::ZERO; D_EF];
                     cols.acc_p_cross = [F::ZERO; D_EF];
                     cols.acc_q_cross = [F::ZERO; D_EF];
-                    cols.num_logup_count = F::ONE;
+                    cols.num_logup_count = F::ZERO;
                     return;
                 }
 
@@ -210,7 +210,7 @@ impl RowMajorChip<F> for TowerLogupSumCheckClaimTraceGenerator {
                             .as_basis_coefficients_slice()
                             .try_into()
                             .unwrap();
-                        cols.num_logup_count = F::from_usize(total_rows);
+                        cols.num_logup_count = F::from_usize(logup_rows.len());
 
                         acc_sum += contribution;
                         acc_p_cross += p_cross_contribution;
