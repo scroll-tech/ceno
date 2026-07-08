@@ -9,13 +9,17 @@ use openvm_cuda_common::stream::GpuDeviceCtx;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::prover::{AirProvingContext, MatrixDimensions};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    BabyBearPoseidon2Config, F, default_duplex_sponge_recorder,
+    BabyBearPoseidon2Config, DuplexSpongeRecorder, F, default_duplex_sponge_recorder,
 };
 use p3_matrix::Matrix;
 use tracing_subscriber::EnvFilter;
 
 use super::{AggregationSubCircuit, RecursionProof, RecursionVk, VerifierSubCircuit};
-use crate::system::{VerifierExternalData, VerifierTraceGen};
+use crate::{
+    circuit::inner::{InnerTraceGen, InnerTraceGenImpl, PreVerifierSubCircuitInput, ProofsType},
+    system::{VerifierExternalData, VerifierTraceGen},
+    utils::{TranscriptLabel, transcript_observe_label},
+};
 
 const MAX_NUM_PROOFS: usize = 2;
 
@@ -99,13 +103,39 @@ fn select_proofs(proofs: &[RecursionProof], count: usize) -> Result<Vec<Recursio
     Ok(proofs.iter().cycle().take(count).cloned().collect())
 }
 
+fn prepare_verifier_inputs(
+    child_vk: &RecursionVk,
+    proofs: &[RecursionProof],
+) -> (Vec<[F; POSEIDON2_WIDTH]>, Vec<DuplexSpongeRecorder>) {
+    let mut initial_transcript = default_duplex_sponge_recorder();
+    transcript_observe_label(&mut initial_transcript, TranscriptLabel::Riscv.as_bytes());
+
+    let tracegen = <InnerTraceGenImpl as InnerTraceGen<
+        openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>,
+    >>::new(false);
+    let (_, poseidon2_compress_inputs, initial_transcripts) =
+        <InnerTraceGenImpl as InnerTraceGen<
+            openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>,
+        >>::generate_pre_verifier_subcircuit_ctxs(&tracegen, PreVerifierSubCircuitInput {
+            proofs,
+            proofs_type: ProofsType::Vm,
+            absent_trace_pvs: None,
+            child_is_app: true,
+            child_vk,
+            child_dag_commit: Default::default(),
+            initial_transcript,
+        });
+    (poseidon2_compress_inputs, initial_transcripts)
+}
+
 fn generate_cpu_ctxs(
     circuit: &VerifierSubCircuit<MAX_NUM_PROOFS>,
     child_vk: &RecursionVk,
     proofs: &[RecursionProof],
     required_heights: Option<&[usize]>,
 ) -> Vec<AirProvingContext<openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>>> {
-    let poseidon2_compress_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
+    let (poseidon2_compress_inputs, initial_transcripts) =
+        prepare_verifier_inputs(child_vk, proofs);
     let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
     let range_check_inputs = vec![];
     let power_check_inputs = vec![];
@@ -126,7 +156,7 @@ fn generate_cpu_ctxs(
         None,
         proofs,
         &mut external_data,
-        vec![default_duplex_sponge_recorder(); proofs.len()],
+        initial_transcripts,
     )
     .expect("CPU tracegen should succeed")
 }
@@ -137,7 +167,8 @@ fn generate_gpu_ctxs(
     proofs: &[RecursionProof],
     required_heights: Option<&[usize]>,
 ) -> Vec<AirProvingContext<GpuBackend>> {
-    let poseidon2_compress_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
+    let (poseidon2_compress_inputs, initial_transcripts) =
+        prepare_verifier_inputs(child_vk, proofs);
     let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
     let range_check_inputs = vec![];
     let power_check_inputs = vec![];
@@ -158,7 +189,7 @@ fn generate_gpu_ctxs(
         None,
         proofs,
         &mut external_data,
-        vec![default_duplex_sponge_recorder(); proofs.len()],
+        initial_transcripts,
     )
     .expect("GPU tracegen should succeed")
 }

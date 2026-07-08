@@ -502,6 +502,36 @@ mod cuda_tracegen {
             let _ = child_vk;
             poseidon2_perm_inputs.extend_from_slice(ctx.0);
             poseidon2_compress_inputs.extend_from_slice(ctx.1);
+            for preflight in &preflights_cpu {
+                poseidon2_perm_inputs.extend(
+                    preflight
+                        .pcs
+                        .base_input_leaf_hashes
+                        .iter()
+                        .map(|record| record.input),
+                );
+                poseidon2_perm_inputs.extend(
+                    preflight
+                        .pcs
+                        .commit_phase_leaf_hashes
+                        .iter()
+                        .map(|record| record.input),
+                );
+                poseidon2_compress_inputs.extend(
+                    preflight
+                        .pcs
+                        .base_input_merkle_rows
+                        .iter()
+                        .map(|record| digests_to_poseidon2_input(record.left, record.right)),
+                );
+                poseidon2_compress_inputs.extend(
+                    preflight
+                        .pcs
+                        .commit_phase_merkle_rows
+                        .iter()
+                        .map(|record| digests_to_poseidon2_input(record.left, record.right)),
+                );
+            }
 
             let poseidon2_trace = {
                 let (mut poseidon_states, poseidon_counts) =
