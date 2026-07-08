@@ -1,11 +1,11 @@
 // Derived in part from OpenVM (https://github.com/openvm-org/openvm),
 // branch develop-v2.1.0-rv64, licensed under MIT OR Apache-2.0.
-
 pub mod batch_constraint;
 pub mod bn254;
 pub mod circuit;
 pub mod continuation;
-pub mod main;
+#[path = "main/mod.rs"]
+pub mod main_module;
 pub mod pcs;
 pub mod proof_shape;
 pub mod system;
@@ -20,4 +20,5 @@ pub mod cuda;
 pub mod bus;
 pub use recursion_circuit::{primitives, subairs};
 
+pub use main_module as main;
 pub use recursion_circuit::define_typed_per_proof_permutation_bus;

@@ -434,12 +434,12 @@ where
         assert_array_eq(
             &mut builder.when(local.is_enabled),
             local.s0_x0_x1,
-            septic_mul_selected::<AB>(&local.s0_all, &x0_minus_x1, local.septic_flags.clone()),
+            septic_mul_selected::<AB>(&local.s0_all, &x0_minus_x1, local.septic_flags),
         );
         assert_array_eq(
             &mut builder.when(local.is_enabled),
             local.s0_squared,
-            septic_mul_selected::<AB>(&local.s0_all, &s0_expr, local.septic_flags.clone()),
+            septic_mul_selected::<AB>(&local.s0_all, &s0_expr, local.septic_flags),
         );
         assert_array_eq(
             &mut builder.when(local.is_enabled),
@@ -1546,9 +1546,9 @@ fn septic_mul_coeff_native(
     let mut out = openvm_stark_sdk::config::baby_bear_poseidon2::EF::ZERO;
     let two = openvm_stark_sdk::config::baby_bear_poseidon2::EF::from_usize(2);
     let five = openvm_stark_sdk::config::baby_bear_poseidon2::EF::from_usize(5);
-    for i in 0..SEPTIC_DEGREE {
-        for j in 0..SEPTIC_DEGREE {
-            let term = a[i] * b[j];
+    for (i, a_value) in a.iter().enumerate().take(SEPTIC_DEGREE) {
+        for (j, b_value) in b.iter().enumerate().take(SEPTIC_DEGREE) {
+            let term = *a_value * *b_value;
             let mut index = i + j;
             if index < SEPTIC_DEGREE {
                 if index == coeff_idx {
@@ -1818,9 +1818,12 @@ where
     <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
 {
     let mut out = ext_zero::<AB::Expr>();
-    for i in 0..SEPTIC_DEGREE {
-        for j in 0..SEPTIC_DEGREE {
-            let term = ext_field_multiply::<AB::Expr>(a[i].clone().map(Into::into), b[j].clone());
+    for (i, a_value) in a.iter().enumerate().take(SEPTIC_DEGREE) {
+        for (j, b_value) in b.iter().enumerate().take(SEPTIC_DEGREE) {
+            let term = ext_field_multiply::<AB::Expr>(
+                core::array::from_fn(|idx| a_value[idx].clone().into()),
+                b_value.clone(),
+            );
             let mut index = i + j;
             if index < SEPTIC_DEGREE {
                 if index == coeff_idx {

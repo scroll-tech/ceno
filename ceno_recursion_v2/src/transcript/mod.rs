@@ -175,7 +175,7 @@ impl TranscriptModule {
     #[tracing::instrument(name = "generate_trace.transcript", level = "trace", skip_all)]
     fn build_transcript_trace(
         &self,
-        proofs: &[RecursionProof],
+        _proofs: &[RecursionProof],
         preflights: &[Preflight],
         required_height: Option<usize>,
     ) -> Option<(RowMajorMatrix<F>, Vec<[F; POSEIDON2_WIDTH]>)> {

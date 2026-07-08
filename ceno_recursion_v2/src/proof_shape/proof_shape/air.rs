@@ -17,14 +17,12 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage,
-        ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage, ForkFinalSampleBus,
+        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage, ForkFinalSampleBus,
         ForkFinalSampleMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
-        FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus, HyperdimBusMessage,
-        LiftedHeightsBus, LiftedHeightsBusMessage, LookupChallengeBus, LookupChallengeKind,
-        LookupChallengeMessage, MainSelectorShapeBus, MainSelectorShapeMessage,
-        MainSelectorSparseIndexShapeBus, MainSelectorSparseIndexShapeMessage, NLiftBus,
-        NLiftMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
+        LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage, MainSelectorShapeBus,
+        MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
+        MainSelectorSparseIndexShapeMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
+        TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
@@ -51,9 +49,6 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     ///
     /// Has a special use on summary row (when `is_last`).
     pub log_height: F,
-    /// Whether this AIR needs rotation openings.
-    pub need_rot: F,
-
     // First possible transcript index of the current AIR.
     pub starting_tidx: F,
     // Fork-local transcript index where the tower verifier starts for this AIR.
@@ -82,9 +77,6 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     /// Computed as max(0, n0, n1, ...) where ni = log_height_i for each present trace.
     pub n_max: F,
     pub is_n_max_greater: F,
-
-    pub num_air_id_lookups: F,
-    pub num_columns: F,
 
     /// The Poseidon2 sponge state at the fork point (trunk state just before
     /// forking). Constrained to be identical across all rows within a proof.
@@ -125,14 +117,9 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
     pub tower_module_bus: TowerModuleBus,
     pub air_presence_bus: AirPresenceBus,
     pub air_shape_bus: AirShapeBus,
-    pub expression_claim_n_max_bus: ExpressionClaimNMaxBus,
-    pub fraction_folder_input_bus: FractionFolderInputBus,
-    pub hyperdim_bus: HyperdimBus,
-    pub lifted_heights_bus: LiftedHeightsBus,
     pub transcript_bus: TranscriptBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub fork_final_sample_bus: ForkFinalSampleBus,
-    pub n_lift_bus: NLiftBus,
     pub main_selector_shape_bus: MainSelectorShapeBus,
     pub main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
 }
@@ -212,13 +199,6 @@ where
         let mut is_required = AB::Expr::ZERO;
         let mut air_idx = AB::Expr::ZERO;
 
-        // Select values for LiftedHeightsBus
-        let mut num_witin = AB::Expr::ZERO;
-        let mut num_structural_witin = AB::Expr::ZERO;
-        let mut num_fixed = AB::Expr::ZERO;
-
-        // Select values for NumPublicValuesBus
-        let mut num_pvs = AB::Expr::ZERO;
         let mut num_read_count = AB::Expr::ZERO;
         let mut num_write_count = AB::Expr::ZERO;
         let mut num_logup_count = AB::Expr::ZERO;
@@ -236,12 +216,6 @@ where
             let is_current_air = self.idx_encoder.get_flag_expr::<AB>(i, localv.idx_flags);
             let mut when_current = builder.when(is_current_air.clone());
             air_idx += is_current_air.clone() * AB::F::from_usize(i);
-            num_witin += is_current_air.clone() * AB::F::from_usize(air_data.num_witin);
-            num_structural_witin +=
-                is_current_air.clone() * AB::F::from_usize(air_data.num_structural_witin);
-            num_fixed += is_current_air.clone() * AB::F::from_usize(air_data.num_fixed);
-
-            num_pvs += is_current_air.clone() * AB::F::from_usize(air_data.num_public_values);
 
             if air_data.is_required {
                 is_required += is_current_air.clone();
@@ -434,7 +408,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::ZERO,
                 value: AB::Expr::from_u32(LABEL_FORK_FIELDS[0]),
                 is_sample: AB::Expr::ZERO,
@@ -447,7 +421,7 @@ where
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: fork_id.clone().into(),
+                    fork_id: fork_id.into(),
                     tidx: AB::Expr::from_usize(fork_tidx_base + i),
                     value: local.lookup_challenge_alpha[i].into(),
                     is_sample: AB::Expr::ZERO,
@@ -458,7 +432,7 @@ where
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: fork_id.clone().into(),
+                    fork_id: fork_id.into(),
                     tidx: AB::Expr::from_usize(fork_tidx_base + D_EF + i),
                     value: local.lookup_challenge_beta[i].into(),
                     is_sample: AB::Expr::ZERO,
@@ -470,9 +444,9 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF),
-                value: fork_id.clone().into(),
+                value: fork_id.into(),
                 is_sample: AB::Expr::ZERO,
             },
             local.is_present * local.is_valid,
@@ -484,7 +458,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 1),
                 value: air_idx.clone(),
                 is_sample: AB::Expr::ZERO,
@@ -495,7 +469,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 2),
                 value: local.height_1.into(),
                 is_sample: AB::Expr::ZERO,
@@ -506,7 +480,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3),
                 value: local.height_2.into(),
                 is_sample: AB::Expr::ZERO,
@@ -522,7 +496,7 @@ where
             builder,
             local.proof_idx,
             ForkFinalSampleMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: forked_challenge_1_tidx.clone(),
             },
             local.is_present * local.is_valid,
@@ -532,7 +506,7 @@ where
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: fork_id.clone().into(),
+                    fork_id: fork_id.into(),
                     tidx: forked_challenge_1_tidx.clone() + AB::Expr::from_usize(i),
                     value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ONE,
@@ -544,40 +518,6 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // AIR SHAPE LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let downstream_enabled = AB::Expr::ZERO;
-
-        self.air_shape_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::AirId.to_field(),
-                value: air_idx.clone(),
-            },
-            local.is_present * local.num_air_id_lookups * downstream_enabled.clone(),
-        );
-
-        self.air_shape_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NumInteractions.to_field(),
-                value: AB::Expr::ZERO,
-            },
-            local.is_present * downstream_enabled.clone(),
-        );
-
-        self.air_shape_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NeedRot.to_field(),
-                value: local.need_rot.into(),
-            },
-            local.is_present * local.num_columns * downstream_enabled.clone(),
-        );
         let base_tower_vars = n.clone() + rotation_vars + ecc_extra_vars;
         // TODO(recursion-v2): prove this low-degree by sending the
         // TowerShapeAir-derived max_layer_count to TowerInputAir. The direct
@@ -631,13 +571,6 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HYPERDIM LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
-        builder.assert_bool(local.need_rot);
-        builder
-            .when(not(local.is_present))
-            .assert_zero(local.need_rot);
-        builder
-            .when(not(local.is_present))
-            .assert_zero(local.num_columns);
         // We range check n in [0, 32).
         self.range_bus.lookup_key(
             builder,
@@ -646,17 +579,6 @@ where
                 max_bits: AB::Expr::from_usize(8),
             },
             local.is_present,
-        );
-
-        self.hyperdim_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            HyperdimBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                n_abs: n.clone(),
-                n_sign_bit: AB::Expr::ZERO,
-            },
-            local.is_present * (local.num_air_id_lookups + AB::F::ONE) * downstream_enabled.clone(),
         );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -679,29 +601,6 @@ where
         builder
             .when(local.is_valid)
             .assert_eq(local.height_2, raw_height_2);
-        let combined_height = local.height_1 + local.height_2;
-
-        self.lifted_heights_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            LiftedHeightsBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                part_idx: AB::Expr::ZERO,
-                commit_idx: AB::Expr::ZERO,
-                hypercube_dim: n.clone(),
-                lifted_height: combined_height.into(),
-                log_lifted_height: local.log_height.into(),
-            },
-            local.is_present
-                * (num_witin + num_structural_witin + num_fixed)
-                * downstream_enabled.clone(),
-        );
-
-        ///////////////////////////////////////////////////////////////////////////////////////////
-        // NUM PUBLIC VALUES
-        ///////////////////////////////////////////////////////////////////////////////////////////
-        let _ = num_pvs;
-
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HEIGHT + GKR MESSAGE
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -770,37 +669,6 @@ where
                 n_logup: local.tower_n_logup.into(),
             },
             local.is_present * local.is_valid,
-        );
-
-        // Send n_max value to expression claim air
-        self.expression_claim_n_max_bus.send(
-            builder,
-            local.proof_idx,
-            ExpressionClaimNMaxMessage {
-                n_max: local.n_max.into(),
-            },
-            local.is_last * downstream_enabled.clone(),
-        );
-
-        // Send n_lift to constraint folding air
-        self.n_lift_bus.send(
-            builder,
-            local.proof_idx,
-            NLiftMessage {
-                air_idx: air_idx,
-                n_lift: local.log_height.into(),
-            },
-            local.is_present * downstream_enabled.clone(),
-        );
-
-        // Send count of present airs to fraction folder air
-        self.fraction_folder_input_bus.send(
-            builder,
-            local.proof_idx,
-            FractionFolderInputMessage {
-                num_present_airs: local.num_present,
-            },
-            local.is_last * downstream_enabled,
         );
     }
 }

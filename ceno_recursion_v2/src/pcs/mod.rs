@@ -141,17 +141,30 @@ fn ensure_supported_basecode_log(basecode_log: usize) -> Result<()> {
     Ok(())
 }
 
-fn push_eq_product_records(
-    preflight: &mut Preflight,
+struct EqProductRecordInput<'a> {
+    preflight: &'a mut Preflight,
     kind: PcsEqProductKind,
     source: PcsEqProductSource,
     round_idx: usize,
     term_idx: usize,
-    point: &[RecursionField],
+    point: &'a [RecursionField],
     point_tidx_base: usize,
     sumcheck_idx: usize,
     point_round_base: usize,
-) -> RecursionField {
+}
+
+fn push_eq_product_records(input: EqProductRecordInput<'_>) -> RecursionField {
+    let EqProductRecordInput {
+        preflight,
+        kind,
+        source,
+        round_idx,
+        term_idx,
+        point,
+        point_tidx_base,
+        sumcheck_idx,
+        point_round_base,
+    } = input;
     let mut acc = RecursionField::ONE;
     let mut index_acc = 0usize;
     for (bit_idx, &point_value) in point.iter().enumerate() {
@@ -497,9 +510,8 @@ fn push_basefold_final_expected_records(
             let mut coeff = RecursionField::ONE;
             let start_term_idx = term_idx;
             let factor_count = num_vars_evaluated + basecode_log;
-            for factor_idx in 0..factor_count {
+            for (factor_idx, point_value) in point.iter().copied().enumerate().take(factor_count) {
                 let is_prefix = factor_idx < num_vars_evaluated;
-                let point_value = point[factor_idx];
                 let (has_challenge, challenge_round, challenge, bit_value, factor) = if is_prefix {
                     let challenge_round = fold_challenges.len() - num_vars_evaluated + factor_idx;
                     let challenge = fold_challenges[challenge_round];
@@ -853,17 +865,17 @@ impl PcsModule {
         for i in 0..num_polys {
             let h_i = comm.cumulative_heights[i + 1] - comm.cumulative_heights[i];
             let s_i = ceil_log2(h_i);
-            let eq_product = push_eq_product_records(
+            let eq_product = push_eq_product_records(EqProductRecordInput {
                 preflight,
-                PcsEqProductKind::JaggedClaim,
-                PcsEqProductSource::Transcript,
+                kind: PcsEqProductKind::JaggedClaim,
+                source: PcsEqProductSource::Transcript,
                 round_idx,
-                i,
-                &z_col,
-                z_col_tidx,
-                round_idx * 2,
-                0,
-            );
+                term_idx: i,
+                point: &z_col,
+                point_tidx_base: z_col_tidx,
+                sumcheck_idx: round_idx * 2,
+                point_round_base: 0,
+            });
             let tail_product = push_suffix_product_records(preflight, round_idx, i, s_i, point);
             if eq_product != eq_col[i] {
                 bail!("jagged eq product replay mismatch");
@@ -884,12 +896,6 @@ impl PcsModule {
             ) = term_sources[i];
             let raw_eval = tail_zero_prod[s_i] * evals[i];
             preflight.pcs.opening_evals[opening_eval_record_idx].raw_value = raw_eval;
-            if std::env::var("CENO_REC_V2_DEBUG_PCS").as_deref() == Ok("1") {
-                eprintln!(
-                    "rec-v2-debug module=pcs source=preflight proof_idx=0 round_idx={round_idx} opening_idx={opening_idx} commit_kind={:?} eval_idx={eval_idx} main_idx={main_idx} main_eval_idx={main_eval_idx} term_idx={i} key=jagged_claim normalized_eval={:?} tail_zero={:?} raw_eval={:?} eq_col={:?} term={:?} acc_out={:?}",
-                    commit_kind, evals[i], tail_zero_prod[s_i], raw_eval, eq_col[i], term, acc
-                );
-            }
             preflight.pcs.jagged_claims.push(PcsJaggedClaimRecord {
                 proof_idx: 0,
                 round_idx,
@@ -910,16 +916,16 @@ impl PcsModule {
                 acc_out: acc,
             });
         }
-        let (rho, expected) = replay_degree2_sumcheck(
-            0,
-            round_idx * 2,
+        let (rho, expected) = replay_degree2_sumcheck(Degree2SumcheckReplayInput {
+            proof_idx: 0,
+            idx: round_idx * 2,
             claimed_sum,
-            &proof.sumcheck_proof,
-            num_giga_vars,
-            false,
+            proof: &proof.sumcheck_proof,
+            num_variables: num_giga_vars,
+            emit_input_record: false,
             preflight,
             ts,
-        )?;
+        })?;
 
         let n_robp = num_giga_vars + usize::from(padded_total.is_power_of_two());
         let rho_row = &rho[..log_h];
@@ -930,22 +936,6 @@ impl PcsModule {
             .zip(&proof.col_evals)
             .map(|(e, v)| *e * *v)
             .sum::<RecursionField>();
-        if std::env::var("CENO_REC_V2_DEBUG_PCS").as_deref() == Ok("1") {
-            for (i, (eq, col_eval)) in eq_rho_col[..w].iter().zip(&proof.col_evals).enumerate() {
-                eprintln!(
-                    "rec-v2-debug module=pcs source=preflight proof_idx=0 round_idx={round_idx} col_idx={i} key=jagged_q_eval rho={:?} eq_rho_col={:?} col_eval={:?} q_term={:?}",
-                    rho,
-                    eq,
-                    col_eval,
-                    *eq * *col_eval
-                );
-            }
-            eprintln!(
-                "rec-v2-debug module=pcs source=preflight proof_idx=0 round_idx={round_idx} key=jagged_q_eval q_eval={:?} f_at_rho={:?} sumcheck_final={:?}",
-                q_eval, proof.f_at_rho, expected
-            );
-        }
-
         let col_tidx = ts.len();
         for (i, eval) in proof.col_evals.iter().copied().enumerate() {
             ts.observe_ext(eval);
@@ -1011,17 +1001,17 @@ impl PcsModule {
         for (i, (&eq_rho_col, &col_eval)) in
             eq_rho_col[..w].iter().zip(&proof.col_evals).enumerate()
         {
-            let eq_product = push_eq_product_records(
+            let eq_product = push_eq_product_records(EqProductRecordInput {
                 preflight,
-                PcsEqProductKind::JaggedQEval,
-                PcsEqProductSource::FoldChallenge,
+                kind: PcsEqProductKind::JaggedQEval,
+                source: PcsEqProductSource::FoldChallenge,
                 round_idx,
-                i,
-                rho_col,
-                0,
-                round_idx * 2,
-                log_h,
-            );
+                term_idx: i,
+                point: rho_col,
+                point_tidx_base: 0,
+                sumcheck_idx: round_idx * 2,
+                point_round_base: log_h,
+            });
             if eq_product != eq_rho_col {
                 bail!("jagged q-eval eq product replay mismatch");
             }
@@ -1049,16 +1039,17 @@ impl PcsModule {
         z_row_padded.resize(n_robp, RecursionField::ZERO);
         let mut rho_padded = rho.clone();
         rho_padded.resize(n_robp, RecursionField::ZERO);
-        let (assist_point, assist_expected) = replay_degree2_sumcheck(
-            0,
-            assist_sumcheck_idx,
-            proof.f_at_rho,
-            &proof.assist_proof,
-            2 * n_robp,
-            false,
-            preflight,
-            ts,
-        )?;
+        let (assist_point, assist_expected) =
+            replay_degree2_sumcheck(Degree2SumcheckReplayInput {
+                proof_idx: 0,
+                idx: assist_sumcheck_idx,
+                claimed_sum: proof.f_at_rho,
+                proof: &proof.assist_proof,
+                num_variables: 2 * n_robp,
+                emit_input_record: false,
+                preflight,
+                ts,
+            })?;
         let rho_star_c = (0..n_robp).map(|i| assist_point[2 * i]).collect_vec();
         let rho_star_d = (0..n_robp).map(|i| assist_point[2 * i + 1]).collect_vec();
         for robp_idx in 0..n_robp {
@@ -1098,15 +1089,6 @@ impl PcsModule {
             compute_q_at_assist_point(&assist_point, &eq_col, &comm.cumulative_heights, n_robp);
         if q_at_rho_star != native_q_at_rho_star {
             bail!("jagged assist q replay mismatch");
-        }
-        if std::env::var("CENO_REC_V2_DEBUG_PCS").as_deref() == Ok("1") {
-            eprintln!(
-                "rec-v2-debug module=pcs source=preflight proof_idx=0 round_idx={round_idx} key=jagged_assist h_at_rho_star={:?} q_at_rho_star={:?} assist_product={:?} assist_expected={:?}",
-                h_at_rho_star,
-                q_at_rho_star,
-                h_at_rho_star * q_at_rho_star,
-                assist_expected
-            );
         }
         preflight.pcs.jagged_assists.push(PcsJaggedAssistRecord {
             proof_idx: 0,
@@ -1478,8 +1460,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
     fn generate_proving_ctxs(
         &self,
-        child_vk: &RecursionVk,
-        proofs: &[RecursionProof],
+        _child_vk: &RecursionVk,
+        _proofs: &[RecursionProof],
         preflights: &[Preflight],
         _ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
@@ -1942,703 +1924,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 record.step,
             )
         });
-
-        if std::env::var("CENO_REC_V2_DEBUG_PCS_COUNTS").as_deref() == Ok("1")
-            || std::env::var("CENO_REC_V2_DEBUG_PCS").as_deref() == Ok("1")
-        {
-            let basefold_eval_sends = transcript_values
-                .iter()
-                .filter(|record| record.is_basefold_eval)
-                .count()
-                * 2;
-            let jagged_f_sends = transcript_values
-                .iter()
-                .filter(|record| record.is_jagged_f_at_rho)
-                .count();
-            let final_message_sends = transcript_values
-                .iter()
-                .filter(|record| record.is_final_message)
-                .count()
-                * (<BasefoldRSParams as BasefoldSpec<RecursionField>>::get_number_queries() + 1);
-            let query_sample_sends = transcript_values
-                .iter()
-                .filter(|record| record.is_query_sample)
-                .count();
-            let batch_coeff_sends = batch_coeffs
-                .iter()
-                .map(|record| record.lookup_count)
-                .sum::<usize>();
-            let sumcheck_input_sends = sumcheck_inputs.len()
-                + jagged_assist_inputs.len()
-                + jagged_claims.iter().filter(|record| record.is_last).count()
-                + basefold_initial_claims
-                    .iter()
-                    .filter(|record| record.is_last)
-                    .count();
-            let sumcheck_output_receives = jagged_q_evals
-                .iter()
-                .filter(|record| record.is_last)
-                .count()
-                + jagged_assists.len()
-                + basefold_final_claims.len();
-            let commitment_root_sends = commitment_roots
-                .iter()
-                .map(|record| record.lookup_count)
-                .sum::<usize>();
-            let commitment_root_receives = base_input_merkle_rows
-                .iter()
-                .filter(|record| record.is_last)
-                .count()
-                + commit_phase_merkle_rows
-                    .iter()
-                    .filter(|record| record.is_last)
-                    .count();
-            let base_input_opening_receives = base_input_leaf_hashes
-                .iter()
-                .flat_map(|record| record.value_is_present)
-                .filter(|&is_present| is_present)
-                .count();
-            let basefold_query_sends = basefold_query_indices.len() * 2
-                + basefold_query_opens
-                    .iter()
-                    .filter(|record| record.is_last_for_height)
-                    .count()
-                + basefold_commit_phase_queries
-                    .iter()
-                    .filter(|record| record.is_last)
-                    .count();
-            let basefold_query_receives = basefold_commit_phase_queries
-                .iter()
-                .filter(|record| record.is_first)
-                .count()
-                + basefold_commit_phase_queries
-                    .iter()
-                    .filter(|record| record.has_reduced_opening)
-                    .count()
-                + basefold_final_codeword
-                    .iter()
-                    .filter(|record| record.is_last)
-                    .count()
-                + basefold_final_codeword
-                    .iter()
-                    .filter(|record| record.is_first)
-                    .count();
-            let commit_phase_leaf_receives = commit_phase_merkle_rows
-                .iter()
-                .filter(|record| record.is_first)
-                .count();
-            let eq_product_sends = eq_products
-                .iter()
-                .map(|record| record.lookup_count)
-                .sum::<usize>();
-            let eq_product_receives = jagged_claims.len()
-                + jagged_q_evals.len()
-                + jagged_assist_q
-                    .iter()
-                    .filter(|record| record.is_first_step)
-                    .count();
-            let suffix_product_sends = suffix_products
-                .iter()
-                .filter(|record| record.is_last)
-                .count();
-            let suffix_product_receives = jagged_claims.len();
-            let jagged_assist_h_sends = jagged_assist_h
-                .iter()
-                .filter(|record| record.is_last)
-                .count();
-            let jagged_assist_h_receives = jagged_assists.len();
-            let jagged_assist_q_sends = jagged_assist_q
-                .iter()
-                .filter(|record| record.is_last)
-                .count();
-            let jagged_assist_q_receives = jagged_assists.len();
-            let basefold_final_point_sends = basefold_final_points.len();
-            let basefold_final_point_receives = basefold_final_expected.len();
-            eprintln!(
-                "rec-v2-debug module=pcs source=trace key=bus_counts opening_eval_send={} opening_eval_recv={} eq_product_send={} eq_product_recv={} suffix_product_send={} suffix_product_recv={} jagged_assist_h_send={} jagged_assist_h_recv={} jagged_assist_q_send={} jagged_assist_q_recv={} basefold_final_point_send={} basefold_final_point_recv={} basefold_eval_send={} basefold_eval_recv={} jagged_f_send={} jagged_f_recv={} batch_coeff_send={} batch_coeff_recv={} final_message_send={} final_message_recv={} query_sample_send={} query_sample_recv={} sumcheck_input_send={} sumcheck_input_recv={} sumcheck_output_send={} sumcheck_output_recv={} commitment_root_send={} commitment_root_recv={} base_input_opening_send={} base_input_opening_recv={} basefold_query_send={} basefold_query_recv={} commit_phase_leaf_send={} commit_phase_leaf_recv={}",
-                opening_evals.len(),
-                jagged_claims.len(),
-                eq_product_sends,
-                eq_product_receives,
-                suffix_product_sends,
-                suffix_product_receives,
-                jagged_assist_h_sends,
-                jagged_assist_h_receives,
-                jagged_assist_q_sends,
-                jagged_assist_q_receives,
-                basefold_final_point_sends,
-                basefold_final_point_receives,
-                basefold_eval_sends,
-                basefold_initial_claims.len() + jagged_q_evals.len(),
-                jagged_f_sends,
-                jagged_assist_inputs.len(),
-                batch_coeff_sends,
-                basefold_initial_claims.len() + basefold_query_opens.len(),
-                final_message_sends,
-                basefold_final_codeword.len()
-                    + basefold_final_expected
-                        .iter()
-                        .filter(|record| record.is_elem_last)
-                        .count(),
-                query_sample_sends,
-                basefold_query_indices.len(),
-                sumcheck_input_sends,
-                sumcheck_rounds
-                    .iter()
-                    .filter(|record| record.is_first)
-                    .count(),
-                sumcheck_rounds
-                    .iter()
-                    .filter(|record| record.is_last)
-                    .count(),
-                sumcheck_output_receives,
-                commitment_root_sends,
-                commitment_root_receives,
-                basefold_query_opens.len(),
-                base_input_opening_receives,
-                basefold_query_sends,
-                basefold_query_receives,
-                commit_phase_leaf_hashes.len(),
-                commit_phase_leaf_receives,
-            );
-
-            let report_map = |name: &str, map: &std::collections::BTreeMap<String, isize>| {
-                let mismatches = map
-                    .iter()
-                    .filter(|(_, balance)| **balance != 0)
-                    .take(3)
-                    .collect_vec();
-                if !mismatches.is_empty() {
-                    eprintln!(
-                        "rec-v2-debug module=pcs source=trace key=bus_mismatch bus={} mismatches={} first={:?}",
-                        name,
-                        map.iter().filter(|(_, balance)| **balance != 0).count(),
-                        mismatches,
-                    );
-                }
-            };
-
-            let mut opening_eval_map = std::collections::BTreeMap::<String, isize>::new();
-            for record in &opening_evals {
-                *opening_eval_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.opening_idx,
-                            record.commit_kind.as_usize(),
-                            record.eval_idx,
-                            record.raw_value
-                        )
-                    ))
-                    .or_default() += 1;
-            }
-            for record in &jagged_claims {
-                let opened_eval = record.tail_zero * record.eval;
-                *opening_eval_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.opening_idx,
-                            record.commit_kind.as_usize(),
-                            record.eval_idx,
-                            opened_eval
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            report_map("opening_eval", &opening_eval_map);
-
-            let mut eq_product_map = std::collections::BTreeMap::<String, isize>::new();
-            for record in eq_products.iter().filter(|record| record.is_last) {
-                *eq_product_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.kind.as_usize(),
-                            record.round_idx,
-                            record.term_idx,
-                            record.acc_out
-                        )
-                    ))
-                    .or_default() += record.lookup_count as isize;
-            }
-            for record in &jagged_claims {
-                *eq_product_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            PcsEqProductKind::JaggedClaim.as_usize(),
-                            record.round_idx,
-                            record.term_idx,
-                            record.eq_col
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            for record in &jagged_q_evals {
-                *eq_product_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            PcsEqProductKind::JaggedQEval.as_usize(),
-                            record.round_idx,
-                            record.term_idx,
-                            record.eq_rho_col
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            for record in jagged_assist_q.iter().filter(|record| record.is_first_step) {
-                *eq_product_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            PcsEqProductKind::JaggedClaim.as_usize(),
-                            record.round_idx,
-                            record.term_idx,
-                            record.eq_col
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            report_map("eq_product", &eq_product_map);
-
-            let mut suffix_product_map = std::collections::BTreeMap::<String, isize>::new();
-            for record in suffix_products.iter().filter(|record| record.is_last) {
-                *suffix_product_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.round_idx,
-                            record.term_idx,
-                            record.acc_out
-                        )
-                    ))
-                    .or_default() += 1;
-            }
-            for record in &jagged_claims {
-                *suffix_product_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.round_idx,
-                            record.term_idx,
-                            record.tail_zero
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            report_map("suffix_product", &suffix_product_map);
-
-            let mut jagged_assist_h_map = std::collections::BTreeMap::<String, isize>::new();
-            for record in jagged_assist_h.iter().filter(|record| record.is_last) {
-                *jagged_assist_h_map
-                    .entry(format!(
-                        "{:?}",
-                        (record.proof_idx, record.round_idx, record.val_out[0])
-                    ))
-                    .or_default() += 1;
-            }
-            for record in &jagged_assists {
-                *jagged_assist_h_map
-                    .entry(format!(
-                        "{:?}",
-                        (record.proof_idx, record.round_idx, record.h_at_rho_star)
-                    ))
-                    .or_default() -= 1;
-            }
-            report_map("jagged_assist_h", &jagged_assist_h_map);
-
-            let mut jagged_assist_q_map = std::collections::BTreeMap::<String, isize>::new();
-            for record in jagged_assist_q.iter().filter(|record| record.is_last) {
-                *jagged_assist_q_map
-                    .entry(format!(
-                        "{:?}",
-                        (record.proof_idx, record.round_idx, record.q_acc_out)
-                    ))
-                    .or_default() += 1;
-            }
-            for record in &jagged_assists {
-                *jagged_assist_q_map
-                    .entry(format!(
-                        "{:?}",
-                        (record.proof_idx, record.round_idx, record.q_at_rho_star)
-                    ))
-                    .or_default() -= 1;
-            }
-            report_map("jagged_assist_q", &jagged_assist_q_map);
-
-            let mut fold_challenge_map = std::collections::BTreeMap::<String, isize>::new();
-            for record in &sumcheck_rounds {
-                *fold_challenge_map
-                    .entry(format!(
-                        "{:?}",
-                        (record.proof_idx, record.idx, record.round, record.challenge)
-                    ))
-                    .or_default() += record.fold_challenge_lookup_count as isize;
-            }
-            for record in basefold_commit_phase_queries.iter() {
-                *fold_challenge_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            8_000_000usize,
-                            record.round,
-                            record.challenge
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            for record in eq_products
-                .iter()
-                .filter(|record| record.source == PcsEqProductSource::FoldChallenge)
-            {
-                *fold_challenge_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.sumcheck_idx,
-                            record.point_round,
-                            record.point
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            for record in &jagged_assist_h {
-                if record.has_rho {
-                    *fold_challenge_map
-                        .entry(format!(
-                            "{:?}",
-                            (
-                                record.proof_idx,
-                                record.round_idx * 2,
-                                record.robp_idx,
-                                record.rho
-                            )
-                        ))
-                        .or_default() -= 1;
-                }
-                for (round, challenge) in [
-                    (2 * record.robp_idx, record.rho_star_c),
-                    (2 * record.robp_idx + 1, record.rho_star_d),
-                ] {
-                    *fold_challenge_map
-                        .entry(format!(
-                            "{:?}",
-                            (record.proof_idx, record.sumcheck_idx, round, challenge)
-                        ))
-                        .or_default() -= 1;
-                }
-            }
-            for record in &jagged_assist_q {
-                for (round, challenge) in [
-                    (2 * record.robp_idx, record.rho_star_c),
-                    (2 * record.robp_idx + 1, record.rho_star_d),
-                ] {
-                    *fold_challenge_map
-                        .entry(format!(
-                            "{:?}",
-                            (record.proof_idx, record.sumcheck_idx, round, challenge)
-                        ))
-                        .or_default() -= 1;
-                }
-            }
-            for record in basefold_final_expected
-                .iter()
-                .filter(|record| record.has_challenge)
-            {
-                *fold_challenge_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.sumcheck_idx,
-                            record.challenge_round,
-                            record.challenge
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            for record in &basefold_final_points {
-                *fold_challenge_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.source_sumcheck_idx,
-                            record.source_round,
-                            record.value
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            report_map("fold_challenge", &fold_challenge_map);
-
-            let mut basefold_final_point_map = std::collections::BTreeMap::<String, isize>::new();
-            for record in &basefold_final_points {
-                *basefold_final_point_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.sumcheck_idx,
-                            record.point_idx,
-                            record.coord_idx,
-                            record.value
-                        )
-                    ))
-                    .or_default() += 1;
-            }
-            for record in &basefold_final_expected {
-                *basefold_final_point_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.sumcheck_idx,
-                            record.point_idx,
-                            record.coord_idx,
-                            record.point_value
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            report_map("basefold_final_point", &basefold_final_point_map);
-
-            let mut commit_height_map = std::collections::BTreeMap::<String, isize>::new();
-            for (proof_idx, (proof, preflight)) in proofs.iter().zip(preflights).enumerate() {
-                let mut lookup_counts = std::collections::BTreeMap::<(usize, usize), usize>::new();
-                for record in preflight
-                    .pcs
-                    .jagged_assist_q
-                    .iter()
-                    .filter(|record| record.is_first_step)
-                {
-                    *lookup_counts
-                        .entry((record.commitment_kind, record.term_idx))
-                        .or_default() += 1;
-                    *lookup_counts
-                        .entry((record.commitment_kind, record.term_idx + 1))
-                        .or_default() += 1;
-                }
-                let mut push_heights = |commitment_kind: usize, heights: &[usize]| {
-                    for (height_idx, &height) in heights.iter().enumerate() {
-                        *commit_height_map
-                            .entry(format!(
-                                "{:?}",
-                                (
-                                    proof_idx,
-                                    commitment_kind,
-                                    height_idx,
-                                    F::from_usize(height)
-                                )
-                            ))
-                            .or_default() += lookup_counts
-                            .get(&(commitment_kind, height_idx))
-                            .copied()
-                            .unwrap_or_default()
-                            as isize;
-                    }
-                };
-                if let Some(commitment) = child_vk.fixed_commit.as_ref() {
-                    push_heights(0, &commitment.cumulative_heights);
-                }
-                if let Some(commitment) = child_vk.fixed_no_omc_init_commit.as_ref() {
-                    push_heights(1, &commitment.cumulative_heights);
-                }
-                push_heights(2, &proof.witin_commit.cumulative_heights);
-            }
-            for record in jagged_assist_q.iter().filter(|record| record.is_first_step) {
-                for (height_idx, value) in [
-                    (record.term_idx, record.t_lo),
-                    (record.term_idx + 1, record.t_hi),
-                ] {
-                    *commit_height_map
-                        .entry(format!(
-                            "{:?}",
-                            (
-                                record.proof_idx,
-                                record.commitment_kind,
-                                height_idx,
-                                F::from_usize(value)
-                            )
-                        ))
-                        .or_default() -= 1;
-                }
-            }
-            report_map("commit_height", &commit_height_map);
-
-            let mut basefold_eval_map = std::collections::BTreeMap::<String, isize>::new();
-            for record in transcript_values
-                .iter()
-                .filter(|record| record.is_basefold_eval)
-            {
-                *basefold_eval_map
-                    .entry(format!(
-                        "{:?}",
-                        (record.proof_idx, record.tidx, record.value)
-                    ))
-                    .or_default() += 2;
-            }
-            for record in &basefold_initial_claims {
-                *basefold_eval_map
-                    .entry(format!(
-                        "{:?}",
-                        (record.proof_idx, record.eval_tidx, record.eval)
-                    ))
-                    .or_default() -= 1;
-            }
-            for record in &jagged_q_evals {
-                *basefold_eval_map
-                    .entry(format!(
-                        "{:?}",
-                        (record.proof_idx, record.col_tidx, record.col_eval)
-                    ))
-                    .or_default() -= 1;
-            }
-            report_map("basefold_eval", &basefold_eval_map);
-
-            let mut basefold_query_map = std::collections::BTreeMap::<String, isize>::new();
-            for record in &basefold_query_indices {
-                *basefold_query_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.query_idx,
-                            PcsBasefoldQueryStage::QueryIndex.as_usize(),
-                            0usize,
-                            RecursionField::from(F::from_usize(record.query_value))
-                        )
-                    ))
-                    .or_default() += 1;
-                *basefold_query_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.query_idx,
-                            PcsBasefoldQueryStage::FinalCodewordStart.as_usize(),
-                            0usize,
-                            RecursionField::ZERO
-                        )
-                    ))
-                    .or_default() += 1;
-            }
-            for record in basefold_query_opens
-                .iter()
-                .filter(|record| record.is_last_for_height)
-            {
-                *basefold_query_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.query_idx,
-                            PcsBasefoldQueryStage::ReducedOpening.as_usize(),
-                            record.log2_height,
-                            record.acc_out
-                        )
-                    ))
-                    .or_default() += 1;
-            }
-            for record in basefold_commit_phase_queries
-                .iter()
-                .filter(|record| record.is_last)
-            {
-                *basefold_query_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.query_idx,
-                            PcsBasefoldQueryStage::FinalFolded.as_usize(),
-                            0usize,
-                            record.folded_out
-                        )
-                    ))
-                    .or_default() += 1;
-            }
-            for record in basefold_commit_phase_queries
-                .iter()
-                .filter(|record| record.is_first)
-            {
-                *basefold_query_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.query_idx,
-                            PcsBasefoldQueryStage::QueryIndex.as_usize(),
-                            0usize,
-                            RecursionField::from(F::from_usize(record.query_value))
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            for record in basefold_commit_phase_queries
-                .iter()
-                .filter(|record| record.has_reduced_opening)
-            {
-                *basefold_query_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.query_idx,
-                            PcsBasefoldQueryStage::ReducedOpening.as_usize(),
-                            record.log2_height,
-                            record.reduced_opening
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            for record in basefold_final_codeword
-                .iter()
-                .filter(|record| record.is_last)
-            {
-                *basefold_query_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.query_idx,
-                            PcsBasefoldQueryStage::FinalFolded.as_usize(),
-                            0usize,
-                            record.folded
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            for record in basefold_final_codeword
-                .iter()
-                .filter(|record| record.is_first)
-            {
-                *basefold_query_map
-                    .entry(format!(
-                        "{:?}",
-                        (
-                            record.proof_idx,
-                            record.query_idx,
-                            PcsBasefoldQueryStage::FinalCodewordStart.as_usize(),
-                            0usize,
-                            RecursionField::ZERO
-                        )
-                    ))
-                    .or_default() -= 1;
-            }
-            report_map("basefold_query", &basefold_query_map);
-        }
 
         let ctx = PcsTraceCtx {
             commitment_roots: &commitment_roots,
@@ -3819,17 +3104,19 @@ where
         let cd10: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(z3, nz4.clone());
         let cd11: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(z3, z4);
 
-        let transitions: [(
-            usize,
-            usize,
-            [AB::Expr; D_EF],
-            [AB::Expr; D_EF],
-            [AB::Expr; D_EF],
-        ); 4] = [
-            (
-                0usize,
-                0usize,
-                ext_add::<AB::Expr>(
+        struct Transition<Expr> {
+            ci: usize,
+            co: usize,
+            w_same: [Expr; D_EF],
+            w_lt1: [Expr; D_EF],
+            w_lt0: [Expr; D_EF],
+        }
+
+        let transitions = [
+            Transition {
+                ci: 0usize,
+                co: 0usize,
+                w_same: ext_add::<AB::Expr>(
                     ext_add::<AB::Expr>(
                         recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                             ab00.clone(),
@@ -3845,11 +3132,11 @@ where
                         cd01.clone(),
                     ),
                 ),
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                w_lt1: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab00.clone(),
                     cd01.clone(),
                 ),
-                ext_add::<AB::Expr>(
+                w_lt0: ext_add::<AB::Expr>(
                     recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                         ab01.clone(),
                         cd10.clone(),
@@ -3859,37 +3146,37 @@ where
                         cd00.clone(),
                     ),
                 ),
-            ),
-            (
-                0usize,
-                1usize,
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+            },
+            Transition {
+                ci: 0usize,
+                co: 1usize,
+                w_same: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab10.clone(),
                     cd10.clone(),
                 ),
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                w_lt1: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab10.clone(),
                     cd11.clone(),
                 ),
-                zero_ext.clone(),
-            ),
-            (
-                1usize,
-                0usize,
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                w_lt0: zero_ext.clone(),
+            },
+            Transition {
+                ci: 1usize,
+                co: 0usize,
+                w_same: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab01.clone(),
                     cd01.clone(),
                 ),
-                zero_ext.clone(),
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                w_lt1: zero_ext.clone(),
+                w_lt0: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab01.clone(),
                     cd00.clone(),
                 ),
-            ),
-            (
-                1usize,
-                1usize,
-                ext_add::<AB::Expr>(
+            },
+            Transition {
+                ci: 1usize,
+                co: 1usize,
+                w_same: ext_add::<AB::Expr>(
                     ext_add::<AB::Expr>(
                         recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                             ab00.clone(),
@@ -3905,15 +3192,22 @@ where
                         cd11.clone(),
                     ),
                 ),
-                ext_add::<AB::Expr>(
+                w_lt1: ext_add::<AB::Expr>(
                     recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab00, cd11),
                     recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab10, cd01),
                 ),
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab11, cd10),
-            ),
+                w_lt0: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab11, cd10),
+            },
         ];
         let mut expected: [[AB::Expr; D_EF]; 4] = core::array::from_fn(|_| zero_ext.clone());
-        for (ci, co, w_same, w_lt1, w_lt0) in transitions {
+        for Transition {
+            ci,
+            co,
+            w_same,
+            w_lt1,
+            w_lt0,
+        } in transitions
+        {
             let v0 = local.val_in[co * 2];
             let v1 = local.val_in[co * 2 + 1];
             let same_v0 =
@@ -3985,7 +3279,7 @@ where
             builder,
             local.proof_idx,
             PcsFoldChallengeMessage {
-                sumcheck_idx: (local.round_idx + local.round_idx).into(),
+                sumcheck_idx: (local.round_idx + local.round_idx),
                 round: local.robp_idx.into(),
                 challenge: local.rho.map(Into::into),
             },
@@ -3996,7 +3290,7 @@ where
             local.proof_idx,
             PcsFoldChallengeMessage {
                 sumcheck_idx: local.sumcheck_idx.into(),
-                round: (local.robp_idx + local.robp_idx).into(),
+                round: (local.robp_idx + local.robp_idx),
                 challenge: local.rho_star_c.map(Into::into),
             },
             local.is_enabled,
@@ -4006,7 +3300,7 @@ where
             local.proof_idx,
             PcsFoldChallengeMessage {
                 sumcheck_idx: local.sumcheck_idx.into(),
-                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE).into(),
+                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE),
                 challenge: local.rho_star_d.map(Into::into),
             },
             local.is_enabled,
@@ -4285,7 +3579,7 @@ where
             local.proof_idx,
             PcsCommitHeightMessage {
                 commitment_kind: local.commitment_kind.into(),
-                height_idx: (local.term_idx + AB::Expr::ONE).into(),
+                height_idx: (local.term_idx + AB::Expr::ONE),
                 value: local.t_hi.into(),
             },
             local.is_enabled * local.is_first_step,
@@ -4295,7 +3589,7 @@ where
             local.proof_idx,
             PcsFoldChallengeMessage {
                 sumcheck_idx: local.sumcheck_idx.into(),
-                round: (local.robp_idx + local.robp_idx).into(),
+                round: (local.robp_idx + local.robp_idx),
                 challenge: local.rho_star_c.map(Into::into),
             },
             local.is_enabled,
@@ -4305,7 +3599,7 @@ where
             local.proof_idx,
             PcsFoldChallengeMessage {
                 sumcheck_idx: local.sumcheck_idx.into(),
-                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE).into(),
+                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE),
                 challenge: local.rho_star_d.map(Into::into),
             },
             local.is_enabled,
@@ -7089,20 +6383,34 @@ impl RowMajorChip<F> for PcsBasefoldFinalClaimTraceGenerator {
     }
 }
 
-fn replay_degree2_sumcheck<TS>(
+struct Degree2SumcheckReplayInput<'a, TS> {
     proof_idx: usize,
     idx: usize,
     claimed_sum: RecursionField,
-    proof: &sumcheck::structs::IOPProof<RecursionField>,
+    proof: &'a sumcheck::structs::IOPProof<RecursionField>,
     num_variables: usize,
     emit_input_record: bool,
-    preflight: &mut Preflight,
-    ts: &mut TS,
+    preflight: &'a mut Preflight,
+    ts: &'a mut TS,
+}
+
+fn replay_degree2_sumcheck<TS>(
+    input: Degree2SumcheckReplayInput<'_, TS>,
 ) -> Result<(Vec<RecursionField>, RecursionField)>
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>
         + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
 {
+    let Degree2SumcheckReplayInput {
+        proof_idx,
+        idx,
+        claimed_sum,
+        proof,
+        num_variables,
+        emit_input_record,
+        preflight,
+        ts,
+    } = input;
     if proof.proofs.len() != num_variables {
         bail!(
             "sumcheck round count mismatch: {} != {num_variables}",

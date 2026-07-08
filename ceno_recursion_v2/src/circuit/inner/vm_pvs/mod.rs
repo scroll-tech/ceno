@@ -42,7 +42,7 @@ pub(crate) type RecursionCommitment =
     <RecursionPcs as mpcs::PolynomialCommitmentScheme<RecursionField>>::Commitment;
 
 pub(crate) fn recursion_commit_digest(commitment: &RecursionCommitment) -> [F; DIGEST_SIZE] {
-    commitment.inner.commit.clone().into()
+    commitment.inner.commit.into()
 }
 
 fn observe_recursion_commitment<TS>(commitment: &RecursionCommitment, ts: &mut TS)

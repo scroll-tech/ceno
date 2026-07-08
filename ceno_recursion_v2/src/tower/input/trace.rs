@@ -68,10 +68,9 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
 
         let mut prev_proof_idx = usize::MAX;
         let mut prev_idx = usize::MAX;
-        for (row_idx, (row_data, (record, q0_claim))) in data_slice
+        for (row_data, (record, q0_claim)) in data_slice
             .chunks_exact_mut(width)
             .zip(gkr_input_records.iter().zip(q0_claims.iter()))
-            .enumerate()
         {
             let cols: &mut TowerInputCols<F> = row_data.borrow_mut();
             let is_new_proof_idx = prev_proof_idx != record.proof_idx;
@@ -108,54 +107,22 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
             cols.r0_claim.copy_from_slice(q0_basis);
             cols.w0_claim.copy_from_slice(q0_basis);
             cols.q0_claim.copy_from_slice(q0_basis);
-            cols.read_out_0.copy_from_slice(
-                record.read_out_evals[0]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.read_out_1.copy_from_slice(
-                record.read_out_evals[1]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.write_out_0.copy_from_slice(
-                record.write_out_evals[0]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.write_out_1.copy_from_slice(
-                record.write_out_evals[1]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.logup_out_0.copy_from_slice(
-                record.logup_out_evals[0]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.logup_out_1.copy_from_slice(
-                record.logup_out_evals[1]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.logup_out_2.copy_from_slice(
-                record.logup_out_evals[2]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.logup_out_3.copy_from_slice(
-                record.logup_out_evals[3]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
+            cols.read_out_0
+                .copy_from_slice(record.read_out_evals[0].as_basis_coefficients_slice());
+            cols.read_out_1
+                .copy_from_slice(record.read_out_evals[1].as_basis_coefficients_slice());
+            cols.write_out_0
+                .copy_from_slice(record.write_out_evals[0].as_basis_coefficients_slice());
+            cols.write_out_1
+                .copy_from_slice(record.write_out_evals[1].as_basis_coefficients_slice());
+            cols.logup_out_0
+                .copy_from_slice(record.logup_out_evals[0].as_basis_coefficients_slice());
+            cols.logup_out_1
+                .copy_from_slice(record.logup_out_evals[1].as_basis_coefficients_slice());
+            cols.logup_out_2
+                .copy_from_slice(record.logup_out_evals[2].as_basis_coefficients_slice());
+            cols.logup_out_3
+                .copy_from_slice(record.logup_out_evals[3].as_basis_coefficients_slice());
             cols.has_read_out = F::from_bool(record.has_read_out);
             cols.has_write_out = F::from_bool(record.has_write_out);
             cols.has_logup_out = F::from_bool(record.has_logup_out);
@@ -191,18 +158,6 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
                 .as_basis_coefficients_slice()
                 .try_into()
                 .unwrap();
-            if std::env::var_os("CENO_REC_V2_DEBUG_TOWER_INPUT").is_some() {
-                eprintln!(
-                    "rec-v2-debug module=tower_input source=trace row={} proof_idx={} idx={} is_first_idx={} is_first={} tidx={} n_logup={}",
-                    row_idx,
-                    record.proof_idx,
-                    record.idx,
-                    is_new_proof_idx,
-                    is_new_idx,
-                    record.tidx,
-                    record.n_logup,
-                );
-            }
             prev_proof_idx = record.proof_idx;
             prev_idx = record.idx;
         }

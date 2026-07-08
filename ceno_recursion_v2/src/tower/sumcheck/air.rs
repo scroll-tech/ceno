@@ -17,9 +17,7 @@ use crate::{
             TowerSumcheckChallengeBus, TowerSumcheckChallengeMessage, TowerSumcheckInputBus,
             TowerSumcheckInputMessage, TowerSumcheckOutputBus, TowerSumcheckOutputMessage,
         },
-        tower_transcript_len::{
-            LABEL_INTERNAL_ROUND, LABEL_INTERNAL_ROUND_FIELDS, SUMCHECK_INIT_LEN,
-        },
+        tower_transcript_len::{LABEL_INTERNAL_ROUND_FIELDS, SUMCHECK_INIT_LEN},
     },
 };
 use recursion_circuit::{
@@ -394,14 +392,14 @@ where
         // 1b. Observe evaluations.
         let mut tidx = local.tidx.into();
         for eval in [local.ev1, local.ev2, local.ev3].into_iter() {
-            for i in 0..D_EF {
+            for (i, value) in eval.iter().enumerate().take(D_EF) {
                 self.forked_transcript_bus.receive(
                     builder,
                     local.proof_idx,
                     ForkedTranscriptBusMessage {
                         fork_id: local.fork_id.into(),
                         tidx: tidx.clone() + AB::Expr::from_usize(i),
-                        value: eval[i].into(),
+                        value: (*value).into(),
                         is_sample: AB::Expr::ZERO,
                     },
                     local.is_enabled * is_not_dummy.clone(),

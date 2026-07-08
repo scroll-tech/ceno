@@ -24,13 +24,7 @@ pub trait InnerTraceGen<PB: ProverBackend> {
     fn new(deferral_enabled: bool) -> Self;
     fn generate_pre_verifier_subcircuit_ctxs<TS>(
         &self,
-        proofs: &[RecursionProof],
-        proofs_type: ProofsType,
-        absent_trace_pvs: Option<(DeferralPvs<F>, bool)>,
-        child_is_app: bool,
-        child_vk: &RecursionVk,
-        child_dag_commit: PB::Commitment,
-        initial_transcript: TS,
+        input: PreVerifierSubCircuitInput<'_, PB::Commitment, TS>,
     ) -> (
         Vec<AirProvingContext<PB>>,
         Vec<[F; POSEIDON2_WIDTH]>,
@@ -48,6 +42,16 @@ pub trait InnerTraceGen<PB: ProverBackend> {
     ) -> Vec<AirProvingContext<PB>>;
 }
 
+pub struct PreVerifierSubCircuitInput<'a, Commitment, TS> {
+    pub proofs: &'a [RecursionProof],
+    pub proofs_type: ProofsType,
+    pub absent_trace_pvs: Option<(DeferralPvs<F>, bool)>,
+    pub child_is_app: bool,
+    pub child_vk: &'a RecursionVk,
+    pub child_dag_commit: Commitment,
+    pub initial_transcript: TS,
+}
+
 pub struct InnerTraceGenImpl {
     pub deferral_enabled: bool,
 }
@@ -59,13 +63,7 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
 
     fn generate_pre_verifier_subcircuit_ctxs<TS>(
         &self,
-        proofs: &[RecursionProof],
-        proofs_type: ProofsType,
-        absent_trace_pvs: Option<(DeferralPvs<F>, bool)>,
-        child_is_app: bool,
-        child_vk: &RecursionVk,
-        child_dag_commit: [F; DIGEST_SIZE],
-        initial_transcript: TS,
+        input: PreVerifierSubCircuitInput<'_, [F; DIGEST_SIZE], TS>,
     ) -> (
         Vec<AirProvingContext<CpuBackend<BabyBearPoseidon2Config>>>,
         Vec<[F; POSEIDON2_WIDTH]>,
@@ -76,6 +74,15 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             + FiatShamirTranscript<BabyBearPoseidon2Config>
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
+        let PreVerifierSubCircuitInput {
+            proofs,
+            proofs_type,
+            absent_trace_pvs,
+            child_is_app,
+            child_vk,
+            child_dag_commit,
+            initial_transcript,
+        } = input;
         let (verifier_ctx, poseidon2_inputs) = super::verifier::generate_proving_ctx(
             child_vk,
             proofs,
@@ -157,13 +164,7 @@ impl InnerTraceGen<GpuBackend> for InnerTraceGenImpl {
 
     fn generate_pre_verifier_subcircuit_ctxs<TS>(
         &self,
-        proofs: &[RecursionProof],
-        proofs_type: ProofsType,
-        absent_trace_pvs: Option<(DeferralPvs<F>, bool)>,
-        child_is_app: bool,
-        child_vk: &RecursionVk,
-        child_dag_commit: [F; DIGEST_SIZE],
-        initial_transcript: TS,
+        input: PreVerifierSubCircuitInput<'_, [F; DIGEST_SIZE], TS>,
     ) -> (
         Vec<AirProvingContext<GpuBackend>>,
         Vec<[F; POSEIDON2_WIDTH]>,
@@ -174,6 +175,15 @@ impl InnerTraceGen<GpuBackend> for InnerTraceGenImpl {
             + FiatShamirTranscript<BabyBearPoseidon2Config>
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
+        let PreVerifierSubCircuitInput {
+            proofs,
+            proofs_type,
+            absent_trace_pvs,
+            child_is_app,
+            child_vk,
+            child_dag_commit,
+            initial_transcript,
+        } = input;
         let _ = (
             self,
             proofs,

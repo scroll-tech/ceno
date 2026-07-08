@@ -1406,24 +1406,6 @@ impl TowerVerify {
             transcript,
         );
         let initial_rt: Point<E> = transcript.sample_and_append_vec(b"product_sum", log2_num_fanin);
-        if std::env::var_os("CENO_REC_V2_DEBUG_TOWER").is_some() {
-            let alpha_pows_str = alpha_pows
-                .iter()
-                .map(|value| format!("{value}"))
-                .collect::<Vec<_>>()
-                .join(",");
-            let beta_str = initial_rt
-                .iter()
-                .map(|value| format!("{value}"))
-                .collect::<Vec<_>>()
-                .join(",");
-            eprintln!(
-                "rec-v2-debug module=tower source=native proof_idx=0 key=alpha_pows value=[{alpha_pows_str}]"
-            );
-            eprintln!(
-                "rec-v2-debug module=tower source=native proof_idx=0 key=beta value=[{beta_str}]"
-            );
-        }
         // initial_claim = \sum_j alpha^j * out_j[rt]
         // out_j[rt] := (record_{j}[rt])
         // out_j[rt] := (logup_p{j}[rt])
@@ -1603,27 +1585,6 @@ impl TowerVerify {
                     })
                     .sum::<E>();
                 let expected_evaluation = eq * weighted_prime_fold;
-
-                if std::env::var_os("CENO_REC_V2_DEBUG_TOWER").is_some() {
-                    let alpha_pows_str = alpha_pows
-                        .iter()
-                        .map(|value| format!("{value}"))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    eprintln!(
-                        "rec-v2-debug module=tower source=native proof_idx=0 layer_idx={round} key=alpha_pows value=[{alpha_pows_str}]"
-                    );
-                    for (round_idx, challenge) in sumcheck_claim.point.iter().enumerate() {
-                        eprintln!(
-                            "rec-v2-debug module=tower source=native proof_idx=0 layer_idx={round} round_idx={round_idx} key=ri value={}",
-                            challenge.elements
-                        );
-                    }
-                    eprintln!(
-                        "rec-v2-debug module=tower source=native proof_idx=0 layer_idx={round} key=tower_checkpoint eq={eq} sumcheck_claim_out={} weighted_prime_fold={weighted_prime_fold} expected_sumcheck_claim_out={expected_evaluation}",
-                        sumcheck_claim.expected_evaluation,
-                    );
-                }
 
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
                     return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));

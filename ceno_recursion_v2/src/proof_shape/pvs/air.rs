@@ -10,7 +10,7 @@ use p3_matrix::Matrix;
 
 use crate::{
     bus::{PublicValuesBus, PublicValuesBusMessage, TranscriptBus, TranscriptBusMessage},
-    proof_shape::bus::{NumPublicValuesBus, NumPublicValuesMessage},
+    proof_shape::bus::NumPublicValuesBus,
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
 };
 

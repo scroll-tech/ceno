@@ -157,7 +157,7 @@ fn extract_commit(commit: Option<impl IntoIterator<Item = F>>) -> [F; DIGEST_SIZ
 
 fn commitment_digest_tidxs(
     child_vk: &RecursionVk,
-    proof: &RecursionProof,
+    _proof: &RecursionProof,
 ) -> (usize, usize, usize) {
     let mut tidx = crate::utils::TranscriptLabel::Riscv.field_len()
         + VK_DIGEST_LEN * D_EF

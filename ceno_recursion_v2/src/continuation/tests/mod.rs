@@ -823,7 +823,7 @@ mod prover_integration {
             "vk circuit_index_to_name count={}",
             vk.circuit_index_to_name.len()
         );
-        for (name, _cvk) in &vk.circuit_vks {
+        for name in vk.circuit_vks.keys() {
             println!("  circuit_vk: {name}");
         }
         Ok(())

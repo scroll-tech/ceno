@@ -46,9 +46,6 @@ mod cuda_abi;
 pub struct AirMetadata {
     is_required: bool,
     num_public_values: usize,
-    num_witin: usize,
-    num_structural_witin: usize,
-    num_fixed: usize,
     num_read_count: usize,
     num_write_count: usize,
     num_logup_count: usize,
@@ -165,10 +162,14 @@ impl ProofShapeModule {
             .max()
             .unwrap_or(0);
 
-        for air_idx in 0..child_vk.circuit_vks.len() {
+        for (air_idx, starting_tidx_entry) in starting_tidx
+            .iter_mut()
+            .enumerate()
+            .take(child_vk.circuit_vks.len())
+        {
             let metadata = &self.per_air[air_idx];
             let is_present = proof.chip_proofs.contains_key(&air_idx);
-            starting_tidx[air_idx] = current_tidx;
+            *starting_tidx_entry = current_tidx;
 
             if !metadata.is_required {
                 current_tidx += 1;
@@ -223,9 +224,6 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
         .map(|idx| {
             let (
                 num_public_values,
-                num_witin,
-                num_structural_witin,
-                num_fixed,
                 raw_read_count,
                 raw_write_count,
                 raw_logup_count,
@@ -240,9 +238,6 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
                     let css = &cs.zkvm_v1_css;
                     (
                         css.instance.len(),
-                        css.num_witin as usize,
-                        css.num_structural_witin as usize,
-                        css.num_fixed,
                         cs.num_reads(),
                         cs.num_writes(),
                         cs.num_lks(),
@@ -250,7 +245,7 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
                         usize::from(cs.has_ecc_ops()),
                     )
                 })
-                .unwrap_or((0, 0, 0, 0, 0, 0, 0, 0, 0));
+                .unwrap_or((0, 0, 0, 0, 0, 0));
             let selectors = child_vk
                 .circuit_index_to_name
                 .get(&idx)
@@ -268,9 +263,6 @@ fn extract_air_metadata_from_vk(child_vk: &RecursionVk) -> Vec<AirMetadata> {
             AirMetadata {
                 is_required: false,
                 num_public_values,
-                num_witin,
-                num_structural_witin,
-                num_fixed,
                 num_read_count,
                 num_write_count,
                 num_logup_count,
@@ -467,17 +459,12 @@ impl AirModule for ProofShapeModule {
             permutation_bus: self.permutation_bus,
             starting_tidx_bus: self.starting_tidx_bus,
             lookup_challenge_bus: self.bus_inventory.lookup_challenge_bus,
-            fraction_folder_input_bus: self.bus_inventory.fraction_folder_input_bus,
-            expression_claim_n_max_bus: self.bus_inventory.expression_claim_n_max_bus,
             tower_module_bus: self.bus_inventory.tower_module_bus,
             air_presence_bus: self.bus_inventory.air_presence_bus,
             air_shape_bus: self.bus_inventory.air_shape_bus,
-            hyperdim_bus: self.bus_inventory.hyperdim_bus,
-            lifted_heights_bus: self.bus_inventory.lifted_heights_bus,
             transcript_bus: self.bus_inventory.transcript_bus,
             forked_transcript_bus: self.bus_inventory.forked_transcript_bus,
             fork_final_sample_bus: self.bus_inventory.fork_final_sample_bus,
-            n_lift_bus: self.bus_inventory.n_lift_bus,
             main_selector_shape_bus: self.bus_inventory.main_selector_shape_bus,
             main_selector_sparse_index_shape_bus: self
                 .bus_inventory

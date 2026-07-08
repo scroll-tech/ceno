@@ -8,21 +8,18 @@ use recursion_circuit::{
 };
 
 use crate::bus::{
-    CachedCommitBus as LocalCachedCommitBus, EccRtBus,
-    ExpressionClaimNMaxBus as LocalExpressionClaimNMaxBus, ForkFinalSampleBus,
-    ForkedTranscriptBus as LocalForkedTranscriptBus,
-    FractionFolderInputBus as LocalFractionFolderInputBus, HyperdimBus as LocalHyperdimBus,
-    LiftedHeightsBus as LocalLiftedHeightsBus, LookupChallengeBus, MainBus, MainContributionBus,
-    MainEccRtChallengeBus, MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus,
+    CachedCommitBus as LocalCachedCommitBus, EccRtBus, ForkFinalSampleBus,
+    ForkedTranscriptBus as LocalForkedTranscriptBus, LookupChallengeBus, MainBus,
+    MainContributionBus, MainEccRtChallengeBus, MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus,
     MainEccRtSumcheckFinalBus, MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus,
     MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
-    NLiftBus as LocalNLiftBus, PcsBaseInputOpeningBus, PcsBasefoldEvalBus,
-    PcsBasefoldFinalExpectedBus, PcsBasefoldFinalPointBus, PcsBasefoldQueryBus, PcsBatchAlphaBus,
-    PcsBatchCoeffBus, PcsCommitHeightBus, PcsCommitPhaseLeafBus, PcsCommitmentRootBus,
-    PcsEqProductBus, PcsFinalMessageBus, PcsFoldChallengeBus, PcsJaggedAssistHBus,
-    PcsJaggedAssistQBus, PcsJaggedFEvalBus, PcsOpeningEvalBus, PcsQuerySampleBus,
-    PcsSuffixProductBus, PcsSumcheckInputBus, PcsSumcheckOutputBus, PcsTranscriptExtBus,
+    PcsBaseInputOpeningBus, PcsBasefoldEvalBus, PcsBasefoldFinalExpectedBus,
+    PcsBasefoldFinalPointBus, PcsBasefoldQueryBus, PcsBatchAlphaBus, PcsBatchCoeffBus,
+    PcsCommitHeightBus, PcsCommitPhaseLeafBus, PcsCommitmentRootBus, PcsEqProductBus,
+    PcsFinalMessageBus, PcsFoldChallengeBus, PcsJaggedAssistHBus, PcsJaggedAssistQBus,
+    PcsJaggedFEvalBus, PcsOpeningEvalBus, PcsQuerySampleBus, PcsSuffixProductBus,
+    PcsSumcheckInputBus, PcsSumcheckOutputBus, PcsTranscriptExtBus,
     PublicValuesBus as LocalPublicValuesBus, TowerMainPointBus, TowerModuleBus,
     TranscriptBus as LocalTranscriptBus,
 };
@@ -34,13 +31,8 @@ pub struct BusInventory {
     pub poseidon2_compress_bus: Poseidon2CompressBus,
     pub merkle_verify_bus: MerkleVerifyBus,
     pub tower_module_bus: TowerModuleBus,
-    pub expression_claim_n_max_bus: LocalExpressionClaimNMaxBus,
-    pub fraction_folder_input_bus: LocalFractionFolderInputBus,
     pub air_presence_bus: AirPresenceBus,
     pub air_shape_bus: AirShapeBus,
-    pub hyperdim_bus: LocalHyperdimBus,
-    pub lifted_heights_bus: LocalLiftedHeightsBus,
-    pub n_lift_bus: LocalNLiftBus,
     pub cached_commit_bus: LocalCachedCommitBus,
     pub public_values_bus: LocalPublicValuesBus,
     pub range_checker_bus: RangeCheckerBus,
@@ -105,14 +97,9 @@ impl BusInventory {
         let tower_module_bus = TowerModuleBus::new(gkr_bus_idx);
 
         let air_shape_bus = AirShapeBus::new(b.new_bus_idx());
-        let hyperdim_bus = LocalHyperdimBus::new(b.new_bus_idx());
-        let lifted_heights_bus = LocalLiftedHeightsBus::new(b.new_bus_idx());
         let public_values_bus = LocalPublicValuesBus::new(b.new_bus_idx());
         let range_checker_bus = RangeCheckerBus::new(b.new_bus_idx());
         let power_checker_bus = PowerCheckerBus::new(b.new_bus_idx());
-        let expression_claim_n_max_bus = LocalExpressionClaimNMaxBus::new(b.new_bus_idx());
-        let fraction_folder_input_bus = LocalFractionFolderInputBus::new(b.new_bus_idx());
-        let n_lift_bus = LocalNLiftBus::new(b.new_bus_idx());
         let air_presence_bus = AirPresenceBus::new(b.new_bus_idx());
 
         let xi_randomness_bus = XiRandomnessBus::new(b.new_bus_idx());
@@ -173,13 +160,8 @@ impl BusInventory {
             poseidon2_compress_bus,
             merkle_verify_bus,
             tower_module_bus,
-            expression_claim_n_max_bus,
-            fraction_folder_input_bus,
             air_presence_bus,
             air_shape_bus,
-            hyperdim_bus,
-            lifted_heights_bus,
-            n_lift_bus,
             cached_commit_bus,
             public_values_bus,
             range_checker_bus,

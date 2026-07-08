@@ -1,28 +1,36 @@
 use std::sync::Arc;
 
-use continuations_v2::SC;
 use eyre::{Result, eyre};
 use openvm_cpu_backend::CpuBackend;
-use openvm_stark_backend::proof::Proof;
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2CpuEngine;
+use openvm_stark_backend::{StarkEngine, StarkProtocolConfig, proof::Proof, prover::ProverBackend};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{
+    BabyBearPoseidon2Config, BabyBearPoseidon2CpuEngine, Digest, EF, F,
+};
 
 use crate::{
-    circuit::inner::InnerTraceGenImpl,
-    system::{RecursionProof, RecursionVk, VerifierSubCircuit},
+    circuit::inner::{InnerTraceGen, InnerTraceGenImpl},
+    system::{RecursionProof, RecursionVk, VerifierSubCircuit, VerifierTraceGen},
 };
 
 mod inner;
 
 pub use inner::*;
 
-pub type InnerCpuProver<const MAX_NUM_PROOFS: usize> =
-    InnerAggregationProver<CpuBackend<SC>, VerifierSubCircuit<MAX_NUM_PROOFS>, InnerTraceGenImpl>;
+pub type InnerCpuProver<const MAX_NUM_PROOFS: usize> = InnerAggregationProver<
+    CpuBackend<BabyBearPoseidon2Config>,
+    VerifierSubCircuit<MAX_NUM_PROOFS>,
+    InnerTraceGenImpl,
+>;
 
 /// Proof produced by the leaf layer: a STARK proof over `SC` (BabyBear + Poseidon2).
-pub type LeafProof = Proof<SC>;
+pub type LeafProof<SC = BabyBearPoseidon2Config> = Proof<SC>;
 
 /// Proof produced by the internal aggregation layer (same STARK config as leaf).
-pub type InternalProof = Proof<SC>;
+pub type InternalProof<SC = BabyBearPoseidon2Config> = Proof<SC>;
+
+/// Verifying key produced for the leaf aggregation circuit.
+pub type LeafVk<SC = BabyBearPoseidon2Config> =
+    openvm_stark_backend::keygen::types::MultiStarkVerifyingKey<SC>;
 
 /// Placeholder for the final root proof that can be verified on-chain.
 ///
@@ -30,11 +38,12 @@ pub type InternalProof = Proof<SC>;
 /// STARK config (`RootSC = BabyBearBn254Poseidon2Config`) and wraps it
 /// in a SNARK (Groth16 / SWIRL). This type will be replaced with a
 /// concrete SNARK proof once the root prover is implemented.
-pub struct RootProof {
-    pub inner_proof: InternalProof,
+pub struct RootProof<SC: StarkProtocolConfig = BabyBearPoseidon2Config> {
+    pub inner_proof: InternalProof<SC>,
 }
 
 /// Configuration for the aggregation pipeline.
+#[derive(Clone)]
 pub struct AggregationOptions {
     /// System parameters for the leaf-layer recursive STARK prover
     /// (log_blowup, num_queries, proof_of_work_bits).
@@ -83,30 +92,51 @@ type Engine =
 ///
 /// 3. **Root**: The final internal proof is re-proved over a BN254-friendly
 ///    STARK config and wrapped in a SNARK for on-chain verification.
-pub struct AggProver<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> {
-    leaf_prover: InnerCpuProver<LEAF_FANIN>,
+pub struct AggProver<
+    const LEAF_FANIN: usize,
+    const INTERNAL_FANIN: usize,
+    SC = BabyBearPoseidon2Config,
+    PB = CpuBackend<SC>,
+    T = InnerTraceGenImpl,
+    Eg = Engine,
+> where
+    SC: StarkProtocolConfig<F = F, EF = EF, Digest = Digest>,
+    PB: ProverBackend<Val = F, Challenge = EF, Commitment = Digest>,
+    T: InnerTraceGen<PB>,
+    VerifierSubCircuit<LEAF_FANIN>: VerifierTraceGen<PB, SC>,
+{
+    leaf_prover: InnerAggregationProver<PB, VerifierSubCircuit<LEAF_FANIN>, T, SC>,
     options: AggregationOptions,
+    _engine: std::marker::PhantomData<Eg>,
 }
 
-impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> AggProver<LEAF_FANIN, INTERNAL_FANIN> {
+impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize, SC, PB, T, Eg>
+    AggProver<LEAF_FANIN, INTERNAL_FANIN, SC, PB, T, Eg>
+where
+    SC: StarkProtocolConfig<F = F, EF = EF, Digest = Digest>,
+    PB: ProverBackend<Val = F, Challenge = EF, Commitment = Digest>,
+    PB::Matrix: Clone,
+    PB::Commitment: Default,
+    T: InnerTraceGen<PB>,
+    Eg: StarkEngine<SC = SC, PB = PB>,
+    VerifierSubCircuit<LEAF_FANIN>: VerifierTraceGen<PB, SC>,
+{
     /// Create a new aggregation prover from the base-layer verifying key.
     pub fn new(child_vk: Arc<RecursionVk>, options: AggregationOptions) -> Self {
-        let leaf_prover = InnerCpuProver::<LEAF_FANIN>::new::<Engine>(
-            child_vk,
-            options.leaf_system_params.clone(),
-            false,
-            None,
-        );
+        let leaf_prover = InnerAggregationProver::<PB, VerifierSubCircuit<LEAF_FANIN>, T, SC>::new::<
+            Eg,
+        >(child_vk, options.leaf_system_params.clone(), false, None);
         Self {
             leaf_prover,
             options,
+            _engine: std::marker::PhantomData,
         }
     }
 
     /// Run the full recursion pipeline: leaf → internal → root.
     ///
     /// Takes all base-layer shard proofs and returns a single root proof.
-    pub fn prove(&self, shard_proofs: &[CenoProof]) -> Result<RootProof> {
+    pub fn prove(&self, shard_proofs: &[CenoProof]) -> Result<RootProof<SC>> {
         if shard_proofs.is_empty() {
             return Err(eyre!("no shard proofs to aggregate"));
         }
@@ -118,12 +148,12 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> AggProver<LEAF_FANIN,
 
     /// Stage 1: Partition shard proofs into chunks of `LEAF_FANIN` and
     /// produce one leaf proof per chunk.
-    fn prove_leaves(&self, shard_proofs: &[CenoProof]) -> Result<Vec<LeafProof>> {
+    fn prove_leaves(&self, shard_proofs: &[CenoProof]) -> Result<Vec<LeafProof<SC>>> {
         let mut leaf_proofs = Vec::new();
         for chunk in shard_proofs.chunks(LEAF_FANIN) {
             let proof = self
                 .leaf_prover
-                .agg_prove_no_def::<Engine>(chunk, ChildVkKind::App)?;
+                .agg_prove_no_def::<Eg>(chunk, ChildVkKind::App)?;
             leaf_proofs.push(proof);
         }
         Ok(leaf_proofs)
@@ -134,7 +164,7 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> AggProver<LEAF_FANIN,
     ///
     /// Not yet implemented — requires `ChildVkKind::RecursiveSelf` support
     /// and converting the leaf prover's own VK into a `RecursionVk`.
-    fn prove_internal(&self, leaf_proofs: Vec<LeafProof>) -> Result<InternalProof> {
+    fn prove_internal(&self, leaf_proofs: Vec<LeafProof<SC>>) -> Result<InternalProof<SC>> {
         if leaf_proofs.len() == 1 {
             return Ok(leaf_proofs.into_iter().next().unwrap());
         }
@@ -161,7 +191,7 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> AggProver<LEAF_FANIN,
     ///
     /// Not yet implemented — requires the root circuit (BabyBearBn254Poseidon2Config)
     /// and a SNARK wrapper (Groth16 or SWIRL).
-    fn prove_root(&self, internal_proof: InternalProof) -> Result<RootProof> {
+    fn prove_root(&self, internal_proof: InternalProof<SC>) -> Result<RootProof<SC>> {
         // TODO: Implement root proving:
         //   1. Build RootCircuit that verifies one Proof<SC> over RootSC
         //   2. Prove with BabyBearBn254Poseidon2 engine
@@ -172,7 +202,12 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> AggProver<LEAF_FANIN,
     }
 
     /// Access the leaf prover's verifying key.
-    pub fn leaf_vk(&self) -> Arc<openvm_stark_backend::keygen::types::MultiStarkVerifyingKey<SC>> {
+    pub fn leaf_vk(&self) -> Arc<LeafVk<SC>> {
         self.leaf_prover.get_vk()
+    }
+
+    /// Verify the recursion proof returned by [`Self::prove`].
+    pub fn verify_root_proof(&self, root_proof: &RootProof<SC>) -> Result<()> {
+        self.leaf_prover.verify_proof::<Eg>(&root_proof.inner_proof)
     }
 }

@@ -192,7 +192,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_last = F::ZERO;
                 cols.sorted_idx = F::from_usize(sorted_idx);
                 cols.log_height = F::from_usize(log_height);
-                cols.need_rot = F::ZERO;
                 let starting_tidx = preflight.proof_shape.starting_tidx[*air_idx];
                 cols.starting_tidx = F::from_usize(starting_tidx);
                 cols.tower_tidx =
@@ -216,8 +215,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 }
                 cols.n_max = F::from_usize(preflight.proof_shape.n_max);
                 cols.is_n_max_greater = F::ZERO;
-                cols.num_air_id_lookups = F::ZERO;
-                cols.num_columns = F::ZERO;
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
                 cols.after_forked_challenge_1 = ef_to_limbs(fork_sample(preflight, fork_id));
@@ -260,7 +257,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.is_last = F::ZERO;
                 cols.sorted_idx = F::from_usize(sorted_idx);
                 cols.log_height = F::ZERO;
-                cols.need_rot = F::ZERO;
                 cols.starting_tidx = F::from_usize(preflight.proof_shape.starting_tidx[air_idx]);
                 cols.tower_tidx = F::ZERO;
                 cols.fork_start_tidx = F::from_usize(preflight.proof_shape.fork_start_tidx);
@@ -276,8 +272,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 }
                 cols.n_max = F::from_usize(preflight.proof_shape.n_max);
                 cols.is_n_max_greater = F::ZERO;
-                cols.num_air_id_lookups = F::ZERO;
-                cols.num_columns = F::ZERO;
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
                 cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
                 cols.after_forked_challenge_1 = [F::ZERO; D_EF];
@@ -314,7 +308,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
             cols.is_last = F::ONE;
             cols.sorted_idx = F::ZERO;
             cols.log_height = F::from_usize(preflight.proof_shape.n_logup);
-            cols.need_rot = F::ZERO;
             cols.starting_tidx = F::from_usize(preflight.proof_shape.post_tidx);
             cols.tower_tidx = F::ZERO;
             cols.fork_start_tidx = F::from_usize(preflight.proof_shape.fork_start_tidx);
@@ -334,8 +327,6 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                     .n_max
                     .abs_diff(preflight.proof_shape.n_logup),
             );
-            cols.num_air_id_lookups = F::ZERO;
-            cols.num_columns = F::ZERO;
             cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
             cols.lookup_challenge_beta = preflight.proof_shape.lookup_challenge_beta;
             cols.after_forked_challenge_1 = [F::ZERO; D_EF];
