@@ -58,6 +58,7 @@ impl ModuleChip<GpuBackend> for PublicValuesGpuTraceGenerator {
                 pvs_tidx,
                 proofs_gpu.len(),
                 num_pvs,
+                device_ctx.stream.as_raw(),
             )
             .unwrap();
         }

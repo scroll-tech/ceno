@@ -649,27 +649,28 @@ mod cuda_tracegen {
                 range_checker.clone(),
                 pow_checker.clone(),
             );
-            let chips = [
-                ProofShapeModuleChip::ProofShape(proof_shape),
-                ProofShapeModuleChip::PublicValues,
-            ];
             let cpu_ctx = (
                 &child_vk.cpu,
                 proofs_cpu.as_slice(),
                 preflights_cpu.as_slice(),
             );
-            let mut ctxs = chips
-                .iter()
-                .map(|chip| {
-                    let trace = chip.generate_trace(
-                        &cpu_ctx,
-                        required_heights.and_then(|heights| heights.get(chip.index()).copied()),
-                    )?;
-                    Some(AirProvingContext::simple_no_pis(
-                        transport_matrix_h2d_row(&trace, &device_ctx).ok()?,
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()?;
+            let proof_shape_chip = ProofShapeModuleChip::ProofShape(proof_shape);
+            // TODO(cuda-tracegen): replace this CPU fallback with a Ceno-specific
+            // proof-shape kernel. The OpenVM proof-shape kernel has incompatible columns.
+            let proof_shape_trace = proof_shape_chip.generate_trace(
+                &cpu_ctx,
+                required_heights.and_then(|heights| heights.get(proof_shape_chip.index()).copied()),
+            )?;
+            let mut ctxs = vec![AirProvingContext::simple_no_pis(
+                transport_matrix_h2d_row(&proof_shape_trace, &device_ctx).ok()?,
+            )];
+
+            ctxs.push(
+                pvs::cuda::PublicValuesGpuTraceGenerator.generate_proving_ctx(
+                    &(proofs, preflights),
+                    required_heights.and_then(|heights| heights.get(1).copied()),
+                )?,
+            );
 
             for &value in external_range_checks {
                 range_checker.add_count(value);
