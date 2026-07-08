@@ -5,6 +5,8 @@ use recursion_circuit::prelude::F;
 
 pub mod deferral;
 pub mod inner;
+pub mod recursive;
+pub mod root;
 
 pub const CONSTRAINT_EVAL_CACHED_INDEX: usize = 0;
 

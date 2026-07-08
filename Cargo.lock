@@ -3757,6 +3757,7 @@ dependencies = [
  "getset",
  "hex-literal",
  "itertools 0.14.0",
+ "num-bigint",
  "openvm-codec-derive",
  "p3-air",
  "p3-challenger",
@@ -3788,11 +3789,14 @@ dependencies = [
  "itertools 0.14.0",
  "metrics-tracing-context",
  "metrics-util",
+ "num-bigint",
  "nvtx",
  "openvm-cpu-backend",
  "openvm-stark-backend",
  "p3-baby-bear",
+ "p3-bn254",
  "p3-field",
+ "p3-poseidon2",
  "rand 0.9.2",
  "serde",
  "serde_json",
@@ -3800,6 +3804,7 @@ dependencies = [
  "tracing",
  "tracing-forest",
  "tracing-subscriber",
+ "zkhash-axiom",
 ]
 
 [[package]]
@@ -3908,6 +3913,22 @@ dependencies = [
  "p3-poseidon2",
  "p3-symmetric",
  "rand 0.9.2",
+]
+
+[[package]]
+name = "p3-bn254"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "923bd91df7dd93481b4bfb53aa903d46d1a49d51160513472a5e95ca92ef1b46"
+dependencies = [
+ "num-bigint",
+ "p3-field",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
+ "paste",
+ "rand 0.9.2",
+ "serde",
 ]
 
 [[package]]
@@ -6568,6 +6589,33 @@ dependencies = [
 name = "zkhash"
 version = "0.2.0"
 source = "git+https://github.com/HorizenLabs/poseidon2.git?rev=bb476b9#bb476b9ca38198cf5092487283c8b8c5d4317c4e"
+dependencies = [
+ "ark-ff 0.4.2",
+ "ark-std 0.4.0",
+ "bitvec",
+ "blake2",
+ "bls12_381",
+ "byteorder",
+ "cfg-if",
+ "group 0.12.1",
+ "group 0.13.0",
+ "halo2",
+ "hex",
+ "jubjub",
+ "lazy_static",
+ "pasta_curves 0.5.1",
+ "rand 0.8.5",
+ "serde",
+ "sha2",
+ "sha3",
+ "subtle",
+]
+
+[[package]]
+name = "zkhash-axiom"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d038a7895d0e3ab0a352f53e7eb4f1f829f88fce2fb3cff93d665a8a0e01af6"
 dependencies = [
  "ark-ff 0.4.2",
  "ark-std 0.4.0",

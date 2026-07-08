@@ -108,9 +108,21 @@ pub fn generate_proving_ctx(
     if let (Some(first), Some(last)) = (proofs.first(), proofs.last()) {
         let pvs: &mut VmPvs<F> = public_values.as_mut_slice().borrow_mut();
         *pvs = build_vm_pvs(fixed_commit, fixed_no_omc_init_commit, first);
+        pvs.init_pc = F::from_u32(child_vk.entry_pc);
+        pvs.init_cycle = F::from_u64(ceno_emul::FullTracer::SUBCYCLES_PER_INSN);
         pvs.exit_code = split_u32_lo_hi(last.public_values.exit_code);
         pvs.end_pc = F::from_u32(last.public_values.end_pc);
         pvs.end_cycle = F::from_u64(last.public_values.end_cycle);
+        pvs.heap_shard_len = aggregate_word_len(
+            first.public_values.heap_start_addr,
+            last.public_values.heap_start_addr,
+            last.public_values.heap_shard_len,
+        );
+        pvs.hint_shard_len = aggregate_word_len(
+            first.public_values.hint_start_addr,
+            last.public_values.hint_start_addr,
+            last.public_values.hint_shard_len,
+        );
     }
 
     AirProvingContext {
@@ -212,4 +224,23 @@ fn ef_to_limbs(value: EF) -> [F; D_EF] {
     let mut out = [F::ZERO; D_EF];
     out.copy_from_slice(value.as_basis_coefficients_slice());
     out
+}
+
+fn aggregate_word_len(first_start: u32, last_start: u32, last_len: u32) -> F {
+    let last_end = last_start
+        .checked_add(
+            last_len
+                .checked_mul(ceno_emul::WORD_SIZE as u32)
+                .expect("range overflow"),
+        )
+        .expect("range overflow");
+    let bytes = last_end
+        .checked_sub(first_start)
+        .expect("non-contiguous aggregate range");
+    assert_eq!(
+        bytes % ceno_emul::WORD_SIZE as u32,
+        0,
+        "aggregate range must be word-aligned"
+    );
+    F::from_u32(bytes / ceno_emul::WORD_SIZE as u32)
 }

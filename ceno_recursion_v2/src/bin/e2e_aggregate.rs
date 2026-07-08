@@ -200,14 +200,18 @@ where
     let child_vk = result.vk.wrap_err("base proving did not return a vk")?;
     let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
     let prover = AggProver::<2, 2>::new(Arc::new(child_vk), options);
-    let root_proof = prover.prove(&shard_proofs)?;
-    prover.verify_root_proof(&root_proof)?;
-    let proof_size = bincode::serialized_size(&root_proof.inner_proof)?;
+    let root_output = prover.prove_with_root_vk(&shard_proofs)?;
+    prover.verify_root_proof(&root_output.root_vk, &root_output.root_proof)?;
+    let proof_size = bincode::serialized_size(&root_output.root_proof)?;
+    println!(
+        "recursion-v2 root proof size: {proof_size} bytes ({:.2} MiB)",
+        proof_size as f64 / (1024.0 * 1024.0)
+    );
 
     tracing::info!(
         shard_count = shard_proofs.len(),
         proof_size_bytes = proof_size,
-        "recursion-v2 aggregation proved and verified"
+        "recursion-v2 aggregation produced a root proof"
     );
     Ok(())
 }
