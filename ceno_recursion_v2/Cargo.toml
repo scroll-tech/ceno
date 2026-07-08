@@ -64,6 +64,7 @@ cuda = [
   "dep:openvm-cuda-builder",
   "dep:openvm-cuda-backend",
   "dep:openvm-cuda-common",
+  "openvm-circuit-primitives/cuda",
 ]
 default = ["parallel"]
 parallel = [

@@ -1,6 +1,6 @@
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Once},
+    sync::{Arc, Mutex, Once},
 };
 
 use eyre::{Result, eyre};
@@ -22,6 +22,22 @@ use crate::{
 };
 
 const MAX_NUM_PROOFS: usize = 2;
+static CUDA_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn run_cuda_fixture_test(
+    name: &str,
+    f: impl FnOnce() -> Result<()> + Send + 'static,
+) -> Result<()> {
+    std::thread::Builder::new()
+        .name(name.to_string())
+        .stack_size(64 * 1024 * 1024)
+        .spawn(move || {
+            let _guard = CUDA_TEST_LOCK.lock().unwrap();
+            f()
+        })?
+        .join()
+        .map_err(|_| eyre!("CUDA fixture test thread panicked"))?
+}
 
 fn init_test_tracing() {
     static INIT: Once = Once::new();
@@ -116,15 +132,18 @@ fn prepare_verifier_inputs(
     let (_, poseidon2_compress_inputs, initial_transcripts) =
         <InnerTraceGenImpl as InnerTraceGen<
             openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>,
-        >>::generate_pre_verifier_subcircuit_ctxs(&tracegen, PreVerifierSubCircuitInput {
-            proofs,
-            proofs_type: ProofsType::Vm,
-            absent_trace_pvs: None,
-            child_is_app: true,
-            child_vk,
-            child_dag_commit: Default::default(),
-            initial_transcript,
-        });
+        >>::generate_pre_verifier_subcircuit_ctxs(
+            &tracegen,
+            PreVerifierSubCircuitInput {
+                proofs,
+                proofs_type: ProofsType::Vm,
+                absent_trace_pvs: None,
+                child_is_app: true,
+                child_vk,
+                child_dag_commit: Default::default(),
+                initial_transcript,
+            },
+        );
     (poseidon2_compress_inputs, initial_transcripts)
 }
 
@@ -252,6 +271,120 @@ fn assert_ctxs_match(
     }
 }
 
+fn assert_ctx_vectors_match(
+    label: &str,
+    cpu_ctxs: Vec<AirProvingContext<openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>>>,
+    gpu_ctxs: Vec<AirProvingContext<GpuBackend>>,
+) {
+    let device_ctx = GpuDeviceCtx::for_current_device().expect("failed to get CUDA device");
+    assert_eq!(cpu_ctxs.len(), gpu_ctxs.len(), "{label} ctx count mismatch");
+
+    for (ctx_idx, (cpu, gpu)) in cpu_ctxs.into_iter().zip(gpu_ctxs).enumerate() {
+        assert_eq!(
+            cpu.cached_mains.len(),
+            gpu.cached_mains.len(),
+            "{label} cached main count mismatch for ctx {ctx_idx}",
+        );
+        assert_eq!(
+            cpu.public_values, gpu.public_values,
+            "{label} public values mismatch for ctx {ctx_idx}",
+        );
+
+        let cpu_trace = cpu.common_main;
+        let gpu_trace = gpu.common_main;
+        let cpu_height = Matrix::height(&cpu_trace);
+        let cpu_width = Matrix::width(&cpu_trace);
+        let gpu_height = MatrixDimensions::height(&gpu_trace);
+        let gpu_width = MatrixDimensions::width(&gpu_trace);
+        assert_eq!(
+            cpu_width, gpu_width,
+            "{label} width mismatch for ctx {ctx_idx}",
+        );
+        assert_eq!(
+            cpu_height, gpu_height,
+            "{label} height mismatch for ctx {ctx_idx}",
+        );
+        let gpu_trace = transport_matrix_d2h_row_major(&gpu_trace, &device_ctx)
+            .expect("failed to copy GPU trace to host");
+        for r in 0..cpu_height {
+            for c in 0..cpu_width {
+                assert_eq!(
+                    cpu_trace.get(r, c),
+                    gpu_trace.get(r, c),
+                    "{label} trace mismatch for ctx {ctx_idx} at row {r} column {c}",
+                );
+            }
+        }
+    }
+}
+
+fn compare_inner_tracegen(shard_count: usize) -> Result<()> {
+    init_test_tracing();
+    let Some((loaded_proofs, child_vk)) = load_fixtures()? else {
+        return Ok(());
+    };
+    let proofs = select_proofs(&loaded_proofs, shard_count)?;
+    let mut initial_transcript = default_duplex_sponge_recorder();
+    transcript_observe_label(&mut initial_transcript, TranscriptLabel::Riscv.as_bytes());
+
+    let cpu_tracegen = <InnerTraceGenImpl as InnerTraceGen<
+        openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>,
+    >>::new(false);
+    let gpu_tracegen = <InnerTraceGenImpl as InnerTraceGen<GpuBackend>>::new(false);
+
+    let (cpu_pre_ctxs, cpu_poseidon2_inputs, cpu_initial_transcripts) =
+        <InnerTraceGenImpl as InnerTraceGen<
+            openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>,
+        >>::generate_pre_verifier_subcircuit_ctxs(
+            &cpu_tracegen,
+            PreVerifierSubCircuitInput {
+                proofs: &proofs,
+                proofs_type: ProofsType::Vm,
+                absent_trace_pvs: None,
+                child_is_app: true,
+                child_vk: &child_vk,
+                child_dag_commit: Default::default(),
+                initial_transcript: initial_transcript.clone(),
+            },
+        );
+    let (gpu_pre_ctxs, gpu_poseidon2_inputs, gpu_initial_transcripts) =
+        <InnerTraceGenImpl as InnerTraceGen<GpuBackend>>::generate_pre_verifier_subcircuit_ctxs(
+            &gpu_tracegen,
+            PreVerifierSubCircuitInput {
+                proofs: &proofs,
+                proofs_type: ProofsType::Vm,
+                absent_trace_pvs: None,
+                child_is_app: true,
+                child_vk: &child_vk,
+                child_dag_commit: Default::default(),
+                initial_transcript,
+            },
+        );
+
+    assert_eq!(cpu_poseidon2_inputs, gpu_poseidon2_inputs);
+    assert_eq!(
+        cpu_initial_transcripts.len(),
+        gpu_initial_transcripts.len(),
+        "initial transcript count mismatch"
+    );
+    assert_ctx_vectors_match("inner pre-verifier", cpu_pre_ctxs, gpu_pre_ctxs);
+
+    let cpu_post_ctxs = <InnerTraceGenImpl as InnerTraceGen<
+        openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>,
+    >>::generate_post_verifier_subcircuit_ctxs(
+        &cpu_tracegen, &proofs, ProofsType::Vm, true
+    );
+    let gpu_post_ctxs =
+        <InnerTraceGenImpl as InnerTraceGen<GpuBackend>>::generate_post_verifier_subcircuit_ctxs(
+            &gpu_tracegen,
+            &proofs,
+            ProofsType::Vm,
+            true,
+        );
+    assert_ctx_vectors_match("inner post-verifier", cpu_post_ctxs, gpu_post_ctxs);
+    Ok(())
+}
+
 fn compare_tracegen(shard_count: usize, replay_required_heights: bool) -> Result<()> {
     init_test_tracing();
     let Some((loaded_proofs, child_vk)) = load_fixtures()? else {
@@ -280,15 +413,26 @@ fn compare_tracegen(shard_count: usize, replay_required_heights: bool) -> Result
 
 #[test]
 fn test_cuda_tracegen_compare_single_fixture_proof() -> Result<()> {
-    compare_tracegen(1, false)
+    run_cuda_fixture_test("cuda-tracegen-single", || compare_tracegen(1, false))
 }
 
 #[test]
 fn test_cuda_tracegen_compare_multi_fixture_proofs() -> Result<()> {
-    compare_tracegen(MAX_NUM_PROOFS, false)
+    run_cuda_fixture_test("cuda-tracegen-multi", || {
+        compare_tracegen(MAX_NUM_PROOFS, false)
+    })
 }
 
 #[test]
 fn test_cuda_tracegen_required_heights_match_cpu() -> Result<()> {
-    compare_tracegen(MAX_NUM_PROOFS, true)
+    run_cuda_fixture_test("cuda-tracegen-required-heights", || {
+        compare_tracegen(MAX_NUM_PROOFS, true)
+    })
+}
+
+#[test]
+fn test_cuda_inner_tracegen_pre_post_match_cpu() -> Result<()> {
+    run_cuda_fixture_test("cuda-inner-tracegen-compare", || {
+        compare_inner_tracegen(MAX_NUM_PROOFS)
+    })
 }
