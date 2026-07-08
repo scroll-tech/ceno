@@ -42,5 +42,6 @@ fn placeholder_system_params() -> SystemParams {
             log_max_message_length: 1,
             pow_bits: 0,
         },
+        1, // max_constraint_degree
     )
 }

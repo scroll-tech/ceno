@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix, prelude::Digest};
-use openvm_cuda_common::{copy::MemCopyH2D, memory_manager::MemTracker};
+use openvm_cuda_common::{copy::MemCopyH2D, memory_manager::MemTracker, stream::GpuDeviceCtx};
 use openvm_stark_backend::prover::AirProvingContext;
 use openvm_stark_sdk::config::baby_bear_poseidon2::DIGEST_SIZE;
 
@@ -79,7 +79,8 @@ impl ModuleChip<GpuBackend> for ProofShapeChipGpu<NUM_LIMBS, LIMB_BITS> {
         let num_airs = vk_gpu.per_air.len();
         let width =
             ProofShapeCols::<u8, NUM_LIMBS>::width() + encoder_width + max_cached * DIGEST_SIZE;
-        let trace = DeviceMatrix::with_capacity(height, width);
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
 
         let per_row_tidx = preflights_gpu
             .iter()
@@ -108,8 +109,9 @@ impl ModuleChip<GpuBackend> for ProofShapeChipGpu<NUM_LIMBS, LIMB_BITS> {
                 main_commit: preflight.proof_shape.main_commit,
             })
             .collect_vec()
-            .to_device()
+            .to_device_on(&device_ctx)
             .unwrap();
+        device_ctx.stream.synchronize().ok()?;
         let inputs = ProofShapeTracegenInputs {
             num_airs,
             l_skip: vk_gpu.system_params.l_skip,

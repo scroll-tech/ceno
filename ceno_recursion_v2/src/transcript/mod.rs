@@ -456,6 +456,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 #[cfg(feature = "cuda")]
 mod cuda_tracegen {
     use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
+    use openvm_cuda_common::stream::GpuDeviceCtx;
 
     use super::*;
     use crate::cuda::{
@@ -474,6 +475,7 @@ mod cuda_tracegen {
             ctx: &Self::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
+            let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
             let proofs_cpu = proofs
                 .iter()
                 .map(|proof| proof.cpu.clone())
@@ -537,10 +539,10 @@ mod cuda_tracegen {
 
             Some(vec![
                 AirProvingContext::simple_no_pis(
-                    transport_matrix_h2d_row(&transcript_trace).ok()?,
+                    transport_matrix_h2d_row(&transcript_trace, &device_ctx).ok()?,
                 ),
                 AirProvingContext::simple_no_pis(
-                    transport_matrix_h2d_row(&poseidon2_trace).ok()?,
+                    transport_matrix_h2d_row(&poseidon2_trace, &device_ctx).ok()?,
                 ),
             ])
         }

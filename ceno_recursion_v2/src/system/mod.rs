@@ -315,6 +315,7 @@ impl<'a> TraceModuleRef<'a> {
 #[cfg(feature = "cuda")]
 mod cuda_tracegen {
     use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
+    use openvm_cuda_common::stream::GpuDeviceCtx;
 
     use super::*;
     use crate::cuda::{GlobalCtxGpu, PreflightGpu, ProofGpu, VerifyingKeyGpu};
@@ -462,6 +463,7 @@ mod cuda_tracegen {
                 .zip(preflights_cpu.iter())
                 .map(|(proof, preflight)| PreflightGpu::new(child_vk, proof, preflight))
                 .collect::<Vec<_>>();
+            let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
 
             let power_checker_gen =
                 Arc::new(PowerCheckerCpuTraceGenerator::<2, POW_CHECKER_HEIGHT>::default());
@@ -503,9 +505,10 @@ mod cuda_tracegen {
             }
             let _ = power_checker_required;
 
-            let exp_bits_trace = exp_bits_len_gen.generate_trace_row_major(exp_bits_len_required)?;
+            let exp_bits_trace =
+                exp_bits_len_gen.generate_trace_row_major(exp_bits_len_required)?;
             ctx_per_trace.push(AirProvingContext::simple_no_pis(
-                transport_matrix_h2d_row(&exp_bits_trace).ok()?,
+                transport_matrix_h2d_row(&exp_bits_trace, &device_ctx).ok()?,
             ));
             Some(ctx_per_trace)
         }

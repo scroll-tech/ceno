@@ -4,10 +4,12 @@ use std::{
 };
 
 use eyre::{Result, eyre};
-use openvm_cuda_backend::{GpuBackend, data_transporter::transport_device_matrix_to_host};
-use openvm_stark_backend::prover::AirProvingContext;
+use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_d2h_row_major};
+use openvm_cuda_common::stream::GpuDeviceCtx;
+use openvm_poseidon2_air::POSEIDON2_WIDTH;
+use openvm_stark_backend::prover::{AirProvingContext, MatrixDimensions};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    BabyBearPoseidon2Config, default_duplex_sponge_recorder,
+    BabyBearPoseidon2Config, F, default_duplex_sponge_recorder,
 };
 use p3_matrix::Matrix;
 use tracing_subscriber::EnvFilter;
@@ -97,24 +99,24 @@ fn select_proofs(proofs: &[RecursionProof], count: usize) -> Result<Vec<Recursio
     Ok(proofs.iter().cycle().take(count).cloned().collect())
 }
 
-fn empty_external_data<'a>(required_heights: Option<&'a [usize]>) -> VerifierExternalData<'a> {
-    VerifierExternalData {
-        poseidon2_compress_inputs: &[],
-        poseidon2_permute_inputs: &[],
-        range_check_inputs: &[],
-        power_check_inputs: &[],
-        required_heights,
-        final_transcript_state: None,
-    }
-}
-
 fn generate_cpu_ctxs(
     circuit: &VerifierSubCircuit<MAX_NUM_PROOFS>,
     child_vk: &RecursionVk,
     proofs: &[RecursionProof],
     required_heights: Option<&[usize]>,
 ) -> Vec<AirProvingContext<openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>>> {
-    let mut external_data = empty_external_data(required_heights);
+    let poseidon2_compress_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
+    let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
+    let range_check_inputs = vec![];
+    let power_check_inputs = vec![];
+    let mut external_data = VerifierExternalData {
+        poseidon2_compress_inputs: &poseidon2_compress_inputs,
+        poseidon2_permute_inputs: &poseidon2_permute_inputs,
+        range_check_inputs: &range_check_inputs,
+        power_check_inputs: &power_check_inputs,
+        required_heights,
+        final_transcript_state: None,
+    };
     <VerifierSubCircuit<MAX_NUM_PROOFS> as VerifierTraceGen<
         openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>,
         BabyBearPoseidon2Config,
@@ -135,7 +137,18 @@ fn generate_gpu_ctxs(
     proofs: &[RecursionProof],
     required_heights: Option<&[usize]>,
 ) -> Vec<AirProvingContext<GpuBackend>> {
-    let mut external_data = empty_external_data(required_heights);
+    let poseidon2_compress_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
+    let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
+    let range_check_inputs = vec![];
+    let power_check_inputs = vec![];
+    let mut external_data = VerifierExternalData {
+        poseidon2_compress_inputs: &poseidon2_compress_inputs,
+        poseidon2_permute_inputs: &poseidon2_permute_inputs,
+        range_check_inputs: &range_check_inputs,
+        power_check_inputs: &power_check_inputs,
+        required_heights,
+        final_transcript_state: None,
+    };
     <VerifierSubCircuit<MAX_NUM_PROOFS> as VerifierTraceGen<
         GpuBackend,
         BabyBearPoseidon2Config,
@@ -155,6 +168,7 @@ fn assert_ctxs_match(
     cpu_ctxs: Vec<AirProvingContext<openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>>>,
     gpu_ctxs: Vec<AirProvingContext<GpuBackend>>,
 ) {
+    let device_ctx = GpuDeviceCtx::for_current_device().expect("failed to get CUDA device");
     let airs = circuit.airs::<BabyBearPoseidon2Config>();
     assert_eq!(cpu_ctxs.len(), airs.len(), "CPU ctx count must match AIRs");
     assert_eq!(gpu_ctxs.len(), airs.len(), "GPU ctx count must match AIRs");
@@ -174,39 +188,33 @@ fn assert_ctxs_match(
             air.name()
         );
 
-        match (cpu.common_main, gpu.common_main) {
-            (Some(cpu_trace), Some(gpu_trace)) => {
+        let cpu_trace = cpu.common_main;
+        let gpu_trace = gpu.common_main;
+        let cpu_height = Matrix::height(&cpu_trace);
+        let cpu_width = Matrix::width(&cpu_trace);
+        let gpu_height = MatrixDimensions::height(&gpu_trace);
+        let gpu_width = MatrixDimensions::width(&gpu_trace);
+        assert_eq!(
+            cpu_width,
+            gpu_width,
+            "width mismatch for AIR {air_idx} ({})",
+            air.name()
+        );
+        assert_eq!(
+            cpu_height,
+            gpu_height,
+            "height mismatch for AIR {air_idx} ({})",
+            air.name()
+        );
+        let gpu_trace = transport_matrix_d2h_row_major(&gpu_trace, &device_ctx)
+            .expect("failed to copy GPU trace to host");
+        for r in 0..cpu_height {
+            for c in 0..cpu_width {
                 assert_eq!(
-                    cpu_trace.width(),
-                    gpu_trace.width(),
-                    "width mismatch for AIR {air_idx} ({})",
+                    cpu_trace.get(r, c),
+                    gpu_trace.get(r, c),
+                    "trace mismatch for AIR {air_idx} ({}) at row {r} column {c}",
                     air.name()
-                );
-                assert_eq!(
-                    cpu_trace.height(),
-                    gpu_trace.height(),
-                    "height mismatch for AIR {air_idx} ({})",
-                    air.name()
-                );
-                let gpu_trace = transport_device_matrix_to_host(&gpu_trace);
-                for r in 0..cpu_trace.height() {
-                    for c in 0..cpu_trace.width() {
-                        assert_eq!(
-                            cpu_trace.get(r, c),
-                            gpu_trace.get(r, c),
-                            "trace mismatch for AIR {air_idx} ({}) at row {r} column {c}",
-                            air.name()
-                        );
-                    }
-                }
-            }
-            (None, None) => {}
-            (cpu, gpu) => {
-                panic!(
-                    "common trace presence mismatch for AIR {air_idx} ({}): cpu={} gpu={}",
-                    air.name(),
-                    cpu.is_some(),
-                    gpu.is_some()
                 );
             }
         }
@@ -225,12 +233,7 @@ fn compare_tracegen(shard_count: usize, replay_required_heights: bool) -> Result
         Some(
             generate_cpu_ctxs(&circuit, &child_vk, &proofs, None)
                 .iter()
-                .map(|ctx| {
-                    ctx.common_main
-                        .as_ref()
-                        .expect("all recursion tracegen ctxs should have a common trace")
-                        .height()
-                })
+                .map(|ctx| Matrix::height(&ctx.common_main))
                 .collect::<Vec<_>>(),
         )
     } else {

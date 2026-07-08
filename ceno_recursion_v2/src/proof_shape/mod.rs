@@ -607,6 +607,7 @@ impl RowMajorChip<F> for ProofShapeModuleChip {
 #[cfg(feature = "cuda")]
 mod cuda_tracegen {
     use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
+    use openvm_cuda_common::stream::GpuDeviceCtx;
 
     use super::*;
     use crate::cuda::{
@@ -629,6 +630,7 @@ mod cuda_tracegen {
             ctx: &<Self as TraceGenModule<GlobalCtxGpu, GpuBackend>>::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
+            let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
             let pow_checker = &ctx.0;
             let external_range_checks = ctx.1;
             let proofs_cpu = proofs
@@ -651,7 +653,11 @@ mod cuda_tracegen {
                 ProofShapeModuleChip::ProofShape(proof_shape),
                 ProofShapeModuleChip::PublicValues,
             ];
-            let cpu_ctx = (&child_vk.cpu, proofs_cpu.as_slice(), preflights_cpu.as_slice());
+            let cpu_ctx = (
+                &child_vk.cpu,
+                proofs_cpu.as_slice(),
+                preflights_cpu.as_slice(),
+            );
             let mut ctxs = chips
                 .iter()
                 .map(|chip| {
@@ -660,7 +666,7 @@ mod cuda_tracegen {
                         required_heights.and_then(|heights| heights.get(chip.index()).copied()),
                     )?;
                     Some(AirProvingContext::simple_no_pis(
-                        transport_matrix_h2d_row(&trace).ok()?,
+                        transport_matrix_h2d_row(&trace, &device_ctx).ok()?,
                     ))
                 })
                 .collect::<Option<Vec<_>>>()?;
@@ -670,7 +676,7 @@ mod cuda_tracegen {
             }
             let range_trace = range_checker.generate_trace_row_major();
             ctxs.push(AirProvingContext::simple_no_pis(
-                transport_matrix_h2d_row(&range_trace).ok()?,
+                transport_matrix_h2d_row(&range_trace, &device_ctx).ok()?,
             ));
             Some(ctxs)
         }
