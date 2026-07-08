@@ -1031,13 +1031,13 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
 #[cfg(test)]
 mod tests {
     use either::Either;
-    use ff_ext::{BabyBearExt4, FromUniformBytes, PoseidonField};
+    use ff_ext::{BabyBearExt4, FieldFrom, FromUniformBytes, PoseidonField};
     use gkr_iop::cpu::{CpuBackend, CpuProver};
     use itertools::Itertools;
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
     use p3::{
         babybear::BabyBear,
-        field::{FieldAlgebra, PrimeField32},
+        field::{PrimeCharacteristicRing, PrimeField32},
     };
     use rand::thread_rng;
     use std::sync::Arc;
@@ -1256,7 +1256,7 @@ mod tests {
             build_main_witness::<E, Pcs, CpuBackend<E, Pcs>, CpuProver<CpuBackend<E, Pcs>>>(
                 &leaf_composed,
                 &leaf_proof_input,
-                &[E::ONE, E::from_canonical_u32(7)],
+                &[E::ONE, E::from_v(7)],
                 WitnessBuildStage::Tower,
             );
         let leaf_r_len = leaf_composed.zkvm_v1_css.r_expressions.len()
@@ -1331,7 +1331,7 @@ mod tests {
             build_main_witness::<E, Pcs, CpuBackend<E, Pcs>, CpuProver<CpuBackend<E, Pcs>>>(
                 &ec_tree_composed,
                 &ec_tree_proof_input,
-                &[E::ONE, E::from_canonical_u32(7)],
+                &[E::ONE, E::from_v(7)],
                 WitnessBuildStage::Tower,
             );
         let ec_tree_r_len = ec_tree_composed.zkvm_v1_css.r_expressions.len()
