@@ -4,10 +4,8 @@ use recursion_circuit::{
 };
 pub use upstream::{
     AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage, CachedCommitBus,
-    CachedCommitBusMessage, ColumnClaimsBus, ColumnClaimsMessage, ExpressionClaimNMaxBus,
-    ExpressionClaimNMaxMessage, FractionFolderInputBus, FractionFolderInputMessage, HyperdimBus,
-    HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage, NLiftBus, NLiftMessage,
-    PublicValuesBus, PublicValuesBusMessage, SelHypercubeBus, SelHypercubeBusMessage, SelUniBus,
+    CachedCommitBusMessage, ColumnClaimsBus, ColumnClaimsMessage, PublicValuesBus,
+    PublicValuesBusMessage, SelHypercubeBus, SelHypercubeBusMessage, SelUniBus,
     SelUniBusMessage, TranscriptBus, TranscriptBusMessage,
 };
 
