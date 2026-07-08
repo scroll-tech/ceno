@@ -275,11 +275,6 @@ impl TowerLayerRecord {
     pub(crate) fn logup_count_at(&self, layer_idx: usize) -> usize {
         self.logup_counts.get(layer_idx).copied().unwrap_or(0)
     }
-
-    #[inline]
-    pub(crate) fn claim_tidx(&self, layer_idx: usize) -> usize {
-        self.layer_tidx(layer_idx) + tower_transcript_len::claim_offset_in_layer(layer_idx)
-    }
 }
 
 pub struct TowerLayerTraceGenerator;

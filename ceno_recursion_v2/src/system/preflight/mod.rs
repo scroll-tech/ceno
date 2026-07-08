@@ -145,8 +145,9 @@ pub struct PcsOpeningPointRecord {
     pub value: RecursionField,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub enum PcsOpeningCommitKind {
+    #[default]
     Witin,
     Fixed,
 }
@@ -157,12 +158,6 @@ impl PcsOpeningCommitKind {
             Self::Witin => 0,
             Self::Fixed => 1,
         }
-    }
-}
-
-impl Default for PcsOpeningCommitKind {
-    fn default() -> Self {
-        Self::Witin
     }
 }
 
@@ -361,8 +356,9 @@ pub struct PcsSumcheckInputRecord {
     pub claim: RecursionField,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub enum PcsEqProductKind {
+    #[default]
     JaggedClaim = 0,
     JaggedQEval = 1,
 }
@@ -373,14 +369,9 @@ impl PcsEqProductKind {
     }
 }
 
-impl Default for PcsEqProductKind {
-    fn default() -> Self {
-        Self::JaggedClaim
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Default)]
 pub enum PcsEqProductSource {
+    #[default]
     Transcript = 0,
     FoldChallenge = 1,
 }
@@ -388,12 +379,6 @@ pub enum PcsEqProductSource {
 impl PcsEqProductSource {
     pub const fn as_usize(self) -> usize {
         self as usize
-    }
-}
-
-impl Default for PcsEqProductSource {
-    fn default() -> Self {
-        Self::Transcript
     }
 }
 

@@ -141,17 +141,30 @@ fn ensure_supported_basecode_log(basecode_log: usize) -> Result<()> {
     Ok(())
 }
 
-fn push_eq_product_records(
-    preflight: &mut Preflight,
+struct EqProductRecordInput<'a> {
+    preflight: &'a mut Preflight,
     kind: PcsEqProductKind,
     source: PcsEqProductSource,
     round_idx: usize,
     term_idx: usize,
-    point: &[RecursionField],
+    point: &'a [RecursionField],
     point_tidx_base: usize,
     sumcheck_idx: usize,
     point_round_base: usize,
-) -> RecursionField {
+}
+
+fn push_eq_product_records(input: EqProductRecordInput<'_>) -> RecursionField {
+    let EqProductRecordInput {
+        preflight,
+        kind,
+        source,
+        round_idx,
+        term_idx,
+        point,
+        point_tidx_base,
+        sumcheck_idx,
+        point_round_base,
+    } = input;
     let mut acc = RecursionField::ONE;
     let mut index_acc = 0usize;
     for (bit_idx, &point_value) in point.iter().enumerate() {
@@ -497,9 +510,8 @@ fn push_basefold_final_expected_records(
             let mut coeff = RecursionField::ONE;
             let start_term_idx = term_idx;
             let factor_count = num_vars_evaluated + basecode_log;
-            for factor_idx in 0..factor_count {
+            for (factor_idx, point_value) in point.iter().copied().enumerate().take(factor_count) {
                 let is_prefix = factor_idx < num_vars_evaluated;
-                let point_value = point[factor_idx];
                 let (has_challenge, challenge_round, challenge, bit_value, factor) = if is_prefix {
                     let challenge_round = fold_challenges.len() - num_vars_evaluated + factor_idx;
                     let challenge = fold_challenges[challenge_round];
@@ -853,17 +865,17 @@ impl PcsModule {
         for i in 0..num_polys {
             let h_i = comm.cumulative_heights[i + 1] - comm.cumulative_heights[i];
             let s_i = ceil_log2(h_i);
-            let eq_product = push_eq_product_records(
+            let eq_product = push_eq_product_records(EqProductRecordInput {
                 preflight,
-                PcsEqProductKind::JaggedClaim,
-                PcsEqProductSource::Transcript,
+                kind: PcsEqProductKind::JaggedClaim,
+                source: PcsEqProductSource::Transcript,
                 round_idx,
-                i,
-                &z_col,
-                z_col_tidx,
-                round_idx * 2,
-                0,
-            );
+                term_idx: i,
+                point: &z_col,
+                point_tidx_base: z_col_tidx,
+                sumcheck_idx: round_idx * 2,
+                point_round_base: 0,
+            });
             let tail_product = push_suffix_product_records(preflight, round_idx, i, s_i, point);
             if eq_product != eq_col[i] {
                 bail!("jagged eq product replay mismatch");
@@ -904,16 +916,16 @@ impl PcsModule {
                 acc_out: acc,
             });
         }
-        let (rho, expected) = replay_degree2_sumcheck(
-            0,
-            round_idx * 2,
+        let (rho, expected) = replay_degree2_sumcheck(Degree2SumcheckReplayInput {
+            proof_idx: 0,
+            idx: round_idx * 2,
             claimed_sum,
-            &proof.sumcheck_proof,
-            num_giga_vars,
-            false,
+            proof: &proof.sumcheck_proof,
+            num_variables: num_giga_vars,
+            emit_input_record: false,
             preflight,
             ts,
-        )?;
+        })?;
 
         let n_robp = num_giga_vars + usize::from(padded_total.is_power_of_two());
         let rho_row = &rho[..log_h];
@@ -989,17 +1001,17 @@ impl PcsModule {
         for (i, (&eq_rho_col, &col_eval)) in
             eq_rho_col[..w].iter().zip(&proof.col_evals).enumerate()
         {
-            let eq_product = push_eq_product_records(
+            let eq_product = push_eq_product_records(EqProductRecordInput {
                 preflight,
-                PcsEqProductKind::JaggedQEval,
-                PcsEqProductSource::FoldChallenge,
+                kind: PcsEqProductKind::JaggedQEval,
+                source: PcsEqProductSource::FoldChallenge,
                 round_idx,
-                i,
-                rho_col,
-                0,
-                round_idx * 2,
-                log_h,
-            );
+                term_idx: i,
+                point: rho_col,
+                point_tidx_base: 0,
+                sumcheck_idx: round_idx * 2,
+                point_round_base: log_h,
+            });
             if eq_product != eq_rho_col {
                 bail!("jagged q-eval eq product replay mismatch");
             }
@@ -1027,16 +1039,17 @@ impl PcsModule {
         z_row_padded.resize(n_robp, RecursionField::ZERO);
         let mut rho_padded = rho.clone();
         rho_padded.resize(n_robp, RecursionField::ZERO);
-        let (assist_point, assist_expected) = replay_degree2_sumcheck(
-            0,
-            assist_sumcheck_idx,
-            proof.f_at_rho,
-            &proof.assist_proof,
-            2 * n_robp,
-            false,
-            preflight,
-            ts,
-        )?;
+        let (assist_point, assist_expected) =
+            replay_degree2_sumcheck(Degree2SumcheckReplayInput {
+                proof_idx: 0,
+                idx: assist_sumcheck_idx,
+                claimed_sum: proof.f_at_rho,
+                proof: &proof.assist_proof,
+                num_variables: 2 * n_robp,
+                emit_input_record: false,
+                preflight,
+                ts,
+            })?;
         let rho_star_c = (0..n_robp).map(|i| assist_point[2 * i]).collect_vec();
         let rho_star_d = (0..n_robp).map(|i| assist_point[2 * i + 1]).collect_vec();
         for robp_idx in 0..n_robp {
@@ -3091,17 +3104,19 @@ where
         let cd10: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(z3, nz4.clone());
         let cd11: [AB::Expr; D_EF] = recursion_circuit::utils::ext_field_multiply(z3, z4);
 
-        let transitions: [(
-            usize,
-            usize,
-            [AB::Expr; D_EF],
-            [AB::Expr; D_EF],
-            [AB::Expr; D_EF],
-        ); 4] = [
-            (
-                0usize,
-                0usize,
-                ext_add::<AB::Expr>(
+        struct Transition<Expr> {
+            ci: usize,
+            co: usize,
+            w_same: [Expr; D_EF],
+            w_lt1: [Expr; D_EF],
+            w_lt0: [Expr; D_EF],
+        }
+
+        let transitions = [
+            Transition {
+                ci: 0usize,
+                co: 0usize,
+                w_same: ext_add::<AB::Expr>(
                     ext_add::<AB::Expr>(
                         recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                             ab00.clone(),
@@ -3117,11 +3132,11 @@ where
                         cd01.clone(),
                     ),
                 ),
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                w_lt1: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab00.clone(),
                     cd01.clone(),
                 ),
-                ext_add::<AB::Expr>(
+                w_lt0: ext_add::<AB::Expr>(
                     recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                         ab01.clone(),
                         cd10.clone(),
@@ -3131,37 +3146,37 @@ where
                         cd00.clone(),
                     ),
                 ),
-            ),
-            (
-                0usize,
-                1usize,
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+            },
+            Transition {
+                ci: 0usize,
+                co: 1usize,
+                w_same: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab10.clone(),
                     cd10.clone(),
                 ),
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                w_lt1: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab10.clone(),
                     cd11.clone(),
                 ),
-                zero_ext.clone(),
-            ),
-            (
-                1usize,
-                0usize,
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                w_lt0: zero_ext.clone(),
+            },
+            Transition {
+                ci: 1usize,
+                co: 0usize,
+                w_same: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab01.clone(),
                     cd01.clone(),
                 ),
-                zero_ext.clone(),
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
+                w_lt1: zero_ext.clone(),
+                w_lt0: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                     ab01.clone(),
                     cd00.clone(),
                 ),
-            ),
-            (
-                1usize,
-                1usize,
-                ext_add::<AB::Expr>(
+            },
+            Transition {
+                ci: 1usize,
+                co: 1usize,
+                w_same: ext_add::<AB::Expr>(
                     ext_add::<AB::Expr>(
                         recursion_circuit::utils::ext_field_multiply::<AB::Expr>(
                             ab00.clone(),
@@ -3177,15 +3192,22 @@ where
                         cd11.clone(),
                     ),
                 ),
-                ext_add::<AB::Expr>(
+                w_lt1: ext_add::<AB::Expr>(
                     recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab00, cd11),
                     recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab10, cd01),
                 ),
-                recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab11, cd10),
-            ),
+                w_lt0: recursion_circuit::utils::ext_field_multiply::<AB::Expr>(ab11, cd10),
+            },
         ];
         let mut expected: [[AB::Expr; D_EF]; 4] = core::array::from_fn(|_| zero_ext.clone());
-        for (ci, co, w_same, w_lt1, w_lt0) in transitions {
+        for Transition {
+            ci,
+            co,
+            w_same,
+            w_lt1,
+            w_lt0,
+        } in transitions
+        {
             let v0 = local.val_in[co * 2];
             let v1 = local.val_in[co * 2 + 1];
             let same_v0 =
@@ -3257,7 +3279,7 @@ where
             builder,
             local.proof_idx,
             PcsFoldChallengeMessage {
-                sumcheck_idx: (local.round_idx + local.round_idx).into(),
+                sumcheck_idx: (local.round_idx + local.round_idx),
                 round: local.robp_idx.into(),
                 challenge: local.rho.map(Into::into),
             },
@@ -3268,7 +3290,7 @@ where
             local.proof_idx,
             PcsFoldChallengeMessage {
                 sumcheck_idx: local.sumcheck_idx.into(),
-                round: (local.robp_idx + local.robp_idx).into(),
+                round: (local.robp_idx + local.robp_idx),
                 challenge: local.rho_star_c.map(Into::into),
             },
             local.is_enabled,
@@ -3278,7 +3300,7 @@ where
             local.proof_idx,
             PcsFoldChallengeMessage {
                 sumcheck_idx: local.sumcheck_idx.into(),
-                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE).into(),
+                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE),
                 challenge: local.rho_star_d.map(Into::into),
             },
             local.is_enabled,
@@ -3557,7 +3579,7 @@ where
             local.proof_idx,
             PcsCommitHeightMessage {
                 commitment_kind: local.commitment_kind.into(),
-                height_idx: (local.term_idx + AB::Expr::ONE).into(),
+                height_idx: (local.term_idx + AB::Expr::ONE),
                 value: local.t_hi.into(),
             },
             local.is_enabled * local.is_first_step,
@@ -3567,7 +3589,7 @@ where
             local.proof_idx,
             PcsFoldChallengeMessage {
                 sumcheck_idx: local.sumcheck_idx.into(),
-                round: (local.robp_idx + local.robp_idx).into(),
+                round: (local.robp_idx + local.robp_idx),
                 challenge: local.rho_star_c.map(Into::into),
             },
             local.is_enabled,
@@ -3577,7 +3599,7 @@ where
             local.proof_idx,
             PcsFoldChallengeMessage {
                 sumcheck_idx: local.sumcheck_idx.into(),
-                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE).into(),
+                round: (local.robp_idx + local.robp_idx + AB::Expr::ONE),
                 challenge: local.rho_star_d.map(Into::into),
             },
             local.is_enabled,
@@ -6361,20 +6383,34 @@ impl RowMajorChip<F> for PcsBasefoldFinalClaimTraceGenerator {
     }
 }
 
-fn replay_degree2_sumcheck<TS>(
+struct Degree2SumcheckReplayInput<'a, TS> {
     proof_idx: usize,
     idx: usize,
     claimed_sum: RecursionField,
-    proof: &sumcheck::structs::IOPProof<RecursionField>,
+    proof: &'a sumcheck::structs::IOPProof<RecursionField>,
     num_variables: usize,
     emit_input_record: bool,
-    preflight: &mut Preflight,
-    ts: &mut TS,
+    preflight: &'a mut Preflight,
+    ts: &'a mut TS,
+}
+
+fn replay_degree2_sumcheck<TS>(
+    input: Degree2SumcheckReplayInput<'_, TS>,
 ) -> Result<(Vec<RecursionField>, RecursionField)>
 where
     TS: FiatShamirTranscript<BabyBearPoseidon2Config>
         + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
 {
+    let Degree2SumcheckReplayInput {
+        proof_idx,
+        idx,
+        claimed_sum,
+        proof,
+        num_variables,
+        emit_input_record,
+        preflight,
+        ts,
+    } = input;
     if proof.proofs.len() != num_variables {
         bail!(
             "sumcheck round count mismatch: {} != {num_variables}",

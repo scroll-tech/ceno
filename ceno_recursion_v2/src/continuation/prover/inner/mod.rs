@@ -23,7 +23,7 @@ use crate::system::VerifierSubCircuit;
 use crate::{
     circuit::{
         Circuit,
-        inner::{InnerCircuit, InnerTraceGen, ProofsType},
+        inner::{InnerCircuit, InnerTraceGen, PreVerifierSubCircuitInput, ProofsType},
     },
     system::{
         AggregationSubCircuit, RecursionProof, RecursionVk, VerifierConfig, VerifierExternalData,
@@ -33,6 +33,7 @@ use crate::{
 };
 
 pub use continuations_v2::prover::ChildVkKind;
+#[cfg(any(debug_assertions, test))]
 use continuations_v2::prover::debug_constraints;
 use openvm_stark_backend::prover::DeviceDataTransporter;
 
@@ -239,20 +240,20 @@ where
 
         let child_dag_commit = child_vk_pcs_data
             .as_ref()
-            .map(|data| data.commitment.clone())
+            .map(|data| data.commitment)
             .unwrap_or_default();
 
         let (pre_ctxs, poseidon2_compress_inputs, subcircuit_initial_transcripts) = self
             .agg_node_tracegen
-            .generate_pre_verifier_subcircuit_ctxs(
+            .generate_pre_verifier_subcircuit_ctxs(PreVerifierSubCircuitInput {
                 proofs,
                 proofs_type,
-                absent_trace_pvs,
                 child_is_app,
                 child_vk,
                 child_dag_commit,
-                transcript,
-            );
+                absent_trace_pvs,
+                initial_transcript: transcript,
+            });
 
         let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
         let range_check_inputs = vec![];
@@ -307,14 +308,6 @@ where
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn air_names(&self) -> Vec<String> {
-        <InnerCircuit<S> as Circuit<SC>>::airs(self.circuit.as_ref())
-            .iter()
-            .map(|air| air.name().to_string())
-            .collect()
-    }
-
     pub fn get_self_vk_pcs_data(&self) -> Option<CommittedTraceData<PB>>
     where
         CommittedTraceData<PB>: Clone,
@@ -357,20 +350,20 @@ where
         transcript_observe_label(&mut transcript, TranscriptLabel::Riscv.as_bytes());
         let child_dag_commit = child_vk_pcs_data
             .as_ref()
-            .map(|data| data.commitment.clone())
+            .map(|data| data.commitment)
             .unwrap_or_default();
 
         let (pre_ctxs, poseidon2_compress_inputs, subcircuit_initial_transcripts) = self
             .agg_node_tracegen
-            .generate_pre_verifier_subcircuit_ctxs(
+            .generate_pre_verifier_subcircuit_ctxs(PreVerifierSubCircuitInput {
                 proofs,
-                ProofsType::Vm,
-                None,
+                proofs_type: ProofsType::Vm,
                 child_is_app,
                 child_vk,
                 child_dag_commit,
-                transcript,
-            );
+                absent_trace_pvs: None,
+                initial_transcript: transcript,
+            });
         let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
         let range_check_inputs = vec![];
         let power_check_inputs = vec![];

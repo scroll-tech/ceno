@@ -535,6 +535,17 @@ fn tower_num_variables(
         .collect()
 }
 
+struct TowerChipRecords {
+    shape_record: TowerShapeRecord,
+    input_record: TowerInputRecord,
+    layer_record: TowerLayerRecord,
+    tower_record: TowerTowerEvalRecord,
+    sumcheck_record: TowerSumcheckRecord,
+    mus_record: Vec<EF>,
+    main_point_records: Vec<crate::system::TowerMainPointRecord>,
+    q0_claim: EF,
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_chip_records(
     proof_idx: usize,
@@ -548,16 +559,7 @@ fn build_chip_records(
     schedule: &TowerTranscriptSchedule,
     tidx: usize,
     fork_final_sample_tidx: usize,
-) -> Result<(
-    TowerShapeRecord,
-    TowerInputRecord,
-    TowerLayerRecord,
-    TowerTowerEvalRecord,
-    TowerSumcheckRecord,
-    Vec<EF>,
-    Vec<crate::system::TowerMainPointRecord>,
-    EF,
-)> {
+) -> Result<TowerChipRecords> {
     let shape_record = build_tower_shape_record(proof_idx, idx, air_idx, chip_proof, circuit_vk);
     let layer_count = shape_record.max_layer_count;
 
@@ -911,7 +913,7 @@ fn build_chip_records(
         layer_output_mu,
     };
 
-    Ok((
+    Ok(TowerChipRecords {
         shape_record,
         input_record,
         layer_record,
@@ -920,19 +922,31 @@ fn build_chip_records(
         mus_record,
         main_point_records,
         q0_claim,
-    ))
+    })
 }
 
-fn build_chip_input_record(
+struct TowerInputRecordBuildInput<'a> {
     proof_idx: usize,
     idx: usize,
     fork_id: usize,
-    chip_proof: &ZKVMChipProof<RecursionField>,
-    circuit_vk: &VerifyingKey<RecursionField>,
-    schedule: &TowerTranscriptSchedule,
+    chip_proof: &'a ZKVMChipProof<RecursionField>,
+    circuit_vk: &'a VerifyingKey<RecursionField>,
+    schedule: &'a TowerTranscriptSchedule,
     tidx: usize,
     fork_final_sample_tidx: usize,
-) -> Result<TowerInputRecord> {
+}
+
+fn build_chip_input_record(input: TowerInputRecordBuildInput<'_>) -> Result<TowerInputRecord> {
+    let TowerInputRecordBuildInput {
+        proof_idx,
+        idx,
+        fork_id,
+        chip_proof,
+        circuit_vk,
+        schedule,
+        tidx,
+        fork_final_sample_tidx,
+    } = input;
     let shape_record = build_tower_shape_record(proof_idx, idx, idx, chip_proof, circuit_vk);
     let layer_count = shape_record.max_layer_count;
 
@@ -960,7 +974,7 @@ fn build_chip_input_record(
     }
 
     for rounds in &chip_proof.tower_proof.logup_specs_eval {
-        for layer_idx in 0..layer_count {
+        for (layer_idx, logup_layer) in logup_layers.iter_mut().enumerate().take(layer_count) {
             let mut quad = [EF::ZERO; 4];
             if let Some(values) = rounds.get(layer_idx) {
                 for (dst, src) in quad.iter_mut().zip(values.iter().take(4)) {
@@ -968,7 +982,7 @@ fn build_chip_input_record(
                 }
             }
             if layer_idx + 1 < shape_record.logup_tower_vars {
-                logup_layers[layer_idx].push(quad);
+                logup_layer.push(quad);
             }
         }
     }
@@ -1293,16 +1307,7 @@ pub(crate) fn build_gkr_blob(
                 .fork_log(pf_entry.fork_idx)
                 .len()
                 .saturating_sub(D_EF);
-            let (
-                shape_record,
-                chip_input_record,
-                layer_record,
-                tower_record,
-                sumcheck_record,
-                mus_record,
-                mut chip_main_point_records,
-                q0_claim,
-            ) = build_chip_records(
+            let mut chip_records = build_chip_records(
                 proof_idx,
                 idx,
                 entry_idx,
@@ -1315,21 +1320,21 @@ pub(crate) fn build_gkr_blob(
                 tower_air_tidx,
                 fork_final_sample_tidx,
             )?;
-            for record in &mut chip_main_point_records {
+            for record in &mut chip_records.main_point_records {
                 record.lookup_count += selector_tower_point_counts
                     .get(&(idx, record.round_idx))
                     .copied()
                     .unwrap_or(0);
             }
-            input_records.push(chip_input_record);
-            proof_q0_claims.push(q0_claim);
-            shape_records.push(shape_record);
-            layer_records.push(layer_record);
-            tower_records.push(tower_record);
-            sumcheck_records.push(sumcheck_record);
-            mus_records.push(mus_record);
-            main_point_records.extend(chip_main_point_records);
-            q0_claims.push(q0_claim);
+            input_records.push(chip_records.input_record);
+            proof_q0_claims.push(chip_records.q0_claim);
+            shape_records.push(chip_records.shape_record);
+            layer_records.push(chip_records.layer_record);
+            tower_records.push(chip_records.tower_record);
+            sumcheck_records.push(chip_records.sumcheck_record);
+            mus_records.push(chip_records.mus_record);
+            main_point_records.extend(chip_records.main_point_records);
+            q0_claims.push(chip_records.q0_claim);
         }
 
         if !has_chip {
@@ -1434,16 +1439,16 @@ pub(crate) fn build_tower_input_records(
                 .fork_log(pf_entry.fork_idx)
                 .len()
                 .saturating_sub(D_EF);
-            input_records.push(build_chip_input_record(
+            input_records.push(build_chip_input_record(TowerInputRecordBuildInput {
                 proof_idx,
-                entry_idx,
-                pf_entry.fork_idx,
+                idx: entry_idx,
+                fork_id: pf_entry.fork_idx,
                 chip_proof,
                 circuit_vk,
-                &transcript_schedule,
-                tower_air_tidx,
+                schedule: &transcript_schedule,
+                tidx: tower_air_tidx,
                 fork_final_sample_tidx,
-            )?);
+            })?);
         }
     }
 
@@ -1541,7 +1546,6 @@ where
 {
     // Bind read/write/lookup out evals into transcript before deriving tower
     // challenges. Mirrors v1 verifier: append_field_element_ext for each eval.
-    let mut _out_eval_count = 0usize;
     for eval in chip_proof
         .r_out_evals
         .iter()
@@ -1550,7 +1554,6 @@ where
         .flatten()
     {
         ts.observe_ext(*eval);
-        _out_eval_count += 1;
     }
 
     // Mirror native: get_challenge_pows calls
@@ -1605,7 +1608,7 @@ where
             transcript_observe_label(ts, &max_num_variables.to_le_bytes());
             transcript_observe_label(ts, &max_degree.to_le_bytes());
 
-            for (_ri_idx, msg) in round_msgs.iter().enumerate() {
+            for msg in round_msgs.iter() {
                 for eval in &msg.evaluations {
                     ts.observe_ext(*eval);
                 }
@@ -1656,11 +1659,10 @@ fn observe_active_tower_eval_round<TS>(
                 .copied()
                 .unwrap_or(0)
                 .saturating_sub(1)
+            && let Some(evals) = spec_rounds.get(round)
         {
-            if let Some(evals) = spec_rounds.get(round) {
-                for eval in evals {
-                    ts.observe_ext(*eval);
-                }
+            for eval in evals {
+                ts.observe_ext(*eval);
             }
         }
     }
@@ -1671,11 +1673,10 @@ fn observe_active_tower_eval_round<TS>(
                 .copied()
                 .unwrap_or(0)
                 .saturating_sub(1)
+            && let Some(evals) = spec_rounds.get(round)
         {
-            if let Some(evals) = spec_rounds.get(round) {
-                for eval in evals {
-                    ts.observe_ext(*eval);
-                }
+            for eval in evals {
+                ts.observe_ext(*eval);
             }
         }
     }

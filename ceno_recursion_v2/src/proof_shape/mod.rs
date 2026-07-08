@@ -162,10 +162,14 @@ impl ProofShapeModule {
             .max()
             .unwrap_or(0);
 
-        for air_idx in 0..child_vk.circuit_vks.len() {
+        for (air_idx, starting_tidx_entry) in starting_tidx
+            .iter_mut()
+            .enumerate()
+            .take(child_vk.circuit_vks.len())
+        {
             let metadata = &self.per_air[air_idx];
             let is_present = proof.chip_proofs.contains_key(&air_idx);
-            starting_tidx[air_idx] = current_tidx;
+            *starting_tidx_entry = current_tidx;
 
             if !metadata.is_required {
                 current_tidx += 1;

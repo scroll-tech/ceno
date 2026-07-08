@@ -341,16 +341,16 @@ fn build_tower_replay_result(
 
         let next_alpha_pows = get_challenge_pows(num_prod_spec + num_logup_spec * 2, transcript);
 
-        update_point_evals(
+        update_point_evals(PointEvalUpdate {
             tower_proof,
             round,
-            &rt_prime,
-            &coeffs,
-            &num_variables,
-            &mut prod_spec_point_n_eval,
-            &mut logup_spec_p_point_n_eval,
-            &mut logup_spec_q_point_n_eval,
-        );
+            rt_prime: &rt_prime,
+            coeffs: &coeffs,
+            num_variables: &num_variables,
+            prod_point_eval: &mut prod_spec_point_n_eval,
+            logup_p_point_eval: &mut logup_spec_p_point_n_eval,
+            logup_q_point_eval: &mut logup_spec_q_point_n_eval,
+        });
 
         let next_eval = aggregate_next_eval(
             round,
@@ -419,16 +419,28 @@ fn compute_expected_evaluation(
     Ok(total)
 }
 
-fn update_point_evals(
-    tower_proof: &TowerProofs<RecursionField>,
+struct PointEvalUpdate<'a> {
+    tower_proof: &'a TowerProofs<RecursionField>,
     round: usize,
-    rt_prime: &Point<RecursionField>,
-    coeffs: &[RecursionField],
-    num_variables: &[usize],
-    prod_point_eval: &mut [PointAndEval<RecursionField>],
-    logup_p_point_eval: &mut [PointAndEval<RecursionField>],
-    logup_q_point_eval: &mut [PointAndEval<RecursionField>],
-) {
+    rt_prime: &'a Point<RecursionField>,
+    coeffs: &'a [RecursionField],
+    num_variables: &'a [usize],
+    prod_point_eval: &'a mut [PointAndEval<RecursionField>],
+    logup_p_point_eval: &'a mut [PointAndEval<RecursionField>],
+    logup_q_point_eval: &'a mut [PointAndEval<RecursionField>],
+}
+
+fn update_point_evals(input: PointEvalUpdate<'_>) {
+    let PointEvalUpdate {
+        tower_proof,
+        round,
+        rt_prime,
+        coeffs,
+        num_variables,
+        prod_point_eval,
+        logup_p_point_eval,
+        logup_q_point_eval,
+    } = input;
     let num_prod_spec = prod_point_eval.len();
     for (spec_idx, point_eval) in prod_point_eval.iter_mut().enumerate() {
         if round

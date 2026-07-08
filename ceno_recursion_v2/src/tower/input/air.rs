@@ -244,12 +244,10 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
         let claim_span = read_active_layers * AB::Expr::from_usize(2 * D_EF)
             + write_active_layers * AB::Expr::from_usize(2 * D_EF)
             + logup_active_layers * AB::Expr::from_usize(4 * D_EF);
-        let fixed_span =
-            num_layers.clone() * AB::Expr::from_usize(SUMCHECK_INIT_LEN + LABEL_MERGE + D_EF);
-        let round_span = num_layers.clone()
-            * (num_layers.clone() + AB::Expr::ONE)
-            * AB::Expr::from_usize(ROUND_LEN / 2);
-        let alpha_span = num_layers.clone() * AB::Expr::from_usize(ALPHA_LEN);
+        let fixed_span = num_layers * AB::Expr::from_usize(SUMCHECK_INIT_LEN + LABEL_MERGE + D_EF);
+        let round_span =
+            num_layers * (num_layers + AB::Expr::ONE) * AB::Expr::from_usize(ROUND_LEN / 2);
+        let alpha_span = num_layers * AB::Expr::from_usize(ALPHA_LEN);
         let tidx_after_gkr_layers = tidx_after_alpha_beta.clone()
             + has_interactions.clone() * (fixed_span + round_span + alpha_span + claim_span);
         // 1. TowerLayerInputBus
@@ -341,14 +339,14 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             - local.has_logup_out * AB::Expr::from_usize(4 * D_EF);
         let mut out_eval_tidx = out_eval_start_tidx;
         for eval in [local.read_out_0, local.read_out_1] {
-            for i in 0..D_EF {
+            for (i, value) in eval.iter().enumerate().take(D_EF) {
                 self.forked_transcript_bus.receive(
                     builder,
                     local.proof_idx,
                     ForkedTranscriptBusMessage {
                         fork_id: local.fork_id.into(),
                         tidx: out_eval_tidx.clone() + AB::Expr::from_usize(i),
-                        value: eval[i].into(),
+                        value: (*value).into(),
                         is_sample: AB::Expr::ZERO,
                     },
                     local.is_enabled * local.has_read_out,
@@ -357,14 +355,14 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             out_eval_tidx += local.has_read_out * AB::Expr::from_usize(D_EF);
         }
         for eval in [local.write_out_0, local.write_out_1] {
-            for i in 0..D_EF {
+            for (i, value) in eval.iter().enumerate().take(D_EF) {
                 self.forked_transcript_bus.receive(
                     builder,
                     local.proof_idx,
                     ForkedTranscriptBusMessage {
                         fork_id: local.fork_id.into(),
                         tidx: out_eval_tidx.clone() + AB::Expr::from_usize(i),
-                        value: eval[i].into(),
+                        value: (*value).into(),
                         is_sample: AB::Expr::ZERO,
                     },
                     local.is_enabled * local.has_write_out,
@@ -378,14 +376,14 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for TowerInputAir {
             local.logup_out_2,
             local.logup_out_3,
         ] {
-            for i in 0..D_EF {
+            for (i, value) in eval.iter().enumerate().take(D_EF) {
                 self.forked_transcript_bus.receive(
                     builder,
                     local.proof_idx,
                     ForkedTranscriptBusMessage {
                         fork_id: local.fork_id.into(),
                         tidx: out_eval_tidx.clone() + AB::Expr::from_usize(i),
-                        value: eval[i].into(),
+                        value: (*value).into(),
                         is_sample: AB::Expr::ZERO,
                     },
                     local.is_enabled * local.has_logup_out,
