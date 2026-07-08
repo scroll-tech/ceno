@@ -70,8 +70,10 @@ impl<SC: StarkProtocolConfig<F = F>, S: AggregationSubCircuit> Circuit<SC> for I
             deferral_enabled,
             instance_public_value_indices: self.instance_public_value_indices.clone(),
         }) as AirRef<SC>;
-        let vm_pvs_cumulative_heights_air =
-            Arc::new(vm_pvs::VmPvsCumulativeHeightsAir { transcript_bus }) as AirRef<SC>;
+        let vm_pvs_cumulative_heights_air = Arc::new(vm_pvs::VmPvsCumulativeHeightsAir {
+            transcript_bus,
+            commit_height_bus: bus_inventory.pcs_commit_height_bus,
+        }) as AirRef<SC>;
         let (idx2_air, post_airs): (AirRef<SC>, Vec<AirRef<SC>>) = if deferral_enabled {
             let def_pvs_air = Arc::new(def_pvs::DeferralPvsAir {
                 public_values_bus,

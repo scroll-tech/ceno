@@ -64,8 +64,9 @@ use crate::{
         AirModule, BusIndexManager, BusInventory, EccReplayClaims, GlobalCtxCpu, MainEccRtRecord,
         MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord, MainSelectorEvalRecord,
         MainSelectorKind, MainSelectorPointDeriveKind, MainSelectorPointRecord,
-        MainSelectorPointSourceKind, MainTowerPointEqRecord, Preflight, RecursionField,
-        RecursionProof, RecursionVk, RotationReplayClaims, TraceGenModule,
+        MainSelectorPointSourceKind, MainTowerPointEqRecord, PcsOpeningClaimRecord,
+        PcsOpeningCommitKind, PcsOpeningEvalRecord, PcsOpeningPointRecord, Preflight,
+        RecursionField, RecursionProof, RecursionVk, RotationReplayClaims, TraceGenModule,
     },
     tower::{
         TowerInputRecord, TowerReplayResult, build_tower_input_records,
@@ -282,6 +283,27 @@ impl MainModule {
                 .entry((proof_idx, round_idx))
                 .or_default() += 1;
         }
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.pcs.opening_points {
+                *global_lookup_counts
+                    .entry((proof_idx, record.global_round_idx))
+                    .or_default() += 1;
+            }
+            for record in &preflight.pcs.suffix_products {
+                if record.has_factor {
+                    *global_lookup_counts
+                        .entry((proof_idx, record.coord_idx))
+                        .or_default() += 1;
+                }
+            }
+            for record in &preflight.pcs.jagged_assist_h {
+                if record.has_z_row {
+                    *global_lookup_counts
+                        .entry((proof_idx, record.robp_idx))
+                        .or_default() += 1;
+                }
+            }
+        }
         let mut eval_lookup_counts =
             std::collections::BTreeMap::<(usize, usize, usize), usize>::new();
         for record in &frontload_term_records {
@@ -298,6 +320,13 @@ impl MainModule {
             *eval_lookup_counts
                 .entry((record.proof_idx, record.idx, record.eval_idx))
                 .or_default() += 1;
+        }
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.pcs.opening_evals {
+                *eval_lookup_counts
+                    .entry((proof_idx, record.main_idx, record.main_eval_idx))
+                    .or_default() += 1;
+            }
         }
         for record in &mut eval_records {
             record.lookup_count = eval_lookup_counts
@@ -381,10 +410,22 @@ impl MainModule {
                         .flat_map(|round| round.challenge_tidx..round.challenge_tidx + D_EF)
                 })
                 .collect::<std::collections::BTreeSet<_>>();
+            let semantic_trunk_tidxs = selector_point_records
+                .iter()
+                .filter(|record| {
+                    record.proof_idx == proof_idx
+                        && record.has_transcript
+                        && record.source_kind == MainSelectorPointSourceKind::EccXY
+                })
+                .flat_map(|record| record.transcript_tidx..record.transcript_tidx + D_EF)
+                .collect::<std::collections::BTreeSet<_>>();
             let values = preflight.transcript.values();
             let samples = preflight.transcript.samples();
             for tidx in preflight.main.transcript_start..preflight.main.transcript_end {
-                if eval_tidxs.contains(&tidx) || global_challenge_tidxs.contains(&tidx) {
+                if eval_tidxs.contains(&tidx)
+                    || global_challenge_tidxs.contains(&tidx)
+                    || semantic_trunk_tidxs.contains(&tidx)
+                {
                     continue;
                 }
                 transcript_records.push(crate::system::MainTranscriptRecord {
@@ -399,7 +440,10 @@ impl MainModule {
         }
         let semantic_fork_tidxs = selector_point_records
             .iter()
-            .filter(|record| record.has_transcript)
+            .filter(|record| {
+                record.has_transcript
+                    && record.source_kind == MainSelectorPointSourceKind::RotationOrigin
+            })
             .flat_map(|record| {
                 (0..D_EF).map(move |offset| {
                     (
@@ -522,6 +566,7 @@ impl AirModule for MainModule {
             Arc::new(MainSelectorPointAir {
                 selector_point_bus: self.main_selector_point_bus,
                 tower_point_bus: self.tower_main_point_bus,
+                transcript_bus: self.transcript_bus,
                 forked_transcript_bus: self.forked_transcript_bus,
                 ecc_rt_bus: self.ecc_rt_bus,
             }) as AirRef<_>,
@@ -799,14 +844,18 @@ where
         log2_num_instances += 1;
     }
     let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
+    let final_tower_layer = tower_replay.layers.last();
     let rt_main = rt_main_from_tower_replay(tower_replay, num_var_with_rotation)
         .ok_or_else(|| eyre!("{name} missing tower main point for rotation replay"))?;
 
+    let (rotation_power_challenges, rotation_power_tidx) =
+        sample_challenge_pows_with_tidx(ts, num_rotations, b"combine subset evals");
     let rotation_challenges = chain!(
         challenges.iter().copied(),
-        sample_challenge_pows(ts, num_rotations, b"combine subset evals")
+        rotation_power_challenges.iter().copied()
     )
     .collect_vec();
+    let rotation_sumcheck_start_tidx = ts.len();
     let (origin_point, expected_evaluation, origin_tidxs) = replay_main_sumcheck(
         ts,
         RecursionField::ZERO,
@@ -860,6 +909,23 @@ where
         &rotation_challenges,
         rotation_sumcheck_expression,
     );
+    if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
+        eprintln!(
+            "rec-v2-debug module=main source=preflight key=rotation_inputs chip_idx={chip_idx} circuit={name} tower_layers={} final_tower_mu={:?} final_tower_challenges={:?} num_var_with_rotation={num_var_with_rotation} rt_main={rt_main:?} rotation_power_tidx={rotation_power_tidx} rotation_power_challenges={rotation_power_challenges:?} rotation_sumcheck_start_tidx={rotation_sumcheck_start_tidx} rotation_origin_tidxs={origin_tidxs:?} rotation_sumcheck_end_tidx={}",
+            tower_replay.layers.len(),
+            final_tower_layer.map(|layer| layer.mu),
+            final_tower_layer.map(|layer| layer.challenges.as_slice()),
+            ts.len(),
+        );
+        eprintln!(
+            "rec-v2-debug module=main source=preflight key=rotation_check chip_idx={chip_idx} circuit={name} num_instances={num_instances} log2_num_instances={log2_num_instances} num_var_with_rotation={num_var_with_rotation} rotation_vars={} rotation_cyclic_group_log2={} rotation_cyclic_subgroup_size={} num_rotations={} expected={expected_evaluation:?} got={got_claim:?} selector_eval={selector_eval:?} rt_main={rt_main:?} origin_point={origin_point:?} first_eval_triple={:?}",
+            composed_cs.rotation_vars().unwrap_or(0),
+            first_layer.rotation_cyclic_group_log2,
+            first_layer.rotation_cyclic_subgroup_size,
+            num_rotations,
+            rotation_proof.evals.get(0..3),
+        );
+    }
     if got_claim != expected_evaluation {
         bail!("{name} rotation verify failed: {expected_evaluation} != {got_claim}");
     }
@@ -1242,7 +1308,38 @@ where
     if acc != expected_evaluation {
         bail!("main constraint claim mismatch: {expected_evaluation} != {acc}");
     }
+    preflight
+        .pcs
+        .opening_claims
+        .extend(layers.iter().map(|layer| {
+            let in_point = global_in_point[..layer.num_var_with_rotation].to_vec();
+            let layer_evals =
+                &main_proof.proof.evals[layer.eval_start..layer.eval_start + layer.eval_len];
+            PcsOpeningClaimRecord {
+                input_opening_point: in_point,
+                wits_in_evals: layer_evals[..layer.layer.n_witin].to_vec(),
+                fixed_in_evals: layer_evals
+                    [layer.layer.n_witin..layer.layer.n_witin + layer.layer.n_fixed]
+                    .to_vec(),
+            }
+        }));
     let mut global_point_lookup_counts = vec![0usize; global_in_point.len()];
+    for (opening_idx, layer) in layers.iter().enumerate() {
+        for (coord_idx, value) in global_in_point[..layer.num_var_with_rotation]
+            .iter()
+            .copied()
+            .enumerate()
+        {
+            global_point_lookup_counts[coord_idx] += 1;
+            preflight.pcs.opening_points.push(PcsOpeningPointRecord {
+                proof_idx: 0,
+                opening_idx,
+                coord_idx,
+                global_round_idx: coord_idx,
+                value,
+            });
+        }
+    }
     for record in &tower_point_eqs {
         global_point_lookup_counts[record.round_idx] += 1;
     }
@@ -1255,6 +1352,37 @@ where
         global_point_lookup_counts[round_idx] += 1;
     }
     let mut eval_lookup_counts = vec![0usize; main_proof.proof.evals.len()];
+    for (opening_idx, layer) in layers.iter().enumerate() {
+        for eval_idx in 0..layer.layer.n_witin {
+            let global_eval_idx = layer.eval_start + eval_idx;
+            eval_lookup_counts[global_eval_idx] += 1;
+            preflight.pcs.opening_evals.push(PcsOpeningEvalRecord {
+                proof_idx: 0,
+                opening_idx,
+                commit_kind: PcsOpeningCommitKind::Witin,
+                eval_idx,
+                main_idx: opening_idx,
+                main_eval_idx: eval_idx,
+                value: main_proof.proof.evals[global_eval_idx],
+                raw_value: main_proof.proof.evals[global_eval_idx],
+            });
+        }
+        for eval_idx in 0..layer.layer.n_fixed {
+            let main_eval_idx = layer.layer.n_witin + eval_idx;
+            let global_eval_idx = layer.eval_start + main_eval_idx;
+            eval_lookup_counts[global_eval_idx] += 1;
+            preflight.pcs.opening_evals.push(PcsOpeningEvalRecord {
+                proof_idx: 0,
+                opening_idx,
+                commit_kind: PcsOpeningCommitKind::Fixed,
+                eval_idx,
+                main_idx: opening_idx,
+                main_eval_idx,
+                value: main_proof.proof.evals[global_eval_idx],
+                raw_value: main_proof.proof.evals[global_eval_idx],
+            });
+        }
+    }
     for record in &frontload_terms {
         if record.has_eval_factor {
             let global_eval_idx = layers[record.idx].eval_start + record.eval_idx;
@@ -1788,7 +1916,33 @@ fn build_main_selector_point_records(
             }
             MainSelectorPointSourceKind::EccXY => {
                 if point.round_idx == 0 {
-                    if let Some(tidx) = eval.ecc_sample_tidx {
+                    if Some(point.selector_idx) == eval.ecc_xy_selector_idx {
+                        if let Some(tidx) = eval.ecc_sample_tidx {
+                            point.has_transcript = true;
+                            point.transcript_tidx = tidx;
+                        }
+                    } else if let Some(source_selector_idx) = eval.ecc_xy_selector_idx {
+                        point.has_source = true;
+                        point.source_selector_idx = source_selector_idx;
+                        point.source_source_kind = MainSelectorPointSourceKind::EccXY;
+                        point.source_round_idx = 0;
+                        if let Some(value) = values_by_key.get(&(
+                            point.proof_idx,
+                            point.idx,
+                            point.air_idx,
+                            source_selector_idx,
+                            point.source_round_idx,
+                        )) {
+                            point.source_value = *value;
+                            source_lookups.push((
+                                point.proof_idx,
+                                point.idx,
+                                point.air_idx,
+                                source_selector_idx,
+                                point.source_round_idx,
+                            ));
+                        }
+                    } else if let Some(tidx) = eval.ecc_sample_tidx {
                         point.has_transcript = true;
                         point.transcript_tidx = tidx;
                     }
@@ -1921,7 +2075,7 @@ fn build_main_ecc_rt_records(
             std::collections::BTreeMap::<(usize, usize, usize), usize>::new(),
             |mut counts, record| {
                 *counts
-                    .entry((record.proof_idx, record.idx, record.round_idx))
+                    .entry((record.proof_idx, record.tower_idx, record.round_idx))
                     .or_default() += 1;
                 counts
             },
@@ -2084,6 +2238,7 @@ fn build_main_ecc_rt_records(
                     idx,
                     fork_id: chip.fork_idx,
                     round_idx,
+                    num_rounds: ecc_replay.rt_tidxs.len(),
                     is_first: round_idx == 0,
                     is_last: round_idx + 1 == ecc_replay.rt_tidxs.len(),
                     tidx,
@@ -2166,24 +2321,24 @@ fn build_lte_witness(
     let active = core::array::from_fn(|i| i < round_idx);
     let mut prefix_acc = [RecursionField::ZERO; 33];
     let mut less_acc = [RecursionField::ZERO; 33];
-    prefix_acc[0] = RecursionField::ONE;
-    for i in 0..32 {
+    prefix_acc[32] = RecursionField::ONE;
+    for i in (0..32).rev() {
         if active[i] {
             let same_one = out_point[i] * rt_point[i];
             let same_zero =
                 (RecursionField::ONE - out_point[i]) * (RecursionField::ONE - rt_point[i]);
             let same_any = same_one + same_zero;
             let equal_choice = if bits[i] { same_one } else { same_zero };
-            prefix_acc[i + 1] = prefix_acc[i] * equal_choice;
-            less_acc[i + 1] = less_acc[i] * same_any
+            prefix_acc[i] = prefix_acc[i + 1] * equal_choice;
+            less_acc[i] = less_acc[i + 1] * same_any
                 + if bits[i] {
-                    prefix_acc[i] * same_zero
+                    prefix_acc[i + 1] * same_zero
                 } else {
                     RecursionField::ZERO
                 };
         } else {
-            prefix_acc[i + 1] = prefix_acc[i];
-            less_acc[i + 1] = less_acc[i];
+            prefix_acc[i] = prefix_acc[i + 1];
+            less_acc[i] = less_acc[i + 1];
         }
     }
     EccLteWitness {
@@ -2241,10 +2396,13 @@ fn native_ecc_equation_evals(
     let mut add_eval = RecursionField::ZERO;
     let mut bypass_eval = RecursionField::ZERO;
     let mut export_eval = RecursionField::ZERO;
+    let s0_x0_x1 = native_septic_mul(s0, &core::array::from_fn(|i| x0[i] - x1[i]));
+    let s0_squared = native_septic_mul(s0, s0);
+    let s0_x0_x3 = native_septic_mul(s0, &core::array::from_fn(|i| x0[i] - x3[i]));
     for i in 0..7 {
-        let v1 = s0[i] * (x0[i] - x1[i]) - (y0[i] - y1[i]);
-        let v2 = s0[i] * s0[i] - x0[i] - x1[i] - x3[i];
-        let v3 = s0[i] * (x0[i] - x3[i]) - (y0[i] + y3[i]);
+        let v1 = s0_x0_x1[i] - (y0[i] - y1[i]);
+        let v2 = s0_squared[i] - x0[i] - x1[i] - x3[i];
+        let v3 = s0_x0_x3[i] - (y0[i] + y3[i]);
         let v4 = x3[i] - x0[i];
         let v5 = y3[i] - y0[i];
         add_eval += v1 * alpha_pows[i] + v2 * alpha_pows[7 + i] + v3 * alpha_pows[14 + i];
@@ -2253,6 +2411,26 @@ fn native_ecc_equation_evals(
             (x3[i] - sum_x[i]) * alpha_pows[35 + i] + (y3[i] - sum_y[i]) * alpha_pows[42 + i];
     }
     (add_eval, bypass_eval, export_eval)
+}
+
+fn native_septic_mul(a: &[RecursionField; 7], b: &[RecursionField; 7]) -> [RecursionField; 7] {
+    let mut out = [RecursionField::ZERO; 7];
+    let two = RecursionField::from_usize(2);
+    let five = RecursionField::from_usize(5);
+    for i in 0..7 {
+        for j in 0..7 {
+            let term = a[i] * b[j];
+            let mut index = i + j;
+            if index < 7 {
+                out[index] += term;
+            } else {
+                index -= 7;
+                out[index] += five * term;
+                out[index + 1] += two * term;
+            }
+        }
+    }
+    out
 }
 
 fn rotation_point_source(

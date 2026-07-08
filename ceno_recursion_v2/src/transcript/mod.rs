@@ -13,8 +13,12 @@ use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_symmetric::Permutation;
 
-use crate::system::{
-    AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk, TraceGenModule,
+use crate::{
+    system::{
+        AirModule, BusInventory, GlobalCtxCpu, Preflight, RecursionProof, RecursionVk,
+        TraceGenModule,
+    },
+    utils::digests_to_poseidon2_input,
 };
 use recursion_circuit::transcript::poseidon2::{CHUNK, Poseidon2Air, Poseidon2Cols};
 
@@ -377,6 +381,36 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
         poseidon2_perm_inputs.extend_from_slice(ctx.0);
         poseidon2_compress_inputs.extend_from_slice(ctx.1);
+        for preflight in preflights {
+            poseidon2_perm_inputs.extend(
+                preflight
+                    .pcs
+                    .base_input_leaf_hashes
+                    .iter()
+                    .map(|record| record.input),
+            );
+            poseidon2_perm_inputs.extend(
+                preflight
+                    .pcs
+                    .commit_phase_leaf_hashes
+                    .iter()
+                    .map(|record| record.input),
+            );
+            poseidon2_compress_inputs.extend(
+                preflight
+                    .pcs
+                    .base_input_merkle_rows
+                    .iter()
+                    .map(|record| digests_to_poseidon2_input(record.left, record.right)),
+            );
+            poseidon2_compress_inputs.extend(
+                preflight
+                    .pcs
+                    .commit_phase_merkle_rows
+                    .iter()
+                    .map(|record| digests_to_poseidon2_input(record.left, record.right)),
+            );
+        }
 
         let poseidon2_trace = {
             let (mut poseidon_states, poseidon_counts) =

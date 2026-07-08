@@ -14,11 +14,11 @@ use crate::{
     bus::{
         AirPresenceBus, AirPresenceBusMessage, EccRtBus, EccRtMessage, ForkedTranscriptBus,
         ForkedTranscriptBusMessage, MainEvalBus, MainEvalMessage, MainGlobalPointBus,
-        MainGlobalPointMessage,
-        MainSelectorPointBus, MainSelectorPointMessage, MainSelectorResultBus,
-        MainSelectorResultMessage, MainSelectorShapeBus, MainSelectorShapeMessage,
-        MainSelectorSparseIndexShapeBus, MainSelectorSparseIndexShapeMessage, TowerMainPointBus,
-        TowerMainPointMessage,
+        MainGlobalPointMessage, MainSelectorPointBus, MainSelectorPointMessage,
+        MainSelectorResultBus, MainSelectorResultMessage, MainSelectorShapeBus,
+        MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
+        MainSelectorSparseIndexShapeMessage, TowerMainPointBus, TowerMainPointMessage,
+        TranscriptBus, TranscriptBusMessage,
     },
     system::{
         MainSelectorEvalRecord, MainSelectorKind, MainSelectorPointDeriveKind,
@@ -646,40 +646,37 @@ where
             .when_transition()
             .when(local.is_quark_step * next.is_final_step)
             .assert_one(local.carry_accumulator);
+        let same_eq_lte_block = local.is_eq_lte_step
+            * next.is_eq_lte_step
+            * (AB::Expr::ONE - local.is_last_eq_lte_step);
         builder
             .when_transition()
-            .when(local.is_eq_lte_step * next.is_eq_lte_step)
+            .when(same_eq_lte_block.clone())
             .assert_eq(next.step_idx, local.step_idx + AB::Expr::ONE);
         builder
             .when_transition()
-            .when(local.is_eq_lte_step * next.is_eq_lte_step)
+            .when(same_eq_lte_block.clone())
             .assert_eq(next.sparse_pos, local.sparse_pos);
         builder
             .when_transition()
-            .when(local.is_eq_lte_step * next.is_eq_lte_step)
+            .when(same_eq_lte_block.clone())
             .assert_eq(next.sparse_index_bits_value, local.sparse_index);
         builder
             .when_transition()
-            .when(local.is_eq_lte_step * next.is_eq_lte_step)
+            .when(same_eq_lte_block.clone())
             .assert_eq(next.round_idx + AB::Expr::ONE, local.round_idx);
         assert_array_eq(
-            &mut builder
-                .when_transition()
-                .when(local.is_eq_lte_step * next.is_eq_lte_step),
+            &mut builder.when_transition().when(same_eq_lte_block.clone()),
             local.acc_out,
             next.acc_in,
         );
         assert_array_eq(
-            &mut builder
-                .when_transition()
-                .when(local.is_eq_lte_step * next.is_eq_lte_step),
+            &mut builder.when_transition().when(same_eq_lte_block.clone()),
             local.factor,
             next.aux,
         );
         assert_array_eq(
-            &mut builder
-                .when_transition()
-                .when(local.is_eq_lte_step * next.is_eq_lte_step),
+            &mut builder.when_transition().when(same_eq_lte_block),
             local.value,
             next.value,
         );
@@ -765,6 +762,7 @@ pub struct MainSelectorEvalAir {
 pub struct MainSelectorPointAir {
     pub selector_point_bus: MainSelectorPointBus,
     pub tower_point_bus: TowerMainPointBus,
+    pub transcript_bus: TranscriptBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub ecc_rt_bus: EccRtBus,
 }
@@ -831,9 +829,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
         builder
             .when(local.is_tower_main + local.is_rotation_origin)
             .assert_zero(local.has_source);
-        builder
-            .when(local.has_ecc_rt)
-            .assert_zero(local.has_source);
+        builder.when(local.has_ecc_rt).assert_zero(local.has_source);
         builder
             .when(
                 local.is_tower_main
@@ -880,6 +876,16 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
             local.is_enabled * local.has_source,
         );
         for i in 0..D_EF {
+            self.transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                TranscriptBusMessage {
+                    tidx: local.transcript_tidx + AB::Expr::from_usize(i),
+                    value: local.value[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                local.is_enabled * local.has_transcript * local.is_ecc_xy,
+            );
             self.forked_transcript_bus.receive(
                 builder,
                 local.proof_idx,
@@ -889,23 +895,28 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainSelectorPointAir {
                     value: local.value[i].into(),
                     is_sample: AB::Expr::ONE,
                 },
-                local.is_enabled * local.has_transcript,
+                local.is_enabled * local.has_transcript * local.is_rotation_origin,
             );
         }
         self.ecc_rt_bus.lookup_key(
             builder,
             local.proof_idx,
             EccRtMessage {
-                idx: local.idx.into(),
+                idx: local.tower_idx.into(),
                 round_idx: local.round_idx.into(),
                 value: local.value.map(Into::into),
             },
             local.is_enabled * local.has_ecc_rt,
         );
         for i in 0..D_EF {
+            let one_coeff = if i == 0 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            };
             let expected = local.derive_identity * local.source_value[i]
-                + local.derive_one_minus * (AB::Expr::ONE - local.source_value[i])
-                + local.derive_one;
+                + local.derive_one_minus * (one_coeff.clone() - local.source_value[i])
+                + local.derive_one * one_coeff;
             builder
                 .when(local.is_enabled * (local.has_source + local.derive_zero + local.derive_one))
                 .assert_eq(local.value[i], expected);
@@ -1317,16 +1328,18 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
                 };
                 let value = end_eval - start_eval;
                 if record.ctx_offset == 0 {
-                    let _ = push_eq_lte_rows(
-                        &mut rows,
-                        record,
-                        0,
-                        record.ctx_num_vars,
-                        end - 1,
-                        zero,
-                        true,
-                        EqLteOutput::ToAccIn,
-                    );
+                    if end != 0 {
+                        let _ = push_eq_lte_rows(
+                            &mut rows,
+                            record,
+                            0,
+                            record.ctx_num_vars,
+                            end - 1,
+                            zero,
+                            true,
+                            EqLteOutput::ToAccIn,
+                        );
+                    }
                 } else {
                     let _ = push_eq_lte_rows(
                         &mut rows,
@@ -1803,11 +1816,19 @@ fn fill_formula_cols(row: &FormulaRow<'_>, cols: &mut MainSelectorFormulaCols<F>
     cols.eq_lte_value_is_zero = F::from_bool(row.eq_lte_value_is_zero);
     cols.is_first_quark_step = F::from_bool(row.quark_is_first);
     cols.is_last_quark_step = F::from_bool(row.quark_is_last);
+    let ordered_sparse_tail_len = row
+        .record
+        .ctx_num_vars
+        .saturating_sub(row.record.ordered_sparse_num_vars);
+    let is_last_ordered_sparse_accumulate = row.record.kind == MainSelectorKind::OrderedSparse
+        && row.step_kind == STEP_ACCUMULATE
+        && row.step_idx + 1 == row.record.sparse_indices.len();
     cols.carry_accumulator = F::from_bool(match row.step_kind {
         STEP_EQ_PRODUCT => {
             row.record.kind == MainSelectorKind::Whole || row.step_idx + 1 < row.record.ctx_num_vars
         }
-        STEP_ACCUMULATE | STEP_MULTIPLY | STEP_QUARK => true,
+        STEP_ACCUMULATE => !(is_last_ordered_sparse_accumulate && ordered_sparse_tail_len > 0),
+        STEP_MULTIPLY | STEP_QUARK => true,
         _ => false,
     });
     cols.round_idx = F::from_usize(row.round_idx);
@@ -2016,6 +2037,20 @@ mod tests {
     #[test]
     fn selector_formula_rows_match_native_prefix() {
         let ctx = SelectorContext::new(2, 5, 3);
+        assert_matches_native(
+            SelectorType::Prefix(structural_expr(0)),
+            MainSelectorKind::Prefix,
+            ctx,
+            0,
+            Vec::new(),
+            point(&[2, 3, 4]),
+            point(&[5, 6, 7]),
+        );
+    }
+
+    #[test]
+    fn selector_formula_rows_match_native_empty_prefix() {
+        let ctx = SelectorContext::new(0, 0, 3);
         assert_matches_native(
             SelectorType::Prefix(structural_expr(0)),
             MainSelectorKind::Prefix,

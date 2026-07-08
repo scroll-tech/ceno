@@ -37,6 +37,7 @@ pub struct MainEccRtChallengeCols<T> {
     pub idx: T,
     pub fork_id: T,
     pub round_idx: T,
+    pub num_rounds: T,
     pub is_first: T,
     pub tidx: T,
     pub out_tidx: T,
@@ -91,14 +92,21 @@ pub struct MainEccRtEquationCols<T> {
     pub alpha: [T; D_EF],
     pub alpha_pow: [T; D_EF],
     pub s0: [T; D_EF],
+    pub s0_all: [[T; D_EF]; SEPTIC_DEGREE],
     pub x0: [T; D_EF],
+    pub x0_all: [[T; D_EF]; SEPTIC_DEGREE],
     pub y0: [T; D_EF],
     pub x1: [T; D_EF],
+    pub x1_all: [[T; D_EF]; SEPTIC_DEGREE],
     pub y1: [T; D_EF],
     pub x3: [T; D_EF],
+    pub x3_all: [[T; D_EF]; SEPTIC_DEGREE],
     pub y3: [T; D_EF],
     pub sum_x: [T; D_EF],
     pub sum_y: [T; D_EF],
+    pub s0_x0_x1: [T; D_EF],
+    pub s0_squared: [T; D_EF],
+    pub s0_x0_x3: [T; D_EF],
     pub add_in: [T; D_EF],
     pub add_out: [T; D_EF],
     pub bypass_in: [T; D_EF],
@@ -260,7 +268,7 @@ where
                 kind: AB::Expr::from_usize(MainEccRtChallengeKind::Rt.as_usize()),
                 value: local.rt.map(Into::into),
             },
-            local.is_enabled,
+            local.is_enabled * (local.num_rounds - local.round_idx + AB::Expr::from_usize(2)),
         );
         self.challenge_bus.add_key_with_lookups(
             builder,
@@ -271,7 +279,7 @@ where
                 kind: AB::Expr::from_usize(MainEccRtChallengeKind::OutRt.as_usize()),
                 value: local.out_rt.map(Into::into),
             },
-            local.is_enabled,
+            local.is_enabled * (local.num_rounds - local.round_idx + AB::Expr::ONE),
         );
         self.challenge_bus.add_key_with_lookups(
             builder,
@@ -282,7 +290,9 @@ where
                 kind: AB::Expr::from_usize(MainEccRtChallengeKind::Alpha.as_usize()),
                 value: local.alpha.map(Into::into),
             },
-            local.is_enabled,
+            local.is_enabled
+                * local.is_first
+                * AB::Expr::from_usize(ECC_EQUATION_FAMILIES * SEPTIC_DEGREE),
         );
 
         let same_ecc = local.is_enabled * next.is_enabled * (AB::Expr::ONE - next.is_first);
@@ -302,6 +312,10 @@ where
             .when_transition()
             .when(same_ecc.clone())
             .assert_eq(next.round_idx, local.round_idx + AB::Expr::ONE);
+        builder
+            .when_transition()
+            .when(same_ecc.clone())
+            .assert_eq(next.num_rounds, local.num_rounds);
         assert_array_eq(
             &mut builder.when_transition().when(same_ecc),
             local.alpha,
@@ -410,28 +424,41 @@ where
             ext_zero::<AB::Expr>(),
         );
 
+        let x0_minus_x1 = core::array::from_fn(|i| {
+            ext_field_subtract::<AB::Expr>(local.x0_all[i], local.x1_all[i])
+        });
+        let x0_minus_x3 = core::array::from_fn(|i| {
+            ext_field_subtract::<AB::Expr>(local.x0_all[i], local.x3_all[i])
+        });
+        let s0_expr = core::array::from_fn(|i| local.s0_all[i].map(Into::into));
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.s0_x0_x1,
+            septic_mul_selected::<AB>(&local.s0_all, &x0_minus_x1, local.septic_flags.clone()),
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.s0_squared,
+            septic_mul_selected::<AB>(&local.s0_all, &s0_expr, local.septic_flags.clone()),
+        );
+        assert_array_eq(
+            &mut builder.when(local.is_enabled),
+            local.s0_x0_x3,
+            septic_mul_selected::<AB>(&local.s0_all, &x0_minus_x3, local.septic_flags),
+        );
         let v1 = ext_field_subtract::<AB::Expr>(
-            ext_field_multiply::<AB::Expr>(
-                local.s0,
-                ext_field_subtract::<AB::Expr>(local.x0, local.x1),
-            ),
+            local.s0_x0_x1,
             ext_field_subtract::<AB::Expr>(local.y0, local.y1),
         );
         let v2 = ext_field_subtract::<AB::Expr>(
             ext_field_subtract::<AB::Expr>(
-                ext_field_subtract::<AB::Expr>(
-                    ext_field_multiply::<AB::Expr>(local.s0, local.s0),
-                    local.x0,
-                ),
+                ext_field_subtract::<AB::Expr>(local.s0_squared, local.x0),
                 local.x1,
             ),
             local.x3,
         );
         let v3 = ext_field_subtract::<AB::Expr>(
-            ext_field_multiply::<AB::Expr>(
-                local.s0,
-                ext_field_subtract::<AB::Expr>(local.x0, local.x3),
-            ),
+            local.s0_x0_x3,
             ext_field_add::<AB::Expr>(local.y0, local.y3),
         );
         let v4 = ext_field_subtract::<AB::Expr>(local.x3, local.x0);
@@ -577,7 +604,10 @@ where
         builder.assert_bool(local.quark_prefix_is_zero);
         builder
             .when(local.is_enabled * local.is_first_bit)
-            .assert_eq(local.bit_weight, AB::Expr::ONE);
+            .assert_eq(
+                local.bit_weight,
+                AB::Expr::from_usize(1usize << (MAX_ECC_VARS - 1)),
+            );
         builder
             .when(local.is_enabled)
             .assert_zero(local.bit * (AB::Expr::ONE - local.is_active));
@@ -821,15 +851,15 @@ where
         builder
             .when_transition()
             .when(same_round.clone())
-            .assert_eq(next.bit_idx, local.bit_idx + AB::Expr::ONE);
+            .assert_eq(next.bit_idx + AB::Expr::ONE, local.bit_idx);
         builder
             .when_transition()
             .when(same_round.clone())
-            .assert_eq(next.bit_weight, local.bit_weight * AB::Expr::from_usize(2));
+            .assert_eq(local.bit_weight, next.bit_weight * AB::Expr::from_usize(2));
         builder
             .when_transition()
             .when(same_round.clone())
-            .assert_zero(next.is_active * (AB::Expr::ONE - local.is_active));
+            .assert_zero(local.is_active * (AB::Expr::ONE - next.is_active));
         assert_array_eq(
             &mut builder.when_transition().when(same_round.clone()),
             local.prefix_out,
@@ -910,7 +940,7 @@ where
         builder
             .when_transition()
             .when(next_round.clone())
-            .assert_zero(next.bit_idx);
+            .assert_eq(next.bit_idx, AB::Expr::from_usize(MAX_ECC_VARS - 1));
         assert_array_eq(
             &mut builder.when_transition().when(next_round.clone()),
             local.quark_out,
@@ -1408,6 +1438,7 @@ fn fill_challenge_cols(record: &MainEccRtRecord, cols: &mut MainEccRtChallengeCo
     cols.idx = F::from_usize(record.idx);
     cols.fork_id = F::from_usize(record.fork_id);
     cols.round_idx = F::from_usize(record.round_idx);
+    cols.num_rounds = F::from_usize(record.num_rounds);
     cols.is_first = F::from_bool(record.is_first);
     cols.tidx = F::from_usize(record.tidx);
     cols.out_tidx = F::from_usize(record.out_tidx);
@@ -1480,18 +1511,24 @@ fn equation_term(
 ) -> openvm_stark_sdk::config::baby_bear_poseidon2::EF {
     match family_idx {
         0 => {
-            record.s0[septic_idx] * (record.x0[septic_idx] - record.x1[septic_idx])
-                - (record.y0[septic_idx] - record.y1[septic_idx])
+            septic_mul_coeff_native(
+                &record.s0,
+                &core::array::from_fn(|i| record.x0[i] - record.x1[i]),
+                septic_idx,
+            ) - (record.y0[septic_idx] - record.y1[septic_idx])
         }
         1 => {
-            record.s0[septic_idx] * record.s0[septic_idx]
+            septic_mul_coeff_native(&record.s0, &record.s0, septic_idx)
                 - record.x0[septic_idx]
                 - record.x1[septic_idx]
                 - record.x3[septic_idx]
         }
         2 => {
-            record.s0[septic_idx] * (record.x0[septic_idx] - record.x3[septic_idx])
-                - (record.y0[septic_idx] + record.y3[septic_idx])
+            septic_mul_coeff_native(
+                &record.s0,
+                &core::array::from_fn(|i| record.x0[i] - record.x3[i]),
+                septic_idx,
+            ) - (record.y0[septic_idx] + record.y3[septic_idx])
         }
         3 => record.x3[septic_idx] - record.x0[septic_idx],
         4 => record.y3[septic_idx] - record.y0[septic_idx],
@@ -1499,6 +1536,36 @@ fn equation_term(
         6 => record.y3[septic_idx] - record.sum_y[septic_idx],
         _ => unreachable!("invalid ECC equation family"),
     }
+}
+
+fn septic_mul_coeff_native(
+    a: &[openvm_stark_sdk::config::baby_bear_poseidon2::EF; SEPTIC_DEGREE],
+    b: &[openvm_stark_sdk::config::baby_bear_poseidon2::EF; SEPTIC_DEGREE],
+    coeff_idx: usize,
+) -> openvm_stark_sdk::config::baby_bear_poseidon2::EF {
+    let mut out = openvm_stark_sdk::config::baby_bear_poseidon2::EF::ZERO;
+    let two = openvm_stark_sdk::config::baby_bear_poseidon2::EF::from_usize(2);
+    let five = openvm_stark_sdk::config::baby_bear_poseidon2::EF::from_usize(5);
+    for i in 0..SEPTIC_DEGREE {
+        for j in 0..SEPTIC_DEGREE {
+            let term = a[i] * b[j];
+            let mut index = i + j;
+            if index < SEPTIC_DEGREE {
+                if index == coeff_idx {
+                    out += term;
+                }
+            } else {
+                index -= SEPTIC_DEGREE;
+                if index == coeff_idx {
+                    out += five * term;
+                }
+                if index + 1 == coeff_idx {
+                    out += two * term;
+                }
+            }
+        }
+    }
+    out
 }
 
 fn fill_equation_cols(row: &MainEccRtEquationRow<'_>, cols: &mut MainEccRtEquationCols<F>) {
@@ -1515,14 +1582,33 @@ fn fill_equation_cols(row: &MainEccRtEquationRow<'_>, cols: &mut MainEccRtEquati
     cols.alpha = ext_to_basis(record.alpha);
     cols.alpha_pow = ext_to_basis(row.alpha_pow);
     cols.s0 = ext_to_basis(record.s0[row.septic_idx]);
+    cols.s0_all = record.s0.map(ext_to_basis);
     cols.x0 = ext_to_basis(record.x0[row.septic_idx]);
+    cols.x0_all = record.x0.map(ext_to_basis);
     cols.y0 = ext_to_basis(record.y0[row.septic_idx]);
     cols.x1 = ext_to_basis(record.x1[row.septic_idx]);
+    cols.x1_all = record.x1.map(ext_to_basis);
     cols.y1 = ext_to_basis(record.y1[row.septic_idx]);
     cols.x3 = ext_to_basis(record.x3[row.septic_idx]);
+    cols.x3_all = record.x3.map(ext_to_basis);
     cols.y3 = ext_to_basis(record.y3[row.septic_idx]);
     cols.sum_x = ext_to_basis(record.sum_x[row.septic_idx]);
     cols.sum_y = ext_to_basis(record.sum_y[row.septic_idx]);
+    cols.s0_x0_x1 = ext_to_basis(septic_mul_coeff_native(
+        &record.s0,
+        &core::array::from_fn(|i| record.x0[i] - record.x1[i]),
+        row.septic_idx,
+    ));
+    cols.s0_squared = ext_to_basis(septic_mul_coeff_native(
+        &record.s0,
+        &record.s0,
+        row.septic_idx,
+    ));
+    cols.s0_x0_x3 = ext_to_basis(septic_mul_coeff_native(
+        &record.s0,
+        &core::array::from_fn(|i| record.x0[i] - record.x3[i]),
+        row.septic_idx,
+    ));
     cols.add_in = ext_to_basis(row.add_in);
     cols.add_out = ext_to_basis(row.add_out);
     cols.bypass_in = ext_to_basis(row.bypass_in);
@@ -1545,7 +1631,7 @@ fn build_quark_rows(records: &[MainEccRtRecord]) -> Vec<MainEccRtQuarkRow<'_>> {
     for record in records {
         let mut active_count = 0usize;
         let mut bit_value = 0usize;
-        for bit_idx in 0..MAX_ECC_VARS {
+        for bit_idx in (0..MAX_ECC_VARS).rev() {
             let active_count_in = active_count;
             let bit_value_in = bit_value;
             if record.lte_active[bit_idx] {
@@ -1577,8 +1663,8 @@ fn fill_quark_cols(row: &MainEccRtQuarkRow<'_>, cols: &mut MainEccRtQuarkCols<F>
     cols.bit_weight = F::from_usize(1usize << row.bit_idx);
     cols.is_first_round = F::from_bool(record.is_first);
     cols.is_last_round = F::from_bool(record.is_last);
-    cols.is_first_bit = F::from_bool(row.bit_idx == 0);
-    cols.is_last_bit = F::from_bool(row.bit_idx + 1 == MAX_ECC_VARS);
+    cols.is_first_bit = F::from_bool(row.bit_idx + 1 == MAX_ECC_VARS);
+    cols.is_last_bit = F::from_bool(row.bit_idx == 0);
     cols.is_active = F::from_bool(record.lte_active[row.bit_idx]);
     cols.bit = F::from_bool(record.lte_bits[row.bit_idx]);
     cols.current_rt = ext_to_basis(record.value);
@@ -1596,12 +1682,12 @@ fn fill_quark_cols(row: &MainEccRtQuarkRow<'_>, cols: &mut MainEccRtQuarkCols<F>
     cols.same_one = ext_to_basis(same_one);
     cols.same_zero = ext_to_basis(same_zero);
     cols.equal_choice = ext_to_basis(equal_choice);
-    cols.active_prefix = ext_to_basis(record.lte_prefix_acc[row.bit_idx] * equal_choice);
-    cols.prefix_in = ext_to_basis(record.lte_prefix_acc[row.bit_idx]);
-    cols.prefix_out = ext_to_basis(record.lte_prefix_acc[row.bit_idx + 1]);
-    cols.less_in = ext_to_basis(record.lte_less_acc[row.bit_idx]);
-    let less_from_prior = record.lte_less_acc[row.bit_idx] * (same_one + same_zero);
-    let less_from_equal = record.lte_prefix_acc[row.bit_idx] * same_zero;
+    cols.active_prefix = ext_to_basis(record.lte_prefix_acc[row.bit_idx + 1] * equal_choice);
+    cols.prefix_in = ext_to_basis(record.lte_prefix_acc[row.bit_idx + 1]);
+    cols.prefix_out = ext_to_basis(record.lte_prefix_acc[row.bit_idx]);
+    cols.less_in = ext_to_basis(record.lte_less_acc[row.bit_idx + 1]);
+    let less_from_prior = record.lte_less_acc[row.bit_idx + 1] * (same_one + same_zero);
+    let less_from_equal = record.lte_prefix_acc[row.bit_idx + 1] * same_zero;
     let active_less = less_from_prior
         + if record.lte_bits[row.bit_idx] {
             less_from_equal
@@ -1611,7 +1697,7 @@ fn fill_quark_cols(row: &MainEccRtQuarkRow<'_>, cols: &mut MainEccRtQuarkCols<F>
     cols.less_from_prior = ext_to_basis(less_from_prior);
     cols.less_from_equal = ext_to_basis(less_from_equal);
     cols.active_less = ext_to_basis(active_less);
-    cols.less_out = ext_to_basis(record.lte_less_acc[row.bit_idx + 1]);
+    cols.less_out = ext_to_basis(record.lte_less_acc[row.bit_idx]);
     cols.active_count_in = F::from_usize(row.active_count_in);
     cols.active_count_out = F::from_usize(row.active_count_out);
     cols.bit_value_in = F::from_usize(row.bit_value_in);
@@ -1704,6 +1790,63 @@ fn choose_ext<AB: AirBuilder>(
     core::array::from_fn(|i| {
         flag.clone() * when_one[i].clone() + (AB::Expr::ONE - flag.clone()) * when_zero[i].clone()
     })
+}
+
+fn septic_mul_selected<AB: AirBuilder>(
+    a: &[[AB::Var; D_EF]; SEPTIC_DEGREE],
+    b: &[[AB::Expr; D_EF]; SEPTIC_DEGREE],
+    septic_flags: [AB::Var; SEPTIC_DEGREE],
+) -> [AB::Expr; D_EF]
+where
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    (0..SEPTIC_DEGREE).fold(ext_zero::<AB::Expr>(), |acc, coeff_idx| {
+        let coeff = septic_mul_coeff::<AB>(a, b, coeff_idx);
+        ext_field_add::<AB::Expr>(
+            acc,
+            ext_field_multiply_scalar::<AB::Expr>(coeff, septic_flags[coeff_idx].clone()),
+        )
+    })
+}
+
+fn septic_mul_coeff<AB: AirBuilder>(
+    a: &[[AB::Var; D_EF]; SEPTIC_DEGREE],
+    b: &[[AB::Expr; D_EF]; SEPTIC_DEGREE],
+    coeff_idx: usize,
+) -> [AB::Expr; D_EF]
+where
+    <AB::Expr as PrimeCharacteristicRing>::PrimeSubfield: BinomiallyExtendable<{ D_EF }>,
+{
+    let mut out = ext_zero::<AB::Expr>();
+    for i in 0..SEPTIC_DEGREE {
+        for j in 0..SEPTIC_DEGREE {
+            let term = ext_field_multiply::<AB::Expr>(a[i].clone().map(Into::into), b[j].clone());
+            let mut index = i + j;
+            if index < SEPTIC_DEGREE {
+                if index == coeff_idx {
+                    out = ext_field_add::<AB::Expr>(out, term);
+                }
+            } else {
+                index -= SEPTIC_DEGREE;
+                if index == coeff_idx {
+                    out = ext_field_add::<AB::Expr>(
+                        out,
+                        ext_field_multiply_scalar::<AB::Expr>(
+                            term.clone(),
+                            AB::Expr::from_usize(5),
+                        ),
+                    );
+                }
+                if index + 1 == coeff_idx {
+                    out = ext_field_add::<AB::Expr>(
+                        out,
+                        ext_field_multiply_scalar::<AB::Expr>(term, AB::Expr::from_usize(2)),
+                    );
+                }
+            }
+        }
+    }
+    out
 }
 
 fn ext_zero<FA: PrimeCharacteristicRing>() -> [FA; D_EF] {
