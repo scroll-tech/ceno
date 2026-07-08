@@ -391,6 +391,38 @@ mod cuda_tracegen {
                     &(),
                     required_heights,
                 ),
+                TraceModuleRef::Pcs(module) => {
+                    let proofs_cpu = proofs
+                        .iter()
+                        .map(|proof| proof.cpu.clone())
+                        .collect::<Vec<_>>();
+                    let preflights_cpu = preflights
+                        .iter()
+                        .map(|preflight| preflight.cpu.clone())
+                        .collect::<Vec<_>>();
+                    let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+                    let ctxs: Vec<AirProvingContext<CpuBackend<BabyBearPoseidon2Config>>> = module
+                        .generate_proving_ctxs(
+                            &child_vk.cpu,
+                            &proofs_cpu,
+                            &preflights_cpu,
+                            &(),
+                            required_heights,
+                        )?;
+                    ctxs.into_iter()
+                        .map(|ctx| {
+                            Some(AirProvingContext {
+                                cached_mains: Vec::new(),
+                                common_main: transport_matrix_h2d_row(
+                                    &ctx.common_main,
+                                    &device_ctx,
+                                )
+                                .ok()?,
+                                public_values: ctx.public_values,
+                            })
+                        })
+                        .collect()
+                }
             }
         }
     }
@@ -477,6 +509,7 @@ mod cuda_tracegen {
                 TraceModuleRef::Tower(&self.gkr),
                 TraceModuleRef::Main(&self.main_module),
                 TraceModuleRef::BatchConstraint(&self.batch_constraint),
+                TraceModuleRef::Pcs(&self.pcs),
             ];
 
             let mut ctxs_by_module = Vec::with_capacity(modules.len());
