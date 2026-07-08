@@ -190,7 +190,7 @@ jobs:
         env:
           RUSTFLAGS: "-C opt-level=3"
           RUST_MIN_STACK: "33554432"
-        run: bash ceno_recursion_v2/scripts/run_e2e_test.sh
+        run: cargo run --release --package ceno_recursion_v2 --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Install cargo make
         run: |
