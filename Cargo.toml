@@ -1,5 +1,5 @@
 [workspace]
-exclude = ["ceno_recursion_v2", "ceno_recursion"]
+exclude = ["ceno_recursion_v2"]
 members = [
   "ceno_cli",
   "ceno_emul",
