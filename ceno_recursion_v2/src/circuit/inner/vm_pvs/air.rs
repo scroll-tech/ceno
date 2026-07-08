@@ -4,7 +4,7 @@ use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
 use ceno_zkvm::instructions::riscv::constants::{
     END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, EXIT_PC, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
     HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBIO_DIGEST_IDX,
-    SHARD_ID_IDX, SHARD_RW_SUM_IDX,
+    PUBIO_DIGEST_U16_LIMBS, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
 };
 use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
@@ -21,7 +21,10 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage},
-    circuit::inner::{bus::PvsAirConsistencyBus, vm_pvs::VmPvs},
+    circuit::inner::{
+        bus::{PvsAirConsistencyBus, PvsAirConsistencyMessage},
+        vm_pvs::VmPvs,
+    },
 };
 
 #[repr(C)]
@@ -160,7 +163,6 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         // When local and next are valid, enforce continuation consistency.
         let mut when_both_valid = builder.when(and(local.is_valid, not(local.is_last)));
         when_both_valid.assert_eq(local.child_pvs.end_pc, next.child_pvs.init_pc);
-        when_both_valid.assert_eq(local.child_pvs.end_cycle, next.child_pvs.init_cycle);
         when_both_valid.assert_eq(
             local.child_pvs.shard_id + AB::Expr::ONE,
             next.child_pvs.shard_id,
@@ -187,7 +189,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
                         pv_idx: AB::Expr::from_usize(pv_idx),
                         value: vm_public_value_by_index::<AB>(local, *global_pv_idx),
                     },
-                    local.is_valid * AB::Expr::from_bool(!crate::system::TOWER_PREFIX_ONLY),
+                    local.is_valid,
                 );
             }
         }
@@ -339,15 +341,15 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         }
 
         // We look up proof metadata from VerifierPvsAir here to ensure consistency on each row.
-        // self.pvs_air_consistency_bus.lookup_key(
-        //     builder,
-        //     local.proof_idx,
-        //     PvsAirConsistencyMessage {
-        //         deferral_flag,
-        //         has_verifier_pvs: local.has_verifier_pvs.into(),
-        //     },
-        //     local.is_valid,
-        // );
+        self.pvs_air_consistency_bus.lookup_key(
+            builder,
+            local.proof_idx,
+            PvsAirConsistencyMessage {
+                deferral_flag,
+                has_verifier_pvs: local.has_verifier_pvs.into(),
+            },
+            local.is_valid,
+        );
 
         // Finally, constrain that this AIR's output public values are consistent with child_pvs.
         let &VmPvs::<_> {
@@ -389,29 +391,31 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             exit_code,
         );
 
-        // constrain static per-proof public values
+        // The aggregate VM public values are first-shard init/static values plus last-shard
+        // exit/end values. Per-shard values are still constrained row-locally through the
+        // public-values and transcript buses above.
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.shard_id, shard_id);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.heap_start_addr, heap_start_addr);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.heap_shard_len, heap_shard_len);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.hint_start_addr, hint_start_addr);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.hint_shard_len, hint_shard_len);
         assert_array_eq(
-            &mut builder.when(local.is_valid),
+            &mut builder.when_first_row(),
             local.child_pvs.public_io,
             public_io,
         );
         assert_array_eq(
-            &mut builder.when(local.is_valid),
+            &mut builder.when_first_row(),
             local.child_pvs.shard_rw_sum,
             shard_rw_sum,
         );
@@ -423,10 +427,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             fixed_commit,
         );
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.init_pc, init_pc);
         builder
-            .when(local.is_valid)
+            .when_first_row()
             .assert_eq(local.child_pvs.init_cycle, init_cycle);
         assert_array_eq(
             &mut builder.when(local.is_valid),
@@ -434,7 +438,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             fixed_no_omc_init_commit,
         );
         assert_array_eq(
-            &mut builder.when(local.is_valid),
+            &mut builder.when_first_row(),
             local.child_pvs.witness_commit,
             witness_commit,
         );
@@ -463,8 +467,9 @@ where
         {
             local.child_pvs.shard_rw_sum[idx - SHARD_RW_SUM_IDX].into()
         }
-        idx if idx == PUBIO_DIGEST_IDX => local.child_pvs.public_io[0].into(),
-        idx if idx == PUBIO_DIGEST_IDX + 1 => local.child_pvs.public_io[1].into(),
+        idx if (PUBIO_DIGEST_IDX..(PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS)).contains(&idx) => {
+            local.child_pvs.public_io[idx - PUBIO_DIGEST_IDX].into()
+        }
         _ => AB::Expr::ZERO,
     }
 }

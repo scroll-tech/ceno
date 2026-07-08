@@ -76,10 +76,7 @@ impl PrecomputedTranscript {
             if k + 1 < schedule.lambdas.len() {
                 challenges.push_back(schedule.lambdas[k + 1]);
             } else {
-                // Native still samples the next alpha after the final merge.
-                // TODO(recursion-v2): record and constrain this final unused
-                // challenge in the tower schedule instead of using a sentinel.
-                challenges.push_back(RecursionField::ZERO);
+                challenges.push_back(schedule.final_alpha);
             }
         }
         Self { challenges }
@@ -349,6 +346,7 @@ fn build_tower_replay_result(
             round,
             &rt_prime,
             &coeffs,
+            &num_variables,
             &mut prod_spec_point_n_eval,
             &mut logup_spec_p_point_n_eval,
             &mut logup_spec_q_point_n_eval,
@@ -426,12 +424,20 @@ fn update_point_evals(
     round: usize,
     rt_prime: &Point<RecursionField>,
     coeffs: &[RecursionField],
+    num_variables: &[usize],
     prod_point_eval: &mut [PointAndEval<RecursionField>],
     logup_p_point_eval: &mut [PointAndEval<RecursionField>],
     logup_q_point_eval: &mut [PointAndEval<RecursionField>],
 ) {
+    let num_prod_spec = prod_point_eval.len();
     for (spec_idx, point_eval) in prod_point_eval.iter_mut().enumerate() {
-        if round < tower_proof.prod_specs_eval[spec_idx].len() {
+        if round
+            < num_variables
+                .get(spec_idx)
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(1)
+        {
             let evals = &tower_proof.prod_specs_eval[spec_idx][round];
             let merged = izip!(evals.iter(), coeffs.iter())
                 .map(|(a, b)| *a * *b)
@@ -445,7 +451,13 @@ fn update_point_evals(
         .zip(logup_q_point_eval.iter_mut())
         .enumerate()
     {
-        if round < tower_proof.logup_specs_eval[spec_idx].len() {
+        if round
+            < num_variables
+                .get(num_prod_spec + spec_idx)
+                .copied()
+                .unwrap_or(0)
+                .saturating_sub(1)
+        {
             let evals = &tower_proof.logup_specs_eval[spec_idx][round];
             let (p_slice, q_slice) = evals.split_at(2);
             let merged_p = izip!(p_slice.iter(), coeffs.iter())
@@ -476,7 +488,7 @@ fn aggregate_next_eval(
         .zip(alpha_pows.iter())
         .zip(num_variables.iter())
     {
-        if round + 1 < *max_round {
+        if round + 1 < max_round.saturating_sub(1) {
             total += *alpha * point_eval.eval;
         }
     }
@@ -487,7 +499,7 @@ fn aggregate_next_eval(
         .zip(alpha_pows[num_prod_spec..].chunks(2))
         .zip(num_variables[num_prod_spec..].iter())
     {
-        if round + 1 < *max_round {
+        if round + 1 < max_round.saturating_sub(1) {
             total += alpha_chunk[0] * p_eval.eval + alpha_chunk[1] * q_eval.eval;
         }
     }

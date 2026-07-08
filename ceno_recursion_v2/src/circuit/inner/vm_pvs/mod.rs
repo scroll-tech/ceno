@@ -1,3 +1,4 @@
+use ceno_zkvm::instructions::riscv::constants::PUBIO_DIGEST_U16_LIMBS;
 use openvm_stark_backend::{FiatShamirTranscript, TranscriptHistory};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use p3_field::PrimeCharacteristicRing;
@@ -29,7 +30,7 @@ pub struct VmPvs<F> {
     pub heap_shard_len: F,
     pub hint_start_addr: F,
     pub hint_shard_len: F,
-    pub public_io: [F; 2],
+    pub public_io: [F; PUBIO_DIGEST_U16_LIMBS],
     pub shard_rw_sum: [F; 2 * SEPTIC_EXTENSION_DEGREE],
 }
 

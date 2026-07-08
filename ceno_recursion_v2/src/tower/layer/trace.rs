@@ -15,10 +15,7 @@ fn ef_one() -> EF {
     EF::ONE
 }
 
-fn weight_bases(
-    record: &TowerLayerRecord,
-    layer_idx: usize,
-) -> ([F; D_EF], [F; D_EF], [F; D_EF], [F; D_EF]) {
+pub(crate) fn weight_values(record: &TowerLayerRecord, layer_idx: usize) -> (EF, EF, EF, EF) {
     let alpha = record.lambda_at(layer_idx);
     let mut pow = ef_one();
     let has_read = record.read_counts.iter().any(|&count| count != 0);
@@ -52,6 +49,15 @@ fn weight_bases(
     } else {
         (EF::ZERO, EF::ZERO)
     };
+    (read_weight, write_weight, logup_p_weight, logup_q_weight)
+}
+
+fn weight_bases(
+    record: &TowerLayerRecord,
+    layer_idx: usize,
+) -> ([F; D_EF], [F; D_EF], [F; D_EF], [F; D_EF]) {
+    let (read_weight, write_weight, logup_p_weight, logup_q_weight) =
+        weight_values(record, layer_idx);
     (
         read_weight
             .as_basis_coefficients_slice()
@@ -72,6 +78,52 @@ fn weight_bases(
     )
 }
 
+pub(crate) fn weighted_prime_fold_for_layer(
+    record: &TowerLayerRecord,
+    tower: &TowerTowerEvalRecord,
+    layer_idx: usize,
+) -> EF {
+    let (read_weight, write_weight, logup_p_weight, logup_q_weight) =
+        weight_values(record, layer_idx);
+    let read_prime = if record.read_active_at(layer_idx) {
+        record
+            .read_prime_claims
+            .get(layer_idx)
+            .copied()
+            .unwrap_or(EF::ZERO)
+    } else {
+        EF::ZERO
+    };
+    let write_prime = if record.write_active_at(layer_idx) {
+        record
+            .write_prime_claims
+            .get(layer_idx)
+            .copied()
+            .unwrap_or(EF::ZERO)
+    } else {
+        EF::ZERO
+    };
+    let (logup_p_cross, logup_q_cross) = if record.logup_active_at(layer_idx) {
+        let logup_quad = tower
+            .logup_layers
+            .get(layer_idx)
+            .and_then(|rows| rows.first())
+            .copied()
+            .unwrap_or([EF::ZERO; 4]);
+        (
+            logup_quad[0] * logup_quad[3] + logup_quad[1] * logup_quad[2],
+            logup_quad[2] * logup_quad[3],
+        )
+    } else {
+        (EF::ZERO, EF::ZERO)
+    };
+
+    read_weight * read_prime
+        + write_weight * write_prime
+        + logup_p_weight * logup_p_cross
+        + logup_q_weight * logup_q_cross
+}
+
 /// Minimal record for parallel tower layer trace generation
 #[derive(Debug, Clone, Default)]
 pub struct TowerLayerRecord {
@@ -82,6 +134,7 @@ pub struct TowerLayerRecord {
     pub tidx: usize,
     pub layer_claims: Vec<[EF; 4]>,
     pub lambdas: Vec<EF>,
+    pub final_alpha: EF,
     pub eq_at_r_primes: Vec<EF>,
     pub read_counts: Vec<usize>,
     pub write_counts: Vec<usize>,
@@ -305,6 +358,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.layer_idx = F::ZERO;
                     cols.tidx = F::from_usize(record.tidx);
                     cols.lambda = [F::ZERO; D_EF];
+                    cols.final_alpha = [F::ZERO; D_EF];
                     let mut lambda_prime_one = [F::ZERO; D_EF];
                     lambda_prime_one[0] = F::ONE;
                     cols.lambda_prime = lambda_prime_one;
@@ -336,6 +390,7 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.write_weight = [F::ZERO; D_EF];
                     cols.logup_p_weight = [F::ZERO; D_EF];
                     cols.logup_q_weight = [F::ZERO; D_EF];
+                    cols.weighted_prime_fold = [F::ZERO; D_EF];
                     cols.eq_at_r_prime = [F::ZERO; D_EF];
                     cols.r0_claim.copy_from_slice(q0_basis);
                     cols.w0_claim.copy_from_slice(q0_basis);
@@ -360,6 +415,11 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.tidx = F::from_usize(record.layer_tidx(layer_idx));
                     cols.lambda = record
                         .lambda_at(layer_idx)
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    cols.final_alpha = record
+                        .final_alpha
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();
@@ -470,8 +530,14 @@ impl RowMajorChip<F> for TowerLayerTraceGenerator {
                     cols.write_weight = write_weight;
                     cols.logup_p_weight = logup_p_weight;
                     cols.logup_q_weight = logup_q_weight;
-                    cols.eq_at_r_prime = record
-                        .eq_at(layer_idx)
+                    let eq_at_r_prime = record.eq_at(layer_idx);
+                    cols.eq_at_r_prime = eq_at_r_prime
+                        .as_basis_coefficients_slice()
+                        .try_into()
+                        .unwrap();
+                    let weighted_prime_fold =
+                        weighted_prime_fold_for_layer(record, tower, layer_idx);
+                    cols.weighted_prime_fold = weighted_prime_fold
                         .as_basis_coefficients_slice()
                         .try_into()
                         .unwrap();

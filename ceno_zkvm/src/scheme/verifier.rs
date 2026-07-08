@@ -1552,13 +1552,13 @@ impl TowerVerify {
                     round,
                 );
 
-                let expected_evaluation: E = (0..num_prod_spec)
+                let weighted_prime_fold: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
                         // prod'[b] = prod[0,b] * prod[1,b]
                         // prod'[out_rt] = \sum_b eq(out_rt,b) * prod'[b] = \sum_b eq(out_rt,b) * prod[0,b] * prod[1,b]
-                        eq * *alpha
+                        *alpha
                             * if round < *max_round - 1 { tower_proofs.prod_specs_eval[spec_index][round].iter().copied().product() } else {
                             E::ZERO
                         }
@@ -1573,7 +1573,7 @@ impl TowerVerify {
                         // logup_p'[out_rt] = \sum_b eq(out_rt,b) * (logup_p[0,b] * logup_q[1,b] + logup_p[1,b] * logup_q[0,b])
                         // logup_q'[out_rt] = \sum_b eq(out_rt,b) * logup_q[0,b] * logup_q[1,b]
                         let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
-                        eq * if round < *max_round - 1 {
+                        if round < *max_round - 1 {
                             let evals = &tower_proofs.logup_specs_eval[spec_index][round];
                             let (p1, p2, q1, q2) =
                                 (evals[0], evals[1], evals[2], evals[3]);
@@ -1584,6 +1584,7 @@ impl TowerVerify {
                         }
                     })
                     .sum::<E>();
+                let expected_evaluation = eq * weighted_prime_fold;
 
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
                     return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));

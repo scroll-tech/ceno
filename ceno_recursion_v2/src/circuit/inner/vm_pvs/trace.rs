@@ -1,3 +1,7 @@
+use ceno_zkvm::{
+    instructions::riscv::constants::{LIMB_BITS, LIMB_MASK, PUBIO_DIGEST_U16_LIMBS, UINT_LIMBS},
+    structs::VK_DIGEST_LEN,
+};
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::prover::AirProvingContext;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
@@ -136,7 +140,7 @@ fn build_vm_pvs(
         heap_shard_len: F::from_u32(pv.heap_shard_len),
         hint_start_addr: F::from_u32(pv.hint_start_addr),
         hint_shard_len: F::from_u32(pv.hint_shard_len),
-        public_io: split_u32_lo_hi(pv.public_io_digest[0]),
+        public_io: split_public_io_digest(pv.public_io_digest),
         shard_rw_sum: pv.shard_rw_sum.map(F::from_u32),
     }
 }
@@ -156,6 +160,7 @@ fn commitment_digest_tidxs(
     proof: &RecursionProof,
 ) -> (usize, usize, usize) {
     let mut tidx = crate::utils::TranscriptLabel::Riscv.field_len()
+        + VK_DIGEST_LEN * D_EF
         + child_vk
             .circuit_vks
             .values()
@@ -193,6 +198,14 @@ fn split_u32_lo_hi(value: u32) -> [F; 2] {
         F::from_u32(value & 0xffff),
         F::from_u32((value >> 16) & 0xffff),
     ]
+}
+
+fn split_public_io_digest(digest: [u32; 8]) -> [F; PUBIO_DIGEST_U16_LIMBS] {
+    core::array::from_fn(|digest_limb_idx| {
+        let word_idx = digest_limb_idx / UINT_LIMBS;
+        let limb_idx = digest_limb_idx % UINT_LIMBS;
+        F::from_u32((digest[word_idx] >> (limb_idx * LIMB_BITS)) & LIMB_MASK)
+    })
 }
 
 fn ef_to_limbs(value: EF) -> [F; D_EF] {

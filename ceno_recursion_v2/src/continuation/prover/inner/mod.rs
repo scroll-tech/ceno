@@ -2,6 +2,8 @@ use std::{sync::Arc, time::Instant};
 
 use continuations_v2::SC;
 use eyre::Result;
+#[cfg(test)]
+use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     StarkEngine,
@@ -17,6 +19,8 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::{
 };
 use verify_stark::pvs::DeferralPvs;
 
+#[cfg(test)]
+use crate::system::VerifierSubCircuit;
 use crate::{
     circuit::{
         Circuit,
@@ -48,7 +52,7 @@ pub struct InnerAggregationProver<
     agg_node_tracegen: T,
 
     child_vk: Arc<RecursionVk>,
-    child_vk_pcs_data: CommittedTraceData<PB>,
+    child_vk_pcs_data: Option<CommittedTraceData<PB>>,
     circuit: Arc<InnerCircuit<S>>,
 
     self_vk_pcs_data: Option<CommittedTraceData<PB>>,
@@ -178,6 +182,7 @@ impl<
 > InnerAggregationProver<PB, S, T>
 where
     PB::Matrix: Clone,
+    PB::Commitment: Default,
 {
     pub fn agg_prove_no_def<E: StarkEngine<SC = SC, PB = PB>>(
         &self,
@@ -235,6 +240,11 @@ where
         let mut transcript = default_duplex_sponge_recorder();
         transcript_observe_label(&mut transcript, TranscriptLabel::Riscv.as_bytes());
 
+        let child_dag_commit = child_vk_pcs_data
+            .as_ref()
+            .map(|data| data.commitment.clone())
+            .unwrap_or_default();
+
         let (pre_ctxs, poseidon2_compress_inputs, subcircuit_initial_transcripts) = self
             .agg_node_tracegen
             .generate_pre_verifier_subcircuit_ctxs(
@@ -243,7 +253,7 @@ where
                 absent_trace_pvs,
                 child_is_app,
                 child_vk,
-                child_vk_pcs_data.commitment,
+                child_dag_commit,
                 transcript,
             );
 
@@ -302,6 +312,101 @@ where
         CommittedTraceData<PB>: Clone,
     {
         self.self_vk_pcs_data.clone()
+    }
+}
+
+#[cfg(test)]
+impl<const MAX_NUM_PROOFS: usize, T>
+    InnerAggregationProver<CpuBackend<SC>, VerifierSubCircuit<MAX_NUM_PROOFS>, T>
+where
+    T: InnerTraceGen<CpuBackend<SC>>,
+{
+    pub(crate) fn debug_with_preflight_mutation<Eg, M>(
+        &self,
+        proofs: &[RecursionProof],
+        child_vk_kind: ChildVkKind,
+        mutate: M,
+    ) -> bool
+    where
+        Eg: StarkEngine<SC = SC, PB = CpuBackend<SC>>,
+        M: FnOnce(&mut [crate::system::Preflight]) -> bool,
+    {
+        assert!(proofs.len() <= self.circuit.verifier_circuit.max_num_proofs());
+
+        let (child_vk, child_vk_pcs_data) = match child_vk_kind {
+            ChildVkKind::RecursiveSelf => {
+                unimplemented!("RecursiveSelf proving is not wired for RecursionVk yet")
+            }
+            _ => (&self.child_vk, self.child_vk_pcs_data.clone()),
+        };
+        let child_is_app = matches!(child_vk_kind, ChildVkKind::App);
+
+        let mut transcript = default_duplex_sponge_recorder();
+        transcript_observe_label(&mut transcript, TranscriptLabel::Riscv.as_bytes());
+        let child_dag_commit = child_vk_pcs_data
+            .as_ref()
+            .map(|data| data.commitment.clone())
+            .unwrap_or_default();
+
+        let (pre_ctxs, poseidon2_compress_inputs, subcircuit_initial_transcripts) = self
+            .agg_node_tracegen
+            .generate_pre_verifier_subcircuit_ctxs(
+                proofs,
+                ProofsType::Vm,
+                None,
+                child_is_app,
+                child_vk,
+                child_dag_commit,
+                transcript,
+            );
+        let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
+        let range_check_inputs = vec![];
+        let power_check_inputs = vec![];
+        let external_data = VerifierExternalData {
+            poseidon2_compress_inputs: &poseidon2_compress_inputs,
+            poseidon2_permute_inputs: &poseidon2_permute_inputs,
+            range_check_inputs: &range_check_inputs,
+            power_check_inputs: &power_check_inputs,
+            required_heights: None,
+            final_transcript_state: None,
+        };
+
+        let mut preflights = proofs
+            .iter()
+            .zip(subcircuit_initial_transcripts)
+            .map(|(proof, sponge)| {
+                self.circuit
+                    .verifier_circuit
+                    .test_run_preflight(sponge, child_vk, proof)
+            })
+            .collect::<Vec<_>>();
+        if !mutate(&mut preflights) {
+            return false;
+        }
+
+        let subcircuit_ctxs = self
+            .circuit
+            .verifier_circuit
+            .test_generate_proving_ctxs_from_preflights::<SC>(
+                child_vk,
+                proofs,
+                &preflights,
+                &external_data,
+            );
+        let post_ctxs = self
+            .agg_node_tracegen
+            .generate_post_verifier_subcircuit_ctxs(proofs, ProofsType::Vm, child_is_app);
+        let ctx = ProvingContext {
+            per_trace: pre_ctxs
+                .into_iter()
+                .chain(subcircuit_ctxs)
+                .chain(post_ctxs)
+                .enumerate()
+                .collect(),
+        };
+        let engine = Eg::new(self.pk.params.clone());
+        debug_constraints(&self.circuit, &ctx, &engine);
+        true
     }
 }
 

@@ -446,7 +446,7 @@ mod tests {
         e2e::ShardContext,
         structs::ProgramParams,
     };
-    use ff_ext::BabyBearExt4;
+    use ff_ext::{BabyBearExt4, FieldFrom};
     use multilinear_extensions::utils::eval_by_expr_with_instance;
 
     type E = BabyBearExt4;
@@ -475,7 +475,7 @@ mod tests {
     ) -> E {
         let wit_row = wit_row.iter().copied().map(E::from).collect_vec();
         let structural_row = structural_row.iter().copied().map(E::from).collect_vec();
-        let challenges = [E::from_canonical_u64(7), E::from_canonical_u64(11)];
+        let challenges = [E::from_v(7), E::from_v(11)];
         eval_by_expr_with_instance::<E>(&[], &wit_row, &structural_row, &[], &challenges, expr)
             .unwrap_right()
     }

@@ -4,7 +4,7 @@ use itertools::fold;
 use openvm_circuit_primitives::{
     SubAir,
     encoder::Encoder,
-    utils::{and, not, or},
+    utils::{and, not},
 };
 use openvm_stark_backend::{
     BaseAirWithPublicValues, PartitionedBaseAir, interaction::InteractionBuilder,
@@ -17,19 +17,19 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirShapeBus, AirShapeBusMessage, ExpressionClaimNMaxBus, ExpressionClaimNMaxMessage,
+        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage,
         ForkFinalSampleBus, ForkFinalSampleMessage, ForkedTranscriptBus,
-        ForkedTranscriptBusMessage, FractionFolderInputBus, FractionFolderInputMessage,
-        HyperdimBus, HyperdimBusMessage, LiftedHeightsBus, LiftedHeightsBusMessage,
-        LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage, NLiftBus, NLiftMessage,
-        TowerModuleBus, TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
+        ForkedTranscriptBusMessage, LookupChallengeBus, LookupChallengeKind,
+        LookupChallengeMessage, MainSelectorShapeBus, MainSelectorShapeMessage,
+        MainSelectorSparseIndexShapeBus, MainSelectorSparseIndexShapeMessage, TowerModuleBus,
+        TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
-        AirMetadata,
+        AirMetadata, SelectorContextMode,
         bus::{
             AirShapeProperty, ProofShapePermutationBus, ProofShapePermutationMessage,
-            StartingTidxBus, StartingTidxMessage,
+            StartingTidxBus,
         },
     },
     subairs::nested_for_loop::{NestedForLoopIoCols, NestedForLoopSubAir},
@@ -49,11 +49,10 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     ///
     /// Has a special use on summary row (when `is_last`).
     pub log_height: F,
-    /// Whether this AIR needs rotation openings.
-    pub need_rot: F,
-
     // First possible transcript index of the current AIR.
     pub starting_tidx: F,
+    // Fork-local transcript index where the tower verifier starts for this AIR.
+    pub tower_tidx: F,
     // First trunk transcript index used by the fork-merge phase.
     pub fork_start_tidx: F,
     // Fork id assigned by native chip-proof iteration order.
@@ -78,9 +77,6 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     /// Computed as max(0, n0, n1, ...) where ni = log_height_i for each present trace.
     pub n_max: F,
     pub is_n_max_greater: F,
-
-    pub num_air_id_lookups: F,
-    pub num_columns: F,
 
     /// The Poseidon2 sponge state at the fork point (trunk state just before
     /// forking). Constrained to be identical across all rows within a proof.
@@ -119,16 +115,13 @@ pub struct ProofShapeAir<const NUM_LIMBS: usize, const LIMB_BITS: usize> {
 
     // Inter-module buses
     pub tower_module_bus: TowerModuleBus,
+    pub air_presence_bus: AirPresenceBus,
     pub air_shape_bus: AirShapeBus,
-    pub expression_claim_n_max_bus: ExpressionClaimNMaxBus,
-    pub fraction_folder_input_bus: FractionFolderInputBus,
-    pub hyperdim_bus: HyperdimBus,
-    pub lifted_heights_bus: LiftedHeightsBus,
     pub transcript_bus: TranscriptBus,
     pub forked_transcript_bus: ForkedTranscriptBus,
     pub fork_final_sample_bus: ForkFinalSampleBus,
-    pub n_lift_bus: NLiftBus,
-    pub tower_prefix_only: bool,
+    pub main_selector_shape_bus: MainSelectorShapeBus,
+    pub main_selector_sparse_index_shape_bus: MainSelectorSparseIndexShapeBus,
 }
 
 impl<F, const NUM_LIMBS: usize, const LIMB_BITS: usize> BaseAir<F>
@@ -206,13 +199,6 @@ where
         let mut is_required = AB::Expr::ZERO;
         let mut air_idx = AB::Expr::ZERO;
 
-        // Select values for LiftedHeightsBus
-        let mut num_witin = AB::Expr::ZERO;
-        let mut num_structural_witin = AB::Expr::ZERO;
-        let mut num_fixed = AB::Expr::ZERO;
-
-        // Select values for NumPublicValuesBus
-        let mut num_pvs = AB::Expr::ZERO;
         let mut num_read_count = AB::Expr::ZERO;
         let mut num_write_count = AB::Expr::ZERO;
         let mut num_logup_count = AB::Expr::ZERO;
@@ -230,12 +216,6 @@ where
             let is_current_air = self.idx_encoder.get_flag_expr::<AB>(i, localv.idx_flags);
             let mut when_current = builder.when(is_current_air.clone());
             air_idx += is_current_air.clone() * AB::F::from_usize(i);
-            num_witin += is_current_air.clone() * AB::F::from_usize(air_data.num_witin);
-            num_structural_witin +=
-                is_current_air.clone() * AB::F::from_usize(air_data.num_structural_witin);
-            num_fixed += is_current_air.clone() * AB::F::from_usize(air_data.num_fixed);
-
-            num_pvs += is_current_air.clone() * AB::F::from_usize(air_data.num_public_values);
 
             if air_data.is_required {
                 is_required += is_current_air.clone();
@@ -257,6 +237,63 @@ where
             read_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.read_op_vars);
             write_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.write_op_vars);
             logup_op_vars += is_current_air.clone() * AB::Expr::from_usize(air_data.logup_op_vars);
+
+            let selector_enabled = local.is_present * local.is_valid * is_current_air.clone();
+            for selector in &air_data.selectors {
+                self.air_presence_bus.add_key_with_lookups(
+                    builder,
+                    local.proof_idx,
+                    AirPresenceBusMessage {
+                        air_idx: AB::Expr::from_usize(i),
+                        is_present: AB::Expr::ONE,
+                    },
+                    selector_enabled.clone(),
+                );
+                let height_1: AB::Expr = local.height_1.into();
+                let height_2: AB::Expr = local.height_2.into();
+                let (ctx_offset, ctx_num_instances) = match selector.context_mode {
+                    SelectorContextMode::Total => {
+                        (AB::Expr::ZERO, height_1.clone() + height_2.clone())
+                    }
+                    SelectorContextMode::Read => (AB::Expr::ZERO, height_1.clone()),
+                    SelectorContextMode::Write => (height_1.clone(), height_2.clone()),
+                };
+                let ctx_num_vars = n.clone()
+                    + AB::Expr::from_usize(air_data.rotation_vars)
+                    + AB::Expr::from_usize(air_data.ecc_extra_vars);
+                self.main_selector_shape_bus.send(
+                    builder,
+                    local.proof_idx,
+                    MainSelectorShapeMessage {
+                        air_idx: AB::Expr::from_usize(i),
+                        selector_idx: AB::Expr::from_usize(selector.selector_idx),
+                        kind: AB::Expr::from_usize(selector.kind),
+                        point_source: AB::Expr::from_usize(selector.point_source),
+                        eval_idx: AB::Expr::from_usize(selector.eval_idx),
+                        ctx_offset,
+                        ctx_num_instances,
+                        ctx_num_vars,
+                        ordered_sparse_num_vars: AB::Expr::from_usize(
+                            selector.ordered_sparse_num_vars,
+                        ),
+                        num_sparse_indices: AB::Expr::from_usize(selector.sparse_indices.len()),
+                    },
+                    selector_enabled.clone(),
+                );
+                for (sparse_pos, sparse_index) in selector.sparse_indices.iter().enumerate() {
+                    self.main_selector_sparse_index_shape_bus.send(
+                        builder,
+                        local.proof_idx,
+                        MainSelectorSparseIndexShapeMessage {
+                            air_idx: AB::Expr::from_usize(i),
+                            selector_idx: AB::Expr::from_usize(selector.selector_idx),
+                            sparse_pos: AB::Expr::from_usize(sparse_pos),
+                            sparse_index: AB::Expr::from_usize(*sparse_index),
+                        },
+                        selector_enabled.clone(),
+                    );
+                }
+            }
         }
 
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -337,22 +374,6 @@ where
         // TRANSCRIPT OBSERVATIONS
         ///////////////////////////////////////////////////////////////////////////////////////////
 
-        let is_first_idx = self.idx_encoder.get_flag_expr::<AB>(0, localv.idx_flags);
-
-        self.starting_tidx_bus.receive(
-            builder,
-            local.proof_idx,
-            StartingTidxMessage {
-                air_idx: air_idx.clone() * local.is_valid
-                    + AB::Expr::from_usize(self.per_air.len()) * local.is_last,
-                tidx: local.starting_tidx.into(),
-            },
-            or(
-                local.is_last,
-                and(local.is_valid, not::<AB::Expr>(is_first_idx)),
-            ) * AB::Expr::from_bool(!self.tower_prefix_only),
-        );
-
         // All active proof-shape rows for a proof agree on the trunk fork-merge
         // start. The value is also constrained by the trunk TranscriptBus
         // receives below; it is not the same concept as proof-shape post_tidx.
@@ -376,17 +397,6 @@ where
                 local.is_present,
             );
         }
-
-        // constrain next air tid
-        self.starting_tidx_bus.send(
-            builder,
-            local.proof_idx,
-            StartingTidxMessage {
-                air_idx: air_idx.clone() + AB::F::ONE,
-                tidx: next.starting_tidx.into(),
-            },
-            local.is_valid * AB::Expr::from_bool(!self.tower_prefix_only),
-        );
 
         ///////////////////////////////////////////////////////////////////////////////////////////
         // SNAPSHOT STATE CONTINUITY (forked transcript)
@@ -508,40 +518,6 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // AIR SHAPE LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
-        let downstream_enabled = AB::Expr::from_bool(!self.tower_prefix_only);
-
-        self.air_shape_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::AirId.to_field(),
-                value: air_idx.clone(),
-            },
-            local.is_present * local.num_air_id_lookups * downstream_enabled.clone(),
-        );
-
-        self.air_shape_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NumInteractions.to_field(),
-                value: AB::Expr::ZERO,
-            },
-            local.is_present * downstream_enabled.clone(),
-        );
-
-        self.air_shape_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            AirShapeBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                property_idx: AirShapeProperty::NeedRot.to_field(),
-                value: local.need_rot.into(),
-            },
-            local.is_present * local.num_columns * downstream_enabled.clone(),
-        );
         let base_tower_vars = n.clone() + rotation_vars + ecc_extra_vars;
         // TODO(recursion-v2): prove this low-degree by sending the
         // TowerShapeAir-derived max_layer_count to TowerInputAir. The direct
@@ -595,13 +571,6 @@ where
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HYPERDIM LOOKUP
         ///////////////////////////////////////////////////////////////////////////////////////////
-        builder.assert_bool(local.need_rot);
-        builder
-            .when(not(local.is_present))
-            .assert_zero(local.need_rot);
-        builder
-            .when(not(local.is_present))
-            .assert_zero(local.num_columns);
         // We range check n in [0, 32).
         self.range_bus.lookup_key(
             builder,
@@ -612,56 +581,26 @@ where
             local.is_present,
         );
 
-        self.hyperdim_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            HyperdimBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                n_abs: n.clone(),
-                n_sign_bit: AB::Expr::ZERO,
-            },
-            local.is_present
-                * (local.num_air_id_lookups + AB::F::ONE)
-                * AB::Expr::from_bool(!self.tower_prefix_only),
-        );
-
         ///////////////////////////////////////////////////////////////////////////////////////////
         // LIFTED HEIGHTS LOOKUP + STACKING COMMITMENTS
         ///////////////////////////////////////////////////////////////////////////////////////////
 
-        let _raw_height_1 = fold(
+        let raw_height_1 = fold(
             local.height_1_limbs.iter().enumerate(),
             AB::Expr::ZERO,
             |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
         );
-        let _raw_height_2 = fold(
+        let raw_height_2 = fold(
             local.height_2_limbs.iter().enumerate(),
             AB::Expr::ZERO,
             |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
         );
-        let combined_height = local.height_1 + local.height_2;
-
-        self.lifted_heights_bus.add_key_with_lookups(
-            builder,
-            local.proof_idx,
-            LiftedHeightsBusMessage {
-                sort_idx: local.sorted_idx.into(),
-                part_idx: AB::Expr::ZERO,
-                commit_idx: AB::Expr::ZERO,
-                hypercube_dim: n.clone(),
-                lifted_height: combined_height.into(),
-                log_lifted_height: local.log_height.into(),
-            },
-            local.is_present
-                * (num_witin + num_structural_witin + num_fixed)
-                * AB::Expr::from_bool(!self.tower_prefix_only),
-        );
-
-        ///////////////////////////////////////////////////////////////////////////////////////////
-        // NUM PUBLIC VALUES
-        ///////////////////////////////////////////////////////////////////////////////////////////
-        let _ = num_pvs;
-
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.height_1, raw_height_1);
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.height_2, raw_height_2);
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HEIGHT + GKR MESSAGE
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -725,51 +664,13 @@ where
             builder,
             local.proof_idx,
             TowerModuleMessage {
-                idx: if self.tower_prefix_only {
-                    local.sorted_idx.into()
-                } else {
-                    air_idx.clone()
-                },
-                tidx: local.starting_tidx.into(),
-                n_logup: if self.tower_prefix_only {
-                    local.tower_n_logup.into()
-                } else {
-                    n
-                },
+                idx: local.sorted_idx.into(),
+                tidx: local.tower_tidx.into(),
+                n_logup: local.tower_n_logup.into(),
             },
             local.is_present * local.is_valid,
         );
 
-        // Send n_max value to expression claim air
-        self.expression_claim_n_max_bus.send(
-            builder,
-            local.proof_idx,
-            ExpressionClaimNMaxMessage {
-                n_max: local.n_max.into(),
-            },
-            local.is_last * downstream_enabled.clone(),
-        );
-
-        // Send n_lift to constraint folding air
-        self.n_lift_bus.send(
-            builder,
-            local.proof_idx,
-            NLiftMessage {
-                air_idx: air_idx,
-                n_lift: local.log_height.into(),
-            },
-            local.is_present * downstream_enabled.clone(),
-        );
-
-        // Send count of present airs to fraction folder air
-        self.fraction_folder_input_bus.send(
-            builder,
-            local.proof_idx,
-            FractionFolderInputMessage {
-                num_present_airs: local.num_present,
-            },
-            local.is_last * downstream_enabled,
-        );
     }
 }
 

@@ -49,6 +49,8 @@ pub struct TowerLayerCols<T> {
 
     /// Sampled batching challenge
     pub lambda: [T; D_EF],
+    /// Native tower samples one final batching challenge after the last merge.
+    pub final_alpha: [T; D_EF],
     /// Challenge inherited from previous layer
     pub lambda_prime: [T; D_EF],
     /// Reduction point
@@ -83,6 +85,7 @@ pub struct TowerLayerCols<T> {
     pub write_weight: [T; D_EF],
     pub logup_p_weight: [T; D_EF],
     pub logup_q_weight: [T; D_EF],
+    pub weighted_prime_fold: [T; D_EF],
 
     /// Received from TowerLayerSumcheckAir
     pub eq_at_r_prime: [T; D_EF],
@@ -361,6 +364,21 @@ where
                 ext_field_multiply::<AB::Expr>(local.logup_q_weight, local.logup_q_xi),
             ),
         );
+        let weighted_prime_fold = ext_field_add::<AB::Expr>(
+            ext_field_add::<AB::Expr>(
+                ext_field_multiply::<AB::Expr>(local.read_weight, local.read_claim_prime),
+                ext_field_multiply::<AB::Expr>(local.write_weight, local.write_claim_prime),
+            ),
+            ext_field_add::<AB::Expr>(
+                ext_field_multiply::<AB::Expr>(local.logup_p_weight, logup_p_cross.clone()),
+                ext_field_multiply::<AB::Expr>(local.logup_q_weight, logup_q_cross.clone()),
+            ),
+        );
+        assert_array_eq(
+            &mut builder.when(enabled_not_dummy.clone()),
+            local.weighted_prime_fold,
+            weighted_prime_fold,
+        );
         assert_zeros(
             &mut builder.when(AB::Expr::ONE - local.read_active),
             local.read_weight.map(Into::into),
@@ -509,7 +527,7 @@ where
             local.proof_idx,
             TowerLayerOutputMessage {
                 idx: local.idx.into(),
-                tidx: tidx_end,
+                tidx: tidx_end + is_last.clone() * AB::Expr::from_usize(ALPHA_LEN),
                 layer_idx_end: local.layer_idx.into(),
                 input_layer_claim: folded_claim.map(Into::into),
                 lambda: local.lambda.map(Into::into),
@@ -538,21 +556,13 @@ where
         );
         // 3. TowerSumcheckOutputBus
         // 3a. Receive sumcheck results
-        let weighted_prime_fold = ext_field_add::<AB::Expr>(
-            ext_field_add::<AB::Expr>(
-                ext_field_multiply::<AB::Expr>(local.read_weight, local.read_claim_prime),
-                ext_field_multiply::<AB::Expr>(local.write_weight, local.write_claim_prime),
-            ),
-            ext_field_add::<AB::Expr>(
-                ext_field_multiply::<AB::Expr>(local.logup_p_weight, logup_p_cross),
-                ext_field_multiply::<AB::Expr>(local.logup_q_weight, logup_q_cross),
-            ),
-        );
         let expected_sumcheck_claim_out =
-            ext_field_multiply::<AB::Expr>(weighted_prime_fold, local.eq_at_r_prime);
-        let _ = expected_sumcheck_claim_out;
-        // TODO(recursion-v2): re-enable the native tower expected-evaluation
-        // equality here once the full tower transcript/replay oracle is wired.
+            ext_field_multiply::<AB::Expr>(local.weighted_prime_fold, local.eq_at_r_prime);
+        assert_array_eq(
+            &mut builder.when(enabled_not_dummy.clone()),
+            local.sumcheck_claim_out,
+            expected_sumcheck_claim_out,
+        );
         self.sumcheck_output_bus.receive(
             builder,
             local.proof_idx,
@@ -576,7 +586,7 @@ where
                 sumcheck_round: local.layer_idx + AB::Expr::ONE,
                 challenge: local.mu.map(Into::into),
             },
-            local.is_enabled * (AB::Expr::ONE - is_last) * is_not_dummy.clone(),
+            local.is_enabled * (AB::Expr::ONE - is_last.clone()) * is_not_dummy.clone(),
         );
 
         ///////////////////////////////////////////////////////////////////////
@@ -697,6 +707,33 @@ where
                     is_sample: AB::Expr::ONE,
                 },
                 local.is_enabled * is_not_dummy.clone(),
+            );
+        }
+        let final_alpha_label_tidx = tidx + AB::Expr::from_usize(D_EF);
+        for (offset, value) in LABEL_COMBINE_FIELDS.into_iter().enumerate() {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: final_alpha_label_tidx.clone() + AB::Expr::from_usize(offset),
+                    value: AB::Expr::from_u32(value),
+                    is_sample: AB::Expr::ZERO,
+                },
+                is_last.clone() * is_not_dummy.clone(),
+            );
+        }
+        for i in 0..D_EF {
+            self.forked_transcript_bus.receive(
+                builder,
+                local.proof_idx,
+                ForkedTranscriptBusMessage {
+                    fork_id: local.fork_id.into(),
+                    tidx: final_alpha_label_tidx.clone() + AB::Expr::from_usize(LABEL_COMBINE + i),
+                    value: local.final_alpha[i].into(),
+                    is_sample: AB::Expr::ONE,
+                },
+                is_last.clone() * is_not_dummy.clone(),
             );
         }
     }
