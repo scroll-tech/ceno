@@ -69,35 +69,17 @@ use tracing::Span;
 
 pub const POW_CHECKER_HEIGHT: usize = 32;
 
-const HARDCODED_CHILD_VK_DIGEST_LIMBS: [[u32; D_EF]; VK_DIGEST_LEN] = [
-    [1913846913, 1134794404, 302722344, 1619176295],
-    [604679097, 1699744227, 1924255980, 872496957],
-];
-
-fn hardcoded_child_vk_digest() -> [RecursionField; VK_DIGEST_LEN] {
-    HARDCODED_CHILD_VK_DIGEST_LIMBS.map(|limbs| {
-        RecursionField::from_basis_coefficients_slice(&limbs.map(F::from_u32))
-            .expect("hardcoded VK digest limbs must match RecursionField degree")
-    })
-}
-
 pub(crate) fn child_vk_digest(child_vk: &RecursionVk) -> [RecursionField; VK_DIGEST_LEN] {
-    if std::env::var_os("CENO_REC_V2_REAL_VK_DIGEST").is_none() {
-        // TODO(recursion-v2): remove this fixture-specific bypass once VK digest
-        // binding is cheap enough for the debug loop. The real digest path below
-        // spends ~89s absorbing the current 95,043,872-byte imported VK through
-        // Poseidon. These constants are the native digest for that fixture.
-        return hardcoded_child_vk_digest();
-    }
-
     static CACHE: OnceLock<
         Mutex<std::collections::HashMap<usize, [RecursionField; VK_DIGEST_LEN]>>,
     > = OnceLock::new();
+
     let key = child_vk as *const RecursionVk as usize;
     let cache = CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()));
     if let Some(digest) = cache.lock().unwrap().get(&key).copied() {
         return digest;
     }
+
     let digest = child_vk.compute_digest();
     cache.lock().unwrap().insert(key, digest);
     digest
