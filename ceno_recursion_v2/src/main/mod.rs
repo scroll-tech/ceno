@@ -160,12 +160,10 @@ impl MainModule {
             .map_err(|err| eyre!("failed to build tower point records for main prefix: {err}"))?;
 
         let mut main_records = Vec::new();
-        for input in tower_input_records
-            .iter()
-            .filter(|record| record.n_logup != 0)
-        {
+        for input in &tower_input_records {
             let tidx = main_tidx_from_tower_input(input);
             main_records.push(MainRecord {
+                is_present: input.n_logup != 0,
                 proof_idx: input.proof_idx,
                 idx: input.idx,
                 tidx,
@@ -187,14 +185,6 @@ impl MainModule {
             if let Some(mut record) = preflight.main.global_sumchecks.last().cloned() {
                 record.proof_idx = proof_idx;
                 global_sumcheck_records.push(record);
-            }
-            if preflight.main.global_sumchecks.len() > 1
-                && std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some()
-            {
-                eprintln!(
-                    "rec-v2-debug module=main source=collect proof_idx={proof_idx} key=global_sumcheck_records value={}",
-                    preflight.main.global_sumchecks.len()
-                );
             }
             eval_records.extend(preflight.main.evals.iter().cloned().map(move |mut record| {
                 record.proof_idx = proof_idx;
@@ -377,22 +367,6 @@ impl MainModule {
                     .unwrap_or(0);
             }
         }
-        if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
-            for global in &global_sumcheck_records {
-                let final_expected = final_claim_records
-                    .iter()
-                    .find(|record| record.proof_idx == global.proof_idx)
-                    .map(|record| record.expected);
-                eprintln!(
-                    "rec-v2-debug module=main source=collect proof_idx={} key=global_expected value={:?} final_expected={:?} global_rows={}",
-                    global.proof_idx,
-                    global.expected,
-                    final_expected,
-                    global.total_rows()
-                );
-            }
-        }
-
         let mut transcript_records = Vec::new();
         for (proof_idx, preflight) in preflights.iter().enumerate() {
             let eval_tidxs = eval_records
@@ -844,18 +818,16 @@ where
         log2_num_instances += 1;
     }
     let num_var_with_rotation = log2_num_instances + composed_cs.rotation_vars().unwrap_or(0);
-    let final_tower_layer = tower_replay.layers.last();
     let rt_main = rt_main_from_tower_replay(tower_replay, num_var_with_rotation)
         .ok_or_else(|| eyre!("{name} missing tower main point for rotation replay"))?;
 
-    let (rotation_power_challenges, rotation_power_tidx) =
+    let (rotation_power_challenges, _) =
         sample_challenge_pows_with_tidx(ts, num_rotations, b"combine subset evals");
     let rotation_challenges = chain!(
         challenges.iter().copied(),
         rotation_power_challenges.iter().copied()
     )
     .collect_vec();
-    let rotation_sumcheck_start_tidx = ts.len();
     let (origin_point, expected_evaluation, origin_tidxs) = replay_main_sumcheck(
         ts,
         RecursionField::ZERO,
@@ -909,23 +881,6 @@ where
         &rotation_challenges,
         rotation_sumcheck_expression,
     );
-    if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
-        eprintln!(
-            "rec-v2-debug module=main source=preflight key=rotation_inputs chip_idx={chip_idx} circuit={name} tower_layers={} final_tower_mu={:?} final_tower_challenges={:?} num_var_with_rotation={num_var_with_rotation} rt_main={rt_main:?} rotation_power_tidx={rotation_power_tidx} rotation_power_challenges={rotation_power_challenges:?} rotation_sumcheck_start_tidx={rotation_sumcheck_start_tidx} rotation_origin_tidxs={origin_tidxs:?} rotation_sumcheck_end_tidx={}",
-            tower_replay.layers.len(),
-            final_tower_layer.map(|layer| layer.mu),
-            final_tower_layer.map(|layer| layer.challenges.as_slice()),
-            ts.len(),
-        );
-        eprintln!(
-            "rec-v2-debug module=main source=preflight key=rotation_check chip_idx={chip_idx} circuit={name} num_instances={num_instances} log2_num_instances={log2_num_instances} num_var_with_rotation={num_var_with_rotation} rotation_vars={} rotation_cyclic_group_log2={} rotation_cyclic_subgroup_size={} num_rotations={} expected={expected_evaluation:?} got={got_claim:?} selector_eval={selector_eval:?} rt_main={rt_main:?} origin_point={origin_point:?} first_eval_triple={:?}",
-            composed_cs.rotation_vars().unwrap_or(0),
-            first_layer.rotation_cyclic_group_log2,
-            first_layer.rotation_cyclic_subgroup_size,
-            num_rotations,
-            rotation_proof.evals.get(0..3),
-        );
-    }
     if got_claim != expected_evaluation {
         bail!("{name} rotation verify failed: {expected_evaluation} != {got_claim}");
     }
@@ -2599,17 +2554,9 @@ fn build_main_selector_eval_records(
                     layer.layer.name
                 );
             }
-            let Some(actual_eval) = main_evals.get(layer.eval_start + eval_idx).copied() else {
+            let Some(_actual_eval) = main_evals.get(layer.eval_start + eval_idx).copied() else {
                 bail!("main selector structural witin index {eval_idx} out of range");
             };
-            if actual_eval != expected_eval {
-                if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
-                    eprintln!(
-                        "rec-v2-debug module=main source=selector-preflight proof_idx=0 idx={idx} air_idx={} selector_idx={selector_idx} wit_id={eval_idx} expected={expected_eval} got={actual_eval}",
-                        layer.air_idx
-                    );
-                }
-            }
             records.push(MainSelectorEvalRecord {
                 proof_idx: 0,
                 idx,
@@ -2762,20 +2709,13 @@ fn validate_direct_structural_evals(
         let Some(out_point) = out_point.as_ref() else {
             continue;
         };
-        if let Some((expected_eval, wit_id)) = sel_type.evaluate(out_point, &in_point, selector_ctx)
+        if let Some((_expected_eval, wit_id)) =
+            sel_type.evaluate(out_point, &in_point, selector_ctx)
         {
             let wit_id = wit_id as usize + structural_witin_offset;
-            let Some(actual_eval) = layer_evals.get(wit_id).copied() else {
+            let Some(_actual_eval) = layer_evals.get(wit_id).copied() else {
                 bail!("main selector structural witin index {wit_id} out of range");
             };
-            if actual_eval != expected_eval {
-                if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
-                    eprintln!(
-                        "rec-v2-debug module=main source=selector-structural-check layer={} wit_id={wit_id} expected={expected_eval} got={actual_eval}",
-                        layer.layer.name
-                    );
-                }
-            }
         }
     }
     for StructuralWitIn { id, witin_type } in &layer.layer.structural_witins {
@@ -2822,11 +2762,6 @@ fn validate_direct_structural_evals(
             Empty => continue,
         };
         if actual_eval != expected_eval {
-            if std::env::var_os("CENO_REC_V2_DEBUG_MAIN").is_some() {
-                eprintln!(
-                    "rec-v2-debug module=main source=structural-check wit_id={wit_id} expected={expected_eval} got={actual_eval}"
-                );
-            }
             bail!(
                 "{} structural witin mismatch: {expected_eval} != {actual_eval}",
                 layer.layer.name

@@ -9,6 +9,7 @@ use crate::tracegen::RowMajorChip;
 
 #[derive(Clone, Debug, Default)]
 pub struct MainRecord {
+    pub is_present: bool,
     pub proof_idx: usize,
     pub idx: usize,
     pub tidx: usize,
@@ -39,7 +40,8 @@ where
     Fill: FnMut(&MainRecord, &mut C, bool, bool),
 {
     let width = C::width();
-    let num_rows = records.len().max(1);
+    let dense_records = dense_main_records(records);
+    let num_rows = dense_records.len().max(1);
     let height = if let Some(height) = required_height {
         if height < num_rows {
             return None;
@@ -49,13 +51,10 @@ where
         num_rows.next_power_of_two().max(1)
     };
     let mut trace = vec![F::ZERO; height * width];
-    if records.is_empty() {
-        return Some(RowMajorMatrix::new(trace, width));
-    }
 
     let mut prev_proof_idx = usize::MAX;
     let mut prev_idx = usize::MAX;
-    for (row_idx, record) in records.iter().enumerate() {
+    for (row_idx, record) in dense_records.iter().enumerate() {
         let offset = row_idx * width;
         let cols_slice = &mut trace[offset..offset + width];
         let cols = C::from_bytes(cols_slice);
@@ -67,6 +66,39 @@ where
     }
 
     Some(RowMajorMatrix::new(trace, width))
+}
+
+fn dense_main_records(records: &[MainRecord]) -> Vec<MainRecord> {
+    if records.is_empty() {
+        return vec![MainRecord::default()];
+    }
+
+    let mut dense = Vec::new();
+    let mut record_idx = 0;
+    while record_idx < records.len() {
+        let proof_idx = records[record_idx].proof_idx;
+        let proof_start = record_idx;
+        while record_idx < records.len() && records[record_idx].proof_idx == proof_idx {
+            record_idx += 1;
+        }
+        let proof_records = &records[proof_start..record_idx];
+        let max_idx = proof_records.last().map(|record| record.idx).unwrap_or(0);
+        let mut proof_record_idx = 0;
+        for idx in 0..=max_idx {
+            if proof_record_idx < proof_records.len() && proof_records[proof_record_idx].idx == idx
+            {
+                dense.push(proof_records[proof_record_idx].clone());
+                proof_record_idx += 1;
+            } else {
+                dense.push(MainRecord {
+                    proof_idx,
+                    idx,
+                    ..Default::default()
+                });
+            }
+        }
+    }
+    dense
 }
 
 trait ColumnAccess<F>: Sized {
@@ -86,6 +118,7 @@ impl ColumnAccess<F> for MainCols<F> {
 
 fn fill_main_cols(record: &MainRecord, cols: &mut MainCols<F>, is_first_idx: bool, is_first: bool) {
     cols.is_enabled = F::ONE;
+    cols.is_present = F::from_bool(record.is_present);
     cols.proof_idx = F::from_usize(record.proof_idx);
     cols.idx = F::from_usize(record.idx);
     cols.is_first_idx = F::from_bool(is_first_idx);
