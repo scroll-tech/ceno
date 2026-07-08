@@ -17,12 +17,12 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage,
-        ForkFinalSampleBus, ForkFinalSampleMessage, ForkedTranscriptBus,
-        ForkedTranscriptBusMessage, LookupChallengeBus, LookupChallengeKind,
-        LookupChallengeMessage, MainSelectorShapeBus, MainSelectorShapeMessage,
-        MainSelectorSparseIndexShapeBus, MainSelectorSparseIndexShapeMessage, TowerModuleBus,
-        TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
+        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage, ForkFinalSampleBus,
+        ForkFinalSampleMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
+        LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage, MainSelectorShapeBus,
+        MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
+        MainSelectorSparseIndexShapeMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
+        TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
@@ -408,7 +408,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::ZERO,
                 value: AB::Expr::from_u32(LABEL_FORK_FIELDS[0]),
                 is_sample: AB::Expr::ZERO,
@@ -421,7 +421,7 @@ where
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: fork_id.clone().into(),
+                    fork_id: fork_id.into(),
                     tidx: AB::Expr::from_usize(fork_tidx_base + i),
                     value: local.lookup_challenge_alpha[i].into(),
                     is_sample: AB::Expr::ZERO,
@@ -432,7 +432,7 @@ where
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: fork_id.clone().into(),
+                    fork_id: fork_id.into(),
                     tidx: AB::Expr::from_usize(fork_tidx_base + D_EF + i),
                     value: local.lookup_challenge_beta[i].into(),
                     is_sample: AB::Expr::ZERO,
@@ -444,9 +444,9 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF),
-                value: fork_id.clone().into(),
+                value: fork_id.into(),
                 is_sample: AB::Expr::ZERO,
             },
             local.is_present * local.is_valid,
@@ -458,7 +458,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 1),
                 value: air_idx.clone(),
                 is_sample: AB::Expr::ZERO,
@@ -469,7 +469,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 2),
                 value: local.height_1.into(),
                 is_sample: AB::Expr::ZERO,
@@ -480,7 +480,7 @@ where
             builder,
             local.proof_idx,
             ForkedTranscriptBusMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: AB::Expr::from_usize(fork_tidx_base + 2 * D_EF + 3),
                 value: local.height_2.into(),
                 is_sample: AB::Expr::ZERO,
@@ -496,7 +496,7 @@ where
             builder,
             local.proof_idx,
             ForkFinalSampleMessage {
-                fork_id: fork_id.clone().into(),
+                fork_id: fork_id.into(),
                 tidx: forked_challenge_1_tidx.clone(),
             },
             local.is_present * local.is_valid,
@@ -506,7 +506,7 @@ where
                 builder,
                 local.proof_idx,
                 ForkedTranscriptBusMessage {
-                    fork_id: fork_id.clone().into(),
+                    fork_id: fork_id.into(),
                     tidx: forked_challenge_1_tidx.clone() + AB::Expr::from_usize(i),
                     value: local.after_forked_challenge_1[i].into(),
                     is_sample: AB::Expr::ONE,
@@ -670,7 +670,6 @@ where
             },
             local.is_present * local.is_valid,
         );
-
     }
 }
 

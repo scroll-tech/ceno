@@ -53,7 +53,7 @@ generic-array.workspace = true
 generic_static = "0.2"
 metrics.workspace = true
 num.workspace = true
-num-bigint = "0.4.6"
+num-bigint = { workspace = true, features = ["rand"] }
 parse-size = "1.1"
 rand.workspace = true
 sp1-curves.workspace = true

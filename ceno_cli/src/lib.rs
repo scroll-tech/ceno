@@ -1,1 +1,1 @@
-// SDK temporarily disabled due to OpenVM dependency incompatibility
+pub mod sdk;

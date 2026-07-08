@@ -628,14 +628,14 @@ where
         // 1b. Observe layer claims
         let mut claim_tidx = tidx_after_sumcheck.clone();
         for eval in [local.read_p0, local.read_p1] {
-            for i in 0..D_EF {
+            for (i, value) in eval.iter().enumerate().take(D_EF) {
                 self.forked_transcript_bus.receive(
                     builder,
                     local.proof_idx,
                     ForkedTranscriptBusMessage {
                         fork_id: local.fork_id.into(),
                         tidx: claim_tidx.clone() + AB::Expr::from_usize(i),
-                        value: eval[i].into(),
+                        value: (*value).into(),
                         is_sample: AB::Expr::ZERO,
                     },
                     local.is_enabled * is_not_dummy.clone() * local.read_active,
@@ -644,14 +644,14 @@ where
             claim_tidx += local.read_active * AB::Expr::from_usize(D_EF);
         }
         for eval in [local.write_p0, local.write_p1] {
-            for i in 0..D_EF {
+            for (i, value) in eval.iter().enumerate().take(D_EF) {
                 self.forked_transcript_bus.receive(
                     builder,
                     local.proof_idx,
                     ForkedTranscriptBusMessage {
                         fork_id: local.fork_id.into(),
                         tidx: claim_tidx.clone() + AB::Expr::from_usize(i),
-                        value: eval[i].into(),
+                        value: (*value).into(),
                         is_sample: AB::Expr::ZERO,
                     },
                     local.is_enabled * is_not_dummy.clone() * local.write_active,
@@ -665,14 +665,14 @@ where
             local.logup_q0,
             local.logup_q1,
         ] {
-            for i in 0..D_EF {
+            for (i, value) in eval.iter().enumerate().take(D_EF) {
                 self.forked_transcript_bus.receive(
                     builder,
                     local.proof_idx,
                     ForkedTranscriptBusMessage {
                         fork_id: local.fork_id.into(),
                         tidx: claim_tidx.clone() + AB::Expr::from_usize(i),
-                        value: eval[i].into(),
+                        value: (*value).into(),
                         is_sample: AB::Expr::ZERO,
                     },
                     local.is_enabled * is_not_dummy.clone() * local.logup_active,

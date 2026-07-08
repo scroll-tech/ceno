@@ -1,11 +1,11 @@
 [workspace]
-exclude = ["ceno_recursion_v2", "ceno_recursion"]
 members = [
   "ceno_cli",
   "ceno_emul",
   "ceno_host",
   "ceno_serde",
   "ceno_rt",
+  "ceno_recursion_v2",
   "ceno_zkvm",
   "derive",
   "examples-builder",

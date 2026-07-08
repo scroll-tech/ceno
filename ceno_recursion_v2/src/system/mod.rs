@@ -352,9 +352,9 @@ impl<const MAX_NUM_PROOFS: usize> VerifierSubCircuit<MAX_NUM_PROOFS> {
     }
 
     #[allow(clippy::type_complexity)]
-    fn build_chip_proof_list<'a>(
-        proof: &'a RecursionProof,
-    ) -> Vec<(usize, &'a ceno_zkvm::scheme::ZKVMChipProof<RecursionField>)> {
+    fn build_chip_proof_list(
+        proof: &RecursionProof,
+    ) -> Vec<(usize, &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>)> {
         // Keep current deterministic ordering: iterate chip map order.
         // Fork IDs are assigned in this order.
         let chip_proof_list: Vec<(usize, &ceno_zkvm::scheme::ZKVMChipProof<RecursionField>)> =

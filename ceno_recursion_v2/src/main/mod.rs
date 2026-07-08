@@ -629,11 +629,11 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             .sort_by_key(|record| (record.proof_idx, record.idx, record.round_idx, record.tidx));
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
         let ctx = MainTraceCtx {
-            main_records: &main_records,
-            selector_eval_records: &selector_eval_records,
-            selector_point_records: &selector_point_records,
-            ecc_rt_records: &ecc_rt_records,
-            transcript_records: &transcript_records,
+            main_records,
+            selector_eval_records,
+            selector_point_records,
+            ecc_rt_records,
+            transcript_records,
         };
         let chips = [
             MainModuleChip::Main,
@@ -1938,23 +1938,23 @@ fn build_main_selector_point_records(
                     point.source_source_kind = MainSelectorPointSourceKind::EccX3Y3;
                     point.source_round_idx = point.round_idx;
                 }
-                if point.has_source {
-                    if let Some(value) = values_by_key.get(&(
+                if point.has_source
+                    && let Some(value) = values_by_key.get(&(
                         point.proof_idx,
                         point.idx,
                         point.air_idx,
                         point.source_selector_idx,
                         point.source_round_idx,
-                    )) {
-                        point.source_value = *value;
-                        source_lookups.push((
-                            point.proof_idx,
-                            point.idx,
-                            point.air_idx,
-                            point.source_selector_idx,
-                            point.source_round_idx,
-                        ));
-                    }
+                    ))
+                {
+                    point.source_value = *value;
+                    source_lookups.push((
+                        point.proof_idx,
+                        point.idx,
+                        point.air_idx,
+                        point.source_selector_idx,
+                        point.source_round_idx,
+                    ));
                 }
             }
             MainSelectorPointSourceKind::EccX3Y3 => {
@@ -2372,9 +2372,9 @@ fn native_septic_mul(a: &[RecursionField; 7], b: &[RecursionField; 7]) -> [Recur
     let mut out = [RecursionField::ZERO; 7];
     let two = RecursionField::from_usize(2);
     let five = RecursionField::from_usize(5);
-    for i in 0..7 {
-        for j in 0..7 {
-            let term = a[i] * b[j];
+    for (i, a_value) in a.iter().enumerate().take(7) {
+        for (j, b_value) in b.iter().enumerate().take(7) {
+            let term = *a_value * *b_value;
             let mut index = i + j;
             if index < 7 {
                 out[index] += term;
@@ -2422,12 +2422,17 @@ fn build_main_tower_point_eq_records(
 ) -> Vec<MainTowerPointEqRecord> {
     let mut records = Vec::new();
     for (idx, layer) in layers.iter().enumerate() {
-        for round_idx in 0..layer.num_var_with_rotation {
+        for (round_idx, global_value) in global_in_point
+            .iter()
+            .copied()
+            .enumerate()
+            .take(layer.num_var_with_rotation)
+        {
             records.push(MainTowerPointEqRecord {
                 proof_idx: 0,
                 idx,
                 round_idx,
-                global_value: global_in_point[round_idx],
+                global_value,
                 tower_value: RecursionField::ZERO,
                 eq_in: RecursionField::ZERO,
                 eq_out: RecursionField::ZERO,
@@ -2655,16 +2660,16 @@ fn build_final_claim_records(
             .main_sumcheck_expression_monomial_terms
             .as_ref()
             .ok_or_else(|| eyre!("missing main sumcheck expression monomial terms"))?;
-        let contribution = build_frontload_term_records_for_layer(
+        let contribution = build_frontload_term_records_for_layer(FrontloadLayerInput {
             idx,
             layer,
             layer_evals,
-            &layer.pi,
-            &main_sumcheck_challenges,
+            pi: &layer.pi,
+            challenges: &main_sumcheck_challenges,
             global_in_point,
             terms,
-            &mut frontload_records,
-        )?;
+            records: &mut frontload_records,
+        })?;
         let monomial_contribution = eval_batched_main_frontload_terms_oracle(
             layer_evals,
             &layer.pi,
@@ -2771,19 +2776,33 @@ fn validate_direct_structural_evals(
     Ok(())
 }
 
-fn build_frontload_term_records_for_layer(
+type MainMonomialTerm =
+    multilinear_extensions::monomial::Term<Expression<RecursionField>, Expression<RecursionField>>;
+
+struct FrontloadLayerInput<'a> {
     idx: usize,
-    layer: &MainReplayLayer<'_>,
-    layer_evals: &[RecursionField],
-    pi: &[RecursionField],
-    challenges: &[RecursionField],
-    global_in_point: &[RecursionField],
-    terms: &[multilinear_extensions::monomial::Term<
-        Expression<RecursionField>,
-        Expression<RecursionField>,
-    >],
-    records: &mut Vec<MainFrontloadTermRecord>,
+    layer: &'a MainReplayLayer<'a>,
+    layer_evals: &'a [RecursionField],
+    pi: &'a [RecursionField],
+    challenges: &'a [RecursionField],
+    global_in_point: &'a [RecursionField],
+    terms: &'a [MainMonomialTerm],
+    records: &'a mut Vec<MainFrontloadTermRecord>,
+}
+
+fn build_frontload_term_records_for_layer(
+    input: FrontloadLayerInput<'_>,
 ) -> Result<RecursionField> {
+    let FrontloadLayerInput {
+        idx,
+        layer,
+        layer_evals,
+        pi,
+        challenges,
+        global_in_point,
+        terms,
+        records,
+    } = input;
     let tail_start = layer.num_var_with_rotation;
     let tail_point = &global_in_point[tail_start..];
     let mut row_idx = 0usize;
@@ -2792,14 +2811,16 @@ fn build_frontload_term_records_for_layer(
 
     for (term_idx, term) in terms.iter().enumerate() {
         let mut term_value = emit_scalar_expr_row(
-            idx,
-            term_idx,
+            &mut ScalarExprEmitCtx {
+                idx,
+                term_idx,
+                pi,
+                challenges,
+                records,
+                row_idx: &mut row_idx,
+                node_idx: &mut node_idx,
+            },
             &term.scalar,
-            pi,
-            challenges,
-            records,
-            &mut row_idx,
-            &mut node_idx,
         )?;
 
         for expr in &term.product {
@@ -2880,114 +2901,108 @@ fn build_frontload_term_records_for_layer(
     Ok(layer_acc)
 }
 
-fn emit_scalar_expr_row(
+struct ScalarExprEmitCtx<'a, 'b> {
     idx: usize,
     term_idx: usize,
+    pi: &'a [RecursionField],
+    challenges: &'a [RecursionField],
+    records: &'a mut Vec<MainFrontloadTermRecord>,
+    row_idx: &'b mut usize,
+    node_idx: &'b mut usize,
+}
+
+fn emit_scalar_expr_row(
+    ctx: &mut ScalarExprEmitCtx<'_, '_>,
     expr: &Expression<RecursionField>,
-    pi: &[RecursionField],
-    challenges: &[RecursionField],
-    records: &mut Vec<MainFrontloadTermRecord>,
-    row_idx: &mut usize,
-    node_idx: &mut usize,
 ) -> Result<RecursionField> {
-    let this_node = *node_idx;
-    *node_idx += 1;
+    let this_node = *ctx.node_idx;
+    *ctx.node_idx += 1;
     let mut record = MainFrontloadTermRecord {
         proof_idx: 0,
-        idx,
-        row_idx: *row_idx,
+        idx: ctx.idx,
+        row_idx: *ctx.row_idx,
         node_idx: this_node,
-        constraint_idx: term_idx,
+        constraint_idx: ctx.term_idx,
         ..MainFrontloadTermRecord::default()
     };
 
-    let value = match expr {
-        Expression::WitIn(_) | Expression::StructuralWitIn(_, _) | Expression::Fixed(_) => {
-            bail!("main monomial scalar must not contain witness-backed expressions")
-        }
-        Expression::Instance(instance) | Expression::InstanceScalar(instance) => {
-            let value = *pi
-                .get(instance.0 as usize)
-                .ok_or_else(|| eyre!("main scalar instance index {} out of range", instance.0))?;
-            record.is_instance = true;
-            record.instance_idx = instance.0 as usize;
-            record.arg0 = value;
-            value
-        }
-        Expression::Constant(value) => {
-            let value = either_to_ext(*value);
-            record.is_const = true;
-            record.arg0 = value;
-            value
-        }
-        Expression::Challenge(ch_id, pow, scalar, offset) => {
-            let challenge_idx = *ch_id as usize;
-            let challenge = *challenges
-                .get(challenge_idx)
-                .ok_or_else(|| eyre!("main scalar challenge index {challenge_idx} out of range"))?;
-            let value = challenge.exp_u64(*pow as u64) * *scalar + *offset;
-            record.is_challenge = true;
-            record.challenge_idx = challenge_idx;
-            record.arg0 = value;
-            value
-        }
-        Expression::Sum(left, right) => {
-            let left = emit_scalar_expr_row(
-                idx, term_idx, left, pi, challenges, records, row_idx, node_idx,
-            )?;
-            let right = emit_scalar_expr_row(
-                idx, term_idx, right, pi, challenges, records, row_idx, node_idx,
-            )?;
-            record.is_add = true;
-            record.arg0 = left;
-            record.arg1 = right;
-            left + right
-        }
-        Expression::Product(left, right) => {
-            let left = emit_scalar_expr_row(
-                idx, term_idx, left, pi, challenges, records, row_idx, node_idx,
-            )?;
-            let right = emit_scalar_expr_row(
-                idx, term_idx, right, pi, challenges, records, row_idx, node_idx,
-            )?;
-            record.is_mul = true;
-            record.arg0 = left;
-            record.arg1 = right;
-            left * right
-        }
-        Expression::ScaledSum(x, a, b) => {
-            let x =
-                emit_scalar_expr_row(idx, term_idx, x, pi, challenges, records, row_idx, node_idx)?;
-            let a =
-                emit_scalar_expr_row(idx, term_idx, a, pi, challenges, records, row_idx, node_idx)?;
-            let b =
-                emit_scalar_expr_row(idx, term_idx, b, pi, challenges, records, row_idx, node_idx)?;
-            let mul_node = *node_idx;
-            *node_idx += 1;
-            records.push(MainFrontloadTermRecord {
-                proof_idx: 0,
-                idx,
-                row_idx: *row_idx,
-                node_idx: mul_node,
-                is_mul: true,
-                constraint_idx: term_idx,
-                arg0: a,
-                arg1: x,
-                value: a * x,
-                ..MainFrontloadTermRecord::default()
-            });
-            *row_idx += 1;
-            record.is_add = true;
-            record.arg0 = a * x;
-            record.arg1 = b;
-            a * x + b
-        }
-    };
+    let value =
+        match expr {
+            Expression::WitIn(_) | Expression::StructuralWitIn(_, _) | Expression::Fixed(_) => {
+                bail!("main monomial scalar must not contain witness-backed expressions")
+            }
+            Expression::Instance(instance) | Expression::InstanceScalar(instance) => {
+                let value = *ctx.pi.get(instance.0).ok_or_else(|| {
+                    eyre!("main scalar instance index {} out of range", instance.0)
+                })?;
+                record.is_instance = true;
+                record.instance_idx = instance.0;
+                record.arg0 = value;
+                value
+            }
+            Expression::Constant(value) => {
+                let value = either_to_ext(*value);
+                record.is_const = true;
+                record.arg0 = value;
+                value
+            }
+            Expression::Challenge(ch_id, pow, scalar, offset) => {
+                let challenge_idx = *ch_id as usize;
+                let challenge = *ctx.challenges.get(challenge_idx).ok_or_else(|| {
+                    eyre!("main scalar challenge index {challenge_idx} out of range")
+                })?;
+                let value = challenge.exp_u64(*pow as u64) * *scalar + *offset;
+                record.is_challenge = true;
+                record.challenge_idx = challenge_idx;
+                record.arg0 = value;
+                value
+            }
+            Expression::Sum(left, right) => {
+                let left = emit_scalar_expr_row(ctx, left)?;
+                let right = emit_scalar_expr_row(ctx, right)?;
+                record.is_add = true;
+                record.arg0 = left;
+                record.arg1 = right;
+                left + right
+            }
+            Expression::Product(left, right) => {
+                let left = emit_scalar_expr_row(ctx, left)?;
+                let right = emit_scalar_expr_row(ctx, right)?;
+                record.is_mul = true;
+                record.arg0 = left;
+                record.arg1 = right;
+                left * right
+            }
+            Expression::ScaledSum(x, a, b) => {
+                let x = emit_scalar_expr_row(ctx, x)?;
+                let a = emit_scalar_expr_row(ctx, a)?;
+                let b = emit_scalar_expr_row(ctx, b)?;
+                let mul_node = *ctx.node_idx;
+                *ctx.node_idx += 1;
+                ctx.records.push(MainFrontloadTermRecord {
+                    proof_idx: 0,
+                    idx: ctx.idx,
+                    row_idx: *ctx.row_idx,
+                    node_idx: mul_node,
+                    is_mul: true,
+                    constraint_idx: ctx.term_idx,
+                    arg0: a,
+                    arg1: x,
+                    value: a * x,
+                    ..MainFrontloadTermRecord::default()
+                });
+                *ctx.row_idx += 1;
+                record.is_add = true;
+                record.arg0 = a * x;
+                record.arg1 = b;
+                a * x + b
+            }
+        };
 
     record.value = value;
     record.chip_acc_out = record.chip_acc_in;
-    records.push(record);
-    *row_idx += 1;
+    ctx.records.push(record);
+    *ctx.row_idx += 1;
     Ok(value)
 }
 

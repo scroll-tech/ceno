@@ -15,7 +15,7 @@ just fails to produce a valid proof — a liveness failure. Scrutinize
 verifier-side edits more than prover-side edits, and treat any edit to
 verifier code as the highest-scrutiny change in the repo.
 
-"Verifier code" includes the **recursive verifier** in `ceno_recursion/`.
+"Verifier code" includes the **recursive verifier** in `ceno_recursion_v2/`.
 Recursion compresses many shard proofs into a single smaller proof by
 running a verifier inside another proof, so a bug there can silently
 pass invalid inner proofs through the compressed proof. Same scrutiny

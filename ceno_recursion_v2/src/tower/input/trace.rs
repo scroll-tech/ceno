@@ -107,54 +107,22 @@ impl RowMajorChip<F> for TowerInputTraceGenerator {
             cols.r0_claim.copy_from_slice(q0_basis);
             cols.w0_claim.copy_from_slice(q0_basis);
             cols.q0_claim.copy_from_slice(q0_basis);
-            cols.read_out_0.copy_from_slice(
-                record.read_out_evals[0]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.read_out_1.copy_from_slice(
-                record.read_out_evals[1]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.write_out_0.copy_from_slice(
-                record.write_out_evals[0]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.write_out_1.copy_from_slice(
-                record.write_out_evals[1]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.logup_out_0.copy_from_slice(
-                record.logup_out_evals[0]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.logup_out_1.copy_from_slice(
-                record.logup_out_evals[1]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.logup_out_2.copy_from_slice(
-                record.logup_out_evals[2]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
-            cols.logup_out_3.copy_from_slice(
-                record.logup_out_evals[3]
-                    .as_basis_coefficients_slice()
-                    .try_into()
-                    .unwrap(),
-            );
+            cols.read_out_0
+                .copy_from_slice(record.read_out_evals[0].as_basis_coefficients_slice());
+            cols.read_out_1
+                .copy_from_slice(record.read_out_evals[1].as_basis_coefficients_slice());
+            cols.write_out_0
+                .copy_from_slice(record.write_out_evals[0].as_basis_coefficients_slice());
+            cols.write_out_1
+                .copy_from_slice(record.write_out_evals[1].as_basis_coefficients_slice());
+            cols.logup_out_0
+                .copy_from_slice(record.logup_out_evals[0].as_basis_coefficients_slice());
+            cols.logup_out_1
+                .copy_from_slice(record.logup_out_evals[1].as_basis_coefficients_slice());
+            cols.logup_out_2
+                .copy_from_slice(record.logup_out_evals[2].as_basis_coefficients_slice());
+            cols.logup_out_3
+                .copy_from_slice(record.logup_out_evals[3].as_basis_coefficients_slice());
             cols.has_read_out = F::from_bool(record.has_read_out);
             cols.has_write_out = F::from_bool(record.has_write_out);
             cols.has_logup_out = F::from_bool(record.has_logup_out);

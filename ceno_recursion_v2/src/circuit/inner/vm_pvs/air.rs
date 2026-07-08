@@ -247,9 +247,11 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             self.transcript_bus,
             local.proof_idx,
             local.fixed_commit_tidx,
-            local.fixed_commit_log2_max_codeword_size,
-            local.fixed_commit_reshape_log_height,
-            local.fixed_commit_cumulative_heights_len,
+            CommitFixedMetadata {
+                log2_max_codeword_size: local.fixed_commit_log2_max_codeword_size,
+                reshape_log_height: local.fixed_commit_reshape_log_height,
+                cumulative_heights_len: local.fixed_commit_cumulative_heights_len,
+            },
             local.is_valid * local.fixed_commit_present,
         );
         for (didx, value) in local.child_pvs.fixed_no_omc_init_commit.iter().enumerate() {
@@ -269,9 +271,11 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             self.transcript_bus,
             local.proof_idx,
             local.fixed_no_omc_init_commit_tidx,
-            local.fixed_no_omc_init_commit_log2_max_codeword_size,
-            local.fixed_no_omc_init_commit_reshape_log_height,
-            local.fixed_no_omc_init_commit_cumulative_heights_len,
+            CommitFixedMetadata {
+                log2_max_codeword_size: local.fixed_no_omc_init_commit_log2_max_codeword_size,
+                reshape_log_height: local.fixed_no_omc_init_commit_reshape_log_height,
+                cumulative_heights_len: local.fixed_no_omc_init_commit_cumulative_heights_len,
+            },
             local.is_valid * local.fixed_no_omc_init_commit_present,
         );
         for (didx, value) in local.child_pvs.witness_commit.iter().enumerate() {
@@ -291,9 +295,11 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             self.transcript_bus,
             local.proof_idx,
             local.witness_commit_tidx,
-            local.witness_commit_log2_max_codeword_size,
-            local.witness_commit_reshape_log_height,
-            local.witness_commit_cumulative_heights_len,
+            CommitFixedMetadata {
+                log2_max_codeword_size: local.witness_commit_log2_max_codeword_size,
+                reshape_log_height: local.witness_commit_reshape_log_height,
+                cumulative_heights_len: local.witness_commit_cumulative_heights_len,
+            },
             local.is_valid.into(),
         );
 
@@ -474,20 +480,24 @@ where
     }
 }
 
+struct CommitFixedMetadata<T> {
+    log2_max_codeword_size: T,
+    reshape_log_height: T,
+    cumulative_heights_len: T,
+}
+
 fn receive_commit_fixed_metadata<AB: AirBuilder + InteractionBuilder>(
     builder: &mut AB,
     transcript_bus: TranscriptBus,
     proof_idx: AB::Var,
     commitment_tidx: AB::Var,
-    log2_max_codeword_size: AB::Var,
-    reshape_log_height: AB::Var,
-    cumulative_heights_len: AB::Var,
+    metadata: CommitFixedMetadata<AB::Var>,
     enabled: AB::Expr,
 ) {
     for (offset, value) in [
-        log2_max_codeword_size,
-        reshape_log_height,
-        cumulative_heights_len,
+        metadata.log2_max_codeword_size,
+        metadata.reshape_log_height,
+        metadata.cumulative_heights_len,
     ]
     .into_iter()
     .enumerate()

@@ -336,7 +336,7 @@ where
                     + local.is_quark_step
                     + local.is_eq_lte_step),
         );
-        let expected_factor = eq_factor::<AB>(local.rhs_point.clone(), local.lhs_point.clone());
+        let expected_factor = eq_factor::<AB>(local.rhs_point, local.lhs_point);
         assert_array_eq(
             &mut builder.when(local.is_enabled * local.is_eq_product_step * local.point_active),
             local.factor,
@@ -349,28 +349,21 @@ where
             local.factor,
             ext_one::<AB::Expr>(),
         );
-        let product = ext_mul::<AB::Expr>(
-            local.acc_in.clone().map(Into::into),
-            local.factor.clone().map(Into::into),
-        );
+        let product =
+            ext_mul::<AB::Expr>(local.acc_in.map(Into::into), local.factor.map(Into::into));
         assert_array_eq(
             &mut builder.when(local.is_enabled * local.is_eq_product_step),
             local.acc_out,
             product,
         );
-        let sum = ext_add::<AB::Expr>(
-            local.acc_in.clone().map(Into::into),
-            local.factor.clone().map(Into::into),
-        );
+        let sum = ext_add::<AB::Expr>(local.acc_in.map(Into::into), local.factor.map(Into::into));
         assert_array_eq(
             &mut builder.when(local.is_enabled * local.is_accumulate_step),
             local.acc_out,
             sum,
         );
-        let multiply_product = ext_mul::<AB::Expr>(
-            local.acc_in.clone().map(Into::into),
-            local.factor.clone().map(Into::into),
-        );
+        let multiply_product =
+            ext_mul::<AB::Expr>(local.acc_in.map(Into::into), local.factor.map(Into::into));
         assert_array_eq(
             &mut builder.when(local.is_enabled * local.is_multiply_step),
             local.acc_out,
@@ -458,16 +451,15 @@ where
             .when(local.is_enabled * local.is_last_quark_step)
             .assert_eq(local.sparse_index, local.ctx_num_instances);
         let quark_zero_factor = ext_mul::<AB::Expr>(
-            ext_one_minus(local.rhs_point.clone().map(Into::into)),
-            ext_one_minus(local.lhs_point.clone().map(Into::into)),
+            ext_one_minus(local.rhs_point.map(Into::into)),
+            ext_one_minus(local.lhs_point.map(Into::into)),
         );
         let quark_one_factor = ext_mul::<AB::Expr>(
-            local.rhs_point.clone().map(Into::into),
-            local.lhs_point.clone().map(Into::into),
+            local.rhs_point.map(Into::into),
+            local.lhs_point.map(Into::into),
         );
-        let quark_lhs =
-            ext_mul::<AB::Expr>(quark_zero_factor, local.factor.clone().map(Into::into));
-        let quark_rhs = ext_mul::<AB::Expr>(quark_one_factor, local.acc_in.clone().map(Into::into));
+        let quark_lhs = ext_mul::<AB::Expr>(quark_zero_factor, local.factor.map(Into::into));
+        let quark_rhs = ext_mul::<AB::Expr>(quark_one_factor, local.acc_in.map(Into::into));
         let quark_out = ext_add::<AB::Expr>(quark_lhs, quark_rhs);
         assert_array_eq(
             &mut builder.when(local.is_enabled * local.is_quark_step),
@@ -506,12 +498,12 @@ where
             .when(local.is_last_eq_lte_step)
             .assert_eq(local.sparse_index, local.sparse_pos);
         let eq_lte_same_one = ext_mul::<AB::Expr>(
-            local.rhs_point.clone().map(Into::into),
-            local.lhs_point.clone().map(Into::into),
+            local.rhs_point.map(Into::into),
+            local.lhs_point.map(Into::into),
         );
         let eq_lte_same_zero = ext_mul::<AB::Expr>(
-            ext_one_minus(local.rhs_point.clone().map(Into::into)),
-            ext_one_minus(local.lhs_point.clone().map(Into::into)),
+            ext_one_minus(local.rhs_point.map(Into::into)),
+            ext_one_minus(local.lhs_point.map(Into::into)),
         );
         let eq_lte_any = ext_add::<AB::Expr>(eq_lte_same_one.clone(), eq_lte_same_zero.clone());
         let eq_lte_equal_choice = ext_add::<AB::Expr>(
@@ -526,21 +518,18 @@ where
             local.aux3,
             eq_lte_equal_choice,
         );
-        let eq_lte_prefix_out = ext_mul::<AB::Expr>(
-            local.acc_in.clone().map(Into::into),
-            local.aux3.clone().map(Into::into),
-        );
-        let eq_lte_less_from_prior =
-            ext_mul::<AB::Expr>(local.aux.clone().map(Into::into), eq_lte_any);
+        let eq_lte_prefix_out =
+            ext_mul::<AB::Expr>(local.acc_in.map(Into::into), local.aux3.map(Into::into));
+        let eq_lte_less_from_prior = ext_mul::<AB::Expr>(local.aux.map(Into::into), eq_lte_any);
         let eq_lte_less_from_equal_prefix_unmasked =
-            ext_mul::<AB::Expr>(local.acc_in.clone().map(Into::into), eq_lte_same_zero);
+            ext_mul::<AB::Expr>(local.acc_in.map(Into::into), eq_lte_same_zero);
         assert_array_eq(
             &mut builder.when(local.is_eq_lte_step),
             local.aux2,
             eq_lte_less_from_equal_prefix_unmasked,
         );
         let eq_lte_less_from_equal_prefix =
-            ext_mul_scalar::<AB::Expr>(local.aux2.clone().map(Into::into), local.point_active);
+            ext_mul_scalar::<AB::Expr>(local.aux2.map(Into::into), local.point_active);
         let eq_lte_less_out =
             ext_add::<AB::Expr>(eq_lte_less_from_prior, eq_lte_less_from_equal_prefix);
         assert_array_eq(
@@ -561,12 +550,12 @@ where
         assert_array_eq(
             &mut builder.when(local.is_enabled * local.is_final_step),
             local.acc_out,
-            local.value.clone().map(Into::into),
+            local.value.map(Into::into),
         );
         assert_array_eq(
             &mut builder.when(local.is_enabled * local.is_final_step),
             local.acc_in,
-            local.value.clone().map(Into::into),
+            local.value.map(Into::into),
         );
         let same_selector_continuation =
             local.is_enabled * next.is_enabled * (AB::Expr::ONE - next.is_shape_step);
@@ -1229,10 +1218,10 @@ struct FormulaRow<'a> {
 
 #[derive(Clone, Copy)]
 enum EqLteOutput {
-    ToValue,
-    ToAccIn,
-    ToFactor,
-    ToNegFactor,
+    Value,
+    AccIn,
+    Factor,
+    NegFactor,
 }
 
 fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>> {
@@ -1309,9 +1298,7 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
 
         let computed_value = match record.kind {
             MainSelectorKind::Whole => {
-                let acc =
-                    push_eq_product_rows(&mut rows, record, 0, record.ctx_num_vars, one, true);
-                acc
+                push_eq_product_rows(&mut rows, record, 0, record.ctx_num_vars, one, true)
             }
             MainSelectorKind::Prefix => {
                 let _ = push_eq_product_rows(&mut rows, record, 0, record.ctx_num_vars, one, true);
@@ -1331,35 +1318,41 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
                     if end != 0 {
                         let _ = push_eq_lte_rows(
                             &mut rows,
-                            record,
-                            0,
-                            record.ctx_num_vars,
-                            end - 1,
-                            zero,
-                            true,
-                            EqLteOutput::ToAccIn,
+                            EqLteRowsInput {
+                                record,
+                                point_offset: 0,
+                                len: record.ctx_num_vars,
+                                max_idx: end - 1,
+                                carried_value: zero,
+                                carried_value_is_zero: true,
+                                output: EqLteOutput::AccIn,
+                            },
                         );
                     }
                 } else {
                     let _ = push_eq_lte_rows(
                         &mut rows,
-                        record,
-                        0,
-                        record.ctx_num_vars,
-                        end - 1,
-                        zero,
-                        true,
-                        EqLteOutput::ToValue,
+                        EqLteRowsInput {
+                            record,
+                            point_offset: 0,
+                            len: record.ctx_num_vars,
+                            max_idx: end - 1,
+                            carried_value: zero,
+                            carried_value_is_zero: true,
+                            output: EqLteOutput::Value,
+                        },
                     );
                     let _ = push_eq_lte_rows(
                         &mut rows,
-                        record,
-                        0,
-                        record.ctx_num_vars,
-                        record.ctx_offset - 1,
-                        end_eval,
-                        false,
-                        EqLteOutput::ToNegFactor,
+                        EqLteRowsInput {
+                            record,
+                            point_offset: 0,
+                            len: record.ctx_num_vars,
+                            max_idx: record.ctx_offset - 1,
+                            carried_value: end_eval,
+                            carried_value_is_zero: false,
+                            output: EqLteOutput::NegFactor,
+                        },
                     );
                 }
                 rows.push(accumulate_row(record, 0, end_eval, -start_eval, value));
@@ -1392,13 +1385,15 @@ fn build_formula_rows(records: &[MainSelectorEvalRecord]) -> Vec<FormulaRow<'_>>
                 let value = subgroup_acc * tail_eval;
                 let _ = push_eq_lte_rows(
                     &mut rows,
-                    record,
-                    subgroup_vars,
-                    record.ctx_num_vars - subgroup_vars,
-                    record.ctx_num_instances - 1,
-                    subgroup_acc,
-                    record.sparse_indices.is_empty(),
-                    EqLteOutput::ToFactor,
+                    EqLteRowsInput {
+                        record,
+                        point_offset: subgroup_vars,
+                        len: record.ctx_num_vars - subgroup_vars,
+                        max_idx: record.ctx_num_instances - 1,
+                        carried_value: subgroup_acc,
+                        carried_value_is_zero: record.sparse_indices.is_empty(),
+                        output: EqLteOutput::Factor,
+                    },
                 );
                 rows.push(multiply_row(
                     record,
@@ -1564,8 +1559,7 @@ fn multiply_row(
     }
 }
 
-fn push_eq_lte_rows<'a>(
-    rows: &mut Vec<FormulaRow<'a>>,
+struct EqLteRowsInput<'a> {
     record: &'a MainSelectorEvalRecord,
     point_offset: usize,
     len: usize,
@@ -1573,7 +1567,21 @@ fn push_eq_lte_rows<'a>(
     carried_value: RecursionField,
     carried_value_is_zero: bool,
     output: EqLteOutput,
+}
+
+fn push_eq_lte_rows<'a>(
+    rows: &mut Vec<FormulaRow<'a>>,
+    input: EqLteRowsInput<'a>,
 ) -> RecursionField {
+    let EqLteRowsInput {
+        record,
+        point_offset,
+        len,
+        max_idx,
+        carried_value,
+        carried_value_is_zero,
+        output,
+    } = input;
     if len == 0 {
         return RecursionField::ONE;
     }
@@ -1613,10 +1621,10 @@ fn push_eq_lte_rows<'a>(
             sparse_index_bits_value: (bound_prefix - bit) / 2,
             eq_lte_is_first: step_idx == 0,
             eq_lte_is_last: is_last,
-            eq_lte_output_to_value: is_last && matches!(output, EqLteOutput::ToValue),
-            eq_lte_output_to_acc_in: is_last && matches!(output, EqLteOutput::ToAccIn),
-            eq_lte_output_to_factor: is_last && matches!(output, EqLteOutput::ToFactor),
-            eq_lte_output_to_neg_factor: is_last && matches!(output, EqLteOutput::ToNegFactor),
+            eq_lte_output_to_value: is_last && matches!(output, EqLteOutput::Value),
+            eq_lte_output_to_acc_in: is_last && matches!(output, EqLteOutput::AccIn),
+            eq_lte_output_to_factor: is_last && matches!(output, EqLteOutput::Factor),
+            eq_lte_output_to_neg_factor: is_last && matches!(output, EqLteOutput::NegFactor),
             eq_lte_value_is_zero: step_idx == 0 && carried_value_is_zero,
             quark_is_first: false,
             quark_is_last: false,
@@ -1680,13 +1688,15 @@ fn push_quark_rows<'a>(
         if prefix_count > 0 && i > 0 {
             factor = push_eq_lte_rows(
                 rows,
-                record,
-                0,
-                i,
-                prefix_count - 1,
-                acc,
-                false,
-                EqLteOutput::ToFactor,
+                EqLteRowsInput {
+                    record,
+                    point_offset: 0,
+                    len: i,
+                    max_idx: prefix_count - 1,
+                    carried_value: acc,
+                    carried_value_is_zero: false,
+                    output: EqLteOutput::Factor,
+                },
             );
         }
         let zero_factor = (one - rhs) * (one - lhs);
