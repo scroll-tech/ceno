@@ -1,6 +1,5 @@
 use std::{sync::Arc, time::Instant};
 
-use continuations_v2::SC;
 use eyre::Result;
 #[cfg(test)]
 use openvm_cpu_backend::CpuBackend;
@@ -15,7 +14,7 @@ use openvm_stark_backend::{
     },
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
-    Digest, EF, F, default_duplex_sponge_recorder,
+    BabyBearPoseidon2Config, Digest, EF, F, default_duplex_sponge_recorder,
 };
 use verify_stark::pvs::DeferralPvs;
 
@@ -42,12 +41,12 @@ pub use openvm_stark_backend::SystemParams;
 /// Forked inner prover that will bridge Ceno ZKVM proofs with OpenVM recursion.
 pub struct InnerAggregationProver<
     PB: ProverBackend<Val = F, Challenge = EF, Commitment = Digest>,
-    S: AggregationSubCircuit + VerifierTraceGen<PB, SC>,
+    S: AggregationSubCircuit + VerifierTraceGen<PB, BabyBearPoseidon2Config>,
     T: InnerTraceGen<PB>,
 > {
-    pk: Arc<MultiStarkProvingKey<SC>>,
+    pk: Arc<MultiStarkProvingKey<BabyBearPoseidon2Config>>,
     d_pk: DeviceMultiStarkProvingKey<PB>,
-    vk: Arc<MultiStarkVerifyingKey<SC>>,
+    vk: Arc<MultiStarkVerifyingKey<BabyBearPoseidon2Config>>,
 
     agg_node_tracegen: T,
 
@@ -60,11 +59,11 @@ pub struct InnerAggregationProver<
 
 impl<
     PB: ProverBackend<Val = F, Challenge = EF, Commitment = Digest>,
-    S: AggregationSubCircuit + VerifierTraceGen<PB, SC>,
+    S: AggregationSubCircuit + VerifierTraceGen<PB, BabyBearPoseidon2Config>,
     T: InnerTraceGen<PB>,
 > InnerAggregationProver<PB, S, T>
 {
-    pub fn new<Eg: StarkEngine<SC = SC, PB = PB>>(
+    pub fn new<Eg: StarkEngine<SC = BabyBearPoseidon2Config, PB = PB>>(
         child_vk: Arc<RecursionVk>,
         system_params: SystemParams,
         is_self_recursive: bool,
@@ -109,9 +108,9 @@ impl<
     }
 
     #[allow(dead_code)]
-    pub fn from_pk<Eg: StarkEngine<SC = SC, PB = PB>>(
+    pub fn from_pk<Eg: StarkEngine<SC = BabyBearPoseidon2Config, PB = PB>>(
         child_vk: Arc<RecursionVk>,
-        pk: Arc<MultiStarkProvingKey<SC>>,
+        pk: Arc<MultiStarkProvingKey<BabyBearPoseidon2Config>>,
         is_self_recursive: bool,
         def_hook_commit: Option<Digest>,
     ) -> Self {
@@ -177,18 +176,18 @@ fn build_instance_public_value_indices(child_vk: &RecursionVk) -> Vec<Vec<usize>
 
 impl<
     PB: ProverBackend<Val = F, Challenge = EF, Commitment = Digest>,
-    S: AggregationSubCircuit + VerifierTraceGen<PB, SC>,
+    S: AggregationSubCircuit + VerifierTraceGen<PB, BabyBearPoseidon2Config>,
     T: InnerTraceGen<PB>,
 > InnerAggregationProver<PB, S, T>
 where
     PB::Matrix: Clone,
     PB::Commitment: Default,
 {
-    pub fn agg_prove_no_def<E: StarkEngine<SC = SC, PB = PB>>(
+    pub fn agg_prove_no_def<E: StarkEngine<SC = BabyBearPoseidon2Config, PB = PB>>(
         &self,
         proofs: &[RecursionProof],
         child_vk_kind: ChildVkKind,
-    ) -> Result<Proof<SC>> {
+    ) -> Result<Proof<BabyBearPoseidon2Config>> {
         let tracegen_start = Instant::now();
         let ctx = self.generate_proving_ctx(proofs, child_vk_kind, ProofsType::Vm, None);
         tracing::info!(
@@ -197,7 +196,10 @@ where
             "generated recursion proving context"
         );
         if tracing::enabled!(tracing::Level::INFO) {
-            trace_heights_tracing_info::<PB, SC>(&ctx.per_trace, &self.circuit.airs());
+            trace_heights_tracing_info::<PB, BabyBearPoseidon2Config>(
+                &ctx.per_trace,
+                &self.circuit.airs(),
+            );
         }
 
         let engine = E::new(self.pk.params.clone());
@@ -295,13 +297,13 @@ where
         }
     }
 
-    pub fn get_vk(&self) -> Arc<MultiStarkVerifyingKey<SC>> {
+    pub fn get_vk(&self) -> Arc<MultiStarkVerifyingKey<BabyBearPoseidon2Config>> {
         self.vk.clone()
     }
 
     #[cfg(test)]
     pub(crate) fn air_names(&self) -> Vec<String> {
-        <InnerCircuit<S> as Circuit<SC>>::airs(self.circuit.as_ref())
+        <InnerCircuit<S> as Circuit<BabyBearPoseidon2Config>>::airs(self.circuit.as_ref())
             .iter()
             .map(|air| air.name().to_string())
             .collect()
@@ -317,9 +319,13 @@ where
 
 #[cfg(test)]
 impl<const MAX_NUM_PROOFS: usize, T>
-    InnerAggregationProver<CpuBackend<SC>, VerifierSubCircuit<MAX_NUM_PROOFS>, T>
+    InnerAggregationProver<
+        CpuBackend<BabyBearPoseidon2Config>,
+        VerifierSubCircuit<MAX_NUM_PROOFS>,
+        T,
+    >
 where
-    T: InnerTraceGen<CpuBackend<SC>>,
+    T: InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>>,
 {
     pub(crate) fn debug_with_preflight_mutation<Eg, M>(
         &self,
@@ -328,7 +334,7 @@ where
         mutate: M,
     ) -> bool
     where
-        Eg: StarkEngine<SC = SC, PB = CpuBackend<SC>>,
+        Eg: StarkEngine<SC = BabyBearPoseidon2Config, PB = CpuBackend<BabyBearPoseidon2Config>>,
         M: FnOnce(&mut [crate::system::Preflight]) -> bool,
     {
         assert!(proofs.len() <= self.circuit.verifier_circuit.max_num_proofs());
@@ -387,7 +393,7 @@ where
         let subcircuit_ctxs = self
             .circuit
             .verifier_circuit
-            .test_generate_proving_ctxs_from_preflights::<SC>(
+            .test_generate_proving_ctxs_from_preflights::<BabyBearPoseidon2Config>(
                 child_vk,
                 proofs,
                 &preflights,

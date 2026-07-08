@@ -56,9 +56,7 @@ impl<AB: AirBuilder + InteractionBuilder> Air<AB> for MainAir {
         builder.assert_bool(local.is_present);
         builder.assert_bool(local.is_first);
         builder.assert_bool(local.is_first_idx);
-        builder
-            .when(local.is_present)
-            .assert_one(local.is_enabled);
+        builder.when(local.is_present).assert_one(local.is_enabled);
 
         NestedForLoopSubAir::<2> {}.eval(
             builder,

@@ -5,8 +5,8 @@ use recursion_circuit::{
 pub use upstream::{
     AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage, CachedCommitBus,
     CachedCommitBusMessage, ColumnClaimsBus, ColumnClaimsMessage, PublicValuesBus,
-    PublicValuesBusMessage, SelHypercubeBus, SelHypercubeBusMessage, SelUniBus,
-    SelUniBusMessage, TranscriptBus, TranscriptBusMessage,
+    PublicValuesBusMessage, SelHypercubeBus, SelHypercubeBusMessage, SelUniBus, SelUniBusMessage,
+    TranscriptBus, TranscriptBusMessage,
 };
 
 // ── Forked transcript bus ─────────────────────────────────────────────────────

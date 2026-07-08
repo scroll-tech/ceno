@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
-use continuations_v2::SC;
 use eyre::{Result, eyre};
 use openvm_cpu_backend::CpuBackend;
 use openvm_stark_backend::proof::Proof;
-use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2CpuEngine;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{
+    BabyBearPoseidon2Config, BabyBearPoseidon2CpuEngine,
+};
 
 use crate::{
     circuit::inner::InnerTraceGenImpl,
@@ -15,14 +16,21 @@ mod inner;
 
 pub use inner::*;
 
-pub type InnerCpuProver<const MAX_NUM_PROOFS: usize> =
-    InnerAggregationProver<CpuBackend<SC>, VerifierSubCircuit<MAX_NUM_PROOFS>, InnerTraceGenImpl>;
+pub type InnerCpuProver<const MAX_NUM_PROOFS: usize> = InnerAggregationProver<
+    CpuBackend<BabyBearPoseidon2Config>,
+    VerifierSubCircuit<MAX_NUM_PROOFS>,
+    InnerTraceGenImpl,
+>;
 
 /// Proof produced by the leaf layer: a STARK proof over `SC` (BabyBear + Poseidon2).
-pub type LeafProof = Proof<SC>;
+pub type LeafProof = Proof<BabyBearPoseidon2Config>;
 
 /// Proof produced by the internal aggregation layer (same STARK config as leaf).
-pub type InternalProof = Proof<SC>;
+pub type InternalProof = Proof<BabyBearPoseidon2Config>;
+
+/// Verifying key produced for the leaf aggregation circuit.
+pub type LeafVk =
+    openvm_stark_backend::keygen::types::MultiStarkVerifyingKey<BabyBearPoseidon2Config>;
 
 /// Placeholder for the final root proof that can be verified on-chain.
 ///
@@ -35,6 +43,7 @@ pub struct RootProof {
 }
 
 /// Configuration for the aggregation pipeline.
+#[derive(Clone)]
 pub struct AggregationOptions {
     /// System parameters for the leaf-layer recursive STARK prover
     /// (log_blowup, num_queries, proof_of_work_bits).
@@ -172,7 +181,7 @@ impl<const LEAF_FANIN: usize, const INTERNAL_FANIN: usize> AggProver<LEAF_FANIN,
     }
 
     /// Access the leaf prover's verifying key.
-    pub fn leaf_vk(&self) -> Arc<openvm_stark_backend::keygen::types::MultiStarkVerifyingKey<SC>> {
+    pub fn leaf_vk(&self) -> Arc<LeafVk> {
         self.leaf_prover.get_vk()
     }
 }

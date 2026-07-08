@@ -17,12 +17,12 @@ use stark_recursion_circuit_derive::AlignedBorrow;
 
 use crate::{
     bus::{
-        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage,
-        ForkFinalSampleBus, ForkFinalSampleMessage, ForkedTranscriptBus,
-        ForkedTranscriptBusMessage, LookupChallengeBus, LookupChallengeKind,
-        LookupChallengeMessage, MainSelectorShapeBus, MainSelectorShapeMessage,
-        MainSelectorSparseIndexShapeBus, MainSelectorSparseIndexShapeMessage, TowerModuleBus,
-        TowerModuleMessage, TranscriptBus, TranscriptBusMessage,
+        AirPresenceBus, AirPresenceBusMessage, AirShapeBus, AirShapeBusMessage, ForkFinalSampleBus,
+        ForkFinalSampleMessage, ForkedTranscriptBus, ForkedTranscriptBusMessage,
+        LookupChallengeBus, LookupChallengeKind, LookupChallengeMessage, MainSelectorShapeBus,
+        MainSelectorShapeMessage, MainSelectorSparseIndexShapeBus,
+        MainSelectorSparseIndexShapeMessage, TowerModuleBus, TowerModuleMessage, TranscriptBus,
+        TranscriptBusMessage,
     },
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
     proof_shape::{
@@ -670,7 +670,6 @@ where
             },
             local.is_present * local.is_valid,
         );
-
     }
 }
 

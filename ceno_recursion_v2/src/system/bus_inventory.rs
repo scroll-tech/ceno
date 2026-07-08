@@ -9,8 +9,8 @@ use recursion_circuit::{
 
 use crate::bus::{
     CachedCommitBus as LocalCachedCommitBus, EccRtBus, ForkFinalSampleBus,
-    ForkedTranscriptBus as LocalForkedTranscriptBus, LookupChallengeBus, MainBus, MainContributionBus,
-    MainEccRtChallengeBus, MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus,
+    ForkedTranscriptBus as LocalForkedTranscriptBus, LookupChallengeBus, MainBus,
+    MainContributionBus, MainEccRtChallengeBus, MainEccRtEquationTotalsBus, MainEccRtQuarkFinalBus,
     MainEccRtSumcheckFinalBus, MainEvalBus, MainExpressionClaimBus, MainGlobalClaimBus,
     MainGlobalPointBus, MainSelectorPointBus, MainSelectorResultBus, MainSelectorShapeBus,
     MainSelectorSparseIndexShapeBus, MainSumcheckInputBus, MainSumcheckOutputBus,
