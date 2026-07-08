@@ -362,6 +362,8 @@ mod cuda_tracegen {
                         )
                         .ok()?,
                     );
+                    range_check_inputs
+                        .extend(crate::pcs::collect_pcs_range_checks(&preflights_cpu));
                     module.generate_proving_ctxs(
                         child_vk,
                         proofs,
