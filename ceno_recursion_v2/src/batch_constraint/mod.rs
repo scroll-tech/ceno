@@ -23,6 +23,9 @@ use crate::{
     tracegen::{ModuleChip, RowMajorChip},
 };
 
+#[cfg(feature = "cuda")]
+mod cuda;
+
 pub struct BatchConstraintModule {
     transcript_bus: crate::bus::TranscriptBus,
     global_claim_bus: crate::bus::MainGlobalClaimBus,
@@ -199,7 +202,7 @@ mod cuda_tracegen {
     use super::*;
     use crate::{
         cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
-        tracegen::cuda::generate_gpu_proving_ctx,
+        tracegen::{ModuleChip, cuda::generate_gpu_proving_ctx},
     };
 
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for BatchConstraintModule {
@@ -252,11 +255,18 @@ mod cuda_tracegen {
                 .iter()
                 .enumerate()
                 .map(|(idx, chip)| {
-                    generate_gpu_proving_ctx(
-                        chip,
-                        &ctx,
-                        required_heights.and_then(|heights| heights.get(idx).copied()),
-                    )
+                    let required_height =
+                        required_heights.and_then(|heights| heights.get(idx).copied());
+                    match chip {
+                        BatchConstraintModuleChip::EvalAbsorb => {
+                            crate::batch_constraint::cuda::MainEvalAbsorbGpuTraceGenerator
+                                .generate_proving_ctx(
+                                    &ctx.records.eval_records.as_slice(),
+                                    required_height,
+                                )
+                        }
+                        _ => generate_gpu_proving_ctx(chip, &ctx, required_height),
+                    }
                 })
                 .collect()
         }

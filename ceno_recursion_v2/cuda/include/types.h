@@ -35,3 +35,12 @@ typedef struct {
     bool has_preprocessed;
     bool need_rot;
 } AirData;
+
+typedef struct {
+    size_t proof_idx;
+    size_t idx;
+    size_t eval_idx;
+    size_t tidx;
+    Fp value[D_EF];
+    size_t lookup_count;
+} MainEvalData;

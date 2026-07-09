@@ -1,4 +1,4 @@
-use openvm_stark_sdk::config::baby_bear_poseidon2::F;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, F};
 
 #[repr(C)]
 #[derive(Debug, Default)]
@@ -31,4 +31,15 @@ pub struct AirData {
     pub num_interactions_per_row: usize,
     pub total_width: usize,
     pub has_preprocessed: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct MainEvalData {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub eval_idx: usize,
+    pub tidx: usize,
+    pub value: [F; D_EF],
+    pub lookup_count: usize,
 }
