@@ -2,21 +2,34 @@ use std::sync::Arc;
 
 use eyre::{Result, eyre};
 use openvm_cpu_backend::CpuBackend;
+#[cfg(feature = "cuda")]
+use openvm_cuda_backend::{
+    BabyBearBn254Poseidon2GpuEngine, BabyBearPoseidon2GpuEngine, GpuBackend,
+};
 use openvm_stark_backend::{
     StarkEngine, StarkProtocolConfig, keygen::types::MultiStarkVerifyingKey, proof::Proof,
     prover::ProverBackend,
 };
 use openvm_stark_sdk::config::{
-    baby_bear_bn254_poseidon2::{BabyBearBn254Poseidon2Config, BabyBearBn254Poseidon2CpuEngine},
-    baby_bear_poseidon2::{BabyBearPoseidon2Config, BabyBearPoseidon2CpuEngine, Digest, EF, F},
+    baby_bear_bn254_poseidon2::BabyBearBn254Poseidon2Config,
+    baby_bear_poseidon2::{BabyBearPoseidon2Config, Digest, EF, F},
+};
+#[cfg(not(feature = "cuda"))]
+use openvm_stark_sdk::config::{
+    baby_bear_bn254_poseidon2::BabyBearBn254Poseidon2CpuEngine,
+    baby_bear_poseidon2::BabyBearPoseidon2CpuEngine,
 };
 
+#[cfg(not(feature = "cuda"))]
+use crate::circuit::recursive::prover::CenoRecursiveCpuProver as CenoRecursiveDefaultProver;
+#[cfg(feature = "cuda")]
+use crate::circuit::recursive::prover::CenoRecursiveGpuProver as CenoRecursiveDefaultProver;
+#[cfg(not(feature = "cuda"))]
+use crate::circuit::root::prover::CenoRootCpuProver as CenoRootDefaultProver;
+#[cfg(feature = "cuda")]
+use crate::circuit::root::prover::CenoRootGpuProver as CenoRootDefaultProver;
 use crate::{
-    circuit::{
-        inner::{InnerTraceGen, InnerTraceGenImpl},
-        recursive::prover::CenoRecursiveCpuProver,
-        root::prover::CenoRootCpuProver,
-    },
+    circuit::inner::{InnerTraceGen, InnerTraceGenImpl},
     system::{RecursionProof, RecursionVk, VerifierSubCircuit, VerifierTraceGen},
 };
 
@@ -30,6 +43,12 @@ pub type InnerCpuProver<const MAX_NUM_PROOFS: usize> = InnerAggregationProver<
     InnerTraceGenImpl,
 >;
 
+#[cfg(not(feature = "cuda"))]
+type DefaultInnerBackend = CpuBackend<BabyBearPoseidon2Config>;
+
+#[cfg(feature = "cuda")]
+type DefaultInnerBackend = GpuBackend;
+
 /// Proof produced by the leaf layer: a STARK proof over `SC` (BabyBear + Poseidon2).
 pub type LeafProof<SC = BabyBearPoseidon2Config> = Proof<SC>;
 
@@ -41,7 +60,10 @@ pub type LeafVk<SC = BabyBearPoseidon2Config> =
     openvm_stark_backend::keygen::types::MultiStarkVerifyingKey<SC>;
 
 pub type RootSC = BabyBearBn254Poseidon2Config;
+#[cfg(not(feature = "cuda"))]
 pub type RootEngine = BabyBearBn254Poseidon2CpuEngine;
+#[cfg(feature = "cuda")]
+pub type RootEngine = BabyBearBn254Poseidon2GpuEngine;
 pub type RootVk = MultiStarkVerifyingKey<RootSC>;
 
 /// Final root STARK proof over the BN254-friendly root config.
@@ -55,6 +77,20 @@ pub struct RootProof {
 pub struct RootProvingOutput {
     pub root_vk: RootVk,
     pub root_proof: RootProof,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RecursionStageTimings {
+    pub leaf_aggregation: std::time::Duration,
+    pub internal_aggregation: std::time::Duration,
+    pub root_proving: std::time::Duration,
+    pub total_create_proof: std::time::Duration,
+}
+
+#[derive(Clone)]
+pub struct TimedRootProvingOutput {
+    pub root_output: RootProvingOutput,
+    pub timings: RecursionStageTimings,
 }
 
 pub fn verify_root_proof(root_vk: &RootVk, root_proof: &RootProof) -> Result<()> {
@@ -109,8 +145,11 @@ impl AggregationOptions {
 }
 
 type CenoProof = RecursionProof;
+#[cfg(not(feature = "cuda"))]
 type Engine =
     BabyBearPoseidon2CpuEngine<openvm_stark_sdk::config::baby_bear_poseidon2::DuplexSponge>;
+#[cfg(feature = "cuda")]
+type Engine = BabyBearPoseidon2GpuEngine;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct InternalAggregationChunkPlan {
@@ -181,7 +220,7 @@ impl RootProveInput<BabyBearPoseidon2Config> for Proof<BabyBearPoseidon2Config> 
         child_vk: Arc<LeafVk<BabyBearPoseidon2Config>>,
         options: &AggregationOptions,
     ) -> Result<RootProvingOutput> {
-        let root_prover = CenoRootCpuProver::new(child_vk, options.root_system_params());
+        let root_prover = CenoRootDefaultProver::new(child_vk, options.root_system_params());
         let proof = root_prover.prove(self)?;
         Ok(RootProvingOutput {
             root_vk: root_prover.get_vk().as_ref().clone(),
@@ -199,7 +238,7 @@ impl InternalAggregateInput<BabyBearPoseidon2Config> for Proof<BabyBearPoseidon2
         let plan = internal_aggregation_chunk_plan(leaf_proofs.len(), FANIN)?;
 
         let internal_params = options.internal_system_params();
-        let internal_for_leaf = CenoRecursiveCpuProver::<FANIN>::new_for_ceno_leaf_child(
+        let internal_for_leaf = CenoRecursiveDefaultProver::<FANIN>::new_for_ceno_leaf_child(
             leaf_vk,
             internal_params.clone(),
         );
@@ -213,7 +252,7 @@ impl InternalAggregateInput<BabyBearPoseidon2Config> for Proof<BabyBearPoseidon2
 
         let i4l_vk = internal_for_leaf.get_vk();
         let internal_recursive =
-            CenoRecursiveCpuProver::<FANIN>::new(i4l_vk, internal_params.clone());
+            CenoRecursiveDefaultProver::<FANIN>::new(i4l_vk, internal_params.clone());
         let mut ir_proofs = Vec::with_capacity(plan.internal_recursive_initial_chunks.len());
         let mut offset = 0;
         for chunk_len in plan.internal_recursive_initial_chunks {
@@ -226,7 +265,7 @@ impl InternalAggregateInput<BabyBearPoseidon2Config> for Proof<BabyBearPoseidon2
         let mut current_vk = internal_recursive.get_vk();
         for layer in plan.internal_recursive_self_layers {
             let self_recursive =
-                CenoRecursiveCpuProver::<FANIN>::new(current_vk, internal_params.clone());
+                CenoRecursiveDefaultProver::<FANIN>::new(current_vk, internal_params.clone());
             let mut next_proofs = Vec::with_capacity(layer.len());
             let mut offset = 0;
             for chunk_len in layer {
@@ -267,7 +306,7 @@ pub struct AggProver<
     const LEAF_FANIN: usize,
     const INTERNAL_FANIN: usize,
     SC = BabyBearPoseidon2Config,
-    PB = CpuBackend<SC>,
+    PB = DefaultInnerBackend,
     T = InnerTraceGenImpl,
     Eg = Engine,
 > where
@@ -314,6 +353,14 @@ where
 
     /// Run the full recursion pipeline and keep the generated root VK.
     pub fn prove_with_root_vk(&self, shard_proofs: &[CenoProof]) -> Result<RootProvingOutput> {
+        Ok(self.prove_with_root_vk_timed(shard_proofs)?.root_output)
+    }
+
+    /// Run the full recursion pipeline and report coarse stage timings.
+    pub fn prove_with_root_vk_timed(
+        &self,
+        shard_proofs: &[CenoProof],
+    ) -> Result<TimedRootProvingOutput> {
         if shard_proofs.is_empty() {
             return Err(eyre!("no shard proofs to aggregate"));
         }
@@ -321,19 +368,71 @@ where
             return Err(eyre!("leaf aggregation fanin must be non-zero"));
         }
 
+        let total_start = std::time::Instant::now();
+        let leaf_start = std::time::Instant::now();
         let leaf_proofs = self.prove_leaves(shard_proofs)?;
+        let leaf_aggregation = leaf_start.elapsed();
+
+        let internal_start = std::time::Instant::now();
         let (final_proof, final_vk) = self.prove_internal(leaf_proofs)?;
-        self.prove_root(final_proof, final_vk)
+        let internal_aggregation = internal_start.elapsed();
+
+        let root_start = std::time::Instant::now();
+        let root_output = self.prove_root(final_proof, final_vk)?;
+        let root_proving = root_start.elapsed();
+        let total_create_proof = total_start.elapsed();
+        tracing::info!(
+            leaf_aggregation_ms = leaf_aggregation.as_secs_f64() * 1000.0,
+            internal_aggregation_ms = internal_aggregation.as_secs_f64() * 1000.0,
+            root_proving_ms = root_proving.as_secs_f64() * 1000.0,
+            total_create_proof_ms = total_create_proof.as_secs_f64() * 1000.0,
+            backend = std::any::type_name::<PB>(),
+            "recursion aggregation stage timings"
+        );
+
+        Ok(TimedRootProvingOutput {
+            root_output,
+            timings: RecursionStageTimings {
+                leaf_aggregation,
+                internal_aggregation,
+                root_proving,
+                total_create_proof,
+            },
+        })
     }
 
     /// Stage 1: Partition shard proofs into chunks of `LEAF_FANIN` and
     /// produce one leaf proof per chunk.
     fn prove_leaves(&self, shard_proofs: &[CenoProof]) -> Result<Vec<LeafProof<SC>>> {
-        let mut leaf_proofs = Vec::new();
-        for chunk in shard_proofs.chunks(LEAF_FANIN) {
+        let leaf_chunk_count = shard_proofs.len().div_ceil(LEAF_FANIN);
+        let app_proof_serialized_bytes = bincode::serialized_size(&shard_proofs)
+            .ok()
+            .and_then(|size| usize::try_from(size).ok())
+            .unwrap_or_default();
+        tracing::info!(
+            shard_proof_count = shard_proofs.len(),
+            leaf_chunk_count,
+            leaf_fanin = LEAF_FANIN,
+            internal_fanin = INTERNAL_FANIN,
+            child_vk_air_count = self.leaf_prover.child_vk_air_count(),
+            app_proof_serialized_bytes,
+            backend = std::any::type_name::<PB>(),
+            "recursion leaf aggregation shape"
+        );
+
+        let mut leaf_proofs = Vec::with_capacity(leaf_chunk_count);
+        for (chunk_index, chunk) in shard_proofs.chunks(LEAF_FANIN).enumerate() {
+            let chunk_start = std::time::Instant::now();
             let proof = self
                 .leaf_prover
                 .agg_prove_no_def::<Eg>(chunk, ChildVkKind::App)?;
+            tracing::info!(
+                chunk_index,
+                child_proof_count = chunk.len(),
+                elapsed_ms = chunk_start.elapsed().as_secs_f64() * 1000.0,
+                backend = std::any::type_name::<PB>(),
+                "recursion leaf aggregation chunk"
+            );
             leaf_proofs.push(proof);
         }
         Ok(leaf_proofs)

@@ -2,12 +2,13 @@ use std::{fs, path::PathBuf, sync::Arc};
 
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
-#[cfg(not(feature = "cuda"))]
-use ceno_recursion_v2::system::utils::test_system_params_zero_pow;
 use ceno_recursion_v2::{
     circuit::inner::InnerTraceGenImpl,
     continuation::prover::{AggProver, AggregationOptions, RootProof, SystemParams},
-    system::{RecursionField, RecursionPcs},
+    system::{
+        RecursionField, RecursionPcs, utils::test_system_params_zero_pow,
+        warm_child_vk_digest_cache,
+    },
 };
 use ceno_zkvm::{
     e2e::{
@@ -25,8 +26,12 @@ use openvm_cuda_backend::{BabyBearPoseidon2GpuEngine, GpuBackend as OpenVmGpuBac
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
 #[cfg(not(feature = "cuda"))]
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2CpuEngine;
-#[cfg(feature = "cuda")]
-use openvm_stark_sdk::config::leaf_params_with_100_bits_security;
+
+const RETH_RECURSION_L_SKIP: usize = 5;
+const RETH_RECURSION_LEAF_N_STACK: usize = 17;
+const RETH_RECURSION_INTERNAL_N_STACK: usize = 17;
+const RETH_RECURSION_ROOT_N_STACK: usize = 16;
+const RETH_RECURSION_K_WHIR: usize = 3;
 
 fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
     parse_size::Config::new()
@@ -100,7 +105,10 @@ struct Args {
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt::try_init().ok();
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init()
+        .ok();
 
     let mut args = Args::parse();
     args.stack_size = args.stack_size.next_multiple_of(WORD_SIZE as u32);
@@ -207,13 +215,20 @@ where
     let shard_proofs = result
         .proofs
         .wrap_err("base proving did not return proofs")?;
-    let child_vk = result.vk.wrap_err("base proving did not return a vk")?;
-    let options = AggregationOptions::new(aggregation_system_params());
-    let root_proof = prove_and_verify_aggregation(Arc::new(child_vk), options, &shard_proofs)?;
-    let proof_size = bincode::serialized_size(&root_proof)?;
+    let child_vk = Arc::new(result.vk.wrap_err("base proving did not return a vk")?);
+    warm_child_vk_digest_cache(&child_vk);
+    let options = aggregation_options();
+    let root_proof = prove_and_verify_aggregation(child_vk, options, &shard_proofs)?;
+    let proof_bytes = bincode2::serde::encode_to_vec(&root_proof, bincode2::config::standard())?;
+    let proof_size = proof_bytes.len();
     println!(
-        "recursion-v2 root proof size: {proof_size} bytes ({:.2} MiB)",
+        "ceno root proof size: {proof_size} bytes ({:.2} MiB)",
         proof_size as f64 / (1024.0 * 1024.0)
+    );
+    let legacy_proof_size = bincode::serialized_size(&root_proof)?;
+    println!(
+        "recursion-v2 root proof size (bincode-v1 legacy): {legacy_proof_size} bytes ({:.2} MiB)",
+        legacy_proof_size as f64 / (1024.0 * 1024.0)
     );
 
     tracing::info!(
@@ -224,20 +239,17 @@ where
     Ok(())
 }
 
-#[cfg(not(feature = "cuda"))]
-fn aggregation_system_params() -> SystemParams {
-    test_system_params_zero_pow(5, 16, 3)
+fn aggregation_system_params(n_stack: usize) -> SystemParams {
+    test_system_params_zero_pow(RETH_RECURSION_L_SKIP, n_stack, RETH_RECURSION_K_WHIR)
 }
 
-#[cfg(feature = "cuda")]
-fn aggregation_system_params() -> SystemParams {
-    let mut params = leaf_params_with_100_bits_security();
-    params.max_constraint_degree = 5;
-    params.whir.mu_pow_bits = 0;
-    params.whir.folding_pow_bits = 0;
-    params.whir.query_phase_pow_bits = 0;
-    params.logup.pow_bits = 0;
-    params
+fn aggregation_options() -> AggregationOptions {
+    let leaf_params = aggregation_system_params(RETH_RECURSION_LEAF_N_STACK);
+    let internal_params = aggregation_system_params(RETH_RECURSION_INTERNAL_N_STACK);
+    let root_params = aggregation_system_params(RETH_RECURSION_ROOT_N_STACK);
+    AggregationOptions::new(leaf_params)
+        .with_internal_system_params(internal_params)
+        .with_root_system_params(root_params)
 }
 
 #[cfg(not(feature = "cuda"))]

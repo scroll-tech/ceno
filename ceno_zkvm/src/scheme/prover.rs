@@ -643,31 +643,24 @@ impl<
                         transcript.append_field_element(&E::BaseField::from_usize(num_instance));
                     }
 
-                    // SAFETY: TypeId check above (before closure) guarantees PB = GpuBackend<E, PCS>.
-                    let gpu_input: ProofInput<'static, gkr_iop::gpu::GpuBackend<E, PCS>> =
-                        unsafe { std::mem::transmute(task.input) };
-
-                    let (proof, opening_evals, input_opening_point) =
-                        create_chip_proof_gpu_impl::<E, PCS>(
-                            task.circuit_name.as_str(),
-                            task.pk,
-                            gpu_input,
-                            transcript,
-                            &task.challenges,
-                            gpu_wd.0,
-                            task.witness_trace_idx,
-                            task.num_witin,
-                            task.structural_rmm,
-                        )?;
-
-                    Ok(ChipTaskResult {
-                        task_id: task.task_id,
-                        circuit_idx: task.circuit_idx,
+                    let mut gpu_task = cast_gpu_chip_task::<E, PCS, PB>(task);
+                    prepare_gpu_chip_input(&mut gpu_task, gpu_wd.0);
+                    let (proof, main_constraint_job) =
+                        create_gpu_chip_proof::<E, PCS>(&mut gpu_task, transcript)?;
+                    let gpu_result = ChipTaskResult {
+                        task_id: gpu_task.task_id,
+                        circuit_idx: gpu_task.circuit_idx,
                         proof,
-                        opening_evals,
-                        input_opening_point,
-                        has_witness_or_fixed: task.has_witness_or_fixed,
-                    })
+                        opening_evals: MainSumcheckEvals {
+                            wits_in_evals: vec![],
+                            fixed_in_evals: vec![],
+                        },
+                        input_opening_point: vec![],
+                        main_constraint_job: Some(main_constraint_job),
+                        has_witness_or_fixed: gpu_task.has_witness_or_fixed,
+                    };
+
+                    Ok(cast_gpu_chip_result::<E, PCS, PB>(gpu_result))
                 });
             }
         }

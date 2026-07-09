@@ -11,7 +11,7 @@ use gkr_iop::{
     gpu::{BB31Base, MultilinearExtensionGpu},
 };
 use multilinear_extensions::{Expression, WitnessId, mle::MultilinearExtension};
-use p3::field::{FieldAlgebra, PrimeField32};
+use p3::field::{PrimeCharacteristicRing, PrimeField32};
 use transcript::{BasicTranscript, Transcript};
 
 use crate::{
@@ -20,7 +20,6 @@ use crate::{
 };
 
 use crate::scheme::gpu::BB31Ext;
-use p3::field::PrimeCharacteristicRing;
 
 pub fn expect_basic_transcript<E: ExtensionField, T: Transcript<E>>(
     transcript: &mut T,

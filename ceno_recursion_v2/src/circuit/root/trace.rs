@@ -2,6 +2,12 @@ use std::borrow::{Borrow, BorrowMut};
 
 use eyre::{Result, eyre};
 use openvm_cpu_backend::CpuBackend;
+#[cfg(feature = "cuda")]
+use openvm_cuda_backend::{
+    GenericGpuBackend, base::DeviceMatrix, hash_scheme::BabyBearBn254Poseidon2HashScheme,
+};
+#[cfg(feature = "cuda")]
+use openvm_cuda_common::stream::GpuDeviceCtx;
 use openvm_stark_backend::{proof::Proof, prover::AirProvingContext};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use p3_field::PrimeCharacteristicRing;
@@ -59,3 +65,22 @@ pub fn root_public_values(proof: &Proof<RootSC>) -> &CenoRootPublicValues<F> {
 }
 
 pub const CENO_ROOT_DIGEST_WIDTH: usize = DIGEST_SIZE;
+
+#[cfg(feature = "cuda")]
+pub fn generate_gpu_proving_ctx(
+    proof: &Proof<BabyBearPoseidon2Config>,
+    device_ctx: &GpuDeviceCtx,
+) -> Result<AirProvingContext<GenericGpuBackend<BabyBearBn254Poseidon2HashScheme>>> {
+    use openvm_cuda_backend::data_transporter::transport_matrix_h2d_col_major;
+    use openvm_stark_backend::prover::ColMajorMatrix;
+
+    let cpu_ctx = generate_proving_ctx(proof)?;
+    let col_major = ColMajorMatrix::from_row_major(&cpu_ctx.common_main);
+    let common_main: DeviceMatrix<F> = transport_matrix_h2d_col_major(&col_major, device_ctx)
+        .map_err(|err| eyre!("failed to transport Ceno root PVS trace to GPU: {err:?}"))?;
+    Ok(AirProvingContext {
+        cached_mains: Vec::new(),
+        common_main,
+        public_values: cpu_ctx.public_values,
+    })
+}

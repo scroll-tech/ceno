@@ -49,7 +49,7 @@ __global__ void public_values_tracegen(
     }
 }
 
-extern "C" int _public_values_recursion_tracegen(
+extern "C" int _ceno_public_values_recursion_tracegen(
     Fp *d_trace,
     size_t height,
     PublicValueData **d_pvs_data,

@@ -2,6 +2,10 @@ use std::borrow::{Borrow, BorrowMut};
 
 use eyre::{Result, eyre};
 use openvm_cpu_backend::CpuBackend;
+#[cfg(feature = "cuda")]
+use openvm_cuda_backend::{GpuBackend, hash_scheme::DefaultHashScheme};
+#[cfg(feature = "cuda")]
+use openvm_cuda_common::stream::GpuDeviceCtx;
 use openvm_stark_backend::{proof::Proof, prover::AirProvingContext};
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, F};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
@@ -107,6 +111,33 @@ pub fn generate_vm_pvs_ctx(
         common_main: RowMajorMatrix::new(trace, width),
         public_values,
     })
+}
+
+#[cfg(feature = "cuda")]
+pub fn generate_verifier_pvs_gpu_ctx(
+    proofs: &[Proof<BabyBearPoseidon2Config>],
+    child_vk_commit: VkCommit<F>,
+    device_ctx: &GpuDeviceCtx,
+) -> Result<AirProvingContext<GpuBackend>> {
+    Ok(
+        openvm_circuit_primitives::hybrid_chip::cpu_proving_ctx_to_gpu::<DefaultHashScheme>(
+            generate_verifier_pvs_ctx(proofs, child_vk_commit)?,
+            device_ctx,
+        ),
+    )
+}
+
+#[cfg(feature = "cuda")]
+pub fn generate_vm_pvs_gpu_ctx(
+    proofs: &[Proof<BabyBearPoseidon2Config>],
+    device_ctx: &GpuDeviceCtx,
+) -> Result<AirProvingContext<GpuBackend>> {
+    Ok(
+        openvm_circuit_primitives::hybrid_chip::cpu_proving_ctx_to_gpu::<DefaultHashScheme>(
+            generate_vm_pvs_ctx(proofs)?,
+            device_ctx,
+        ),
+    )
 }
 
 fn debug_recursive_vm_pvs(

@@ -4,7 +4,7 @@ use openvm_stark_backend::{
     prover::{AirProvingContext, ProverBackend},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::F;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use crate::system::{Preflight, RecursionProof, RecursionVk};
 
@@ -78,9 +78,27 @@ pub(crate) mod cuda {
         required_height: Option<usize>,
     ) -> Option<AirProvingContext<GpuBackend>> {
         let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let cpu_start = std::time::Instant::now();
         let common_main_rm = t.generate_trace(ctx, required_height);
+        tracing::info!(
+            elapsed_ms = cpu_start.elapsed().as_secs_f64() * 1000.0,
+            has_trace = common_main_rm.is_some(),
+            required_height,
+            "recursion gpu row-major CPU tracegen fallback"
+        );
         common_main_rm.map(|m| {
-            AirProvingContext::simple_no_pis(transport_matrix_h2d_row(&m, &device_ctx).unwrap())
+            let height = m.height();
+            let width = m.width();
+            let h2d_start = std::time::Instant::now();
+            let common_main = transport_matrix_h2d_row(&m, &device_ctx).unwrap();
+            tracing::info!(
+                elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+                height,
+                width,
+                cells = height * width,
+                "recursion gpu row-major H2D transport"
+            );
+            AirProvingContext::simple_no_pis(common_main)
         })
     }
 }

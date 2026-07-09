@@ -5,7 +5,10 @@ use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_recursion_v2::{
     continuation::prover::{AggProver, AggregationOptions, LeafVk, RootProof, SystemParams},
-    system::{RecursionField, RecursionPcs, RecursionProof, utils::test_system_params_zero_pow},
+    system::{
+        RecursionField, RecursionPcs, RecursionProof, utils::test_system_params_zero_pow,
+        warm_child_vk_digest_cache,
+    },
 };
 use ceno_zkvm::{
     e2e::{MultiProver, run_e2e_proof, setup_program},
@@ -213,8 +216,21 @@ where
             .zkvm_vk
             .clone()
             .context("zkvm_vk is not set; call set_app_vk or init_base_prover first")?;
+        #[cfg(not(feature = "gpu"))]
+        let recursion_backend = "cpu";
+        #[cfg(feature = "gpu")]
+        let recursion_backend = "gpu";
+        tracing::info!(
+            recursion_backend,
+            leaf = recursion_backend,
+            internal = recursion_backend,
+            root = recursion_backend,
+            "ceno recursion backend summary"
+        );
+        let app_vk = Arc::new(app_vk);
+        warm_child_vk_digest_cache(&app_vk);
         Ok(CenoRecursionV2Prover::new(
-            Arc::new(app_vk),
+            app_vk,
             self.aggregation_options(),
         ))
     }

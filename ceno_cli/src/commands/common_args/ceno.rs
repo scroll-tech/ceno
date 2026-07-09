@@ -5,7 +5,7 @@ use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
 use ceno_recursion_v2::{
     continuation::prover::{AggProver, AggregationOptions},
-    system::utils::test_system_params_zero_pow,
+    system::{utils::test_system_params_zero_pow, warm_child_vk_digest_cache},
 };
 use ceno_zkvm::{
     e2e::*,
@@ -567,9 +567,11 @@ fn prove_recursion_inner<P: AsRef<Path>>(
             .context("failed to serialize vk")?;
     }
     if let Some(out_root_proof) = args.out_root_proof.as_ref() {
-        let start = std::time::Instant::now();
         let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
-        let prover = AggProver::<2, 2>::new(Arc::new(vk), options);
+        let vk = Arc::new(vk);
+        warm_child_vk_digest_cache(&vk);
+        let start = std::time::Instant::now();
+        let prover = AggProver::<2, 2>::new(vk, options);
         let root_output = prover
             .prove_with_root_vk(&zkvm_proofs)
             .map_err(|err| anyhow::anyhow!("{err}"))?;
