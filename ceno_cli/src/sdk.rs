@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_recursion_v2::{
-    continuation::prover::{AggProver, AggregationOptions, LeafVk, RootProof},
+    continuation::prover::{AggProver, AggregationOptions, LeafVk, RootProof, SystemParams},
     system::{RecursionField, RecursionPcs, RecursionProof, utils::test_system_params_zero_pow},
 };
 use ceno_zkvm::{
@@ -26,10 +26,36 @@ use serde::Serialize;
 
 pub const DEFAULT_LEAF_FANIN: usize = 2;
 pub const DEFAULT_INTERNAL_FANIN: usize = 2;
+pub const DEFAULT_RECURSION_L_SKIP: usize = 5;
+pub const DEFAULT_RECURSION_N_STACK: usize = 16;
+pub const DEFAULT_RECURSION_K_WHIR: usize = 3;
 
 pub type CenoRecursionV2Prover = AggProver<DEFAULT_LEAF_FANIN, DEFAULT_INTERNAL_FANIN>;
 pub type CenoRecursionV2RootProof = RootProof;
 pub type CenoRecursionV2LeafVk = LeafVk;
+
+pub fn recursion_system_params(l_skip: usize, n_stack: usize, k_whir: usize) -> SystemParams {
+    test_system_params_zero_pow(l_skip, n_stack, k_whir)
+}
+
+pub fn recursion_aggregation_options(
+    leaf_system_params: SystemParams,
+    internal_system_params: SystemParams,
+    root_system_params: SystemParams,
+) -> AggregationOptions {
+    AggregationOptions::new(leaf_system_params)
+        .with_internal_system_params(internal_system_params)
+        .with_root_system_params(root_system_params)
+}
+
+pub fn default_aggregation_options() -> AggregationOptions {
+    let params = recursion_system_params(
+        DEFAULT_RECURSION_L_SKIP,
+        DEFAULT_RECURSION_N_STACK,
+        DEFAULT_RECURSION_K_WHIR,
+    );
+    recursion_aggregation_options(params.clone(), params.clone(), params)
+}
 
 #[allow(clippy::type_complexity)]
 pub struct Sdk<E, PCS, PB, PD, SC = (), VC = ()>
@@ -257,7 +283,3 @@ where
 }
 
 pub type RecursionCenoSDK<SC = (), VC = ()> = CenoSDK<RecursionField, RecursionPcs, SC, VC>;
-
-fn default_aggregation_options() -> AggregationOptions {
-    AggregationOptions::new(test_system_params_zero_pow(5, 16, 3))
-}
