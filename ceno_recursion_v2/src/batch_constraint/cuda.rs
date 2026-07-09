@@ -10,9 +10,12 @@ use openvm_stark_sdk::config::baby_bear_poseidon2::F;
 use p3_field::BasedVectorSpace;
 
 use crate::{
-    cuda::{to_device_or_nullptr, types::MainEvalData},
-    main::eval_absorb::MainEvalAbsorbCols,
-    system::MainEvalRecord,
+    cuda::{
+        to_device_or_nullptr,
+        types::{MainEvalData, MainTowerPointEqData},
+    },
+    main::{eval_absorb::MainEvalAbsorbCols, tower_point::MainTowerPointEqCols},
+    system::{MainEvalRecord, MainTowerPointEqRecord},
     tracegen::ModuleChip,
 };
 
@@ -21,6 +24,14 @@ unsafe extern "C" {
         d_trace: *mut F,
         height: usize,
         d_records: *const MainEvalData,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> i32;
+
+    fn _main_tower_point_eq_tracegen(
+        d_trace: *mut F,
+        height: usize,
+        d_records: *const MainTowerPointEqData,
         num_records: usize,
         stream: cudaStream_t,
     ) -> i32;
@@ -35,6 +46,24 @@ unsafe fn main_eval_absorb_tracegen(
 ) -> Result<(), CudaError> {
     unsafe {
         CudaError::from_result(_main_eval_absorb_tracegen(
+            d_trace.as_mut_ptr(),
+            height,
+            d_records.as_ptr(),
+            num_records,
+            stream,
+        ))
+    }
+}
+
+unsafe fn main_tower_point_eq_tracegen(
+    d_trace: &DeviceBuffer<F>,
+    height: usize,
+    d_records: &DeviceBuffer<MainTowerPointEqData>,
+    num_records: usize,
+    stream: cudaStream_t,
+) -> Result<(), CudaError> {
+    unsafe {
+        CudaError::from_result(_main_tower_point_eq_tracegen(
             d_trace.as_mut_ptr(),
             height,
             d_records.as_ptr(),
@@ -87,6 +116,76 @@ impl ModuleChip<GpuBackend> for MainEvalAbsorbGpuTraceGenerator {
         let d_records = to_device_or_nullptr(&records).ok()?;
         unsafe {
             main_eval_absorb_tracegen(
+                trace.buffer(),
+                height,
+                &d_records,
+                records.len(),
+                device_ctx.stream.as_raw(),
+            )
+            .ok()?;
+        }
+        device_ctx.stream.synchronize().ok()?;
+        mem.emit_metrics();
+        Some(AirProvingContext::simple_no_pis(trace))
+    }
+}
+
+pub struct MainTowerPointEqGpuTraceGenerator;
+
+impl ModuleChip<GpuBackend> for MainTowerPointEqGpuTraceGenerator {
+    type Ctx<'a> = &'a [MainTowerPointEqRecord];
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    fn generate_proving_ctx(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<AirProvingContext<GpuBackend>> {
+        let mem = MemTracker::start("tracegen.main_tower_point_eq");
+        let num_valid_rows = records.len().max(1);
+        let height = if let Some(height) = required_height {
+            if height < num_valid_rows {
+                return None;
+            }
+            height
+        } else {
+            num_valid_rows.next_power_of_two()
+        };
+        let width = MainTowerPointEqCols::<F>::width();
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+
+        let records = records
+            .iter()
+            .map(|record| MainTowerPointEqData {
+                proof_idx: record.proof_idx,
+                idx: record.idx,
+                round_idx: record.round_idx,
+                global_value: record
+                    .global_value
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                tower_value: record
+                    .tower_value
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                eq_in: record
+                    .eq_in
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                eq_out: record
+                    .eq_out
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+            })
+            .collect::<Vec<_>>();
+        let d_records = to_device_or_nullptr(&records).ok()?;
+        unsafe {
+            main_tower_point_eq_tracegen(
                 trace.buffer(),
                 height,
                 &d_records,

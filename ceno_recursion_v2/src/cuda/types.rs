@@ -43,3 +43,15 @@ pub struct MainEvalData {
     pub value: [F; D_EF],
     pub lookup_count: usize,
 }
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct MainTowerPointEqData {
+    pub proof_idx: usize,
+    pub idx: usize,
+    pub round_idx: usize,
+    pub global_value: [F; D_EF],
+    pub tower_value: [F; D_EF],
+    pub eq_in: [F; D_EF],
+    pub eq_out: [F; D_EF],
+}

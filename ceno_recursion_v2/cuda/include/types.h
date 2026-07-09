@@ -44,3 +44,13 @@ typedef struct {
     Fp value[D_EF];
     size_t lookup_count;
 } MainEvalData;
+
+typedef struct {
+    size_t proof_idx;
+    size_t idx;
+    size_t round_idx;
+    Fp global_value[D_EF];
+    Fp tower_value[D_EF];
+    Fp eq_in[D_EF];
+    Fp eq_out[D_EF];
+} MainTowerPointEqData;

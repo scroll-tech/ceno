@@ -265,6 +265,13 @@ mod cuda_tracegen {
                                     required_height,
                                 )
                         }
+                        BatchConstraintModuleChip::TowerPointEq => {
+                            crate::batch_constraint::cuda::MainTowerPointEqGpuTraceGenerator
+                                .generate_proving_ctx(
+                                    &ctx.records.tower_point_eq_records.as_slice(),
+                                    required_height,
+                                )
+                        }
                         _ => generate_gpu_proving_ctx(chip, &ctx, required_height),
                     }
                 })
