@@ -723,6 +723,105 @@ impl RowMajorChip<F> for MainModuleChip {
     }
 }
 
+#[cfg(feature = "cuda")]
+mod cuda_tracegen {
+    use openvm_cuda_backend::GpuBackend;
+
+    use super::*;
+    use crate::{
+        cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
+        tracegen::cuda::generate_gpu_proving_ctx,
+    };
+
+    impl TraceGenModule<GlobalCtxGpu, GpuBackend> for MainModule {
+        type ModuleSpecificCtx<'a> = ();
+
+        fn generate_proving_ctxs(
+            &self,
+            child_vk: &VerifyingKeyGpu,
+            proofs: &[ProofGpu],
+            preflights: &[PreflightGpu],
+            _ctx: &Self::ModuleSpecificCtx<'_>,
+            required_heights: Option<&[usize]>,
+        ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
+            let proofs_cpu = proofs
+                .iter()
+                .map(|proof| proof.cpu.clone())
+                .collect::<Vec<_>>();
+            let preflights_cpu = preflights
+                .iter()
+                .map(|preflight| preflight.cpu.clone())
+                .collect::<Vec<_>>();
+            let mut records =
+                Self::collect_records(&child_vk.cpu, &proofs_cpu, &preflights_cpu).ok()?;
+            let MainCollectedRecords {
+                ref mut main_records,
+                global_sumcheck_records: _,
+                eval_records: _,
+                ref mut selector_eval_records,
+                ref mut selector_point_records,
+                ref mut ecc_rt_records,
+                tower_point_eq_records: _,
+                frontload_term_records: _,
+                final_claim_records: _,
+                ref mut transcript_records,
+            } = records;
+            main_records.sort_by_key(|record| (record.proof_idx, record.idx));
+            selector_eval_records.sort_by_key(|record| {
+                (
+                    record.proof_idx,
+                    record.idx,
+                    record.air_idx,
+                    record.selector_idx,
+                )
+            });
+            selector_point_records.sort_by_key(|record| {
+                (
+                    record.proof_idx,
+                    record.idx,
+                    record.air_idx,
+                    record.selector_idx,
+                    record.round_idx,
+                )
+            });
+            ecc_rt_records.sort_by_key(|record| {
+                (record.proof_idx, record.idx, record.round_idx, record.tidx)
+            });
+            transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
+            let ctx = MainTraceCtx {
+                main_records: &main_records,
+                selector_eval_records: &selector_eval_records,
+                selector_point_records: &selector_point_records,
+                ecc_rt_records: &ecc_rt_records,
+                transcript_records: &transcript_records,
+            };
+            let chips = [
+                MainModuleChip::Main,
+                MainModuleChip::TranscriptBind,
+                MainModuleChip::EccRtChallenge,
+                MainModuleChip::EccRtEquation,
+                MainModuleChip::EccRtSumcheck,
+                MainModuleChip::EccRtQuark,
+                MainModuleChip::EccRt,
+                MainModuleChip::SelectorPoint,
+                MainModuleChip::SelectorFormula,
+                MainModuleChip::SelectorEval,
+            ];
+            chips
+                .iter()
+                .enumerate()
+                .map(|(idx, chip)| {
+                    generate_gpu_proving_ctx(
+                        chip,
+                        &ctx,
+                        required_heights.and_then(|heights| heights.get(idx).copied()),
+                    )
+                })
+                .collect()
+        }
+    }
+}
+
 fn main_tidx_from_tower_input(record: &TowerInputRecord) -> usize {
     let tidx_after_alpha_beta = record.tidx + tower_transcript_len::ALPHA_BETA_LEN;
     let read_active_layers = record.read_tower_vars - usize::from(record.has_read_out);

@@ -505,6 +505,7 @@ dependencies = [
  "openvm-continuations",
  "openvm-cpu-backend",
  "openvm-cuda-backend",
+ "openvm-cuda-builder",
  "openvm-cuda-common",
  "openvm-poseidon2-air",
  "openvm-recursion-circuit",

@@ -1,6 +1,10 @@
+#[cfg(feature = "cuda")]
+use openvm_circuit_primitives::hybrid_chip::cpu_proving_ctx_to_gpu;
 use openvm_cpu_backend::CpuBackend;
 #[cfg(feature = "cuda")]
 use openvm_cuda_backend::GpuBackend;
+#[cfg(feature = "cuda")]
+use openvm_cuda_common::stream::GpuDeviceCtx;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     FiatShamirTranscript, TranscriptHistory,
@@ -175,25 +179,18 @@ impl InnerTraceGen<GpuBackend> for InnerTraceGenImpl {
             + FiatShamirTranscript<BabyBearPoseidon2Config>
             + TranscriptHistory<F = F, State = [F; POSEIDON2_WIDTH]>,
     {
-        let PreVerifierSubCircuitInput {
-            proofs,
-            proofs_type,
-            absent_trace_pvs,
-            child_is_app,
-            child_vk,
-            child_dag_commit,
-            initial_transcript,
-        } = input;
-        let _ = (
-            self,
-            proofs,
-            proofs_type,
-            absent_trace_pvs,
-            child_is_app,
-            child_vk,
-            child_dag_commit,
-        );
-        (vec![], vec![], vec![initial_transcript; proofs.len()])
+        let device_ctx = GpuDeviceCtx::for_current_device()
+            .expect("failed to get CUDA device for inner tracegen");
+        let (cpu_ctxs, poseidon2_inputs, initial_transcripts) =
+            <Self as InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>>>::generate_pre_verifier_subcircuit_ctxs(
+                self,
+                input,
+            );
+        let gpu_ctxs = cpu_ctxs
+            .into_iter()
+            .map(|ctx| cpu_proving_ctx_to_gpu(ctx, &device_ctx))
+            .collect();
+        (gpu_ctxs, poseidon2_inputs, initial_transcripts)
     }
 
     fn generate_post_verifier_subcircuit_ctxs(
@@ -202,7 +199,16 @@ impl InnerTraceGen<GpuBackend> for InnerTraceGenImpl {
         proofs_type: ProofsType,
         child_is_app: bool,
     ) -> Vec<AirProvingContext<GpuBackend>> {
-        let _ = (self, proofs, proofs_type, child_is_app);
-        vec![]
+        let device_ctx = GpuDeviceCtx::for_current_device()
+            .expect("failed to get CUDA device for inner tracegen");
+        <Self as InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>>>::generate_post_verifier_subcircuit_ctxs(
+            self,
+            proofs,
+            proofs_type,
+            child_is_app,
+        )
+        .into_iter()
+        .map(|ctx| cpu_proving_ctx_to_gpu(ctx, &device_ctx))
+        .collect()
     }
 }

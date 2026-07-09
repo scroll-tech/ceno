@@ -1,7 +1,7 @@
 #![allow(clippy::missing_safety_doc)]
 
 use openvm_cuda_backend::prelude::{Digest, F};
-use openvm_cuda_common::{d_buffer::DeviceBuffer, error::CudaError};
+use openvm_cuda_common::{d_buffer::DeviceBuffer, error::CudaError, stream::cudaStream_t};
 
 use crate::cuda::types::{AirData, PublicValueData, TraceHeight, TraceMetadata};
 
@@ -48,6 +48,7 @@ unsafe extern "C" {
         d_pvs_tidx: *const *const usize,
         num_proofs: usize,
         num_pvs: usize,
+        stream: cudaStream_t,
     ) -> i32;
 }
 
@@ -87,6 +88,7 @@ pub unsafe fn public_values_tracegen(
     d_pvs_tidx: Vec<*const usize>,
     num_proofs: usize,
     num_pvs: usize,
+    stream: cudaStream_t,
 ) -> Result<(), CudaError> {
     unsafe {
         CudaError::from_result(_public_values_recursion_tracegen(
@@ -96,6 +98,7 @@ pub unsafe fn public_values_tracegen(
             d_pvs_tidx.as_ptr(),
             num_proofs,
             num_pvs,
+            stream,
         ))
     }
 }

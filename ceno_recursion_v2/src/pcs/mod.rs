@@ -1314,7 +1314,7 @@ impl PcsModule {
 
 impl AirModule for PcsModule {
     fn num_airs(&self) -> usize {
-        26
+        27
     }
 
     fn airs<SC: StarkProtocolConfig<F = F>>(&self) -> Vec<AirRef<SC>> {
@@ -3333,6 +3333,7 @@ pub struct PcsJaggedAssistQCols<T> {
     pub is_first_step: T,
     pub is_last_step: T,
     pub term_is_last: T,
+    pub is_next_term: T,
     pub eq_col: [T; D_EF],
     pub t_lo: T,
     pub t_hi: T,
@@ -3345,6 +3346,7 @@ pub struct PcsJaggedAssistQCols<T> {
     pub d_acc_out: T,
     pub rho_star_c: [T; D_EF],
     pub rho_star_d: [T; D_EF],
+    pub factor: [T; D_EF],
     pub term_acc_in: [T; D_EF],
     pub term_acc_out: [T; D_EF],
     pub q_acc_in: [T; D_EF],
@@ -3385,6 +3387,7 @@ where
         builder.assert_bool(local.is_first_step);
         builder.assert_bool(local.is_last_step);
         builder.assert_bool(local.term_is_last);
+        builder.assert_bool(local.is_next_term);
         builder.assert_bool(local.c_bit);
         builder.assert_bool(local.d_bit);
         builder.when(local.is_enabled).assert_eq(
@@ -3394,6 +3397,9 @@ where
         builder
             .when(local.is_enabled)
             .assert_eq(local.is_last, local.is_last_step * local.term_is_last);
+        builder
+            .when(local.is_enabled)
+            .assert_eq(local.is_next_term, local.is_last_step - local.is_last);
         builder
             .when(local.is_enabled * local.is_first)
             .assert_zero(local.term_idx);
@@ -3458,10 +3464,11 @@ where
         };
         let c_factor = ext_factor(local.c_bit, local.rho_star_c);
         let d_factor = ext_factor(local.d_bit, local.rho_star_d);
-        let factor: [AB::Expr; D_EF] =
+        let expected_factor: [AB::Expr; D_EF] =
             recursion_circuit::utils::ext_field_multiply(c_factor, d_factor);
+        assert_array_eq(builder, local.factor, expected_factor);
         let expected_term_acc: [AB::Expr; D_EF] =
-            recursion_circuit::utils::ext_field_multiply(local.term_acc_in, factor);
+            recursion_circuit::utils::ext_field_multiply(local.term_acc_in, local.factor);
         assert_array_eq(builder, local.term_acc_out, expected_term_acc);
 
         let q_delta = local.term_acc_out.map(|limb| local.is_last_step * limb);
@@ -3494,7 +3501,7 @@ where
             .when(continues.clone())
             .assert_eq(next.commitment_kind, local.commitment_kind);
 
-        let same_term = continues.clone() * (AB::Expr::ONE - local.is_last_step);
+        let same_term = local.is_enabled * (AB::Expr::ONE - local.is_last_step);
         builder
             .when_transition()
             .when(same_term.clone())
@@ -3538,7 +3545,7 @@ where
             local.q_acc_out,
         );
 
-        let next_term = continues * local.is_last_step;
+        let next_term = local.is_enabled * local.is_next_term;
         builder
             .when_transition()
             .when(next_term.clone())
@@ -5880,6 +5887,10 @@ impl RowMajorChip<F> for PcsJaggedAssistQTraceGenerator {
         let width = PcsJaggedAssistQCols::<F>::width();
         let height = trace_height(records.len(), required_height)?;
         let mut trace = vec![F::ZERO; height * width];
+        for row in trace.chunks_exact_mut(width) {
+            let cols: &mut PcsJaggedAssistQCols<F> = row.borrow_mut();
+            cols.factor[0] = F::ONE;
+        }
         for (row_idx, record) in records.iter().enumerate() {
             let row = &mut trace[row_idx * width..(row_idx + 1) * width];
             let cols: &mut PcsJaggedAssistQCols<F> = row.borrow_mut();
@@ -5896,6 +5907,7 @@ impl RowMajorChip<F> for PcsJaggedAssistQTraceGenerator {
             cols.is_first_step = F::from_bool(record.is_first_step);
             cols.is_last_step = F::from_bool(record.is_last_step);
             cols.term_is_last = F::from_bool(record.term_is_last);
+            cols.is_next_term = F::from_bool(record.is_last_step && !record.term_is_last);
             cols.eq_col = ext_limbs(record.eq_col);
             cols.t_lo = F::from_usize(record.t_lo);
             cols.t_hi = F::from_usize(record.t_hi);
@@ -5908,6 +5920,17 @@ impl RowMajorChip<F> for PcsJaggedAssistQTraceGenerator {
             cols.d_acc_out = F::from_usize(record.d_acc_out);
             cols.rho_star_c = ext_limbs(record.rho_star_c);
             cols.rho_star_d = ext_limbs(record.rho_star_d);
+            let c_factor = if record.c_bit {
+                record.rho_star_c
+            } else {
+                RecursionField::ONE - record.rho_star_c
+            };
+            let d_factor = if record.d_bit {
+                record.rho_star_d
+            } else {
+                RecursionField::ONE - record.rho_star_d
+            };
+            cols.factor = ext_limbs(c_factor * d_factor);
             cols.term_acc_in = ext_limbs(record.term_acc_in);
             cols.term_acc_out = ext_limbs(record.term_acc_out);
             cols.q_acc_in = ext_limbs(record.q_acc_in);
@@ -7400,6 +7423,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use openvm_stark_backend::{
+        air_builders::symbolic::get_symbolic_builder, keygen::types::TraceWidth,
+    };
 
     #[test]
     fn basefold_basecode_log_zero_is_only_supported_shape() {
@@ -7409,5 +7435,22 @@ mod tests {
             err.to_string().contains("only basecode_log == 0"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn pcs_jagged_assist_q_degree_is_at_most_four() {
+        let air = PcsJaggedAssistQAir {
+            fold_challenge_bus: PcsFoldChallengeBus::new(1),
+            eq_product_bus: PcsEqProductBus::new(2),
+            commit_height_bus: PcsCommitHeightBus::new(3),
+            jagged_assist_q_bus: PcsJaggedAssistQBus::new(4),
+        };
+        let width = TraceWidth {
+            preprocessed: None,
+            cached_mains: vec![],
+            common_main: PcsJaggedAssistQCols::<F>::width(),
+        };
+        let symbolic = get_symbolic_builder::<F, _>(&air, &width).constraints();
+        assert!(symbolic.max_constraint_degree() <= 4);
     }
 }

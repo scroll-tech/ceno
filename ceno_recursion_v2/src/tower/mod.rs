@@ -1837,11 +1837,10 @@ mod cuda_tracegen {
                 TowerModuleChip::Shape,
                 TowerModuleChip::Activity,
                 TowerModuleChip::Input,
+                TowerModuleChip::AlphaPow,
                 TowerModuleChip::Layer,
-                TowerModuleChip::ProdReadClaim,
-                TowerModuleChip::ProdWriteClaim,
-                TowerModuleChip::LogupClaim,
                 TowerModuleChip::LayerSumcheck,
+                TowerModuleChip::MainPoint,
             ];
 
             chips

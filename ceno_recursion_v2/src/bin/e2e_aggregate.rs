@@ -2,9 +2,12 @@ use std::{fs, path::PathBuf, sync::Arc};
 
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
+#[cfg(not(feature = "cuda"))]
+use ceno_recursion_v2::system::utils::test_system_params_zero_pow;
 use ceno_recursion_v2::{
-    continuation::prover::{AggProver, AggregationOptions},
-    system::{RecursionField, RecursionPcs, utils::test_system_params_zero_pow},
+    circuit::inner::InnerTraceGenImpl,
+    continuation::prover::{AggProver, AggregationOptions, RootProof, SystemParams},
+    system::{RecursionField, RecursionPcs},
 };
 use ceno_zkvm::{
     e2e::{
@@ -17,6 +20,13 @@ use clap::Parser;
 use eyre::{Context, ContextCompat, Result, eyre};
 use gkr_iop::hal::ProverBackend;
 use mpcs::SecurityLevel;
+#[cfg(feature = "cuda")]
+use openvm_cuda_backend::{BabyBearPoseidon2GpuEngine, GpuBackend as OpenVmGpuBackend};
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
+#[cfg(not(feature = "cuda"))]
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2CpuEngine;
+#[cfg(feature = "cuda")]
+use openvm_stark_sdk::config::leaf_params_with_100_bits_security;
 
 fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
     parse_size::Config::new()
@@ -198,10 +208,8 @@ where
         .proofs
         .wrap_err("base proving did not return proofs")?;
     let child_vk = result.vk.wrap_err("base proving did not return a vk")?;
-    let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
-    let prover = AggProver::<2, 2>::new(Arc::new(child_vk), options);
-    let root_proof = prover.prove(&shard_proofs)?;
-    prover.verify_root_proof(&root_proof)?;
+    let options = AggregationOptions::new(aggregation_system_params());
+    let root_proof = prove_and_verify_aggregation(Arc::new(child_vk), options, &shard_proofs)?;
     let proof_size = bincode::serialized_size(&root_proof.inner_proof)?;
 
     tracing::info!(
@@ -210,4 +218,58 @@ where
         "recursion-v2 aggregation proved and verified"
     );
     Ok(())
+}
+
+#[cfg(not(feature = "cuda"))]
+fn aggregation_system_params() -> SystemParams {
+    test_system_params_zero_pow(5, 16, 3)
+}
+
+#[cfg(feature = "cuda")]
+fn aggregation_system_params() -> SystemParams {
+    let mut params = leaf_params_with_100_bits_security();
+    params.max_constraint_degree = 5;
+    params.whir.mu_pow_bits = 0;
+    params.whir.folding_pow_bits = 0;
+    params.whir.query_phase_pow_bits = 0;
+    params.logup.pow_bits = 0;
+    params
+}
+
+#[cfg(not(feature = "cuda"))]
+fn prove_and_verify_aggregation(
+    child_vk: Arc<ceno_recursion_v2::system::RecursionVk>,
+    options: AggregationOptions,
+    shard_proofs: &[ceno_recursion_v2::system::RecursionProof],
+) -> Result<RootProof<BabyBearPoseidon2Config>> {
+    let prover = AggProver::<
+        2,
+        2,
+        BabyBearPoseidon2Config,
+        openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>,
+        InnerTraceGenImpl,
+        BabyBearPoseidon2CpuEngine,
+    >::new(child_vk, options);
+    let root_proof = prover.prove(shard_proofs)?;
+    prover.verify_root_proof(&root_proof)?;
+    Ok(root_proof)
+}
+
+#[cfg(feature = "cuda")]
+fn prove_and_verify_aggregation(
+    child_vk: Arc<ceno_recursion_v2::system::RecursionVk>,
+    options: AggregationOptions,
+    shard_proofs: &[ceno_recursion_v2::system::RecursionProof],
+) -> Result<RootProof<BabyBearPoseidon2Config>> {
+    let prover = AggProver::<
+        2,
+        2,
+        BabyBearPoseidon2Config,
+        OpenVmGpuBackend,
+        InnerTraceGenImpl,
+        BabyBearPoseidon2GpuEngine,
+    >::new(child_vk, options);
+    let root_proof = prover.prove(shard_proofs)?;
+    prover.verify_root_proof(&root_proof)?;
+    Ok(root_proof)
 }
