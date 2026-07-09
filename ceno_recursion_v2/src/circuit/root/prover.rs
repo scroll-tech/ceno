@@ -183,7 +183,7 @@ where
     }
 }
 
-trait CenoRootPvsCtx<PB: ProverBackend> {
+pub trait CenoRootPvsCtx<PB: ProverBackend> {
     fn generate_root_pvs_ctx(
         &self,
         proof: &Proof<BabyBearPoseidon2Config>,

@@ -7,7 +7,7 @@ use openvm_cuda_backend::{BabyBearPoseidon2GpuEngine, GpuBackend};
 #[cfg(feature = "cuda")]
 use openvm_cuda_common::stream::GpuDeviceCtx;
 use openvm_stark_backend::{
-    StarkEngine, StarkProtocolConfig, SystemParams,
+    StarkEngine, SystemParams,
     keygen::types::{MultiStarkProvingKey, MultiStarkVerifyingKey},
     proof::Proof,
     prover::{
@@ -214,7 +214,7 @@ where
     }
 }
 
-trait CenoRecursivePvsCtx<PB: ProverBackend> {
+pub trait CenoRecursivePvsCtx<PB: ProverBackend> {
     fn generate_verifier_pvs_ctx(
         &self,
         proofs: &[Proof<BabyBearPoseidon2Config>],

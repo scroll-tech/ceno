@@ -63,7 +63,6 @@ use openvm_stark_sdk::{
     p3_baby_bear::Poseidon2BabyBear,
 };
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
-use p3_matrix::Matrix;
 use recursion_circuit::primitives::{
     exp_bits_len::{ExpBitsLenAir, ExpBitsLenTraceGenerator},
     pow::{PowerCheckerAir, PowerCheckerCpuTraceGenerator},

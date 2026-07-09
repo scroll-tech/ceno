@@ -4,7 +4,7 @@ use openvm_stark_backend::{
     prover::{AirProvingContext, ProverBackend},
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::F;
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use p3_matrix::dense::RowMajorMatrix;
 
 use crate::system::{Preflight, RecursionProof, RecursionVk};
 
