@@ -61,6 +61,7 @@ impl<SC: StarkProtocolConfig<F = F>, T: RowMajorChip<F>> ModuleChip<CpuBackend<S
 #[cfg(feature = "cuda")]
 pub(crate) mod cuda {
     use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
+    use openvm_cuda_common::stream::GpuDeviceCtx;
 
     use super::*;
     use crate::cuda::{preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu};
@@ -76,8 +77,10 @@ pub(crate) mod cuda {
         ctx: &T::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<AirProvingContext<GpuBackend>> {
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
         let common_main_rm = t.generate_trace(ctx, required_height);
-        common_main_rm
-            .map(|m| AirProvingContext::simple_no_pis(transport_matrix_h2d_row(&m).unwrap()))
+        common_main_rm.map(|m| {
+            AirProvingContext::simple_no_pis(transport_matrix_h2d_row(&m, &device_ctx).unwrap())
+        })
     }
 }

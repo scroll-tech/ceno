@@ -1,5 +1,5 @@
 use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix};
-use openvm_cuda_common::memory_manager::MemTracker;
+use openvm_cuda_common::{memory_manager::MemTracker, stream::GpuDeviceCtx};
 use openvm_stark_backend::prover::AirProvingContext;
 
 use crate::{
@@ -38,7 +38,8 @@ impl ModuleChip<GpuBackend> for PublicValuesGpuTraceGenerator {
             num_valid_rows.next_power_of_two()
         };
         let width = PublicValuesCols::<u8>::width();
-        let trace = DeviceMatrix::with_capacity(height, width);
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
 
         let pvs_data = proofs_gpu
             .iter()
@@ -57,6 +58,7 @@ impl ModuleChip<GpuBackend> for PublicValuesGpuTraceGenerator {
                 pvs_tidx,
                 proofs_gpu.len(),
                 num_pvs,
+                device_ctx.stream.as_raw(),
             )
             .unwrap();
         }

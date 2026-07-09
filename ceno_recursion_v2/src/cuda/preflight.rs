@@ -1,8 +1,12 @@
+use ceno_zkvm::structs::VK_DIGEST_LEN;
 use openvm_cuda_backend::prelude::EF;
 use openvm_cuda_common::d_buffer::DeviceBuffer;
-use openvm_stark_sdk::config::baby_bear_poseidon2::Digest;
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, Digest};
 
-use crate::system::{Preflight, RecursionProof, RecursionVk};
+use crate::{
+    system::{Preflight, RecursionProof, RecursionVk},
+    utils::TranscriptLabel,
+};
 
 use super::{
     to_device_or_nullptr,
@@ -79,7 +83,7 @@ impl PreflightGpu {
     }
 
     fn proof_shape(
-        _vk: &RecursionVk,
+        vk: &RecursionVk,
         _proof: &RecursionProof,
         _preflight: &Preflight,
     ) -> ProofShapePreflightGpu {
@@ -87,12 +91,27 @@ impl PreflightGpu {
         let empty_metadata: [TraceMetadata; 0] = [];
         let empty_commits: [Digest; 0] = [];
         let empty_indices: [usize; 0] = [];
+        let mut tidx = TranscriptLabel::Riscv.field_len() + VK_DIGEST_LEN * D_EF;
+        let pvs_tidx_by_air = vk
+            .circuit_vks
+            .values()
+            .map(|circuit_vk| {
+                let instance_openings = &circuit_vk.get_cs().zkvm_v1_css.instance;
+                let starting_tidx = if instance_openings.is_empty() {
+                    0
+                } else {
+                    tidx
+                };
+                tidx += instance_openings.len();
+                starting_tidx
+            })
+            .collect::<Vec<_>>();
         ProofShapePreflightGpu {
             sorted_trace_heights: to_device_or_nullptr(&empty_heights).unwrap(),
             sorted_trace_metadata: to_device_or_nullptr(&empty_metadata).unwrap(),
             sorted_cached_commits: to_device_or_nullptr(&empty_commits).unwrap(),
             per_row_tidx: to_device_or_nullptr(&empty_indices).unwrap(),
-            pvs_tidx: to_device_or_nullptr(&empty_indices).unwrap(),
+            pvs_tidx: to_device_or_nullptr(&pvs_tidx_by_air).unwrap(),
             post_tidx: 0,
             num_present: 0,
             n_max: 0,

@@ -1,4 +1,6 @@
-use openvm_cuda_common::{copy::MemCopyH2D, d_buffer::DeviceBuffer, error::MemCopyError};
+use openvm_cuda_common::{
+    copy::MemCopyH2D, d_buffer::DeviceBuffer, error::MemCopyError, stream::GpuDeviceCtx,
+};
 use recursion_circuit::system::GlobalTraceGenCtx;
 
 pub mod preflight;
@@ -25,6 +27,12 @@ where
     if h2d.is_empty() {
         Ok(DeviceBuffer::new())
     } else {
-        h2d.to_device()
+        let device_ctx = GpuDeviceCtx::for_current_device().expect("failed to get CUDA device");
+        let buffer = h2d.to_device_on(&device_ctx)?;
+        device_ctx
+            .stream
+            .synchronize()
+            .expect("failed to synchronize CUDA stream");
+        Ok(buffer)
     }
 }

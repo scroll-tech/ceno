@@ -1,6 +1,6 @@
 use openvm_cuda_common::d_buffer::DeviceBuffer;
 
-use crate::system::{RecursionProof, RecursionVk};
+use crate::system::{RecursionField, RecursionProof, RecursionVk};
 
 use super::{to_device_or_nullptr, types::PublicValueData};
 
@@ -34,10 +34,10 @@ pub struct WhirProofGpu {
 }
 
 impl ProofGpu {
-    pub fn new(_vk: &RecursionVk, proof: &RecursionProof) -> Self {
+    pub fn new(vk: &RecursionVk, proof: &RecursionProof) -> Self {
         ProofGpu {
             cpu: proof.clone(),
-            proof_shape: Self::proof_shape(),
+            proof_shape: Self::proof_shape(vk, proof),
             gkr: Self::gkr(proof),
             batch_constraint: Self::batch_constraint(proof),
             stacking: Self::stacking(proof),
@@ -45,10 +45,29 @@ impl ProofGpu {
         }
     }
 
-    fn proof_shape() -> ProofShapeProofGpu {
-        let empty: [PublicValueData; 0] = [];
+    fn proof_shape(vk: &RecursionVk, proof: &RecursionProof) -> ProofShapeProofGpu {
+        let num_airs = vk.circuit_vks.len();
+        let mut public_values = Vec::new();
+        for (air_idx, circuit_vk) in vk.circuit_vks.values().enumerate() {
+            let instance_openings = &circuit_vk.get_cs().zkvm_v1_css.instance;
+            let air_num_pvs = instance_openings.len();
+            public_values.extend(
+                instance_openings
+                    .iter()
+                    .enumerate()
+                    .map(|(pv_idx, instance)| PublicValueData {
+                        air_idx,
+                        air_num_pvs,
+                        num_airs,
+                        pv_idx,
+                        value: proof
+                            .public_values
+                            .query_by_index::<RecursionField>(instance.0),
+                    }),
+            );
+        }
         ProofShapeProofGpu {
-            public_values: to_device_or_nullptr(&empty).unwrap(),
+            public_values: to_device_or_nullptr(&public_values).unwrap(),
         }
     }
 

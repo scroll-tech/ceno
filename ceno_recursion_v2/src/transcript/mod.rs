@@ -452,3 +452,129 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         ])
     }
 }
+
+#[cfg(feature = "cuda")]
+mod cuda_tracegen {
+    use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
+    use openvm_cuda_common::stream::GpuDeviceCtx;
+
+    use super::*;
+    use crate::cuda::{
+        GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu,
+    };
+
+    impl TraceGenModule<GlobalCtxGpu, GpuBackend> for TranscriptModule {
+        type ModuleSpecificCtx<'a> = (&'a [[F; POSEIDON2_WIDTH]], &'a [[F; POSEIDON2_WIDTH]]);
+
+        #[tracing::instrument(skip_all)]
+        fn generate_proving_ctxs(
+            &self,
+            child_vk: &VerifyingKeyGpu,
+            proofs: &[ProofGpu],
+            preflights: &[PreflightGpu],
+            ctx: &Self::ModuleSpecificCtx<'_>,
+            required_heights: Option<&[usize]>,
+        ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
+            let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+            let proofs_cpu = proofs
+                .iter()
+                .map(|proof| proof.cpu.clone())
+                .collect::<Vec<_>>();
+            let preflights_cpu = preflights
+                .iter()
+                .map(|preflight| preflight.cpu.clone())
+                .collect::<Vec<_>>();
+
+            let (required_transcript, required_poseidon2) = if let Some(heights) = required_heights
+            {
+                if heights.len() != 2 {
+                    return None;
+                }
+                (Some(heights[0]), Some(heights[1]))
+            } else {
+                (None, None)
+            };
+
+            let (transcript_trace, mut poseidon2_perm_inputs) =
+                self.build_transcript_trace(&proofs_cpu, &preflights_cpu, required_transcript)?;
+            let mut poseidon2_compress_inputs = Vec::new();
+
+            let _ = child_vk;
+            poseidon2_perm_inputs.extend_from_slice(ctx.0);
+            poseidon2_compress_inputs.extend_from_slice(ctx.1);
+            for preflight in &preflights_cpu {
+                poseidon2_perm_inputs.extend(
+                    preflight
+                        .pcs
+                        .base_input_leaf_hashes
+                        .iter()
+                        .map(|record| record.input),
+                );
+                poseidon2_perm_inputs.extend(
+                    preflight
+                        .pcs
+                        .commit_phase_leaf_hashes
+                        .iter()
+                        .map(|record| record.input),
+                );
+                poseidon2_compress_inputs.extend(
+                    preflight
+                        .pcs
+                        .base_input_merkle_rows
+                        .iter()
+                        .map(|record| digests_to_poseidon2_input(record.left, record.right)),
+                );
+                poseidon2_compress_inputs.extend(
+                    preflight
+                        .pcs
+                        .commit_phase_merkle_rows
+                        .iter()
+                        .map(|record| digests_to_poseidon2_input(record.left, record.right)),
+                );
+            }
+
+            let poseidon2_trace = {
+                let (mut poseidon_states, poseidon_counts) =
+                    Self::dedup_poseidon_inputs(poseidon2_perm_inputs, poseidon2_compress_inputs);
+                let poseidon2_valid_rows = poseidon_states.len();
+                let poseidon2_num_rows = if let Some(height) = required_poseidon2 {
+                    if height == 0 || poseidon2_valid_rows > height {
+                        return None;
+                    }
+                    height
+                } else if poseidon2_valid_rows == 0 {
+                    1
+                } else {
+                    poseidon2_valid_rows.next_power_of_two()
+                };
+
+                poseidon_states.resize(poseidon2_num_rows, [F::ZERO; POSEIDON2_WIDTH]);
+
+                let inner_width = self.sub_chip.air.width();
+                let poseidon2_width = Poseidon2Cols::<F, SBOX_REGISTERS>::width();
+                let inner_trace = self.sub_chip.generate_trace(poseidon_states);
+                let mut poseidon_trace = vec![F::ZERO; poseidon2_num_rows * poseidon2_width];
+
+                for (i, row) in poseidon_trace.chunks_exact_mut(poseidon2_width).enumerate() {
+                    let inner_off = i * inner_width;
+                    row[..inner_width]
+                        .copy_from_slice(&inner_trace.values[inner_off..inner_off + inner_width]);
+                    let cols: &mut Poseidon2Cols<F, SBOX_REGISTERS> = row.borrow_mut();
+                    let count = poseidon_counts.get(i).copied().unwrap_or_default();
+                    cols.permute_mult = F::from_u32(count.perm);
+                    cols.compress_mult = F::from_u32(count.compress);
+                }
+                RowMajorMatrix::new(poseidon_trace, poseidon2_width)
+            };
+
+            Some(vec![
+                AirProvingContext::simple_no_pis(
+                    transport_matrix_h2d_row(&transcript_trace, &device_ctx).ok()?,
+                ),
+                AirProvingContext::simple_no_pis(
+                    transport_matrix_h2d_row(&poseidon2_trace, &device_ctx).ok()?,
+                ),
+            ])
+        }
+    }
+}
