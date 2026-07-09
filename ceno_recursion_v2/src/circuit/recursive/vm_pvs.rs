@@ -79,7 +79,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB>
             builder.when(local.is_valid * (AB::Expr::ONE - local.is_last.into()));
         when_both_valid.assert_eq(local.child_pvs.end_pc, next.child_pvs.init_pc);
         when_both_valid.assert_eq(
-            local.child_pvs.shard_id + AB::Expr::ONE,
+            local.child_pvs.shard_id + local.child_pvs.shard_count,
             next.child_pvs.shard_id,
         );
         when_both_valid.assert_eq(
@@ -144,6 +144,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB>
         builder
             .when_first_row()
             .assert_eq(local.child_pvs.shard_id, public_pvs.shard_id);
+        builder.when(local.is_last).assert_eq(
+            local.child_pvs.shard_id + local.child_pvs.shard_count,
+            public_pvs.shard_id.into() + public_pvs.shard_count.into(),
+        );
         builder
             .when_first_row()
             .assert_eq(local.child_pvs.heap_start_addr, public_pvs.heap_start_addr);

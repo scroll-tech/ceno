@@ -75,6 +75,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB>
             local.child_vm_pvs.exit_code,
             [AB::F::ZERO, AB::F::ZERO],
         );
+        builder.assert_zero(local.child_vm_pvs.shard_id);
 
         for (pv_idx, value) in local.child_verifier_pvs.as_slice().iter().enumerate() {
             self.public_values_bus.receive(

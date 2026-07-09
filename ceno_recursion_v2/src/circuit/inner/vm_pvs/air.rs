@@ -161,10 +161,13 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .assert_eq(local.child_pvs.exit_code[1], suspend_exit_code_hi);
 
         // When local and next are valid, enforce continuation consistency.
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.shard_count, AB::Expr::ONE);
         let mut when_both_valid = builder.when(and(local.is_valid, not(local.is_last)));
         when_both_valid.assert_eq(local.child_pvs.end_pc, next.child_pvs.init_pc);
         when_both_valid.assert_eq(
-            local.child_pvs.shard_id + AB::Expr::ONE,
+            local.child_pvs.shard_id + local.child_pvs.shard_count,
             next.child_pvs.shard_id,
         );
         when_both_valid.assert_eq(
@@ -373,6 +376,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             end_pc,
             end_cycle,
             shard_id,
+            shard_count,
             heap_start_addr,
             heap_shard_len,
             hint_start_addr,
@@ -407,6 +411,10 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         builder
             .when_first_row()
             .assert_eq(local.child_pvs.shard_id, shard_id);
+        builder.when(local.is_last).assert_eq(
+            local.child_pvs.shard_id + local.child_pvs.shard_count,
+            shard_id.into() + shard_count.into(),
+        );
         builder
             .when_first_row()
             .assert_eq(local.child_pvs.heap_start_addr, heap_start_addr);
