@@ -2,6 +2,8 @@ use std::{fs, path::PathBuf, sync::Arc};
 
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
+#[cfg(not(feature = "cuda"))]
+use ceno_recursion_v2::system::utils::test_system_params_zero_pow;
 use ceno_recursion_v2::{
     circuit::inner::InnerTraceGenImpl,
     continuation::prover::{AggProver, AggregationOptions, RootProof, SystemParams},
@@ -18,8 +20,6 @@ use clap::Parser;
 use eyre::{Context, ContextCompat, Result, eyre};
 use gkr_iop::hal::ProverBackend;
 use mpcs::SecurityLevel;
-#[cfg(not(feature = "cuda"))]
-use ceno_recursion_v2::system::utils::test_system_params_zero_pow;
 #[cfg(feature = "cuda")]
 use openvm_cuda_backend::{BabyBearPoseidon2GpuEngine, GpuBackend as OpenVmGpuBackend};
 use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
@@ -228,6 +228,7 @@ fn aggregation_system_params() -> SystemParams {
 #[cfg(feature = "cuda")]
 fn aggregation_system_params() -> SystemParams {
     let mut params = leaf_params_with_100_bits_security();
+    params.max_constraint_degree = 5;
     params.whir.mu_pow_bits = 0;
     params.whir.folding_pow_bits = 0;
     params.whir.query_phase_pow_bits = 0;
