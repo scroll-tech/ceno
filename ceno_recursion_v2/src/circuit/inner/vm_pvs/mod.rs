@@ -26,6 +26,7 @@ pub struct VmPvs<F> {
     pub end_pc: F,
     pub end_cycle: F,
     pub shard_id: F,
+    pub shard_count: F,
     pub heap_start_addr: F,
     pub heap_shard_len: F,
     pub hint_start_addr: F,

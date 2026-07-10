@@ -161,16 +161,24 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             .assert_eq(local.child_pvs.exit_code[1], suspend_exit_code_hi);
 
         // When local and next are valid, enforce continuation consistency.
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.child_pvs.shard_count, AB::Expr::ONE);
         let mut when_both_valid = builder.when(and(local.is_valid, not(local.is_last)));
         when_both_valid.assert_eq(local.child_pvs.end_pc, next.child_pvs.init_pc);
         when_both_valid.assert_eq(
-            local.child_pvs.shard_id + AB::Expr::ONE,
+            local.child_pvs.shard_id + local.child_pvs.shard_count,
             next.child_pvs.shard_id,
         );
         when_both_valid.assert_eq(
             local.child_pvs.heap_start_addr
                 + local.child_pvs.heap_shard_len * AB::Expr::from_u32(WORD_SIZE as u32),
             next.child_pvs.heap_start_addr,
+        );
+        when_both_valid.assert_eq(
+            local.child_pvs.hint_start_addr
+                + local.child_pvs.hint_shard_len * AB::Expr::from_u32(WORD_SIZE as u32),
+            next.child_pvs.hint_start_addr,
         );
 
         // Mirror verifier invariant: every shard starts at SUBCYCLES_PER_INSN.
@@ -368,6 +376,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             end_pc,
             end_cycle,
             shard_id,
+            shard_count,
             heap_start_addr,
             heap_shard_len,
             hint_start_addr,
@@ -398,23 +407,30 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         );
 
         // The aggregate VM public values are first-shard init/static values plus last-shard
-        // exit/end values. Per-shard values are still constrained row-locally through the
-        // public-values and transcript buses above.
+        // exit/end values. Heap/hint lengths cover the full contiguous aggregate range.
         builder
             .when_first_row()
             .assert_eq(local.child_pvs.shard_id, shard_id);
+        builder.when(local.is_last).assert_eq(
+            local.child_pvs.shard_id + local.child_pvs.shard_count,
+            shard_id.into() + shard_count.into(),
+        );
         builder
             .when_first_row()
             .assert_eq(local.child_pvs.heap_start_addr, heap_start_addr);
-        builder
-            .when_first_row()
-            .assert_eq(local.child_pvs.heap_shard_len, heap_shard_len);
+        builder.when(local.is_last).assert_eq(
+            local.child_pvs.heap_start_addr
+                + local.child_pvs.heap_shard_len * AB::Expr::from_u32(WORD_SIZE as u32),
+            heap_start_addr.into() + heap_shard_len.into() * AB::Expr::from_u32(WORD_SIZE as u32),
+        );
         builder
             .when_first_row()
             .assert_eq(local.child_pvs.hint_start_addr, hint_start_addr);
-        builder
-            .when_first_row()
-            .assert_eq(local.child_pvs.hint_shard_len, hint_shard_len);
+        builder.when(local.is_last).assert_eq(
+            local.child_pvs.hint_start_addr
+                + local.child_pvs.hint_shard_len * AB::Expr::from_u32(WORD_SIZE as u32),
+            hint_start_addr.into() + hint_shard_len.into() * AB::Expr::from_u32(WORD_SIZE as u32),
+        );
         assert_array_eq(
             &mut builder.when_first_row(),
             local.child_pvs.public_io,

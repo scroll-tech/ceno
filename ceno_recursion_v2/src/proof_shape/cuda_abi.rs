@@ -41,7 +41,7 @@ unsafe extern "C" {
         num_proofs: usize,
         inputs: *const ProofShapeTracegenInputs,
     ) -> i32;
-    fn _public_values_recursion_tracegen(
+    fn _ceno_public_values_recursion_tracegen(
         d_trace: *mut F,
         height: usize,
         d_pvs_data: *const *const PublicValueData,
@@ -91,7 +91,7 @@ pub unsafe fn public_values_tracegen(
     stream: cudaStream_t,
 ) -> Result<(), CudaError> {
     unsafe {
-        CudaError::from_result(_public_values_recursion_tracegen(
+        CudaError::from_result(_ceno_public_values_recursion_tracegen(
             d_trace.as_mut_ptr(),
             height,
             d_pvs_data.as_ptr(),

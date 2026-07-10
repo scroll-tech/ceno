@@ -1,13 +1,18 @@
 #[cfg(test)]
 mod prover_integration {
     use crate::{
-        continuation::prover::{AggProver, AggregationOptions, ChildVkKind, InnerCpuProver},
+        circuit::{Circuit, root::CenoRootCircuit},
+        continuation::prover::{
+            AggProver, AggregationOptions, ChildVkKind, InnerCpuProver,
+            internal_aggregation_chunk_plan,
+        },
         system::{
             AggregationSubCircuit, RecursionField, RecursionProof, RecursionVk, VerifierSubCircuit,
             VerifierTraceGen, utils::test_system_params_zero_pow,
         },
     };
     use bincode;
+    use ceno_emul::WORD_SIZE;
     use ceno_zkvm::scheme::{MainConstraintProof, PublicValues, ZKVMChipProof, ZKVMProof};
     use eyre::{Result, eyre};
     use ff_ext::GoldilocksExt2;
@@ -17,6 +22,7 @@ mod prover_integration {
         default_duplex_sponge_recorder,
     };
     use p3_field::PrimeCharacteristicRing;
+    use recursion_circuit::system::VerifierSubCircuit as OpenVmVerifierSubCircuit;
     use std::{
         collections::BTreeMap,
         io::Cursor,
@@ -166,7 +172,15 @@ mod prover_integration {
         if proofs.is_empty() {
             return Err(eyre!("proof fixture did not contain any proofs"));
         }
-        Ok(proofs.iter().cycle().take(count).cloned().collect())
+        if proofs.len() < count {
+            return Err(eyre!(
+                "proof fixture contained {} proofs but this test needs {}; \
+                 regenerate proof.bin with a real split fixture instead of duplicating shards",
+                proofs.len(),
+                count,
+            ));
+        }
+        Ok(proofs.iter().take(count).cloned().collect())
     }
 
     fn load_vk(path: &Path) -> Result<Option<ZkvmVk>> {
@@ -206,21 +220,50 @@ mod prover_integration {
         let Some((loaded_proofs, child_vk)) = load_fixtures()? else {
             return Ok(());
         };
+        if loaded_proofs.len() < shard_count {
+            println!(
+                "skipping recursion v2 test: fixture has {} shard proofs but test needs {}; \
+                 regenerate with --max-cycle-per-shard=1600 for multi-shard coverage",
+                loaded_proofs.len(),
+                shard_count,
+            );
+            return Ok(());
+        }
         let shard_proofs = select_proofs(&loaded_proofs, shard_count)?;
 
         let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
         let prover = AggProver::<2, 2>::new(Arc::new(child_vk), options);
 
         let start = Instant::now();
-        let root_proof = prover.prove(&shard_proofs)?;
+        let root_output = prover.prove_with_root_vk(&shard_proofs)?;
+        prover.verify_root_proof(&root_output.root_vk, &root_output.root_proof)?;
         let elapsed = start.elapsed();
-        let proof_size =
-            bincode::serialized_size(&root_proof.inner_proof).expect("serialization error");
         println!(
-            "agg prover ({shard_count} shards): elapsed={elapsed:?}, proof_size={:.2}mb",
-            byte_to_mb(proof_size)
+            "agg prover ({shard_count} shards): elapsed={elapsed:?}, produced and verified root proof",
         );
         Ok(())
+    }
+
+    fn assert_agg_rejects_before_root(
+        child_vk: ZkvmVk,
+        shard_proofs: Vec<ZkvmProof>,
+        case_name: &str,
+    ) {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+            let prover = AggProver::<2, 2>::new(Arc::new(child_vk), options);
+            prover.prove(&shard_proofs)
+        }));
+        let err = match result {
+            Err(_) => return,
+            Ok(Ok(_)) => panic!("{case_name}: aggregation unexpectedly produced a root proof"),
+            Ok(Err(err)) => err,
+        };
+        assert!(
+            !err.to_string()
+                .contains("internal aggregation not yet implemented"),
+            "{case_name}: mutation reached root blocker instead of being rejected"
+        );
     }
 
     fn first_fixture_proof_and_vk() -> Result<Option<(ZkvmProof, ZkvmVk)>> {
@@ -373,6 +416,81 @@ mod prover_integration {
     #[test]
     fn agg_prover_two_shards() -> Result<()> {
         agg_prove_with_count(2)
+    }
+
+    #[test]
+    fn internal_plan_wraps_single_leaf_before_root() -> Result<()> {
+        let plan = internal_aggregation_chunk_plan(1, 2)?;
+        assert_eq!(plan.internal_for_leaf_chunks, vec![1]);
+        assert_eq!(plan.internal_recursive_initial_chunks, vec![1]);
+        assert!(plan.internal_recursive_self_layers.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn internal_plan_keeps_odd_remainder_as_partial_chunk() -> Result<()> {
+        let plan = internal_aggregation_chunk_plan(5, 2)?;
+        assert_eq!(plan.internal_for_leaf_chunks, vec![2, 2, 1]);
+        assert_eq!(plan.internal_recursive_initial_chunks, vec![2, 1]);
+        assert_eq!(plan.internal_recursive_self_layers, vec![vec![2]]);
+        Ok(())
+    }
+
+    #[test]
+    fn agg_rejects_wrong_first_init_pc() -> Result<()> {
+        let Some((mut proof, child_vk)) = first_fixture_proof_and_vk()? else {
+            return Ok(());
+        };
+        proof.public_values.init_pc = proof.public_values.init_pc.wrapping_add(4);
+        assert_agg_rejects_before_root(child_vk, vec![proof], "wrong first init_pc");
+        Ok(())
+    }
+
+    #[test]
+    fn agg_rejects_non_adjacent_hint_range() -> Result<()> {
+        let Some((loaded_proofs, child_vk)) = load_fixtures()? else {
+            return Ok(());
+        };
+        if loaded_proofs.len() < 2 {
+            println!("skipping hint adjacency test: fixture has fewer than two shards");
+            return Ok(());
+        }
+        let mut shard_proofs = loaded_proofs.into_iter().take(2).collect::<Vec<_>>();
+        shard_proofs[1].public_values.hint_start_addr = shard_proofs[1]
+            .public_values
+            .hint_start_addr
+            .wrapping_add(WORD_SIZE as u32);
+        assert_agg_rejects_before_root(child_vk, shard_proofs, "non-adjacent hint range");
+        Ok(())
+    }
+
+    #[test]
+    fn ceno_root_circuit_registers_ceno_pvs_air() -> Result<()> {
+        let Some((_, child_vk)) = load_fixtures()? else {
+            return Ok(());
+        };
+        let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+        let prover = AggProver::<2, 2>::new(Arc::new(child_vk), options);
+        let leaf_vk = prover.leaf_vk();
+        let verifier_circuit = OpenVmVerifierSubCircuit::<1>::new(leaf_vk.clone());
+        let root_circuit = CenoRootCircuit::new(Arc::new(verifier_circuit), leaf_vk.pre_hash);
+        let air_names =
+            <CenoRootCircuit<_> as Circuit<crate::circuit::root::RootSC>>::airs(&root_circuit)
+                .into_iter()
+                .map(|air| air.name().to_string())
+                .collect::<Vec<_>>();
+
+        assert!(
+            air_names
+                .first()
+                .is_some_and(|name| name.contains("CenoRootVerifierPvsAir")),
+            "first root AIR should bind Ceno public values, got {air_names:?}"
+        );
+        assert!(
+            air_names.len() > 1,
+            "root circuit should include the reused verifier subcircuit"
+        );
+        Ok(())
     }
 
     #[test]
@@ -827,9 +945,5 @@ mod prover_integration {
             println!("  circuit_vk: {name}");
         }
         Ok(())
-    }
-
-    fn byte_to_mb(byte_size: u64) -> f64 {
-        byte_size as f64 / (1024.0 * 1024.0)
     }
 }

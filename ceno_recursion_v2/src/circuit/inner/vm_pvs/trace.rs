@@ -7,7 +7,7 @@ use openvm_stark_backend::prover::AirProvingContext;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
     BabyBearPoseidon2Config, D_EF, DIGEST_SIZE, EF, F,
 };
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use std::borrow::BorrowMut;
 
@@ -111,6 +111,20 @@ pub fn generate_proving_ctx(
         pvs.exit_code = split_u32_lo_hi(last.public_values.exit_code);
         pvs.end_pc = F::from_u32(last.public_values.end_pc);
         pvs.end_cycle = F::from_u64(last.public_values.end_cycle);
+        pvs.shard_count =
+            aggregate_shard_count(first.public_values.shard_id, last.public_values.shard_id);
+        pvs.heap_shard_len = aggregate_word_len(
+            first.public_values.heap_start_addr,
+            last.public_values.heap_start_addr,
+            last.public_values.heap_shard_len,
+        );
+        pvs.hint_shard_len = aggregate_word_len(
+            first.public_values.hint_start_addr,
+            last.public_values.hint_start_addr,
+            last.public_values.hint_shard_len,
+        );
+
+        debug_vm_pvs(child_vk, first, fixed_commit, fixed_no_omc_init_commit, pvs);
     }
 
     AirProvingContext {
@@ -118,6 +132,31 @@ pub fn generate_proving_ctx(
         common_main: trace,
         public_values,
     }
+}
+
+fn debug_vm_pvs(
+    child_vk: &RecursionVk,
+    first: &RecursionProof,
+    fixed_commit: [F; DIGEST_SIZE],
+    fixed_no_omc_init_commit: [F; DIGEST_SIZE],
+    aggregate_pvs: &VmPvs<F>,
+) {
+    if std::env::var_os("CENO_REC_V2_DEBUG_VM_PVS").is_none() {
+        return;
+    }
+
+    let first_pvs = build_vm_pvs(fixed_commit, fixed_no_omc_init_commit, first);
+    eprintln!(
+        "rec-v2-debug module=vm_pvs source=trace row=0 first_init_pc={:#x} first_init_cycle={} child_vk_entry_pc={:#x} aggregate_init_pc={:#x} aggregate_init_cycle={} fixed_commit_eq={} fixed_no_omc_init_commit_eq={} witness_commit_eq={}",
+        first.public_values.init_pc,
+        first.public_values.init_cycle,
+        child_vk.entry_pc,
+        aggregate_pvs.init_pc.as_canonical_u32(),
+        aggregate_pvs.init_cycle.as_canonical_u32(),
+        first_pvs.fixed_commit == aggregate_pvs.fixed_commit,
+        first_pvs.fixed_no_omc_init_commit == aggregate_pvs.fixed_no_omc_init_commit,
+        first_pvs.witness_commit == aggregate_pvs.witness_commit,
+    );
 }
 
 fn build_vm_pvs(
@@ -136,6 +175,7 @@ fn build_vm_pvs(
         end_pc: F::from_u32(pv.end_pc),
         end_cycle: F::from_u64(pv.end_cycle),
         shard_id: F::from_u32(pv.shard_id),
+        shard_count: F::ONE,
         heap_start_addr: F::from_u32(pv.heap_start_addr),
         heap_shard_len: F::from_u32(pv.heap_shard_len),
         hint_start_addr: F::from_u32(pv.hint_start_addr),
@@ -212,4 +252,31 @@ fn ef_to_limbs(value: EF) -> [F; D_EF] {
     let mut out = [F::ZERO; D_EF];
     out.copy_from_slice(value.as_basis_coefficients_slice());
     out
+}
+
+fn aggregate_word_len(first_start: u32, last_start: u32, last_len: u32) -> F {
+    let last_end = last_start
+        .checked_add(
+            last_len
+                .checked_mul(ceno_emul::WORD_SIZE as u32)
+                .expect("range overflow"),
+        )
+        .expect("range overflow");
+    let bytes = last_end
+        .checked_sub(first_start)
+        .expect("non-contiguous aggregate range");
+    assert_eq!(
+        bytes % ceno_emul::WORD_SIZE as u32,
+        0,
+        "aggregate range must be word-aligned"
+    );
+    F::from_u32(bytes / ceno_emul::WORD_SIZE as u32)
+}
+
+fn aggregate_shard_count(first_shard_id: u32, last_shard_id: u32) -> F {
+    let count = last_shard_id
+        .checked_sub(first_shard_id)
+        .and_then(|delta| delta.checked_add(1))
+        .expect("non-contiguous aggregate shard range");
+    F::from_u32(count)
 }

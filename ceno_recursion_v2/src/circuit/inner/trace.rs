@@ -87,6 +87,7 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             child_dag_commit,
             initial_transcript,
         } = input;
+        let verifier_start = std::time::Instant::now();
         let (verifier_ctx, poseidon2_inputs) = super::verifier::generate_proving_ctx(
             child_vk,
             proofs,
@@ -95,6 +96,12 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             child_dag_commit,
             self.deferral_enabled,
         );
+        tracing::info!(
+            elapsed_ms = verifier_start.elapsed().as_secs_f64() * 1000.0,
+            proof_count = proofs.len(),
+            "recursion pre-verifier component verifier_pvs"
+        );
+        let preflight_start = std::time::Instant::now();
         let (preflights, per_proof_initial_transcripts): (Vec<Preflight>, Vec<TS>) = proofs
             .iter()
             .map(|proof| {
@@ -106,6 +113,12 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
                 (preflight, sponge)
             })
             .unzip();
+        tracing::info!(
+            elapsed_ms = preflight_start.elapsed().as_secs_f64() * 1000.0,
+            proof_count = proofs.len(),
+            "recursion pre-verifier component run_preflight"
+        );
+        let vm_pvs_start = std::time::Instant::now();
         let vm_ctx = super::vm_pvs::generate_proving_ctx(
             child_vk,
             proofs,
@@ -114,9 +127,21 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
             child_is_app,
             self.deferral_enabled,
         );
+        tracing::info!(
+            elapsed_ms = vm_pvs_start.elapsed().as_secs_f64() * 1000.0,
+            proof_count = proofs.len(),
+            "recursion pre-verifier component vm_pvs"
+        );
+        let vm_metadata_start = std::time::Instant::now();
         let vm_metadata_ctx =
             super::vm_pvs::generate_metadata_proving_ctx(child_vk, proofs, &preflights);
+        tracing::info!(
+            elapsed_ms = vm_metadata_start.elapsed().as_secs_f64() * 1000.0,
+            proof_count = proofs.len(),
+            "recursion pre-verifier component vm_pvs_metadata"
+        );
         let mut poseidon2_inputs = poseidon2_inputs;
+        let def_unset_start = std::time::Instant::now();
         let idx2_ctx = if self.deferral_enabled {
             let (def_pvs_ctx, def_poseidon2_inputs) = super::def_pvs::generate_proving_ctx(
                 proofs,
@@ -129,6 +154,11 @@ impl InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>> for InnerTraceGenImpl {
         } else {
             super::unset::generate_proving_ctx(&[], child_is_app)
         };
+        tracing::info!(
+            elapsed_ms = def_unset_start.elapsed().as_secs_f64() * 1000.0,
+            proof_count = proofs.len(),
+            "recursion pre-verifier component def_or_unset"
+        );
 
         (
             vec![verifier_ctx, vm_ctx, vm_metadata_ctx, idx2_ctx],
@@ -181,15 +211,28 @@ impl InnerTraceGen<GpuBackend> for InnerTraceGenImpl {
     {
         let device_ctx = GpuDeviceCtx::for_current_device()
             .expect("failed to get CUDA device for inner tracegen");
+        let cpu_start = std::time::Instant::now();
         let (cpu_ctxs, poseidon2_inputs, initial_transcripts) =
             <Self as InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>>>::generate_pre_verifier_subcircuit_ctxs(
                 self,
                 input,
             );
+        tracing::info!(
+            elapsed_ms = cpu_start.elapsed().as_secs_f64() * 1000.0,
+            trace_count = cpu_ctxs.len(),
+            "recursion gpu pre-verifier CPU tracegen fallback"
+        );
+        let h2d_start = std::time::Instant::now();
+        let trace_count = cpu_ctxs.len();
         let gpu_ctxs = cpu_ctxs
             .into_iter()
             .map(|ctx| cpu_proving_ctx_to_gpu(ctx, &device_ctx))
             .collect();
+        tracing::info!(
+            elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+            trace_count,
+            "recursion gpu pre-verifier H2D transport"
+        );
         (gpu_ctxs, poseidon2_inputs, initial_transcripts)
     }
 
@@ -201,14 +244,29 @@ impl InnerTraceGen<GpuBackend> for InnerTraceGenImpl {
     ) -> Vec<AirProvingContext<GpuBackend>> {
         let device_ctx = GpuDeviceCtx::for_current_device()
             .expect("failed to get CUDA device for inner tracegen");
-        <Self as InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>>>::generate_post_verifier_subcircuit_ctxs(
+        let cpu_start = std::time::Instant::now();
+        let cpu_ctxs = <Self as InnerTraceGen<CpuBackend<BabyBearPoseidon2Config>>>::generate_post_verifier_subcircuit_ctxs(
             self,
             proofs,
             proofs_type,
             child_is_app,
-        )
-        .into_iter()
-        .map(|ctx| cpu_proving_ctx_to_gpu(ctx, &device_ctx))
-        .collect()
+        );
+        tracing::info!(
+            elapsed_ms = cpu_start.elapsed().as_secs_f64() * 1000.0,
+            trace_count = cpu_ctxs.len(),
+            "recursion gpu post-verifier CPU tracegen fallback"
+        );
+        let h2d_start = std::time::Instant::now();
+        let trace_count = cpu_ctxs.len();
+        let gpu_ctxs = cpu_ctxs
+            .into_iter()
+            .map(|ctx| cpu_proving_ctx_to_gpu(ctx, &device_ctx))
+            .collect();
+        tracing::info!(
+            elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+            trace_count,
+            "recursion gpu post-verifier H2D transport"
+        );
+        gpu_ctxs
     }
 }

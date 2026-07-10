@@ -6,7 +6,7 @@ use openvm_stark_backend::prover::AirProvingContext;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, DIGEST_SIZE, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
-use verify_stark::pvs::{VerifierBasePvs, VerifierDefPvs};
+use verify_stark::pvs::{VerifierBasePvs, VerifierDefPvs, VkCommit};
 
 use crate::{
     circuit::inner::{
@@ -31,9 +31,7 @@ pub fn generate_proving_ctx(
     AirProvingContext<CpuBackend<BabyBearPoseidon2Config>>,
     Vec<[F; POSEIDON2_WIDTH]>,
 ) {
-    // TODO(recursion-proof-bridge): populate verifier trace/public values from RecursionProof.
-    // Any verifier-specific values not available on RecursionProof are currently zero-mocked.
-    let _ = (proofs, proofs_type, child_is_app, child_dag_commit);
+    let _ = proofs_type;
     let child_vk_digest = child_vk_digest(child_vk);
 
     let rows = proofs.len().max(1).next_power_of_two();
@@ -54,7 +52,7 @@ pub fn generate_proving_ctx(
         let cols: &mut VerifierPvsCols<F> = base_row.borrow_mut();
         cols.proof_idx = F::from_usize(proof_idx);
         cols.is_valid = F::ONE;
-        cols.has_verifier_pvs = F::ZERO;
+        cols.has_verifier_pvs = F::from_bool(!child_is_app);
         for (dst, digest_elem) in cols.child_vk_digest.iter_mut().zip(child_vk_digest) {
             dst.copy_from_slice(digest_elem.as_basis_coefficients_slice());
         }
@@ -70,13 +68,26 @@ pub fn generate_proving_ctx(
     if deferral_enabled {
         num_public_values += VerifierDefPvs::<u8>::width();
     }
+    let mut public_values = vec![F::ZERO; num_public_values];
+    let base_pvs: &mut VerifierBasePvs<F> =
+        public_values[..VerifierBasePvs::<u8>::width()].borrow_mut();
+    if child_is_app {
+        base_pvs.app_vk_commit = ceno_vk_commit(child_dag_commit);
+    }
 
     (
         AirProvingContext {
             cached_mains: vec![],
             common_main: RowMajorMatrix::new(trace, width),
-            public_values: vec![F::ZERO; num_public_values],
+            public_values,
         },
         vec![],
     )
+}
+
+fn ceno_vk_commit(cached_commit: [F; DIGEST_SIZE]) -> VkCommit<F> {
+    VkCommit {
+        cached_commit,
+        vk_pre_hash: [F::ZERO; DIGEST_SIZE],
+    }
 }

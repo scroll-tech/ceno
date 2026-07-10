@@ -194,9 +194,17 @@ where
     ) -> Result<Proof<SC>> {
         let tracegen_start = Instant::now();
         let ctx = self.generate_proving_ctx(proofs, child_vk_kind, ProofsType::Vm, None);
+        let tracegen_elapsed = tracegen_start.elapsed();
+        let trace_summary = recursion_trace_summary::<PB, SC>(&ctx.per_trace, &self.circuit.airs());
         tracing::info!(
-            elapsed_ms = tracegen_start.elapsed().as_secs_f64() * 1000.0,
+            elapsed_ms = tracegen_elapsed.as_secs_f64() * 1000.0,
             num_traces = ctx.per_trace.len(),
+            total_trace_cells = trace_summary.total_cells,
+            total_trace_width = trace_summary.total_width,
+            largest_air_id = trace_summary.largest_air_id,
+            largest_air_name = trace_summary.largest_air_name,
+            largest_trace_cells = trace_summary.largest_cells,
+            backend = std::any::type_name::<PB>(),
             "generated recursion proving context"
         );
         if tracing::enabled!(tracing::Level::INFO) {
@@ -212,6 +220,7 @@ where
         let proof = engine.prove(&self.d_pk, ctx)?;
         tracing::info!(
             elapsed_ms = prove_start.elapsed().as_secs_f64() * 1000.0,
+            backend = std::any::type_name::<PB>(),
             "proved recursion aggregation"
         );
         self.verify_proof::<E>(&proof)?;
@@ -243,6 +252,15 @@ where
             .map(|data| data.commitment)
             .unwrap_or_default();
 
+        #[cfg(feature = "cuda")]
+        if std::any::type_name::<PB>().contains("GpuBackend") {
+            tracing::info!(
+                proof_count = proofs.len(),
+                "recursion gpu tracegen uses CPU trace construction with H2D transport"
+            );
+        }
+
+        let pre_start = Instant::now();
         let (pre_ctxs, poseidon2_compress_inputs, subcircuit_initial_transcripts) = self
             .agg_node_tracegen
             .generate_pre_verifier_subcircuit_ctxs(PreVerifierSubCircuitInput {
@@ -254,6 +272,13 @@ where
                 absent_trace_pvs,
                 initial_transcript: transcript,
             });
+        tracing::info!(
+            elapsed_ms = pre_start.elapsed().as_secs_f64() * 1000.0,
+            trace_count = pre_ctxs.len(),
+            proof_count = proofs.len(),
+            backend = std::any::type_name::<PB>(),
+            "generated recursion pre-verifier traces"
+        );
 
         let poseidon2_permute_inputs: Vec<[F; POSEIDON2_WIDTH]> = vec![];
         let range_check_inputs = vec![];
@@ -267,6 +292,7 @@ where
             final_transcript_state: None,
         };
 
+        let verifier_start = Instant::now();
         let subcircuit_ctxs = self
             .circuit
             .verifier_circuit
@@ -278,10 +304,25 @@ where
                 subcircuit_initial_transcripts,
             )
             .expect("verifier sub-circuit ctx generation");
+        tracing::info!(
+            elapsed_ms = verifier_start.elapsed().as_secs_f64() * 1000.0,
+            trace_count = subcircuit_ctxs.len(),
+            proof_count = proofs.len(),
+            backend = std::any::type_name::<PB>(),
+            "generated recursion verifier subcircuit traces"
+        );
 
+        let post_start = Instant::now();
         let post_ctxs = self
             .agg_node_tracegen
             .generate_post_verifier_subcircuit_ctxs(proofs, proofs_type, child_is_app);
+        tracing::info!(
+            elapsed_ms = post_start.elapsed().as_secs_f64() * 1000.0,
+            trace_count = post_ctxs.len(),
+            proof_count = proofs.len(),
+            backend = std::any::type_name::<PB>(),
+            "generated recursion post-verifier traces"
+        );
 
         ProvingContext {
             per_trace: pre_ctxs
@@ -295,6 +336,10 @@ where
 
     pub fn get_vk(&self) -> Arc<MultiStarkVerifyingKey<SC>> {
         self.vk.clone()
+    }
+
+    pub fn child_vk_air_count(&self) -> usize {
+        self.child_vk.circuit_vks.len()
     }
 
     pub fn verify_proof<E: StarkEngine<SC = SC, PB = PB>>(&self, proof: &Proof<SC>) -> Result<()> {
@@ -419,8 +464,6 @@ fn trace_heights_tracing_info<PB: ProverBackend, SC: openvm_stark_backend::Stark
     ctxs: &[(usize, AirProvingContext<PB>)],
     airs: &[openvm_stark_backend::AirRef<SC>],
 ) {
-    let mut total_cells = 0usize;
-    let mut total_width = 0usize;
     for ((air_id, ctx), air) in ctxs.iter().zip(airs) {
         let height = ctx.common_main.height();
         let width = ctx.common_main.width();
@@ -433,8 +476,42 @@ fn trace_heights_tracing_info<PB: ProverBackend, SC: openvm_stark_backend::Stark
             cells,
             "recursion trace dimensions"
         );
-        total_cells += cells;
-        total_width += width;
     }
-    tracing::info!(total_cells, total_width, "recursion trace totals");
+    let summary = recursion_trace_summary::<PB, SC>(ctxs, airs);
+    tracing::info!(
+        total_cells = summary.total_cells,
+        total_width = summary.total_width,
+        largest_air_id = summary.largest_air_id,
+        largest_air_name = summary.largest_air_name,
+        largest_trace_cells = summary.largest_cells,
+        "recursion trace totals"
+    );
+}
+
+#[derive(Default)]
+struct RecursionTraceSummary {
+    total_cells: usize,
+    total_width: usize,
+    largest_air_id: usize,
+    largest_air_name: String,
+    largest_cells: usize,
+}
+
+fn recursion_trace_summary<PB: ProverBackend, SC: openvm_stark_backend::StarkProtocolConfig>(
+    ctxs: &[(usize, AirProvingContext<PB>)],
+    airs: &[openvm_stark_backend::AirRef<SC>],
+) -> RecursionTraceSummary {
+    let mut summary = RecursionTraceSummary::default();
+    for ((air_id, ctx), air) in ctxs.iter().zip(airs) {
+        let width = ctx.common_main.width();
+        let cells = ctx.common_main.height() * width;
+        summary.total_cells += cells;
+        summary.total_width += width;
+        if cells > summary.largest_cells {
+            summary.largest_air_id = *air_id;
+            summary.largest_air_name = air.name();
+            summary.largest_cells = cells;
+        }
+    }
+    summary
 }

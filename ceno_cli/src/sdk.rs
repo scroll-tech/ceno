@@ -4,8 +4,11 @@ use anyhow::{Context, Result};
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_recursion_v2::{
-    continuation::prover::{AggProver, AggregationOptions, LeafVk, RootProof},
-    system::{RecursionField, RecursionPcs, RecursionProof, utils::test_system_params_zero_pow},
+    continuation::prover::{AggProver, AggregationOptions, LeafVk, RootProof, SystemParams},
+    system::{
+        RecursionField, RecursionPcs, RecursionProof, utils::test_system_params_zero_pow,
+        warm_child_vk_digest_cache,
+    },
 };
 use ceno_zkvm::{
     e2e::{MultiProver, run_e2e_proof, setup_program},
@@ -26,10 +29,36 @@ use serde::Serialize;
 
 pub const DEFAULT_LEAF_FANIN: usize = 2;
 pub const DEFAULT_INTERNAL_FANIN: usize = 2;
+pub const DEFAULT_RECURSION_L_SKIP: usize = 5;
+pub const DEFAULT_RECURSION_N_STACK: usize = 16;
+pub const DEFAULT_RECURSION_K_WHIR: usize = 3;
 
 pub type CenoRecursionV2Prover = AggProver<DEFAULT_LEAF_FANIN, DEFAULT_INTERNAL_FANIN>;
 pub type CenoRecursionV2RootProof = RootProof;
 pub type CenoRecursionV2LeafVk = LeafVk;
+
+pub fn recursion_system_params(l_skip: usize, n_stack: usize, k_whir: usize) -> SystemParams {
+    test_system_params_zero_pow(l_skip, n_stack, k_whir)
+}
+
+pub fn recursion_aggregation_options(
+    leaf_system_params: SystemParams,
+    internal_system_params: SystemParams,
+    root_system_params: SystemParams,
+) -> AggregationOptions {
+    AggregationOptions::new(leaf_system_params)
+        .with_internal_system_params(internal_system_params)
+        .with_root_system_params(root_system_params)
+}
+
+pub fn default_aggregation_options() -> AggregationOptions {
+    let params = recursion_system_params(
+        DEFAULT_RECURSION_L_SKIP,
+        DEFAULT_RECURSION_N_STACK,
+        DEFAULT_RECURSION_K_WHIR,
+    );
+    recursion_aggregation_options(params.clone(), params.clone(), params)
+}
 
 #[allow(clippy::type_complexity)]
 pub struct Sdk<E, PCS, PB, PD, SC = (), VC = ()>
@@ -187,8 +216,21 @@ where
             .zkvm_vk
             .clone()
             .context("zkvm_vk is not set; call set_app_vk or init_base_prover first")?;
+        #[cfg(not(feature = "gpu"))]
+        let recursion_backend = "cpu";
+        #[cfg(feature = "gpu")]
+        let recursion_backend = "gpu";
+        tracing::info!(
+            recursion_backend,
+            leaf = recursion_backend,
+            internal = recursion_backend,
+            root = recursion_backend,
+            "ceno recursion backend summary"
+        );
+        let app_vk = Arc::new(app_vk);
+        warm_child_vk_digest_cache(&app_vk);
         Ok(CenoRecursionV2Prover::new(
-            Arc::new(app_vk),
+            app_vk,
             self.aggregation_options(),
         ))
     }
@@ -257,7 +299,3 @@ where
 }
 
 pub type RecursionCenoSDK<SC = (), VC = ()> = CenoSDK<RecursionField, RecursionPcs, SC, VC>;
-
-fn default_aggregation_options() -> AggregationOptions {
-    AggregationOptions::new(test_system_params_zero_pow(5, 16, 3))
-}
