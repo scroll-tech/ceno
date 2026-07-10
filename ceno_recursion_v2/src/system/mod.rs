@@ -378,7 +378,11 @@ mod cuda_tracegen {
             let module_name = self.name();
             let module_start = std::time::Instant::now();
             match self {
-                TraceModuleRef::Transcript(module) => module.generate_proving_ctxs(
+                TraceModuleRef::Transcript(module) => <TranscriptModule as TraceGenModule<
+                    crate::cuda::GlobalCtxGpu,
+                    GpuBackend,
+                >>::generate_proving_ctxs(
+                    module,
                     child_vk,
                     proofs,
                     preflights,
@@ -408,7 +412,11 @@ mod cuda_tracegen {
                     );
                     range_check_inputs
                         .extend(crate::pcs::collect_pcs_range_checks(&preflights_cpu));
-                    module.generate_proving_ctxs(
+                    <ProofShapeModule as TraceGenModule<
+                        crate::cuda::GlobalCtxGpu,
+                        GpuBackend,
+                    >>::generate_proving_ctxs(
+                        module,
                         child_vk,
                         proofs,
                         preflights,
@@ -416,34 +424,107 @@ mod cuda_tracegen {
                         required_heights,
                     )
                 }
-                TraceModuleRef::Tower(module) => module.generate_proving_ctxs(
+                TraceModuleRef::Tower(module) => <TowerModule as TraceGenModule<
+                    crate::cuda::GlobalCtxGpu,
+                    GpuBackend,
+                >>::generate_proving_ctxs(
+                    module,
                     child_vk,
                     proofs,
                     preflights,
                     exp_bits_len_gen,
                     required_heights,
                 ),
-                TraceModuleRef::Main(module) => module.generate_proving_ctxs(
+                TraceModuleRef::Main(module) => <MainModule as TraceGenModule<
+                    crate::cuda::GlobalCtxGpu,
+                    GpuBackend,
+                >>::generate_proving_ctxs(
+                    module,
                     child_vk,
                     proofs,
                     preflights,
                     &(),
                     required_heights,
                 ),
-                TraceModuleRef::BatchConstraint(module) => module.generate_proving_ctxs(
-                    child_vk,
-                    proofs,
-                    preflights,
-                    &(),
-                    required_heights,
-                ),
-                TraceModuleRef::Pcs(module) => module.generate_proving_ctxs(
-                    child_vk,
-                    proofs,
-                    preflights,
-                    &(),
-                    required_heights,
-                ),
+                TraceModuleRef::BatchConstraint(module) => {
+                    <BatchConstraintModule as TraceGenModule<
+                        crate::cuda::GlobalCtxGpu,
+                        GpuBackend,
+                    >>::generate_proving_ctxs(
+                        module,
+                        child_vk,
+                        proofs,
+                        preflights,
+                        &(),
+                        required_heights,
+                    )
+                }
+                TraceModuleRef::Pcs(module) => {
+                    let proofs_cpu = proofs
+                        .iter()
+                        .map(|proof| proof.cpu.clone())
+                        .collect::<Vec<_>>();
+                    let preflights_cpu = preflights
+                        .iter()
+                        .map(|preflight| preflight.cpu.clone())
+                        .collect::<Vec<_>>();
+                    let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+                    let cpu_start = std::time::Instant::now();
+                    let cpu_ctxs = <PcsModule as TraceGenModule<
+                        GlobalCtxCpu,
+                        CpuBackend<BabyBearPoseidon2Config>,
+                    >>::generate_proving_ctxs(
+                        module,
+                        &child_vk.cpu,
+                        &proofs_cpu,
+                        &preflights_cpu,
+                        &(),
+                        required_heights,
+                    )?;
+                    tracing::info!(
+                        elapsed_ms = cpu_start.elapsed().as_secs_f64() * 1000.0,
+                        trace_count = cpu_ctxs.len(),
+                        "pcs.cpu_generate_proving_ctxs"
+                    );
+                    let h2d_all_start = std::time::Instant::now();
+                    let h2d_ctxs = cpu_ctxs
+                        .into_iter()
+                        .enumerate()
+                        .map(|(idx, ctx)| {
+                            if !ctx.cached_mains.is_empty() {
+                                return None;
+                            }
+                            let air_name = PcsModule::chip_trace_names()
+                                .get(idx)
+                                .copied()
+                                .unwrap_or("unknown");
+                            let height = ctx.common_main.height();
+                            let width = ctx.common_main.width();
+                            let h2d_start = std::time::Instant::now();
+                            let common_main =
+                                transport_matrix_h2d_row(&ctx.common_main, &device_ctx).ok()?;
+                            tracing::info!(
+                                elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+                                air_name,
+                                height,
+                                width,
+                                cells = height * width,
+                                "pcs.h2d_trace"
+                            );
+                            Some(AirProvingContext {
+                                cached_mains: Vec::new(),
+                                common_main,
+                                public_values: ctx.public_values,
+                            })
+                        })
+                        .collect::<Option<Vec<_>>>()?;
+                    tracing::info!(
+                        elapsed_ms = h2d_all_start.elapsed().as_secs_f64() * 1000.0,
+                        trace_count = h2d_ctxs.len(),
+                        "pcs.h2d_all"
+                    );
+                    Some(h2d_ctxs)
+                }
             }
             .inspect(|ctxs| {
                 tracing::info!(

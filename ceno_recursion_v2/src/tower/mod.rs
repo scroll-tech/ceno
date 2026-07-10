@@ -94,6 +94,8 @@ use witness::next_pow2_instance_padding;
 
 // Internal bus definitions
 mod bus;
+#[cfg(feature = "cuda")]
+mod cuda;
 pub use bus::{
     TowerAlphaPowBus, TowerAlphaPowMessage, TowerSumcheckChallengeBus,
     TowerSumcheckChallengeMessage, TowerSumcheckInputBus, TowerSumcheckInputMessage,
@@ -1751,6 +1753,19 @@ impl TowerModuleChip {
 impl RowMajorChip<F> for TowerModuleChip {
     type Ctx<'a> = TowerBlobCpu;
 
+    #[cfg(feature = "cuda")]
+    fn trace_name(&self) -> &'static str {
+        match self {
+            TowerModuleChip::Shape => "TowerShapeAir",
+            TowerModuleChip::Activity => "TowerActivityAir",
+            TowerModuleChip::Input => "TowerInputAir",
+            TowerModuleChip::AlphaPow => "TowerAlphaPowAir",
+            TowerModuleChip::Layer => "TowerLayerAir",
+            TowerModuleChip::LayerSumcheck => "TowerLayerSumcheckAir",
+            TowerModuleChip::MainPoint => "TowerMainPointAir",
+        }
+    }
+
     #[tracing::instrument(
         name = "wrapper.generate_trace",
         level = "trace",
@@ -1846,11 +1861,17 @@ mod cuda_tracegen {
             chips
                 .iter()
                 .map(|chip| {
-                    generate_gpu_proving_ctx(
-                        chip,
-                        &blob,
-                        required_heights.and_then(|heights| heights.get(chip.index()).copied()),
-                    )
+                    let required_height =
+                        required_heights.and_then(|heights| heights.get(chip.index()).copied());
+                    match chip {
+                        TowerModuleChip::LayerSumcheck => {
+                            crate::tower::cuda::TowerSumcheckGpuTraceGenerator.generate_proving_ctx(
+                                &(&blob.sumcheck_records, &blob.mus_records),
+                                required_height,
+                            )
+                        }
+                        _ => generate_gpu_proving_ctx(chip, &blob, required_height),
+                    }
                 })
                 .collect()
         }

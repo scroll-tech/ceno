@@ -163,8 +163,42 @@ enum BatchConstraintModuleChip {
     FinalClaim,
 }
 
+#[cfg(feature = "cuda")]
+impl BatchConstraintModuleChip {
+    fn stable_name(&self) -> &'static str {
+        match self {
+            BatchConstraintModuleChip::GlobalSumcheck => "GlobalSumcheck",
+            BatchConstraintModuleChip::EvalAbsorb => "EvalAbsorb",
+            BatchConstraintModuleChip::TowerPointEq => "TowerPointEq",
+            BatchConstraintModuleChip::FrontloadTerm => "FrontloadTerm",
+            BatchConstraintModuleChip::FinalClaim => "FinalClaim",
+        }
+    }
+
+    fn record_count(&self, ctx: &BatchConstraintTraceCtx<'_>) -> usize {
+        match self {
+            BatchConstraintModuleChip::GlobalSumcheck => ctx.records.global_sumcheck_records.len(),
+            BatchConstraintModuleChip::EvalAbsorb => ctx.records.eval_records.len(),
+            BatchConstraintModuleChip::TowerPointEq => ctx.records.tower_point_eq_records.len(),
+            BatchConstraintModuleChip::FrontloadTerm => ctx.records.frontload_term_records.len(),
+            BatchConstraintModuleChip::FinalClaim => ctx.records.final_claim_records.len(),
+        }
+    }
+}
+
 impl RowMajorChip<F> for BatchConstraintModuleChip {
     type Ctx<'a> = BatchConstraintTraceCtx<'a>;
+
+    #[cfg(feature = "cuda")]
+    fn trace_name(&self) -> &'static str {
+        match self {
+            BatchConstraintModuleChip::GlobalSumcheck => "MainGlobalSumcheckAir",
+            BatchConstraintModuleChip::EvalAbsorb => "MainEvalAbsorbAir",
+            BatchConstraintModuleChip::TowerPointEq => "MainTowerPointEqAir",
+            BatchConstraintModuleChip::FrontloadTerm => "MainFrontloadTermAir",
+            BatchConstraintModuleChip::FinalClaim => "MainFinalClaimAir",
+        }
+    }
 
     fn generate_trace(
         &self,
@@ -225,8 +259,19 @@ mod cuda_tracegen {
                 .iter()
                 .map(|preflight| preflight.cpu.clone())
                 .collect::<Vec<_>>();
+            let collect_start = std::time::Instant::now();
             let mut records =
                 MainModule::collect_records(&child_vk.cpu, &proofs_cpu, &preflights_cpu).ok()?;
+            tracing::info!(
+                elapsed_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
+                global_sumcheck = records.global_sumcheck_records.len(),
+                eval_absorb = records.eval_records.len(),
+                tower_point_eq = records.tower_point_eq_records.len(),
+                frontload_term = records.frontload_term_records.len(),
+                final_claim = records.final_claim_records.len(),
+                "batch_constraint.collect_records"
+            );
+            let sort_start = std::time::Instant::now();
             records
                 .global_sumcheck_records
                 .sort_by_key(|record| record.proof_idx);
@@ -242,8 +287,17 @@ mod cuda_tracegen {
             records
                 .final_claim_records
                 .sort_by_key(|record| (record.proof_idx, record.idx));
+            tracing::info!(
+                elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
+                global_sumcheck = records.global_sumcheck_records.len(),
+                eval_absorb = records.eval_records.len(),
+                tower_point_eq = records.tower_point_eq_records.len(),
+                frontload_term = records.frontload_term_records.len(),
+                final_claim = records.final_claim_records.len(),
+                "batch_constraint.sort_records"
+            );
 
-            let ctx = BatchConstraintTraceCtx { records: &records };
+            let trace_ctx = BatchConstraintTraceCtx { records: &records };
             let chips = [
                 BatchConstraintModuleChip::GlobalSumcheck,
                 BatchConstraintModuleChip::EvalAbsorb,
@@ -257,23 +311,58 @@ mod cuda_tracegen {
                 .map(|(idx, chip)| {
                     let required_height =
                         required_heights.and_then(|heights| heights.get(idx).copied());
-                    match chip {
+                    let chip_start = std::time::Instant::now();
+                    let proving_ctx = match chip {
                         BatchConstraintModuleChip::EvalAbsorb => {
                             crate::batch_constraint::cuda::MainEvalAbsorbGpuTraceGenerator
                                 .generate_proving_ctx(
-                                    &ctx.records.eval_records.as_slice(),
+                                    &trace_ctx.records.eval_records.as_slice(),
                                     required_height,
                                 )
                         }
                         BatchConstraintModuleChip::TowerPointEq => {
                             crate::batch_constraint::cuda::MainTowerPointEqGpuTraceGenerator
                                 .generate_proving_ctx(
-                                    &ctx.records.tower_point_eq_records.as_slice(),
+                                    &trace_ctx.records.tower_point_eq_records.as_slice(),
                                     required_height,
                                 )
                         }
-                        _ => generate_gpu_proving_ctx(chip, &ctx, required_height),
+                        BatchConstraintModuleChip::FrontloadTerm => {
+                            crate::batch_constraint::cuda::MainFrontloadTermGpuTraceGenerator
+                                .generate_proving_ctx(
+                                    &trace_ctx.records.frontload_term_records.as_slice(),
+                                    required_height,
+                                )
+                        }
+                        _ => generate_gpu_proving_ctx(chip, &trace_ctx, required_height),
+                    };
+                    tracing::info!(
+                        elapsed_ms = chip_start.elapsed().as_secs_f64() * 1000.0,
+                        chip = chip.stable_name(),
+                        air = chip.trace_name(),
+                        required_height,
+                        record_count = chip.record_count(&trace_ctx),
+                        path = if matches!(
+                            chip,
+                            BatchConstraintModuleChip::EvalAbsorb
+                                | BatchConstraintModuleChip::TowerPointEq
+                                | BatchConstraintModuleChip::FrontloadTerm
+                        ) {
+                            "gpu_direct"
+                        } else {
+                            "row_major_fallback"
+                        },
+                        has_trace = proving_ctx.is_some(),
+                        "batch_constraint.chip_tracegen"
+                    );
+                    if proving_ctx.is_none() {
+                        tracing::warn!(
+                            air = chip.trace_name(),
+                            required_height,
+                            "batch constraint gpu tracegen returned none"
+                        );
                     }
+                    proving_ctx
                 })
                 .collect()
         }

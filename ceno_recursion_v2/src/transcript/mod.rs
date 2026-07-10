@@ -457,6 +457,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 mod cuda_tracegen {
     use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
     use openvm_cuda_common::stream::GpuDeviceCtx;
+    use p3_matrix::Matrix;
 
     use super::*;
     use crate::cuda::{
@@ -476,6 +477,7 @@ mod cuda_tracegen {
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
             let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+            let clone_start = std::time::Instant::now();
             let proofs_cpu = proofs
                 .iter()
                 .map(|proof| proof.cpu.clone())
@@ -484,6 +486,12 @@ mod cuda_tracegen {
                 .iter()
                 .map(|preflight| preflight.cpu.clone())
                 .collect::<Vec<_>>();
+            tracing::info!(
+                elapsed_ms = clone_start.elapsed().as_secs_f64() * 1000.0,
+                proof_count = proofs_cpu.len(),
+                preflight_count = preflights_cpu.len(),
+                "transcript.clone_cpu_inputs"
+            );
 
             let (required_transcript, required_poseidon2) = if let Some(heights) = required_heights
             {
@@ -495,11 +503,20 @@ mod cuda_tracegen {
                 (None, None)
             };
 
+            let transcript_start = std::time::Instant::now();
             let (transcript_trace, mut poseidon2_perm_inputs) =
                 self.build_transcript_trace(&proofs_cpu, &preflights_cpu, required_transcript)?;
+            tracing::info!(
+                elapsed_ms = transcript_start.elapsed().as_secs_f64() * 1000.0,
+                height = transcript_trace.height(),
+                width = transcript_trace.width(),
+                cells = transcript_trace.height() * transcript_trace.width(),
+                "transcript.build_transcript_trace"
+            );
             let mut poseidon2_compress_inputs = Vec::new();
 
             let _ = child_vk;
+            let collect_poseidon_start = std::time::Instant::now();
             poseidon2_perm_inputs.extend_from_slice(ctx.0);
             poseidon2_compress_inputs.extend_from_slice(ctx.1);
             for preflight in &preflights_cpu {
@@ -532,10 +549,29 @@ mod cuda_tracegen {
                         .map(|record| digests_to_poseidon2_input(record.left, record.right)),
                 );
             }
+            let perm_input_count = poseidon2_perm_inputs.len();
+            let compress_input_count = poseidon2_compress_inputs.len();
+            tracing::info!(
+                elapsed_ms = collect_poseidon_start.elapsed().as_secs_f64() * 1000.0,
+                perm_input_count,
+                compress_input_count,
+                total_input_count = perm_input_count + compress_input_count,
+                "transcript.collect_poseidon_inputs"
+            );
 
             let poseidon2_trace = {
+                let dedup_start = std::time::Instant::now();
                 let (mut poseidon_states, poseidon_counts) =
                     Self::dedup_poseidon_inputs(poseidon2_perm_inputs, poseidon2_compress_inputs);
+                let unique_state_count = poseidon_states.len();
+                tracing::info!(
+                    elapsed_ms = dedup_start.elapsed().as_secs_f64() * 1000.0,
+                    unique_state_count,
+                    duplicate_count = (perm_input_count + compress_input_count)
+                        .saturating_sub(unique_state_count),
+                    "transcript.dedup_poseidon_inputs"
+                );
+                let build_poseidon_start = std::time::Instant::now();
                 let poseidon2_valid_rows = poseidon_states.len();
                 let poseidon2_num_rows = if let Some(height) = required_poseidon2 {
                     if height == 0 || poseidon2_valid_rows > height {
@@ -564,16 +600,44 @@ mod cuda_tracegen {
                     cols.permute_mult = F::from_u32(count.perm);
                     cols.compress_mult = F::from_u32(count.compress);
                 }
-                RowMajorMatrix::new(poseidon_trace, poseidon2_width)
+                let trace = RowMajorMatrix::new(poseidon_trace, poseidon2_width);
+                tracing::info!(
+                    elapsed_ms = build_poseidon_start.elapsed().as_secs_f64() * 1000.0,
+                    height = trace.height(),
+                    width = trace.width(),
+                    cells = trace.height() * trace.width(),
+                    valid_rows = poseidon2_valid_rows,
+                    "transcript.build_poseidon2_trace"
+                );
+                trace
             };
 
+            let transcript_height = transcript_trace.height();
+            let transcript_width = transcript_trace.width();
+            let h2d_transcript_start = std::time::Instant::now();
+            let transcript_trace = transport_matrix_h2d_row(&transcript_trace, &device_ctx).ok()?;
+            tracing::info!(
+                elapsed_ms = h2d_transcript_start.elapsed().as_secs_f64() * 1000.0,
+                height = transcript_height,
+                width = transcript_width,
+                cells = transcript_height * transcript_width,
+                "transcript.h2d_transcript_trace"
+            );
+            let poseidon2_height = poseidon2_trace.height();
+            let poseidon2_width = poseidon2_trace.width();
+            let h2d_poseidon_start = std::time::Instant::now();
+            let poseidon2_trace = transport_matrix_h2d_row(&poseidon2_trace, &device_ctx).ok()?;
+            tracing::info!(
+                elapsed_ms = h2d_poseidon_start.elapsed().as_secs_f64() * 1000.0,
+                height = poseidon2_height,
+                width = poseidon2_width,
+                cells = poseidon2_height * poseidon2_width,
+                "transcript.h2d_poseidon2_trace"
+            );
+
             Some(vec![
-                AirProvingContext::simple_no_pis(
-                    transport_matrix_h2d_row(&transcript_trace, &device_ctx).ok()?,
-                ),
-                AirProvingContext::simple_no_pis(
-                    transport_matrix_h2d_row(&poseidon2_trace, &device_ctx).ok()?,
-                ),
+                AirProvingContext::simple_no_pis(transcript_trace),
+                AirProvingContext::simple_no_pis(poseidon2_trace),
             ])
         }
     }

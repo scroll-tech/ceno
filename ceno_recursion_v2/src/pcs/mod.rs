@@ -66,7 +66,7 @@ use crate::{
         PcsSumcheckInputRecord, PcsSumcheckRoundRecord, PcsTranscriptValueRecord, Preflight,
         RecursionField, RecursionPcs, RecursionProof, RecursionVk, TraceGenModule,
     },
-    tracegen::{ModuleChip, RowMajorChip},
+    tracegen::RowMajorChip,
     utils::digests_to_poseidon2_input,
 };
 use recursion_circuit::{
@@ -1466,6 +1466,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         _ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
+        let mut group_start = std::time::Instant::now();
         let mut transcript_values = preflights
             .iter()
             .enumerate()
@@ -1481,6 +1482,12 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             })
             .collect_vec();
         transcript_values.sort_by_key(|record| (record.proof_idx, record.tidx));
+        tracing::info!(
+            elapsed_ms = group_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = transcript_values.len(),
+            "pcs.collect_sort.transcript_values"
+        );
+        group_start = std::time::Instant::now();
         let mut sumcheck_rounds = preflights
             .iter()
             .enumerate()
@@ -1511,6 +1518,14 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             })
             .collect_vec();
         sumcheck_inputs.sort_by_key(|record| (record.proof_idx, record.idx));
+        tracing::info!(
+            elapsed_ms = group_start.elapsed().as_secs_f64() * 1000.0,
+            sumcheck_round_count = sumcheck_rounds.len(),
+            sumcheck_input_count = sumcheck_inputs.len(),
+            record_count = sumcheck_rounds.len() + sumcheck_inputs.len(),
+            "pcs.collect_sort.sumcheck_rounds_inputs"
+        );
+        group_start = std::time::Instant::now();
         let mut eq_products = preflights
             .iter()
             .enumerate()
@@ -1531,6 +1546,12 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 record.bit_idx,
             )
         });
+        tracing::info!(
+            elapsed_ms = group_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = eq_products.len(),
+            "pcs.collect_sort.eq_products"
+        );
+        group_start = std::time::Instant::now();
         let mut suffix_products = preflights
             .iter()
             .enumerate()
@@ -1553,6 +1574,12 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 record.step_idx,
             )
         });
+        tracing::info!(
+            elapsed_ms = group_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = suffix_products.len(),
+            "pcs.collect_sort.suffix_products"
+        );
+        group_start = std::time::Instant::now();
         let mut jagged_assist_h = preflights
             .iter()
             .enumerate()
@@ -1590,6 +1617,14 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 record.step_idx,
             )
         });
+        tracing::info!(
+            elapsed_ms = group_start.elapsed().as_secs_f64() * 1000.0,
+            jagged_assist_h_count = jagged_assist_h.len(),
+            jagged_assist_q_count = jagged_assist_q.len(),
+            record_count = jagged_assist_h.len() + jagged_assist_q.len(),
+            "pcs.collect_sort.jagged_assist_h_q"
+        );
+        group_start = std::time::Instant::now();
         let mut basefold_initial_claims = preflights
             .iter()
             .enumerate()
@@ -1924,6 +1959,51 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                 record.step,
             )
         });
+        let remaining_record_count = basefold_initial_claims.len()
+            + jagged_assist_inputs.len()
+            + jagged_claims.len()
+            + batch_coeffs.len()
+            + jagged_q_evals.len()
+            + jagged_assists.len()
+            + basefold_final_expected.len()
+            + basefold_final_points.len()
+            + basefold_final_claims.len()
+            + opening_points.len()
+            + opening_evals.len()
+            + basefold_query_indices.len()
+            + basefold_query_opens.len()
+            + basefold_commit_phase_queries.len()
+            + basefold_final_codeword.len()
+            + commitment_roots.len()
+            + base_input_leaf_hashes.len()
+            + base_input_merkle_rows.len()
+            + commit_phase_leaf_hashes.len()
+            + commit_phase_merkle_rows.len();
+        tracing::info!(
+            elapsed_ms = group_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = remaining_record_count,
+            basefold_initial_claims = basefold_initial_claims.len(),
+            jagged_assist_inputs = jagged_assist_inputs.len(),
+            jagged_claims = jagged_claims.len(),
+            batch_coeffs = batch_coeffs.len(),
+            jagged_q_evals = jagged_q_evals.len(),
+            jagged_assists = jagged_assists.len(),
+            basefold_final_expected = basefold_final_expected.len(),
+            basefold_final_points = basefold_final_points.len(),
+            basefold_final_claims = basefold_final_claims.len(),
+            opening_points = opening_points.len(),
+            opening_evals = opening_evals.len(),
+            basefold_query_indices = basefold_query_indices.len(),
+            basefold_query_opens = basefold_query_opens.len(),
+            basefold_commit_phase_queries = basefold_commit_phase_queries.len(),
+            basefold_final_codeword = basefold_final_codeword.len(),
+            commitment_roots = commitment_roots.len(),
+            base_input_leaf_hashes = base_input_leaf_hashes.len(),
+            base_input_merkle_rows = base_input_merkle_rows.len(),
+            commit_phase_leaf_hashes = commit_phase_leaf_hashes.len(),
+            commit_phase_merkle_rows = commit_phase_merkle_rows.len(),
+            "pcs.collect_sort.remaining_record_groups"
+        );
 
         let ctx = PcsTraceCtx {
             commitment_roots: &commitment_roots,
@@ -1986,10 +2066,24 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         .into_iter()
         .enumerate()
         .map(|(idx, chip)| {
-            chip.generate_proving_ctx(
-                &ctx,
-                required_heights.and_then(|heights| heights.get(idx).copied()),
-            )
+            let required_height = required_heights.and_then(|heights| heights.get(idx).copied());
+            let trace_start = std::time::Instant::now();
+            let trace = chip.generate_trace(&ctx, required_height);
+            tracing::info!(
+                elapsed_ms = trace_start.elapsed().as_secs_f64() * 1000.0,
+                air_name = chip.trace_name(),
+                record_count = chip.record_count(&ctx),
+                required_height,
+                has_trace = trace.is_some(),
+                height = trace.as_ref().map(|trace| trace.height()).unwrap_or(0),
+                width = trace.as_ref().map(|trace| trace.width()).unwrap_or(0),
+                cells = trace
+                    .as_ref()
+                    .map(|trace| trace.height() * trace.width())
+                    .unwrap_or(0),
+                "pcs.cpu_tracegen"
+            );
+            trace.map(AirProvingContext::simple_no_pis)
         })
         .collect()
     }
@@ -5398,6 +5492,41 @@ struct PcsTraceCtx<'a> {
     basefold_final_claims: &'a [PcsBasefoldFinalClaimRecord],
 }
 
+impl PcsModule {
+    pub(crate) fn chip_trace_names() -> &'static [&'static str] {
+        &[
+            "PcsCommitmentRootAir",
+            "PcsBaseInputLeafHashAir",
+            "PcsBaseInputMerkleAir",
+            "PcsCommitPhaseLeafHashAir",
+            "PcsCommitPhaseMerkleAir",
+            "PcsOpeningPointAir",
+            "PcsBasefoldFinalPointAir",
+            "PcsOpeningEvalAir",
+            "PcsEqProductAir",
+            "PcsSuffixProductAir",
+            "PcsJaggedAssistHAir",
+            "PcsJaggedAssistQAir",
+            "PcsBasefoldQueryIndexAir",
+            "PcsBasefoldQueryOpenAir",
+            "PcsBasefoldCommitPhaseQueryAir",
+            "PcsBasefoldFinalCodewordAir",
+            "PcsTranscriptValuesAir",
+            "PcsBasefoldInitialClaimAir",
+            "PcsJaggedAssistInputAir",
+            "PcsJaggedClaimAir",
+            "PcsSumcheckInputAir",
+            "PcsSumcheckAir",
+            "PcsBatchCoeffAir",
+            "PcsJaggedQEvalAir",
+            "PcsJaggedAssistAir",
+            "PcsBasefoldFinalExpectedAir",
+            "PcsBasefoldFinalClaimAir",
+        ]
+    }
+}
+
+#[derive(Copy, Clone)]
 enum PcsModuleChip {
     CommitmentRoot,
     BaseInputLeafHash,
@@ -5426,6 +5555,44 @@ enum PcsModuleChip {
     JaggedAssist,
     BasefoldFinalExpected,
     BasefoldFinalClaim,
+}
+
+impl PcsModuleChip {
+    fn trace_name(&self) -> &'static str {
+        PcsModule::chip_trace_names()[*self as usize]
+    }
+
+    fn record_count(&self, ctx: &PcsTraceCtx<'_>) -> usize {
+        match self {
+            PcsModuleChip::CommitmentRoot => ctx.commitment_roots.len(),
+            PcsModuleChip::BaseInputLeafHash => ctx.base_input_leaf_hashes.len(),
+            PcsModuleChip::BaseInputMerkle => ctx.base_input_merkle_rows.len(),
+            PcsModuleChip::CommitPhaseLeafHash => ctx.commit_phase_leaf_hashes.len(),
+            PcsModuleChip::CommitPhaseMerkle => ctx.commit_phase_merkle_rows.len(),
+            PcsModuleChip::OpeningPoint => ctx.opening_points.len(),
+            PcsModuleChip::BasefoldFinalPoint => ctx.basefold_final_points.len(),
+            PcsModuleChip::OpeningEval => ctx.opening_evals.len(),
+            PcsModuleChip::EqProduct => ctx.eq_products.len(),
+            PcsModuleChip::SuffixProduct => ctx.suffix_products.len(),
+            PcsModuleChip::JaggedAssistH => ctx.jagged_assist_h.len(),
+            PcsModuleChip::JaggedAssistQ => ctx.jagged_assist_q.len(),
+            PcsModuleChip::BasefoldQueryIndex => ctx.basefold_query_indices.len(),
+            PcsModuleChip::BasefoldQueryOpen => ctx.basefold_query_opens.len(),
+            PcsModuleChip::BasefoldCommitPhaseQuery => ctx.basefold_commit_phase_queries.len(),
+            PcsModuleChip::BasefoldFinalCodeword => ctx.basefold_final_codeword.len(),
+            PcsModuleChip::TranscriptValues => ctx.transcript_values.len(),
+            PcsModuleChip::BasefoldInitialClaim => ctx.basefold_initial_claims.len(),
+            PcsModuleChip::JaggedAssistInput => ctx.jagged_assist_inputs.len(),
+            PcsModuleChip::JaggedClaim => ctx.jagged_claims.len(),
+            PcsModuleChip::SumcheckInput => ctx.sumcheck_inputs.len(),
+            PcsModuleChip::Sumcheck => ctx.sumcheck_rounds.len(),
+            PcsModuleChip::BatchCoeff => ctx.batch_coeffs.len(),
+            PcsModuleChip::JaggedQEval => ctx.jagged_q_evals.len(),
+            PcsModuleChip::JaggedAssist => ctx.jagged_assists.len(),
+            PcsModuleChip::BasefoldFinalExpected => ctx.basefold_final_expected.len(),
+            PcsModuleChip::BasefoldFinalClaim => ctx.basefold_final_claims.len(),
+        }
+    }
 }
 
 impl RowMajorChip<F> for PcsModuleChip {

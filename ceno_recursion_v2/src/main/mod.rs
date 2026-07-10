@@ -688,6 +688,22 @@ enum MainModuleChip {
 impl RowMajorChip<F> for MainModuleChip {
     type Ctx<'a> = MainTraceCtx<'a>;
 
+    #[cfg(feature = "cuda")]
+    fn trace_name(&self) -> &'static str {
+        match self {
+            MainModuleChip::Main => "MainAir",
+            MainModuleChip::TranscriptBind => "MainTranscriptBindAir",
+            MainModuleChip::EccRtChallenge => "MainEccRtChallengeAir",
+            MainModuleChip::EccRtEquation => "MainEccRtEquationAir",
+            MainModuleChip::EccRtSumcheck => "MainEccRtSumcheckAir",
+            MainModuleChip::EccRtQuark => "MainEccRtQuarkAir",
+            MainModuleChip::EccRt => "MainEccRtAir",
+            MainModuleChip::SelectorPoint => "MainSelectorPointAir",
+            MainModuleChip::SelectorFormula => "MainSelectorFormulaAir",
+            MainModuleChip::SelectorEval => "MainSelectorEvalAir",
+        }
+    }
+
     fn generate_trace(
         &self,
         ctx: &Self::Ctx<'_>,
@@ -811,11 +827,18 @@ mod cuda_tracegen {
                 .iter()
                 .enumerate()
                 .map(|(idx, chip)| {
-                    generate_gpu_proving_ctx(
-                        chip,
-                        &ctx,
-                        required_heights.and_then(|heights| heights.get(idx).copied()),
-                    )
+                    let required_height =
+                        required_heights.and_then(|heights| heights.get(idx).copied());
+                    match chip {
+                        MainModuleChip::SelectorFormula => {
+                            crate::main::selector::cuda::MainSelectorFormulaGpuTraceGenerator
+                                .generate_proving_ctx(
+                                    &selector_eval_records.as_slice(),
+                                    required_height,
+                                )
+                        }
+                        _ => generate_gpu_proving_ctx(chip, &ctx, required_height),
+                    }
                 })
                 .collect()
         }
