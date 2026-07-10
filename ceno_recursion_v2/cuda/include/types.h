@@ -120,6 +120,19 @@ typedef struct {
 
 typedef struct {
     size_t proof_idx;
+    bool is_proof_start;
+    size_t tidx;
+    bool is_sample;
+    Fp mask[8];
+    Fp prev_state[16];
+    Fp post_state[16];
+    bool is_fork_start;
+    bool is_fork;
+    size_t fork_id;
+} TranscriptRowData;
+
+typedef struct {
+    size_t proof_idx;
     size_t idx;
     size_t fork_id;
     size_t layer_idx;

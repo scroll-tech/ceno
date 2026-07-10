@@ -28,6 +28,21 @@ pub use transcript_air::{ForkedTranscriptAir, ForkedTranscriptCols};
 // Should be 1 when 3 <= max_constraint_degree < 7.
 const SBOX_REGISTERS: usize = 1;
 
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+struct TranscriptRowData {
+    proof_idx: usize,
+    is_proof_start: bool,
+    tidx: usize,
+    is_sample: bool,
+    mask: [F; CHUNK],
+    prev_state: [F; POSEIDON2_WIDTH],
+    post_state: [F; POSEIDON2_WIDTH],
+    is_fork_start: bool,
+    is_fork: bool,
+    fork_id: usize,
+}
+
 pub struct TranscriptModule {
     pub bus_inventory: BusInventory,
     final_state_bus_enabled: bool,
@@ -85,16 +100,13 @@ impl TranscriptModule {
         num_valid_rows
     }
 
-    /// Fill transcript trace rows from a single transcript log.
+    /// Build transcript row records from a single transcript log.
     ///
-    /// `tidx_offset` is added to the local tidx.
-    ///
-    /// Returns the final sponge state after processing the log.
+    /// `tidx_offset` is added to the local tidx. Returns the final sponge state after processing
+    /// the log.
     #[allow(clippy::too_many_arguments)]
-    fn fill_log_rows(
+    fn collect_log_row_records(
         &self,
-        trace: &mut [F],
-        transcript_width: usize,
         log: &openvm_stark_backend::TranscriptLog<F, [F; POSEIDON2_WIDTH]>,
         proof_idx: usize,
         fork_id: usize,
@@ -102,34 +114,34 @@ impl TranscriptModule {
         is_fork_start: bool,
         initial_state: [F; POSEIDON2_WIDTH],
         tidx_offset: usize,
+        out: &mut Vec<TranscriptRowData>,
         poseidon2_perm_inputs: &mut Vec<[F; POSEIDON2_WIDTH]>,
     ) -> [F; POSEIDON2_WIDTH] {
         let mut tidx = 0usize;
         let mut prev_poseidon_state = initial_state;
+        let start_row = out.len();
 
-        for (i, row) in trace.chunks_exact_mut(transcript_width).enumerate() {
-            let cols: &mut ForkedTranscriptCols<F> = row.borrow_mut();
-            cols.proof_idx = F::from_usize(proof_idx);
-            cols.fork_id = F::from_usize(fork_id);
-
-            if i == 0 && is_proof_start {
-                cols.is_proof_start = F::ONE;
-            }
-            if i == 0 && is_fork_start {
-                cols.is_fork_start = F::ONE;
-            }
-            cols.is_fork = F::from_bool(is_fork_start);
+        while tidx < log.len() {
+            let local_row = out.len() - start_row;
+            let mut record = TranscriptRowData {
+                proof_idx,
+                is_proof_start: local_row == 0 && is_proof_start,
+                fork_id,
+                is_fork_start: local_row == 0 && is_fork_start,
+                is_fork: is_fork_start,
+                prev_state: prev_poseidon_state,
+                ..Default::default()
+            };
 
             let is_sample = log.samples()[tidx];
-            cols.is_sample = F::from_bool(is_sample);
-            cols.tidx = F::from_usize(tidx + tidx_offset);
-            cols.mask[0] = F::ONE;
-            cols.prev_state = prev_poseidon_state;
+            record.is_sample = is_sample;
+            record.tidx = tidx + tidx_offset;
+            record.mask[0] = F::ONE;
 
             if is_sample {
-                debug_assert_eq!(cols.prev_state[CHUNK - 1], log.values()[tidx]);
+                debug_assert_eq!(record.prev_state[CHUNK - 1], log.values()[tidx]);
             } else {
-                cols.prev_state[0] = log.values()[tidx];
+                record.prev_state[0] = log.values()[tidx];
             }
 
             tidx += 1;
@@ -145,11 +157,11 @@ impl TranscriptModule {
                     break;
                 }
 
-                cols.mask[idx] = F::ONE;
+                record.mask[idx] = F::ONE;
                 if is_sample {
-                    debug_assert_eq!(cols.prev_state[CHUNK - 1 - idx], log.values()[tidx]);
+                    debug_assert_eq!(record.prev_state[CHUNK - 1 - idx], log.values()[tidx]);
                 } else {
-                    cols.prev_state[idx] = log.values()[tidx];
+                    record.prev_state[idx] = log.values()[tidx];
                 }
 
                 tidx += 1;
@@ -160,12 +172,13 @@ impl TranscriptModule {
                 }
             }
 
-            prev_poseidon_state = cols.prev_state;
+            prev_poseidon_state = record.prev_state;
             if permuted {
                 self.perm.permute_mut(&mut prev_poseidon_state);
-                poseidon2_perm_inputs.push(cols.prev_state);
+                poseidon2_perm_inputs.push(record.prev_state);
             }
-            cols.post_state = prev_poseidon_state;
+            record.post_state = prev_poseidon_state;
+            out.push(record);
         }
 
         debug_assert_eq!(tidx, log.len());
@@ -173,14 +186,11 @@ impl TranscriptModule {
     }
 
     #[tracing::instrument(name = "generate_trace.transcript", level = "trace", skip_all)]
-    fn build_transcript_trace(
+    fn collect_transcript_row_records(
         &self,
-        _proofs: &[RecursionProof],
-        preflights: &[Preflight],
+        preflights: &[&Preflight],
         required_height: Option<usize>,
-    ) -> Option<(RowMajorMatrix<F>, Vec<[F; POSEIDON2_WIDTH]>)> {
-        let transcript_width = ForkedTranscriptCols::<F>::width();
-
+    ) -> Option<(Vec<TranscriptRowData>, usize, Vec<[F; POSEIDON2_WIDTH]>)> {
         // Count valid rows for each proof (trunk + all forks).
         struct ProofRowInfo {
             trunk_rows: usize,
@@ -215,20 +225,15 @@ impl TranscriptModule {
             total_valid_rows.next_power_of_two()
         };
 
-        let mut transcript_trace = vec![F::ZERO; transcript_num_rows * transcript_width];
+        let mut records = Vec::with_capacity(total_valid_rows);
         let mut poseidon2_perm_inputs = vec![];
 
-        let mut offset = 0usize;
         for (pidx, preflight) in preflights.iter().enumerate() {
             let info = &proof_infos[pidx];
 
             // Fill trunk rows (fork_id = 0, tidx_offset = 0).
-            let trunk_end = offset + info.trunk_rows;
-            let trunk_slice =
-                &mut transcript_trace[offset * transcript_width..trunk_end * transcript_width];
-            let _trunk_final_state = self.fill_log_rows(
-                trunk_slice,
-                transcript_width,
+            let before_trunk = records.len();
+            let _trunk_final_state = self.collect_log_row_records(
                 &preflight.transcript,
                 pidx,
                 0,                          // fork_id
@@ -236,21 +241,17 @@ impl TranscriptModule {
                 false,                      // is_fork_start
                 [F::ZERO; POSEIDON2_WIDTH], // trunk starts with zero state
                 0,                          // tidx_offset: trunk starts at global tidx 0
+                &mut records,
                 &mut poseidon2_perm_inputs,
             );
-            offset = trunk_end;
+            debug_assert_eq!(records.len() - before_trunk, info.trunk_rows);
 
             // Fill fork rows with fork-local tidx offsets.
             for (fi, fork_log) in preflight.fork_transcripts.iter().enumerate() {
-                let fork_rows = info.fork_rows[fi];
-                let fork_end = offset + fork_rows;
-                let fork_slice =
-                    &mut transcript_trace[offset * transcript_width..fork_end * transcript_width];
+                let before_fork = records.len();
                 // Fresh fork semantics: every fork transcript starts from a
                 // clean sponge state and is domain-separated by "fork".
-                let _ = self.fill_log_rows(
-                    fork_slice,
-                    transcript_width,
+                let _ = self.collect_log_row_records(
                     &fork_log.log,
                     pidx,
                     fork_log.fork_id,
@@ -258,16 +259,40 @@ impl TranscriptModule {
                     true,  // is_fork_start
                     [F::ZERO; POSEIDON2_WIDTH],
                     0,
+                    &mut records,
                     &mut poseidon2_perm_inputs,
                 );
-                offset = fork_end;
+                debug_assert_eq!(records.len() - before_fork, info.fork_rows[fi]);
             }
         }
+        debug_assert_eq!(records.len(), total_valid_rows);
 
-        Some((
-            RowMajorMatrix::new(transcript_trace, transcript_width),
-            poseidon2_perm_inputs,
-        ))
+        Some((records, transcript_num_rows, poseidon2_perm_inputs))
+    }
+
+    fn transcript_trace_from_records(
+        records: &[TranscriptRowData],
+        height: usize,
+    ) -> RowMajorMatrix<F> {
+        let transcript_width = ForkedTranscriptCols::<F>::width();
+        let mut transcript_trace = vec![F::ZERO; height * transcript_width];
+        for (record, row) in records
+            .iter()
+            .zip(transcript_trace.chunks_exact_mut(transcript_width))
+        {
+            let cols: &mut ForkedTranscriptCols<F> = row.borrow_mut();
+            cols.proof_idx = F::from_usize(record.proof_idx);
+            cols.is_proof_start = F::from_bool(record.is_proof_start);
+            cols.tidx = F::from_usize(record.tidx);
+            cols.is_sample = F::from_bool(record.is_sample);
+            cols.mask = record.mask;
+            cols.prev_state = record.prev_state;
+            cols.post_state = record.post_state;
+            cols.is_fork_start = F::from_bool(record.is_fork_start);
+            cols.is_fork = F::from_bool(record.is_fork);
+            cols.fork_id = F::from_usize(record.fork_id);
+        }
+        RowMajorMatrix::new(transcript_trace, transcript_width)
     }
 
     fn dedup_poseidon_inputs(
@@ -375,8 +400,11 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             (None, None)
         };
 
-        let (transcript_trace, mut poseidon2_perm_inputs) =
-            self.build_transcript_trace(proofs, preflights, required_transcript)?;
+        let preflight_refs = preflights.iter().collect::<Vec<_>>();
+        let (transcript_records, transcript_height, mut poseidon2_perm_inputs) =
+            self.collect_transcript_row_records(&preflight_refs, required_transcript)?;
+        let transcript_trace =
+            Self::transcript_trace_from_records(&transcript_records, transcript_height);
         let mut poseidon2_compress_inputs = Vec::new();
 
         poseidon2_perm_inputs.extend_from_slice(ctx.0);
@@ -455,14 +483,97 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
 #[cfg(feature = "cuda")]
 mod cuda_tracegen {
-    use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
-    use openvm_cuda_common::stream::GpuDeviceCtx;
+    use openvm_cuda_backend::{
+        GpuBackend, base::DeviceMatrix, data_transporter::transport_matrix_h2d_row,
+    };
+    use openvm_cuda_common::{
+        d_buffer::DeviceBuffer,
+        error::CudaError,
+        memory_manager::MemTracker,
+        stream::{GpuDeviceCtx, cudaStream_t},
+    };
     use p3_matrix::Matrix;
 
     use super::*;
     use crate::cuda::{
-        GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu,
+        GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, to_device_or_nullptr,
+        vk::VerifyingKeyGpu,
     };
+
+    unsafe extern "C" {
+        fn _transcript_tracegen(
+            d_trace: *mut F,
+            height: usize,
+            d_records: *const TranscriptRowData,
+            num_records: usize,
+            stream: cudaStream_t,
+        ) -> i32;
+    }
+
+    unsafe fn transcript_tracegen(
+        d_trace: &DeviceBuffer<F>,
+        height: usize,
+        d_records: &DeviceBuffer<TranscriptRowData>,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> Result<(), CudaError> {
+        unsafe {
+            CudaError::from_result(_transcript_tracegen(
+                d_trace.as_mut_ptr(),
+                height,
+                d_records.as_ptr(),
+                num_records,
+                stream,
+            ))
+        }
+    }
+
+    fn generate_transcript_gpu_ctx(
+        records: &[TranscriptRowData],
+        height: usize,
+    ) -> Option<AirProvingContext<GpuBackend>> {
+        let mem = MemTracker::start("tracegen.transcript");
+        let width = ForkedTranscriptCols::<F>::width();
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+
+        let h2d_start = std::time::Instant::now();
+        let d_records = to_device_or_nullptr(records).ok()?;
+        tracing::info!(
+            elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "transcript.h2d_row_records"
+        );
+
+        let kernel_start = std::time::Instant::now();
+        unsafe {
+            if let Err(err) = transcript_tracegen(
+                trace.buffer(),
+                height,
+                &d_records,
+                records.len(),
+                device_ctx.stream.as_raw(),
+            ) {
+                tracing::warn!(?err, "transcript_tracegen failed");
+                return None;
+            }
+        }
+        device_ctx.stream.synchronize().ok()?;
+        tracing::info!(
+            elapsed_ms = kernel_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "transcript.kernel_launch_sync"
+        );
+        mem.emit_metrics();
+
+        Some(AirProvingContext::simple_no_pis(trace))
+    }
 
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for TranscriptModule {
         type ModuleSpecificCtx<'a> = (&'a [[F; POSEIDON2_WIDTH]], &'a [[F; POSEIDON2_WIDTH]]);
@@ -477,21 +588,11 @@ mod cuda_tracegen {
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
             let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
-            let clone_start = std::time::Instant::now();
-            let proofs_cpu = proofs
-                .iter()
-                .map(|proof| proof.cpu.clone())
-                .collect::<Vec<_>>();
+            let _ = (child_vk, proofs);
             let preflights_cpu = preflights
                 .iter()
-                .map(|preflight| preflight.cpu.clone())
+                .map(|preflight| &preflight.cpu)
                 .collect::<Vec<_>>();
-            tracing::info!(
-                elapsed_ms = clone_start.elapsed().as_secs_f64() * 1000.0,
-                proof_count = proofs_cpu.len(),
-                preflight_count = preflights_cpu.len(),
-                "transcript.clone_cpu_inputs"
-            );
 
             let (required_transcript, required_poseidon2) = if let Some(heights) = required_heights
             {
@@ -504,18 +605,18 @@ mod cuda_tracegen {
             };
 
             let transcript_start = std::time::Instant::now();
-            let (transcript_trace, mut poseidon2_perm_inputs) =
-                self.build_transcript_trace(&proofs_cpu, &preflights_cpu, required_transcript)?;
+            let (transcript_records, transcript_height, mut poseidon2_perm_inputs) =
+                self.collect_transcript_row_records(&preflights_cpu, required_transcript)?;
             tracing::info!(
                 elapsed_ms = transcript_start.elapsed().as_secs_f64() * 1000.0,
-                height = transcript_trace.height(),
-                width = transcript_trace.width(),
-                cells = transcript_trace.height() * transcript_trace.width(),
-                "transcript.build_transcript_trace"
+                record_count = transcript_records.len(),
+                height = transcript_height,
+                width = ForkedTranscriptCols::<F>::width(),
+                cells = transcript_height * ForkedTranscriptCols::<F>::width(),
+                "transcript.collect_row_records"
             );
             let mut poseidon2_compress_inputs = Vec::new();
 
-            let _ = child_vk;
             let collect_poseidon_start = std::time::Instant::now();
             poseidon2_perm_inputs.extend_from_slice(ctx.0);
             poseidon2_compress_inputs.extend_from_slice(ctx.1);
@@ -612,17 +713,8 @@ mod cuda_tracegen {
                 trace
             };
 
-            let transcript_height = transcript_trace.height();
-            let transcript_width = transcript_trace.width();
-            let h2d_transcript_start = std::time::Instant::now();
-            let transcript_trace = transport_matrix_h2d_row(&transcript_trace, &device_ctx).ok()?;
-            tracing::info!(
-                elapsed_ms = h2d_transcript_start.elapsed().as_secs_f64() * 1000.0,
-                height = transcript_height,
-                width = transcript_width,
-                cells = transcript_height * transcript_width,
-                "transcript.h2d_transcript_trace"
-            );
+            let transcript_trace =
+                generate_transcript_gpu_ctx(&transcript_records, transcript_height)?;
             let poseidon2_height = poseidon2_trace.height();
             let poseidon2_width = poseidon2_trace.width();
             let h2d_poseidon_start = std::time::Instant::now();
@@ -636,7 +728,7 @@ mod cuda_tracegen {
             );
 
             Some(vec![
-                AirProvingContext::simple_no_pis(transcript_trace),
+                transcript_trace,
                 AirProvingContext::simple_no_pis(poseidon2_trace),
             ])
         }
