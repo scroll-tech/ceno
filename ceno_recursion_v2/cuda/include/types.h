@@ -88,6 +88,38 @@ typedef struct {
 
 typedef struct {
     size_t proof_idx;
+    size_t round_idx;
+    size_t sumcheck_idx;
+    size_t commitment_kind;
+    size_t term_idx;
+    size_t step_idx;
+    size_t robp_idx;
+    bool is_first;
+    bool is_last;
+    bool is_first_step;
+    bool is_last_step;
+    bool term_is_last;
+    Fp eq_col[D_EF];
+    size_t t_lo;
+    size_t t_hi;
+    bool c_bit;
+    bool d_bit;
+    size_t bit_pow2;
+    size_t c_acc_in;
+    size_t c_acc_out;
+    size_t d_acc_in;
+    size_t d_acc_out;
+    Fp rho_star_c[D_EF];
+    Fp rho_star_d[D_EF];
+    Fp factor[D_EF];
+    Fp term_acc_in[D_EF];
+    Fp term_acc_out[D_EF];
+    Fp q_acc_in[D_EF];
+    Fp q_acc_out[D_EF];
+} PcsJaggedAssistQData;
+
+typedef struct {
+    size_t proof_idx;
     size_t idx;
     size_t fork_id;
     size_t layer_idx;

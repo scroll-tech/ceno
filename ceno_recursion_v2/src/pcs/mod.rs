@@ -1,4 +1,6 @@
 use core::borrow::{Borrow, BorrowMut};
+#[cfg(feature = "cuda")]
+use std::cell::Cell;
 use std::sync::Arc;
 
 use eyre::{Result, bail};
@@ -15,7 +17,8 @@ use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, BaseAirWithPublicValues, FiatShamirTranscript, PartitionedBaseAir, StarkProtocolConfig,
-    TranscriptHistory, interaction::InteractionBuilder, prover::AirProvingContext,
+    TranscriptHistory, interaction::InteractionBuilder, p3_maybe_rayon::prelude::*,
+    prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{
     BabyBearPoseidon2Config, D_EF, DIGEST_SIZE, EF, F, poseidon2_compress_with_capacity,
@@ -1595,28 +1598,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             })
             .collect_vec();
         jagged_assist_h.sort_by_key(|record| (record.proof_idx, record.round_idx, record.step_idx));
-        let mut jagged_assist_q = preflights
-            .iter()
-            .enumerate()
-            .flat_map(|(proof_idx, p)| {
-                p.pcs
-                    .jagged_assist_q
-                    .iter()
-                    .cloned()
-                    .map(move |mut record| {
-                        record.proof_idx = proof_idx;
-                        record
-                    })
-            })
-            .collect_vec();
-        jagged_assist_q.sort_by_key(|record| {
-            (
-                record.proof_idx,
-                record.round_idx,
-                record.term_idx,
-                record.step_idx,
-            )
-        });
+        let jagged_assist_q = collect_pcs_jagged_assist_q_records(preflights);
         tracing::info!(
             elapsed_ms = group_start.elapsed().as_secs_f64() * 1000.0,
             jagged_assist_h_count = jagged_assist_h.len(),
@@ -2067,6 +2049,21 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         .enumerate()
         .map(|(idx, chip)| {
             let required_height = required_heights.and_then(|heights| heights.get(idx).copied());
+            if matches!(chip, PcsModuleChip::JaggedAssistQ) && skip_pcs_jagged_assist_q_cpu_trace()
+            {
+                let width = PcsJaggedAssistQCols::<F>::width();
+                tracing::info!(
+                    air_name = chip.trace_name(),
+                    record_count = chip.record_count(&ctx),
+                    required_height,
+                    width,
+                    "pcs.cpu_tracegen_skipped_for_gpu_direct"
+                );
+                return Some(AirProvingContext::simple_no_pis(RowMajorMatrix::new(
+                    vec![F::ZERO; width],
+                    width,
+                )));
+            }
             let trace_start = std::time::Instant::now();
             let trace = chip.generate_trace(&ctx, required_height);
             tracing::info!(
@@ -5526,6 +5523,59 @@ impl PcsModule {
     }
 }
 
+#[cfg(feature = "cuda")]
+thread_local! {
+    static SKIP_JAGGED_ASSIST_Q_CPU_TRACE: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(feature = "cuda")]
+pub(crate) fn with_skip_pcs_jagged_assist_q_cpu_trace<T>(f: impl FnOnce() -> T) -> T {
+    SKIP_JAGGED_ASSIST_Q_CPU_TRACE.with(|flag| {
+        let previous = flag.replace(true);
+        let result = f();
+        flag.set(previous);
+        result
+    })
+}
+
+#[cfg(feature = "cuda")]
+fn skip_pcs_jagged_assist_q_cpu_trace() -> bool {
+    SKIP_JAGGED_ASSIST_Q_CPU_TRACE.with(Cell::get)
+}
+
+#[cfg(not(feature = "cuda"))]
+fn skip_pcs_jagged_assist_q_cpu_trace() -> bool {
+    false
+}
+
+pub(crate) fn collect_pcs_jagged_assist_q_records(
+    preflights: &[Preflight],
+) -> Vec<PcsJaggedAssistQRecord> {
+    let mut records = preflights
+        .iter()
+        .enumerate()
+        .flat_map(|(proof_idx, p)| {
+            p.pcs
+                .jagged_assist_q
+                .iter()
+                .cloned()
+                .map(move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                })
+        })
+        .collect_vec();
+    records.sort_by_key(|record| {
+        (
+            record.proof_idx,
+            record.round_idx,
+            record.term_idx,
+            record.step_idx,
+        )
+    });
+    records
+}
+
 #[derive(Copy, Clone)]
 enum PcsModuleChip {
     CommitmentRoot,
@@ -5835,25 +5885,27 @@ impl RowMajorChip<F> for PcsCommitPhaseMerkleTraceGenerator {
         let width = PcsCommitPhaseMerkleCols::<F>::width();
         let height = trace_height(records.len(), required_height)?;
         let mut trace = vec![F::ZERO; height * width];
-        for (row_idx, record) in records.iter().enumerate() {
-            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
-            let cols: &mut PcsCommitPhaseMerkleCols<F> = row.borrow_mut();
-            cols.is_enabled = F::ONE;
-            cols.proof_idx = F::from_usize(record.proof_idx);
-            cols.query_idx = F::from_usize(record.query_idx);
-            cols.round = F::from_usize(record.round);
-            cols.step = F::from_usize(record.step);
-            cols.is_first = F::from_bool(record.is_first);
-            cols.is_last = F::from_bool(record.is_last);
-            cols.idx_in = F::from_usize(record.idx_in);
-            cols.idx_bit = F::from_usize(record.idx_bit);
-            cols.idx_out = F::from_usize(record.idx_out);
-            cols.current = record.current;
-            cols.sibling = record.sibling;
-            cols.left = record.left;
-            cols.right = record.right;
-            cols.output = record.output;
-        }
+        trace
+            .par_chunks_exact_mut(width)
+            .zip(records.par_iter())
+            .for_each(|(row, record)| {
+                let cols: &mut PcsCommitPhaseMerkleCols<F> = row.borrow_mut();
+                cols.is_enabled = F::ONE;
+                cols.proof_idx = F::from_usize(record.proof_idx);
+                cols.query_idx = F::from_usize(record.query_idx);
+                cols.round = F::from_usize(record.round);
+                cols.step = F::from_usize(record.step);
+                cols.is_first = F::from_bool(record.is_first);
+                cols.is_last = F::from_bool(record.is_last);
+                cols.idx_in = F::from_usize(record.idx_in);
+                cols.idx_bit = F::from_usize(record.idx_bit);
+                cols.idx_out = F::from_usize(record.idx_out);
+                cols.current = record.current;
+                cols.sibling = record.sibling;
+                cols.left = record.left;
+                cols.right = record.right;
+                cols.output = record.output;
+            });
         Some(RowMajorMatrix::new(trace, width))
     }
 }
@@ -5949,30 +6001,32 @@ impl RowMajorChip<F> for PcsEqProductTraceGenerator {
         let width = PcsEqProductCols::<F>::width();
         let height = trace_height(records.len(), required_height)?;
         let mut trace = vec![F::ZERO; height * width];
-        for (row_idx, record) in records.iter().enumerate() {
-            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
-            let cols: &mut PcsEqProductCols<F> = row.borrow_mut();
-            cols.is_enabled = F::ONE;
-            cols.proof_idx = F::from_usize(record.proof_idx);
-            cols.kind = F::from_usize(record.kind.as_usize());
-            cols.source = F::from_usize(record.source.as_usize());
-            cols.round_idx = F::from_usize(record.round_idx);
-            cols.term_idx = F::from_usize(record.term_idx);
-            cols.bit_idx = F::from_usize(record.bit_idx);
-            cols.is_first = F::from_bool(record.is_first);
-            cols.is_last = F::from_bool(record.is_last);
-            cols.lookup_count = F::from_usize(record.lookup_count);
-            cols.point_tidx = F::from_usize(record.point_tidx);
-            cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
-            cols.point_round = F::from_usize(record.point_round);
-            cols.index_bit = F::from_bool(record.index_bit);
-            cols.index_pow2 = F::from_usize(record.index_pow2);
-            cols.index_acc_in = F::from_usize(record.index_acc_in);
-            cols.index_acc_out = F::from_usize(record.index_acc_out);
-            cols.point = ext_limbs(record.point);
-            cols.acc_in = ext_limbs(record.acc_in);
-            cols.acc_out = ext_limbs(record.acc_out);
-        }
+        trace
+            .par_chunks_exact_mut(width)
+            .zip(records.par_iter())
+            .for_each(|(row, record)| {
+                let cols: &mut PcsEqProductCols<F> = row.borrow_mut();
+                cols.is_enabled = F::ONE;
+                cols.proof_idx = F::from_usize(record.proof_idx);
+                cols.kind = F::from_usize(record.kind.as_usize());
+                cols.source = F::from_usize(record.source.as_usize());
+                cols.round_idx = F::from_usize(record.round_idx);
+                cols.term_idx = F::from_usize(record.term_idx);
+                cols.bit_idx = F::from_usize(record.bit_idx);
+                cols.is_first = F::from_bool(record.is_first);
+                cols.is_last = F::from_bool(record.is_last);
+                cols.lookup_count = F::from_usize(record.lookup_count);
+                cols.point_tidx = F::from_usize(record.point_tidx);
+                cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+                cols.point_round = F::from_usize(record.point_round);
+                cols.index_bit = F::from_bool(record.index_bit);
+                cols.index_pow2 = F::from_usize(record.index_pow2);
+                cols.index_acc_in = F::from_usize(record.index_acc_in);
+                cols.index_acc_out = F::from_usize(record.index_acc_out);
+                cols.point = ext_limbs(record.point);
+                cols.acc_in = ext_limbs(record.acc_in);
+                cols.acc_out = ext_limbs(record.acc_out);
+            });
         Some(RowMajorMatrix::new(trace, width))
     }
 }
@@ -5988,22 +6042,24 @@ impl RowMajorChip<F> for PcsSuffixProductTraceGenerator {
         let width = PcsSuffixProductCols::<F>::width();
         let height = trace_height(records.len(), required_height)?;
         let mut trace = vec![F::ZERO; height * width];
-        for (row_idx, record) in records.iter().enumerate() {
-            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
-            let cols: &mut PcsSuffixProductCols<F> = row.borrow_mut();
-            cols.is_enabled = F::ONE;
-            cols.proof_idx = F::from_usize(record.proof_idx);
-            cols.round_idx = F::from_usize(record.round_idx);
-            cols.term_idx = F::from_usize(record.term_idx);
-            cols.coord_idx = F::from_usize(record.coord_idx);
-            cols.step_idx = F::from_usize(record.step_idx);
-            cols.is_first = F::from_bool(record.is_first);
-            cols.is_last = F::from_bool(record.is_last);
-            cols.has_factor = F::from_bool(record.has_factor);
-            cols.point = ext_limbs(record.point);
-            cols.acc_in = ext_limbs(record.acc_in);
-            cols.acc_out = ext_limbs(record.acc_out);
-        }
+        trace
+            .par_chunks_exact_mut(width)
+            .zip(records.par_iter())
+            .for_each(|(row, record)| {
+                let cols: &mut PcsSuffixProductCols<F> = row.borrow_mut();
+                cols.is_enabled = F::ONE;
+                cols.proof_idx = F::from_usize(record.proof_idx);
+                cols.round_idx = F::from_usize(record.round_idx);
+                cols.term_idx = F::from_usize(record.term_idx);
+                cols.coord_idx = F::from_usize(record.coord_idx);
+                cols.step_idx = F::from_usize(record.step_idx);
+                cols.is_first = F::from_bool(record.is_first);
+                cols.is_last = F::from_bool(record.is_last);
+                cols.has_factor = F::from_bool(record.has_factor);
+                cols.point = ext_limbs(record.point);
+                cols.acc_in = ext_limbs(record.acc_in);
+                cols.acc_out = ext_limbs(record.acc_out);
+            });
         Some(RowMajorMatrix::new(trace, width))
     }
 }
@@ -6054,56 +6110,206 @@ impl RowMajorChip<F> for PcsJaggedAssistQTraceGenerator {
         let width = PcsJaggedAssistQCols::<F>::width();
         let height = trace_height(records.len(), required_height)?;
         let mut trace = vec![F::ZERO; height * width];
-        for row in trace.chunks_exact_mut(width) {
+        trace.par_chunks_exact_mut(width).for_each(|row| {
             let cols: &mut PcsJaggedAssistQCols<F> = row.borrow_mut();
             cols.factor[0] = F::ONE;
-        }
-        for (row_idx, record) in records.iter().enumerate() {
-            let row = &mut trace[row_idx * width..(row_idx + 1) * width];
-            let cols: &mut PcsJaggedAssistQCols<F> = row.borrow_mut();
-            cols.is_enabled = F::ONE;
-            cols.proof_idx = F::from_usize(record.proof_idx);
-            cols.round_idx = F::from_usize(record.round_idx);
-            cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
-            cols.commitment_kind = F::from_usize(record.commitment_kind);
-            cols.term_idx = F::from_usize(record.term_idx);
-            cols.step_idx = F::from_usize(record.step_idx);
-            cols.robp_idx = F::from_usize(record.robp_idx);
-            cols.is_first = F::from_bool(record.is_first);
-            cols.is_last = F::from_bool(record.is_last);
-            cols.is_first_step = F::from_bool(record.is_first_step);
-            cols.is_last_step = F::from_bool(record.is_last_step);
-            cols.term_is_last = F::from_bool(record.term_is_last);
-            cols.is_next_term = F::from_bool(record.is_last_step && !record.term_is_last);
-            cols.eq_col = ext_limbs(record.eq_col);
-            cols.t_lo = F::from_usize(record.t_lo);
-            cols.t_hi = F::from_usize(record.t_hi);
-            cols.c_bit = F::from_bool(record.c_bit);
-            cols.d_bit = F::from_bool(record.d_bit);
-            cols.bit_pow2 = F::from_usize(record.bit_pow2);
-            cols.c_acc_in = F::from_usize(record.c_acc_in);
-            cols.c_acc_out = F::from_usize(record.c_acc_out);
-            cols.d_acc_in = F::from_usize(record.d_acc_in);
-            cols.d_acc_out = F::from_usize(record.d_acc_out);
-            cols.rho_star_c = ext_limbs(record.rho_star_c);
-            cols.rho_star_d = ext_limbs(record.rho_star_d);
-            let c_factor = if record.c_bit {
-                record.rho_star_c
-            } else {
-                RecursionField::ONE - record.rho_star_c
-            };
-            let d_factor = if record.d_bit {
-                record.rho_star_d
-            } else {
-                RecursionField::ONE - record.rho_star_d
-            };
-            cols.factor = ext_limbs(c_factor * d_factor);
-            cols.term_acc_in = ext_limbs(record.term_acc_in);
-            cols.term_acc_out = ext_limbs(record.term_acc_out);
-            cols.q_acc_in = ext_limbs(record.q_acc_in);
-            cols.q_acc_out = ext_limbs(record.q_acc_out);
-        }
+        });
+        trace
+            .par_chunks_exact_mut(width)
+            .zip(records.par_iter())
+            .for_each(|(row, record)| {
+                let cols: &mut PcsJaggedAssistQCols<F> = row.borrow_mut();
+                cols.is_enabled = F::ONE;
+                cols.proof_idx = F::from_usize(record.proof_idx);
+                cols.round_idx = F::from_usize(record.round_idx);
+                cols.sumcheck_idx = F::from_usize(record.sumcheck_idx);
+                cols.commitment_kind = F::from_usize(record.commitment_kind);
+                cols.term_idx = F::from_usize(record.term_idx);
+                cols.step_idx = F::from_usize(record.step_idx);
+                cols.robp_idx = F::from_usize(record.robp_idx);
+                cols.is_first = F::from_bool(record.is_first);
+                cols.is_last = F::from_bool(record.is_last);
+                cols.is_first_step = F::from_bool(record.is_first_step);
+                cols.is_last_step = F::from_bool(record.is_last_step);
+                cols.term_is_last = F::from_bool(record.term_is_last);
+                cols.is_next_term = F::from_bool(record.is_last_step && !record.term_is_last);
+                cols.eq_col = ext_limbs(record.eq_col);
+                cols.t_lo = F::from_usize(record.t_lo);
+                cols.t_hi = F::from_usize(record.t_hi);
+                cols.c_bit = F::from_bool(record.c_bit);
+                cols.d_bit = F::from_bool(record.d_bit);
+                cols.bit_pow2 = F::from_usize(record.bit_pow2);
+                cols.c_acc_in = F::from_usize(record.c_acc_in);
+                cols.c_acc_out = F::from_usize(record.c_acc_out);
+                cols.d_acc_in = F::from_usize(record.d_acc_in);
+                cols.d_acc_out = F::from_usize(record.d_acc_out);
+                cols.rho_star_c = ext_limbs(record.rho_star_c);
+                cols.rho_star_d = ext_limbs(record.rho_star_d);
+                let c_factor = if record.c_bit {
+                    record.rho_star_c
+                } else {
+                    RecursionField::ONE - record.rho_star_c
+                };
+                let d_factor = if record.d_bit {
+                    record.rho_star_d
+                } else {
+                    RecursionField::ONE - record.rho_star_d
+                };
+                cols.factor = ext_limbs(c_factor * d_factor);
+                cols.term_acc_in = ext_limbs(record.term_acc_in);
+                cols.term_acc_out = ext_limbs(record.term_acc_out);
+                cols.q_acc_in = ext_limbs(record.q_acc_in);
+                cols.q_acc_out = ext_limbs(record.q_acc_out);
+            });
         Some(RowMajorMatrix::new(trace, width))
+    }
+}
+
+#[cfg(feature = "cuda")]
+pub(crate) mod cuda_tracegen {
+    use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix};
+    use openvm_cuda_common::{
+        d_buffer::DeviceBuffer,
+        error::CudaError,
+        memory_manager::MemTracker,
+        stream::{GpuDeviceCtx, cudaStream_t},
+    };
+
+    use super::*;
+    use crate::cuda::{to_device_or_nullptr, types::PcsJaggedAssistQData};
+
+    unsafe extern "C" {
+        fn _pcs_jagged_assist_q_tracegen(
+            d_trace: *mut F,
+            height: usize,
+            d_records: *const PcsJaggedAssistQData,
+            num_records: usize,
+            stream: cudaStream_t,
+        ) -> i32;
+    }
+
+    unsafe fn pcs_jagged_assist_q_tracegen(
+        d_trace: &DeviceBuffer<F>,
+        height: usize,
+        d_records: &DeviceBuffer<PcsJaggedAssistQData>,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> Result<(), CudaError> {
+        unsafe {
+            CudaError::from_result(_pcs_jagged_assist_q_tracegen(
+                d_trace.as_mut_ptr(),
+                height,
+                d_records.as_ptr(),
+                num_records,
+                stream,
+            ))
+        }
+    }
+
+    pub(crate) fn generate_pcs_jagged_assist_q_gpu_ctx(
+        records: &[PcsJaggedAssistQRecord],
+        required_height: Option<usize>,
+    ) -> Option<AirProvingContext<GpuBackend>> {
+        let mem = MemTracker::start("tracegen.pcs_jagged_assist_q");
+        let width = PcsJaggedAssistQCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+
+        let pack_start = std::time::Instant::now();
+        let records = records
+            .iter()
+            .map(|record| {
+                let c_factor = if record.c_bit {
+                    record.rho_star_c
+                } else {
+                    RecursionField::ONE - record.rho_star_c
+                };
+                let d_factor = if record.d_bit {
+                    record.rho_star_d
+                } else {
+                    RecursionField::ONE - record.rho_star_d
+                };
+                PcsJaggedAssistQData {
+                    proof_idx: record.proof_idx,
+                    round_idx: record.round_idx,
+                    sumcheck_idx: record.sumcheck_idx,
+                    commitment_kind: record.commitment_kind,
+                    term_idx: record.term_idx,
+                    step_idx: record.step_idx,
+                    robp_idx: record.robp_idx,
+                    is_first: record.is_first,
+                    is_last: record.is_last,
+                    is_first_step: record.is_first_step,
+                    is_last_step: record.is_last_step,
+                    term_is_last: record.term_is_last,
+                    eq_col: ext_limbs(record.eq_col),
+                    t_lo: record.t_lo,
+                    t_hi: record.t_hi,
+                    c_bit: record.c_bit,
+                    d_bit: record.d_bit,
+                    bit_pow2: record.bit_pow2,
+                    c_acc_in: record.c_acc_in,
+                    c_acc_out: record.c_acc_out,
+                    d_acc_in: record.d_acc_in,
+                    d_acc_out: record.d_acc_out,
+                    rho_star_c: ext_limbs(record.rho_star_c),
+                    rho_star_d: ext_limbs(record.rho_star_d),
+                    factor: ext_limbs(c_factor * d_factor),
+                    term_acc_in: ext_limbs(record.term_acc_in),
+                    term_acc_out: ext_limbs(record.term_acc_out),
+                    q_acc_in: ext_limbs(record.q_acc_in),
+                    q_acc_out: ext_limbs(record.q_acc_out),
+                }
+            })
+            .collect::<Vec<_>>();
+        tracing::info!(
+            elapsed_ms = pack_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_jagged_assist_q.pack_records"
+        );
+
+        let h2d_start = std::time::Instant::now();
+        let d_records = to_device_or_nullptr(&records).ok()?;
+        tracing::info!(
+            elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_jagged_assist_q.h2d_records"
+        );
+
+        let kernel_start = std::time::Instant::now();
+        unsafe {
+            if let Err(err) = pcs_jagged_assist_q_tracegen(
+                trace.buffer(),
+                height,
+                &d_records,
+                records.len(),
+                device_ctx.stream.as_raw(),
+            ) {
+                tracing::warn!(?err, "pcs_jagged_assist_q_tracegen failed");
+                return None;
+            }
+        }
+        if let Err(err) = device_ctx.stream.synchronize() {
+            tracing::warn!(?err, "pcs_jagged_assist_q_tracegen synchronize failed");
+            return None;
+        }
+        tracing::info!(
+            elapsed_ms = kernel_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_jagged_assist_q.kernel_launch_sync"
+        );
+        mem.emit_metrics();
+        Some(AirProvingContext::simple_no_pis(trace))
     }
 }
 

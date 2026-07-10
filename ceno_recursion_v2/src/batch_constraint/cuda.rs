@@ -5,7 +5,7 @@ use openvm_cuda_common::{
     memory_manager::MemTracker,
     stream::{GpuDeviceCtx, cudaStream_t},
 };
-use openvm_stark_backend::prover::AirProvingContext;
+use openvm_stark_backend::{p3_maybe_rayon::prelude::*, prover::AirProvingContext};
 use openvm_stark_sdk::config::baby_bear_poseidon2::F;
 use p3_field::BasedVectorSpace;
 
@@ -186,7 +186,7 @@ impl ModuleChip<GpuBackend> for MainFrontloadTermGpuTraceGenerator {
 
         let pack_start = std::time::Instant::now();
         let records = records
-            .iter()
+            .par_iter()
             .map(|record| MainFrontloadTermData {
                 proof_idx: record.proof_idx,
                 idx: record.idx,

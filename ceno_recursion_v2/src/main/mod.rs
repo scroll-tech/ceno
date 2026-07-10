@@ -28,7 +28,8 @@ use multilinear_extensions::{
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
-    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory, prover::AirProvingContext,
+    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
+    p3_maybe_rayon::prelude::*, prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
@@ -471,30 +472,263 @@ impl MainModule {
 
         Ok(MainCollectedRecords {
             main_records,
-            global_sumcheck_records,
-            eval_records,
             selector_eval_records,
             selector_point_records,
             ecc_rt_records,
+            transcript_records,
+        })
+    }
+
+    pub(crate) fn collect_batch_constraint_records(
+        child_vk: &RecursionVk,
+        proofs: &[RecursionProof],
+        preflights: &[Preflight],
+    ) -> Result<MainBatchConstraintRecords> {
+        if proofs.len() != preflights.len() {
+            bail!(
+                "proof/preflight length mismatch ({} proofs vs {} preflights)",
+                proofs.len(),
+                preflights.len()
+            );
+        }
+
+        let tower_main_point_records = build_tower_main_point_records(child_vk, proofs, preflights)
+            .map_err(|err| eyre!("failed to build tower point records for main prefix: {err}"))?;
+        let proof_records = preflights
+            .par_iter()
+            .enumerate()
+            .map(|(proof_idx, preflight)| {
+                let global_sumcheck =
+                    preflight
+                        .main
+                        .global_sumchecks
+                        .last()
+                        .cloned()
+                        .map(|mut record| {
+                            record.proof_idx = proof_idx;
+                            record
+                        });
+                let eval_records = preflight
+                    .main
+                    .evals
+                    .iter()
+                    .cloned()
+                    .map(|mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+                    .collect_vec();
+                let selector_eval_records = preflight
+                    .main
+                    .selector_evals
+                    .iter()
+                    .cloned()
+                    .map(|mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+                    .collect_vec();
+                let frontload_term_records = preflight
+                    .main
+                    .frontload_terms
+                    .iter()
+                    .cloned()
+                    .map(|mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+                    .collect_vec();
+                let final_claim_records = preflight
+                    .main
+                    .final_claims
+                    .iter()
+                    .cloned()
+                    .map(|mut record| {
+                        record.proof_idx = proof_idx;
+                        record
+                    })
+                    .collect_vec();
+                (
+                    global_sumcheck,
+                    eval_records,
+                    selector_eval_records,
+                    frontload_term_records,
+                    final_claim_records,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let mut global_sumcheck_records = Vec::new();
+        let mut eval_records = Vec::new();
+        let mut selector_eval_records = Vec::new();
+        let mut frontload_term_records = Vec::new();
+        let mut final_claim_records = Vec::new();
+        for (
+            global_sumcheck,
+            mut proof_eval_records,
+            mut proof_selector_eval_records,
+            mut proof_frontload_term_records,
+            mut proof_final_claim_records,
+        ) in proof_records
+        {
+            if let Some(record) = global_sumcheck {
+                global_sumcheck_records.push(record);
+            }
+            eval_records.append(&mut proof_eval_records);
+            selector_eval_records.append(&mut proof_selector_eval_records);
+            frontload_term_records.append(&mut proof_frontload_term_records);
+            final_claim_records.append(&mut proof_final_claim_records);
+        }
+        if final_claim_records.is_empty() {
+            final_claim_records.push(MainFinalClaimRecord::default());
+        }
+        if global_sumcheck_records.is_empty() {
+            global_sumcheck_records.push(crate::system::MainGlobalSumcheckRecord::default());
+        }
+
+        let global_by_proof = global_sumcheck_records
+            .iter()
+            .map(|record| {
+                (
+                    record.proof_idx,
+                    record
+                        .rounds
+                        .iter()
+                        .map(|round| round.challenge)
+                        .collect_vec(),
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut eq_acc_by_chip = std::collections::HashMap::<(usize, usize), RecursionField>::new();
+        let mut tower_point_eq_records = Vec::new();
+        for tower_point in &tower_main_point_records {
+            let Some(global_point) = global_by_proof
+                .get(&tower_point.proof_idx)
+                .and_then(|points| points.get(tower_point.round_idx))
+                .copied()
+            else {
+                continue;
+            };
+            let acc = eq_acc_by_chip
+                .entry((tower_point.proof_idx, tower_point.idx))
+                .or_insert(RecursionField::ONE);
+            let eq_in = *acc;
+            *acc *= global_point * tower_point.value
+                + (RecursionField::ONE - global_point) * (RecursionField::ONE - tower_point.value);
+            tower_point_eq_records.push(MainTowerPointEqRecord {
+                proof_idx: tower_point.proof_idx,
+                idx: tower_point.idx,
+                round_idx: tower_point.round_idx,
+                global_value: global_point,
+                tower_value: tower_point.value,
+                eq_in,
+                eq_out: *acc,
+            });
+        }
+
+        let mut global_lookup_counts = std::collections::HashMap::<(usize, usize), usize>::new();
+        for record in &tower_point_eq_records {
+            *global_lookup_counts
+                .entry((record.proof_idx, record.round_idx))
+                .or_default() += 1;
+        }
+        for record in &frontload_term_records {
+            if record.has_global_factor {
+                *global_lookup_counts
+                    .entry((record.proof_idx, record.global_round_idx))
+                    .or_default() += 1;
+            }
+        }
+        for (proof_idx, round_idx) in selector_formula_global_point_lookups(&selector_eval_records)
+        {
+            *global_lookup_counts
+                .entry((proof_idx, round_idx))
+                .or_default() += 1;
+        }
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.pcs.opening_points {
+                *global_lookup_counts
+                    .entry((proof_idx, record.global_round_idx))
+                    .or_default() += 1;
+            }
+            for record in &preflight.pcs.suffix_products {
+                if record.has_factor {
+                    *global_lookup_counts
+                        .entry((proof_idx, record.coord_idx))
+                        .or_default() += 1;
+                }
+            }
+            for record in &preflight.pcs.jagged_assist_h {
+                if record.has_z_row {
+                    *global_lookup_counts
+                        .entry((proof_idx, record.robp_idx))
+                        .or_default() += 1;
+                }
+            }
+        }
+        let mut eval_lookup_counts =
+            std::collections::HashMap::<(usize, usize, usize), usize>::new();
+        for record in &frontload_term_records {
+            if record.has_eval_factor {
+                *eval_lookup_counts
+                    .entry((record.proof_idx, record.idx, record.eval_idx))
+                    .or_default() += 1;
+            }
+        }
+        for record in &selector_eval_records {
+            if !record.has_eval {
+                continue;
+            }
+            *eval_lookup_counts
+                .entry((record.proof_idx, record.idx, record.eval_idx))
+                .or_default() += 1;
+        }
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.pcs.opening_evals {
+                *eval_lookup_counts
+                    .entry((proof_idx, record.main_idx, record.main_eval_idx))
+                    .or_default() += 1;
+            }
+        }
+        for record in &mut eval_records {
+            record.lookup_count = eval_lookup_counts
+                .get(&(record.proof_idx, record.idx, record.eval_idx))
+                .copied()
+                .unwrap_or(0);
+        }
+        for global in &mut global_sumcheck_records {
+            for (round_idx, round) in global.rounds.iter_mut().enumerate() {
+                round.point_lookup_count = global_lookup_counts
+                    .get(&(global.proof_idx, round_idx))
+                    .copied()
+                    .unwrap_or(0);
+            }
+        }
+
+        Ok(MainBatchConstraintRecords {
+            global_sumcheck_records,
+            eval_records,
             tower_point_eq_records,
             frontload_term_records,
             final_claim_records,
-            transcript_records,
         })
     }
 }
 
 pub(crate) struct MainCollectedRecords {
     pub(crate) main_records: Vec<MainRecord>,
-    pub(crate) global_sumcheck_records: Vec<crate::system::MainGlobalSumcheckRecord>,
-    pub(crate) eval_records: Vec<MainEvalRecord>,
     pub(crate) selector_eval_records: Vec<MainSelectorEvalRecord>,
     pub(crate) selector_point_records: Vec<MainSelectorPointRecord>,
     pub(crate) ecc_rt_records: Vec<MainEccRtRecord>,
+    pub(crate) transcript_records: Vec<crate::system::MainTranscriptRecord>,
+}
+
+pub(crate) struct MainBatchConstraintRecords {
+    pub(crate) global_sumcheck_records: Vec<crate::system::MainGlobalSumcheckRecord>,
+    pub(crate) eval_records: Vec<MainEvalRecord>,
     pub(crate) tower_point_eq_records: Vec<MainTowerPointEqRecord>,
     pub(crate) frontload_term_records: Vec<MainFrontloadTermRecord>,
     pub(crate) final_claim_records: Vec<MainFinalClaimRecord>,
-    pub(crate) transcript_records: Vec<crate::system::MainTranscriptRecord>,
 }
 
 impl AirModule for MainModule {
@@ -597,14 +831,9 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         let mut records = Self::collect_records(child_vk, proofs, preflights).ok()?;
         let MainCollectedRecords {
             ref mut main_records,
-            global_sumcheck_records: _,
-            eval_records: _,
             ref mut selector_eval_records,
             ref mut selector_point_records,
             ref mut ecc_rt_records,
-            tower_point_eq_records: _,
-            frontload_term_records: _,
-            final_claim_records: _,
             ref mut transcript_records,
         } = records;
         main_records.sort_by_key(|record| (record.proof_idx, record.idx));
@@ -772,14 +1001,9 @@ mod cuda_tracegen {
                 Self::collect_records(&child_vk.cpu, &proofs_cpu, &preflights_cpu).ok()?;
             let MainCollectedRecords {
                 ref mut main_records,
-                global_sumcheck_records: _,
-                eval_records: _,
                 ref mut selector_eval_records,
                 ref mut selector_point_records,
                 ref mut ecc_rt_records,
-                tower_point_eq_records: _,
-                frontload_term_records: _,
-                final_claim_records: _,
                 ref mut transcript_records,
             } = records;
             main_records.sort_by_key(|record| (record.proof_idx, record.idx));

@@ -91,6 +91,40 @@ pub struct MainFrontloadTermData {
 
 #[repr(C)]
 #[derive(Debug, Default)]
+pub struct PcsJaggedAssistQData {
+    pub proof_idx: usize,
+    pub round_idx: usize,
+    pub sumcheck_idx: usize,
+    pub commitment_kind: usize,
+    pub term_idx: usize,
+    pub step_idx: usize,
+    pub robp_idx: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub is_first_step: bool,
+    pub is_last_step: bool,
+    pub term_is_last: bool,
+    pub eq_col: [F; D_EF],
+    pub t_lo: usize,
+    pub t_hi: usize,
+    pub c_bit: bool,
+    pub d_bit: bool,
+    pub bit_pow2: usize,
+    pub c_acc_in: usize,
+    pub c_acc_out: usize,
+    pub d_acc_in: usize,
+    pub d_acc_out: usize,
+    pub rho_star_c: [F; D_EF],
+    pub rho_star_d: [F; D_EF],
+    pub factor: [F; D_EF],
+    pub term_acc_in: [F; D_EF],
+    pub term_acc_out: [F; D_EF],
+    pub q_acc_in: [F; D_EF],
+    pub q_acc_out: [F; D_EF],
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
 pub struct TowerSumcheckData {
     pub proof_idx: usize,
     pub idx: usize,
