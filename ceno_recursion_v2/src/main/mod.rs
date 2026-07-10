@@ -179,7 +179,6 @@ impl MainModule {
         let mut eval_records = Vec::new();
         let mut selector_eval_records = Vec::new();
         let mut tower_point_eq_records = Vec::new();
-        let mut frontload_term_records = Vec::new();
         let mut final_claim_records = Vec::new();
         for (proof_idx, preflight) in preflights.iter().enumerate() {
             if let Some(mut record) = preflight.main.global_sumchecks.last().cloned() {
@@ -191,12 +190,6 @@ impl MainModule {
                 record
             }));
             selector_eval_records.extend(preflight.main.selector_evals.iter().cloned().map(
-                move |mut record| {
-                    record.proof_idx = proof_idx;
-                    record
-                },
-            ));
-            frontload_term_records.extend(preflight.main.frontload_terms.iter().cloned().map(
                 move |mut record| {
                     record.proof_idx = proof_idx;
                     record
@@ -260,11 +253,13 @@ impl MainModule {
                 .entry((record.proof_idx, record.round_idx))
                 .or_default() += 1;
         }
-        for record in &frontload_term_records {
-            if record.has_global_factor {
-                *global_lookup_counts
-                    .entry((record.proof_idx, record.global_round_idx))
-                    .or_default() += 1;
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.main.frontload_terms {
+                if record.has_global_factor {
+                    *global_lookup_counts
+                        .entry((proof_idx, record.global_round_idx))
+                        .or_default() += 1;
+                }
             }
         }
         for (proof_idx, round_idx) in selector_formula_global_point_lookups(&selector_eval_records)
@@ -296,11 +291,13 @@ impl MainModule {
         }
         let mut eval_lookup_counts =
             std::collections::BTreeMap::<(usize, usize, usize), usize>::new();
-        for record in &frontload_term_records {
-            if record.has_eval_factor {
-                *eval_lookup_counts
-                    .entry((record.proof_idx, record.idx, record.eval_idx))
-                    .or_default() += 1;
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.main.frontload_terms {
+                if record.has_eval_factor {
+                    *eval_lookup_counts
+                        .entry((proof_idx, record.idx, record.eval_idx))
+                        .or_default() += 1;
+                }
             }
         }
         for record in &selector_eval_records {
@@ -803,6 +800,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         _ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
+        let collect_start = std::time::Instant::now();
         let mut records = Self::collect_records(child_vk, proofs, preflights).ok()?;
         let MainCollectedRecords {
             ref mut main_records,
@@ -811,6 +809,16 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             ref mut ecc_rt_records,
             ref mut transcript_records,
         } = records;
+        tracing::info!(
+            elapsed_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
+            main_count = main_records.len(),
+            selector_eval_count = selector_eval_records.len(),
+            selector_point_count = selector_point_records.len(),
+            ecc_rt_count = ecc_rt_records.len(),
+            transcript_count = transcript_records.len(),
+            "main.collect_records"
+        );
+        let sort_start = std::time::Instant::now();
         main_records.sort_by_key(|record| (record.proof_idx, record.idx));
         selector_eval_records.sort_by_key(|record| {
             (
@@ -832,6 +840,15 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         ecc_rt_records
             .sort_by_key(|record| (record.proof_idx, record.idx, record.round_idx, record.tidx));
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
+        tracing::info!(
+            elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
+            main_count = main_records.len(),
+            selector_eval_count = selector_eval_records.len(),
+            selector_point_count = selector_point_records.len(),
+            ecc_rt_count = ecc_rt_records.len(),
+            transcript_count = transcript_records.len(),
+            "main.sort_records"
+        );
         let ctx = MainTraceCtx {
             main_records,
             selector_eval_records,
@@ -967,6 +984,7 @@ mod cuda_tracegen {
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
             let _ = (child_vk, proofs, preflights);
             let (child_vk_cpu, proofs_cpu, preflights_cpu) = *ctx;
+            let collect_start = std::time::Instant::now();
             let mut records =
                 Self::collect_records(child_vk_cpu, proofs_cpu, preflights_cpu).ok()?;
             let MainCollectedRecords {
@@ -976,6 +994,16 @@ mod cuda_tracegen {
                 ref mut ecc_rt_records,
                 ref mut transcript_records,
             } = records;
+            tracing::info!(
+                elapsed_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
+                main_count = main_records.len(),
+                selector_eval_count = selector_eval_records.len(),
+                selector_point_count = selector_point_records.len(),
+                ecc_rt_count = ecc_rt_records.len(),
+                transcript_count = transcript_records.len(),
+                "main.collect_records"
+            );
+            let sort_start = std::time::Instant::now();
             main_records.sort_by_key(|record| (record.proof_idx, record.idx));
             selector_eval_records.sort_by_key(|record| {
                 (
@@ -998,6 +1026,15 @@ mod cuda_tracegen {
                 (record.proof_idx, record.idx, record.round_idx, record.tidx)
             });
             transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
+            tracing::info!(
+                elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
+                main_count = main_records.len(),
+                selector_eval_count = selector_eval_records.len(),
+                selector_point_count = selector_point_records.len(),
+                ecc_rt_count = ecc_rt_records.len(),
+                transcript_count = transcript_records.len(),
+                "main.sort_records"
+            );
             let ctx = MainTraceCtx {
                 main_records: &main_records,
                 selector_eval_records: &selector_eval_records,
