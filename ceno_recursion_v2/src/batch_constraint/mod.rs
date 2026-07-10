@@ -113,9 +113,8 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         _ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
-        let mut records =
+        let records =
             MainModule::collect_batch_constraint_records(child_vk, proofs, preflights).ok()?;
-        let _sort_stats = ensure_batch_constraint_record_order(&mut records);
 
         let ctx = BatchConstraintTraceCtx { records: &records };
         let chips = [
@@ -140,68 +139,6 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
 struct BatchConstraintTraceCtx<'a> {
     records: &'a MainBatchConstraintRecords,
-}
-
-#[derive(Default)]
-struct BatchConstraintSortStats {
-    global_sumcheck: bool,
-    eval_absorb: bool,
-    tower_point_eq: bool,
-    frontload_term: bool,
-    final_claim: bool,
-}
-
-fn ensure_batch_constraint_record_order(
-    records: &mut MainBatchConstraintRecords,
-) -> BatchConstraintSortStats {
-    let mut stats = BatchConstraintSortStats::default();
-
-    if !records
-        .global_sumcheck_records
-        .windows(2)
-        .all(|w| w[0].proof_idx <= w[1].proof_idx)
-    {
-        records
-            .global_sumcheck_records
-            .sort_unstable_by_key(|record| record.proof_idx);
-        stats.global_sumcheck = true;
-    }
-    if !records.eval_records.windows(2).all(|w| {
-        (w[0].proof_idx, w[0].idx, w[0].eval_idx) <= (w[1].proof_idx, w[1].idx, w[1].eval_idx)
-    }) {
-        records
-            .eval_records
-            .sort_unstable_by_key(|record| (record.proof_idx, record.idx, record.eval_idx));
-        stats.eval_absorb = true;
-    }
-    if !records.tower_point_eq_records.windows(2).all(|w| {
-        (w[0].proof_idx, w[0].idx, w[0].round_idx) <= (w[1].proof_idx, w[1].idx, w[1].round_idx)
-    }) {
-        records
-            .tower_point_eq_records
-            .sort_unstable_by_key(|record| (record.proof_idx, record.idx, record.round_idx));
-        stats.tower_point_eq = true;
-    }
-    if !records.frontload_term_records.windows(2).all(|w| {
-        (w[0].proof_idx, w[0].idx, w[0].row_idx) <= (w[1].proof_idx, w[1].idx, w[1].row_idx)
-    }) {
-        records
-            .frontload_term_records
-            .sort_unstable_by_key(|record| (record.proof_idx, record.idx, record.row_idx));
-        stats.frontload_term = true;
-    }
-    if !records
-        .final_claim_records
-        .windows(2)
-        .all(|w| (w[0].proof_idx, w[0].idx) <= (w[1].proof_idx, w[1].idx))
-    {
-        records
-            .final_claim_records
-            .sort_unstable_by_key(|record| (record.proof_idx, record.idx));
-        stats.final_claim = true;
-    }
-
-    stats
 }
 
 enum BatchConstraintModuleChip {
@@ -304,7 +241,7 @@ mod cuda_tracegen {
             let _ = (child_vk, proofs, preflights);
             let (child_vk_cpu, proofs_cpu, preflights_cpu) = *ctx;
             let collect_start = std::time::Instant::now();
-            let mut records = MainModule::collect_batch_constraint_records(
+            let records = MainModule::collect_batch_constraint_records(
                 child_vk_cpu,
                 proofs_cpu,
                 preflights_cpu,
@@ -320,14 +257,13 @@ mod cuda_tracegen {
                 "batch_constraint.collect_records"
             );
             let sort_start = std::time::Instant::now();
-            let sort_stats = ensure_batch_constraint_record_order(&mut records);
             tracing::info!(
                 elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
-                sorted_global_sumcheck = sort_stats.global_sumcheck,
-                sorted_eval_absorb = sort_stats.eval_absorb,
-                sorted_tower_point_eq = sort_stats.tower_point_eq,
-                sorted_frontload_term = sort_stats.frontload_term,
-                sorted_final_claim = sort_stats.final_claim,
+                sorted_global_sumcheck = false,
+                sorted_eval_absorb = false,
+                sorted_tower_point_eq = false,
+                sorted_frontload_term = false,
+                sorted_final_claim = false,
                 global_sumcheck = records.global_sumcheck_records.len(),
                 eval_absorb = records.eval_records.len(),
                 tower_point_eq = records.tower_point_eq_records.len(),

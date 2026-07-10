@@ -28,8 +28,7 @@ use multilinear_extensions::{
 use openvm_cpu_backend::CpuBackend;
 use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
-    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory,
-    p3_maybe_rayon::prelude::*, prover::AirProvingContext,
+    AirRef, FiatShamirTranscript, StarkProtocolConfig, TranscriptHistory, prover::AirProvingContext,
 };
 use openvm_stark_sdk::config::baby_bear_poseidon2::{BabyBearPoseidon2Config, D_EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
@@ -494,90 +493,47 @@ impl MainModule {
 
         let tower_main_point_records = build_tower_main_point_records(child_vk, proofs, preflights)
             .map_err(|err| eyre!("failed to build tower point records for main prefix: {err}"))?;
-        let proof_records = preflights
-            .par_iter()
-            .enumerate()
-            .map(|(proof_idx, preflight)| {
-                let global_sumcheck =
-                    preflight
-                        .main
-                        .global_sumchecks
-                        .last()
-                        .cloned()
-                        .map(|mut record| {
-                            record.proof_idx = proof_idx;
-                            record
-                        });
-                let eval_records = preflight
-                    .main
-                    .evals
-                    .iter()
-                    .cloned()
-                    .map(|mut record| {
-                        record.proof_idx = proof_idx;
-                        record
-                    })
-                    .collect_vec();
-                let selector_eval_records = preflight
-                    .main
-                    .selector_evals
-                    .iter()
-                    .cloned()
-                    .map(|mut record| {
-                        record.proof_idx = proof_idx;
-                        record
-                    })
-                    .collect_vec();
-                let frontload_term_records = preflight
-                    .main
-                    .frontload_terms
-                    .iter()
-                    .cloned()
-                    .map(|mut record| {
-                        record.proof_idx = proof_idx;
-                        record
-                    })
-                    .collect_vec();
-                let final_claim_records = preflight
-                    .main
-                    .final_claims
-                    .iter()
-                    .cloned()
-                    .map(|mut record| {
-                        record.proof_idx = proof_idx;
-                        record
-                    })
-                    .collect_vec();
-                (
-                    global_sumcheck,
-                    eval_records,
-                    selector_eval_records,
-                    frontload_term_records,
-                    final_claim_records,
-                )
-            })
-            .collect::<Vec<_>>();
+        let mut global_sumcheck_records = Vec::with_capacity(preflights.len());
+        let mut eval_records =
+            Vec::with_capacity(preflights.iter().map(|p| p.main.evals.len()).sum());
+        let mut selector_eval_records =
+            Vec::with_capacity(preflights.iter().map(|p| p.main.selector_evals.len()).sum());
+        let mut frontload_term_records = Vec::with_capacity(
+            preflights
+                .iter()
+                .map(|p| p.main.frontload_terms.len())
+                .sum(),
+        );
+        let mut final_claim_records =
+            Vec::with_capacity(preflights.iter().map(|p| p.main.final_claims.len()).sum());
 
-        let mut global_sumcheck_records = Vec::new();
-        let mut eval_records = Vec::new();
-        let mut selector_eval_records = Vec::new();
-        let mut frontload_term_records = Vec::new();
-        let mut final_claim_records = Vec::new();
-        for (
-            global_sumcheck,
-            mut proof_eval_records,
-            mut proof_selector_eval_records,
-            mut proof_frontload_term_records,
-            mut proof_final_claim_records,
-        ) in proof_records
-        {
-            if let Some(record) = global_sumcheck {
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            if let Some(mut record) = preflight.main.global_sumchecks.last().cloned() {
+                record.proof_idx = proof_idx;
                 global_sumcheck_records.push(record);
             }
-            eval_records.append(&mut proof_eval_records);
-            selector_eval_records.append(&mut proof_selector_eval_records);
-            frontload_term_records.append(&mut proof_frontload_term_records);
-            final_claim_records.append(&mut proof_final_claim_records);
+            eval_records.extend(preflight.main.evals.iter().cloned().map(move |mut record| {
+                record.proof_idx = proof_idx;
+                record
+            }));
+            selector_eval_records.extend(preflight.main.selector_evals.iter().cloned().map(
+                move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                },
+            ));
+            frontload_term_records.extend(preflight.main.frontload_terms.iter().cloned().map(
+                move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                },
+            ));
+            final_claim_records.extend(preflight.main.final_claims.iter().cloned().map(
+                move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                },
+            ));
         }
         if final_claim_records.is_empty() {
             final_claim_records.push(MainFinalClaimRecord::default());
@@ -586,26 +542,20 @@ impl MainModule {
             global_sumcheck_records.push(crate::system::MainGlobalSumcheckRecord::default());
         }
 
-        let global_by_proof = global_sumcheck_records
-            .iter()
-            .map(|record| {
-                (
-                    record.proof_idx,
-                    record
-                        .rounds
-                        .iter()
-                        .map(|round| round.challenge)
-                        .collect_vec(),
-                )
-            })
-            .collect::<std::collections::HashMap<_, _>>();
+        let mut global_by_proof = vec![None; preflights.len()];
+        for record in &global_sumcheck_records {
+            if let Some(slot) = global_by_proof.get_mut(record.proof_idx) {
+                *slot = Some(record);
+            }
+        }
         let mut eq_acc_by_chip = std::collections::HashMap::<(usize, usize), RecursionField>::new();
-        let mut tower_point_eq_records = Vec::new();
+        let mut tower_point_eq_records = Vec::with_capacity(tower_main_point_records.len());
         for tower_point in &tower_main_point_records {
             let Some(global_point) = global_by_proof
-                .get(&tower_point.proof_idx)
-                .and_then(|points| points.get(tower_point.round_idx))
-                .copied()
+                .get(tower_point.proof_idx)
+                .and_then(|record| *record)
+                .and_then(|record| record.rounds.get(tower_point.round_idx))
+                .map(|round| round.challenge)
             else {
                 continue;
             };
@@ -626,48 +576,72 @@ impl MainModule {
             });
         }
 
-        let mut global_lookup_counts = std::collections::HashMap::<(usize, usize), usize>::new();
+        let mut global_lookup_counts = vec![Vec::<usize>::new(); preflights.len()];
+        for global in &global_sumcheck_records {
+            if let Some(counts) = global_lookup_counts.get_mut(global.proof_idx) {
+                counts.resize(global.rounds.len(), 0);
+            }
+        }
         for record in &tower_point_eq_records {
-            *global_lookup_counts
-                .entry((record.proof_idx, record.round_idx))
-                .or_default() += 1;
+            if let Some(count) = global_lookup_counts
+                .get_mut(record.proof_idx)
+                .and_then(|counts| counts.get_mut(record.round_idx))
+            {
+                *count += 1;
+            }
         }
         for record in &frontload_term_records {
-            if record.has_global_factor {
-                *global_lookup_counts
-                    .entry((record.proof_idx, record.global_round_idx))
-                    .or_default() += 1;
+            if record.has_global_factor
+                && let Some(count) = global_lookup_counts
+                    .get_mut(record.proof_idx)
+                    .and_then(|counts| counts.get_mut(record.global_round_idx))
+            {
+                *count += 1;
             }
         }
         for (proof_idx, round_idx) in selector_formula_global_point_lookups(&selector_eval_records)
         {
-            *global_lookup_counts
-                .entry((proof_idx, round_idx))
-                .or_default() += 1;
+            if let Some(count) = global_lookup_counts
+                .get_mut(proof_idx)
+                .and_then(|counts| counts.get_mut(round_idx))
+            {
+                *count += 1;
+            }
         }
         for (proof_idx, preflight) in preflights.iter().enumerate() {
             for record in &preflight.pcs.opening_points {
-                *global_lookup_counts
-                    .entry((proof_idx, record.global_round_idx))
-                    .or_default() += 1;
+                if let Some(count) = global_lookup_counts
+                    .get_mut(proof_idx)
+                    .and_then(|counts| counts.get_mut(record.global_round_idx))
+                {
+                    *count += 1;
+                }
             }
             for record in &preflight.pcs.suffix_products {
-                if record.has_factor {
-                    *global_lookup_counts
-                        .entry((proof_idx, record.coord_idx))
-                        .or_default() += 1;
+                if record.has_factor
+                    && let Some(count) = global_lookup_counts
+                        .get_mut(proof_idx)
+                        .and_then(|counts| counts.get_mut(record.coord_idx))
+                {
+                    *count += 1;
                 }
             }
             for record in &preflight.pcs.jagged_assist_h {
-                if record.has_z_row {
-                    *global_lookup_counts
-                        .entry((proof_idx, record.robp_idx))
-                        .or_default() += 1;
+                if record.has_z_row
+                    && let Some(count) = global_lookup_counts
+                        .get_mut(proof_idx)
+                        .and_then(|counts| counts.get_mut(record.robp_idx))
+                {
+                    *count += 1;
                 }
             }
         }
         let mut eval_lookup_counts =
-            std::collections::HashMap::<(usize, usize, usize), usize>::new();
+            std::collections::HashMap::<(usize, usize, usize), usize>::with_capacity(
+                frontload_term_records
+                    .len()
+                    .saturating_add(selector_eval_records.len()),
+            );
         for record in &frontload_term_records {
             if record.has_eval_factor {
                 *eval_lookup_counts
@@ -699,7 +673,8 @@ impl MainModule {
         for global in &mut global_sumcheck_records {
             for (round_idx, round) in global.rounds.iter_mut().enumerate() {
                 round.point_lookup_count = global_lookup_counts
-                    .get(&(global.proof_idx, round_idx))
+                    .get(global.proof_idx)
+                    .and_then(|counts| counts.get(round_idx))
                     .copied()
                     .unwrap_or(0);
             }
