@@ -183,14 +183,6 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB>
             local.child_pvs.internal_for_leaf_vk_commit,
             public_pvs.internal_for_leaf_vk_commit,
         );
-        assert_vk_commit_eq(
-            &mut builder.when_first_row().when(
-                local.child_pvs.recursion_flag * (local.child_pvs.recursion_flag - AB::F::ONE),
-            ),
-            local.child_pvs.internal_recursive_vk_commit,
-            public_pvs.internal_recursive_vk_commit,
-        );
-
         let child_commit = vk_commit_const::<AB>(self.child_vk_commit);
         assert_vk_commit_eq(
             &mut builder.when_first_row().when(
@@ -215,6 +207,20 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB>
             public_pvs.internal_recursive_vk_commit,
         );
 
+        let half = AB::F::TWO.inverse();
+        let is_internal_flag_zero = (local.child_pvs.internal_flag - AB::F::ONE)
+            * (local.child_pvs.internal_flag - AB::F::TWO)
+            * half;
+        let is_internal_flag_one =
+            (AB::Expr::TWO - local.child_pvs.internal_flag) * local.child_pvs.internal_flag;
+        let is_recursion_flag_zero = (local.child_pvs.recursion_flag - AB::F::ONE)
+            * (local.child_pvs.recursion_flag - AB::F::TWO)
+            * half;
+        let is_recursion_flag_one =
+            (AB::Expr::TWO - local.child_pvs.recursion_flag) * local.child_pvs.recursion_flag;
+        let is_recursion_flag_two =
+            (local.child_pvs.recursion_flag - AB::F::ONE) * local.child_pvs.recursion_flag * half;
+
         assert_vk_commit_unset(
             &mut builder.when_first_row().when(
                 (local.child_pvs.internal_flag - AB::F::ONE)
@@ -225,7 +231,7 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB>
         assert_vk_commit_unset(
             &mut builder
                 .when_first_row()
-                .when(AB::Expr::ONE - local.child_pvs.recursion_flag.into()),
+                .when(is_recursion_flag_zero.clone()),
             public_pvs.internal_recursive_vk_commit,
         );
 
@@ -238,16 +244,6 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB>
             local.is_valid,
         );
 
-        let half = AB::F::TWO.inverse();
-        let is_internal_flag_zero = (local.child_pvs.internal_flag - AB::F::ONE)
-            * (local.child_pvs.internal_flag - AB::F::TWO)
-            * half;
-        let is_internal_flag_one =
-            (AB::Expr::TWO - local.child_pvs.internal_flag) * local.child_pvs.internal_flag;
-        let is_recursion_flag_one =
-            (AB::Expr::TWO - local.child_pvs.recursion_flag) * local.child_pvs.recursion_flag;
-        let is_recursion_flag_two =
-            (local.child_pvs.recursion_flag - AB::F::ONE) * local.child_pvs.recursion_flag * half;
         let cached_commit = from_fn(|i| {
             is_internal_flag_zero.clone() * local.child_pvs.app_vk_commit.cached_commit[i]
                 + is_internal_flag_one.clone() * local.child_pvs.leaf_vk_commit.cached_commit[i]
