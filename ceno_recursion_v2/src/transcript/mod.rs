@@ -548,6 +548,10 @@ mod cuda_tracegen {
                     poseidon2_valid_rows.next_power_of_two()
                 };
 
+                // TODO(cuda-tracegen): Poseidon2Air is the largest table in the
+                // current fixture, but using OpenVM's CUDA inner tracegen plus a
+                // Ceno count-column kernel regressed context generation
+                // (~5.67s -> ~6.1s). Revisit with GPU-side input assembly/dedup.
                 poseidon_states.resize(poseidon2_num_rows, [F::ZERO; POSEIDON2_WIDTH]);
 
                 let inner_width = self.sub_chip.air.width();

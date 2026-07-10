@@ -272,6 +272,23 @@ mod cuda_tracegen {
                                     required_height,
                                 )
                         }
+                        BatchConstraintModuleChip::FinalClaim => {
+                            crate::batch_constraint::cuda::MainFinalClaimGpuTraceGenerator
+                                .generate_proving_ctx(
+                                    &ctx.records.final_claim_records.as_slice(),
+                                    required_height,
+                                )
+                        }
+                        BatchConstraintModuleChip::FrontloadTerm => {
+                            crate::batch_constraint::cuda::MainFrontloadTermGpuTraceGenerator
+                                .generate_proving_ctx(
+                                    &ctx.records.frontload_term_records.as_slice(),
+                                    required_height,
+                                )
+                        }
+                        // TODO(cuda-tracegen): MainGlobalSumcheckAir is tiny for the current
+                        // fixtures, and the CUDA path regressed whole-tracegen timing
+                        // (~5.7s -> ~6.1s). Revisit with a per-AIR benchmark or larger workload.
                         _ => generate_gpu_proving_ctx(chip, &ctx, required_height),
                     }
                 })

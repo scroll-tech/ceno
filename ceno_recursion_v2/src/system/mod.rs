@@ -437,55 +437,13 @@ mod cuda_tracegen {
                     &(),
                     required_heights,
                 ),
-                TraceModuleRef::Pcs(module) => {
-                    let proofs_cpu = proofs
-                        .iter()
-                        .map(|proof| proof.cpu.clone())
-                        .collect::<Vec<_>>();
-                    let preflights_cpu = preflights
-                        .iter()
-                        .map(|preflight| preflight.cpu.clone())
-                        .collect::<Vec<_>>();
-                    let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
-                    let cpu_start = std::time::Instant::now();
-                    let ctxs: Vec<AirProvingContext<CpuBackend<BabyBearPoseidon2Config>>> = module
-                        .generate_proving_ctxs(
-                            &child_vk.cpu,
-                            &proofs_cpu,
-                            &preflights_cpu,
-                            &(),
-                            required_heights,
-                        )?;
-                    tracing::info!(
-                        module = module_name,
-                        elapsed_ms = cpu_start.elapsed().as_secs_f64() * 1000.0,
-                        trace_count = ctxs.len(),
-                        "recursion gpu verifier module CPU tracegen fallback"
-                    );
-                    let h2d_start = std::time::Instant::now();
-                    let trace_count = ctxs.len();
-                    let out = ctxs
-                        .into_iter()
-                        .map(|ctx| {
-                            Some(AirProvingContext {
-                                cached_mains: Vec::new(),
-                                common_main: transport_matrix_h2d_row(
-                                    &ctx.common_main,
-                                    &device_ctx,
-                                )
-                                .ok()?,
-                                public_values: ctx.public_values,
-                            })
-                        })
-                        .collect();
-                    tracing::info!(
-                        module = module_name,
-                        elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
-                        trace_count,
-                        "recursion gpu verifier module H2D transport"
-                    );
-                    out
-                }
+                TraceModuleRef::Pcs(module) => module.generate_proving_ctxs(
+                    child_vk,
+                    proofs,
+                    preflights,
+                    &(),
+                    required_heights,
+                ),
             }
             .inspect(|ctxs| {
                 tracing::info!(

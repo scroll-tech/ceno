@@ -77,6 +77,9 @@ use recursion_circuit::{
     primitives::bus::{RangeCheckerBus, RangeCheckerBusMessage},
 };
 
+#[cfg(feature = "cuda")]
+mod cuda;
+
 pub struct PcsModule {
     transcript_bus: TranscriptBus,
     main_global_point_bus: MainGlobalPointBus,
@@ -5398,6 +5401,7 @@ struct PcsTraceCtx<'a> {
     basefold_final_claims: &'a [PcsBasefoldFinalClaimRecord],
 }
 
+#[derive(Clone, Copy)]
 enum PcsModuleChip {
     CommitmentRoot,
     BaseInputLeafHash,

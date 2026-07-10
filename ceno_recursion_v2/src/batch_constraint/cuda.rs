@@ -12,10 +12,15 @@ use p3_field::BasedVectorSpace;
 use crate::{
     cuda::{
         to_device_or_nullptr,
-        types::{MainEvalData, MainTowerPointEqData},
+        types::{MainEvalData, MainFinalClaimData, MainFrontloadTermData, MainTowerPointEqData},
     },
-    main::{eval_absorb::MainEvalAbsorbCols, tower_point::MainTowerPointEqCols},
-    system::{MainEvalRecord, MainTowerPointEqRecord},
+    main::{
+        eval_absorb::MainEvalAbsorbCols, final_claim::MainFinalClaimCols,
+        frontload::MainFrontloadTermCols, tower_point::MainTowerPointEqCols,
+    },
+    system::{
+        MainEvalRecord, MainFinalClaimRecord, MainFrontloadTermRecord, MainTowerPointEqRecord,
+    },
     tracegen::ModuleChip,
 };
 
@@ -35,6 +40,23 @@ unsafe extern "C" {
         num_records: usize,
         stream: cudaStream_t,
     ) -> i32;
+
+    fn _main_final_claim_tracegen(
+        d_trace: *mut F,
+        height: usize,
+        d_records: *const MainFinalClaimData,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> i32;
+
+    fn _main_frontload_term_tracegen(
+        d_trace: *mut F,
+        height: usize,
+        d_records: *const MainFrontloadTermData,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> i32;
+
 }
 
 unsafe fn main_eval_absorb_tracegen(
@@ -46,6 +68,42 @@ unsafe fn main_eval_absorb_tracegen(
 ) -> Result<(), CudaError> {
     unsafe {
         CudaError::from_result(_main_eval_absorb_tracegen(
+            d_trace.as_mut_ptr(),
+            height,
+            d_records.as_ptr(),
+            num_records,
+            stream,
+        ))
+    }
+}
+
+unsafe fn main_final_claim_tracegen(
+    d_trace: &DeviceBuffer<F>,
+    height: usize,
+    d_records: &DeviceBuffer<MainFinalClaimData>,
+    num_records: usize,
+    stream: cudaStream_t,
+) -> Result<(), CudaError> {
+    unsafe {
+        CudaError::from_result(_main_final_claim_tracegen(
+            d_trace.as_mut_ptr(),
+            height,
+            d_records.as_ptr(),
+            num_records,
+            stream,
+        ))
+    }
+}
+
+unsafe fn main_frontload_term_tracegen(
+    d_trace: &DeviceBuffer<F>,
+    height: usize,
+    d_records: &DeviceBuffer<MainFrontloadTermData>,
+    num_records: usize,
+    stream: cudaStream_t,
+) -> Result<(), CudaError> {
+    unsafe {
+        CudaError::from_result(_main_frontload_term_tracegen(
             d_trace.as_mut_ptr(),
             height,
             d_records.as_ptr(),
@@ -186,6 +244,174 @@ impl ModuleChip<GpuBackend> for MainTowerPointEqGpuTraceGenerator {
         let d_records = to_device_or_nullptr(&records).ok()?;
         unsafe {
             main_tower_point_eq_tracegen(
+                trace.buffer(),
+                height,
+                &d_records,
+                records.len(),
+                device_ctx.stream.as_raw(),
+            )
+            .ok()?;
+        }
+        device_ctx.stream.synchronize().ok()?;
+        mem.emit_metrics();
+        Some(AirProvingContext::simple_no_pis(trace))
+    }
+}
+
+pub struct MainFinalClaimGpuTraceGenerator;
+
+impl ModuleChip<GpuBackend> for MainFinalClaimGpuTraceGenerator {
+    type Ctx<'a> = &'a [MainFinalClaimRecord];
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    fn generate_proving_ctx(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<AirProvingContext<GpuBackend>> {
+        let mem = MemTracker::start("tracegen.main_final_claim");
+        let num_valid_rows = records.len().max(1);
+        let height = if let Some(height) = required_height {
+            if height < num_valid_rows {
+                return None;
+            }
+            height
+        } else {
+            num_valid_rows.next_power_of_two()
+        };
+        let width = MainFinalClaimCols::<F>::width();
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+
+        let records = records
+            .iter()
+            .map(|record| MainFinalClaimData {
+                proof_idx: record.proof_idx,
+                idx: record.idx,
+                contribution: record
+                    .contribution
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                acc_in: record
+                    .acc_in
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                acc_out: record
+                    .acc_out
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                expected: record
+                    .expected
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+            })
+            .collect::<Vec<_>>();
+        let d_records = to_device_or_nullptr(&records).ok()?;
+        unsafe {
+            main_final_claim_tracegen(
+                trace.buffer(),
+                height,
+                &d_records,
+                records.len(),
+                device_ctx.stream.as_raw(),
+            )
+            .ok()?;
+        }
+        device_ctx.stream.synchronize().ok()?;
+        mem.emit_metrics();
+        Some(AirProvingContext::simple_no_pis(trace))
+    }
+}
+
+pub struct MainFrontloadTermGpuTraceGenerator;
+
+impl ModuleChip<GpuBackend> for MainFrontloadTermGpuTraceGenerator {
+    type Ctx<'a> = &'a [MainFrontloadTermRecord];
+
+    #[tracing::instrument(level = "trace", skip_all)]
+    fn generate_proving_ctx(
+        &self,
+        records: &Self::Ctx<'_>,
+        required_height: Option<usize>,
+    ) -> Option<AirProvingContext<GpuBackend>> {
+        let mem = MemTracker::start("tracegen.main_frontload_term");
+        let num_valid_rows = records.len().max(1);
+        let height = if let Some(height) = required_height {
+            if height < num_valid_rows {
+                return None;
+            }
+            height
+        } else {
+            num_valid_rows.next_power_of_two()
+        };
+        let width = MainFrontloadTermCols::<F>::width();
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+
+        let records = records
+            .iter()
+            .map(|record| MainFrontloadTermData {
+                proof_idx: record.proof_idx,
+                idx: record.idx,
+                row_idx: record.row_idx,
+                node_idx: record.node_idx,
+                eval_idx: record.eval_idx,
+                has_eval_factor: record.has_eval_factor,
+                instance_idx: record.instance_idx,
+                challenge_idx: record.challenge_idx,
+                global_round_idx: record.global_round_idx,
+                has_global_factor: record.has_global_factor,
+                is_wit: record.is_wit,
+                is_const: record.is_const,
+                is_instance: record.is_instance,
+                is_challenge: record.is_challenge,
+                is_add: record.is_add,
+                is_sub: record.is_sub,
+                is_neg: record.is_neg,
+                is_mul: record.is_mul,
+                is_fold: record.is_fold,
+                is_tail: record.is_tail,
+                constraint_idx: record.constraint_idx,
+                alpha: record
+                    .alpha
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                arg0: record
+                    .arg0
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                arg1: record
+                    .arg1
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                value: record
+                    .value
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                chip_acc_in: record
+                    .chip_acc_in
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                chip_acc_out: record
+                    .chip_acc_out
+                    .as_basis_coefficients_slice()
+                    .try_into()
+                    .unwrap(),
+                is_last_chip_step: record.is_last_chip_step,
+            })
+            .collect::<Vec<_>>();
+        let d_records = to_device_or_nullptr(&records).ok()?;
+        unsafe {
+            main_frontload_term_tracegen(
                 trace.buffer(),
                 height,
                 &d_records,

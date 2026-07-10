@@ -18,9 +18,9 @@ if [[ "$FORCE_REGEN" != "1" && -f "$PROOF_FILE" && -f "$VK_FILE" ]]; then
     echo "[fixtures] found:"
     ls -lh "$PROOF_FILE" "$VK_FILE"
 else
-    echo "[fixtures] generating base-layer proofs (fibonacci, --pcs=$PCS, --max-cycle-per-shard=$MAX_CYCLE_PER_SHARD) ..."
+    echo "[fixtures] generating base-layer proofs (keccak_syscall, --pcs=$PCS, --max-cycle-per-shard=$MAX_CYCLE_PER_SHARD) ..."
 
-    ELF="$REPO_ROOT/examples/target/riscv32im-ceno-zkvm-elf/release/examples/fibonacci"
+    ELF="$REPO_ROOT/examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall"
     if [[ ! -f "$ELF" ]]; then
         echo "[fixtures] building example ELFs..."
         cargo build --release --manifest-path "$REPO_ROOT/examples/Cargo.toml" --examples
