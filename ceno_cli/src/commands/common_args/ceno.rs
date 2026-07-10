@@ -3,6 +3,10 @@ use crate::utils::*;
 use anyhow::{Context, bail};
 use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
 use ceno_host::{CenoStdin, memory_from_file};
+use ceno_recursion_v2::{
+    continuation::prover::{AggProver, AggregationOptions},
+    system::{utils::test_system_params_zero_pow, warm_child_vk_digest_cache},
+};
 use ceno_zkvm::{
     e2e::*,
     scheme::{
@@ -21,6 +25,7 @@ use serde::Serialize;
 use std::{
     fs::File,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 /// Ceno options
@@ -71,6 +76,9 @@ pub struct CenoOptions {
     /// The path to the proof file to write.
     #[arg(long)]
     pub out_proof: Option<PathBuf>,
+    /// The path to the recursion-v2 root proof artifact to write.
+    #[arg(long)]
+    pub out_root_proof: Option<PathBuf>,
     /// The path to the verification key file to write.
     #[arg(long)]
     pub out_vk: Option<PathBuf>,
@@ -325,6 +333,7 @@ impl CenoOptions {
         self.try_setup_logger();
         match (self.pcs, self.field) {
             (PcsKind::Jagged, FieldType::Goldilocks) => {
+                ensure_no_root_proof_output(self)?;
                 prove_inner::<GoldilocksExt2, Jagged<Basefold<GoldilocksExt2, BasefoldRSParams>>, P>(
                     self,
                     compilation_options,
@@ -332,15 +341,14 @@ impl CenoOptions {
                     Checkpoint::Complete,
                 )
             }
-            (PcsKind::Jagged, FieldType::BabyBear) => {
-                prove_inner::<BabyBearExt4, Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>, P>(
-                    self,
-                    compilation_options,
-                    elf_path,
-                    Checkpoint::Complete,
-                )
-            }
+            (PcsKind::Jagged, FieldType::BabyBear) => prove_recursion_inner::<P>(
+                self,
+                compilation_options,
+                elf_path,
+                Checkpoint::Complete,
+            ),
             (PcsKind::Basefold, FieldType::Goldilocks) => {
+                ensure_no_root_proof_output(self)?;
                 prove_inner::<GoldilocksExt2, Basefold<GoldilocksExt2, BasefoldRSParams>, P>(
                     self,
                     compilation_options,
@@ -349,6 +357,7 @@ impl CenoOptions {
                 )
             }
             (PcsKind::Basefold, FieldType::BabyBear) => {
+                ensure_no_root_proof_output(self)?;
                 prove_inner::<BabyBearExt4, Basefold<BabyBearExt4, BasefoldRSParams>, P>(
                     self,
                     compilation_options,
@@ -357,6 +366,7 @@ impl CenoOptions {
                 )
             }
             (PcsKind::Whir, FieldType::Goldilocks) => {
+                ensure_no_root_proof_output(self)?;
                 prove_inner::<GoldilocksExt2, Whir<GoldilocksExt2, WhirDefaultSpec>, P>(
                     self,
                     compilation_options,
@@ -365,6 +375,7 @@ impl CenoOptions {
                 )
             }
             (PcsKind::Whir, FieldType::BabyBear) => {
+                ensure_no_root_proof_output(self)?;
                 prove_inner::<BabyBearExt4, Whir<BabyBearExt4, WhirDefaultSpec>, P>(
                     self,
                     compilation_options,
@@ -510,6 +521,81 @@ fn prove_inner<
             File::create(&path).context(format!("failed to create {}", path.display()))?;
         bincode::serialize_into(vk_file, &verifier.into_inner())
             .context("failed to serialize vk")?;
+    }
+    Ok(())
+}
+
+fn prove_recursion_inner<P: AsRef<Path>>(
+    args: &CenoOptions,
+    compilation_options: &CompilationOptions,
+    elf_path: P,
+    checkpoint: Checkpoint,
+) -> anyhow::Result<()> {
+    let result = run_elf_inner::<BabyBearExt4, Jagged<Basefold<BabyBearExt4, BasefoldRSParams>>, P>(
+        args,
+        compilation_options,
+        elf_path,
+        checkpoint,
+    )?;
+    let zkvm_proofs = result.proofs.expect("PrepSanityCheck should yield proof.");
+    let vk = result.vk.expect("PrepSanityCheck should yield vk.");
+
+    let start = std::time::Instant::now();
+    let verifier = ZKVMVerifier::new(vk.clone());
+    if let Err(e) = verify(zkvm_proofs.clone(), &verifier) {
+        bail!("Verification failed: {e:?}");
+    }
+    print_cargo_message(
+        "Verified",
+        format_args!("proof in {:.2}s", start.elapsed().as_secs_f32()),
+    );
+
+    if let Some(out_proof) = args.out_proof.as_ref() {
+        let path = canonicalize_allow_nx(out_proof)?;
+        print_cargo_message("Writing", format_args!("proof to {}", path.display()));
+        let proof_file =
+            File::create(&path).context(format!("failed to create {}", path.display()))?;
+        bincode::serialize_into(proof_file, &zkvm_proofs)
+            .context("failed to serialize zkvm proof")?;
+    }
+    if let Some(out_vk) = args.out_vk.as_ref() {
+        let path = canonicalize_allow_nx(out_vk)?;
+        print_cargo_message("Writing", format_args!("vk to {}", path.display()));
+        let vk_file =
+            File::create(&path).context(format!("failed to create {}", path.display()))?;
+        bincode::serialize_into(vk_file, &verifier.into_inner())
+            .context("failed to serialize vk")?;
+    }
+    if let Some(out_root_proof) = args.out_root_proof.as_ref() {
+        let options = AggregationOptions::new(test_system_params_zero_pow(5, 16, 3));
+        let vk = Arc::new(vk);
+        warm_child_vk_digest_cache(&vk);
+        let start = std::time::Instant::now();
+        let prover = AggProver::<2, 2>::new(vk, options);
+        let root_output = prover
+            .prove_with_root_vk(&zkvm_proofs)
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        prover
+            .verify_root_proof(&root_output.root_vk, &root_output.root_proof)
+            .map_err(|err| anyhow::anyhow!("{err}"))?;
+        print_cargo_message(
+            "Aggregated",
+            format_args!("root proof in {:.2}s", start.elapsed().as_secs_f32()),
+        );
+
+        let path = canonicalize_allow_nx(out_root_proof)?;
+        print_cargo_message("Writing", format_args!("root proof to {}", path.display()));
+        let proof_file =
+            File::create(&path).context(format!("failed to create {}", path.display()))?;
+        bincode::serialize_into(proof_file, &root_output.root_proof)
+            .context("failed to serialize recursion-v2 root proof")?;
+    }
+    Ok(())
+}
+
+fn ensure_no_root_proof_output(args: &CenoOptions) -> anyhow::Result<()> {
+    if args.out_root_proof.is_some() {
+        bail!("--out-root-proof requires --field baby-bear --pcs jagged");
     }
     Ok(())
 }
