@@ -374,6 +374,14 @@ struct Poseidon2Count {
     compress: u32,
 }
 
+#[cfg(feature = "cuda")]
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+struct Poseidon2Record {
+    state: [F; POSEIDON2_WIDTH],
+    count: Poseidon2Count,
+}
+
 impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>>
     for TranscriptModule
 {
@@ -483,21 +491,17 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
 
 #[cfg(feature = "cuda")]
 mod cuda_tracegen {
-    use openvm_cuda_backend::{
-        GpuBackend, base::DeviceMatrix, data_transporter::transport_matrix_h2d_row,
+    use super::*;
+    use crate::cuda::{
+        GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, to_device_or_nullptr,
+        vk::VerifyingKeyGpu,
     };
+    use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix};
     use openvm_cuda_common::{
         d_buffer::DeviceBuffer,
         error::CudaError,
         memory_manager::MemTracker,
         stream::{GpuDeviceCtx, cudaStream_t},
-    };
-    use p3_matrix::Matrix;
-
-    use super::*;
-    use crate::cuda::{
-        GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, to_device_or_nullptr,
-        vk::VerifyingKeyGpu,
     };
 
     unsafe extern "C" {
@@ -505,6 +509,15 @@ mod cuda_tracegen {
             d_trace: *mut F,
             height: usize,
             d_records: *const TranscriptRowData,
+            num_records: usize,
+            stream: cudaStream_t,
+        ) -> i32;
+
+        fn _transcript_poseidon2_tracegen(
+            d_trace: *mut F,
+            height: usize,
+            width: usize,
+            d_records: *const Poseidon2Record,
             num_records: usize,
             stream: cudaStream_t,
         ) -> i32;
@@ -521,6 +534,26 @@ mod cuda_tracegen {
             CudaError::from_result(_transcript_tracegen(
                 d_trace.as_mut_ptr(),
                 height,
+                d_records.as_ptr(),
+                num_records,
+                stream,
+            ))
+        }
+    }
+
+    unsafe fn poseidon2_tracegen(
+        d_trace: &DeviceBuffer<F>,
+        height: usize,
+        width: usize,
+        d_records: &DeviceBuffer<Poseidon2Record>,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> Result<(), CudaError> {
+        unsafe {
+            CudaError::from_result(_transcript_poseidon2_tracegen(
+                d_trace.as_mut_ptr(),
+                height,
+                width,
                 d_records.as_ptr(),
                 num_records,
                 stream,
@@ -575,6 +608,62 @@ mod cuda_tracegen {
         Some(AirProvingContext::simple_no_pis(trace))
     }
 
+    fn generate_poseidon2_gpu_ctx(
+        states: Vec<[F; POSEIDON2_WIDTH]>,
+        counts: Vec<Poseidon2Count>,
+        height: usize,
+    ) -> Option<AirProvingContext<GpuBackend>> {
+        let mem = MemTracker::start("tracegen.transcript_poseidon2");
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let width = Poseidon2Cols::<F, SBOX_REGISTERS>::width();
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+        let valid_rows = states.len();
+        let records = states
+            .into_iter()
+            .zip(counts)
+            .map(|(state, count)| Poseidon2Record { state, count })
+            .collect::<Vec<_>>();
+
+        let h2d_start = std::time::Instant::now();
+        let d_records = to_device_or_nullptr(&records).ok()?;
+        tracing::info!(
+            elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "transcript.h2d_poseidon2_records"
+        );
+
+        let kernel_start = std::time::Instant::now();
+        unsafe {
+            if let Err(err) = poseidon2_tracegen(
+                trace.buffer(),
+                height,
+                width,
+                &d_records,
+                valid_rows,
+                device_ctx.stream.as_raw(),
+            ) {
+                tracing::warn!(?err, "transcript_poseidon2_tracegen failed");
+                return None;
+            }
+        }
+        device_ctx.stream.synchronize().ok()?;
+        tracing::info!(
+            elapsed_ms = kernel_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            valid_rows,
+            height,
+            width,
+            cells = height * width,
+            "transcript.poseidon2_kernel_launch_sync"
+        );
+        mem.emit_metrics();
+
+        Some(AirProvingContext::simple_no_pis(trace))
+    }
+
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for TranscriptModule {
         type ModuleSpecificCtx<'a> = (
             &'a [Preflight],
@@ -591,7 +680,6 @@ mod cuda_tracegen {
             ctx: &Self::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
-            let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
             let _ = (child_vk, proofs);
             let _ = preflights;
             let preflight_refs = ctx.0.iter().collect::<Vec<_>>();
@@ -664,7 +752,7 @@ mod cuda_tracegen {
 
             let poseidon2_trace = {
                 let dedup_start = std::time::Instant::now();
-                let (mut poseidon_states, poseidon_counts) =
+                let (poseidon_states, poseidon_counts) =
                     Self::dedup_poseidon_inputs(poseidon2_perm_inputs, poseidon2_compress_inputs);
                 let unique_state_count = poseidon_states.len();
                 tracing::info!(
@@ -674,7 +762,6 @@ mod cuda_tracegen {
                         .saturating_sub(unique_state_count),
                     "transcript.dedup_poseidon_inputs"
                 );
-                let build_poseidon_start = std::time::Instant::now();
                 let poseidon2_valid_rows = poseidon_states.len();
                 let poseidon2_num_rows = if let Some(height) = required_poseidon2 {
                     if height == 0 || poseidon2_valid_rows > height {
@@ -686,53 +773,13 @@ mod cuda_tracegen {
                 } else {
                     poseidon2_valid_rows.next_power_of_two()
                 };
-
-                poseidon_states.resize(poseidon2_num_rows, [F::ZERO; POSEIDON2_WIDTH]);
-
-                let inner_width = self.sub_chip.air.width();
-                let poseidon2_width = Poseidon2Cols::<F, SBOX_REGISTERS>::width();
-                let inner_trace = self.sub_chip.generate_trace(poseidon_states);
-                let mut poseidon_trace = vec![F::ZERO; poseidon2_num_rows * poseidon2_width];
-
-                for (i, row) in poseidon_trace.chunks_exact_mut(poseidon2_width).enumerate() {
-                    let inner_off = i * inner_width;
-                    row[..inner_width]
-                        .copy_from_slice(&inner_trace.values[inner_off..inner_off + inner_width]);
-                    let cols: &mut Poseidon2Cols<F, SBOX_REGISTERS> = row.borrow_mut();
-                    let count = poseidon_counts.get(i).copied().unwrap_or_default();
-                    cols.permute_mult = F::from_u32(count.perm);
-                    cols.compress_mult = F::from_u32(count.compress);
-                }
-                let trace = RowMajorMatrix::new(poseidon_trace, poseidon2_width);
-                tracing::info!(
-                    elapsed_ms = build_poseidon_start.elapsed().as_secs_f64() * 1000.0,
-                    height = trace.height(),
-                    width = trace.width(),
-                    cells = trace.height() * trace.width(),
-                    valid_rows = poseidon2_valid_rows,
-                    "transcript.build_poseidon2_trace"
-                );
-                trace
+                generate_poseidon2_gpu_ctx(poseidon_states, poseidon_counts, poseidon2_num_rows)?
             };
 
             let transcript_trace =
                 generate_transcript_gpu_ctx(&transcript_records, transcript_height)?;
-            let poseidon2_height = poseidon2_trace.height();
-            let poseidon2_width = poseidon2_trace.width();
-            let h2d_poseidon_start = std::time::Instant::now();
-            let poseidon2_trace = transport_matrix_h2d_row(&poseidon2_trace, &device_ctx).ok()?;
-            tracing::info!(
-                elapsed_ms = h2d_poseidon_start.elapsed().as_secs_f64() * 1000.0,
-                height = poseidon2_height,
-                width = poseidon2_width,
-                cells = poseidon2_height * poseidon2_width,
-                "transcript.h2d_poseidon2_trace"
-            );
 
-            Some(vec![
-                transcript_trace,
-                AirProvingContext::simple_no_pis(poseidon2_trace),
-            ])
+            Some(vec![transcript_trace, poseidon2_trace])
         }
     }
 }

@@ -132,6 +132,16 @@ typedef struct {
 } TranscriptRowData;
 
 typedef struct {
+    uint32_t perm;
+    uint32_t compress;
+} Poseidon2Count;
+
+typedef struct {
+    Fp state[16];
+    Poseidon2Count count;
+} Poseidon2Record;
+
+typedef struct {
     size_t proof_idx;
     size_t idx;
     size_t fork_id;
