@@ -285,11 +285,12 @@ mod cuda_tracegen {
     use super::*;
     use crate::{
         cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
+        system::{Preflight, RecursionProof, RecursionVk},
         tracegen::{ModuleChip, cuda::generate_gpu_proving_ctx},
     };
 
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for BatchConstraintModule {
-        type ModuleSpecificCtx<'a> = ();
+        type ModuleSpecificCtx<'a> = (&'a RecursionVk, &'a [RecursionProof], &'a [Preflight]);
 
         #[tracing::instrument(skip_all)]
         fn generate_proving_ctxs(
@@ -297,22 +298,16 @@ mod cuda_tracegen {
             child_vk: &VerifyingKeyGpu,
             proofs: &[ProofGpu],
             preflights: &[PreflightGpu],
-            _ctx: &Self::ModuleSpecificCtx<'_>,
+            ctx: &Self::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
-            let proofs_cpu = proofs
-                .iter()
-                .map(|proof| proof.cpu.clone())
-                .collect::<Vec<_>>();
-            let preflights_cpu = preflights
-                .iter()
-                .map(|preflight| preflight.cpu.clone())
-                .collect::<Vec<_>>();
+            let _ = (child_vk, proofs, preflights);
+            let (child_vk_cpu, proofs_cpu, preflights_cpu) = *ctx;
             let collect_start = std::time::Instant::now();
             let mut records = MainModule::collect_batch_constraint_records(
-                &child_vk.cpu,
-                &proofs_cpu,
-                &preflights_cpu,
+                child_vk_cpu,
+                proofs_cpu,
+                preflights_cpu,
             )
             .ok()?;
             tracing::info!(

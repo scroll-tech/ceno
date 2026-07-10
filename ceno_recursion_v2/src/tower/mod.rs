@@ -1815,11 +1815,17 @@ mod cuda_tracegen {
     use super::*;
     use crate::{
         cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
+        system::{Preflight, RecursionProof, RecursionVk},
         tracegen::cuda::generate_gpu_proving_ctx,
     };
 
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for TowerModule {
-        type ModuleSpecificCtx<'a> = ExpBitsLenTraceGenerator;
+        type ModuleSpecificCtx<'a> = (
+            &'a RecursionVk,
+            &'a [RecursionProof],
+            &'a [Preflight],
+            &'a ExpBitsLenTraceGenerator,
+        );
 
         #[tracing::instrument(skip_all)]
         fn generate_proving_ctxs(
@@ -1827,18 +1833,15 @@ mod cuda_tracegen {
             child_vk: &VerifyingKeyGpu,
             proofs: &[ProofGpu],
             preflights: &[PreflightGpu],
-            exp_bits_len_gen: &ExpBitsLenTraceGenerator,
+            ctx: &Self::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
-            let proofs_cpu: Vec<_> = proofs.iter().map(|proof| proof.cpu.clone()).collect();
-            let preflights_cpu: Vec<_> = preflights
-                .iter()
-                .map(|preflight| preflight.cpu.clone())
-                .collect();
+            let _ = (child_vk, proofs, preflights);
+            let (child_vk_cpu, proofs_cpu, preflights_cpu, exp_bits_len_gen) = *ctx;
             let blob = match self.generate_blob(
-                &child_vk.cpu,
-                &proofs_cpu,
-                &preflights_cpu,
+                child_vk_cpu,
+                proofs_cpu,
+                preflights_cpu,
                 exp_bits_len_gen,
             ) {
                 Ok(blob) => blob,

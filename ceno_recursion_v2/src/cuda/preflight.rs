@@ -15,7 +15,6 @@ use super::{
 
 #[derive(Debug)]
 pub struct PreflightGpu {
-    pub cpu: Preflight,
     pub transcript: TranscriptLog,
     pub proof_shape: ProofShapePreflightGpu,
     pub gkr: TowerPreflightGpu,
@@ -68,7 +67,6 @@ pub struct WhirPreflightGpu {
 impl PreflightGpu {
     pub fn new(vk: &RecursionVk, proof: &RecursionProof, preflight: &Preflight) -> Self {
         PreflightGpu {
-            cpu: preflight.clone(),
             transcript: Self::transcript(preflight),
             proof_shape: Self::proof_shape(vk, proof, preflight),
             gkr: Self::gkr(preflight),

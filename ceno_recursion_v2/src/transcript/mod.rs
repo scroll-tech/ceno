@@ -576,7 +576,11 @@ mod cuda_tracegen {
     }
 
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for TranscriptModule {
-        type ModuleSpecificCtx<'a> = (&'a [[F; POSEIDON2_WIDTH]], &'a [[F; POSEIDON2_WIDTH]]);
+        type ModuleSpecificCtx<'a> = (
+            &'a [Preflight],
+            &'a [[F; POSEIDON2_WIDTH]],
+            &'a [[F; POSEIDON2_WIDTH]],
+        );
 
         #[tracing::instrument(skip_all)]
         fn generate_proving_ctxs(
@@ -589,10 +593,8 @@ mod cuda_tracegen {
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
             let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
             let _ = (child_vk, proofs);
-            let preflights_cpu = preflights
-                .iter()
-                .map(|preflight| &preflight.cpu)
-                .collect::<Vec<_>>();
+            let _ = preflights;
+            let preflight_refs = ctx.0.iter().collect::<Vec<_>>();
 
             let (required_transcript, required_poseidon2) = if let Some(heights) = required_heights
             {
@@ -606,7 +608,7 @@ mod cuda_tracegen {
 
             let transcript_start = std::time::Instant::now();
             let (transcript_records, transcript_height, mut poseidon2_perm_inputs) =
-                self.collect_transcript_row_records(&preflights_cpu, required_transcript)?;
+                self.collect_transcript_row_records(&preflight_refs, required_transcript)?;
             tracing::info!(
                 elapsed_ms = transcript_start.elapsed().as_secs_f64() * 1000.0,
                 record_count = transcript_records.len(),
@@ -618,9 +620,9 @@ mod cuda_tracegen {
             let mut poseidon2_compress_inputs = Vec::new();
 
             let collect_poseidon_start = std::time::Instant::now();
-            poseidon2_perm_inputs.extend_from_slice(ctx.0);
-            poseidon2_compress_inputs.extend_from_slice(ctx.1);
-            for preflight in &preflights_cpu {
+            poseidon2_perm_inputs.extend_from_slice(ctx.1);
+            poseidon2_compress_inputs.extend_from_slice(ctx.2);
+            for preflight in &preflight_refs {
                 poseidon2_perm_inputs.extend(
                     preflight
                         .pcs

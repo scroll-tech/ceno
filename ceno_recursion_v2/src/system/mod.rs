@@ -378,8 +378,11 @@ mod cuda_tracegen {
         #[tracing::instrument(name = "wrapper.generate_proving_ctxs", level = "trace", skip_all)]
         fn generate_gpu_ctxs(
             self,
+            child_vk_cpu: &RecursionVk,
             child_vk: &VerifyingKeyGpu,
+            proofs_cpu: &[RecursionProof],
             proofs: &[ProofGpu],
+            preflights_cpu: &[Preflight],
             preflights: &[PreflightGpu],
             pow_checker_gen: &Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
             exp_bits_len_gen: &ExpBitsLenTraceGenerator,
@@ -398,6 +401,7 @@ mod cuda_tracegen {
                     proofs,
                     preflights,
                     &(
+                        preflights_cpu,
                         external_data.poseidon2_permute_inputs,
                         external_data.poseidon2_compress_inputs,
                     ),
@@ -405,24 +409,15 @@ mod cuda_tracegen {
                 ),
                 TraceModuleRef::ProofShape(module) => {
                     let mut range_check_inputs = external_data.range_check_inputs.to_vec();
-                    let proofs_cpu = proofs
-                        .iter()
-                        .map(|proof| proof.cpu.clone())
-                        .collect::<Vec<_>>();
-                    let preflights_cpu = preflights
-                        .iter()
-                        .map(|preflight| preflight.cpu.clone())
-                        .collect::<Vec<_>>();
                     range_check_inputs.extend(
                         crate::tower::collect_tower_range_checks(
-                            &child_vk.cpu,
-                            &proofs_cpu,
-                            &preflights_cpu,
+                            child_vk_cpu,
+                            proofs_cpu,
+                            preflights_cpu,
                         )
                         .ok()?,
                     );
-                    range_check_inputs
-                        .extend(crate::pcs::collect_pcs_range_checks(&preflights_cpu));
+                    range_check_inputs.extend(crate::pcs::collect_pcs_range_checks(preflights_cpu));
                     <ProofShapeModule as TraceGenModule<
                         crate::cuda::GlobalCtxGpu,
                         GpuBackend,
@@ -431,7 +426,13 @@ mod cuda_tracegen {
                         child_vk,
                         proofs,
                         preflights,
-                        &(pow_checker_gen.clone(), range_check_inputs.as_slice()),
+                        &(
+                            pow_checker_gen.clone(),
+                            range_check_inputs.as_slice(),
+                            child_vk_cpu,
+                            proofs_cpu,
+                            preflights_cpu,
+                        ),
                         required_heights,
                     )
                 }
@@ -443,7 +444,7 @@ mod cuda_tracegen {
                     child_vk,
                     proofs,
                     preflights,
-                    exp_bits_len_gen,
+                    &(child_vk_cpu, proofs_cpu, preflights_cpu, exp_bits_len_gen),
                     required_heights,
                 ),
                 TraceModuleRef::Main(module) => <MainModule as TraceGenModule<
@@ -454,7 +455,7 @@ mod cuda_tracegen {
                     child_vk,
                     proofs,
                     preflights,
-                    &(),
+                    &(child_vk_cpu, proofs_cpu, preflights_cpu),
                     required_heights,
                 ),
                 TraceModuleRef::BatchConstraint(module) => {
@@ -466,19 +467,11 @@ mod cuda_tracegen {
                         child_vk,
                         proofs,
                         preflights,
-                        &(),
+                        &(child_vk_cpu, proofs_cpu, preflights_cpu),
                         required_heights,
                     )
                 }
                 TraceModuleRef::Pcs(module) => {
-                    let proofs_cpu = proofs
-                        .iter()
-                        .map(|proof| proof.cpu.clone())
-                        .collect::<Vec<_>>();
-                    let preflights_cpu = preflights
-                        .iter()
-                        .map(|preflight| preflight.cpu.clone())
-                        .collect::<Vec<_>>();
                     let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
                     let cpu_start = std::time::Instant::now();
                     let cpu_ctxs = crate::pcs::with_skip_pcs_jagged_assist_q_cpu_trace(|| {
@@ -487,9 +480,9 @@ mod cuda_tracegen {
                             CpuBackend<BabyBearPoseidon2Config>,
                         >>::generate_proving_ctxs(
                             module,
-                            &child_vk.cpu,
-                            &proofs_cpu,
-                            &preflights_cpu,
+                            child_vk_cpu,
+                            proofs_cpu,
+                            preflights_cpu,
                             &(),
                             required_heights,
                         )
@@ -505,7 +498,7 @@ mod cuda_tracegen {
                     let jagged_assist_q_required = required_heights
                         .and_then(|heights| heights.get(jagged_assist_q_idx).copied());
                     let jagged_assist_q_records =
-                        crate::pcs::collect_pcs_jagged_assist_q_records(&preflights_cpu);
+                        crate::pcs::collect_pcs_jagged_assist_q_records(preflights_cpu);
                     let jagged_assist_q_gpu_start = std::time::Instant::now();
                     let jagged_assist_q_gpu_ctx =
                         crate::pcs::cuda_tracegen::generate_pcs_jagged_assist_q_gpu_ctx(
@@ -708,8 +701,11 @@ mod cuda_tracegen {
                     proofs.len(),
                     || {
                         module.generate_gpu_ctxs(
+                            child_vk,
                             &leaf_gpu_staging.child_vk,
+                            proofs,
                             &leaf_gpu_staging.proofs,
+                            preflights_cpu.as_slice(),
                             &leaf_gpu_staging.preflights,
                             &power_checker_gen,
                             &exp_bits_len_gen,

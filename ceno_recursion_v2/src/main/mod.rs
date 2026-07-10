@@ -975,30 +975,25 @@ mod cuda_tracegen {
     use super::*;
     use crate::{
         cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
+        system::{Preflight, RecursionProof, RecursionVk},
         tracegen::cuda::generate_gpu_proving_ctx,
     };
 
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for MainModule {
-        type ModuleSpecificCtx<'a> = ();
+        type ModuleSpecificCtx<'a> = (&'a RecursionVk, &'a [RecursionProof], &'a [Preflight]);
 
         fn generate_proving_ctxs(
             &self,
             child_vk: &VerifyingKeyGpu,
             proofs: &[ProofGpu],
             preflights: &[PreflightGpu],
-            _ctx: &Self::ModuleSpecificCtx<'_>,
+            ctx: &Self::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
-            let proofs_cpu = proofs
-                .iter()
-                .map(|proof| proof.cpu.clone())
-                .collect::<Vec<_>>();
-            let preflights_cpu = preflights
-                .iter()
-                .map(|preflight| preflight.cpu.clone())
-                .collect::<Vec<_>>();
+            let _ = (child_vk, proofs, preflights);
+            let (child_vk_cpu, proofs_cpu, preflights_cpu) = *ctx;
             let mut records =
-                Self::collect_records(&child_vk.cpu, &proofs_cpu, &preflights_cpu).ok()?;
+                Self::collect_records(child_vk_cpu, proofs_cpu, preflights_cpu).ok()?;
             let MainCollectedRecords {
                 ref mut main_records,
                 ref mut selector_eval_records,
