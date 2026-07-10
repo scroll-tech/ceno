@@ -17,7 +17,7 @@ use tracing_subscriber::EnvFilter;
 use super::{AggregationSubCircuit, RecursionProof, RecursionVk, VerifierSubCircuit};
 use crate::{
     circuit::inner::{InnerTraceGen, InnerTraceGenImpl, PreVerifierSubCircuitInput, ProofsType},
-    system::{VerifierExternalData, VerifierTraceGen, child_vk_digest},
+    system::{VerifierExternalData, VerifierTraceGen},
     utils::{TranscriptLabel, transcript_observe_label},
 };
 
@@ -110,15 +110,6 @@ fn load_fixtures() -> Result<Option<(Vec<RecursionProof>, RecursionVk)>> {
         return Ok(None);
     };
     Ok(Some((proofs, vk)))
-}
-
-fn warm_child_vk_digest(child_vk: &RecursionVk) {
-    let start = std::time::Instant::now();
-    let _ = child_vk_digest(child_vk);
-    tracing::info!(
-        elapsed_ms = start.elapsed().as_secs_f64() * 1000.0,
-        "warmed child_vk_digest before CUDA tracegen test"
-    );
 }
 
 fn select_proofs(proofs: &[RecursionProof], count: usize) -> Result<Vec<RecursionProof>> {
@@ -332,7 +323,6 @@ fn compare_inner_tracegen(shard_count: usize) -> Result<()> {
     let Some((loaded_proofs, child_vk)) = load_fixtures()? else {
         return Ok(());
     };
-    warm_child_vk_digest(&child_vk);
     let proofs = select_proofs(&loaded_proofs, shard_count)?;
     let mut initial_transcript = default_duplex_sponge_recorder();
     transcript_observe_label(&mut initial_transcript, TranscriptLabel::Riscv.as_bytes());
@@ -400,7 +390,6 @@ fn compare_tracegen(shard_count: usize, replay_required_heights: bool) -> Result
     let Some((loaded_proofs, child_vk)) = load_fixtures()? else {
         return Ok(());
     };
-    warm_child_vk_digest(&child_vk);
     let proofs = select_proofs(&loaded_proofs, shard_count)?;
     let circuit = VerifierSubCircuit::<MAX_NUM_PROOFS>::new(Arc::new(child_vk.clone()));
 

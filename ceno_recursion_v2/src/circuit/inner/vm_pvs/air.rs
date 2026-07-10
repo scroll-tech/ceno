@@ -187,9 +187,6 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             AB::Expr::from_u64(Tracer::SUBCYCLES_PER_INSN),
         );
 
-        // Ceno stores public values in one global namespace. Each AIR's instance list maps its
-        // local pv_idx to a global public-value index, so duplicate global indices across AIRs
-        // must resolve to the same canonical VmPvs expression here.
         for (air_idx, instance_indices) in self.instance_public_value_indices.iter().enumerate() {
             for (pv_idx, global_pv_idx) in instance_indices.iter().enumerate() {
                 self.public_values_bus.receive(
