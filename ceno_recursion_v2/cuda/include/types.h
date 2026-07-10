@@ -120,6 +120,59 @@ typedef struct {
 
 typedef struct {
     size_t proof_idx;
+    size_t kind;
+    size_t source;
+    size_t round_idx;
+    size_t term_idx;
+    size_t bit_idx;
+    bool is_first;
+    bool is_last;
+    size_t lookup_count;
+    size_t point_tidx;
+    size_t sumcheck_idx;
+    size_t point_round;
+    bool index_bit;
+    size_t index_pow2;
+    size_t index_acc_in;
+    size_t index_acc_out;
+    Fp point[D_EF];
+    Fp acc_in[D_EF];
+    Fp acc_out[D_EF];
+} PcsEqProductData;
+
+typedef struct {
+    size_t proof_idx;
+    size_t round_idx;
+    size_t term_idx;
+    size_t coord_idx;
+    size_t step_idx;
+    bool is_first;
+    bool is_last;
+    bool has_factor;
+    Fp point[D_EF];
+    Fp acc_in[D_EF];
+    Fp acc_out[D_EF];
+} PcsSuffixProductData;
+
+typedef struct {
+    size_t proof_idx;
+    size_t query_idx;
+    size_t round;
+    size_t step;
+    bool is_first;
+    bool is_last;
+    size_t idx_in;
+    size_t idx_bit;
+    size_t idx_out;
+    Fp current[DIGEST_SIZE];
+    Fp sibling[DIGEST_SIZE];
+    Fp left[DIGEST_SIZE];
+    Fp right[DIGEST_SIZE];
+    Fp output[DIGEST_SIZE];
+} PcsCommitPhaseMerkleData;
+
+typedef struct {
+    size_t proof_idx;
     bool is_proof_start;
     size_t tidx;
     bool is_sample;

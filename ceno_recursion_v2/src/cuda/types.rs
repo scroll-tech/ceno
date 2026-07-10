@@ -1,4 +1,4 @@
-use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, F};
+use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, DIGEST_SIZE, F};
 
 #[repr(C)]
 #[derive(Debug, Default)]
@@ -121,6 +121,65 @@ pub struct PcsJaggedAssistQData {
     pub term_acc_out: [F; D_EF],
     pub q_acc_in: [F; D_EF],
     pub q_acc_out: [F; D_EF],
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct PcsEqProductData {
+    pub proof_idx: usize,
+    pub kind: usize,
+    pub source: usize,
+    pub round_idx: usize,
+    pub term_idx: usize,
+    pub bit_idx: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub lookup_count: usize,
+    pub point_tidx: usize,
+    pub sumcheck_idx: usize,
+    pub point_round: usize,
+    pub index_bit: bool,
+    pub index_pow2: usize,
+    pub index_acc_in: usize,
+    pub index_acc_out: usize,
+    pub point: [F; D_EF],
+    pub acc_in: [F; D_EF],
+    pub acc_out: [F; D_EF],
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct PcsSuffixProductData {
+    pub proof_idx: usize,
+    pub round_idx: usize,
+    pub term_idx: usize,
+    pub coord_idx: usize,
+    pub step_idx: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub has_factor: bool,
+    pub point: [F; D_EF],
+    pub acc_in: [F; D_EF],
+    pub acc_out: [F; D_EF],
+}
+
+#[repr(C)]
+#[derive(Debug, Default)]
+pub struct PcsCommitPhaseMerkleData {
+    pub proof_idx: usize,
+    pub query_idx: usize,
+    pub round: usize,
+    pub step: usize,
+    pub is_first: bool,
+    pub is_last: bool,
+    pub idx_in: usize,
+    pub idx_bit: usize,
+    pub idx_out: usize,
+    pub current: [F; DIGEST_SIZE],
+    pub sibling: [F; DIGEST_SIZE],
+    pub left: [F; DIGEST_SIZE],
+    pub right: [F; DIGEST_SIZE],
+    pub output: [F; DIGEST_SIZE],
 }
 
 #[repr(C)]

@@ -1555,7 +1555,7 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
             "pcs.collect_sort.eq_products"
         );
         group_start = std::time::Instant::now();
-        let mut suffix_products = preflights
+        let suffix_products = preflights
             .iter()
             .enumerate()
             .flat_map(|(proof_idx, p)| {
@@ -1569,21 +1569,26 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                     })
             })
             .collect_vec();
-        suffix_products.sort_by_key(|record| {
+        debug_assert!(suffix_products.windows(2).all(|records| {
             (
-                record.proof_idx,
-                record.round_idx,
-                record.term_idx,
-                record.step_idx,
+                records[0].proof_idx,
+                records[0].round_idx,
+                records[0].term_idx,
+                records[0].step_idx,
+            ) <= (
+                records[1].proof_idx,
+                records[1].round_idx,
+                records[1].term_idx,
+                records[1].step_idx,
             )
-        });
+        }));
         tracing::info!(
             elapsed_ms = group_start.elapsed().as_secs_f64() * 1000.0,
             record_count = suffix_products.len(),
             "pcs.collect_sort.suffix_products"
         );
         group_start = std::time::Instant::now();
-        let mut jagged_assist_h = preflights
+        let jagged_assist_h = preflights
             .iter()
             .enumerate()
             .flat_map(|(proof_idx, p)| {
@@ -1597,7 +1602,17 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
                     })
             })
             .collect_vec();
-        jagged_assist_h.sort_by_key(|record| (record.proof_idx, record.round_idx, record.step_idx));
+        debug_assert!(jagged_assist_h.windows(2).all(|records| {
+            (
+                records[0].proof_idx,
+                records[0].round_idx,
+                records[0].step_idx,
+            ) <= (
+                records[1].proof_idx,
+                records[1].round_idx,
+                records[1].step_idx,
+            )
+        }));
         let jagged_assist_q = collect_pcs_jagged_assist_q_records(preflights);
         tracing::info!(
             elapsed_ms = group_start.elapsed().as_secs_f64() * 1000.0,
@@ -2049,6 +2064,50 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         .enumerate()
         .map(|(idx, chip)| {
             let required_height = required_heights.and_then(|heights| heights.get(idx).copied());
+            if matches!(chip, PcsModuleChip::CommitPhaseMerkle)
+                && skip_pcs_commit_phase_merkle_cpu_trace()
+            {
+                let width = PcsCommitPhaseMerkleCols::<F>::width();
+                tracing::info!(
+                    air_name = chip.trace_name(),
+                    record_count = chip.record_count(&ctx),
+                    required_height,
+                    width,
+                    "pcs.cpu_tracegen_skipped_for_gpu_direct"
+                );
+                return Some(AirProvingContext::simple_no_pis(RowMajorMatrix::new(
+                    vec![F::ZERO; width],
+                    width,
+                )));
+            }
+            if matches!(chip, PcsModuleChip::EqProduct) && skip_pcs_eq_product_cpu_trace() {
+                let width = PcsEqProductCols::<F>::width();
+                tracing::info!(
+                    air_name = chip.trace_name(),
+                    record_count = chip.record_count(&ctx),
+                    required_height,
+                    width,
+                    "pcs.cpu_tracegen_skipped_for_gpu_direct"
+                );
+                return Some(AirProvingContext::simple_no_pis(RowMajorMatrix::new(
+                    vec![F::ZERO; width],
+                    width,
+                )));
+            }
+            if matches!(chip, PcsModuleChip::SuffixProduct) && skip_pcs_suffix_product_cpu_trace() {
+                let width = PcsSuffixProductCols::<F>::width();
+                tracing::info!(
+                    air_name = chip.trace_name(),
+                    record_count = chip.record_count(&ctx),
+                    required_height,
+                    width,
+                    "pcs.cpu_tracegen_skipped_for_gpu_direct"
+                );
+                return Some(AirProvingContext::simple_no_pis(RowMajorMatrix::new(
+                    vec![F::ZERO; width],
+                    width,
+                )));
+            }
             if matches!(chip, PcsModuleChip::JaggedAssistQ) && skip_pcs_jagged_assist_q_cpu_trace()
             {
                 let width = PcsJaggedAssistQCols::<F>::width();
@@ -5526,15 +5585,30 @@ impl PcsModule {
 #[cfg(feature = "cuda")]
 thread_local! {
     static SKIP_JAGGED_ASSIST_Q_CPU_TRACE: Cell<bool> = const { Cell::new(false) };
+    static SKIP_EQ_PRODUCT_CPU_TRACE: Cell<bool> = const { Cell::new(false) };
+    static SKIP_SUFFIX_PRODUCT_CPU_TRACE: Cell<bool> = const { Cell::new(false) };
+    static SKIP_COMMIT_PHASE_MERKLE_CPU_TRACE: Cell<bool> = const { Cell::new(false) };
 }
 
 #[cfg(feature = "cuda")]
-pub(crate) fn with_skip_pcs_jagged_assist_q_cpu_trace<T>(f: impl FnOnce() -> T) -> T {
+pub(crate) fn with_skip_pcs_gpu_direct_cpu_traces<T>(f: impl FnOnce() -> T) -> T {
     SKIP_JAGGED_ASSIST_Q_CPU_TRACE.with(|flag| {
-        let previous = flag.replace(true);
-        let result = f();
-        flag.set(previous);
-        result
+        SKIP_EQ_PRODUCT_CPU_TRACE.with(|eq_flag| {
+            SKIP_SUFFIX_PRODUCT_CPU_TRACE.with(|suffix_flag| {
+                SKIP_COMMIT_PHASE_MERKLE_CPU_TRACE.with(|merkle_flag| {
+                    let previous_jagged = flag.replace(true);
+                    let previous_eq = eq_flag.replace(true);
+                    let previous_suffix = suffix_flag.replace(true);
+                    let previous_merkle = merkle_flag.replace(true);
+                    let result = f();
+                    merkle_flag.set(previous_merkle);
+                    suffix_flag.set(previous_suffix);
+                    eq_flag.set(previous_eq);
+                    flag.set(previous_jagged);
+                    result
+                })
+            })
+        })
     })
 }
 
@@ -5543,15 +5617,133 @@ fn skip_pcs_jagged_assist_q_cpu_trace() -> bool {
     SKIP_JAGGED_ASSIST_Q_CPU_TRACE.with(Cell::get)
 }
 
+#[cfg(feature = "cuda")]
+fn skip_pcs_eq_product_cpu_trace() -> bool {
+    SKIP_EQ_PRODUCT_CPU_TRACE.with(Cell::get)
+}
+
+#[cfg(feature = "cuda")]
+fn skip_pcs_suffix_product_cpu_trace() -> bool {
+    SKIP_SUFFIX_PRODUCT_CPU_TRACE.with(Cell::get)
+}
+
+#[cfg(feature = "cuda")]
+fn skip_pcs_commit_phase_merkle_cpu_trace() -> bool {
+    SKIP_COMMIT_PHASE_MERKLE_CPU_TRACE.with(Cell::get)
+}
+
 #[cfg(not(feature = "cuda"))]
 fn skip_pcs_jagged_assist_q_cpu_trace() -> bool {
     false
 }
 
+#[cfg(not(feature = "cuda"))]
+fn skip_pcs_eq_product_cpu_trace() -> bool {
+    false
+}
+
+#[cfg(not(feature = "cuda"))]
+fn skip_pcs_suffix_product_cpu_trace() -> bool {
+    false
+}
+
+#[cfg(not(feature = "cuda"))]
+fn skip_pcs_commit_phase_merkle_cpu_trace() -> bool {
+    false
+}
+
+#[cfg(feature = "cuda")]
+pub(crate) fn collect_pcs_commit_phase_merkle_records(
+    preflights: &[Preflight],
+) -> Vec<PcsCommitPhaseMerkleRecord> {
+    let mut records = preflights
+        .iter()
+        .enumerate()
+        .flat_map(|(proof_idx, p)| {
+            p.pcs
+                .commit_phase_merkle_rows
+                .iter()
+                .cloned()
+                .map(move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                })
+        })
+        .collect_vec();
+    records.sort_by_key(|record| {
+        (
+            record.proof_idx,
+            record.query_idx,
+            record.round,
+            record.step,
+        )
+    });
+    records
+}
+
+#[cfg(feature = "cuda")]
+pub(crate) fn collect_pcs_eq_product_records(preflights: &[Preflight]) -> Vec<PcsEqProductRecord> {
+    let mut records = preflights
+        .iter()
+        .enumerate()
+        .flat_map(|(proof_idx, p)| {
+            p.pcs.eq_products.iter().cloned().map(move |mut record| {
+                record.proof_idx = proof_idx;
+                record
+            })
+        })
+        .collect_vec();
+    records.sort_by_key(|record| {
+        (
+            record.proof_idx,
+            record.kind.as_usize(),
+            record.source.as_usize(),
+            record.round_idx,
+            record.term_idx,
+            record.bit_idx,
+        )
+    });
+    records
+}
+
+#[cfg(feature = "cuda")]
+pub(crate) fn collect_pcs_suffix_product_records(
+    preflights: &[Preflight],
+) -> Vec<PcsSuffixProductRecord> {
+    let records = preflights
+        .iter()
+        .enumerate()
+        .flat_map(|(proof_idx, p)| {
+            p.pcs
+                .suffix_products
+                .iter()
+                .cloned()
+                .map(move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                })
+        })
+        .collect_vec();
+    debug_assert!(records.windows(2).all(|records| {
+        (
+            records[0].proof_idx,
+            records[0].round_idx,
+            records[0].term_idx,
+            records[0].step_idx,
+        ) <= (
+            records[1].proof_idx,
+            records[1].round_idx,
+            records[1].term_idx,
+            records[1].step_idx,
+        )
+    }));
+    records
+}
+
 pub(crate) fn collect_pcs_jagged_assist_q_records(
     preflights: &[Preflight],
 ) -> Vec<PcsJaggedAssistQRecord> {
-    let mut records = preflights
+    let records = preflights
         .iter()
         .enumerate()
         .flat_map(|(proof_idx, p)| {
@@ -5565,14 +5757,19 @@ pub(crate) fn collect_pcs_jagged_assist_q_records(
                 })
         })
         .collect_vec();
-    records.sort_by_key(|record| {
+    debug_assert!(records.windows(2).all(|records| {
         (
-            record.proof_idx,
-            record.round_idx,
-            record.term_idx,
-            record.step_idx,
+            records[0].proof_idx,
+            records[0].round_idx,
+            records[0].term_idx,
+            records[0].step_idx,
+        ) <= (
+            records[1].proof_idx,
+            records[1].round_idx,
+            records[1].term_idx,
+            records[1].step_idx,
         )
-    });
+    }));
     records
 }
 
@@ -6176,9 +6373,38 @@ pub(crate) mod cuda_tracegen {
     };
 
     use super::*;
-    use crate::cuda::{to_device_or_nullptr, types::PcsJaggedAssistQData};
+    use crate::cuda::{
+        to_device_or_nullptr,
+        types::{
+            PcsCommitPhaseMerkleData, PcsEqProductData, PcsJaggedAssistQData, PcsSuffixProductData,
+        },
+    };
 
     unsafe extern "C" {
+        fn _pcs_commit_phase_merkle_tracegen(
+            d_trace: *mut F,
+            height: usize,
+            d_records: *const PcsCommitPhaseMerkleData,
+            num_records: usize,
+            stream: cudaStream_t,
+        ) -> i32;
+
+        fn _pcs_eq_product_tracegen(
+            d_trace: *mut F,
+            height: usize,
+            d_records: *const PcsEqProductData,
+            num_records: usize,
+            stream: cudaStream_t,
+        ) -> i32;
+
+        fn _pcs_suffix_product_tracegen(
+            d_trace: *mut F,
+            height: usize,
+            d_records: *const PcsSuffixProductData,
+            num_records: usize,
+            stream: cudaStream_t,
+        ) -> i32;
+
         fn _pcs_jagged_assist_q_tracegen(
             d_trace: *mut F,
             height: usize,
@@ -6204,6 +6430,299 @@ pub(crate) mod cuda_tracegen {
                 stream,
             ))
         }
+    }
+
+    unsafe fn pcs_commit_phase_merkle_tracegen(
+        d_trace: &DeviceBuffer<F>,
+        height: usize,
+        d_records: &DeviceBuffer<PcsCommitPhaseMerkleData>,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> Result<(), CudaError> {
+        unsafe {
+            CudaError::from_result(_pcs_commit_phase_merkle_tracegen(
+                d_trace.as_mut_ptr(),
+                height,
+                d_records.as_ptr(),
+                num_records,
+                stream,
+            ))
+        }
+    }
+
+    unsafe fn pcs_eq_product_tracegen(
+        d_trace: &DeviceBuffer<F>,
+        height: usize,
+        d_records: &DeviceBuffer<PcsEqProductData>,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> Result<(), CudaError> {
+        unsafe {
+            CudaError::from_result(_pcs_eq_product_tracegen(
+                d_trace.as_mut_ptr(),
+                height,
+                d_records.as_ptr(),
+                num_records,
+                stream,
+            ))
+        }
+    }
+
+    unsafe fn pcs_suffix_product_tracegen(
+        d_trace: &DeviceBuffer<F>,
+        height: usize,
+        d_records: &DeviceBuffer<PcsSuffixProductData>,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> Result<(), CudaError> {
+        unsafe {
+            CudaError::from_result(_pcs_suffix_product_tracegen(
+                d_trace.as_mut_ptr(),
+                height,
+                d_records.as_ptr(),
+                num_records,
+                stream,
+            ))
+        }
+    }
+
+    pub(crate) fn generate_pcs_commit_phase_merkle_gpu_ctx(
+        records: &[PcsCommitPhaseMerkleRecord],
+        required_height: Option<usize>,
+    ) -> Option<AirProvingContext<GpuBackend>> {
+        let mem = MemTracker::start("tracegen.pcs_commit_phase_merkle");
+        let width = PcsCommitPhaseMerkleCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+
+        let pack_start = std::time::Instant::now();
+        let records = records
+            .iter()
+            .map(|record| PcsCommitPhaseMerkleData {
+                proof_idx: record.proof_idx,
+                query_idx: record.query_idx,
+                round: record.round,
+                step: record.step,
+                is_first: record.is_first,
+                is_last: record.is_last,
+                idx_in: record.idx_in,
+                idx_bit: record.idx_bit,
+                idx_out: record.idx_out,
+                current: record.current,
+                sibling: record.sibling,
+                left: record.left,
+                right: record.right,
+                output: record.output,
+            })
+            .collect::<Vec<_>>();
+        tracing::info!(
+            elapsed_ms = pack_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_commit_phase_merkle.pack_records"
+        );
+
+        let h2d_start = std::time::Instant::now();
+        let d_records = to_device_or_nullptr(&records).ok()?;
+        tracing::info!(
+            elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_commit_phase_merkle.h2d_records"
+        );
+
+        let kernel_start = std::time::Instant::now();
+        unsafe {
+            if let Err(err) = pcs_commit_phase_merkle_tracegen(
+                trace.buffer(),
+                height,
+                &d_records,
+                records.len(),
+                device_ctx.stream.as_raw(),
+            ) {
+                tracing::warn!(?err, "pcs_commit_phase_merkle_tracegen failed");
+                return None;
+            }
+        }
+        if let Err(err) = device_ctx.stream.synchronize() {
+            tracing::warn!(?err, "pcs_commit_phase_merkle_tracegen synchronize failed");
+            return None;
+        }
+        tracing::info!(
+            elapsed_ms = kernel_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_commit_phase_merkle.kernel_launch_sync"
+        );
+        mem.emit_metrics();
+        Some(AirProvingContext::simple_no_pis(trace))
+    }
+
+    pub(crate) fn generate_pcs_eq_product_gpu_ctx(
+        records: &[PcsEqProductRecord],
+        required_height: Option<usize>,
+    ) -> Option<AirProvingContext<GpuBackend>> {
+        let mem = MemTracker::start("tracegen.pcs_eq_product");
+        let width = PcsEqProductCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+
+        let pack_start = std::time::Instant::now();
+        let records = records
+            .iter()
+            .map(|record| PcsEqProductData {
+                proof_idx: record.proof_idx,
+                kind: record.kind.as_usize(),
+                source: record.source.as_usize(),
+                round_idx: record.round_idx,
+                term_idx: record.term_idx,
+                bit_idx: record.bit_idx,
+                is_first: record.is_first,
+                is_last: record.is_last,
+                lookup_count: record.lookup_count,
+                point_tidx: record.point_tidx,
+                sumcheck_idx: record.sumcheck_idx,
+                point_round: record.point_round,
+                index_bit: record.index_bit,
+                index_pow2: record.index_pow2,
+                index_acc_in: record.index_acc_in,
+                index_acc_out: record.index_acc_out,
+                point: ext_limbs(record.point),
+                acc_in: ext_limbs(record.acc_in),
+                acc_out: ext_limbs(record.acc_out),
+            })
+            .collect::<Vec<_>>();
+        tracing::info!(
+            elapsed_ms = pack_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_eq_product.pack_records"
+        );
+
+        let h2d_start = std::time::Instant::now();
+        let d_records = to_device_or_nullptr(&records).ok()?;
+        tracing::info!(
+            elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_eq_product.h2d_records"
+        );
+
+        let kernel_start = std::time::Instant::now();
+        unsafe {
+            if let Err(err) = pcs_eq_product_tracegen(
+                trace.buffer(),
+                height,
+                &d_records,
+                records.len(),
+                device_ctx.stream.as_raw(),
+            ) {
+                tracing::warn!(?err, "pcs_eq_product_tracegen failed");
+                return None;
+            }
+        }
+        if let Err(err) = device_ctx.stream.synchronize() {
+            tracing::warn!(?err, "pcs_eq_product_tracegen synchronize failed");
+            return None;
+        }
+        tracing::info!(
+            elapsed_ms = kernel_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_eq_product.kernel_launch_sync"
+        );
+        mem.emit_metrics();
+        Some(AirProvingContext::simple_no_pis(trace))
+    }
+
+    pub(crate) fn generate_pcs_suffix_product_gpu_ctx(
+        records: &[PcsSuffixProductRecord],
+        required_height: Option<usize>,
+    ) -> Option<AirProvingContext<GpuBackend>> {
+        let mem = MemTracker::start("tracegen.pcs_suffix_product");
+        let width = PcsSuffixProductCols::<F>::width();
+        let height = trace_height(records.len(), required_height)?;
+        let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+
+        let pack_start = std::time::Instant::now();
+        let records = records
+            .iter()
+            .map(|record| PcsSuffixProductData {
+                proof_idx: record.proof_idx,
+                round_idx: record.round_idx,
+                term_idx: record.term_idx,
+                coord_idx: record.coord_idx,
+                step_idx: record.step_idx,
+                is_first: record.is_first,
+                is_last: record.is_last,
+                has_factor: record.has_factor,
+                point: ext_limbs(record.point),
+                acc_in: ext_limbs(record.acc_in),
+                acc_out: ext_limbs(record.acc_out),
+            })
+            .collect::<Vec<_>>();
+        tracing::info!(
+            elapsed_ms = pack_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_suffix_product.pack_records"
+        );
+
+        let h2d_start = std::time::Instant::now();
+        let d_records = to_device_or_nullptr(&records).ok()?;
+        tracing::info!(
+            elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_suffix_product.h2d_records"
+        );
+
+        let kernel_start = std::time::Instant::now();
+        unsafe {
+            if let Err(err) = pcs_suffix_product_tracegen(
+                trace.buffer(),
+                height,
+                &d_records,
+                records.len(),
+                device_ctx.stream.as_raw(),
+            ) {
+                tracing::warn!(?err, "pcs_suffix_product_tracegen failed");
+                return None;
+            }
+        }
+        if let Err(err) = device_ctx.stream.synchronize() {
+            tracing::warn!(?err, "pcs_suffix_product_tracegen synchronize failed");
+            return None;
+        }
+        tracing::info!(
+            elapsed_ms = kernel_start.elapsed().as_secs_f64() * 1000.0,
+            record_count = records.len(),
+            height,
+            width,
+            cells = height * width,
+            "pcs_suffix_product.kernel_launch_sync"
+        );
+        mem.emit_metrics();
+        Some(AirProvingContext::simple_no_pis(trace))
     }
 
     pub(crate) fn generate_pcs_jagged_assist_q_gpu_ctx(

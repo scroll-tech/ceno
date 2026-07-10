@@ -474,7 +474,7 @@ mod cuda_tracegen {
                 TraceModuleRef::Pcs(module) => {
                     let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
                     let cpu_start = std::time::Instant::now();
-                    let cpu_ctxs = crate::pcs::with_skip_pcs_jagged_assist_q_cpu_trace(|| {
+                    let cpu_ctxs = crate::pcs::with_skip_pcs_gpu_direct_cpu_traces(|| {
                         <PcsModule as TraceGenModule<
                             GlobalCtxCpu,
                             CpuBackend<BabyBearPoseidon2Config>,
@@ -491,6 +491,60 @@ mod cuda_tracegen {
                         elapsed_ms = cpu_start.elapsed().as_secs_f64() * 1000.0,
                         trace_count = cpu_ctxs.len(),
                         "pcs.cpu_generate_proving_ctxs"
+                    );
+                    let commit_phase_merkle_idx = crate::pcs::PcsModule::chip_trace_names()
+                        .iter()
+                        .position(|name| *name == "PcsCommitPhaseMerkleAir")?;
+                    let commit_phase_merkle_required = required_heights
+                        .and_then(|heights| heights.get(commit_phase_merkle_idx).copied());
+                    let commit_phase_merkle_records =
+                        crate::pcs::collect_pcs_commit_phase_merkle_records(preflights_cpu);
+                    let commit_phase_merkle_gpu_start = std::time::Instant::now();
+                    let commit_phase_merkle_gpu_ctx =
+                        crate::pcs::cuda_tracegen::generate_pcs_commit_phase_merkle_gpu_ctx(
+                            &commit_phase_merkle_records,
+                            commit_phase_merkle_required,
+                        )?;
+                    tracing::info!(
+                        elapsed_ms = commit_phase_merkle_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                        record_count = commit_phase_merkle_records.len(),
+                        "pcs.commit_phase_merkle.gpu_direct"
+                    );
+                    let eq_product_idx = crate::pcs::PcsModule::chip_trace_names()
+                        .iter()
+                        .position(|name| *name == "PcsEqProductAir")?;
+                    let eq_product_required =
+                        required_heights.and_then(|heights| heights.get(eq_product_idx).copied());
+                    let eq_product_records =
+                        crate::pcs::collect_pcs_eq_product_records(preflights_cpu);
+                    let eq_product_gpu_start = std::time::Instant::now();
+                    let eq_product_gpu_ctx =
+                        crate::pcs::cuda_tracegen::generate_pcs_eq_product_gpu_ctx(
+                            &eq_product_records,
+                            eq_product_required,
+                        )?;
+                    tracing::info!(
+                        elapsed_ms = eq_product_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                        record_count = eq_product_records.len(),
+                        "pcs.eq_product.gpu_direct"
+                    );
+                    let suffix_product_idx = crate::pcs::PcsModule::chip_trace_names()
+                        .iter()
+                        .position(|name| *name == "PcsSuffixProductAir")?;
+                    let suffix_product_required = required_heights
+                        .and_then(|heights| heights.get(suffix_product_idx).copied());
+                    let suffix_product_records =
+                        crate::pcs::collect_pcs_suffix_product_records(preflights_cpu);
+                    let suffix_product_gpu_start = std::time::Instant::now();
+                    let suffix_product_gpu_ctx =
+                        crate::pcs::cuda_tracegen::generate_pcs_suffix_product_gpu_ctx(
+                            &suffix_product_records,
+                            suffix_product_required,
+                        )?;
+                    tracing::info!(
+                        elapsed_ms = suffix_product_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                        record_count = suffix_product_records.len(),
+                        "pcs.suffix_product.gpu_direct"
                     );
                     let jagged_assist_q_idx = crate::pcs::PcsModule::chip_trace_names()
                         .iter()
@@ -511,11 +565,23 @@ mod cuda_tracegen {
                         "pcs.jagged_assist_q.gpu_direct"
                     );
                     let h2d_all_start = std::time::Instant::now();
+                    let mut commit_phase_merkle_gpu_ctx = Some(commit_phase_merkle_gpu_ctx);
+                    let mut eq_product_gpu_ctx = Some(eq_product_gpu_ctx);
+                    let mut suffix_product_gpu_ctx = Some(suffix_product_gpu_ctx);
                     let mut jagged_assist_q_gpu_ctx = Some(jagged_assist_q_gpu_ctx);
                     let h2d_ctxs = cpu_ctxs
                         .into_iter()
                         .enumerate()
                         .map(|(idx, ctx)| {
+                            if idx == commit_phase_merkle_idx {
+                                return commit_phase_merkle_gpu_ctx.take();
+                            }
+                            if idx == eq_product_idx {
+                                return eq_product_gpu_ctx.take();
+                            }
+                            if idx == suffix_product_idx {
+                                return suffix_product_gpu_ctx.take();
+                            }
                             if idx == jagged_assist_q_idx {
                                 return jagged_assist_q_gpu_ctx.take();
                             }
