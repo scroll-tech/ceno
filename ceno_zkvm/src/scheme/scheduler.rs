@@ -390,7 +390,7 @@ impl ChipScheduler {
                                     Err(ZKVMError::BackendError(BackendError::CircuitError(
                                         msg.into_boxed_str(),
                                     ))),
-                                    PB::E::ZERO,
+                                    <PB::E as p3::field::PrimeCharacteristicRing>::ZERO,
                                 )
                             }
                         };
