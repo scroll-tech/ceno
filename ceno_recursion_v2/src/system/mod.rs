@@ -357,6 +357,7 @@ impl<'a> TraceModuleRef<'a> {
 mod cuda_tracegen {
     use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
     use openvm_cuda_common::stream::GpuDeviceCtx;
+    use p3_matrix::Matrix;
 
     use super::*;
     use crate::cuda::{PreflightGpu, ProofGpu, VerifyingKeyGpu};

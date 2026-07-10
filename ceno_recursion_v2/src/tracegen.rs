@@ -62,6 +62,7 @@ impl<SC: StarkProtocolConfig<F = F>, T: RowMajorChip<F>> ModuleChip<CpuBackend<S
 pub(crate) mod cuda {
     use openvm_cuda_backend::{GpuBackend, data_transporter::transport_matrix_h2d_row};
     use openvm_cuda_common::stream::GpuDeviceCtx;
+    use p3_matrix::Matrix;
 
     use super::*;
     use crate::cuda::{preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu};
