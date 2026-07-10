@@ -36,6 +36,8 @@ pub use types::{
     convert_vk_from_zkvm,
 };
 
+#[cfg(feature = "profile")]
+use std::time::Instant;
 use std::{
     iter, mem,
     sync::{Arc, Mutex, OnceLock},
@@ -70,6 +72,39 @@ use recursion_circuit::primitives::{
 use tracing::Span;
 
 pub const POW_CHECKER_HEIGHT: usize = 32;
+
+#[cfg(feature = "profile")]
+fn profile_generate_step<T>(
+    backend: &'static str,
+    step: &'static str,
+    module: Option<&'static str>,
+    proof_count: usize,
+    f: impl FnOnce() -> T,
+) -> T {
+    let start = Instant::now();
+    let result = f();
+    tracing::info!(
+        target: "ceno_recursion_v2::profile",
+        backend,
+        step,
+        module = module.unwrap_or("all"),
+        proof_count,
+        elapsed_ms = start.elapsed().as_secs_f64() * 1000.0,
+        "verifier_subcircuit_generate_proving_ctxs"
+    );
+    result
+}
+
+#[cfg(not(feature = "profile"))]
+fn profile_generate_step<T>(
+    _backend: &'static str,
+    _step: &'static str,
+    _module: Option<&'static str>,
+    _proof_count: usize,
+    f: impl FnOnce() -> T,
+) -> T {
+    f()
+}
 
 pub(crate) fn child_vk_digest(child_vk: &RecursionVk) -> [RecursionField; VK_DIGEST_LEN] {
     static CACHE: OnceLock<
@@ -447,23 +482,26 @@ mod cuda_tracegen {
             }
 
             let span = Span::current();
-            let preflights_cpu = std::thread::scope(|s| {
-                let handles: Vec<_> = proofs
-                    .iter()
-                    .zip(initial_transcripts)
-                    .map(|(zk_proof, sponge)| {
-                        let span = span.clone();
-                        s.spawn(move || {
-                            let _guard = span.enter();
-                            self.run_preflight(sponge, child_vk, zk_proof)
-                        })
+            let preflights_cpu =
+                profile_generate_step("gpu", "preflight", None, proofs.len(), || {
+                    std::thread::scope(|s| {
+                        let handles: Vec<_> = proofs
+                            .iter()
+                            .zip(initial_transcripts)
+                            .map(|(zk_proof, sponge)| {
+                                let span = span.clone();
+                                s.spawn(move || {
+                                    let _guard = span.enter();
+                                    self.run_preflight(sponge, child_vk, zk_proof)
+                                })
+                            })
+                            .collect();
+                        handles
+                            .into_iter()
+                            .map(|h| h.join().unwrap())
+                            .collect::<Vec<_>>()
                     })
-                    .collect();
-                handles
-                    .into_iter()
-                    .map(|h| h.join().unwrap())
-                    .collect::<Vec<_>>()
-            });
+                });
 
             if let Some(final_transcript_state) = &mut external_data.final_transcript_state {
                 final_transcript_state.fill(F::ZERO);
@@ -498,14 +536,22 @@ mod cuda_tracegen {
 
             let mut ctxs_by_module = Vec::with_capacity(modules.len());
             for (module, required_heights) in modules.into_iter().zip(module_required) {
-                let Some(module_ctxs) = module.generate_gpu_ctxs(
-                    &child_vk_gpu,
-                    &proofs_gpu,
-                    &preflights_gpu,
-                    &power_checker_gen,
-                    &exp_bits_len_gen,
-                    external_data,
-                    required_heights,
+                let Some(module_ctxs) = profile_generate_step(
+                    "gpu",
+                    "module_trace_generation",
+                    Some(module.name()),
+                    proofs.len(),
+                    || {
+                        module.generate_gpu_ctxs(
+                            &child_vk_gpu,
+                            &proofs_gpu,
+                            &preflights_gpu,
+                            &power_checker_gen,
+                            &exp_bits_len_gen,
+                            external_data,
+                            required_heights,
+                        )
+                    },
                 ) else {
                     tracing::debug!(
                         module = module.name(),
@@ -935,23 +981,25 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         let span = Span::current();
         let child_vk_recursion = child_vk;
         let this = self;
-        let preflights = std::thread::scope(|s| {
-            let handles: Vec<_> = proofs
-                .iter()
-                .zip(initial_transcripts)
-                .map(|(zk_proof, sponge)| {
-                    let child_vk = child_vk_recursion;
-                    let span = span.clone();
-                    s.spawn(move || {
-                        let _guard = span.enter();
-                        this.run_preflight(sponge, child_vk, zk_proof)
+        let preflights = profile_generate_step("cpu", "preflight", None, proofs.len(), || {
+            std::thread::scope(|s| {
+                let handles: Vec<_> = proofs
+                    .iter()
+                    .zip(initial_transcripts)
+                    .map(|(zk_proof, sponge)| {
+                        let child_vk = child_vk_recursion;
+                        let span = span.clone();
+                        s.spawn(move || {
+                            let _guard = span.enter();
+                            this.run_preflight(sponge, child_vk, zk_proof)
+                        })
                     })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap())
-                .collect::<Vec<_>>()
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap())
+                    .collect::<Vec<_>>()
+            })
         });
 
         if let Some(final_transcript_state) = &mut external_data.final_transcript_state {
@@ -981,15 +1029,23 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             .zip(module_required)
             .map(|(module, required_heights)| {
                 let _guard = span.enter();
-                module.generate_cpu_ctxs(
-                    child_vk,
-                    proofs,
-                    &preflights,
-                    &child_vk_pcs_data,
-                    &power_checker_gen,
-                    &exp_bits_len_gen,
-                    external_data,
-                    required_heights,
+                profile_generate_step(
+                    "cpu",
+                    "module_trace_generation",
+                    Some(module.name()),
+                    proofs.len(),
+                    || {
+                        module.generate_cpu_ctxs(
+                            child_vk,
+                            proofs,
+                            &preflights,
+                            &child_vk_pcs_data,
+                            &power_checker_gen,
+                            &exp_bits_len_gen,
+                            external_data,
+                            required_heights,
+                        )
+                    },
                 )
             })
             .collect::<Vec<_>>();
