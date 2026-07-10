@@ -36,6 +36,8 @@ pub use types::{
     convert_vk_from_zkvm,
 };
 
+#[cfg(feature = "profile")]
+use std::time::Instant;
 use std::{
     iter, mem,
     sync::{Arc, Mutex, OnceLock},
@@ -55,7 +57,6 @@ use openvm_poseidon2_air::POSEIDON2_WIDTH;
 use openvm_stark_backend::{
     AirRef, FiatShamirTranscript, StarkEngine, StarkProtocolConfig, TranscriptHistory,
     interaction::BusIndex,
-    p3_maybe_rayon::prelude::*,
     prover::{AirProvingContext, CommittedTraceData, ProverBackend},
 };
 use openvm_stark_sdk::{
@@ -70,6 +71,39 @@ use recursion_circuit::primitives::{
 use tracing::Span;
 
 pub const POW_CHECKER_HEIGHT: usize = 32;
+
+#[cfg(feature = "profile")]
+fn profile_generate_step<T>(
+    backend: &'static str,
+    step: &'static str,
+    module: Option<&'static str>,
+    proof_count: usize,
+    f: impl FnOnce() -> T,
+) -> T {
+    let start = Instant::now();
+    let result = f();
+    tracing::info!(
+        target: "ceno_recursion_v2::profile",
+        backend,
+        step,
+        module = module.unwrap_or("all"),
+        proof_count,
+        elapsed_ms = start.elapsed().as_secs_f64() * 1000.0,
+        "verifier_subcircuit_generate_proving_ctxs"
+    );
+    result
+}
+
+#[cfg(not(feature = "profile"))]
+fn profile_generate_step<T>(
+    _backend: &'static str,
+    _step: &'static str,
+    _module: Option<&'static str>,
+    _proof_count: usize,
+    f: impl FnOnce() -> T,
+) -> T {
+    f()
+}
 
 #[cfg(not(feature = "cuda"))]
 fn new_exp_bits_len_trace_generator() -> Option<ExpBitsLenTraceGenerator> {
@@ -327,129 +361,263 @@ mod cuda_tracegen {
     use super::*;
     use crate::cuda::{PreflightGpu, ProofGpu, VerifyingKeyGpu};
 
+    struct GpuTracegenExternalData<'a> {
+        poseidon2_compress_inputs: &'a [[F; POSEIDON2_WIDTH]],
+        poseidon2_permute_inputs: &'a [[F; POSEIDON2_WIDTH]],
+        range_check_inputs: &'a [usize],
+    }
+
+    struct LeafGpuStaging {
+        child_vk: VerifyingKeyGpu,
+        proofs: Vec<ProofGpu>,
+        preflights: Vec<PreflightGpu>,
+    }
+
     impl<'a> TraceModuleRef<'a> {
         #[allow(clippy::too_many_arguments)]
         #[tracing::instrument(name = "wrapper.generate_proving_ctxs", level = "trace", skip_all)]
         fn generate_gpu_ctxs(
             self,
+            child_vk_cpu: &RecursionVk,
             child_vk: &VerifyingKeyGpu,
+            proofs_cpu: &[RecursionProof],
             proofs: &[ProofGpu],
+            preflights_cpu: &[Preflight],
             preflights: &[PreflightGpu],
             pow_checker_gen: &Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
             exp_bits_len_gen: &ExpBitsLenTraceGenerator,
-            external_data: &VerifierExternalData<'_>,
+            external_data: &GpuTracegenExternalData<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
             let module_name = self.name();
             let module_start = std::time::Instant::now();
             match self {
-                TraceModuleRef::Transcript(module) => module.generate_proving_ctxs(
+                TraceModuleRef::Transcript(module) => <TranscriptModule as TraceGenModule<
+                    crate::cuda::GlobalCtxGpu,
+                    GpuBackend,
+                >>::generate_proving_ctxs(
+                    module,
                     child_vk,
                     proofs,
                     preflights,
                     &(
-                        external_data.poseidon2_permute_inputs.as_slice(),
-                        external_data.poseidon2_compress_inputs.as_slice(),
+                        preflights_cpu,
+                        external_data.poseidon2_permute_inputs,
+                        external_data.poseidon2_compress_inputs,
                     ),
                     required_heights,
                 ),
                 TraceModuleRef::ProofShape(module) => {
                     let mut range_check_inputs = external_data.range_check_inputs.to_vec();
-                    let proofs_cpu = proofs
-                        .iter()
-                        .map(|proof| proof.cpu.clone())
-                        .collect::<Vec<_>>();
-                    let preflights_cpu = preflights
-                        .iter()
-                        .map(|preflight| preflight.cpu.clone())
-                        .collect::<Vec<_>>();
                     range_check_inputs.extend(
                         crate::tower::collect_tower_range_checks(
-                            &child_vk.cpu,
-                            &proofs_cpu,
-                            &preflights_cpu,
+                            child_vk_cpu,
+                            proofs_cpu,
+                            preflights_cpu,
                         )
                         .ok()?,
                     );
-                    range_check_inputs
-                        .extend(crate::pcs::collect_pcs_range_checks(&preflights_cpu));
-                    module.generate_proving_ctxs(
+                    range_check_inputs.extend(crate::pcs::collect_pcs_range_checks(preflights_cpu));
+                    <ProofShapeModule as TraceGenModule<
+                        crate::cuda::GlobalCtxGpu,
+                        GpuBackend,
+                    >>::generate_proving_ctxs(
+                        module,
                         child_vk,
                         proofs,
                         preflights,
-                        &(pow_checker_gen.clone(), range_check_inputs.as_slice()),
+                        &(
+                            pow_checker_gen.clone(),
+                            range_check_inputs.as_slice(),
+                            child_vk_cpu,
+                            proofs_cpu,
+                            preflights_cpu,
+                        ),
                         required_heights,
                     )
                 }
-                TraceModuleRef::Tower(module) => module.generate_proving_ctxs(
+                TraceModuleRef::Tower(module) => <TowerModule as TraceGenModule<
+                    crate::cuda::GlobalCtxGpu,
+                    GpuBackend,
+                >>::generate_proving_ctxs(
+                    module,
                     child_vk,
                     proofs,
                     preflights,
-                    exp_bits_len_gen,
+                    &(child_vk_cpu, proofs_cpu, preflights_cpu, exp_bits_len_gen),
                     required_heights,
                 ),
-                TraceModuleRef::Main(module) => module.generate_proving_ctxs(
+                TraceModuleRef::Main(module) => <MainModule as TraceGenModule<
+                    crate::cuda::GlobalCtxGpu,
+                    GpuBackend,
+                >>::generate_proving_ctxs(
+                    module,
                     child_vk,
                     proofs,
                     preflights,
-                    &(),
+                    &(child_vk_cpu, proofs_cpu, preflights_cpu),
                     required_heights,
                 ),
-                TraceModuleRef::BatchConstraint(module) => module.generate_proving_ctxs(
-                    child_vk,
-                    proofs,
-                    preflights,
-                    &(),
-                    required_heights,
-                ),
+                TraceModuleRef::BatchConstraint(module) => {
+                    <BatchConstraintModule as TraceGenModule<
+                        crate::cuda::GlobalCtxGpu,
+                        GpuBackend,
+                    >>::generate_proving_ctxs(
+                        module,
+                        child_vk,
+                        proofs,
+                        preflights,
+                        &(child_vk_cpu, proofs_cpu, preflights_cpu),
+                        required_heights,
+                    )
+                }
                 TraceModuleRef::Pcs(module) => {
-                    let proofs_cpu = proofs
-                        .iter()
-                        .map(|proof| proof.cpu.clone())
-                        .collect::<Vec<_>>();
-                    let preflights_cpu = preflights
-                        .iter()
-                        .map(|preflight| preflight.cpu.clone())
-                        .collect::<Vec<_>>();
                     let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
                     let cpu_start = std::time::Instant::now();
-                    let ctxs: Vec<AirProvingContext<CpuBackend<BabyBearPoseidon2Config>>> = module
-                        .generate_proving_ctxs(
-                            &child_vk.cpu,
-                            &proofs_cpu,
-                            &preflights_cpu,
+                    let cpu_ctxs = crate::pcs::with_skip_pcs_gpu_direct_cpu_traces(|| {
+                        <PcsModule as TraceGenModule<
+                            GlobalCtxCpu,
+                            CpuBackend<BabyBearPoseidon2Config>,
+                        >>::generate_proving_ctxs(
+                            module,
+                            child_vk_cpu,
+                            proofs_cpu,
+                            preflights_cpu,
                             &(),
                             required_heights,
+                        )
+                    })?;
+                    tracing::info!(
+                        elapsed_ms = cpu_start.elapsed().as_secs_f64() * 1000.0,
+                        trace_count = cpu_ctxs.len(),
+                        "pcs.cpu_generate_proving_ctxs"
+                    );
+                    let commit_phase_merkle_idx = crate::pcs::PcsModule::chip_trace_names()
+                        .iter()
+                        .position(|name| *name == "PcsCommitPhaseMerkleAir")?;
+                    let commit_phase_merkle_required = required_heights
+                        .and_then(|heights| heights.get(commit_phase_merkle_idx).copied());
+                    let commit_phase_merkle_records =
+                        crate::pcs::collect_pcs_commit_phase_merkle_records(preflights_cpu);
+                    let commit_phase_merkle_gpu_start = std::time::Instant::now();
+                    let commit_phase_merkle_gpu_ctx =
+                        crate::pcs::cuda_tracegen::generate_pcs_commit_phase_merkle_gpu_ctx(
+                            &commit_phase_merkle_records,
+                            commit_phase_merkle_required,
                         )?;
                     tracing::info!(
-                        module = module_name,
-                        elapsed_ms = cpu_start.elapsed().as_secs_f64() * 1000.0,
-                        trace_count = ctxs.len(),
-                        "recursion gpu verifier module CPU tracegen fallback"
+                        elapsed_ms = commit_phase_merkle_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                        record_count = commit_phase_merkle_records.len(),
+                        "pcs.commit_phase_merkle.gpu_direct"
                     );
-                    let h2d_start = std::time::Instant::now();
-                    let trace_count = ctxs.len();
-                    let out = ctxs
+                    let eq_product_idx = crate::pcs::PcsModule::chip_trace_names()
+                        .iter()
+                        .position(|name| *name == "PcsEqProductAir")?;
+                    let eq_product_required =
+                        required_heights.and_then(|heights| heights.get(eq_product_idx).copied());
+                    let eq_product_records =
+                        crate::pcs::collect_pcs_eq_product_records(preflights_cpu);
+                    let eq_product_gpu_start = std::time::Instant::now();
+                    let eq_product_gpu_ctx =
+                        crate::pcs::cuda_tracegen::generate_pcs_eq_product_gpu_ctx(
+                            &eq_product_records,
+                            eq_product_required,
+                        )?;
+                    tracing::info!(
+                        elapsed_ms = eq_product_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                        record_count = eq_product_records.len(),
+                        "pcs.eq_product.gpu_direct"
+                    );
+                    let suffix_product_idx = crate::pcs::PcsModule::chip_trace_names()
+                        .iter()
+                        .position(|name| *name == "PcsSuffixProductAir")?;
+                    let suffix_product_required = required_heights
+                        .and_then(|heights| heights.get(suffix_product_idx).copied());
+                    let suffix_product_records =
+                        crate::pcs::collect_pcs_suffix_product_records(preflights_cpu);
+                    let suffix_product_gpu_start = std::time::Instant::now();
+                    let suffix_product_gpu_ctx =
+                        crate::pcs::cuda_tracegen::generate_pcs_suffix_product_gpu_ctx(
+                            &suffix_product_records,
+                            suffix_product_required,
+                        )?;
+                    tracing::info!(
+                        elapsed_ms = suffix_product_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                        record_count = suffix_product_records.len(),
+                        "pcs.suffix_product.gpu_direct"
+                    );
+                    let jagged_assist_q_idx = crate::pcs::PcsModule::chip_trace_names()
+                        .iter()
+                        .position(|name| *name == "PcsJaggedAssistQAir")?;
+                    let jagged_assist_q_required = required_heights
+                        .and_then(|heights| heights.get(jagged_assist_q_idx).copied());
+                    let jagged_assist_q_records =
+                        crate::pcs::collect_pcs_jagged_assist_q_records(preflights_cpu);
+                    let jagged_assist_q_gpu_start = std::time::Instant::now();
+                    let jagged_assist_q_gpu_ctx =
+                        crate::pcs::cuda_tracegen::generate_pcs_jagged_assist_q_gpu_ctx(
+                            &jagged_assist_q_records,
+                            jagged_assist_q_required,
+                        )?;
+                    tracing::info!(
+                        elapsed_ms = jagged_assist_q_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                        record_count = jagged_assist_q_records.len(),
+                        "pcs.jagged_assist_q.gpu_direct"
+                    );
+                    let h2d_all_start = std::time::Instant::now();
+                    let mut commit_phase_merkle_gpu_ctx = Some(commit_phase_merkle_gpu_ctx);
+                    let mut eq_product_gpu_ctx = Some(eq_product_gpu_ctx);
+                    let mut suffix_product_gpu_ctx = Some(suffix_product_gpu_ctx);
+                    let mut jagged_assist_q_gpu_ctx = Some(jagged_assist_q_gpu_ctx);
+                    let h2d_ctxs = cpu_ctxs
                         .into_iter()
-                        .map(|ctx| {
+                        .enumerate()
+                        .map(|(idx, ctx)| {
+                            if idx == commit_phase_merkle_idx {
+                                return commit_phase_merkle_gpu_ctx.take();
+                            }
+                            if idx == eq_product_idx {
+                                return eq_product_gpu_ctx.take();
+                            }
+                            if idx == suffix_product_idx {
+                                return suffix_product_gpu_ctx.take();
+                            }
+                            if idx == jagged_assist_q_idx {
+                                return jagged_assist_q_gpu_ctx.take();
+                            }
+                            if !ctx.cached_mains.is_empty() {
+                                return None;
+                            }
+                            let air_name = PcsModule::chip_trace_names()
+                                .get(idx)
+                                .copied()
+                                .unwrap_or("unknown");
+                            let height = ctx.common_main.height();
+                            let width = ctx.common_main.width();
+                            let h2d_start = std::time::Instant::now();
+                            let common_main =
+                                transport_matrix_h2d_row(&ctx.common_main, &device_ctx).ok()?;
+                            tracing::info!(
+                                elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
+                                air_name,
+                                height,
+                                width,
+                                cells = height * width,
+                                "pcs.h2d_trace"
+                            );
                             Some(AirProvingContext {
                                 cached_mains: Vec::new(),
-                                common_main: transport_matrix_h2d_row(
-                                    &ctx.common_main,
-                                    &device_ctx,
-                                )
-                                .ok()?,
+                                common_main,
                                 public_values: ctx.public_values,
                             })
                         })
-                        .collect();
+                        .collect::<Option<Vec<_>>>()?;
                     tracing::info!(
-                        module = module_name,
-                        elapsed_ms = h2d_start.elapsed().as_secs_f64() * 1000.0,
-                        trace_count,
-                        "recursion gpu verifier module H2D transport"
+                        elapsed_ms = h2d_all_start.elapsed().as_secs_f64() * 1000.0,
+                        trace_count = h2d_ctxs.len(),
+                        "pcs.h2d_all"
                     );
-                    out
+                    Some(h2d_ctxs)
                 }
             }
             .inspect(|ctxs| {
@@ -500,23 +668,26 @@ mod cuda_tracegen {
 
             let span = Span::current();
             let preflight_start = std::time::Instant::now();
-            let preflights_cpu = std::thread::scope(|s| {
-                let handles: Vec<_> = proofs
-                    .iter()
-                    .zip(initial_transcripts)
-                    .map(|(zk_proof, sponge)| {
-                        let span = span.clone();
-                        s.spawn(move || {
-                            let _guard = span.enter();
-                            self.run_preflight(sponge, child_vk, zk_proof)
-                        })
+            let preflights_cpu =
+                profile_generate_step("gpu", "preflight", None, proofs.len(), || {
+                    std::thread::scope(|s| {
+                        let handles: Vec<_> = proofs
+                            .iter()
+                            .zip(initial_transcripts)
+                            .map(|(zk_proof, sponge)| {
+                                let span = span.clone();
+                                s.spawn(move || {
+                                    let _guard = span.enter();
+                                    self.run_preflight(sponge, child_vk, zk_proof)
+                                })
+                            })
+                            .collect();
+                        handles
+                            .into_iter()
+                            .map(|h| h.join().unwrap())
+                            .collect::<Vec<_>>()
                     })
-                    .collect();
-                handles
-                    .into_iter()
-                    .map(|h| h.join().unwrap())
-                    .collect::<Vec<_>>()
-            });
+                });
             tracing::info!(
                 elapsed_ms = preflight_start.elapsed().as_secs_f64() * 1000.0,
                 proof_count = proofs.len(),
@@ -527,27 +698,54 @@ mod cuda_tracegen {
                 final_transcript_state.fill(F::ZERO);
             }
 
-            let gpu_wrap_start = std::time::Instant::now();
+            let gpu_staging_start = std::time::Instant::now();
+            let vk_gpu_start = std::time::Instant::now();
             let child_vk_gpu = VerifyingKeyGpu::new(child_vk);
+            tracing::info!(
+                elapsed_ms = vk_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                "recursion gpu verifier child VK staging"
+            );
+            let proofs_gpu_start = std::time::Instant::now();
             let proofs_gpu = proofs
                 .iter()
                 .map(|proof| ProofGpu::new(child_vk, proof))
                 .collect::<Vec<_>>();
+            tracing::info!(
+                elapsed_ms = proofs_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                proof_count = proofs.len(),
+                "recursion gpu verifier proof staging"
+            );
+            let preflights_gpu_start = std::time::Instant::now();
             let preflights_gpu = proofs
                 .iter()
                 .zip(preflights_cpu.iter())
                 .map(|(proof, preflight)| PreflightGpu::new(child_vk, proof, preflight))
                 .collect::<Vec<_>>();
+            tracing::info!(
+                elapsed_ms = preflights_gpu_start.elapsed().as_secs_f64() * 1000.0,
+                proof_count = proofs.len(),
+                "recursion gpu verifier preflight staging"
+            );
+            let leaf_gpu_staging = LeafGpuStaging {
+                child_vk: child_vk_gpu,
+                proofs: proofs_gpu,
+                preflights: preflights_gpu,
+            };
             let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
             tracing::info!(
-                elapsed_ms = gpu_wrap_start.elapsed().as_secs_f64() * 1000.0,
+                elapsed_ms = gpu_staging_start.elapsed().as_secs_f64() * 1000.0,
                 proof_count = proofs.len(),
-                "recursion gpu verifier proof/vk H2D transport"
+                "recursion gpu verifier shared leaf staging"
             );
 
             let power_checker_gen =
                 Arc::new(PowerCheckerCpuTraceGenerator::<2, POW_CHECKER_HEIGHT>::default());
             let exp_bits_len_gen = ExpBitsLenTraceGenerator::new(device_ctx.clone());
+            let gpu_external_data = GpuTracegenExternalData {
+                poseidon2_compress_inputs: external_data.poseidon2_compress_inputs.as_slice(),
+                poseidon2_permute_inputs: external_data.poseidon2_permute_inputs.as_slice(),
+                range_check_inputs: external_data.range_check_inputs.as_slice(),
+            };
 
             let (module_required, power_checker_required, exp_bits_len_required) =
                 self.split_required_heights(external_data.required_heights);
@@ -562,14 +760,25 @@ mod cuda_tracegen {
 
             let mut ctxs_by_module = Vec::with_capacity(modules.len());
             for (module, required_heights) in modules.into_iter().zip(module_required) {
-                let Some(module_ctxs) = module.generate_gpu_ctxs(
-                    &child_vk_gpu,
-                    &proofs_gpu,
-                    &preflights_gpu,
-                    &power_checker_gen,
-                    &exp_bits_len_gen,
-                    external_data,
-                    required_heights,
+                let Some(module_ctxs) = profile_generate_step(
+                    "gpu",
+                    "module_trace_generation",
+                    Some(module.name()),
+                    proofs.len(),
+                    || {
+                        module.generate_gpu_ctxs(
+                            child_vk,
+                            &leaf_gpu_staging.child_vk,
+                            proofs,
+                            &leaf_gpu_staging.proofs,
+                            preflights_cpu.as_slice(),
+                            &leaf_gpu_staging.preflights,
+                            &power_checker_gen,
+                            &exp_bits_len_gen,
+                            &gpu_external_data,
+                            required_heights,
+                        )
+                    },
                 ) else {
                     tracing::debug!(
                         module = module.name(),
@@ -579,7 +788,6 @@ mod cuda_tracegen {
                 };
                 ctxs_by_module.push(module_ctxs);
             }
-
             let mut ctx_per_trace = ctxs_by_module.into_iter().flatten().collect::<Vec<_>>();
             if power_checker_required.is_some_and(|h| h != POW_CHECKER_HEIGHT) {
                 return None;
@@ -1008,23 +1216,25 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
         let span = Span::current();
         let child_vk_recursion = child_vk;
         let this = self;
-        let preflights = std::thread::scope(|s| {
-            let handles: Vec<_> = proofs
-                .iter()
-                .zip(initial_transcripts)
-                .map(|(zk_proof, sponge)| {
-                    let child_vk = child_vk_recursion;
-                    let span = span.clone();
-                    s.spawn(move || {
-                        let _guard = span.enter();
-                        this.run_preflight(sponge, child_vk, zk_proof)
+        let preflights = profile_generate_step("cpu", "preflight", None, proofs.len(), || {
+            std::thread::scope(|s| {
+                let handles: Vec<_> = proofs
+                    .iter()
+                    .zip(initial_transcripts)
+                    .map(|(zk_proof, sponge)| {
+                        let child_vk = child_vk_recursion;
+                        let span = span.clone();
+                        s.spawn(move || {
+                            let _guard = span.enter();
+                            this.run_preflight(sponge, child_vk, zk_proof)
+                        })
                     })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap())
-                .collect::<Vec<_>>()
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|h| h.join().unwrap())
+                    .collect::<Vec<_>>()
+            })
         });
 
         if let Some(final_transcript_state) = &mut external_data.final_transcript_state {
@@ -1047,37 +1257,35 @@ impl<SC: StarkProtocolConfig<F = F>, const MAX_NUM_PROOFS: usize>
             TraceModuleRef::Pcs(&self.pcs),
         ];
 
-        let span = Span::current();
-        let ctxs_by_module = modules
-            .clone()
-            .into_par_iter()
-            .zip(module_required)
-            .map(|(module, required_heights)| {
-                let _guard = span.enter();
-                module.generate_cpu_ctxs(
-                    child_vk,
-                    proofs,
-                    &preflights,
-                    &child_vk_pcs_data,
-                    &power_checker_gen,
-                    &exp_bits_len_gen,
-                    external_data,
-                    required_heights,
-                )
-            })
-            .collect::<Vec<_>>();
-
-        for (module, module_ctxs) in modules.into_iter().zip(ctxs_by_module.iter()) {
-            if module_ctxs.is_none() {
+        let mut ctxs_by_module = Vec::with_capacity(modules.len());
+        for (module, required_heights) in modules.into_iter().zip(module_required) {
+            let Some(module_ctxs) = profile_generate_step(
+                "cpu",
+                "module_trace_generation",
+                Some(module.name()),
+                proofs.len(),
+                || {
+                    module.generate_cpu_ctxs(
+                        child_vk,
+                        proofs,
+                        &preflights,
+                        &child_vk_pcs_data,
+                        &power_checker_gen,
+                        &exp_bits_len_gen,
+                        external_data,
+                        required_heights,
+                    )
+                },
+            ) else {
                 tracing::debug!(
                     module = module.name(),
                     "module trace generation returned no contexts"
                 );
-            }
+                return None;
+            };
+            ctxs_by_module.push(module_ctxs);
         }
 
-        let ctxs_by_module: Vec<Vec<AirProvingContext<CpuBackend<SC>>>> =
-            ctxs_by_module.into_iter().collect::<Option<Vec<_>>>()?;
         let mut ctx_per_trace = ctxs_by_module.into_iter().flatten().collect::<Vec<_>>();
         if power_checker_required.is_some_and(|h| h != POW_CHECKER_HEIGHT) {
             return None;

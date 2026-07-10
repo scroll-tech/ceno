@@ -47,7 +47,7 @@ impl TowerSumcheckRecord {
     }
 
     #[inline]
-    fn derive_tidx(&self, layer_idx: usize, round_in_layer: usize) -> usize {
+    pub(crate) fn derive_tidx(&self, layer_idx: usize, round_in_layer: usize) -> usize {
         let previous_layers = (0..layer_idx)
             .map(|idx| {
                 tower_transcript_len::compact_layer_span(

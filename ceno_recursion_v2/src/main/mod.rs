@@ -179,7 +179,6 @@ impl MainModule {
         let mut eval_records = Vec::new();
         let mut selector_eval_records = Vec::new();
         let mut tower_point_eq_records = Vec::new();
-        let mut frontload_term_records = Vec::new();
         let mut final_claim_records = Vec::new();
         for (proof_idx, preflight) in preflights.iter().enumerate() {
             if let Some(mut record) = preflight.main.global_sumchecks.last().cloned() {
@@ -191,12 +190,6 @@ impl MainModule {
                 record
             }));
             selector_eval_records.extend(preflight.main.selector_evals.iter().cloned().map(
-                move |mut record| {
-                    record.proof_idx = proof_idx;
-                    record
-                },
-            ));
-            frontload_term_records.extend(preflight.main.frontload_terms.iter().cloned().map(
                 move |mut record| {
                     record.proof_idx = proof_idx;
                     record
@@ -260,11 +253,13 @@ impl MainModule {
                 .entry((record.proof_idx, record.round_idx))
                 .or_default() += 1;
         }
-        for record in &frontload_term_records {
-            if record.has_global_factor {
-                *global_lookup_counts
-                    .entry((record.proof_idx, record.global_round_idx))
-                    .or_default() += 1;
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.main.frontload_terms {
+                if record.has_global_factor {
+                    *global_lookup_counts
+                        .entry((proof_idx, record.global_round_idx))
+                        .or_default() += 1;
+                }
             }
         }
         for (proof_idx, round_idx) in selector_formula_global_point_lookups(&selector_eval_records)
@@ -296,11 +291,13 @@ impl MainModule {
         }
         let mut eval_lookup_counts =
             std::collections::BTreeMap::<(usize, usize, usize), usize>::new();
-        for record in &frontload_term_records {
-            if record.has_eval_factor {
-                *eval_lookup_counts
-                    .entry((record.proof_idx, record.idx, record.eval_idx))
-                    .or_default() += 1;
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.main.frontload_terms {
+                if record.has_eval_factor {
+                    *eval_lookup_counts
+                        .entry((proof_idx, record.idx, record.eval_idx))
+                        .or_default() += 1;
+                }
             }
         }
         for record in &selector_eval_records {
@@ -471,30 +468,239 @@ impl MainModule {
 
         Ok(MainCollectedRecords {
             main_records,
-            global_sumcheck_records,
-            eval_records,
             selector_eval_records,
             selector_point_records,
             ecc_rt_records,
+            transcript_records,
+        })
+    }
+
+    pub(crate) fn collect_batch_constraint_records(
+        child_vk: &RecursionVk,
+        proofs: &[RecursionProof],
+        preflights: &[Preflight],
+    ) -> Result<MainBatchConstraintRecords> {
+        if proofs.len() != preflights.len() {
+            bail!(
+                "proof/preflight length mismatch ({} proofs vs {} preflights)",
+                proofs.len(),
+                preflights.len()
+            );
+        }
+
+        let tower_main_point_records = build_tower_main_point_records(child_vk, proofs, preflights)
+            .map_err(|err| eyre!("failed to build tower point records for main prefix: {err}"))?;
+        let mut global_sumcheck_records = Vec::with_capacity(preflights.len());
+        let mut eval_records =
+            Vec::with_capacity(preflights.iter().map(|p| p.main.evals.len()).sum());
+        let mut selector_eval_records =
+            Vec::with_capacity(preflights.iter().map(|p| p.main.selector_evals.len()).sum());
+        let mut frontload_term_records = Vec::with_capacity(
+            preflights
+                .iter()
+                .map(|p| p.main.frontload_terms.len())
+                .sum(),
+        );
+        let mut final_claim_records =
+            Vec::with_capacity(preflights.iter().map(|p| p.main.final_claims.len()).sum());
+
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            if let Some(mut record) = preflight.main.global_sumchecks.last().cloned() {
+                record.proof_idx = proof_idx;
+                global_sumcheck_records.push(record);
+            }
+            eval_records.extend(preflight.main.evals.iter().cloned().map(move |mut record| {
+                record.proof_idx = proof_idx;
+                record
+            }));
+            selector_eval_records.extend(preflight.main.selector_evals.iter().cloned().map(
+                move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                },
+            ));
+            frontload_term_records.extend(preflight.main.frontload_terms.iter().cloned().map(
+                move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                },
+            ));
+            final_claim_records.extend(preflight.main.final_claims.iter().cloned().map(
+                move |mut record| {
+                    record.proof_idx = proof_idx;
+                    record
+                },
+            ));
+        }
+        if final_claim_records.is_empty() {
+            final_claim_records.push(MainFinalClaimRecord::default());
+        }
+        if global_sumcheck_records.is_empty() {
+            global_sumcheck_records.push(crate::system::MainGlobalSumcheckRecord::default());
+        }
+
+        let mut global_by_proof = vec![None; preflights.len()];
+        for record in &global_sumcheck_records {
+            if let Some(slot) = global_by_proof.get_mut(record.proof_idx) {
+                *slot = Some(record);
+            }
+        }
+        let mut eq_acc_by_chip = std::collections::HashMap::<(usize, usize), RecursionField>::new();
+        let mut tower_point_eq_records = Vec::with_capacity(tower_main_point_records.len());
+        for tower_point in &tower_main_point_records {
+            let Some(global_point) = global_by_proof
+                .get(tower_point.proof_idx)
+                .and_then(|record| *record)
+                .and_then(|record| record.rounds.get(tower_point.round_idx))
+                .map(|round| round.challenge)
+            else {
+                continue;
+            };
+            let acc = eq_acc_by_chip
+                .entry((tower_point.proof_idx, tower_point.idx))
+                .or_insert(RecursionField::ONE);
+            let eq_in = *acc;
+            *acc *= global_point * tower_point.value
+                + (RecursionField::ONE - global_point) * (RecursionField::ONE - tower_point.value);
+            tower_point_eq_records.push(MainTowerPointEqRecord {
+                proof_idx: tower_point.proof_idx,
+                idx: tower_point.idx,
+                round_idx: tower_point.round_idx,
+                global_value: global_point,
+                tower_value: tower_point.value,
+                eq_in,
+                eq_out: *acc,
+            });
+        }
+
+        let mut global_lookup_counts = vec![Vec::<usize>::new(); preflights.len()];
+        for global in &global_sumcheck_records {
+            if let Some(counts) = global_lookup_counts.get_mut(global.proof_idx) {
+                counts.resize(global.rounds.len(), 0);
+            }
+        }
+        for record in &tower_point_eq_records {
+            if let Some(count) = global_lookup_counts
+                .get_mut(record.proof_idx)
+                .and_then(|counts| counts.get_mut(record.round_idx))
+            {
+                *count += 1;
+            }
+        }
+        for record in &frontload_term_records {
+            if record.has_global_factor
+                && let Some(count) = global_lookup_counts
+                    .get_mut(record.proof_idx)
+                    .and_then(|counts| counts.get_mut(record.global_round_idx))
+            {
+                *count += 1;
+            }
+        }
+        for (proof_idx, round_idx) in selector_formula_global_point_lookups(&selector_eval_records)
+        {
+            if let Some(count) = global_lookup_counts
+                .get_mut(proof_idx)
+                .and_then(|counts| counts.get_mut(round_idx))
+            {
+                *count += 1;
+            }
+        }
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.pcs.opening_points {
+                if let Some(count) = global_lookup_counts
+                    .get_mut(proof_idx)
+                    .and_then(|counts| counts.get_mut(record.global_round_idx))
+                {
+                    *count += 1;
+                }
+            }
+            for record in &preflight.pcs.suffix_products {
+                if record.has_factor
+                    && let Some(count) = global_lookup_counts
+                        .get_mut(proof_idx)
+                        .and_then(|counts| counts.get_mut(record.coord_idx))
+                {
+                    *count += 1;
+                }
+            }
+            for record in &preflight.pcs.jagged_assist_h {
+                if record.has_z_row
+                    && let Some(count) = global_lookup_counts
+                        .get_mut(proof_idx)
+                        .and_then(|counts| counts.get_mut(record.robp_idx))
+                {
+                    *count += 1;
+                }
+            }
+        }
+        let mut eval_lookup_counts =
+            std::collections::HashMap::<(usize, usize, usize), usize>::with_capacity(
+                frontload_term_records
+                    .len()
+                    .saturating_add(selector_eval_records.len()),
+            );
+        for record in &frontload_term_records {
+            if record.has_eval_factor {
+                *eval_lookup_counts
+                    .entry((record.proof_idx, record.idx, record.eval_idx))
+                    .or_default() += 1;
+            }
+        }
+        for record in &selector_eval_records {
+            if !record.has_eval {
+                continue;
+            }
+            *eval_lookup_counts
+                .entry((record.proof_idx, record.idx, record.eval_idx))
+                .or_default() += 1;
+        }
+        for (proof_idx, preflight) in preflights.iter().enumerate() {
+            for record in &preflight.pcs.opening_evals {
+                *eval_lookup_counts
+                    .entry((proof_idx, record.main_idx, record.main_eval_idx))
+                    .or_default() += 1;
+            }
+        }
+        for record in &mut eval_records {
+            record.lookup_count = eval_lookup_counts
+                .get(&(record.proof_idx, record.idx, record.eval_idx))
+                .copied()
+                .unwrap_or(0);
+        }
+        for global in &mut global_sumcheck_records {
+            for (round_idx, round) in global.rounds.iter_mut().enumerate() {
+                round.point_lookup_count = global_lookup_counts
+                    .get(global.proof_idx)
+                    .and_then(|counts| counts.get(round_idx))
+                    .copied()
+                    .unwrap_or(0);
+            }
+        }
+
+        Ok(MainBatchConstraintRecords {
+            global_sumcheck_records,
+            eval_records,
             tower_point_eq_records,
             frontload_term_records,
             final_claim_records,
-            transcript_records,
         })
     }
 }
 
 pub(crate) struct MainCollectedRecords {
     pub(crate) main_records: Vec<MainRecord>,
-    pub(crate) global_sumcheck_records: Vec<crate::system::MainGlobalSumcheckRecord>,
-    pub(crate) eval_records: Vec<MainEvalRecord>,
     pub(crate) selector_eval_records: Vec<MainSelectorEvalRecord>,
     pub(crate) selector_point_records: Vec<MainSelectorPointRecord>,
     pub(crate) ecc_rt_records: Vec<MainEccRtRecord>,
+    pub(crate) transcript_records: Vec<crate::system::MainTranscriptRecord>,
+}
+
+pub(crate) struct MainBatchConstraintRecords {
+    pub(crate) global_sumcheck_records: Vec<crate::system::MainGlobalSumcheckRecord>,
+    pub(crate) eval_records: Vec<MainEvalRecord>,
     pub(crate) tower_point_eq_records: Vec<MainTowerPointEqRecord>,
     pub(crate) frontload_term_records: Vec<MainFrontloadTermRecord>,
     pub(crate) final_claim_records: Vec<MainFinalClaimRecord>,
-    pub(crate) transcript_records: Vec<crate::system::MainTranscriptRecord>,
 }
 
 impl AirModule for MainModule {
@@ -594,19 +800,25 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         _ctx: &Self::ModuleSpecificCtx<'_>,
         required_heights: Option<&[usize]>,
     ) -> Option<Vec<AirProvingContext<CpuBackend<SC>>>> {
+        let collect_start = std::time::Instant::now();
         let mut records = Self::collect_records(child_vk, proofs, preflights).ok()?;
         let MainCollectedRecords {
             ref mut main_records,
-            global_sumcheck_records: _,
-            eval_records: _,
             ref mut selector_eval_records,
             ref mut selector_point_records,
             ref mut ecc_rt_records,
-            tower_point_eq_records: _,
-            frontload_term_records: _,
-            final_claim_records: _,
             ref mut transcript_records,
         } = records;
+        tracing::info!(
+            elapsed_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
+            main_count = main_records.len(),
+            selector_eval_count = selector_eval_records.len(),
+            selector_point_count = selector_point_records.len(),
+            ecc_rt_count = ecc_rt_records.len(),
+            transcript_count = transcript_records.len(),
+            "main.collect_records"
+        );
+        let sort_start = std::time::Instant::now();
         main_records.sort_by_key(|record| (record.proof_idx, record.idx));
         selector_eval_records.sort_by_key(|record| {
             (
@@ -628,6 +840,15 @@ impl<SC: StarkProtocolConfig<F = F>> TraceGenModule<GlobalCtxCpu, CpuBackend<SC>
         ecc_rt_records
             .sort_by_key(|record| (record.proof_idx, record.idx, record.round_idx, record.tidx));
         transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
+        tracing::info!(
+            elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
+            main_count = main_records.len(),
+            selector_eval_count = selector_eval_records.len(),
+            selector_point_count = selector_point_records.len(),
+            ecc_rt_count = ecc_rt_records.len(),
+            transcript_count = transcript_records.len(),
+            "main.sort_records"
+        );
         let ctx = MainTraceCtx {
             main_records,
             selector_eval_records,
@@ -688,6 +909,22 @@ enum MainModuleChip {
 impl RowMajorChip<F> for MainModuleChip {
     type Ctx<'a> = MainTraceCtx<'a>;
 
+    #[cfg(feature = "cuda")]
+    fn trace_name(&self) -> &'static str {
+        match self {
+            MainModuleChip::Main => "MainAir",
+            MainModuleChip::TranscriptBind => "MainTranscriptBindAir",
+            MainModuleChip::EccRtChallenge => "MainEccRtChallengeAir",
+            MainModuleChip::EccRtEquation => "MainEccRtEquationAir",
+            MainModuleChip::EccRtSumcheck => "MainEccRtSumcheckAir",
+            MainModuleChip::EccRtQuark => "MainEccRtQuarkAir",
+            MainModuleChip::EccRt => "MainEccRtAir",
+            MainModuleChip::SelectorPoint => "MainSelectorPointAir",
+            MainModuleChip::SelectorFormula => "MainSelectorFormulaAir",
+            MainModuleChip::SelectorEval => "MainSelectorEvalAir",
+        }
+    }
+
     fn generate_trace(
         &self,
         ctx: &Self::Ctx<'_>,
@@ -730,42 +967,43 @@ mod cuda_tracegen {
     use super::*;
     use crate::{
         cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
+        system::{Preflight, RecursionProof, RecursionVk},
         tracegen::cuda::generate_gpu_proving_ctx,
     };
 
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for MainModule {
-        type ModuleSpecificCtx<'a> = ();
+        type ModuleSpecificCtx<'a> = (&'a RecursionVk, &'a [RecursionProof], &'a [Preflight]);
 
         fn generate_proving_ctxs(
             &self,
             child_vk: &VerifyingKeyGpu,
             proofs: &[ProofGpu],
             preflights: &[PreflightGpu],
-            _ctx: &Self::ModuleSpecificCtx<'_>,
+            ctx: &Self::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
-            let proofs_cpu = proofs
-                .iter()
-                .map(|proof| proof.cpu.clone())
-                .collect::<Vec<_>>();
-            let preflights_cpu = preflights
-                .iter()
-                .map(|preflight| preflight.cpu.clone())
-                .collect::<Vec<_>>();
+            let _ = (child_vk, proofs, preflights);
+            let (child_vk_cpu, proofs_cpu, preflights_cpu) = *ctx;
+            let collect_start = std::time::Instant::now();
             let mut records =
-                Self::collect_records(&child_vk.cpu, &proofs_cpu, &preflights_cpu).ok()?;
+                Self::collect_records(child_vk_cpu, proofs_cpu, preflights_cpu).ok()?;
             let MainCollectedRecords {
                 ref mut main_records,
-                global_sumcheck_records: _,
-                eval_records: _,
                 ref mut selector_eval_records,
                 ref mut selector_point_records,
                 ref mut ecc_rt_records,
-                tower_point_eq_records: _,
-                frontload_term_records: _,
-                final_claim_records: _,
                 ref mut transcript_records,
             } = records;
+            tracing::info!(
+                elapsed_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
+                main_count = main_records.len(),
+                selector_eval_count = selector_eval_records.len(),
+                selector_point_count = selector_point_records.len(),
+                ecc_rt_count = ecc_rt_records.len(),
+                transcript_count = transcript_records.len(),
+                "main.collect_records"
+            );
+            let sort_start = std::time::Instant::now();
             main_records.sort_by_key(|record| (record.proof_idx, record.idx));
             selector_eval_records.sort_by_key(|record| {
                 (
@@ -788,6 +1026,15 @@ mod cuda_tracegen {
                 (record.proof_idx, record.idx, record.round_idx, record.tidx)
             });
             transcript_records.sort_by_key(|record| (record.proof_idx, record.tidx));
+            tracing::info!(
+                elapsed_ms = sort_start.elapsed().as_secs_f64() * 1000.0,
+                main_count = main_records.len(),
+                selector_eval_count = selector_eval_records.len(),
+                selector_point_count = selector_point_records.len(),
+                ecc_rt_count = ecc_rt_records.len(),
+                transcript_count = transcript_records.len(),
+                "main.sort_records"
+            );
             let ctx = MainTraceCtx {
                 main_records: &main_records,
                 selector_eval_records: &selector_eval_records,
@@ -811,11 +1058,18 @@ mod cuda_tracegen {
                 .iter()
                 .enumerate()
                 .map(|(idx, chip)| {
-                    generate_gpu_proving_ctx(
-                        chip,
-                        &ctx,
-                        required_heights.and_then(|heights| heights.get(idx).copied()),
-                    )
+                    let required_height =
+                        required_heights.and_then(|heights| heights.get(idx).copied());
+                    match chip {
+                        MainModuleChip::SelectorFormula => {
+                            crate::main::selector::cuda::MainSelectorFormulaGpuTraceGenerator
+                                .generate_proving_ctx(
+                                    &selector_eval_records.as_slice(),
+                                    required_height,
+                                )
+                        }
+                        _ => generate_gpu_proving_ctx(chip, &ctx, required_height),
+                    }
                 })
                 .collect()
         }

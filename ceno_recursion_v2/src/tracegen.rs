@@ -35,6 +35,11 @@ pub(crate) trait RowMajorChip<F> {
         ctx: &Self::Ctx<'_>,
         required_height: Option<usize>,
     ) -> Option<RowMajorMatrix<F>>;
+
+    #[cfg(feature = "cuda")]
+    fn trace_name(&self) -> &'static str {
+        std::any::type_name::<Self>()
+    }
 }
 
 #[allow(dead_code)]
@@ -79,12 +84,14 @@ pub(crate) mod cuda {
         required_height: Option<usize>,
     ) -> Option<AirProvingContext<GpuBackend>> {
         let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+        let trace_name = t.trace_name();
         let cpu_start = std::time::Instant::now();
         let common_main_rm = t.generate_trace(ctx, required_height);
         tracing::info!(
             elapsed_ms = cpu_start.elapsed().as_secs_f64() * 1000.0,
             has_trace = common_main_rm.is_some(),
             required_height,
+            air = trace_name,
             "recursion gpu row-major CPU tracegen fallback"
         );
         common_main_rm.map(|m| {
@@ -97,6 +104,7 @@ pub(crate) mod cuda {
                 height,
                 width,
                 cells = height * width,
+                air = trace_name,
                 "recursion gpu row-major H2D transport"
             );
             AirProvingContext::simple_no_pis(common_main)

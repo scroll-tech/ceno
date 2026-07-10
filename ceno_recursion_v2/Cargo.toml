@@ -75,3 +75,4 @@ parallel = [
   "openvm-stark-backend/parallel",
   "openvm-stark-sdk/parallel",
 ]
+profile = []

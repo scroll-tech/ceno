@@ -1826,21 +1826,7 @@ fn fill_formula_cols(row: &FormulaRow<'_>, cols: &mut MainSelectorFormulaCols<F>
     cols.eq_lte_value_is_zero = F::from_bool(row.eq_lte_value_is_zero);
     cols.is_first_quark_step = F::from_bool(row.quark_is_first);
     cols.is_last_quark_step = F::from_bool(row.quark_is_last);
-    let ordered_sparse_tail_len = row
-        .record
-        .ctx_num_vars
-        .saturating_sub(row.record.ordered_sparse_num_vars);
-    let is_last_ordered_sparse_accumulate = row.record.kind == MainSelectorKind::OrderedSparse
-        && row.step_kind == STEP_ACCUMULATE
-        && row.step_idx + 1 == row.record.sparse_indices.len();
-    cols.carry_accumulator = F::from_bool(match row.step_kind {
-        STEP_EQ_PRODUCT => {
-            row.record.kind == MainSelectorKind::Whole || row.step_idx + 1 < row.record.ctx_num_vars
-        }
-        STEP_ACCUMULATE => !(is_last_ordered_sparse_accumulate && ordered_sparse_tail_len > 0),
-        STEP_MULTIPLY | STEP_QUARK => true,
-        _ => false,
-    });
+    cols.carry_accumulator = F::from_bool(formula_row_carry_accumulator(row));
     cols.round_idx = F::from_usize(row.round_idx);
     cols.sparse_pos = F::from_usize(row.sparse_pos);
     cols.sparse_index = F::from_usize(row.sparse_index);
@@ -1867,6 +1853,202 @@ fn fill_formula_cols(row: &FormulaRow<'_>, cols: &mut MainSelectorFormulaCols<F>
     cols.aux2 = row.aux2.as_basis_coefficients_slice().try_into().unwrap();
     cols.aux3 = row.aux3.as_basis_coefficients_slice().try_into().unwrap();
     cols.value = row.value.as_basis_coefficients_slice().try_into().unwrap();
+}
+
+fn formula_row_carry_accumulator(row: &FormulaRow<'_>) -> bool {
+    let ordered_sparse_tail_len = row
+        .record
+        .ctx_num_vars
+        .saturating_sub(row.record.ordered_sparse_num_vars);
+    let is_last_ordered_sparse_accumulate = row.record.kind == MainSelectorKind::OrderedSparse
+        && row.step_kind == STEP_ACCUMULATE
+        && row.step_idx + 1 == row.record.sparse_indices.len();
+    match row.step_kind {
+        STEP_EQ_PRODUCT => {
+            row.record.kind == MainSelectorKind::Whole || row.step_idx + 1 < row.record.ctx_num_vars
+        }
+        STEP_ACCUMULATE => !(is_last_ordered_sparse_accumulate && ordered_sparse_tail_len > 0),
+        STEP_MULTIPLY | STEP_QUARK => true,
+        _ => false,
+    }
+}
+
+#[cfg(feature = "cuda")]
+pub(crate) mod cuda {
+    use std::time::Instant;
+
+    use openvm_cuda_backend::{GpuBackend, base::DeviceMatrix};
+    use openvm_cuda_common::{
+        d_buffer::DeviceBuffer,
+        error::CudaError,
+        memory_manager::MemTracker,
+        stream::{GpuDeviceCtx, cudaStream_t},
+    };
+    use openvm_stark_backend::prover::AirProvingContext;
+
+    use super::{
+        FormulaRow, MainSelectorFormulaCols, MainSelectorKind, STEP_ACCUMULATE, STEP_EQ_LTE,
+        STEP_EQ_PRODUCT, STEP_FINAL, STEP_MULTIPLY, STEP_QUARK, STEP_SHAPE, STEP_SPARSE_INDEX,
+        build_formula_rows, formula_row_carry_accumulator, selector_kind_code,
+        selector_point_source_code,
+    };
+    use crate::{
+        cuda::{to_device_or_nullptr, types::MainSelectorFormulaData},
+        system::MainSelectorEvalRecord,
+        tracegen::ModuleChip,
+    };
+    use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, F};
+    use p3_field::BasedVectorSpace;
+
+    unsafe extern "C" {
+        fn _main_selector_formula_tracegen(
+            d_trace: *mut F,
+            height: usize,
+            d_records: *const MainSelectorFormulaData,
+            num_records: usize,
+            stream: cudaStream_t,
+        ) -> i32;
+    }
+
+    unsafe fn main_selector_formula_tracegen(
+        d_trace: &DeviceBuffer<F>,
+        height: usize,
+        d_records: &DeviceBuffer<MainSelectorFormulaData>,
+        num_records: usize,
+        stream: cudaStream_t,
+    ) -> Result<(), CudaError> {
+        unsafe {
+            CudaError::from_result(_main_selector_formula_tracegen(
+                d_trace.as_mut_ptr(),
+                height,
+                d_records.as_ptr(),
+                num_records,
+                stream,
+            ))
+        }
+    }
+
+    pub(crate) struct MainSelectorFormulaGpuTraceGenerator;
+
+    impl ModuleChip<GpuBackend> for MainSelectorFormulaGpuTraceGenerator {
+        type Ctx<'a> = &'a [MainSelectorEvalRecord];
+
+        #[tracing::instrument(level = "trace", skip_all)]
+        fn generate_proving_ctx(
+            &self,
+            records: &Self::Ctx<'_>,
+            required_height: Option<usize>,
+        ) -> Option<AirProvingContext<GpuBackend>> {
+            let mem = MemTracker::start("tracegen.main_selector_formula");
+            let build_start = Instant::now();
+            let rows = build_formula_rows(records);
+            let build_elapsed_ms = build_start.elapsed().as_secs_f64() * 1000.0;
+            let num_valid_rows = rows.len().max(1);
+            let height = if let Some(height) = required_height {
+                if height < num_valid_rows {
+                    return None;
+                }
+                height
+            } else {
+                num_valid_rows.next_power_of_two()
+            };
+            let width = MainSelectorFormulaCols::<F>::width();
+            let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
+            let trace = DeviceMatrix::with_capacity_on(height, width, &device_ctx);
+
+            let pack_start = Instant::now();
+            let records = rows.iter().map(formula_row_to_data).collect::<Vec<_>>();
+            let pack_elapsed_ms = pack_start.elapsed().as_secs_f64() * 1000.0;
+            tracing::info!(
+                build_formula_rows_ms = build_elapsed_ms,
+                pack_formula_rows_ms = pack_elapsed_ms,
+                row_count = records.len(),
+                "main selector formula gpu tracegen row preparation"
+            );
+
+            let d_records = to_device_or_nullptr(&records).ok()?;
+            unsafe {
+                if let Err(err) = main_selector_formula_tracegen(
+                    trace.buffer(),
+                    height,
+                    &d_records,
+                    records.len(),
+                    device_ctx.stream.as_raw(),
+                ) {
+                    tracing::warn!(?err, "main_selector_formula_tracegen failed");
+                    return None;
+                }
+            }
+            if let Err(err) = device_ctx.stream.synchronize() {
+                tracing::warn!(?err, "main_selector_formula_tracegen synchronize failed");
+                return None;
+            }
+            mem.emit_metrics();
+            Some(AirProvingContext::simple_no_pis(trace))
+        }
+    }
+
+    fn formula_row_to_data(row: &FormulaRow<'_>) -> MainSelectorFormulaData {
+        let record = row.record;
+        MainSelectorFormulaData {
+            proof_idx: record.proof_idx,
+            idx: record.idx,
+            air_idx: record.air_idx,
+            selector_idx: record.selector_idx,
+            eval_idx: record.eval_idx,
+            kind: selector_kind_code(record.kind),
+            source_kind: selector_point_source_code(record.point_source),
+            is_whole: record.kind == MainSelectorKind::Whole,
+            is_prefix: record.kind == MainSelectorKind::Prefix,
+            is_ordered_sparse: record.kind == MainSelectorKind::OrderedSparse,
+            is_quark_binary_tree_less_than: record.kind
+                == MainSelectorKind::QuarkBinaryTreeLessThan,
+            ctx_offset: record.ctx_offset,
+            ctx_num_instances: record.ctx_num_instances,
+            ctx_num_vars: record.ctx_num_vars,
+            ordered_sparse_num_vars: record.ordered_sparse_num_vars,
+            num_sparse_indices: record.sparse_indices.len(),
+            step_kind: row.step_kind,
+            step_idx: row.step_idx,
+            is_shape_step: row.step_kind == STEP_SHAPE,
+            is_eq_product_step: row.step_kind == STEP_EQ_PRODUCT,
+            is_sparse_index_step: row.step_kind == STEP_SPARSE_INDEX,
+            is_accumulate_step: row.step_kind == STEP_ACCUMULATE,
+            is_final_step: row.step_kind == STEP_FINAL,
+            is_multiply_step: row.step_kind == STEP_MULTIPLY,
+            is_quark_step: row.step_kind == STEP_QUARK,
+            is_eq_lte_step: row.step_kind == STEP_EQ_LTE,
+            is_first_eq_lte_step: row.eq_lte_is_first,
+            is_last_eq_lte_step: row.eq_lte_is_last,
+            eq_lte_output_to_value: row.eq_lte_output_to_value,
+            eq_lte_output_to_acc_in: row.eq_lte_output_to_acc_in,
+            eq_lte_output_to_factor: row.eq_lte_output_to_factor,
+            eq_lte_output_to_neg_factor: row.eq_lte_output_to_neg_factor,
+            eq_lte_value_is_zero: row.eq_lte_value_is_zero,
+            is_first_quark_step: row.quark_is_first,
+            is_last_quark_step: row.quark_is_last,
+            carry_accumulator: formula_row_carry_accumulator(row),
+            round_idx: row.round_idx,
+            sparse_pos: row.sparse_pos,
+            sparse_index: row.sparse_index,
+            sparse_index_bits_value: row.sparse_index_bits_value,
+            point_active: row.point_active,
+            lhs_point: ef_to_base(row.lhs_point),
+            rhs_point: ef_to_base(row.rhs_point),
+            factor: ef_to_base(row.factor),
+            acc_in: ef_to_base(row.acc_in),
+            acc_out: ef_to_base(row.acc_out),
+            aux: ef_to_base(row.aux),
+            aux2: ef_to_base(row.aux2),
+            aux3: ef_to_base(row.aux3),
+            value: ef_to_base(row.value),
+            ..Default::default()
+        }
+    }
+
+    fn ef_to_base(value: crate::system::RecursionField) -> [F; D_EF] {
+        value.as_basis_coefficients_slice().try_into().unwrap()
+    }
 }
 
 fn selector_kind_code(kind: MainSelectorKind) -> usize {

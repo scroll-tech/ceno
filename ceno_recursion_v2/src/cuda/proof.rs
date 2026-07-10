@@ -5,7 +5,6 @@ use crate::system::{RecursionField, RecursionProof, RecursionVk};
 use super::{to_device_or_nullptr, types::PublicValueData};
 
 pub struct ProofGpu {
-    pub cpu: RecursionProof,
     pub proof_shape: ProofShapeProofGpu,
     pub gkr: TowerProofGpu,
     pub batch_constraint: BatchConstraintProofGpu,
@@ -36,7 +35,6 @@ pub struct WhirProofGpu {
 impl ProofGpu {
     pub fn new(vk: &RecursionVk, proof: &RecursionProof) -> Self {
         ProofGpu {
-            cpu: proof.clone(),
             proof_shape: Self::proof_shape(vk, proof),
             gkr: Self::gkr(proof),
             batch_constraint: Self::batch_constraint(proof),

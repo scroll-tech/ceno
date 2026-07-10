@@ -94,6 +94,8 @@ use witness::next_pow2_instance_padding;
 
 // Internal bus definitions
 mod bus;
+#[cfg(feature = "cuda")]
+mod cuda;
 pub use bus::{
     TowerAlphaPowBus, TowerAlphaPowMessage, TowerSumcheckChallengeBus,
     TowerSumcheckChallengeMessage, TowerSumcheckInputBus, TowerSumcheckInputMessage,
@@ -1751,6 +1753,19 @@ impl TowerModuleChip {
 impl RowMajorChip<F> for TowerModuleChip {
     type Ctx<'a> = TowerBlobCpu;
 
+    #[cfg(feature = "cuda")]
+    fn trace_name(&self) -> &'static str {
+        match self {
+            TowerModuleChip::Shape => "TowerShapeAir",
+            TowerModuleChip::Activity => "TowerActivityAir",
+            TowerModuleChip::Input => "TowerInputAir",
+            TowerModuleChip::AlphaPow => "TowerAlphaPowAir",
+            TowerModuleChip::Layer => "TowerLayerAir",
+            TowerModuleChip::LayerSumcheck => "TowerLayerSumcheckAir",
+            TowerModuleChip::MainPoint => "TowerMainPointAir",
+        }
+    }
+
     #[tracing::instrument(
         name = "wrapper.generate_trace",
         level = "trace",
@@ -1800,11 +1815,17 @@ mod cuda_tracegen {
     use super::*;
     use crate::{
         cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
+        system::{Preflight, RecursionProof, RecursionVk},
         tracegen::cuda::generate_gpu_proving_ctx,
     };
 
     impl TraceGenModule<GlobalCtxGpu, GpuBackend> for TowerModule {
-        type ModuleSpecificCtx<'a> = ExpBitsLenTraceGenerator;
+        type ModuleSpecificCtx<'a> = (
+            &'a RecursionVk,
+            &'a [RecursionProof],
+            &'a [Preflight],
+            &'a ExpBitsLenTraceGenerator,
+        );
 
         #[tracing::instrument(skip_all)]
         fn generate_proving_ctxs(
@@ -1812,18 +1833,15 @@ mod cuda_tracegen {
             child_vk: &VerifyingKeyGpu,
             proofs: &[ProofGpu],
             preflights: &[PreflightGpu],
-            exp_bits_len_gen: &ExpBitsLenTraceGenerator,
+            ctx: &Self::ModuleSpecificCtx<'_>,
             required_heights: Option<&[usize]>,
         ) -> Option<Vec<AirProvingContext<GpuBackend>>> {
-            let proofs_cpu: Vec<_> = proofs.iter().map(|proof| proof.cpu.clone()).collect();
-            let preflights_cpu: Vec<_> = preflights
-                .iter()
-                .map(|preflight| preflight.cpu.clone())
-                .collect();
+            let _ = (child_vk, proofs, preflights);
+            let (child_vk_cpu, proofs_cpu, preflights_cpu, exp_bits_len_gen) = *ctx;
             let blob = match self.generate_blob(
-                &child_vk.cpu,
-                &proofs_cpu,
-                &preflights_cpu,
+                child_vk_cpu,
+                proofs_cpu,
+                preflights_cpu,
                 exp_bits_len_gen,
             ) {
                 Ok(blob) => blob,
@@ -1846,11 +1864,17 @@ mod cuda_tracegen {
             chips
                 .iter()
                 .map(|chip| {
-                    generate_gpu_proving_ctx(
-                        chip,
-                        &blob,
-                        required_heights.and_then(|heights| heights.get(chip.index()).copied()),
-                    )
+                    let required_height =
+                        required_heights.and_then(|heights| heights.get(chip.index()).copied());
+                    match chip {
+                        TowerModuleChip::LayerSumcheck => {
+                            crate::tower::cuda::TowerSumcheckGpuTraceGenerator.generate_proving_ctx(
+                                &(&blob.sumcheck_records, &blob.mus_records),
+                                required_height,
+                            )
+                        }
+                        _ => generate_gpu_proving_ctx(chip, &blob, required_height),
+                    }
                 })
                 .collect()
         }

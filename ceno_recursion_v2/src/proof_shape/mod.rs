@@ -597,8 +597,9 @@ mod cuda_tracegen {
     use openvm_cuda_common::stream::GpuDeviceCtx;
 
     use super::*;
-    use crate::cuda::{
-        GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu,
+    use crate::{
+        cuda::{GlobalCtxGpu, preflight::PreflightGpu, proof::ProofGpu, vk::VerifyingKeyGpu},
+        system::{Preflight, RecursionProof, RecursionVk},
     };
     use recursion_circuit::primitives::range::RangeCheckerCpuTraceGenerator;
 
@@ -606,12 +607,15 @@ mod cuda_tracegen {
         type ModuleSpecificCtx<'a> = (
             Arc<PowerCheckerCpuTraceGenerator<2, POW_CHECKER_HEIGHT>>,
             &'a [usize],
+            &'a RecursionVk,
+            &'a [RecursionProof],
+            &'a [Preflight],
         );
 
         #[tracing::instrument(skip_all)]
         fn generate_proving_ctxs(
             &self,
-            child_vk: &VerifyingKeyGpu,
+            _child_vk: &VerifyingKeyGpu,
             proofs: &[ProofGpu],
             preflights: &[PreflightGpu],
             ctx: &<Self as TraceGenModule<GlobalCtxGpu, GpuBackend>>::ModuleSpecificCtx<'_>,
@@ -620,14 +624,9 @@ mod cuda_tracegen {
             let device_ctx = GpuDeviceCtx::for_current_device().ok()?;
             let pow_checker = &ctx.0;
             let external_range_checks = ctx.1;
-            let proofs_cpu = proofs
-                .iter()
-                .map(|proof| proof.cpu.clone())
-                .collect::<Vec<_>>();
-            let preflights_cpu = preflights
-                .iter()
-                .map(|preflight| preflight.cpu.clone())
-                .collect::<Vec<_>>();
+            let child_vk_cpu = ctx.2;
+            let proofs_cpu = ctx.3;
+            let preflights_cpu = ctx.4;
 
             let range_checker = Arc::new(RangeCheckerCpuTraceGenerator::<8>::default());
             let proof_shape = proof_shape::ProofShapeChip::<4, 8>::new(
@@ -636,11 +635,7 @@ mod cuda_tracegen {
                 range_checker.clone(),
                 pow_checker.clone(),
             );
-            let cpu_ctx = (
-                &child_vk.cpu,
-                proofs_cpu.as_slice(),
-                preflights_cpu.as_slice(),
-            );
+            let cpu_ctx = (child_vk_cpu, proofs_cpu, preflights_cpu);
             let proof_shape_chip = ProofShapeModuleChip::ProofShape(proof_shape);
             // TODO(cuda-tracegen): replace this CPU fallback with a Ceno-specific
             // proof-shape kernel. The OpenVM proof-shape kernel has incompatible columns.
