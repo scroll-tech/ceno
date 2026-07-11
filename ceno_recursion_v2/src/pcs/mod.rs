@@ -5128,6 +5128,19 @@ where
             local.q_eval,
             local.acc_out,
         );
+        let has_empty_eq_product = local.is_first * local.is_last;
+        let one = core::array::from_fn(|i| {
+            if i == 0 {
+                AB::Expr::ONE
+            } else {
+                AB::Expr::ZERO
+            }
+        });
+        assert_array_eq(
+            &mut builder.when(local.is_enabled * has_empty_eq_product.clone()),
+            local.eq_rho_col,
+            one,
+        );
 
         let continues = local.is_enabled * (AB::Expr::ONE - local.is_last);
         builder
@@ -5174,7 +5187,7 @@ where
                 term_idx: local.term_idx.into(),
                 value: local.eq_rho_col.map(Into::into),
             },
-            local.is_enabled,
+            local.is_enabled * (AB::Expr::ONE - has_empty_eq_product),
         );
         let product = recursion_circuit::utils::ext_field_multiply(local.acc_out, local.f_at_rho);
         assert_array_eq(
