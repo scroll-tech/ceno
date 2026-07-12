@@ -1,0 +1,688 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Recursion V2 Design Principles - Ceno Docs</title>
+
+
+        <!-- Custom HTML head -->
+        <script>
+        MathJax = {
+          tex: {
+            inlineMath: [['$', '$']],
+            displayMath: [['$$', '$$']],
+            processEscapes: true
+          }
+        };
+        </script>
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon-de23e50b.svg">
+        <link rel="shortcut icon" href="favicon-8114d1fc.png">
+        <link rel="stylesheet" href="css/variables-8adf115d.css">
+        <link rel="stylesheet" href="css/general-2459343d.css">
+        <link rel="stylesheet" href="css/chrome-ae938929.css">
+        <link rel="stylesheet" href="css/print-9e4910d8.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="fonts/fonts-9644e21d.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="mdbook-highlight-css" href="highlight-493f70e1.css">
+        <link rel="stylesheet" id="mdbook-tomorrow-night-css" href="tomorrow-night-4c0ae647.css">
+        <link rel="stylesheet" id="mdbook-ayu-highlight-css" href="ayu-highlight-3fdfc3ac.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex-8b66f622.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc-cd86a274.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="mdbook-body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="mdbook-sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("mdbook-sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="mdbook-sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="mdbook-sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="mdbook-page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="mdbook-menu-bar-hover-placeholder"></div>
+                <div id="mdbook-menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="mdbook-sidebar-toggle" class="icon-button" for="mdbook-sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="mdbook-sidebar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M0 96C0 78.3 14.3 64 32 64H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32C14.3 128 0 113.7 0 96zM0 256c0-17.7 14.3-32 32-32H416c17.7 0 32 14.3 32 32s-14.3 32-32 32H32c-17.7 0-32-14.3-32-32zM448 416c0 17.7-14.3 32-32 32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32H416c17.7 0 32 14.3 32 32z"/></svg></span>
+                        </label>
+                        <button id="mdbook-theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="mdbook-theme-list">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M371.3 367.1c27.3-3.9 51.9-19.4 67.2-42.9L600.2 74.1c12.6-19.5 9.4-45.3-7.6-61.2S549.7-4.4 531.1 9.6L294.4 187.2c-24 18-38.2 46.1-38.4 76.1L371.3 367.1zm-19.6 25.4l-116-104.4C175.9 290.3 128 339.6 128 400c0 3.9 .2 7.8 .6 11.6c1.8 17.5-10.2 36.4-27.8 36.4H96c-17.7 0-32 14.3-32 32s14.3 32 32 32H240c61.9 0 112-50.1 112-112c0-2.5-.1-5-.2-7.5z"/></svg></span>
+                        </button>
+                        <ul id="mdbook-theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="mdbook-theme-ayu">Ayu</button></li>
+                        </ul>
+                        <button id="mdbook-search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="mdbook-searchbar">
+                            <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352c79.5 0 144-64.5 144-144s-64.5-144-144-144S64 128.5 64 208s64.5 144 144 144z"/></svg></span>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Ceno Docs</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <span class=fa-svg id="print-button"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M128 0C92.7 0 64 28.7 64 64v96h64V64H354.7L384 93.3V160h64V93.3c0-17-6.7-33.3-18.7-45.3L400 18.7C388 6.7 371.7 0 354.7 0H128zM384 352v32 64H128V384 368 352H384zm64 32h32c17.7 0 32-14.3 32-32V256c0-35.3-28.7-64-64-64H64c-35.3 0-64 28.7-64 64v96c0 17.7 14.3 32 32 32H64v64c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V384zm-16-88c-13.3 0-24-10.7-24-24s10.7-24 24-24s24 10.7 24 24s-10.7 24-24 24z"/></svg></span>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="mdbook-search-wrapper" class="hidden">
+                    <form id="mdbook-searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="mdbook-searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="mdbook-searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <span class=fa-svg id="fa-spin"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M304 48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zm0 416c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM48 304c26.5 0 48-21.5 48-48s-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48zm464-48c0-26.5-21.5-48-48-48s-48 21.5-48 48s21.5 48 48 48s48-21.5 48-48zM142.9 437c18.7-18.7 18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zm0-294.2c18.7-18.7 18.7-49.1 0-67.9S93.7 56.2 75 75s-18.7 49.1 0 67.9s49.1 18.7 67.9 0zM369.1 437c18.7 18.7 49.1 18.7 67.9 0s18.7-49.1 0-67.9s-49.1-18.7-67.9 0s-18.7 49.1 0 67.9z"/></svg></span>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="mdbook-searchresults-outer" class="searchresults-outer hidden">
+                        <div id="mdbook-searchresults-header" class="searchresults-header"></div>
+                        <ul id="mdbook-searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('mdbook-sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('mdbook-sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#mdbook-sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="mdbook-content" class="content">
+                    <main>
+                        <h1 id="recursion-v2-design-principles"><a class="header" href="#recursion-v2-design-principles">Recursion V2 Design Principles</a></h1>
+<p>This document is a working design wiki for <code>ceno_recursion_v2</code>. The goal is to bridge the gap between the native <code>ceno_zkvm</code> Rust verifier and the recursion-v2 AIR, trace, transcript, and bus-message style.</p>
+<p><code>ceno_recursion_v2</code> is still incomplete. Treat this document as the shared migration model for implementing verifier logic module by module.</p>
+<h2 id="core-mental-model"><a class="header" href="#core-mental-model">Core Mental Model</a></h2>
+<p>The native Rust verifier is an imperative program. It checks a proof by executing functions, loops, branches, transcript operations, and assertions.</p>
+<p>recursion-v2 proves that the same verifier program was executed correctly, but encoded as:</p>
+<ul>
+<li>preflight-prepared rows</li>
+<li>fixed AIR columns</li>
+<li>local algebraic constraints</li>
+<li>bus-linked function parameters</li>
+<li>transcript rows proving Fiat-Shamir order</li>
+<li><code>proof_idx</code>, <code>chip_idx</code>, <code>air_idx</code>, and round keys connecting the module network</li>
+</ul>
+<p>The translation rule is:</p>
+<pre><code class="language-text">Rust verifier function call -&gt; AIR rows + local constraints + bus messages
+Rust verifier loop          -&gt; repeated matrix rows
+Rust verifier local value   -&gt; column value
+Rust verifier assertion     -&gt; AIR constraint
+Rust verifier transcript op -&gt; transcript row + transcript bus connection
+</code></pre>
+<p>Rows are the execution trace. Columns are the verifier state. AIR constraints are the assertions. Bus messages are function calls. <code>TranscriptAir</code> is the global Fiat-Shamir machine.</p>
+<h2 id="preflight"><a class="header" href="#preflight">Preflight</a></h2>
+<p>Preflight is deterministic verifier replay and trace preparation.</p>
+<p>Its purpose is to convert verifier inputs into structured records that can be filled into AIR matrices. Preflight is like preparing matrix data, but it is not trusted by itself. Values computed by preflight are witness data until AIR constraints and bus messages prove them correct.</p>
+<p>Typical preflight input:</p>
+<pre><code class="language-text">RecursionProof
+RecursionVk
+public values
+proof_idx / chip_idx / air_idx metadata
+transcript initial state
+circuit ordering and AIR ordering
+shape metadata
+</code></pre>
+<p>Typical preflight output:</p>
+<pre><code class="language-text">proof-shape records
+transcript records
+tower records
+main records
+sumcheck records
+opening records
+public-value records
+bus-message payload records
+</code></pre>
+<p>Good preflight logic:</p>
+<ul>
+<li>parse proof structure</li>
+<li>derive row counts and trace shapes</li>
+<li>replay transcript order</li>
+<li>derive transcript challenges</li>
+<li>convert native proof arrays into row-oriented records</li>
+<li>assign <code>proof_idx</code>, <code>chip_idx</code>, <code>air_idx</code>, <code>layer_idx</code>, <code>round_idx</code>, and <code>tidx</code></li>
+<li>compute helper values that AIR will later constrain</li>
+<li>build records in exactly the order expected by AIR trace generation</li>
+</ul>
+<p>Bad preflight logic:</p>
+<ul>
+<li>trusting verifier equality without an AIR constraint</li>
+<li>silently accepting invalid proof shape</li>
+<li>computing a value used by another module without a bus equality</li>
+<li>replaying transcript differently from the native verifier</li>
+<li>hiding replay recomputation inside trace generation</li>
+<li>using placeholders without explicit TODO ownership and shape constraints</li>
+</ul>
+<p>The standing rule is:</p>
+<pre><code class="language-text">Preflight owns replay and record preparation.
+AIR owns correctness.
+Bus messages own cross-module equality.
+</code></pre>
+<p>Blob and trace generation should consume preflight replay records read-only. Avoid hidden replay recomputation after preflight.</p>
+<h2 id="matrix-view"><a class="header" href="#matrix-view">Matrix View</a></h2>
+<p>recursion-v2 is a collection of 2D matrices. Each module owns one or more AIR tables, for example:</p>
+<pre><code class="language-text">ProofShapeAir
+TranscriptAir
+TowerInputAir
+TowerLayerAir
+TowerSumcheckAir
+MainAir
+MainSumcheckAir
+OpeningAir
+PublicValuesAir
+</code></pre>
+<p>Each row is one verifier step. Each column is one fixed field needed to check that step.</p>
+<p>A proof, chip, layer, or round usually appears as one or more rows tagged by identifiers:</p>
+<pre><code class="language-text">proof_idx
+chip_idx
+air_idx
+layer_idx
+round_idx
+tidx
+is_present
+is_first
+is_last
+</code></pre>
+<p><code>proof_idx</code> should be treated as a global key across the whole module network. Most modules either carry it directly or send and receive it through bus messages.</p>
+<p>One proof may expand into many rows:</p>
+<ul>
+<li>one row per chip</li>
+<li>one row per AIR</li>
+<li>one row per tower layer</li>
+<li>one row per sumcheck round</li>
+<li>one row per transcript absorb</li>
+<li>one row per opening query</li>
+</ul>
+<p>All expanded rows should carry enough key material to reconnect them to the original proof.</p>
+<h2 id="module-boundaries"><a class="header" href="#module-boundaries">Module Boundaries</a></h2>
+<p>Native Rust verifier module boundaries are not always the right AIR boundaries. The Rust verifier is organized for imperative readability and reuse; recursion-v2 should be organized for fixed-column constraints, row expansion, transcript ordering, and bus connectivity.</p>
+<p>When mirroring native verifier logic, do not assume that one Rust function must become one AIR. It is acceptable to introduce one or more new modules or AIRs when that better exposes repeated structure as fixed columns plus rows.</p>
+<p>Good reasons to split or introduce an AIR:</p>
+<ul>
+<li>a repeated verifier subroutine can become a narrow row-oriented table</li>
+<li>a native function mixes unrelated transcript, shape, and algebraic checks</li>
+<li>a value is produced by one logical stage and consumed by several later stages</li>
+<li>a bus boundary makes function parameters and return values clearer</li>
+<li>separate shape, transcript, and semantic constraints become easier to audit</li>
+</ul>
+<p>Bad reasons to split:</p>
+<ul>
+<li>creating a module for every small helper function</li>
+<li>adding a bus where a local column constraint is enough</li>
+<li>hiding one-off logic behind a new AIR without repeated structure</li>
+<li>copying another project’s module boundary without checking Ceno verifier semantics</li>
+</ul>
+<p>Design rule:</p>
+<pre><code class="language-text">Choose AIR boundaries for constraint clarity and row reuse.
+Do not over-engineer one-off verifier logic into unnecessary modules.
+</code></pre>
+<h2 id="repeated-logic-becomes-rows"><a class="header" href="#repeated-logic-becomes-rows">Repeated Logic Becomes Rows</a></h2>
+<p>In Rust verifier code, repeated structure appears as loops:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>for proof in proofs {
+    for chip in chips {
+        for round in rounds {
+            verify_round(...);
+        }
+    }
+}
+<span class="boring">}</span></code></pre>
+<p>In recursion-v2, those repeated iterations become rows.</p>
+<p>Loop variables become row identifiers:</p>
+<pre><code class="language-text">proof_idx
+chip_idx
+air_idx
+layer_idx
+round_idx
+</code></pre>
+<p>Loop-local values become columns:</p>
+<pre><code class="language-text">claim_in
+claim_out
+challenge
+evals
+alpha
+eq_at_r
+</code></pre>
+<p>Branches become selector columns:</p>
+<pre><code class="language-text">is_present
+is_first
+is_last
+is_padding
+is_grouped_shape
+</code></pre>
+<p>This applies even when the logic has a fixed maximum length. If the structure repeats, it is usually cheaper and clearer to encode it row-wise instead of adding many columns. Columns increase AIR width globally; rows are often the natural representation for repeated verifier work.</p>
+<p>Design rule:</p>
+<pre><code class="language-text">Repeated dynamic structure      -&gt; rows
+Repeated fixed-length structure -&gt; usually rows if columns would grow too much
+Small fixed tuple               -&gt; columns
+Cross-module value              -&gt; bus message
+</code></pre>
+<h2 id="function-calls-become-bus-messages"><a class="header" href="#function-calls-become-bus-messages">Function Calls Become Bus Messages</a></h2>
+<p>In the native Rust verifier, data moves through function calls:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let tower_result = verify_tower(...);
+verify_main(tower_result.rt_main, claimed_sum, ...);
+<span class="boring">}</span></code></pre>
+<p>In recursion-v2, modules do not call each other directly. Instead:</p>
+<pre><code class="language-text">Tower module sends:
+  proof_idx, chip_idx, rt_main, tower_claim
+
+Main module receives:
+  proof_idx, chip_idx, rt_main, tower_claim
+</code></pre>
+<p>A bus message is the AIR equivalent of function arguments and return values.</p>
+<p>If two modules need the same value, that value must either:</p>
+<ul>
+<li>be linked by bus, or</li>
+<li>be independently recomputed from values already linked by bus</li>
+</ul>
+<p>Preflight may fill the same value into two matrices, but equality only becomes proven when constrained locally or through a bus.</p>
+<p>For each bus, ask:</p>
+<pre><code class="language-text">What uniquely identifies this verifier value?
+</code></pre>
+<p>Example keys:</p>
+<pre><code class="language-text">Transcript value: proof_idx + tidx
+Tower-to-main value: proof_idx + chip_idx
+Proof-shape value: proof_idx + air_idx
+Tower layer value: proof_idx + chip_idx + layer_idx
+Sumcheck round value: proof_idx + chip_idx + layer_idx + round_idx
+</code></pre>
+<p>Good bus keys prevent accidental matching between unrelated rows.</p>
+<h2 id="transcript-module"><a class="header" href="#transcript-module">Transcript Module</a></h2>
+<p>The transcript module is the clearest example of recursion-v2 style.</p>
+<p>In the native Rust verifier, transcript logic is imperative:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>transcript.append_field_element_ext(value);
+let challenge = transcript.sample_vec(...);
+<span class="boring">}</span></code></pre>
+<p>In recursion-v2, transcript operations become rows in a transcript matrix.</p>
+<p>The transcript module has fixed columns. Preflight fills many rows with absorb and sample events:</p>
+<pre><code class="language-text">proof_idx
+tidx
+op_type
+absorbed_value
+sampled_value
+label
+state_before
+state_after
+</code></pre>
+<p>The respective verifier module also stores the value it believes was absorbed or sampled. Equality is enforced through transcript bus messages.</p>
+<p>Example:</p>
+<pre><code class="language-text">TowerAir has an alpha challenge column.
+TranscriptAir has a sampled alpha row.
+The transcript bus proves proof_idx, tidx, and alpha are the same.
+</code></pre>
+<p>Transcript conversion rule:</p>
+<pre><code class="language-text">Rust transcript append -&gt; local module value + TranscriptAir absorb row + transcript bus
+Rust transcript sample -&gt; local module challenge + TranscriptAir sample row + transcript bus
+</code></pre>
+<p>This prevents each module from inventing its own challenges. The transcript module proves global Fiat-Shamir ordering, while each verifier module proves that it used the sampled values in its equations.</p>
+<p><code>tidx</code> should be treated as the transcript program counter. Any module that observes or samples transcript values should make its <code>tidx</code> progression explicit and bus-linked.</p>
+<h2 id="shape-vs-semantics"><a class="header" href="#shape-vs-semantics">Shape vs Semantics</a></h2>
+<p>Preflight prepares both shape data and semantic witness data, but AIR must prove the important parts.</p>
+<p>Shape data:</p>
+<pre><code class="language-text">number of proofs
+number of chips
+number of AIRs
+number of tower specs
+number of rounds
+number of transcript words
+which rows are present
+which rows are padding
+</code></pre>
+<p>Semantic data:</p>
+<pre><code class="language-text">sumcheck transition equations
+tower aggregation equations
+lookup dummy multiplicity
+main claimed sum
+opening evaluations
+transcript challenge usage
+cross-module value equality
+</code></pre>
+<p><code>ProofShapeAir</code> exists so shape is globally visible. Other modules should not guess shape independently if they need to agree.</p>
+<p>Important rule:</p>
+<pre><code class="language-text">If the native verifier distinguishes two counts, recursion-v2 should also distinguish them.
+</code></pre>
+<p>For grouped tower changes, for example:</p>
+<pre><code class="language-text">raw read count      = cs.num_reads()
+proof read count    = proof.r_out_evals.len(), usually 0 or 1
+tower variable size = derived from raw read count
+transcript span     = derived from proof read count
+</code></pre>
+<p>Collapsing these into one field creates bugs.</p>
+<h2 id="vk-derived-data-ownership"><a class="header" href="#vk-derived-data-ownership">VK-Derived Data Ownership</a></h2>
+<p>If a value, field, count, expression, or branch condition is derived from the child VK in the native Rust verifier, recursion-v2 should reflect that same ownership.</p>
+<p>Do not turn VK-derived verifier data into unconstrained proof witness data just because it is convenient to fill into a matrix. The source of truth should remain the child VK or a value derived from the child VK and made visible through proof-shape or VK-related records.</p>
+<p>Examples of VK-derived data:</p>
+<pre><code class="language-text">circuit ordering
+AIR/chip metadata
+raw read/write/lookup counts
+rotation variables
+rotation subgroup size
+GKR circuit shape
+number of public values
+number of witin/fixed/structural columns
+table expression counts
+whether a circuit has ECC ops
+</code></pre>
+<p>recursion-v2 may copy VK-derived data into preflight records or AIR columns, but those values should be treated as VK metadata, not as prover-chosen proof data. If another module needs the value, expose it through an explicit shape/VK metadata path or bus message.</p>
+<p>Rule of thumb:</p>
+<pre><code class="language-text">Native verifier derives from child VK -&gt; recursion-v2 derives from child VK or constrained VK metadata.
+Native verifier reads from proof      -&gt; recursion-v2 reads from proof records.
+Native verifier derives from transcript -&gt; recursion-v2 derives through TranscriptAir and transcript bus.
+</code></pre>
+<p>This distinction matters when a value appears both in proof data and VK data. The AIR should constrain that they agree instead of silently trusting the proof copy.</p>
+<h2 id="native-verifier-mapping-checklist"><a class="header" href="#native-verifier-mapping-checklist">Native Verifier Mapping Checklist</a></h2>
+<p>When mirroring a native Rust verifier block into recursion-v2, inspect the verifier code and classify:</p>
+<pre><code class="language-text">inputs
+local derived values
+assertions
+loops
+branches
+transcript operations
+return values
+cross-module dependencies
+</code></pre>
+<p>Then map them to:</p>
+<pre><code class="language-text">preflight record fields
+AIR columns
+AIR constraints
+selector columns
+transcript rows
+bus messages
+shape metadata
+</code></pre>
+<p>Practical translation table:</p>
+<pre><code class="language-text">Rust input parameter       -&gt; record field or bus receive
+Rust return value          -&gt; bus send
+Rust local variable        -&gt; witness column
+Rust assertion             -&gt; AIR constraint
+Rust loop                  -&gt; repeated rows
+Rust if/else               -&gt; selector columns
+Rust transcript append     -&gt; TranscriptAir absorb row + transcript bus
+Rust transcript sample     -&gt; TranscriptAir sample row + transcript bus
+Rust vector length         -&gt; ProofShapeAir metadata
+Rust index                 -&gt; row key column
+Rust function side effect  -&gt; local constraints or bus message
+</code></pre>
+<h2 id="extra-air-constraint-checklist"><a class="header" href="#extra-air-constraint-checklist">Extra AIR Constraint Checklist</a></h2>
+<p>Imperative verifier code and AIR code have different failure modes. A native Rust verifier can rely on control flow, types, vector lengths, indexing, and function call boundaries. AIR tables need explicit constraints for many of those facts.</p>
+<p>When migrating a module, identify constraints that are extra in AIR even if they are implicit in Rust.</p>
+<p>Common AIR-only constraints:</p>
+<ul>
+<li>booleanity of selector columns such as <code>is_present</code>, <code>is_first</code>, <code>is_last</code>, and branch flags</li>
+<li>row transition constraints for counters such as <code>round_idx</code>, <code>layer_idx</code>, <code>chip_idx</code>, and <code>tidx</code></li>
+<li>padding-row constraints so inactive rows cannot carry meaningful claims</li>
+<li>first-row and last-row boundary constraints</li>
+<li>shape agreement between local row counts and <code>ProofShapeAir</code></li>
+<li>bus key equality for cross-module values</li>
+<li>transcript order and challenge-use equality through transcript bus messages</li>
+<li>range or domain checks for indices, counts, and enum-like fields</li>
+<li>active/inactive masking of sumcheck and tower equations</li>
+<li>consistency between proof-derived fields and VK-derived metadata</li>
+<li>uniqueness or balance constraints where native code would use a single function call</li>
+</ul>
+<p>For every native assertion, ask two questions:</p>
+<pre><code class="language-text">What algebraic equation proves the same fact?
+What extra row/selector/bus constraints are needed because this is now a table?
+</code></pre>
+<p>Do not stop at copying the native equation. AIR also needs to prove that the equation is applied to the right row, with the right key, under the right selector, and with the right transcript challenge.</p>
+<h2 id="openvm-as-reference-not-template"><a class="header" href="#openvm-as-reference-not-template">OpenVM as Reference, Not Template</a></h2>
+<p>OpenVM recursion code can be useful design reference:</p>
+<pre><code class="language-text">../openvm/crates/recursion/src
+</code></pre>
+<p>Use it to study row-oriented layouts, bus patterns, transcript tables, proof-shape handling, and module organization. Do not blindly copy it.</p>
+<p>Ceno recursion-v2 must be tuned to Ceno’s native verifier semantics:</p>
+<ul>
+<li>Ceno proof and VK types</li>
+<li>Ceno transcript order</li>
+<li>Ceno tower, main, lookup, rotation, and ECC verifier logic</li>
+<li>Ceno shape metadata and chip ordering</li>
+<li>Ceno-specific grouped/dense tower behavior</li>
+</ul>
+<p>Reference OpenVM for design ideas; mirror <code>ceno_zkvm</code> for correctness.</p>
+<h2 id="migration-workflow"><a class="header" href="#migration-workflow">Migration Workflow</a></h2>
+<p>For each native verifier migration task:</p>
+<ol>
+<li>Identify the native verifier block and exact source lines.</li>
+<li>Write down the verifier inputs, outputs, transcript operations, assertions, and loops.</li>
+<li>Mark which values are proof-derived, VK-derived, transcript-derived, or locally derived.</li>
+<li>Decide which values are local to one AIR and which cross module boundaries.</li>
+<li>Choose AIR/module boundaries for fixed-column clarity and repeated row structure, not blindly from Rust function boundaries.</li>
+<li>Add or update preflight records for deterministic replay data.</li>
+<li>Fill matrix rows from preflight records.</li>
+<li>Add local AIR constraints for native verifier assertions.</li>
+<li>Add AIR-only constraints for selectors, padding, row transitions, key equality, and shape agreement.</li>
+<li>Add bus sends and receives for function parameters, return values, shape metadata, VK-derived metadata, and transcript values.</li>
+<li>Validate AIR order, trace order, row counts, and transcript order before chasing deeper semantic failures.</li>
+</ol>
+<p>Preferred implementation discipline:</p>
+<ul>
+<li>keep diffs surgical</li>
+<li>mirror native verifier naming when practical</li>
+<li>preserve row ordering and transcript ordering exactly</li>
+<li>add shape checks before semantic constraints</li>
+<li>avoid broad refactors during migration</li>
+<li>tag placeholders with explicit TODO ownership</li>
+</ul>
+<h2 id="grouped-tower-case-study"><a class="header" href="#grouped-tower-case-study">Grouped Tower Case Study</a></h2>
+<p>The grouped tower verifier change is a useful example of why shape and semantics must be separated.</p>
+<p>Native verifier now distinguishes:</p>
+<pre><code class="language-text">raw counts:
+  cs.num_reads()
+  cs.num_writes()
+  cs.num_lks()
+
+proof counts:
+  proof.r_out_evals.len()
+  proof.w_out_evals.len()
+  proof.lk_out_evals.len()
+</code></pre>
+<p>Grouped proof shape accepts:</p>
+<pre><code class="language-text">r_out_evals.len()  == usize::from(num_reads &gt; 0)
+w_out_evals.len()  == usize::from(num_writes &gt; 0)
+lk_out_evals.len() == usize::from(num_lks &gt; 0)
+</code></pre>
+<p>Dense proof shape accepts:</p>
+<pre><code class="language-text">r_out_evals.len()  == num_reads
+w_out_evals.len()  == num_writes
+lk_out_evals.len() == num_lks
+</code></pre>
+<p>The transcript span follows proof counts, because only proof out-evals are absorbed.</p>
+<p>The grouped tower variable depth follows raw counts:</p>
+<pre><code class="language-text">num_var_with_rotation + ceil_log2(raw_count.next_power_of_two())
+</code></pre>
+<p>The main verifier consumes the tail of the grouped tower point:</p>
+<pre><code class="language-text">rt_main = rt_tower[rt_tower.len() - num_var_with_rotation..]
+</code></pre>
+<p>This is because grouped operation-index coordinates are extra tower coordinates, while main-GKR still uses only row and rotation coordinates.</p>
+<p>The recursion-v2 migration implication:</p>
+<ul>
+<li><code>ProofShapeAir</code> should expose proof counts where transcript/table shape needs proof counts.</li>
+<li>raw counts must remain available where tower depth or lookup padding needs raw operation counts.</li>
+<li>tower replay must classify grouped vs dense shape.</li>
+<li>main replay should use <code>main_out_evals</code> and explicit <code>claimed_sum</code>, not reconstruct main claims from terminal tower values.</li>
+<li>transcript buses must use the grouped absorption schedule.</li>
+</ul>
+<h2 id="placeholder-policy"><a class="header" href="#placeholder-policy">Placeholder Policy</a></h2>
+<p>Temporary placeholders are allowed only when they are:</p>
+<ul>
+<li>deterministic</li>
+<li>shape-correct</li>
+<li>locally constrained enough to avoid unrelated failures</li>
+<li>tagged with explicit TODO ownership</li>
+</ul>
+<p>Use comments like:</p>
+<pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// TODO(recursion-v2-migration): replace placeholder with native verifier replay value.
+<span class="boring">}</span></code></pre>
+<p>Do not allow placeholders to hide shape mismatches, transcript ordering mismatches, or bus key mismatches.</p>
+<h2 id="acceptance-criteria-for-a-migration-step"><a class="header" href="#acceptance-criteria-for-a-migration-step">Acceptance Criteria for a Migration Step</a></h2>
+<p>A migration step is healthy when:</p>
+<ul>
+<li><code>airs()</code> order matches trace context order</li>
+<li>number of AIRs matches number of generated trace matrices</li>
+<li>row counts match proof shape</li>
+<li>transcript <code>tidx</code> progression matches native verifier order</li>
+<li>bus sends and receives balance with correct keys</li>
+<li>placeholders are explicit and shape-correct</li>
+<li>the first failing validation reason is known if semantic verification is incomplete</li>
+</ul>
+<p>Use native verifier behavior as the source of truth. recursion-v2 should encode the same verifier logic in row-oriented AIR form, not invent a parallel verifier.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="architecture-overview.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                            </a>
+
+                            <a rel="next prefetch" href="memory-continuation-checks.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="architecture-overview.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M41.4 233.4c-12.5 12.5-12.5 32.8 0 45.3l160 160c12.5 12.5 32.8 12.5 45.3 0s12.5-32.8 0-45.3L109.3 256 246.6 118.6c12.5-12.5 12.5-32.8 0-45.3s-32.8-12.5-45.3 0l-160 160z"/></svg></span>
+                    </a>
+
+                    <a rel="next prefetch" href="memory-continuation-checks.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M278.6 233.4c12.5 12.5 12.5 32.8 0 45.3l-160 160c-12.5 12.5-32.8 12.5-45.3 0s-12.5-32.8 0-45.3L210.7 256 73.4 118.6c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0l160 160z"/></svg></span>
+                    </a>
+            </nav>
+
+        </div>
+
+        <template id=fa-eye><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M288 32c-80.8 0-145.5 36.8-192.6 80.6C48.6 156 17.3 208 2.5 243.7c-3.3 7.9-3.3 16.7 0 24.6C17.3 304 48.6 356 95.4 399.4C142.5 443.2 207.2 480 288 480s145.5-36.8 192.6-80.6c46.8-43.5 78.1-95.4 93-131.1c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C433.5 68.8 368.8 32 288 32zM432 256c0 79.5-64.5 144-144 144s-144-64.5-144-144s64.5-144 144-144s144 64.5 144 144zM288 192c0 35.3-28.7 64-64 64c-11.5 0-22.3-3-31.6-8.4c-.2 2.8-.4 5.5-.4 8.4c0 53 43 96 96 96s96-43 96-96s-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6z"/></svg></span></template>
+        <template id=fa-eye-slash><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M38.8 5.1C28.4-3.1 13.3-1.2 5.1 9.2S-1.2 34.7 9.2 42.9l592 464c10.4 8.2 25.5 6.3 33.7-4.1s6.3-25.5-4.1-33.7L525.6 386.7c39.6-40.6 66.4-86.1 79.9-118.4c3.3-7.9 3.3-16.7 0-24.6c-14.9-35.7-46.2-87.7-93-131.1C465.5 68.8 400.8 32 320 32c-68.2 0-125 26.3-169.3 60.8L38.8 5.1zM223.1 149.5C248.6 126.2 282.7 112 320 112c79.5 0 144 64.5 144 144c0 24.9-6.3 48.3-17.4 68.7L408 294.5c5.2-11.8 8-24.8 8-38.5c0-53-43-96-96-96c-2.8 0-5.6 .1-8.4 .4c5.3 9.3 8.4 20.1 8.4 31.6c0 10.2-2.4 19.8-6.6 28.3l-90.3-70.8zm223.1 298L373 389.9c-16.4 6.5-34.3 10.1-53 10.1c-79.5 0-144-64.5-144-144c0-6.9 .5-13.6 1.4-20.2L83.1 161.5C60.3 191.2 44 220.8 34.5 243.7c-3.3 7.9-3.3 16.7 0 24.6c14.9 35.7 46.2 87.7 93 131.1C174.5 443.2 239.2 480 320 480c47.8 0 89.9-12.9 126.2-32.5z"/></svg></span></template>
+        <template id=fa-copy><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M502.6 70.63l-61.25-61.25C435.4 3.371 427.2 0 418.7 0H255.1c-35.35 0-64 28.66-64 64l.0195 256C192 355.4 220.7 384 256 384h192c35.2 0 64-28.8 64-64V93.25C512 84.77 508.6 76.63 502.6 70.63zM464 320c0 8.836-7.164 16-16 16H255.1c-8.838 0-16-7.164-16-16L239.1 64.13c0-8.836 7.164-16 16-16h128L384 96c0 17.67 14.33 32 32 32h47.1V320zM272 448c0 8.836-7.164 16-16 16H63.1c-8.838 0-16-7.164-16-16L47.98 192.1c0-8.836 7.164-16 16-16H160V128H63.99c-35.35 0-64 28.65-64 64l.0098 256C.002 483.3 28.66 512 64 512h192c35.2 0 64-28.8 64-64v-32h-47.1L272 448z"/></svg></span></template>
+        <template id=fa-play><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M73 39c-14.8-9.1-33.4-9.4-48.5-.9S0 62.6 0 80V432c0 17.4 9.4 33.4 24.5 41.9s33.7 8.1 48.5-.9L361 297c14.3-8.7 23-24.2 23-41s-8.7-32.2-23-41L73 39z"/></svg></span></template>
+        <template id=fa-clock-rotate-left><span class=fa-svg><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 6.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2022 Fonticons, Inc. --><path d="M75 75L41 41C25.9 25.9 0 36.6 0 57.9V168c0 13.3 10.7 24 24 24H134.1c21.4 0 32.1-25.9 17-41l-30.8-30.8C155 85.5 203 64 256 64c106 0 192 86 192 192s-86 192-192 192c-40.8 0-78.6-12.7-109.7-34.4c-14.5-10.1-34.4-6.6-44.6 7.9s-6.6 34.4 7.9 44.6C151.2 495 201.7 512 256 512c141.4 0 256-114.6 256-256S397.4 0 256 0C185.3 0 121.3 28.7 75 75zm181 53c-13.3 0-24 10.7-24 24V256c0 6.4 2.5 12.5 7 17l72 72c9.4 9.4 24.6 9.4 33.9 0s9.4-24.6 0-33.9l-65-65V152c0-13.3-10.7-24-24-24z"/></svg></span></template>
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr-ef4e11c1.min.js"></script>
+        <script src="mark-09e88c2c.min.js"></script>
+        <script src="searcher-c2a407aa.js"></script>
+
+        <script src="clipboard-1626706a.min.js"></script>
+        <script src="highlight-abc7f01d.js"></script>
+        <script src="book-a0b12cfe.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+
+    </div>
+    </body>
+</html>
