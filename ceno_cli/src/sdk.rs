@@ -27,8 +27,8 @@ use gkr_iop::hal::ProverBackend;
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use serde::Serialize;
 
-pub const DEFAULT_LEAF_FANIN: usize = 2;
-pub const DEFAULT_INTERNAL_FANIN: usize = 2;
+pub const DEFAULT_LEAF_FANIN: usize = 4;
+pub const DEFAULT_INTERNAL_FANIN: usize = 4;
 pub const DEFAULT_RECURSION_L_SKIP: usize = 5;
 pub const DEFAULT_RECURSION_N_STACK: usize = 16;
 pub const DEFAULT_RECURSION_K_WHIR: usize = 3;
