@@ -25,7 +25,7 @@ use multilinear_extensions::{
     util::{ceil_log2, max_usable_threads},
 };
 use ndarray::{ArrayView, Ix2, Ix3, s};
-use p3::field::FieldAlgebra;
+
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::{ParallelSlice, ParallelSliceMut},
@@ -48,6 +48,7 @@ use crate::{
     scheme::utils::gkr_witness,
     structs::{CustomRWTag, RAMType},
 };
+use p3::field::PrimeCharacteristicRing;
 
 pub const ROUNDS: usize = 24;
 pub const ROUNDS_CEIL_LOG2: usize = 5; // log_2(24.next_pow2())
@@ -175,7 +176,7 @@ pub fn keccak_state_record<E: ExtensionField>(
         CustomRWTag::KeccakState.expr::<E>(),
         cycle,
         state_ptr,
-        E::BaseField::from_canonical_u64(phase).expr(),
+        E::BaseField::from_u64(phase).expr(),
     ]
     .into_iter()
     .chain(state)
@@ -683,7 +684,7 @@ where
         //     RC.iter()
         //         .flat_map(|x| {
         //             (0..8)
-        //                 .map(|i| E::BaseField::from_canonical_u64((x >> (i << 3)) & 0xFF))
+        //                 .map(|i| E::BaseField::from_u64((x >> (i << 3)) & 0xFF))
         //                 .collect_vec()
         //         })
         //         .collect_vec(),
@@ -773,10 +774,9 @@ where
                         let round_index = cyclic_group.next().unwrap();
                         let wits = &mut wits[round_index as usize * self.n_committed..]
                             [..self.n_committed];
-                        wits[self.cycle.id as usize] =
-                            E::BaseField::from_canonical_u64(state.cur_ts);
+                        wits[self.cycle.id as usize] = E::BaseField::from_u64(state.cur_ts);
                         wits[self.state_ptr.id as usize] =
-                            E::BaseField::from_canonical_u64(state.state_ptr_address.0 as u64);
+                            E::BaseField::from_u64(state.state_ptr_address.0 as u64);
 
                         // set selector
                         if let Some(index) = sel_first_iter.next() {
@@ -1242,7 +1242,7 @@ pub fn run_lookup_keccakf<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> 
             //             .to_vec()
             //             .iter()
             //             .flat_map(|e| vec![*e as u32, (e >> 32) as u32])
-            //             .map(|e| Goldilocks::from_canonical_u64(e as u64))
+            //             .map(|e| Goldilocks::from_u64(e as u64))
             //             .collect_vec(),
             //         instance_outputs[i]
             //     );

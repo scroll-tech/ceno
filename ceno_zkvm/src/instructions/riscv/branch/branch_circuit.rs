@@ -21,7 +21,7 @@ use crate::{
     witness::LkMultiplicity,
 };
 use multilinear_extensions::Expression;
-pub use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 
 pub struct BranchCircuit<E, I>(PhantomData<(E, I)>);
 
@@ -160,8 +160,8 @@ impl<E: ExtensionField, I: RIVInstruction> Instruction<E> for BranchCircuit<E, I
         if let Some(equal) = &config.is_equal {
             equal.assign_instance(
                 instance,
-                E::BaseField::from_canonical_u64(rs2.as_u64()),
-                E::BaseField::from_canonical_u64(rs1.as_u64()),
+                E::BaseField::from_u64(rs2.as_u64()),
+                E::BaseField::from_u64(rs1.as_u64()),
             )?;
         }
 

@@ -11,7 +11,6 @@ use gkr_iop::{
 };
 use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
-use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,
@@ -41,6 +40,7 @@ use crate::{
     uint::Value,
     witness::LkMultiplicity,
 };
+use p3::field::PrimeCharacteristicRing;
 
 #[derive(Debug)]
 pub struct KeccakEcallConfig<E: ExtensionField> {
@@ -80,7 +80,7 @@ fn assign_memory_expr<E: ExtensionField>(
         let multilinear_extensions::Expression::WitIn(wit) = limb_expr else {
             panic!("keccak ecall state limbs must be witness columns");
         };
-        instance[*wit as usize] = E::BaseField::from_canonical_u64(*limb as u64);
+        instance[*wit as usize] = E::BaseField::from_u64(*limb as u64);
     }
 }
 
@@ -160,10 +160,7 @@ impl<E: ExtensionField> Instruction<E> for KeccakEcallInstruction<E> {
                 WriteMEM::construct_circuit(
                     cb,
                     state_ptr.prev_value.as_ref().unwrap().value()
-                        + E::BaseField::from_canonical_u32(
-                            ByteAddr::from((i * WORD_SIZE) as u32).0,
-                        )
-                        .expr(),
+                        + E::BaseField::from_u32(ByteAddr::from((i * WORD_SIZE) as u32).0).expr(),
                     val_before.clone(),
                     val_after.clone(),
                     vm_state.ts,
@@ -449,7 +446,7 @@ mod tests {
         e2e::ShardContext,
         structs::ProgramParams,
     };
-    use ff_ext::BabyBearExt4;
+    use ff_ext::{BabyBearExt4, FieldFrom};
     use multilinear_extensions::utils::eval_by_expr_with_instance;
 
     type E = BabyBearExt4;
@@ -478,7 +475,7 @@ mod tests {
     ) -> E {
         let wit_row = wit_row.iter().copied().map(E::from).collect_vec();
         let structural_row = structural_row.iter().copied().map(E::from).collect_vec();
-        let challenges = [E::from_canonical_u64(7), E::from_canonical_u64(11)];
+        let challenges = [E::from_v(7), E::from_v(11)];
         eval_by_expr_with_instance::<E>(&[], &wit_row, &structural_row, &[], &challenges, expr)
             .unwrap_right()
     }

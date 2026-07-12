@@ -186,11 +186,11 @@ jobs:
           RUSTFLAGS: "-C opt-level=3"
         run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/sha_extend_syscall
 
-      #      - name: Run aggregation e2e
-      #        env:
-      #          RUSTFLAGS: "-C opt-level=3"
-      #        run: |
-      #          cargo run --release --package ceno_recursion --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+      - name: Run recursion v2 aggregation e2e
+        env:
+          RUSTFLAGS: "-C opt-level=3"
+          RUST_MIN_STACK: "33554432"
+        run: cargo run --release --package ceno_recursion_v2 --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Install cargo make
         run: |

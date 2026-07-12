@@ -18,7 +18,7 @@ Main crates in this repo:
 - `gkr_iop/` — local GKR circuit framework: `Chip`, `Layer`, zerocheck /
   sumcheck / linear layer provers, CPU and GPU backends. 
 - `ceno_emul/` — RISC-V emulator (produces traces for the prover).
-- `ceno_recursion/` — recursive proof aggregation stack. Compresses
+- `ceno_recursion_v2/` — recursive proof aggregation stack. Compresses
   shard proofs by running a verifier inside another proof; treat as
   verifier code for soundness purposes. **Must stay in lockstep with
   the native Rust verifier** — any protocol-level change on one side
@@ -91,7 +91,7 @@ surface. See `docs/src/technical-overview.md` for the long form.
 
 ## What to prioritize when editing
 
-Verifier code — including the recursive verifier in `ceno_recursion/`
+Verifier code — including the recursive verifier in `ceno_recursion_v2/`
 — is the highest-scrutiny surface in the repo. Spend more thinking
 time per line there than anywhere else; prefer a slow, explicit edit
 over a clever one.

@@ -4,7 +4,7 @@ use gkr_iop::error::CircuitBuilderError;
 use super::GlobalStateRegisterMachineChipOperations;
 use crate::{circuit_builder::CircuitBuilder, structs::RAMType};
 use multilinear_extensions::{Expression, ToExpr};
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 
 impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitBuilder<'_, E> {
     fn state_in(
@@ -13,7 +13,7 @@ impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitB
         ts: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
         let record: Vec<Expression<E>> = vec![
-            E::BaseField::from_canonical_u64(RAMType::GlobalState as u64).expr(),
+            E::BaseField::from_u64(RAMType::GlobalState as u64).expr(),
             pc,
             ts,
         ];
@@ -26,7 +26,7 @@ impl<E: ExtensionField> GlobalStateRegisterMachineChipOperations<E> for CircuitB
         ts: Expression<E>,
     ) -> Result<(), CircuitBuilderError> {
         let record: Vec<Expression<E>> = vec![
-            E::BaseField::from_canonical_u64(RAMType::GlobalState as u64).expr(),
+            E::BaseField::from_u64(RAMType::GlobalState as u64).expr(),
             pc,
             ts,
         ];

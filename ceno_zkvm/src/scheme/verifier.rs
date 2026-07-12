@@ -1,5 +1,6 @@
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};
+use p3::field::PrimeCharacteristicRing;
 use std::{
     iter::{self, once, repeat_n},
     marker::PhantomData,
@@ -50,13 +51,12 @@ use multilinear_extensions::{
     virtual_poly::{VPAuxInfo, build_eq_x_r_vec_sequential, eq_eval},
     virtual_polys::VirtualPolynomials,
 };
-use p3::field::FieldAlgebra;
 use sumcheck::{
     frontload,
     structs::{IOPProof, IOPVerifierState, SumCheckSubClaim},
     util::get_challenge_pows,
 };
-use transcript::{ForkableTranscript, Transcript};
+use transcript::{BasicTranscript, ForkableTranscript, Transcript};
 use witness::next_pow2_instance_padding;
 
 pub use crate::structs::RV32imMemStateConfig;
@@ -363,7 +363,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         assert_eq!(
             vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX),
-            E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN)
+            E::BaseField::from_u64(Tracer::SUBCYCLES_PER_INSN)
         );
 
         let shard_id = vm_proof.public_values.shard_id as usize;
@@ -404,7 +404,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 // to satisfy initial reads for all prev_cycle = 0 < init_cycle
                 let init_cycle = vm_proof.public_values.query_by_index::<E>(INIT_CYCLE_IDX);
                 let expected_init_cycle =
-                    E::BaseField::from_canonical_u64(Tracer::SUBCYCLES_PER_INSN);
+                    E::BaseField::from_u64(Tracer::SUBCYCLES_PER_INSN);
                 if init_cycle != expected_init_cycle {
                     return Err(ZKVMError::VerifyError(
                         format!(
@@ -418,7 +418,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 let expected_init_pc = if let Some(prev_pc) = prev_pc {
                     prev_pc
                 } else {
-                    E::BaseField::from_canonical_u32(self.vk.entry_pc)
+                    E::BaseField::from_u32(self.vk.entry_pc)
                 };
                 if init_pc != expected_init_pc {
                     return Err(ZKVMError::VerifyError(
@@ -522,15 +522,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             PCS::write_commitment(fixed_commit, &mut transcript).map_err(ZKVMError::PCSError)?;
         }
 
-        // write (circuit_idx, num_instance) to transcript
-        for (circuit_idx, proof) in vm_proof.chip_proofs.iter() {
-            transcript.append_field_element(&E::BaseField::from_canonical_u32(*circuit_idx as u32));
-            // length of proof.num_instances will be constrained in verify_chip_proof
-            for num_instance in &proof.num_instances {
-                transcript.append_field_element(&E::BaseField::from_canonical_usize(*num_instance));
-            }
-        }
-
         // write witin commitment to transcript
         PCS::write_commitment(&vm_proof.witin_commit, &mut transcript)
             .map_err(ZKVMError::PCSError)?;
@@ -584,11 +575,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
 
         // fork transcript to support chip concurrently proved
         let mut pending_main_constraints = Vec::with_capacity(num_proofs);
-        let mut forked_transcripts = transcript.fork(num_proofs);
-        for ((index, proof), transcript) in vm_proof
+        let mut forked_transcripts = vec![BasicTranscript::new(b"fork"); num_proofs];
+        for (index, ((circuit_index, proof), transcript)) in vm_proof
             .chip_proofs
             .iter()
             .zip_eq(forked_transcripts.iter_mut())
+            .enumerate()
         {
             let num_instance: usize = proof.num_instances.iter().sum();
             if num_instance == 0 {
@@ -596,9 +588,9 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                     format!("{shard_id}th shard chip {index} has zero instances").into(),
                 ));
             }
-            let circuit_name = self.vk.circuit_index_to_name.get(index).ok_or_else(|| {
+            let circuit_name = self.vk.circuit_index_to_name.get(circuit_index).ok_or_else(|| {
                 ZKVMError::VKNotFound(
-                    format!("{shard_id}th shard circuit index {index} missing from vk index map")
+                    format!("{shard_id}th shard circuit index {circuit_index} missing from vk index map")
                         .into(),
                 )
             })?;
@@ -684,7 +676,13 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 })
                 .sum::<Result<E, ZKVMError>>()?;
 
-            transcript.append_field_element(&E::BaseField::from_canonical_u64(*index as u64));
+            transcript.append_field_element_ext(&challenges[0]);
+            transcript.append_field_element_ext(&challenges[1]);
+            transcript.append_field_element(&E::BaseField::from_usize(index));
+            transcript.append_field_element(&E::BaseField::from_u64(*circuit_index as u64));
+            for num_instance in &proof.num_instances {
+                transcript.append_field_element(&E::BaseField::from_usize(*num_instance));
+            }
 
             // compute logup_sum padding
             // getting the number of dummy padding item that we used in this opcode circuit
@@ -745,8 +743,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
                 shard_ec_sum = shard_ec_sum + chip_shard_ec_sum;
             }
         }
-        logup_sum -= E::from_canonical_u64(dummy_table_item_multiplicity as u64)
-            * dummy_table_item.inverse();
+        logup_sum -= E::from_u64(dummy_table_item_multiplicity as u64) * dummy_table_item.inverse();
 
         #[cfg(debug_assertions)]
         {
@@ -1555,13 +1552,13 @@ impl TowerVerify {
                     round,
                 );
 
-                let expected_evaluation: E = (0..num_prod_spec)
+                let weighted_prime_fold: E = (0..num_prod_spec)
                     .zip(alpha_pows.iter())
                     .zip(num_variables.iter())
                     .map(|((spec_index, alpha), max_round)| {
                         // prod'[b] = prod[0,b] * prod[1,b]
                         // prod'[out_rt] = \sum_b eq(out_rt,b) * prod'[b] = \sum_b eq(out_rt,b) * prod[0,b] * prod[1,b]
-                        eq * *alpha
+                        *alpha
                             * if round < *max_round - 1 { tower_proofs.prod_specs_eval[spec_index][round].iter().copied().product() } else {
                             E::ZERO
                         }
@@ -1576,7 +1573,7 @@ impl TowerVerify {
                         // logup_p'[out_rt] = \sum_b eq(out_rt,b) * (logup_p[0,b] * logup_q[1,b] + logup_p[1,b] * logup_q[0,b])
                         // logup_q'[out_rt] = \sum_b eq(out_rt,b) * logup_q[0,b] * logup_q[1,b]
                         let (alpha_numerator, alpha_denominator) = (&alpha[0], &alpha[1]);
-                        eq * if round < *max_round - 1 {
+                        if round < *max_round - 1 {
                             let evals = &tower_proofs.logup_specs_eval[spec_index][round];
                             let (p1, p2, q1, q2) =
                                 (evals[0], evals[1], evals[2], evals[3]);
@@ -1587,6 +1584,7 @@ impl TowerVerify {
                         }
                     })
                     .sum::<E>();
+                let expected_evaluation = eq * weighted_prime_fold;
 
                 if expected_evaluation != sumcheck_claim.expected_evaluation {
                     return Err(ZKVMError::VerifyError("mismatch tower evaluation".into()));

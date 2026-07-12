@@ -19,7 +19,7 @@ use gkr_iop::{
 use itertools::Itertools;
 use mpcs::{Point, PolynomialCommitmentScheme};
 use multilinear_extensions::{Expression, Instance, ToExpr};
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing as FieldAlgebra;
 use poseidon::challenger::{CanObserve, DefaultChallenger, FieldChallenger};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -116,7 +116,7 @@ pub enum CustomRWTag {
 
 impl CustomRWTag {
     pub fn expr<E: ExtensionField>(self) -> Expression<E> {
-        E::BaseField::from_canonical_u16(self as u16).expr()
+        E::BaseField::from_u16(self as u16).expr()
     }
 }
 
@@ -1086,16 +1086,16 @@ pub struct ZKVMVerifyingKey<
 /// Number of extension-field elements squeezed from the digest sponge.
 pub const VK_DIGEST_LEN: usize = 2;
 
-/// Convert bytes into base-field elements using ≤ 3-byte chunks.
-fn bytes_to_felts_safe<F: FieldAlgebra>(bytes: &[u8]) -> Vec<F> {
-    bytes
-        .chunks(3)
-        .map(|chunk| {
-            let mut arr = [0u8; 4];
-            arr[..chunk.len()].copy_from_slice(chunk);
-            F::from_canonical_u32(u32::from_le_bytes(arr))
-        })
-        .collect()
+fn observe_bytes_safe<F, C>(challenger: &mut C, bytes: &[u8])
+where
+    F: FieldAlgebra,
+    C: CanObserve<F>,
+{
+    for chunk in bytes.chunks(3) {
+        let mut arr = [0u8; 4];
+        arr[..chunk.len()].copy_from_slice(chunk);
+        challenger.observe(F::from_u32(u32::from_le_bytes(arr)));
+    }
 }
 
 /// Hash the supplied VK preimage into `VK_DIGEST_LEN` extension elements.
@@ -1128,8 +1128,8 @@ where
     .expect("vk digest serialization is infallible for a valid VK");
 
     let mut sponge = DefaultChallenger::<E::BaseField>::new_poseidon_default();
-    sponge.observe_slice(&bytes_to_felts_safe::<E::BaseField>(&bytes));
-    std::array::from_fn(|_| sponge.sample_ext_element())
+    observe_bytes_safe::<E::BaseField, _>(&mut sponge, &bytes);
+    std::array::from_fn(|_| sponge.sample_algebra_element())
 }
 
 impl<E, PCS, M> ZKVMVerifyingKey<E, PCS, M>
@@ -1138,6 +1138,17 @@ where
     PCS: PolynomialCommitmentScheme<E>,
     M: Clone + Default + Serialize + DeserializeOwned,
 {
+    /// Rebuild `circuit_index_to_name` from `circuit_vks` after deserialization.
+    /// The field is `#[serde(skip)]` so it deserializes as empty.
+    pub fn rebuild_circuit_index(&mut self) {
+        self.circuit_index_to_name = self
+            .circuit_vks
+            .keys()
+            .enumerate()
+            .map(|(i, name)| (i, name.clone()))
+            .collect();
+    }
+
     /// Poseidon-sponge digest of the verifying key's soundness-bound fields.
     pub fn compute_digest(&self) -> [E; VK_DIGEST_LEN] {
         compute_vk_digest_inner::<E, PCS, M>(

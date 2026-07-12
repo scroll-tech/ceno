@@ -57,7 +57,7 @@ use multilinear_extensions::{
     utils::eval_by_expr_constant,
     virtual_poly::{build_eq_x_r_vec, eq_eval},
 };
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing as FieldAlgebra;
 use rayon::{
     iter::{
         IndexedParallelIterator, IntoParallelIterator, IntoParallelRefIterator,
@@ -2138,6 +2138,7 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
 > {
     let stream = gkr_iop::gpu::get_thread_stream();
     use crate::scheme::constants::{NUM_FANIN, NUM_FANIN_LOGUP};
+    use ceno_gpu::{CudaHal as _, bb31::GpuPolynomialExt};
 
     let ComposedConstrainSystem {
         zkvm_v1_css: cs, ..

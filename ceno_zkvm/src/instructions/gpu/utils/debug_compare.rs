@@ -10,7 +10,7 @@ use ceno_emul::{StepIndex, StepRecord, WordAddr};
 use ceno_gpu::common::witgen::types::{GpuRamRecordSlot, GpuShardRamRecord};
 use ff_ext::ExtensionField;
 use gkr_iop::{RAMType, tables::LookupTable, utils::lk_multiplicity::Multiplicity};
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing as FieldAlgebra;
 use std::cell::{Cell, RefCell};
 use witness::RowMajorMatrix;
 
@@ -422,8 +422,8 @@ pub(crate) fn debug_compare_shard_ec<E: ExtensionField, I: Instruction<E>>(
                 global_clk: g.global_clk,
                 is_to_write_set: g.is_to_write_set != 0,
             };
-            let x = SepticExtension(g.point_x.map(|v| E::BaseField::from_canonical_u32(v)));
-            let y = SepticExtension(g.point_y.map(|v| E::BaseField::from_canonical_u32(v)));
+            let x = SepticExtension(g.point_x.map(|v| E::BaseField::from_u32(v)));
+            let y = SepticExtension(g.point_y.map(|v| E::BaseField::from_u32(v)));
             let point = SepticPoint::from_affine(x, y);
             let ec = ECPoint::<E> {
                 nonce: g.nonce,

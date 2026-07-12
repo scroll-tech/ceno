@@ -8,7 +8,7 @@ use std::{
 use ff_ext::ExtensionField;
 pub use gkr_iop::utils::i64_to_base;
 use itertools::Itertools;
-use p3::field::Field;
+use p3::field::{Field, PrimeCharacteristicRing};
 
 #[cfg(feature = "u16limb_circuit")]
 use crate::instructions::riscv::constants::UINT_LIMBS;
@@ -17,8 +17,6 @@ use multilinear_extensions::Expression;
 #[cfg(feature = "u16limb_circuit")]
 use multilinear_extensions::ToExpr;
 #[cfg(feature = "u16limb_circuit")]
-use p3::field::FieldAlgebra;
-
 pub fn split_to_u8<T: From<u8>>(value: u32) -> Vec<T> {
     (0..(u32::BITS / 8))
         .scan(value, |acc, _| {
@@ -132,10 +130,7 @@ pub fn imm_sign_extend_circuit<E: ExtensionField>(
     if !require_signed {
         [imm, E::BaseField::ZERO.expr()]
     } else {
-        [
-            imm,
-            is_signed * E::BaseField::from_canonical_u16(0xffff).expr(),
-        ]
+        [imm, is_signed * E::BaseField::from_u16(0xffff).expr()]
     }
 }
 

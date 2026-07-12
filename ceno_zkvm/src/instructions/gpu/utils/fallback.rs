@@ -3,7 +3,7 @@ use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
 use itertools::Itertools;
 use multilinear_extensions::util::max_usable_threads;
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing as FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     slice::ParallelSlice,

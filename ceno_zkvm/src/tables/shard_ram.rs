@@ -24,7 +24,7 @@ use gkr_iop::{
 use itertools::{Itertools, chain};
 use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
 use p3::{
-    field::{Field, FieldAlgebra},
+    field::{Field, PrimeCharacteristicRing as FieldAlgebra},
     matrix::dense::RowMajorMatrix,
     symmetric::Permutation,
 };
@@ -118,13 +118,13 @@ impl ShardRamRecord {
     ) -> ECPoint<E> {
         let mut nonce = 0;
         let mut input = vec![
-            E::BaseField::from_canonical_u32(self.addr),
-            E::BaseField::from_canonical_u32(self.ram_type as u32),
-            E::BaseField::from_canonical_u32(self.value & 0xFFFF), // lower 16 bits
-            E::BaseField::from_canonical_u32((self.value >> 16) & 0xFFFF), // higher 16 bits
-            E::BaseField::from_canonical_u64(self.shard),
-            E::BaseField::from_canonical_u64(self.global_clk),
-            E::BaseField::from_canonical_u32(nonce),
+            E::BaseField::from_u32(self.addr),
+            E::BaseField::from_u32(self.ram_type as u32),
+            E::BaseField::from_u32(self.value & 0xFFFF), // lower 16 bits
+            E::BaseField::from_u32((self.value >> 16) & 0xFFFF), // higher 16 bits
+            E::BaseField::from_u64(self.shard),
+            E::BaseField::from_u64(self.global_clk),
+            E::BaseField::from_u32(nonce),
             E::BaseField::ZERO,
             E::BaseField::ZERO,
             E::BaseField::ZERO,
@@ -166,7 +166,7 @@ impl ShardRamRecord {
             }
             // try again with different nonce
             nonce += 1;
-            input[6] = E::BaseField::from_canonical_u32(nonce);
+            input[6] = E::BaseField::from_u32(nonce);
         }
     }
 }
@@ -314,19 +314,19 @@ impl<E: ExtensionField> ShardRamConfig<E> {
         // `lookup_ltu_byte(a, b, 1)` asserts `a, b` are bytes and `a < b`.
         cb.lookup_ltu_byte(
             y6_lo_bytes[3].expr(),
-            E::BaseField::from_canonical_u64(Y6_LO_TOP_BYTE_LT_BOUND).expr(),
+            E::BaseField::from_u64(Y6_LO_TOP_BYTE_LT_BOUND).expr(),
             Expression::ONE,
         )?;
         let y6_lo = y6_lo_bytes[0].expr()
-            + y6_lo_bytes[1].expr() * E::BaseField::from_canonical_u64(1 << 8).expr()
-            + y6_lo_bytes[2].expr() * E::BaseField::from_canonical_u64(1 << 16).expr()
-            + y6_lo_bytes[3].expr() * E::BaseField::from_canonical_u64(1 << 24).expr();
+            + y6_lo_bytes[1].expr() * E::BaseField::from_u64(1 << 8).expr()
+            + y6_lo_bytes[2].expr() * E::BaseField::from_u64(1 << 16).expr()
+            + y6_lo_bytes[3].expr() * E::BaseField::from_u64(1 << 24).expr();
         let y6 = y[SEPTIC_EXTENSION_DEGREE - 1].expr();
         cb.condition_require_equal(
             || "y6 binds to is_global_write",
             is_global_write.expr(),
             y6,
-            E::BaseField::from_canonical_u64(<E::BaseField as SmallField>::MODULUS_U64 - 1).expr()
+            E::BaseField::from_u64(<E::BaseField as SmallField>::MODULUS_U64 - 1).expr()
                 - y6_lo.clone(),
             y6_lo + Expression::ONE,
         )?;
@@ -486,19 +486,19 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
         }
         lk_multiplicity.lookup_ltu_byte((y6_lo_u64 >> 24) & 0xff, Y6_LO_TOP_BYTE_LT_BOUND);
 
-        let ram_type = E::BaseField::from_canonical_u32(record.ram_type as u32);
+        let ram_type = E::BaseField::from_u32(record.ram_type as u32);
         let mut input = [E::BaseField::ZERO; 16];
 
         let k = UINT_LIMBS;
-        input[0] = E::BaseField::from_canonical_u32(record.addr);
+        input[0] = E::BaseField::from_u32(record.addr);
         input[1] = ram_type;
         input[2..(k + 2)]
             .iter_mut()
             .zip(value.as_u16_limbs().iter())
-            .for_each(|(i, v)| *i = E::BaseField::from_canonical_u16(*v));
-        input[2 + k] = E::BaseField::from_canonical_u64(record.shard);
-        input[2 + k + 1] = E::BaseField::from_canonical_u64(record.global_clk);
-        input[2 + k + 2] = E::BaseField::from_canonical_u32(*nonce);
+            .for_each(|(i, v)| *i = E::BaseField::from_u16(*v));
+        input[2 + k] = E::BaseField::from_u64(record.shard);
+        input[2 + k + 1] = E::BaseField::from_u64(record.global_clk);
+        input[2 + k + 2] = E::BaseField::from_u32(*nonce);
 
         config.perm_config.assign_instance(
             &mut instance[config.perm_config.p3_cols[0].id as usize..],
@@ -1031,13 +1031,13 @@ impl<E: ExtensionField> ShardRamCircuit<E> {
 #[cfg(test)]
 mod tests {
     use either::Either;
-    use ff_ext::{BabyBearExt4, FromUniformBytes, PoseidonField};
+    use ff_ext::{BabyBearExt4, FieldFrom, FromUniformBytes, PoseidonField};
     use gkr_iop::cpu::{CpuBackend, CpuProver};
     use itertools::Itertools;
     use mpcs::{BasefoldDefault, PolynomialCommitmentScheme, SecurityLevel};
     use p3::{
         babybear::BabyBear,
-        field::{FieldAlgebra, PrimeField32},
+        field::{PrimeCharacteristicRing, PrimeField32},
     };
     use rand::thread_rng;
     use std::sync::Arc;
@@ -1256,7 +1256,7 @@ mod tests {
             build_main_witness::<E, Pcs, CpuBackend<E, Pcs>, CpuProver<CpuBackend<E, Pcs>>>(
                 &leaf_composed,
                 &leaf_proof_input,
-                &[E::ONE, E::from_canonical_u32(7)],
+                &[E::ONE, E::from_v(7)],
                 WitnessBuildStage::Tower,
             );
         let leaf_r_len = leaf_composed.zkvm_v1_css.r_expressions.len()
@@ -1331,7 +1331,7 @@ mod tests {
             build_main_witness::<E, Pcs, CpuBackend<E, Pcs>, CpuProver<CpuBackend<E, Pcs>>>(
                 &ec_tree_composed,
                 &ec_tree_proof_input,
-                &[E::ONE, E::from_canonical_u32(7)],
+                &[E::ONE, E::from_v(7)],
                 WitnessBuildStage::Tower,
             );
         let ec_tree_r_len = ec_tree_composed.zkvm_v1_css.r_expressions.len()

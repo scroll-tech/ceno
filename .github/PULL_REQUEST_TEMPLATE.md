@@ -8,7 +8,7 @@
 
 ## Change Highlights
 
-<!-- Briefly list the key changes by crate/module (for example: ceno_zkvm, ceno_emul, ceno_recursion, docs). -->
+<!-- Briefly list the key changes by crate/module (for example: ceno_zkvm, ceno_emul, ceno_recursion_v2, docs). -->
 
 ## Benchmark / Performance Impact
 

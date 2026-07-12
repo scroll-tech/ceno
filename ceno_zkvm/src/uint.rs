@@ -1,3 +1,4 @@
+use p3::field::PrimeCharacteristicRing;
 mod arithmetic;
 pub mod constants;
 mod logic;
@@ -16,7 +17,7 @@ use ff_ext::{ExtensionField, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use itertools::{Itertools, enumerate};
 use multilinear_extensions::{Expression, ToExpr, WitIn, util::ceil_log2};
-use p3::field::FieldAlgebra;
+
 use std::{
     borrow::Cow,
     mem::{self},
@@ -187,7 +188,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
                 limbs
                     .into_iter()
                     .take(Self::NUM_LIMBS)
-                    .map(|limb| E::BaseField::from_canonical_u64(limb.into()).expr())
+                    .map(|limb| E::BaseField::from_u64(limb.into()).expr())
                     .collect::<Vec<Expression<E>>>(),
             ),
             carries: None,
@@ -264,7 +265,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             for (wire, limb) in wires.iter().zip(
                 limbs_values
                     .iter()
-                    .map(|v| E::BaseField::from_canonical_u64(*v as u64))
+                    .map(|v| E::BaseField::from_u64(*v as u64))
                     .chain(std::iter::repeat(E::BaseField::ZERO)),
             ) {
                 instance[wire.id as usize] = limb;
@@ -290,7 +291,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
             for (wire, carry) in carries.iter().zip(
                 carry_values
                     .iter()
-                    .map(|v| E::BaseField::from_canonical_u64(Into::<u64>::into(*v)))
+                    .map(|v| E::BaseField::from_u64(Into::<u64>::into(*v)))
                     .chain(std::iter::repeat(E::BaseField::ZERO)),
             ) {
                 instance[wire.id as usize] = carry;
@@ -483,7 +484,7 @@ impl<const M: usize, const C: usize, E: ExtensionField> UIntLimbs<M, C, E> {
     pub fn counter_vector<F: SmallField>(size: usize) -> Vec<Vec<F>> {
         let num_vars = ceil_log2(size);
         let number_of_limbs = num_vars.div_ceil(C);
-        let cell_modulo = F::from_canonical_u64(1 << C);
+        let cell_modulo = F::from_u64(1 << C);
 
         let mut res = vec![vec![F::ZERO; number_of_limbs]];
 
@@ -754,7 +755,7 @@ impl<'a, T: Into<u64> + From<u32> + Copy + Default> Value<'a, T> {
     pub fn u16_fields<F: SmallField>(&self) -> Vec<F> {
         self.limbs
             .iter()
-            .map(|v| F::from_canonical_u64(*v as u64))
+            .map(|v| F::from_u64(*v as u64))
             .collect_vec()
     }
 

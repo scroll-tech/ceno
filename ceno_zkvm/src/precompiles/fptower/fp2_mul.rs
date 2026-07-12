@@ -34,7 +34,7 @@ use gkr_iop::{
 use itertools::Itertools;
 use multilinear_extensions::{Expression, ToExpr, WitIn, util::max_usable_threads};
 use num::BigUint;
-use p3::field::FieldAlgebra;
+
 use rayon::{
     iter::{IndexedParallelIterator, ParallelIterator},
     prelude::ParallelSlice,
@@ -53,6 +53,7 @@ use crate::{
     precompiles::{SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend},
     witness::LkMultiplicity,
 };
+use p3::field::PrimeCharacteristicRing;
 
 pub const fn num_fp2_mul_cols<P: FpOpField>() -> usize {
     size_of::<Fp2MulAssignWitCols<u8, P>>()

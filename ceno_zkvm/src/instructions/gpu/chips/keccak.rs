@@ -14,7 +14,7 @@ use ceno_gpu::{
     common::{transpose::matrix_transpose, witgen::types::GpuShardRamRecord},
 };
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing as FieldAlgebra;
 use tracing::info_span;
 use witness::{DeviceMatrixLayout, InstancePaddingStrategy, RowMajorMatrix};
 

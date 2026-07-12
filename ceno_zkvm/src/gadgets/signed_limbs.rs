@@ -7,7 +7,8 @@ use crate::{
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use gkr_iop::error::CircuitBuilderError;
 use multilinear_extensions::{Expression, ToExpr, WitIn};
-use p3::field::FieldAlgebra;
+
+use p3::field::PrimeCharacteristicRing;
 use std::{array, marker::PhantomData};
 use witness::set_val;
 
@@ -70,13 +71,11 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
 
         circuit_builder.require_zero(
             || "a_diff",
-            a_diff.expr()
-                * (E::BaseField::from_canonical_u32(1 << LIMB_BITS).expr() - a_diff.expr()),
+            a_diff.expr() * (E::BaseField::from_u32(1 << LIMB_BITS).expr() - a_diff.expr()),
         )?;
         circuit_builder.require_zero(
             || "b_diff",
-            b_diff.expr()
-                * (E::BaseField::from_canonical_u32(1 << LIMB_BITS).expr() - b_diff.expr()),
+            b_diff.expr() * (E::BaseField::from_u32(1 << LIMB_BITS).expr() - b_diff.expr()),
         )?;
 
         let mut prefix_sum = Expression::ZERO;
@@ -86,7 +85,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
                 b_msb_f.expr() - a_msb_f.expr()
             } else {
                 b_expr[i].expr() - a_expr[i].expr()
-            }) * (E::BaseField::from_canonical_u8(2).expr() * cmp_lt.expr()
+            }) * (E::BaseField::from_u8(2).expr() * cmp_lt.expr()
                 - E::BaseField::ONE.expr());
             prefix_sum += diff_marker[i].expr();
             circuit_builder.require_zero(
@@ -122,7 +121,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
             || "a_msb_f_signed_range_check",
             a_msb_f.expr()
                 + if is_sign_comparison {
-                    E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr()
+                    E::BaseField::from_u32(1 << (LIMB_BITS - 1)).expr()
                 } else {
                     Expression::ZERO
                 },
@@ -132,7 +131,7 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
             || "b_msb_f_signed_range_check",
             b_msb_f.expr()
                 + if is_sign_comparison {
-                    E::BaseField::from_canonical_u32(1 << (LIMB_BITS - 1)).expr()
+                    E::BaseField::from_u32(1 << (LIMB_BITS - 1)).expr()
                 } else {
                     Expression::ZERO
                 },
@@ -170,23 +169,23 @@ impl<E: ExtensionField> UIntLimbsLT<E> {
         // otherwise read_rs1_msb_f and read_rs2_msb_f
         let (a_msb_f, a_msb_range) = if is_a_neg {
             (
-                -E::BaseField::from_canonical_u32((1 << LIMB_BITS) - a[UINT_LIMBS - 1] as u32),
+                -E::BaseField::from_u32((1 << LIMB_BITS) - a[UINT_LIMBS - 1] as u32),
                 a[UINT_LIMBS - 1] - (1 << (LIMB_BITS - 1)),
             )
         } else {
             (
-                E::BaseField::from_canonical_u16(a[UINT_LIMBS - 1]),
+                E::BaseField::from_u16(a[UINT_LIMBS - 1]),
                 a[UINT_LIMBS - 1] + ((is_sign_comparison as u16) << (LIMB_BITS - 1)),
             )
         };
         let (b_msb_f, b_msb_range) = if is_b_neg {
             (
-                -E::BaseField::from_canonical_u32((1 << LIMB_BITS) - b[UINT_LIMBS - 1] as u32),
+                -E::BaseField::from_u32((1 << LIMB_BITS) - b[UINT_LIMBS - 1] as u32),
                 b[UINT_LIMBS - 1] - (1 << (LIMB_BITS - 1)),
             )
         } else {
             (
-                E::BaseField::from_canonical_u16(b[UINT_LIMBS - 1]),
+                E::BaseField::from_u16(b[UINT_LIMBS - 1]),
                 b[UINT_LIMBS - 1] + ((is_sign_comparison as u16) << (LIMB_BITS - 1)),
             )
         };

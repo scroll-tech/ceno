@@ -104,9 +104,9 @@ impl<F: SmallField> Add4Operation<F> {
             self.is_carry_1[i] = F::from_bool(carry[i] == 1);
             self.is_carry_2[i] = F::from_bool(carry[i] == 2);
             self.is_carry_3[i] = F::from_bool(carry[i] == 3);
-            self.carry[i] = F::from_canonical_u8(carry[i]);
+            self.carry[i] = F::from_u8(carry[i]);
             debug_assert!(carry[i] <= 3);
-            debug_assert_eq!(self.value[i], F::from_canonical_u32(res % base));
+            debug_assert_eq!(self.value[i], F::from_u32(res % base));
         }
 
         // Range check.

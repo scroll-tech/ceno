@@ -15,7 +15,7 @@ use ceno_gpu::{
 };
 use ff_ext::ExtensionField;
 use gkr_iop::utils::lk_multiplicity::Multiplicity;
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing as FieldAlgebra;
 use std::cell::Cell;
 use tracing::info_span;
 use witness::RowMajorMatrix;

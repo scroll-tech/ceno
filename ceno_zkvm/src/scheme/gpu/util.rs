@@ -11,7 +11,7 @@ use gkr_iop::{
     gpu::{BB31Base, MultilinearExtensionGpu},
 };
 use multilinear_extensions::{Expression, WitnessId, mle::MultilinearExtension};
-use p3::field::{FieldAlgebra, PrimeField32};
+use p3::field::{PrimeCharacteristicRing, PrimeField32};
 use transcript::{BasicTranscript, Transcript};
 
 use crate::{
@@ -56,7 +56,7 @@ fn read_base_value_from_gpu<'a, E: ExtensionField>(
                 .get(index, stream.as_ref())
                 .map_err(|e| hal_to_backend_error(format!("failed to read GPU buffer: {e:?}")))?;
             let canonical = raw.as_canonical_u32();
-            Ok(E::BaseField::from_canonical_u32(canonical))
+            Ok(E::BaseField::from_u32(canonical))
         }
         GpuFieldType::Ext(_) => Err(hal_to_backend_error(
             "expected base-field polynomial for final-sum extraction",
