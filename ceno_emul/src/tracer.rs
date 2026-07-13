@@ -1064,6 +1064,12 @@ pub struct PreflightTracer {
     config: PreflightTracerConfig,
 }
 
+pub(crate) const NATIVE_TRACE_READ_RS1: u32 = 1 << 0;
+pub(crate) const NATIVE_TRACE_READ_RS2: u32 = 1 << 1;
+pub(crate) const NATIVE_TRACE_WRITE_RD: u32 = 1 << 2;
+pub(crate) const NATIVE_TRACE_LOAD_MEM: u32 = 1 << 3;
+pub(crate) const NATIVE_TRACE_STORE_MEM: u32 = 1 << 4;
+
 #[derive(Clone)]
 pub struct PreflightTracerConfig {
     record_next_accesses: bool,
@@ -1223,6 +1229,45 @@ impl PreflightTracer {
     #[inline(always)]
     fn reset_register_tracking(&mut self) {
         self.register_reads_tracked = 0;
+    }
+
+    pub(crate) fn trace_native_step(
+        &mut self,
+        pc_before: ByteAddr,
+        pc_after: ByteAddr,
+        kind: InsnKind,
+        flags: u32,
+        rs1_idx: RegIdx,
+        rs1_value: Word,
+        rs2_idx: RegIdx,
+        rs2_value: Word,
+        rd_idx: RegIdx,
+        memory_addr: WordAddr,
+    ) -> bool {
+        self.pc.before = pc_before;
+        self.last_kind = kind;
+        self.last_rs1 = None;
+        self.register_reads_tracked = 0;
+
+        if flags & NATIVE_TRACE_READ_RS1 != 0 {
+            self.load_register(rs1_idx, rs1_value);
+        }
+        if flags & NATIVE_TRACE_READ_RS2 != 0 {
+            self.load_register(rs2_idx, rs2_value);
+        }
+        if flags & NATIVE_TRACE_WRITE_RD != 0 {
+            self.store_register(rd_idx, Change::new(0, 0));
+        }
+        if flags & NATIVE_TRACE_LOAD_MEM != 0 {
+            self.track_access(memory_addr, Self::SUBCYCLE_MEM);
+        } else if flags & NATIVE_TRACE_STORE_MEM != 0 {
+            self.update_mmio_bounds(memory_addr);
+            self.track_access(memory_addr, Self::SUBCYCLE_MEM);
+        }
+
+        self.pc.after = pc_after;
+        self.advance();
+        pc_before == pc_after
     }
 }
 

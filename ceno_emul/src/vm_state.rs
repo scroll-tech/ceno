@@ -4,9 +4,9 @@ use crate::{
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     dense_addr_space::DenseAddrSpace,
     platform::Platform,
-    rv32im::{Instruction, TrapCause},
+    rv32im::{InsnKind, Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
-    tracer::{Change, FullTracer, Tracer},
+    tracer::{Change, FullTracer, PreflightTracer, Tracer},
 };
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
@@ -38,6 +38,36 @@ impl VMState<FullTracer> {
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
         VMState::<FullTracer>::new_from_elf_with_tracer(platform, elf)
+    }
+}
+
+impl VMState<PreflightTracer> {
+    pub(crate) fn trace_preflight_native_step(
+        &mut self,
+        pc_before: ByteAddr,
+        kind: InsnKind,
+        flags: u32,
+        rs1_idx: RegIdx,
+        rs1_value: Word,
+        rs2_idx: RegIdx,
+        rs2_value: Word,
+        rd_idx: RegIdx,
+        memory_addr: WordAddr,
+        pc_after: ByteAddr,
+    ) -> bool {
+        self.pc = pc_after.0;
+        self.tracer.trace_native_step(
+            pc_before,
+            pc_after,
+            kind,
+            flags,
+            rs1_idx,
+            rs1_value,
+            rs2_idx,
+            rs2_value,
+            rd_idx,
+            memory_addr,
+        )
     }
 }
 

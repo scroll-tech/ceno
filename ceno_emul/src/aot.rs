@@ -1,11 +1,17 @@
 use crate::{
-    Change, EmuContext, InsnKind, Instruction, PC_STEP_SIZE, Program, Tracer, VMState,
-    addr::{ByteAddr, WordAddr},
+    Change, EmuContext, InsnKind, Instruction, PC_STEP_SIZE, PreflightTracer, Program, Tracer,
+    VMState,
+    addr::{ByteAddr, RegIdx, WordAddr},
     rv32im::TrapCause,
+    tracer::{
+        NATIVE_TRACE_LOAD_MEM, NATIVE_TRACE_READ_RS1, NATIVE_TRACE_READ_RS2,
+        NATIVE_TRACE_STORE_MEM, NATIVE_TRACE_WRITE_RD,
+    },
 };
 use anyhow::{Context, Result, anyhow, bail};
 use libloading::{Library, Symbol};
 use std::{
+    any::TypeId,
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
     fs,
@@ -52,6 +58,11 @@ const AOT_CTX_TRACE_MEM_ADDR_OFFSET: usize = 76;
 const AOT_CTX_TRACE_MEM_BEFORE_OFFSET: usize = 80;
 const AOT_CTX_TRACE_MEM_AFTER_OFFSET: usize = 84;
 const AOT_CTX_PC_OFFSET: usize = 88;
+const AOT_CTX_TRACE_FLAGS_OFFSET: usize = 108;
+const AOT_CTX_TRACE_RS1_IDX_OFFSET: usize = 112;
+const AOT_CTX_TRACE_RS2_IDX_OFFSET: usize = 116;
+const AOT_CTX_TRACE_RD_IDX_OFFSET: usize = 120;
+const AOT_CTX_TRACE_KIND_OFFSET: usize = 124;
 
 thread_local! {
     static LAST_AOT_ERROR: RefCell<Option<anyhow::Error>> = const { RefCell::new(None) };
@@ -81,6 +92,11 @@ struct AotRuntimeContext {
     pc: *mut u32,
     instructions: *const Instruction,
     program_base: u32,
+    trace_flags: u32,
+    trace_rs1_idx: u32,
+    trace_rs2_idx: u32,
+    trace_rd_idx: u32,
+    trace_kind: u32,
 }
 
 #[derive(Debug)]
@@ -132,7 +148,7 @@ impl AotProgram {
         }
     }
 
-    pub fn run_to_halt<T: Tracer>(
+    pub fn run_to_halt<T: Tracer + 'static>(
         &self,
         vm: &mut VMState<T>,
         max_steps: usize,
@@ -140,7 +156,7 @@ impl AotProgram {
         self.run_to_halt_with_trace(vm, max_steps, true)
     }
 
-    pub fn run_pure_to_halt<T: Tracer>(
+    pub fn run_pure_to_halt<T: Tracer + 'static>(
         &self,
         vm: &mut VMState<T>,
         max_steps: usize,
@@ -148,7 +164,7 @@ impl AotProgram {
         self.run_to_halt_with_trace(vm, max_steps, false)
     }
 
-    fn run_to_halt_with_trace<T: Tracer>(
+    fn run_to_halt_with_trace<T: Tracer + 'static>(
         &self,
         vm: &mut VMState<T>,
         max_steps: usize,
@@ -194,9 +210,18 @@ impl AotProgram {
             pc: pc_ptr,
             instructions,
             program_base,
+            trace_flags: 0,
+            trace_rs1_idx: 0,
+            trace_rs2_idx: 0,
+            trace_rd_idx: 0,
+            trace_kind: 0,
         };
         let trace_fn = if trace_native_steps {
-            (aot_trace_native_compute::<T> as AotTraceFn) as *const c_void
+            if TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
+                (aot_trace_native_preflight as AotTraceFn) as *const c_void
+            } else {
+                (aot_trace_native_compute::<T> as AotTraceFn) as *const c_void
+            }
         } else {
             std::ptr::null()
         };
@@ -716,9 +741,112 @@ fn native_step_stores_memory(kind: InsnKind) -> bool {
     matches!(kind, InsnKind::SB | InsnKind::SH | InsnKind::SW)
 }
 
+fn native_trace_flags(insn: Instruction) -> u32 {
+    let mut flags = 0;
+    if native_step_reads_rs1(insn.kind) {
+        flags |= NATIVE_TRACE_READ_RS1;
+    }
+    if native_step_reads_rs2(insn.kind) {
+        flags |= NATIVE_TRACE_READ_RS2;
+    }
+    if native_step_writes_rd(insn.kind) {
+        flags |= NATIVE_TRACE_WRITE_RD;
+    }
+    if native_step_loads_memory(insn.kind) {
+        flags |= NATIVE_TRACE_LOAD_MEM;
+    }
+    if native_step_stores_memory(insn.kind) {
+        flags |= NATIVE_TRACE_STORE_MEM;
+    }
+    flags
+}
+
+fn emit_native_trace_metadata(mut file: impl Write, insn: Instruction) -> Result<()> {
+    writeln!(
+        file,
+        "    movl ${:#010x}, {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12)",
+        native_trace_flags(insn)
+    )?;
+    writeln!(
+        file,
+        "    movl ${}, {AOT_CTX_TRACE_RS1_IDX_OFFSET}(%r12)",
+        insn.rs1
+    )?;
+    writeln!(
+        file,
+        "    movl ${}, {AOT_CTX_TRACE_RS2_IDX_OFFSET}(%r12)",
+        insn.rs2
+    )?;
+    writeln!(
+        file,
+        "    movl ${}, {AOT_CTX_TRACE_RD_IDX_OFFSET}(%r12)",
+        insn.rd_internal()
+    )?;
+    writeln!(
+        file,
+        "    movl ${}, {AOT_CTX_TRACE_KIND_OFFSET}(%r12)",
+        insn.kind as u8
+    )?;
+    Ok(())
+}
+
+fn native_trace_kind(kind: u32) -> InsnKind {
+    match kind as u8 {
+        x if x == InsnKind::ADD as u8 => InsnKind::ADD,
+        x if x == InsnKind::SUB as u8 => InsnKind::SUB,
+        x if x == InsnKind::XOR as u8 => InsnKind::XOR,
+        x if x == InsnKind::OR as u8 => InsnKind::OR,
+        x if x == InsnKind::AND as u8 => InsnKind::AND,
+        x if x == InsnKind::SLL as u8 => InsnKind::SLL,
+        x if x == InsnKind::SRL as u8 => InsnKind::SRL,
+        x if x == InsnKind::SRA as u8 => InsnKind::SRA,
+        x if x == InsnKind::SLT as u8 => InsnKind::SLT,
+        x if x == InsnKind::SLTU as u8 => InsnKind::SLTU,
+        x if x == InsnKind::ADDI as u8 => InsnKind::ADDI,
+        x if x == InsnKind::XORI as u8 => InsnKind::XORI,
+        x if x == InsnKind::ORI as u8 => InsnKind::ORI,
+        x if x == InsnKind::ANDI as u8 => InsnKind::ANDI,
+        x if x == InsnKind::SLLI as u8 => InsnKind::SLLI,
+        x if x == InsnKind::SRLI as u8 => InsnKind::SRLI,
+        x if x == InsnKind::SRAI as u8 => InsnKind::SRAI,
+        x if x == InsnKind::SLTI as u8 => InsnKind::SLTI,
+        x if x == InsnKind::SLTIU as u8 => InsnKind::SLTIU,
+        x if x == InsnKind::BEQ as u8 => InsnKind::BEQ,
+        x if x == InsnKind::BNE as u8 => InsnKind::BNE,
+        x if x == InsnKind::BLT as u8 => InsnKind::BLT,
+        x if x == InsnKind::BGE as u8 => InsnKind::BGE,
+        x if x == InsnKind::BLTU as u8 => InsnKind::BLTU,
+        x if x == InsnKind::BGEU as u8 => InsnKind::BGEU,
+        x if x == InsnKind::JAL as u8 => InsnKind::JAL,
+        x if x == InsnKind::JALR as u8 => InsnKind::JALR,
+        x if x == InsnKind::MUL as u8 => InsnKind::MUL,
+        x if x == InsnKind::MULH as u8 => InsnKind::MULH,
+        x if x == InsnKind::MULHSU as u8 => InsnKind::MULHSU,
+        x if x == InsnKind::MULHU as u8 => InsnKind::MULHU,
+        x if x == InsnKind::DIV as u8 => InsnKind::DIV,
+        x if x == InsnKind::DIVU as u8 => InsnKind::DIVU,
+        x if x == InsnKind::REM as u8 => InsnKind::REM,
+        x if x == InsnKind::REMU as u8 => InsnKind::REMU,
+        x if x == InsnKind::LB as u8 => InsnKind::LB,
+        x if x == InsnKind::LH as u8 => InsnKind::LH,
+        x if x == InsnKind::LW as u8 => InsnKind::LW,
+        x if x == InsnKind::LBU as u8 => InsnKind::LBU,
+        x if x == InsnKind::LHU as u8 => InsnKind::LHU,
+        #[cfg(feature = "u16limb_circuit")]
+        x if x == InsnKind::LUI as u8 => InsnKind::LUI,
+        #[cfg(feature = "u16limb_circuit")]
+        x if x == InsnKind::AUIPC as u8 => InsnKind::AUIPC,
+        x if x == InsnKind::SB as u8 => InsnKind::SB,
+        x if x == InsnKind::SH as u8 => InsnKind::SH,
+        x if x == InsnKind::SW as u8 => InsnKind::SW,
+        _ => InsnKind::INVALID,
+    }
+}
+
 fn emit_native_compute(mut file: impl Write, pc: u32, insn: Instruction) -> Result<()> {
     let rd = insn.rd_internal();
     writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    emit_native_trace_metadata(&mut file, insn)?;
     writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
     writeln!(
         file,
@@ -884,6 +1012,7 @@ fn emit_native_unsigned_div(mut file: impl Write, pc: u32, op: UnsignedDivOp) ->
 
 fn emit_native_control_flow(mut file: impl Write, pc: u32, insn: Instruction) -> Result<()> {
     writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    emit_native_trace_metadata(&mut file, insn)?;
     writeln!(
         file,
         "    movl ${pc:#010x}, {AOT_CTX_TRACE_PC_OFFSET}(%r12)"
@@ -997,6 +1126,7 @@ fn emit_native_memory(mut file: impl Write, pc: u32, insn: Instruction) -> Resul
 
     writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
     writeln!(file, "    movq {AOT_CTX_MEMORY_CELLS_OFFSET}(%r12), %r11")?;
+    emit_native_trace_metadata(&mut file, insn)?;
     writeln!(
         file,
         "    movl ${pc:#010x}, {AOT_CTX_TRACE_PC_OFFSET}(%r12)"
@@ -1318,6 +1448,37 @@ unsafe extern "C" fn aot_trace_native_compute<T: Tracer>(context: *mut AotRuntim
             LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(err));
             AOT_STATUS_ERROR
         }
+    }
+}
+
+unsafe extern "C" fn aot_trace_native_preflight(context: *mut AotRuntimeContext) -> u32 {
+    let context = unsafe { &mut *context };
+    let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
+    if vm.halted() {
+        context.trace_next_pc = vm.get_pc().0;
+        return AOT_STATUS_HALTED;
+    }
+
+    let pc = ByteAddr(context.trace_pc);
+    let kind = native_trace_kind(context.trace_kind);
+    let busy_loop = vm.trace_preflight_native_step(
+        pc,
+        kind,
+        context.trace_flags,
+        context.trace_rs1_idx as RegIdx,
+        context.trace_rs1_value,
+        context.trace_rs2_idx as RegIdx,
+        context.trace_rs2_value,
+        context.trace_rd_idx as RegIdx,
+        WordAddr(context.trace_mem_addr),
+        ByteAddr(context.trace_next_pc),
+    );
+    if busy_loop && !vm.halted() {
+        context.trace_next_pc = vm.get_pc().0;
+        LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(anyhow!("Stuck in loop {}", "{}")));
+        AOT_STATUS_ERROR
+    } else {
+        AOT_STATUS_CONTINUE
     }
 }
 
