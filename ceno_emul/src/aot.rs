@@ -1,5 +1,6 @@
 use crate::{
-    EmuContext, InsnKind, Instruction, PC_STEP_SIZE, Program, Tracer, VMState, addr::ByteAddr,
+    Change, EmuContext, InsnKind, Instruction, PC_STEP_SIZE, Program, Tracer, VMState,
+    addr::{ByteAddr, WordAddr},
     rv32im::TrapCause,
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -16,15 +17,60 @@ use std::{
     time::{Duration, Instant},
 };
 
-type NativeEntry = unsafe extern "C" fn(*mut c_void, AotInsnFn, u64, *mut u64, u32) -> u32;
+type NativeEntry =
+    unsafe extern "C" fn(*mut AotRuntimeContext, AotInsnFn, AotTraceFn, u64, *mut u64, u32) -> u32;
 type AotInsnFn = unsafe extern "C" fn(*mut c_void, u32, *mut u32) -> u32;
+type AotTraceFn = unsafe extern "C" fn(*mut AotRuntimeContext) -> u32;
 
 const AOT_STATUS_HALTED: u32 = 0;
 const AOT_STATUS_CONTINUE: u32 = 1;
 const AOT_STATUS_ERROR: u32 = 2;
 
+const AOT_CTX_VM_OFFSET: usize = 0;
+const AOT_CTX_REGISTERS_OFFSET: usize = 8;
+const AOT_CTX_TRACE_PC_OFFSET: usize = 16;
+const AOT_CTX_TRACE_NEXT_PC_OFFSET: usize = 20;
+const AOT_CTX_TRACE_RS1_VALUE_OFFSET: usize = 24;
+const AOT_CTX_TRACE_RS2_VALUE_OFFSET: usize = 28;
+const AOT_CTX_TRACE_RD_BEFORE_OFFSET: usize = 32;
+const AOT_CTX_TRACE_RD_AFTER_OFFSET: usize = 36;
+const AOT_CTX_MEMORY_CELLS_OFFSET: usize = 40;
+const AOT_CTX_MEMORY_BASE_WORD_OFFSET: usize = 48;
+const AOT_CTX_HEAP_START_OFFSET: usize = 52;
+const AOT_CTX_HEAP_END_OFFSET: usize = 56;
+const AOT_CTX_STACK_START_OFFSET: usize = 60;
+const AOT_CTX_STACK_END_OFFSET: usize = 64;
+const AOT_CTX_HINTS_START_OFFSET: usize = 68;
+const AOT_CTX_HINTS_END_OFFSET: usize = 72;
+const AOT_CTX_TRACE_MEM_ADDR_OFFSET: usize = 76;
+const AOT_CTX_TRACE_MEM_BEFORE_OFFSET: usize = 80;
+const AOT_CTX_TRACE_MEM_AFTER_OFFSET: usize = 84;
+
 thread_local! {
     static LAST_AOT_ERROR: RefCell<Option<anyhow::Error>> = const { RefCell::new(None) };
+}
+
+#[repr(C)]
+struct AotRuntimeContext {
+    vm: *mut c_void,
+    registers: *mut u32,
+    trace_pc: u32,
+    trace_next_pc: u32,
+    trace_rs1_value: u32,
+    trace_rs2_value: u32,
+    trace_rd_before: u32,
+    trace_rd_after: u32,
+    memory_cells: *mut u32,
+    memory_base_word: u32,
+    heap_start: u32,
+    heap_end: u32,
+    stack_start: u32,
+    stack_end: u32,
+    hints_start: u32,
+    hints_end: u32,
+    trace_mem_addr: u32,
+    trace_mem_before: u32,
+    trace_mem_after: u32,
 }
 
 #[derive(Debug)]
@@ -41,6 +87,8 @@ pub struct AotProgram {
     entry: NativeEntry,
     compile_load_time: Duration,
 }
+
+pub type AotInstance = AotProgram;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BasicBlock {
@@ -86,10 +134,39 @@ impl AotProgram {
         let started = Instant::now();
         LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = None);
         let mut executed_steps = 0u64;
+        let memory_base_word = vm.memory_base_word().0;
+        let heap = vm.platform().heap.clone();
+        let stack = vm.platform().stack.clone();
+        let hints = vm.platform().hints.clone();
+        let vm_ptr = vm as *mut VMState<T> as *mut c_void;
+        let registers = vm.registers_mut_ptr();
+        let memory_cells = vm.memory_cells_mut_ptr();
+        let mut context = AotRuntimeContext {
+            vm: vm_ptr,
+            registers,
+            trace_pc: 0,
+            trace_next_pc: 0,
+            trace_rs1_value: 0,
+            trace_rs2_value: 0,
+            trace_rd_before: 0,
+            trace_rd_after: 0,
+            memory_cells,
+            memory_base_word,
+            heap_start: heap.start,
+            heap_end: heap.end,
+            stack_start: stack.start,
+            stack_end: stack.end,
+            hints_start: hints.start,
+            hints_end: hints.end,
+            trace_mem_addr: 0,
+            trace_mem_before: 0,
+            trace_mem_after: 0,
+        };
         let native_status = unsafe {
             (self.entry)(
-                vm as *mut VMState<T> as *mut c_void,
+                &mut context,
                 aot_exec_one::<T>,
+                aot_trace_native_compute::<T>,
                 max_steps as u64,
                 &mut executed_steps,
                 vm.get_pc().0,
@@ -275,17 +352,19 @@ fn write_assembly(path: &Path, program: &Program, blocks: &[BasicBlock]) -> Resu
     writeln!(file, "    pushq %r13")?;
     writeln!(file, "    pushq %r14")?;
     writeln!(file, "    pushq %r15")?;
-    writeln!(file, "    subq $16, %rsp")?;
+    writeln!(file, "    pushq %rbp")?;
+    writeln!(file, "    subq $24, %rsp")?;
     writeln!(file, "    movq %rdi, %r12")?;
     writeln!(file, "    movq %rsi, %r13")?;
     writeln!(file, "    movq %rdx, %r14")?;
-    writeln!(file, "    movq %rcx, %rbx")?;
-    writeln!(file, "    movl %r8d, %r15d")?;
+    writeln!(file, "    movq %rcx, %rbp")?;
+    writeln!(file, "    movq %r8, %rbx")?;
+    writeln!(file, "    movl %r9d, %r15d")?;
     writeln!(file, "    movq $0, 0(%rsp)")?;
     writeln!(file, "    movl %r15d, 8(%rsp)")?;
     writeln!(file, "L_dispatch:")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
-    writeln!(file, "    cmpq %r14, %rax")?;
+    writeln!(file, "    cmpq %rbp, %rax")?;
     writeln!(file, "    jae L_done")?;
     for block in blocks {
         let label = labels.get(&block.start_pc).expect("block label must exist");
@@ -298,14 +377,19 @@ fn write_assembly(path: &Path, program: &Program, blocks: &[BasicBlock]) -> Resu
         writeln!(file, "{label}:")?;
         let mut pc = block.start_pc;
         while pc < block.end_pc {
-            emit_call_one(&mut file, pc)?;
             let insn = instruction_at(program, pc)?;
+            emit_instruction_body(&mut file, pc, insn)?;
             pc = pc.wrapping_add(PC_STEP_SIZE as u32);
             if terminates_block(insn.kind) {
-                writeln!(file, "    jmp L_dispatch")?;
+                emit_successor_jump(&mut file, program, &labels, pc - PC_STEP_SIZE as u32, insn)?;
             }
         }
-        writeln!(file, "    jmp L_dispatch")?;
+        if let Some(prev_pc) = pc.checked_sub(PC_STEP_SIZE as u32) {
+            let insn = instruction_at(program, prev_pc)?;
+            if !terminates_block(insn.kind) {
+                emit_successor_jump(&mut file, program, &labels, prev_pc, insn)?;
+            }
+        }
     }
     writeln!(file, "L_dynamic:")?;
     emit_call_current_pc(&mut file)?;
@@ -320,7 +404,8 @@ fn write_assembly(path: &Path, program: &Program, blocks: &[BasicBlock]) -> Resu
     writeln!(file, "    movq %rax, (%rbx)")?;
     writeln!(file, "    movl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "L_return:")?;
-    writeln!(file, "    addq $16, %rsp")?;
+    writeln!(file, "    addq $24, %rsp")?;
+    writeln!(file, "    popq %rbp")?;
     writeln!(file, "    popq %r15")?;
     writeln!(file, "    popq %r14")?;
     writeln!(file, "    popq %r13")?;
@@ -333,9 +418,23 @@ fn write_assembly(path: &Path, program: &Program, blocks: &[BasicBlock]) -> Resu
 
 fn emit_call_one(mut file: impl Write, pc: u32) -> Result<()> {
     writeln!(file, "    leaq 8(%rsp), %rdx")?;
-    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    movq {AOT_CTX_VM_OFFSET}(%r12), %rdi")?;
     writeln!(file, "    movl ${pc:#010x}, %esi")?;
     writeln!(file, "    call *%r13")?;
+    emit_after_step(&mut file)?;
+    Ok(())
+}
+
+fn emit_call_current_pc(mut file: impl Write) -> Result<()> {
+    writeln!(file, "    leaq 8(%rsp), %rdx")?;
+    writeln!(file, "    movq {AOT_CTX_VM_OFFSET}(%r12), %rdi")?;
+    writeln!(file, "    movl %r15d, %esi")?;
+    writeln!(file, "    call *%r13")?;
+    emit_after_step(&mut file)?;
+    Ok(())
+}
+
+fn emit_after_step(mut file: impl Write) -> Result<()> {
     writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
     writeln!(file, "    je L_error")?;
     writeln!(file, "    incq 0(%rsp)")?;
@@ -343,22 +442,717 @@ fn emit_call_one(mut file: impl Write, pc: u32) -> Result<()> {
     writeln!(file, "    cmpl ${AOT_STATUS_HALTED}, %eax")?;
     writeln!(file, "    je L_done")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
-    writeln!(file, "    cmpq %r14, %rax")?;
+    writeln!(file, "    cmpq %rbp, %rax")?;
     writeln!(file, "    jae L_done")?;
     Ok(())
 }
 
-fn emit_call_current_pc(mut file: impl Write) -> Result<()> {
-    writeln!(file, "    leaq 8(%rsp), %rdx")?;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeOpcodeFamily {
+    Compute,
+    ControlFlow,
+    Memory,
+}
+
+fn native_opcode_family(kind: InsnKind) -> Option<NativeOpcodeFamily> {
+    if supports_native_compute(kind) {
+        Some(NativeOpcodeFamily::Compute)
+    } else if supports_native_control_flow(kind) {
+        Some(NativeOpcodeFamily::ControlFlow)
+    } else if supports_native_memory(kind) {
+        Some(NativeOpcodeFamily::Memory)
+    } else {
+        None
+    }
+}
+
+fn emit_instruction_body(mut file: impl Write, pc: u32, insn: Instruction) -> Result<()> {
+    match native_opcode_family(insn.kind) {
+        Some(NativeOpcodeFamily::Compute) => emit_native_compute(&mut file, pc, insn),
+        Some(NativeOpcodeFamily::ControlFlow) => emit_native_control_flow(&mut file, pc, insn),
+        Some(NativeOpcodeFamily::Memory) => emit_native_memory(&mut file, pc, insn),
+        None => emit_call_one(&mut file, pc),
+    }
+}
+
+fn supports_native_compute(kind: InsnKind) -> bool {
+    let base_supported = matches!(
+        kind,
+        InsnKind::ADD
+            | InsnKind::SUB
+            | InsnKind::XOR
+            | InsnKind::OR
+            | InsnKind::AND
+            | InsnKind::SLL
+            | InsnKind::SRL
+            | InsnKind::SRA
+            | InsnKind::SLT
+            | InsnKind::SLTU
+            | InsnKind::MUL
+            | InsnKind::MULH
+            | InsnKind::MULHSU
+            | InsnKind::MULHU
+            | InsnKind::DIV
+            | InsnKind::DIVU
+            | InsnKind::REM
+            | InsnKind::REMU
+            | InsnKind::ADDI
+            | InsnKind::XORI
+            | InsnKind::ORI
+            | InsnKind::ANDI
+            | InsnKind::SLLI
+            | InsnKind::SRLI
+            | InsnKind::SRAI
+            | InsnKind::SLTI
+            | InsnKind::SLTIU
+    );
+    #[cfg(feature = "u16limb_circuit")]
+    let feature_supported = matches!(kind, InsnKind::LUI | InsnKind::AUIPC);
+    #[cfg(not(feature = "u16limb_circuit"))]
+    let feature_supported = false;
+    base_supported || feature_supported
+}
+
+fn supports_native_control_flow(kind: InsnKind) -> bool {
+    matches!(
+        kind,
+        InsnKind::BEQ
+            | InsnKind::BNE
+            | InsnKind::BLT
+            | InsnKind::BGE
+            | InsnKind::BLTU
+            | InsnKind::BGEU
+            | InsnKind::JAL
+            | InsnKind::JALR
+    )
+}
+
+fn supports_native_memory(kind: InsnKind) -> bool {
+    matches!(
+        kind,
+        InsnKind::LB
+            | InsnKind::LH
+            | InsnKind::LW
+            | InsnKind::LBU
+            | InsnKind::LHU
+            | InsnKind::SB
+            | InsnKind::SH
+            | InsnKind::SW
+    )
+}
+
+fn native_compute_reads_rs2(kind: InsnKind) -> bool {
+    matches!(
+        kind,
+        InsnKind::ADD
+            | InsnKind::SUB
+            | InsnKind::XOR
+            | InsnKind::OR
+            | InsnKind::AND
+            | InsnKind::SLL
+            | InsnKind::SRL
+            | InsnKind::SRA
+            | InsnKind::SLT
+            | InsnKind::SLTU
+            | InsnKind::MUL
+            | InsnKind::MULH
+            | InsnKind::MULHSU
+            | InsnKind::MULHU
+            | InsnKind::DIV
+            | InsnKind::DIVU
+            | InsnKind::REM
+            | InsnKind::REMU
+    )
+}
+
+fn native_step_reads_rs1(kind: InsnKind) -> bool {
+    supports_native_compute(kind)
+        || matches!(
+            kind,
+            InsnKind::BEQ
+                | InsnKind::BNE
+                | InsnKind::BLT
+                | InsnKind::BGE
+                | InsnKind::BLTU
+                | InsnKind::BGEU
+                | InsnKind::JALR
+                | InsnKind::LB
+                | InsnKind::LH
+                | InsnKind::LW
+                | InsnKind::LBU
+                | InsnKind::LHU
+                | InsnKind::SB
+                | InsnKind::SH
+                | InsnKind::SW
+        )
+}
+
+fn native_step_reads_rs2(kind: InsnKind) -> bool {
+    native_compute_reads_rs2(kind)
+        || matches!(
+            kind,
+            InsnKind::BEQ
+                | InsnKind::BNE
+                | InsnKind::BLT
+                | InsnKind::BGE
+                | InsnKind::BLTU
+                | InsnKind::BGEU
+                | InsnKind::SB
+                | InsnKind::SH
+                | InsnKind::SW
+        )
+}
+
+fn native_step_writes_rd(kind: InsnKind) -> bool {
+    let base_writes_rd = matches!(
+        kind,
+        InsnKind::ADD
+            | InsnKind::SUB
+            | InsnKind::XOR
+            | InsnKind::OR
+            | InsnKind::AND
+            | InsnKind::SLL
+            | InsnKind::SRL
+            | InsnKind::SRA
+            | InsnKind::SLT
+            | InsnKind::SLTU
+            | InsnKind::MUL
+            | InsnKind::MULH
+            | InsnKind::MULHSU
+            | InsnKind::MULHU
+            | InsnKind::DIV
+            | InsnKind::DIVU
+            | InsnKind::REM
+            | InsnKind::REMU
+            | InsnKind::ADDI
+            | InsnKind::XORI
+            | InsnKind::ORI
+            | InsnKind::ANDI
+            | InsnKind::SLLI
+            | InsnKind::SRLI
+            | InsnKind::SRAI
+            | InsnKind::SLTI
+            | InsnKind::SLTIU
+            | InsnKind::JAL
+            | InsnKind::JALR
+            | InsnKind::LB
+            | InsnKind::LH
+            | InsnKind::LW
+            | InsnKind::LBU
+            | InsnKind::LHU
+    );
+    #[cfg(feature = "u16limb_circuit")]
+    let feature_writes_rd = matches!(kind, InsnKind::LUI | InsnKind::AUIPC);
+    #[cfg(not(feature = "u16limb_circuit"))]
+    let feature_writes_rd = false;
+    base_writes_rd || feature_writes_rd
+}
+
+fn native_step_loads_memory(kind: InsnKind) -> bool {
+    matches!(
+        kind,
+        InsnKind::LB | InsnKind::LH | InsnKind::LW | InsnKind::LBU | InsnKind::LHU
+    )
+}
+
+fn native_step_stores_memory(kind: InsnKind) -> bool {
+    matches!(kind, InsnKind::SB | InsnKind::SH | InsnKind::SW)
+}
+
+fn emit_native_compute(mut file: impl Write, pc: u32, insn: Instruction) -> Result<()> {
+    let rd = insn.rd_internal();
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
+    writeln!(
+        file,
+        "    movl %eax, {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12)"
+    )?;
+    if native_compute_reads_rs2(insn.kind) {
+        writeln!(file, "    movl {}(%r10), %ecx", insn.rs2 as usize * 4)?;
+        writeln!(
+            file,
+            "    movl %ecx, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)"
+        )?;
+    } else {
+        writeln!(file, "    movl $0, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)")?;
+    }
+    writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
+    writeln!(
+        file,
+        "    movl %edx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
+    )?;
+    match insn.kind {
+        InsnKind::ADD => writeln!(file, "    addl %ecx, %eax")?,
+        InsnKind::SUB => writeln!(file, "    subl %ecx, %eax")?,
+        InsnKind::XOR => writeln!(file, "    xorl %ecx, %eax")?,
+        InsnKind::OR => writeln!(file, "    orl %ecx, %eax")?,
+        InsnKind::AND => writeln!(file, "    andl %ecx, %eax")?,
+        InsnKind::SLL => writeln!(file, "    shll %cl, %eax")?,
+        InsnKind::SRL => writeln!(file, "    shrl %cl, %eax")?,
+        InsnKind::SRA => writeln!(file, "    sarl %cl, %eax")?,
+        InsnKind::SLT => {
+            writeln!(file, "    cmpl %ecx, %eax")?;
+            writeln!(file, "    setl %al")?;
+            writeln!(file, "    movzbl %al, %eax")?;
+        }
+        InsnKind::SLTU => {
+            writeln!(file, "    cmpl %ecx, %eax")?;
+            writeln!(file, "    setb %al")?;
+            writeln!(file, "    movzbl %al, %eax")?;
+        }
+        InsnKind::MUL => writeln!(file, "    imull %ecx, %eax")?,
+        InsnKind::MULH => {
+            writeln!(file, "    imull %ecx")?;
+            writeln!(file, "    movl %edx, %eax")?;
+        }
+        InsnKind::MULHSU => {
+            writeln!(file, "    movslq %eax, %rax")?;
+            writeln!(file, "    movl %ecx, %ecx")?;
+            writeln!(file, "    imulq %rcx, %rax")?;
+            writeln!(file, "    sarq $32, %rax")?;
+        }
+        InsnKind::MULHU => {
+            writeln!(file, "    mull %ecx")?;
+            writeln!(file, "    movl %edx, %eax")?;
+        }
+        InsnKind::DIV => emit_native_signed_div(&mut file, pc, SignedDivOp::Quotient)?,
+        InsnKind::REM => emit_native_signed_div(&mut file, pc, SignedDivOp::Remainder)?,
+        InsnKind::DIVU => emit_native_unsigned_div(&mut file, pc, UnsignedDivOp::Quotient)?,
+        InsnKind::REMU => emit_native_unsigned_div(&mut file, pc, UnsignedDivOp::Remainder)?,
+        InsnKind::ADDI => writeln!(file, "    addl ${:#010x}, %eax", insn.imm as u32)?,
+        InsnKind::XORI => writeln!(file, "    xorl ${:#010x}, %eax", insn.imm as u32)?,
+        InsnKind::ORI => writeln!(file, "    orl ${:#010x}, %eax", insn.imm as u32)?,
+        InsnKind::ANDI => writeln!(file, "    andl ${:#010x}, %eax", insn.imm as u32)?,
+        InsnKind::SLLI => writeln!(file, "    shll ${}, %eax", insn.imm as u32 & 0x1f)?,
+        InsnKind::SRLI => writeln!(file, "    shrl ${}, %eax", insn.imm as u32 & 0x1f)?,
+        InsnKind::SRAI => writeln!(file, "    sarl ${}, %eax", insn.imm as u32 & 0x1f)?,
+        InsnKind::SLTI => {
+            writeln!(file, "    cmpl ${:#010x}, %eax", insn.imm as u32)?;
+            writeln!(file, "    setl %al")?;
+            writeln!(file, "    movzbl %al, %eax")?;
+        }
+        InsnKind::SLTIU => {
+            writeln!(file, "    cmpl ${:#010x}, %eax", insn.imm as u32)?;
+            writeln!(file, "    setb %al")?;
+            writeln!(file, "    movzbl %al, %eax")?;
+        }
+        #[cfg(feature = "u16limb_circuit")]
+        InsnKind::LUI => writeln!(file, "    movl ${:#010x}, %eax", insn.imm as u32)?,
+        #[cfg(feature = "u16limb_circuit")]
+        InsnKind::AUIPC => writeln!(
+            file,
+            "    movl ${:#010x}, %eax",
+            pc.wrapping_add(insn.imm as u32)
+        )?,
+        _ => unreachable!("unsupported native compute instruction: {:?}", insn.kind),
+    }
+    writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
+    writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
+    writeln!(
+        file,
+        "    movl ${pc:#010x}, {AOT_CTX_TRACE_PC_OFFSET}(%r12)"
+    )?;
+    writeln!(
+        file,
+        "    movl ${:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)",
+        pc.wrapping_add(PC_STEP_SIZE as u32)
+    )?;
     writeln!(file, "    movq %r12, %rdi")?;
-    writeln!(file, "    movl %r15d, %esi")?;
-    writeln!(file, "    call *%r13")?;
-    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je L_error")?;
-    writeln!(file, "    incq 0(%rsp)")?;
-    writeln!(file, "    movl 8(%rsp), %r15d")?;
-    writeln!(file, "    cmpl ${AOT_STATUS_HALTED}, %eax")?;
-    writeln!(file, "    je L_done")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
+    writeln!(file, "    movl %r15d, 8(%rsp)")?;
+    emit_after_step(&mut file)?;
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum SignedDivOp {
+    Quotient,
+    Remainder,
+}
+
+fn emit_native_signed_div(mut file: impl Write, pc: u32, op: SignedDivOp) -> Result<()> {
+    let zero_label = format!(".L_signed_div_zero_{pc:x}");
+    let overflow_label = format!(".L_signed_div_overflow_{pc:x}");
+    let done_label = format!(".L_signed_div_done_{pc:x}");
+
+    writeln!(file, "    testl %ecx, %ecx")?;
+    writeln!(file, "    je {zero_label}")?;
+    writeln!(file, "    cmpl $0xffffffff, %ecx")?;
+    writeln!(file, "    jne 1f")?;
+    writeln!(file, "    cmpl $0x80000000, %eax")?;
+    writeln!(file, "    je {overflow_label}")?;
+    writeln!(file, "1:")?;
+    writeln!(file, "    cltd")?;
+    writeln!(file, "    idivl %ecx")?;
+    if matches!(op, SignedDivOp::Remainder) {
+        writeln!(file, "    movl %edx, %eax")?;
+    }
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{zero_label}:")?;
+    if matches!(op, SignedDivOp::Quotient) {
+        writeln!(file, "    movl $0xffffffff, %eax")?;
+    }
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{overflow_label}:")?;
+    match op {
+        SignedDivOp::Quotient => writeln!(file, "    movl $0x80000000, %eax")?,
+        SignedDivOp::Remainder => writeln!(file, "    xorl %eax, %eax")?,
+    }
+    writeln!(file, "{done_label}:")?;
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum UnsignedDivOp {
+    Quotient,
+    Remainder,
+}
+
+fn emit_native_unsigned_div(mut file: impl Write, pc: u32, op: UnsignedDivOp) -> Result<()> {
+    let zero_label = format!(".L_unsigned_div_zero_{pc:x}");
+    let done_label = format!(".L_unsigned_div_done_{pc:x}");
+
+    writeln!(file, "    testl %ecx, %ecx")?;
+    writeln!(file, "    je {zero_label}")?;
+    writeln!(file, "    xorl %edx, %edx")?;
+    writeln!(file, "    divl %ecx")?;
+    if matches!(op, UnsignedDivOp::Remainder) {
+        writeln!(file, "    movl %edx, %eax")?;
+    }
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{zero_label}:")?;
+    if matches!(op, UnsignedDivOp::Quotient) {
+        writeln!(file, "    movl $0xffffffff, %eax")?;
+    }
+    writeln!(file, "{done_label}:")?;
+    Ok(())
+}
+
+fn emit_native_control_flow(mut file: impl Write, pc: u32, insn: Instruction) -> Result<()> {
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    writeln!(
+        file,
+        "    movl ${pc:#010x}, {AOT_CTX_TRACE_PC_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movl $0, {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12)")?;
+    writeln!(file, "    movl $0, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)")?;
+    writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)")?;
+    writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
+
+    if insn.kind == InsnKind::JAL {
+        let rd = insn.rd_internal();
+        writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
+        writeln!(
+            file,
+            "    movl %edx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
+        )?;
+        writeln!(
+            file,
+            "    movl ${:#010x}, %eax",
+            pc.wrapping_add(PC_STEP_SIZE as u32)
+        )?;
+        writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
+        writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
+        writeln!(
+            file,
+            "    movl ${:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)",
+            branch_target(pc, insn)?
+        )?;
+    } else if insn.kind == InsnKind::JALR {
+        let slow_label = format!(".L_jalr_slow_{pc:x}");
+        let done_label = format!(".L_jalr_done_{pc:x}");
+        let rd = insn.rd_internal();
+        writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
+        writeln!(
+            file,
+            "    movl %eax, {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12)"
+        )?;
+        writeln!(file, "    leal {}(%rax), %edx", insn.imm)?;
+        writeln!(file, "    andl $0xfffffffe, %edx")?;
+        writeln!(file, "    testl $3, %edx")?;
+        writeln!(file, "    jne {slow_label}")?;
+        writeln!(file, "    movl %edx, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)")?;
+        writeln!(file, "    movl {}(%r10), %edx", rd as usize * 4)?;
+        writeln!(
+            file,
+            "    movl %edx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
+        )?;
+        writeln!(
+            file,
+            "    movl ${:#010x}, %eax",
+            pc.wrapping_add(PC_STEP_SIZE as u32)
+        )?;
+        writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
+        writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
+        writeln!(file, "    movq %r12, %rdi")?;
+        writeln!(file, "    call *%r14")?;
+        writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
+        writeln!(file, "    movl %r15d, 8(%rsp)")?;
+        emit_after_step(&mut file)?;
+        writeln!(file, "    jmp {done_label}")?;
+        writeln!(file, "{slow_label}:")?;
+        emit_call_one(&mut file, pc)?;
+        writeln!(file, "{done_label}:")?;
+        return Ok(());
+    } else {
+        let target_pc = branch_target(pc, insn)?;
+        let fallthrough_pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+        let taken_label = format!(".L_branch_taken_{pc:x}");
+        let done_label = format!(".L_branch_done_{pc:x}");
+        writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
+        writeln!(
+            file,
+            "    movl %eax, {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12)"
+        )?;
+        writeln!(file, "    movl {}(%r10), %ecx", insn.rs2 as usize * 4)?;
+        writeln!(
+            file,
+            "    movl %ecx, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)"
+        )?;
+        writeln!(file, "    cmpl %ecx, %eax")?;
+        match insn.kind {
+            InsnKind::BEQ => writeln!(file, "    je {taken_label}")?,
+            InsnKind::BNE => writeln!(file, "    jne {taken_label}")?,
+            InsnKind::BLT => writeln!(file, "    jl {taken_label}")?,
+            InsnKind::BGE => writeln!(file, "    jge {taken_label}")?,
+            InsnKind::BLTU => writeln!(file, "    jb {taken_label}")?,
+            InsnKind::BGEU => writeln!(file, "    jae {taken_label}")?,
+            _ => unreachable!(
+                "unsupported native control-flow instruction: {:?}",
+                insn.kind
+            ),
+        }
+        writeln!(
+            file,
+            "    movl ${fallthrough_pc:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)"
+        )?;
+        writeln!(file, "    jmp {done_label}")?;
+        writeln!(file, "{taken_label}:")?;
+        writeln!(
+            file,
+            "    movl ${target_pc:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)"
+        )?;
+        writeln!(file, "{done_label}:")?;
+    }
+
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
+    writeln!(file, "    movl %r15d, 8(%rsp)")?;
+    emit_after_step(&mut file)?;
+    Ok(())
+}
+
+fn emit_native_memory(mut file: impl Write, pc: u32, insn: Instruction) -> Result<()> {
+    let slow_label = format!(".L_memory_slow_{pc:x}");
+    let done_label = format!(".L_memory_done_{pc:x}");
+    let range_ok_label = format!(".L_memory_range_ok_{pc:x}");
+    let rd = insn.rd_internal();
+
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    writeln!(file, "    movq {AOT_CTX_MEMORY_CELLS_OFFSET}(%r12), %r11")?;
+    writeln!(
+        file,
+        "    movl ${pc:#010x}, {AOT_CTX_TRACE_PC_OFFSET}(%r12)"
+    )?;
+    writeln!(
+        file,
+        "    movl ${:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)",
+        pc.wrapping_add(PC_STEP_SIZE as u32)
+    )?;
+    writeln!(file, "    movl $0, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)")?;
+    writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)")?;
+    writeln!(file, "    movl $0, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
+    writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
+    writeln!(
+        file,
+        "    movl %eax, {AOT_CTX_TRACE_RS1_VALUE_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    leal {}(%rax), %edx", insn.imm)?;
+    match insn.kind {
+        InsnKind::LH | InsnKind::LHU | InsnKind::SH => {
+            writeln!(file, "    testl $1, %edx")?;
+            writeln!(file, "    jne {slow_label}")?;
+        }
+        InsnKind::LW | InsnKind::SW => {
+            writeln!(file, "    testl $3, %edx")?;
+            writeln!(file, "    jne {slow_label}")?;
+        }
+        _ => {}
+    }
+    emit_native_range_check(
+        &mut file,
+        AOT_CTX_HEAP_START_OFFSET,
+        AOT_CTX_HEAP_END_OFFSET,
+        &range_ok_label,
+    )?;
+    emit_native_range_check(
+        &mut file,
+        AOT_CTX_STACK_START_OFFSET,
+        AOT_CTX_STACK_END_OFFSET,
+        &range_ok_label,
+    )?;
+    emit_native_range_check(
+        &mut file,
+        AOT_CTX_HINTS_START_OFFSET,
+        AOT_CTX_HINTS_END_OFFSET,
+        &range_ok_label,
+    )?;
+    writeln!(file, "    jmp {slow_label}")?;
+    writeln!(file, "{range_ok_label}:")?;
+    writeln!(file, "    movl %edx, %r8d")?;
+    writeln!(file, "    andl $3, %r8d")?;
+    writeln!(file, "    shll $3, %r8d")?;
+    writeln!(file, "    shrl $2, %edx")?;
+    writeln!(file, "    movl %edx, {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12)")?;
+    writeln!(
+        file,
+        "    subl {AOT_CTX_MEMORY_BASE_WORD_OFFSET}(%r12), %edx"
+    )?;
+    writeln!(file, "    movl %edx, %esi")?;
+    match insn.kind {
+        InsnKind::LB | InsnKind::LH | InsnKind::LW | InsnKind::LBU | InsnKind::LHU => {
+            writeln!(file, "    movl (%r11,%rsi,4), %eax")?;
+            writeln!(
+                file,
+                "    movl %eax, {AOT_CTX_TRACE_MEM_BEFORE_OFFSET}(%r12)"
+            )?;
+            writeln!(
+                file,
+                "    movl %eax, {AOT_CTX_TRACE_MEM_AFTER_OFFSET}(%r12)"
+            )?;
+            writeln!(file, "    movl {}(%r10), %ecx", rd as usize * 4)?;
+            writeln!(
+                file,
+                "    movl %ecx, {AOT_CTX_TRACE_RD_BEFORE_OFFSET}(%r12)"
+            )?;
+            if insn.kind != InsnKind::LW {
+                writeln!(file, "    movl %r8d, %ecx")?;
+                writeln!(file, "    shrl %cl, %eax")?;
+            }
+            match insn.kind {
+                InsnKind::LB => writeln!(file, "    movsbl %al, %eax")?,
+                InsnKind::LH => writeln!(file, "    movswl %ax, %eax")?,
+                InsnKind::LW => {}
+                InsnKind::LBU => writeln!(file, "    movzbl %al, %eax")?,
+                InsnKind::LHU => writeln!(file, "    movzwl %ax, %eax")?,
+                _ => unreachable!("unsupported native load instruction: {:?}", insn.kind),
+            }
+            writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
+            writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
+        }
+        InsnKind::SB | InsnKind::SH | InsnKind::SW => {
+            writeln!(file, "    movl {}(%r10), %r9d", insn.rs2 as usize * 4)?;
+            writeln!(
+                file,
+                "    movl %r9d, {AOT_CTX_TRACE_RS2_VALUE_OFFSET}(%r12)"
+            )?;
+            writeln!(file, "    movl (%r11,%rsi,4), %eax")?;
+            writeln!(
+                file,
+                "    movl %eax, {AOT_CTX_TRACE_MEM_BEFORE_OFFSET}(%r12)"
+            )?;
+            match insn.kind {
+                InsnKind::SB => {
+                    writeln!(file, "    andl $0xff, %r9d")?;
+                    writeln!(file, "    movl %r8d, %ecx")?;
+                    writeln!(file, "    shll %cl, %r9d")?;
+                    writeln!(file, "    movl $0xff, %edx")?;
+                    writeln!(file, "    shll %cl, %edx")?;
+                    writeln!(file, "    notl %edx")?;
+                    writeln!(file, "    andl %edx, %eax")?;
+                    writeln!(file, "    orl %r9d, %eax")?;
+                }
+                InsnKind::SH => {
+                    writeln!(file, "    andl $0xffff, %r9d")?;
+                    writeln!(file, "    movl %r8d, %ecx")?;
+                    writeln!(file, "    shll %cl, %r9d")?;
+                    writeln!(file, "    movl $0xffff, %edx")?;
+                    writeln!(file, "    shll %cl, %edx")?;
+                    writeln!(file, "    notl %edx")?;
+                    writeln!(file, "    andl %edx, %eax")?;
+                    writeln!(file, "    orl %r9d, %eax")?;
+                }
+                InsnKind::SW => {
+                    writeln!(file, "    movl %r9d, %eax")?;
+                }
+                _ => unreachable!("unsupported native store instruction: {:?}", insn.kind),
+            }
+            writeln!(file, "    movl %eax, (%r11,%rsi,4)")?;
+            writeln!(
+                file,
+                "    movl %eax, {AOT_CTX_TRACE_MEM_AFTER_OFFSET}(%r12)"
+            )?;
+        }
+        _ => unreachable!("unsupported native memory instruction: {:?}", insn.kind),
+    }
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
+    writeln!(file, "    movl %r15d, 8(%rsp)")?;
+    emit_after_step(&mut file)?;
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{slow_label}:")?;
+    emit_call_one(&mut file, pc)?;
+    writeln!(file, "{done_label}:")?;
+    Ok(())
+}
+
+fn emit_native_range_check(
+    mut file: impl Write,
+    start_offset: usize,
+    end_offset: usize,
+    ok_label: &str,
+) -> Result<()> {
+    writeln!(file, "    cmpl {start_offset}(%r12), %edx")?;
+    writeln!(file, "    jb 1f")?;
+    writeln!(file, "    cmpl {end_offset}(%r12), %edx")?;
+    writeln!(file, "    jb {ok_label}")?;
+    writeln!(file, "1:")?;
+    Ok(())
+}
+
+fn emit_successor_jump(
+    mut file: impl Write,
+    program: &Program,
+    labels: &BTreeMap<u32, String>,
+    pc: u32,
+    insn: Instruction,
+) -> Result<()> {
+    let mut successors = Vec::new();
+    match insn.kind {
+        InsnKind::BEQ
+        | InsnKind::BNE
+        | InsnKind::BLT
+        | InsnKind::BGE
+        | InsnKind::BLTU
+        | InsnKind::BGEU => {
+            successors.push(branch_target(pc, insn)?);
+            if let Some(next_pc) = fallthrough_pc(program, pc) {
+                successors.push(next_pc);
+            }
+        }
+        InsnKind::JAL => {
+            successors.push(branch_target(pc, insn)?);
+        }
+        InsnKind::JALR | InsnKind::ECALL | InsnKind::INVALID => {}
+        _ => {
+            if let Some(next_pc) = fallthrough_pc(program, pc) {
+                successors.push(next_pc);
+            }
+        }
+    }
+
+    successors.sort_unstable();
+    successors.dedup();
+    for successor in successors {
+        if let Some(label) = labels.get(&successor) {
+            writeln!(file, "    cmpl ${successor:#010x}, %r15d")?;
+            writeln!(file, "    je {label}")?;
+        }
+    }
+    writeln!(file, "    jmp L_dispatch")?;
     Ok(())
 }
 
@@ -403,6 +1197,83 @@ unsafe extern "C" fn aot_exec_one<T: Tracer>(vm: *mut c_void, pc: u32, next_pc: 
             unsafe {
                 *next_pc = vm.get_pc().0;
             }
+            LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(err));
+            AOT_STATUS_ERROR
+        }
+    }
+}
+
+unsafe extern "C" fn aot_trace_native_compute<T: Tracer>(context: *mut AotRuntimeContext) -> u32 {
+    let context = unsafe { &mut *context };
+    let vm = unsafe { &mut *(context.vm as *mut VMState<T>) };
+    if vm.halted() {
+        context.trace_next_pc = vm.get_pc().0;
+        return AOT_STATUS_HALTED;
+    }
+
+    let pc = ByteAddr(context.trace_pc);
+    vm.set_pc(pc);
+    let result = (|| -> Result<()> {
+        let Some(insn) = vm.fetch(pc.waddr()) else {
+            vm.trap(TrapCause::InstructionAccessFault)?;
+            bail!(
+                "Fatal: could not fetch instruction at pc={pc:?}, ELF does not have instructions there."
+            );
+        };
+        if !supports_native_compute(insn.kind)
+            && !supports_native_control_flow(insn.kind)
+            && !supports_native_memory(insn.kind)
+        {
+            bail!(
+                "AOT native trace helper received unsupported instruction {:?} at pc={:#010x}",
+                insn.kind,
+                pc.0
+            );
+        }
+
+        if native_step_reads_rs1(insn.kind) {
+            vm.tracer_mut()
+                .load_register(insn.rs1, context.trace_rs1_value);
+        }
+        if native_step_reads_rs2(insn.kind) {
+            vm.tracer_mut()
+                .load_register(insn.rs2, context.trace_rs2_value);
+        }
+        if native_step_writes_rd(insn.kind) {
+            vm.tracer_mut().store_register(
+                insn.rd_internal() as _,
+                Change {
+                    before: context.trace_rd_before,
+                    after: context.trace_rd_after,
+                },
+            );
+        }
+        if native_step_loads_memory(insn.kind) {
+            vm.tracer_mut()
+                .load_memory(WordAddr(context.trace_mem_addr), context.trace_mem_after);
+        }
+        if native_step_stores_memory(insn.kind) {
+            vm.tracer_mut().store_memory(
+                WordAddr(context.trace_mem_addr),
+                Change {
+                    before: context.trace_mem_before,
+                    after: context.trace_mem_after,
+                },
+            );
+        }
+        vm.set_pc(ByteAddr(context.trace_next_pc));
+        vm.on_normal_end(&insn);
+        let step = vm.tracer_mut().advance();
+        if vm.tracer().is_busy_loop(&step) && !vm.halted() {
+            bail!("Stuck in loop {}", "{}");
+        }
+        Ok(())
+    })();
+
+    match result {
+        Ok(()) => AOT_STATUS_CONTINUE,
+        Err(err) => {
+            context.trace_next_pc = vm.get_pc().0;
             LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(err));
             AOT_STATUS_ERROR
         }
@@ -465,6 +1336,31 @@ mod tests {
     }
 
     #[test]
+    fn native_opcode_family_keeps_unsupported_ops_on_slow_path() {
+        assert_eq!(
+            native_opcode_family(InsnKind::ADD),
+            Some(NativeOpcodeFamily::Compute)
+        );
+        assert_eq!(
+            native_opcode_family(InsnKind::BEQ),
+            Some(NativeOpcodeFamily::ControlFlow)
+        );
+        assert_eq!(
+            native_opcode_family(InsnKind::LW),
+            Some(NativeOpcodeFamily::Memory)
+        );
+        assert_eq!(
+            native_opcode_family(InsnKind::DIV),
+            Some(NativeOpcodeFamily::Compute)
+        );
+        assert_eq!(
+            native_opcode_family(InsnKind::JALR),
+            Some(NativeOpcodeFamily::ControlFlow)
+        );
+        assert_eq!(native_opcode_family(InsnKind::ECALL), None);
+    }
+
+    #[test]
     fn aot_trace_matches_interpreter_for_supported_loop() {
         let program = Arc::new(program(vec![
             encode_rv32(InsnKind::ADDI, 0, 0, 1, 5),
@@ -489,6 +1385,371 @@ mod tests {
             aot_vm.tracer().recorded_steps(),
             interp.tracer().recorded_steps()
         );
+    }
+
+    #[test]
+    fn aot_native_arithmetic_matches_interpreter() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, -1),
+            encode_rv32(InsnKind::ADDI, 1, 0, 2, 2),
+            encode_rv32(InsnKind::XORI, 2, 0, 3, -1),
+            encode_rv32(InsnKind::ORI, 3, 0, 4, 0x55),
+            encode_rv32(InsnKind::ANDI, 4, 0, 6, 0x0f),
+            encode_rv32(InsnKind::ADD, 1, 6, 7, 0),
+            encode_rv32(InsnKind::SUB, 7, 6, 8, 0),
+            encode_rv32(InsnKind::XOR, 8, 7, 9, 0),
+            encode_rv32(InsnKind::OR, 9, 6, 12, 0),
+            encode_rv32(InsnKind::AND, 12, 7, 13, 0),
+            encode_rv32(InsnKind::ADDI, 13, 0, 0, 123),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        for idx in 0..VMState::<crate::FullTracer>::REG_COUNT as u8 {
+            assert_eq!(
+                aot_vm.peek_register(idx),
+                interp.peek_register(idx),
+                "register x{idx} mismatch"
+            );
+        }
+        assert_eq!(
+            aot_vm.tracer().recorded_steps(),
+            interp.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    fn aot_native_shifts_and_comparisons_match_interpreter() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 1),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 33),
+            encode_rv32(InsnKind::SLL, 1, 2, 3, 0),
+            encode_rv32(InsnKind::SRL, 3, 2, 4, 0),
+            encode_rv32(InsnKind::ADDI, 0, 0, 6, -8),
+            encode_rv32(InsnKind::SRAI, 6, 0, 7, 1),
+            encode_rv32(InsnKind::SRA, 6, 2, 8, 0),
+            encode_rv32(InsnKind::SLLI, 1, 0, 9, 31),
+            encode_rv32(InsnKind::SRLI, 9, 0, 12, 31),
+            encode_rv32(InsnKind::SLT, 6, 1, 13, 0),
+            encode_rv32(InsnKind::SLTU, 6, 1, 14, 0),
+            encode_rv32(InsnKind::SLTI, 6, 0, 15, -7),
+            encode_rv32(InsnKind::SLTIU, 6, 0, 16, -7),
+            encode_rv32(InsnKind::SLTIU, 1, 0, 17, -1),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        for idx in 0..VMState::<crate::FullTracer>::REG_COUNT as u8 {
+            assert_eq!(
+                aot_vm.peek_register(idx),
+                interp.peek_register(idx),
+                "register x{idx} mismatch"
+            );
+        }
+        assert_eq!(
+            aot_vm.tracer().recorded_steps(),
+            interp.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    fn aot_native_branches_and_jal_match_interpreter() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, -1),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 1),
+            encode_rv32(InsnKind::BEQ, 2, 2, 0, 8),
+            encode_rv32(InsnKind::ADDI, 0, 0, 3, 99),
+            encode_rv32(InsnKind::BNE, 1, 2, 0, 8),
+            encode_rv32(InsnKind::ADDI, 0, 0, 4, 99),
+            encode_rv32(InsnKind::BLT, 1, 2, 0, 8),
+            encode_rv32(InsnKind::ADDI, 0, 0, 6, 99),
+            encode_rv32(InsnKind::BGE, 2, 1, 0, 8),
+            encode_rv32(InsnKind::ADDI, 0, 0, 7, 99),
+            encode_rv32(InsnKind::BLTU, 1, 2, 0, 8),
+            encode_rv32(InsnKind::ADDI, 0, 0, 8, 8),
+            encode_rv32(InsnKind::BGEU, 1, 2, 0, 8),
+            encode_rv32(InsnKind::ADDI, 0, 0, 9, 99),
+            encode_rv32(InsnKind::JAL, 0, 0, 12, 8),
+            encode_rv32(InsnKind::ADDI, 0, 0, 13, 99),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        for idx in 0..VMState::<crate::FullTracer>::REG_COUNT as u8 {
+            assert_eq!(
+                aot_vm.peek_register(idx),
+                interp.peek_register(idx),
+                "register x{idx} mismatch"
+            );
+        }
+        assert_eq!(
+            aot_vm.tracer().recorded_steps(),
+            interp.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    fn aot_native_multiply_matches_interpreter() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, -1),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 2),
+            encode_rv32(InsnKind::MUL, 1, 2, 3, 0),
+            encode_rv32(InsnKind::MULH, 1, 2, 4, 0),
+            encode_rv32(InsnKind::MULHU, 1, 2, 6, 0),
+            encode_rv32(InsnKind::MULHSU, 1, 2, 7, 0),
+            encode_rv32(InsnKind::ADDI, 0, 0, 8, 1),
+            encode_rv32(InsnKind::SLLI, 8, 0, 8, 31),
+            encode_rv32(InsnKind::MUL, 8, 1, 9, 0),
+            encode_rv32(InsnKind::MULH, 8, 1, 11, 0),
+            encode_rv32(InsnKind::MULHU, 8, 1, 12, 0),
+            encode_rv32(InsnKind::MULHSU, 8, 1, 13, 0),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        for idx in 0..VMState::<crate::FullTracer>::REG_COUNT as u8 {
+            assert_eq!(
+                aot_vm.peek_register(idx),
+                interp.peek_register(idx),
+                "register x{idx} mismatch"
+            );
+        }
+        assert_eq!(
+            aot_vm.tracer().recorded_steps(),
+            interp.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    fn aot_native_div_rem_matches_interpreter() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, -7),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 3),
+            encode_rv32(InsnKind::DIV, 1, 2, 3, 0),
+            encode_rv32(InsnKind::REM, 1, 2, 4, 0),
+            encode_rv32(InsnKind::DIVU, 1, 2, 6, 0),
+            encode_rv32(InsnKind::REMU, 1, 2, 7, 0),
+            encode_rv32(InsnKind::ADDI, 0, 0, 8, 1),
+            encode_rv32(InsnKind::SLLI, 8, 0, 8, 31),
+            encode_rv32(InsnKind::ADDI, 0, 0, 9, -1),
+            encode_rv32(InsnKind::DIV, 8, 9, 11, 0),
+            encode_rv32(InsnKind::REM, 8, 9, 12, 0),
+            encode_rv32(InsnKind::DIV, 1, 0, 13, 0),
+            encode_rv32(InsnKind::REM, 1, 0, 14, 0),
+            encode_rv32(InsnKind::DIVU, 1, 0, 15, 0),
+            encode_rv32(InsnKind::REMU, 1, 0, 16, 0),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        for idx in 0..VMState::<crate::FullTracer>::REG_COUNT as u8 {
+            assert_eq!(
+                aot_vm.peek_register(idx),
+                interp.peek_register(idx),
+                "register x{idx} mismatch"
+            );
+        }
+        assert_eq!(
+            aot_vm.tracer().recorded_steps(),
+            interp.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "u16limb_circuit")]
+    fn aot_native_lui_auipc_matches_interpreter() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::LUI, 0, 0, 1, 0x1234),
+            encode_rv32(InsnKind::AUIPC, 0, 0, 2, 0x40),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        assert_eq!(aot_vm.peek_register(1), interp.peek_register(1));
+        assert_eq!(aot_vm.peek_register(2), interp.peek_register(2));
+        assert_eq!(
+            aot_vm.tracer().recorded_steps(),
+            interp.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    fn aot_native_lw_sw_match_interpreter() {
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::LW, 20, 0, 1, 0),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, 5),
+            encode_rv32(InsnKind::SW, 20, 1, 0, 4),
+            encode_rv32(InsnKind::LW, 20, 0, 2, 4),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        interp.init_register_unsafe(20, base);
+        interp.init_memory(ByteAddr(base).waddr(), 37);
+        interp.init_memory(ByteAddr(base + 4).waddr(), 0);
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        aot_vm.init_register_unsafe(20, base);
+        aot_vm.init_memory(ByteAddr(base).waddr(), 37);
+        aot_vm.init_memory(ByteAddr(base + 4).waddr(), 0);
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        for idx in 0..VMState::<crate::FullTracer>::REG_COUNT as u8 {
+            assert_eq!(
+                aot_vm.peek_register(idx),
+                interp.peek_register(idx),
+                "register x{idx} mismatch"
+            );
+        }
+        assert_eq!(aot_vm.peek_memory(ByteAddr(base + 4).waddr()), 42);
+        assert_eq!(
+            aot_vm.tracer().recorded_steps(),
+            interp.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    fn aot_native_byte_halfword_memory_matches_interpreter() {
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::LB, 20, 0, 1, 2),
+            encode_rv32(InsnKind::LBU, 20, 0, 2, 2),
+            encode_rv32(InsnKind::LH, 20, 0, 3, 2),
+            encode_rv32(InsnKind::LHU, 20, 0, 4, 2),
+            encode_rv32(InsnKind::ADDI, 0, 0, 6, 0x55),
+            encode_rv32(InsnKind::SB, 20, 6, 0, 1),
+            encode_rv32(InsnKind::ADDI, 0, 0, 7, 0xabcd),
+            encode_rv32(InsnKind::SH, 20, 7, 0, 4),
+            encode_rv32(InsnKind::LW, 20, 0, 8, 0),
+            encode_rv32(InsnKind::LW, 20, 0, 9, 4),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        interp.init_register_unsafe(20, base);
+        interp.init_memory(ByteAddr(base).waddr(), 0x80ff_7f00);
+        interp.init_memory(ByteAddr(base + 4).waddr(), 0);
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        aot_vm.init_register_unsafe(20, base);
+        aot_vm.init_memory(ByteAddr(base).waddr(), 0x80ff_7f00);
+        aot_vm.init_memory(ByteAddr(base + 4).waddr(), 0);
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        for idx in 0..VMState::<crate::FullTracer>::REG_COUNT as u8 {
+            assert_eq!(
+                aot_vm.peek_register(idx),
+                interp.peek_register(idx),
+                "register x{idx} mismatch"
+            );
+        }
+        assert_eq!(aot_vm.peek_memory(ByteAddr(base).waddr()), 0x80ff_5500);
+        assert_eq!(aot_vm.peek_memory(ByteAddr(base + 4).waddr()), 0xabcd);
+        assert_eq!(
+            aot_vm.tracer().recorded_steps(),
+            interp.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    fn aot_memory_misalignment_uses_exact_slow_path_traps() {
+        let base = CENO_PLATFORM.heap.start;
+        let lw_program = Arc::new(program(vec![encode_rv32(InsnKind::LW, 20, 0, 1, 1)]));
+        let lw_aot = AotProgram::compile(lw_program.clone()).unwrap();
+        let mut lw_vm = VMState::new(CENO_PLATFORM.clone(), lw_program);
+        lw_vm.init_register_unsafe(20, base);
+        let err = lw_aot.run_to_halt(&mut lw_vm, 1).unwrap_err().to_string();
+        assert!(err.contains("LoadAddressMisaligned"));
+
+        let lh_program = Arc::new(program(vec![encode_rv32(InsnKind::LH, 20, 0, 1, 1)]));
+        let lh_aot = AotProgram::compile(lh_program.clone()).unwrap();
+        let mut lh_vm = VMState::new(CENO_PLATFORM.clone(), lh_program);
+        lh_vm.init_register_unsafe(20, base);
+        let err = lh_aot.run_to_halt(&mut lh_vm, 1).unwrap_err().to_string();
+        assert!(err.contains("LoadAddressMisaligned"));
+
+        let sw_program = Arc::new(program(vec![encode_rv32(InsnKind::SW, 20, 1, 0, 1)]));
+        let sw_aot = AotProgram::compile(sw_program.clone()).unwrap();
+        let mut sw_vm = VMState::new(CENO_PLATFORM.clone(), sw_program);
+        sw_vm.init_register_unsafe(20, base);
+        sw_vm.init_register_unsafe(1, 42);
+        let err = sw_aot.run_to_halt(&mut sw_vm, 1).unwrap_err().to_string();
+        assert!(err.contains("StoreAddressMisaligned"));
+
+        let sh_program = Arc::new(program(vec![encode_rv32(InsnKind::SH, 20, 1, 0, 1)]));
+        let sh_aot = AotProgram::compile(sh_program.clone()).unwrap();
+        let mut sh_vm = VMState::new(CENO_PLATFORM.clone(), sh_program);
+        sh_vm.init_register_unsafe(20, base);
+        sh_vm.init_register_unsafe(1, 42);
+        let err = sh_aot.run_to_halt(&mut sh_vm, 1).unwrap_err().to_string();
+        assert!(err.contains("StoreAddressMisaligned"));
+    }
+
+    #[test]
+    fn aot_memory_access_faults_use_exact_slow_path_traps() {
+        let lb_program = Arc::new(program(vec![encode_rv32(InsnKind::LB, 20, 0, 1, 0)]));
+        let lb_aot = AotProgram::compile(lb_program.clone()).unwrap();
+        let mut lb_vm = VMState::new(CENO_PLATFORM.clone(), lb_program);
+        lb_vm.init_register_unsafe(20, 0);
+        let err = lb_aot.run_to_halt(&mut lb_vm, 1).unwrap_err().to_string();
+        assert!(err.contains("LoadAccessFault"));
+
+        let sb_program = Arc::new(program(vec![encode_rv32(InsnKind::SB, 20, 1, 0, 0)]));
+        let sb_aot = AotProgram::compile(sb_program.clone()).unwrap();
+        let mut sb_vm = VMState::new(CENO_PLATFORM.clone(), sb_program);
+        sb_vm.init_register_unsafe(20, 0);
+        sb_vm.init_register_unsafe(1, 42);
+        let err = sb_aot.run_to_halt(&mut sb_vm, 1).unwrap_err().to_string();
+        assert!(err.contains("StoreAccessFault"));
     }
 
     #[test]
@@ -540,5 +1801,18 @@ mod tests {
             aot_vm.tracer().recorded_steps(),
             interp.tracer().recorded_steps()
         );
+    }
+
+    #[test]
+    fn aot_jalr_misalignment_uses_exact_slow_path_trap() {
+        let base = CENO_PLATFORM.pc_base();
+        let program = Arc::new(program(vec![encode_rv32(InsnKind::JALR, 1, 0, 0, 0)]));
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut vm = VMState::new(CENO_PLATFORM.clone(), program);
+        vm.init_register_unsafe(1, base + 2);
+
+        let err = aot.run_to_halt(&mut vm, 1).unwrap_err().to_string();
+
+        assert!(err.contains("InstructionAddressMisaligned"));
     }
 }

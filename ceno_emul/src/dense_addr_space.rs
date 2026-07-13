@@ -48,6 +48,14 @@ impl<T: Copy + Default> DenseAddrSpace<T> {
         self.index(addr).map(|idx| &self.cells[idx])
     }
 
+    pub(crate) fn base(&self) -> WordAddr {
+        self.base
+    }
+
+    pub(crate) fn cells_mut_ptr(&mut self) -> *mut T {
+        self.cells.as_mut_ptr()
+    }
+
     fn index(&self, addr: WordAddr) -> Option<usize> {
         if addr.0 < self.base.0 || addr.0 >= self.end.0 {
             return None;

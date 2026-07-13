@@ -165,6 +165,18 @@ impl<T: Tracer> VMState<T> {
         self.registers[idx as usize] = value;
     }
 
+    pub(crate) fn registers_mut_ptr(&mut self) -> *mut Word {
+        self.registers.as_mut_ptr()
+    }
+
+    pub(crate) fn memory_cells_mut_ptr(&mut self) -> *mut Word {
+        self.memory.cells_mut_ptr()
+    }
+
+    pub(crate) fn memory_base_word(&self) -> WordAddr {
+        self.memory.base()
+    }
+
     fn halt(&mut self, exit_code: u32) {
         self.set_pc(0.into());
         self.halt_state = Some(HaltState { exit_code });
