@@ -2,7 +2,7 @@
 
 ## Implemented In This Pass
 
-Current base commit: `bb1ba1f0 Emit Preflight dense trace updates natively`.
+Current base commit before block-boundary planner work: `8d5cf094 Make Preflight AOT shard-aware`.
 
 - Extended direct native `PreflightTracer` support to shard-planned configs instead of only the default full-shard config.
   - Direct mode now works with finite `max_cycle_per_shard`.
@@ -40,6 +40,20 @@ Current base commit: `bb1ba1f0 Emit Preflight dense trace updates natively`.
   - finite cell shard parity with a test `StepCellExtractor`
   - native store final-access parity
   - shard boundaries and `max_step_shard` parity
+- Added opt-in direct Preflight block-boundary shard planning behind `CENO_AOT_BLOCK_SHARD_PLAN`.
+  - Native code still updates exact per-instruction Preflight access cycles.
+  - Eligible compute/control basic blocks batch only planner cell/cycle/step counter updates.
+  - Shard-limit checks move from every instruction to basic-block entry for eligible blocks.
+  - Blocks containing memory ops, `JALR`, `ECALL`, or unsupported opcodes keep the exact per-instruction direct planner path.
+  - Block cell costs are built at run time from the active `StepCellExtractor`, matching the existing per-instruction step-cell table ownership.
+  - This mode is intentionally approximate at shard cuts: a single eligible block can overrun a limit because cuts are only considered before block entry.
+- Fused native memory range classification with direct Preflight heap/stack/hints min/max updates.
+  - The memory fast path now updates only the already-classified region instead of scanning all tracked regions again in the generic post-step hook.
+  - Misaligned and non-standard memory ranges still fall back to Rust-owned behavior.
+- Cached direct Preflight access bookkeeping values once per native step.
+  - Native code loads the dense latest-access base pointer, current cycle, and current shard start once per step.
+  - Register and memory access updates reuse those cached values.
+  - The rare first-touch or next-cycle-boundary helper path reloads the cache after returning.
 
 - Added a Ceno-side `AotRuntimeContext` and `AotInstance` alias.
 - Changed the generated native entry ABI to receive runtime context, slow-path helper, and native trace helper.
@@ -92,6 +106,8 @@ Current base commit: `bb1ba1f0 Emit Preflight dense trace updates natively`.
 - `cargo test -p ceno_emul --features aot-x86_64 aot::tests -- --nocapture`
 - `cargo check -p ceno_emul --features aot-x86_64`
 - `cargo check -p ceno_zkvm --features aot-x86_64`
+- `cargo test -p ceno_emul --features aot-x86_64 aot_preflight_block_plan_matches_without_shard_cuts -- --nocapture`
+- `cargo fmt --check`
 - `RUST_MIN_STACK=536870912 cargo test -p ceno_zkvm --features aot-x86_64 'e2e::tests::fibonacci_guest_aot_emulates' -- --nocapture`
 - `RUST_MIN_STACK=33554432 cargo test -p ceno_zkvm --features aot-x86_64 keccak_syscall_guest_aot_emulates -- --nocapture`
 - `cargo test -p ceno_emul --release --features aot-x86_64 aot::tests::aot_pure_perf_probe -- --ignored --nocapture`
@@ -137,6 +153,48 @@ Reth 23587691 two-shard run:
   - app create_proof including AOT profile/compile: 69.133466161 s
   - recursion create_proof: 2.382841375 s
   - total create_proof including AOT setup: 71.548594398 s
+- AOT block-boundary shard planner experiment: `sanity_23587691_aot_blockplan_fullprofile_witgen0_cache1_h23_maxcell6_20260713_184117.log`
+  - env: `CENO_AOT_BLOCK_SHARD_PLAN=1`
+  - AOT profile sampled: 24,790,776 steps in 843.246204 ms, roots=5359 selected_roots=5359
+  - AOT compile/load: 53.004060935 s, blocks=15196, reachable_instructions=133818
+  - preflight-execute: 570 ms
+  - AOT execution time inside preflight: 570.282164 ms
+  - fallback_steps: 243,501 (0.98%)
+  - shards: 2, boundaries `[4, 63663136, 99163108]`
+  - app create_proof including AOT profile/compile: 68.629844087 s
+  - app create_proof excluding AOT profile/compile setup: about 14.782536948 s
+  - recursion create_proof: 2.435336288 s
+  - total create_proof including AOT setup: 71.096151264 s
+  - preflight speedup over interpreter: `799 / 570.282164 = 1.40x`
+  - preflight improvement over direct per-instruction shard planner AOT: `589.324545 / 570.282164 = 1.03x`
+- AOT block planner plus fused memory-bound update: `sanity_23587691_aot_blockplan_memfuse_fullprofile_witgen0_cache1_h23_maxcell6_20260713_185252.log`
+  - env: `CENO_AOT_BLOCK_SHARD_PLAN=1`
+  - AOT profile sampled: 24,790,776 steps in 850.078361 ms, roots=5359 selected_roots=5359
+  - AOT compile/load: 53.531814868 s, blocks=15196, reachable_instructions=133818
+  - preflight-execute: 545 ms
+  - AOT execution time inside preflight: 545.429258 ms
+  - fallback_steps: 243,501 (0.98%)
+  - shards: 2, boundaries `[4, 63663136, 99163108]`
+  - app create_proof including AOT profile/compile: 68.550592785 s
+  - app create_proof excluding AOT profile/compile setup: about 14.168699556 s
+  - recursion create_proof: 2.342365743 s
+  - total create_proof including AOT setup: 70.924246523 s
+  - preflight speedup over interpreter: `799 / 545.429258 = 1.46x`
+  - preflight improvement over block-boundary planner: `570.282164 / 545.429258 = 1.05x`
+- AOT block planner plus fused memory bounds plus cached access bookkeeping: `sanity_23587691_aot_blockplan_memfuse_accesscache_fullprofile_witgen0_cache1_h23_maxcell6_20260713_185858.log`
+  - env: `CENO_AOT_BLOCK_SHARD_PLAN=1`
+  - AOT profile sampled: 24,790,776 steps in 848.554958 ms, roots=5359 selected_roots=5359
+  - AOT compile/load: 55.723621655 s, blocks=15196, reachable_instructions=133818
+  - preflight-execute: 533 ms
+  - AOT execution time inside preflight: 532.595503 ms
+  - fallback_steps: 243,501 (0.98%)
+  - shards: 2, boundaries `[4, 63663136, 99163108]`
+  - app create_proof including AOT profile/compile: 71.018177266 s
+  - app create_proof excluding AOT profile/compile setup: about 14.445996653 s
+  - recursion create_proof: 2.340359624 s
+  - total create_proof including AOT setup: 73.389153783 s
+  - preflight speedup over interpreter: `799 / 532.595503 = 1.50x`
+  - preflight improvement over fused memory-bound update: `545.429258 / 532.595503 = 1.02x`
 - Non-AOT control run accidentally using `CENO_AOT=1` without `CENO_EMULATOR_BACKEND=aot`: `sanity_23587691_aot_regstatic_fullprofile_witgen0_cache1_h23_maxcell6_20260713_175549.log`
   - preflight-execute: 803 ms
   - app create_proof: 12.151200913 s
