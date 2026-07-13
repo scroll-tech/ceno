@@ -1055,6 +1055,7 @@ pub fn emulate_program<'a>(
         multi_prover.max_cycle_per_shard,
     )
     .with_step_cell_extractor(step_cell_extractor);
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
     let profile_tracer_config = tracer_config.clone();
     let preflight_program = program.clone();
     let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")

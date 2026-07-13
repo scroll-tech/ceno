@@ -42,6 +42,10 @@ impl VMState<FullTracer> {
 }
 
 impl VMState<PreflightTracer> {
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn trace_preflight_native_step(
         &mut self,
         pc_before: ByteAddr,
@@ -191,22 +195,42 @@ impl<T: Tracer> VMState<T> {
         self.registers[idx as usize] = value;
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn registers_mut_ptr(&mut self) -> *mut Word {
         self.registers.as_mut_ptr()
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn pc_mut_ptr(&mut self) -> *mut Word {
         &mut self.pc
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn memory_cells_mut_ptr(&mut self) -> *mut Word {
         self.memory.cells_mut_ptr()
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn memory_base_word(&self) -> WordAddr {
         self.memory.base()
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn trace_fetch_known(&mut self, pc: WordAddr, insn: Instruction) {
         self.tracer.fetch(pc, insn);
         self.tracer.track_mmu_maxtouch_before();

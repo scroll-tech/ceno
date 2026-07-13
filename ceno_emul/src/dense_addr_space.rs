@@ -51,10 +51,18 @@ impl<T: Copy + Default> DenseAddrSpace<T> {
         self.index(addr).map(|idx| &self.cells[idx])
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn base(&self) -> WordAddr {
         self.base
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn cells_mut_ptr(&mut self) -> *mut T {
         self.cells.as_mut_ptr()
     }
