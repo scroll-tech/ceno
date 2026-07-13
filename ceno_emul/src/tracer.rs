@@ -247,6 +247,24 @@ impl LatestAccesses {
         prev
     }
 
+    fn cells_mut_ptr(&mut self) -> *mut Cycle {
+        self.store.cells_mut_ptr()
+    }
+
+    fn base(&self) -> WordAddr {
+        self.store.base()
+    }
+
+    fn record_native_first_touch(&mut self, addr: WordAddr) {
+        self.len += 1;
+        #[cfg(not(any(test, debug_assertions)))]
+        let _ = addr;
+        #[cfg(any(test, debug_assertions))]
+        {
+            self.touched.push(addr);
+        }
+    }
+
     pub fn cycle(&self, addr: WordAddr) -> Cycle {
         *self
             .store
@@ -1067,6 +1085,16 @@ pub(crate) const NATIVE_TRACE_WRITE_RD: u32 = 1 << 2;
 pub(crate) const NATIVE_TRACE_LOAD_MEM: u32 = 1 << 3;
 pub(crate) const NATIVE_TRACE_STORE_MEM: u32 = 1 << 4;
 
+pub(crate) struct PreflightNativeTraceState {
+    pub latest_cells: *mut Cycle,
+    pub latest_base: WordAddr,
+    pub cycle: *mut Cycle,
+    pub pc_before: *mut ByteAddr,
+    pub pc_after: *mut ByteAddr,
+    pub last_kind: *mut InsnKind,
+    pub current_shard_start_cycle: *const Cycle,
+}
+
 #[derive(Clone)]
 pub struct PreflightTracerConfig {
     record_next_accesses: bool,
@@ -1202,6 +1230,52 @@ impl PreflightTracer {
             planner.finalize(self.cycle);
         }
         (planner, self.next_accesses)
+    }
+
+    pub(crate) fn supports_direct_native_trace(&self) -> bool {
+        self.config.step_cell_extractor.is_none()
+            && self.config.max_cell_per_shard == u64::MAX
+            && self.config.max_cycle_per_shard == Cycle::MAX
+    }
+
+    pub(crate) fn native_trace_state(&mut self) -> PreflightNativeTraceState {
+        debug_assert!(self.supports_direct_native_trace());
+        PreflightNativeTraceState {
+            latest_cells: self.latest_accesses.cells_mut_ptr(),
+            latest_base: self.latest_accesses.base(),
+            cycle: &mut self.cycle,
+            pc_before: &mut self.pc.before,
+            pc_after: &mut self.pc.after,
+            last_kind: &mut self.last_kind,
+            current_shard_start_cycle: &self.current_shard_start_cycle,
+        }
+    }
+
+    pub(crate) fn record_native_access_side_effects(
+        &mut self,
+        addr: WordAddr,
+        prev_cycle: Cycle,
+        cur_cycle: Cycle,
+    ) {
+        if prev_cycle == Cycle::default() {
+            self.latest_accesses.record_native_first_touch(addr);
+        }
+        if self.config.record_next_accesses && prev_cycle < self.current_shard_start_cycle {
+            self.next_accesses
+                .entry(prev_cycle)
+                .or_default()
+                .push((addr, cur_cycle));
+        }
+    }
+
+    pub(crate) fn observe_native_steps(&mut self, steps: u64) {
+        debug_assert!(self.supports_direct_native_trace());
+        if let Some(planner) = self.planner.as_mut() {
+            planner.cur_cycle_in_shard = planner
+                .cur_cycle_in_shard
+                .saturating_add(steps.saturating_mul(Self::SUBCYCLES_PER_INSN));
+            planner.cur_step_count = planner.cur_step_count.saturating_add(steps as usize);
+        }
     }
 
     #[inline(always)]

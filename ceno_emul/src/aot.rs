@@ -1,7 +1,7 @@
 use crate::{
     Change, EmuContext, InsnKind, Instruction, PC_STEP_SIZE, PreflightTracer, Program, Tracer,
     VMState,
-    addr::{ByteAddr, RegIdx, WordAddr},
+    addr::{ByteAddr, Cycle, RegIdx, WordAddr},
     rv32im::TrapCause,
     tracer::{
         NATIVE_TRACE_LOAD_MEM, NATIVE_TRACE_READ_RS1, NATIVE_TRACE_READ_RS2,
@@ -63,6 +63,28 @@ const AOT_CTX_TRACE_RS1_IDX_OFFSET: usize = 112;
 const AOT_CTX_TRACE_RS2_IDX_OFFSET: usize = 116;
 const AOT_CTX_TRACE_RD_IDX_OFFSET: usize = 120;
 const AOT_CTX_TRACE_KIND_OFFSET: usize = 124;
+const AOT_CTX_TRACE_MODE_OFFSET: usize = 128;
+const AOT_CTX_PREFLIGHT_LATEST_CELLS_OFFSET: usize = 136;
+const AOT_CTX_PREFLIGHT_LATEST_BASE_OFFSET: usize = 144;
+const AOT_CTX_PREFLIGHT_CYCLE_OFFSET: usize = 152;
+const AOT_CTX_PREFLIGHT_PC_BEFORE_OFFSET: usize = 160;
+const AOT_CTX_PREFLIGHT_PC_AFTER_OFFSET: usize = 168;
+const AOT_CTX_PREFLIGHT_LAST_KIND_OFFSET: usize = 176;
+const AOT_CTX_PREFLIGHT_CURRENT_SHARD_START_OFFSET: usize = 184;
+const AOT_CTX_PREFLIGHT_PREV_CYCLE_OFFSET: usize = 192;
+const AOT_CTX_PREFLIGHT_CUR_CYCLE_OFFSET: usize = 200;
+const AOT_CTX_PREFLIGHT_EVENT_ADDR_OFFSET: usize = 208;
+const AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET: usize = 212;
+const AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET: usize = 216;
+
+const AOT_TRACE_MODE_NONE: u32 = 0;
+const AOT_TRACE_MODE_CALLBACK: u32 = 1;
+const AOT_TRACE_MODE_PREFLIGHT_DIRECT: u32 = 2;
+
+const AOT_PREFLIGHT_HELPER_ACCESS: u32 = 1;
+const AOT_PREFLIGHT_HELPER_SYNC: u32 = 2;
+const AOT_PREFLIGHT_HELPER_BUSY_LOOP: u32 = 3;
+const AOT_PREFLIGHT_HELPER_CALLBACK: u32 = 4;
 
 thread_local! {
     static LAST_AOT_ERROR: RefCell<Option<anyhow::Error>> = const { RefCell::new(None) };
@@ -97,6 +119,19 @@ struct AotRuntimeContext {
     trace_rs2_idx: u32,
     trace_rd_idx: u32,
     trace_kind: u32,
+    trace_mode: u32,
+    preflight_latest_cells: *mut Cycle,
+    preflight_latest_base: u32,
+    preflight_cycle: *mut Cycle,
+    preflight_pc_before: *mut ByteAddr,
+    preflight_pc_after: *mut ByteAddr,
+    preflight_last_kind: *mut InsnKind,
+    preflight_current_shard_start: *const Cycle,
+    preflight_prev_cycle: Cycle,
+    preflight_cur_cycle: Cycle,
+    preflight_event_addr: u32,
+    preflight_helper_kind: u32,
+    preflight_pending_steps: Cycle,
 }
 
 #[derive(Debug)]
@@ -187,6 +222,32 @@ impl AotProgram {
         let memory_cells = vm.memory_cells_mut_ptr();
         let instructions = self.program.instructions.as_ptr();
         let program_base = self.program.base_address;
+        let mut trace_mode = if trace_native_steps {
+            AOT_TRACE_MODE_CALLBACK
+        } else {
+            AOT_TRACE_MODE_NONE
+        };
+        let mut preflight_latest_cells = std::ptr::null_mut();
+        let mut preflight_latest_base = 0;
+        let mut preflight_cycle = std::ptr::null_mut();
+        let mut preflight_pc_before = std::ptr::null_mut();
+        let mut preflight_pc_after = std::ptr::null_mut();
+        let mut preflight_last_kind = std::ptr::null_mut();
+        let mut preflight_current_shard_start = std::ptr::null();
+        if trace_native_steps && TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
+            let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
+            if preflight_vm.tracer().supports_direct_native_trace() {
+                let state = preflight_vm.tracer_mut().native_trace_state();
+                trace_mode = AOT_TRACE_MODE_PREFLIGHT_DIRECT;
+                preflight_latest_cells = state.latest_cells;
+                preflight_latest_base = state.latest_base.0;
+                preflight_cycle = state.cycle;
+                preflight_pc_before = state.pc_before;
+                preflight_pc_after = state.pc_after;
+                preflight_last_kind = state.last_kind;
+                preflight_current_shard_start = state.current_shard_start_cycle;
+            }
+        }
         let mut context = AotRuntimeContext {
             vm: vm_ptr,
             registers,
@@ -215,10 +276,27 @@ impl AotProgram {
             trace_rs2_idx: 0,
             trace_rd_idx: 0,
             trace_kind: 0,
+            trace_mode,
+            preflight_latest_cells,
+            preflight_latest_base,
+            preflight_cycle,
+            preflight_pc_before,
+            preflight_pc_after,
+            preflight_last_kind,
+            preflight_current_shard_start,
+            preflight_prev_cycle: 0,
+            preflight_cur_cycle: 0,
+            preflight_event_addr: 0,
+            preflight_helper_kind: 0,
+            preflight_pending_steps: 0,
         };
         let trace_fn = if trace_native_steps {
             if TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
-                (aot_trace_native_preflight as AotTraceFn) as *const c_void
+                if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT {
+                    (aot_preflight_direct_helper as AotTraceFn) as *const c_void
+                } else {
+                    (aot_trace_native_preflight as AotTraceFn) as *const c_void
+                }
             } else {
                 (aot_trace_native_compute::<T> as AotTraceFn) as *const c_void
             }
@@ -458,6 +536,7 @@ fn write_assembly(path: &Path, program: &Program, blocks: &[BasicBlock]) -> Resu
     emit_call_current_pc(&mut file)?;
     writeln!(file, "    jmp L_dispatch")?;
     writeln!(file, "L_done:")?;
+    emit_sync_preflight_direct(&mut file)?;
     writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
     writeln!(file, "    movl %r15d, (%rdx)")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
@@ -484,6 +563,7 @@ fn write_assembly(path: &Path, program: &Program, blocks: &[BasicBlock]) -> Resu
 }
 
 fn emit_call_one(mut file: impl Write, pc: u32) -> Result<()> {
+    emit_sync_preflight_direct(&mut file)?;
     writeln!(file, "    leaq 8(%rsp), %rdx")?;
     writeln!(file, "    movq {AOT_CTX_VM_OFFSET}(%r12), %rdi")?;
     writeln!(file, "    movl ${pc:#010x}, %esi")?;
@@ -493,6 +573,7 @@ fn emit_call_one(mut file: impl Write, pc: u32) -> Result<()> {
 }
 
 fn emit_call_current_pc(mut file: impl Write) -> Result<()> {
+    emit_sync_preflight_direct(&mut file)?;
     writeln!(file, "    leaq 8(%rsp), %rdx")?;
     writeln!(file, "    movq {AOT_CTX_VM_OFFSET}(%r12), %rdi")?;
     writeln!(file, "    movl %r15d, %esi")?;
@@ -514,18 +595,221 @@ fn emit_after_step(mut file: impl Write) -> Result<()> {
     Ok(())
 }
 
-fn emit_after_native_step(mut file: impl Write) -> Result<()> {
+fn emit_after_native_step(mut file: impl Write, pc: u32) -> Result<()> {
+    let no_trace_label = format!(".L_after_native_no_trace_{pc:x}");
+    let direct_label = format!(".L_after_native_direct_{pc:x}");
+    let done_label = format!(".L_after_native_done_{pc:x}");
     writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
     writeln!(file, "    movl %r15d, 8(%rsp)")?;
     writeln!(file, "    testq %r14, %r14")?;
-    writeln!(file, "    je 1f")?;
+    writeln!(file, "    je {no_trace_label}")?;
+    writeln!(
+        file,
+        "    cmpl ${AOT_TRACE_MODE_PREFLIGHT_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    je {direct_label}")?;
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    call *%r14")?;
-    writeln!(file, "    jmp 2f")?;
-    writeln!(file, "1:")?;
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{no_trace_label}:")?;
     writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
-    writeln!(file, "2:")?;
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{direct_label}:")?;
+    emit_preflight_direct_step(&mut file)?;
+    writeln!(file, "{done_label}:")?;
     emit_after_step(&mut file)?;
+    Ok(())
+}
+
+fn emit_sync_preflight_direct(mut file: impl Write) -> Result<()> {
+    writeln!(
+        file,
+        "    cmpl ${AOT_TRACE_MODE_PREFLIGHT_DIRECT}, {AOT_CTX_TRACE_MODE_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    jne 1f")?;
+    writeln!(
+        file,
+        "    cmpq $0, {AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    je 1f")?;
+    writeln!(
+        file,
+        "    movl ${AOT_PREFLIGHT_HELPER_SYNC}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
+    writeln!(file, "    je L_error")?;
+    writeln!(file, "1:")?;
+    Ok(())
+}
+
+fn emit_preflight_direct_step(mut file: impl Write) -> Result<()> {
+    writeln!(
+        file,
+        "    testl ${NATIVE_TRACE_STORE_MEM}, {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    jne 9f")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PC_BEFORE_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %ecx")?;
+    writeln!(file, "    movl %ecx, (%rax)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_PC_AFTER_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %ecx")?;
+    writeln!(file, "    movl %ecx, (%rax)")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_LAST_KIND_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_KIND_OFFSET}(%r12), %ecx")?;
+    writeln!(file, "    movb %cl, (%rax)")?;
+
+    writeln!(
+        file,
+        "    testl ${NATIVE_TRACE_READ_RS1}, {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    je 1f")?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_RS1_IDX_OFFSET}(%r12), %eax")?;
+    writeln!(file, "    shll $6, %eax")?;
+    emit_preflight_direct_access(&mut file, "%eax", PreflightSubcycle::Rs1)?;
+    writeln!(file, "1:")?;
+    writeln!(
+        file,
+        "    testl ${NATIVE_TRACE_READ_RS2}, {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    je 2f")?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_RS2_IDX_OFFSET}(%r12), %eax")?;
+    writeln!(file, "    shll $6, %eax")?;
+    emit_preflight_direct_access(&mut file, "%eax", PreflightSubcycle::Rs2)?;
+    writeln!(file, "2:")?;
+    writeln!(
+        file,
+        "    testl ${NATIVE_TRACE_WRITE_RD}, {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    je 3f")?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_RD_IDX_OFFSET}(%r12), %eax")?;
+    writeln!(file, "    shll $6, %eax")?;
+    emit_preflight_direct_access(&mut file, "%eax", PreflightSubcycle::Rd)?;
+    writeln!(file, "3:")?;
+    writeln!(
+        file,
+        "    testl ${NATIVE_TRACE_LOAD_MEM}, {AOT_CTX_TRACE_FLAGS_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    je 4f")?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %eax")?;
+    emit_preflight_direct_access(&mut file, "%eax", PreflightSubcycle::Mem)?;
+    writeln!(file, "4:")?;
+
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %rax"
+    )?;
+    writeln!(file, "    addq $4, (%rax)")?;
+    writeln!(
+        file,
+        "    incq {AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movl {AOT_CTX_TRACE_PC_OFFSET}(%r12), %eax")?;
+    writeln!(file, "    cmpl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %eax")?;
+    writeln!(file, "    jne 5f")?;
+    writeln!(
+        file,
+        "    movl ${AOT_PREFLIGHT_HELPER_BUSY_LOOP}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    jmp 6f")?;
+    writeln!(file, "5:")?;
+    writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
+    writeln!(file, "6:")?;
+    writeln!(file, "    jmp 10f")?;
+
+    writeln!(file, "9:")?;
+    emit_sync_preflight_direct(&mut file)?;
+    writeln!(
+        file,
+        "    movl ${AOT_PREFLIGHT_HELPER_CALLBACK}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "10:")?;
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum PreflightSubcycle {
+    Rs1,
+    Rs2,
+    Rd,
+    Mem,
+}
+
+impl PreflightSubcycle {
+    fn value(self) -> u64 {
+        match self {
+            PreflightSubcycle::Rs1 => 0,
+            PreflightSubcycle::Rs2 => 1,
+            PreflightSubcycle::Rd => 2,
+            PreflightSubcycle::Mem => 3,
+        }
+    }
+}
+
+fn emit_preflight_direct_access(
+    mut file: impl Write,
+    addr_reg: &str,
+    subcycle: PreflightSubcycle,
+) -> Result<()> {
+    writeln!(file, "    movl {addr_reg}, %r9d")?;
+    writeln!(file, "    movl %r9d, %ecx")?;
+    writeln!(
+        file,
+        "    subl {AOT_CTX_PREFLIGHT_LATEST_BASE_OFFSET}(%r12), %ecx"
+    )?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_LATEST_CELLS_OFFSET}(%r12), %rdx"
+    )?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_CYCLE_OFFSET}(%r12), %rsi"
+    )?;
+    writeln!(file, "    movq (%rsi), %r8")?;
+    writeln!(file, "    addq ${}, %r8", subcycle.value())?;
+    writeln!(file, "    movq (%rdx,%rcx,8), %r11")?;
+    writeln!(file, "    movq %r8, (%rdx,%rcx,8)")?;
+    writeln!(file, "    testq %r11, %r11")?;
+    writeln!(file, "    je 1f")?;
+    writeln!(
+        file,
+        "    movq {AOT_CTX_PREFLIGHT_CURRENT_SHARD_START_OFFSET}(%r12), %rsi"
+    )?;
+    writeln!(file, "    cmpq (%rsi), %r11")?;
+    writeln!(file, "    jae 2f")?;
+    writeln!(file, "1:")?;
+    writeln!(file, "    movl %r9d, {AOT_CTX_PREFLIGHT_EVENT_ADDR_OFFSET}(%r12)")?;
+    writeln!(
+        file,
+        "    movq %r11, {AOT_CTX_PREFLIGHT_PREV_CYCLE_OFFSET}(%r12)"
+    )?;
+    writeln!(
+        file,
+        "    movq %r8, {AOT_CTX_PREFLIGHT_CUR_CYCLE_OFFSET}(%r12)"
+    )?;
+    writeln!(
+        file,
+        "    movl ${AOT_PREFLIGHT_HELPER_ACCESS}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
+    )?;
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
+    writeln!(file, "    je L_error")?;
+    writeln!(file, "2:")?;
     Ok(())
 }
 
@@ -942,7 +1226,7 @@ fn emit_native_compute(mut file: impl Write, pc: u32, insn: Instruction) -> Resu
         "    movl ${:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)",
         pc.wrapping_add(PC_STEP_SIZE as u32)
     )?;
-    emit_after_native_step(&mut file)?;
+    emit_after_native_step(&mut file, pc)?;
     Ok(())
 }
 
@@ -1067,7 +1351,7 @@ fn emit_native_control_flow(mut file: impl Write, pc: u32, insn: Instruction) ->
         )?;
         writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
         writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
-        emit_after_native_step(&mut file)?;
+        emit_after_native_step(&mut file, pc)?;
         writeln!(file, "    jmp {done_label}")?;
         writeln!(file, "{slow_label}:")?;
         emit_call_one(&mut file, pc)?;
@@ -1114,7 +1398,7 @@ fn emit_native_control_flow(mut file: impl Write, pc: u32, insn: Instruction) ->
         writeln!(file, "{done_label}:")?;
     }
 
-    emit_after_native_step(&mut file)?;
+    emit_after_native_step(&mut file, pc)?;
     Ok(())
 }
 
@@ -1262,7 +1546,7 @@ fn emit_native_memory(mut file: impl Write, pc: u32, insn: Instruction) -> Resul
         }
         _ => unreachable!("unsupported native memory instruction: {:?}", insn.kind),
     }
-    emit_after_native_step(&mut file)?;
+    emit_after_native_step(&mut file, pc)?;
     writeln!(file, "    jmp {done_label}")?;
     writeln!(file, "{slow_label}:")?;
     emit_call_one(&mut file, pc)?;
@@ -1480,6 +1764,52 @@ unsafe extern "C" fn aot_trace_native_preflight(context: *mut AotRuntimeContext)
     }
 }
 
+unsafe extern "C" fn aot_preflight_direct_helper(context: *mut AotRuntimeContext) -> u32 {
+    let context = unsafe { &mut *context };
+    let vm = unsafe { &mut *(context.vm as *mut VMState<PreflightTracer>) };
+    if vm.halted() {
+        context.trace_next_pc = vm.get_pc().0;
+        return AOT_STATUS_HALTED;
+    }
+
+    match context.preflight_helper_kind {
+        AOT_PREFLIGHT_HELPER_ACCESS => {
+            vm.tracer_mut().record_native_access_side_effects(
+                WordAddr(context.preflight_event_addr),
+                context.preflight_prev_cycle,
+                context.preflight_cur_cycle,
+            );
+            AOT_STATUS_CONTINUE
+        }
+        AOT_PREFLIGHT_HELPER_SYNC => {
+            vm.tracer_mut()
+                .observe_native_steps(context.preflight_pending_steps);
+            context.preflight_pending_steps = 0;
+            AOT_STATUS_CONTINUE
+        }
+        AOT_PREFLIGHT_HELPER_BUSY_LOOP => {
+            vm.tracer_mut()
+                .observe_native_steps(context.preflight_pending_steps);
+            context.preflight_pending_steps = 0;
+            context.trace_next_pc = vm.get_pc().0;
+            LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(anyhow!("Stuck in loop {}", "{}")));
+            AOT_STATUS_ERROR
+        }
+        AOT_PREFLIGHT_HELPER_CALLBACK => {
+            vm.tracer_mut()
+                .observe_native_steps(context.preflight_pending_steps);
+            context.preflight_pending_steps = 0;
+            unsafe { aot_trace_native_preflight(context as *mut AotRuntimeContext) }
+        }
+        other => {
+            LAST_AOT_ERROR.with(|slot| {
+                *slot.borrow_mut() = Some(anyhow!("unknown AOT Preflight helper kind {other}"))
+            });
+            AOT_STATUS_ERROR
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1523,6 +1853,30 @@ mod tests {
                     end_pc: base + 16,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn aot_runtime_context_offsets_match_assembly_constants() {
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, trace_mode),
+            AOT_CTX_TRACE_MODE_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_latest_cells),
+            AOT_CTX_PREFLIGHT_LATEST_CELLS_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_cycle),
+            AOT_CTX_PREFLIGHT_CYCLE_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_current_shard_start),
+            AOT_CTX_PREFLIGHT_CURRENT_SHARD_START_OFFSET
+        );
+        assert_eq!(
+            std::mem::offset_of!(AotRuntimeContext, preflight_pending_steps),
+            AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET
         );
     }
 
@@ -1585,6 +1939,50 @@ mod tests {
             aot_vm.tracer().recorded_steps(),
             interp.tracer().recorded_steps()
         );
+    }
+
+    #[test]
+    fn aot_preflight_direct_trace_matches_interpreter_accesses() {
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 0),
+            encode_rv32(InsnKind::ADD, 2, 1, 2, 0),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+            encode_rv32(InsnKind::BNE, 1, 0, 0, -8),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::<crate::PreflightTracer>::new_with_tracer(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+        );
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer(
+            CENO_PLATFORM.clone(),
+            program,
+        );
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        assert_eq!(aot_vm.peek_register(1), interp.peek_register(1));
+        assert_eq!(aot_vm.peek_register(2), interp.peek_register(2));
+        assert_eq!(
+            aot_vm.tracer().final_accesses().len(),
+            interp.tracer().final_accesses().len()
+        );
+        for addr in interp.tracer().final_accesses().addresses() {
+            assert_eq!(
+                aot_vm.tracer().final_accesses().cycle(*addr),
+                interp.tracer().final_accesses().cycle(*addr),
+                "final access mismatch at {addr:?}"
+            );
+        }
+
+        let interp_next = interp.take_tracer().into_next_accesses();
+        let aot_next = aot_vm.take_tracer().into_next_accesses();
+        assert_eq!(aot_next, interp_next);
     }
 
     #[test]
