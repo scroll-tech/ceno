@@ -1238,9 +1238,7 @@ impl PreflightTracer {
         kind: InsnKind,
         flags: u32,
         rs1_idx: RegIdx,
-        rs1_value: Word,
         rs2_idx: RegIdx,
-        rs2_value: Word,
         rd_idx: RegIdx,
         memory_addr: WordAddr,
     ) -> bool {
@@ -1250,13 +1248,13 @@ impl PreflightTracer {
         self.register_reads_tracked = 0;
 
         if flags & NATIVE_TRACE_READ_RS1 != 0 {
-            self.load_register(rs1_idx, rs1_value);
+            self.track_access(Platform::register_vma(rs1_idx).into(), Self::SUBCYCLE_RS1);
         }
         if flags & NATIVE_TRACE_READ_RS2 != 0 {
-            self.load_register(rs2_idx, rs2_value);
+            self.track_access(Platform::register_vma(rs2_idx).into(), Self::SUBCYCLE_RS2);
         }
         if flags & NATIVE_TRACE_WRITE_RD != 0 {
-            self.store_register(rd_idx, Change::new(0, 0));
+            self.track_access(Platform::register_vma(rd_idx).into(), Self::SUBCYCLE_RD);
         }
         if flags & NATIVE_TRACE_LOAD_MEM != 0 {
             self.track_access(memory_addr, Self::SUBCYCLE_MEM);
