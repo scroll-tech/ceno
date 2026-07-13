@@ -236,10 +236,7 @@ impl LatestAccesses {
     }
 
     fn track(&mut self, addr: WordAddr, cycle: Cycle) -> Cycle {
-        let prev = self
-            .store
-            .replace(addr, cycle)
-            .unwrap_or_else(|| panic!("addr {addr:?} outside tracked address space"));
+        let prev = self.store.replace_in_bounds(addr, cycle);
         if prev == Cycle::default() {
             self.len += 1;
             #[cfg(any(test, debug_assertions))]

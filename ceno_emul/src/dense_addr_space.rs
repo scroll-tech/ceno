@@ -36,12 +36,15 @@ impl<T: Copy + Default> DenseAddrSpace<T> {
         })
     }
 
-    pub(crate) fn replace(&mut self, addr: WordAddr, value: T) -> Option<T> {
-        self.index(addr).map(|idx| {
-            let prev = self.cells[idx];
-            self.cells[idx] = value;
-            prev
-        })
+    pub(crate) fn replace_in_bounds(&mut self, addr: WordAddr, value: T) -> T {
+        assert!(
+            addr.0 >= self.base.0 && addr.0 < self.end.0,
+            "addr {addr:?} outside tracked address space"
+        );
+        let idx = (addr.0 - self.base.0) as usize;
+        let prev = self.cells[idx];
+        self.cells[idx] = value;
+        prev
     }
 
     pub(crate) fn get_ref(&self, addr: WordAddr) -> Option<&T> {
