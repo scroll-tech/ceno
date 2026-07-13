@@ -17,8 +17,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-type NativeEntry =
-    unsafe extern "C" fn(*mut AotRuntimeContext, AotInsnFn, AotTraceFn, u64, *mut u64, u32) -> u32;
+type NativeEntry = unsafe extern "C" fn(
+    *mut AotRuntimeContext,
+    AotInsnFn,
+    *const c_void,
+    u64,
+    *mut u64,
+    u32,
+) -> u32;
 type AotInsnFn = unsafe extern "C" fn(*mut c_void, u32, *mut u32) -> u32;
 type AotTraceFn = unsafe extern "C" fn(*mut AotRuntimeContext) -> u32;
 
@@ -45,6 +51,7 @@ const AOT_CTX_HINTS_END_OFFSET: usize = 72;
 const AOT_CTX_TRACE_MEM_ADDR_OFFSET: usize = 76;
 const AOT_CTX_TRACE_MEM_BEFORE_OFFSET: usize = 80;
 const AOT_CTX_TRACE_MEM_AFTER_OFFSET: usize = 84;
+const AOT_CTX_PC_OFFSET: usize = 88;
 
 thread_local! {
     static LAST_AOT_ERROR: RefCell<Option<anyhow::Error>> = const { RefCell::new(None) };
@@ -71,6 +78,9 @@ struct AotRuntimeContext {
     trace_mem_addr: u32,
     trace_mem_before: u32,
     trace_mem_after: u32,
+    pc: *mut u32,
+    instructions: *const Instruction,
+    program_base: u32,
 }
 
 #[derive(Debug)]
@@ -127,6 +137,23 @@ impl AotProgram {
         vm: &mut VMState<T>,
         max_steps: usize,
     ) -> Result<AotRunReport> {
+        self.run_to_halt_with_trace(vm, max_steps, true)
+    }
+
+    pub fn run_pure_to_halt<T: Tracer>(
+        &self,
+        vm: &mut VMState<T>,
+        max_steps: usize,
+    ) -> Result<AotRunReport> {
+        self.run_to_halt_with_trace(vm, max_steps, false)
+    }
+
+    fn run_to_halt_with_trace<T: Tracer>(
+        &self,
+        vm: &mut VMState<T>,
+        max_steps: usize,
+        trace_native_steps: bool,
+    ) -> Result<AotRunReport> {
         if !std::ptr::eq(vm.program(), self.program.as_ref()) {
             bail!("AOT program does not match VM program");
         }
@@ -140,7 +167,10 @@ impl AotProgram {
         let hints = vm.platform().hints.clone();
         let vm_ptr = vm as *mut VMState<T> as *mut c_void;
         let registers = vm.registers_mut_ptr();
+        let pc_ptr = vm.pc_mut_ptr();
         let memory_cells = vm.memory_cells_mut_ptr();
+        let instructions = self.program.instructions.as_ptr();
+        let program_base = self.program.base_address;
         let mut context = AotRuntimeContext {
             vm: vm_ptr,
             registers,
@@ -161,12 +191,20 @@ impl AotProgram {
             trace_mem_addr: 0,
             trace_mem_before: 0,
             trace_mem_after: 0,
+            pc: pc_ptr,
+            instructions,
+            program_base,
+        };
+        let trace_fn = if trace_native_steps {
+            (aot_trace_native_compute::<T> as AotTraceFn) as *const c_void
+        } else {
+            std::ptr::null()
         };
         let native_status = unsafe {
             (self.entry)(
                 &mut context,
                 aot_exec_one::<T>,
-                aot_trace_native_compute::<T>,
+                trace_fn,
                 max_steps as u64,
                 &mut executed_steps,
                 vm.get_pc().0,
@@ -395,11 +433,15 @@ fn write_assembly(path: &Path, program: &Program, blocks: &[BasicBlock]) -> Resu
     emit_call_current_pc(&mut file)?;
     writeln!(file, "    jmp L_dispatch")?;
     writeln!(file, "L_done:")?;
+    writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
+    writeln!(file, "    movl %r15d, (%rdx)")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
     writeln!(file, "    movq %rax, (%rbx)")?;
     writeln!(file, "    movl ${AOT_STATUS_HALTED}, %eax")?;
     writeln!(file, "    jmp L_return")?;
     writeln!(file, "L_error:")?;
+    writeln!(file, "    movq {AOT_CTX_PC_OFFSET}(%r12), %rdx")?;
+    writeln!(file, "    movl %r15d, (%rdx)")?;
     writeln!(file, "    movq 0(%rsp), %rax")?;
     writeln!(file, "    movq %rax, (%rbx)")?;
     writeln!(file, "    movl ${AOT_STATUS_ERROR}, %eax")?;
@@ -444,6 +486,21 @@ fn emit_after_step(mut file: impl Write) -> Result<()> {
     writeln!(file, "    movq 0(%rsp), %rax")?;
     writeln!(file, "    cmpq %rbp, %rax")?;
     writeln!(file, "    jae L_done")?;
+    Ok(())
+}
+
+fn emit_after_native_step(mut file: impl Write) -> Result<()> {
+    writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
+    writeln!(file, "    movl %r15d, 8(%rsp)")?;
+    writeln!(file, "    testq %r14, %r14")?;
+    writeln!(file, "    je 1f")?;
+    writeln!(file, "    movq %r12, %rdi")?;
+    writeln!(file, "    call *%r14")?;
+    writeln!(file, "    jmp 2f")?;
+    writeln!(file, "1:")?;
+    writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
+    writeln!(file, "2:")?;
+    emit_after_step(&mut file)?;
     Ok(())
 }
 
@@ -757,11 +814,7 @@ fn emit_native_compute(mut file: impl Write, pc: u32, insn: Instruction) -> Resu
         "    movl ${:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)",
         pc.wrapping_add(PC_STEP_SIZE as u32)
     )?;
-    writeln!(file, "    movq %r12, %rdi")?;
-    writeln!(file, "    call *%r14")?;
-    writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
-    writeln!(file, "    movl %r15d, 8(%rsp)")?;
-    emit_after_step(&mut file)?;
+    emit_after_native_step(&mut file)?;
     Ok(())
 }
 
@@ -885,11 +938,7 @@ fn emit_native_control_flow(mut file: impl Write, pc: u32, insn: Instruction) ->
         )?;
         writeln!(file, "    movl %eax, {}(%r10)", rd as usize * 4)?;
         writeln!(file, "    movl %eax, {AOT_CTX_TRACE_RD_AFTER_OFFSET}(%r12)")?;
-        writeln!(file, "    movq %r12, %rdi")?;
-        writeln!(file, "    call *%r14")?;
-        writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
-        writeln!(file, "    movl %r15d, 8(%rsp)")?;
-        emit_after_step(&mut file)?;
+        emit_after_native_step(&mut file)?;
         writeln!(file, "    jmp {done_label}")?;
         writeln!(file, "{slow_label}:")?;
         emit_call_one(&mut file, pc)?;
@@ -936,11 +985,7 @@ fn emit_native_control_flow(mut file: impl Write, pc: u32, insn: Instruction) ->
         writeln!(file, "{done_label}:")?;
     }
 
-    writeln!(file, "    movq %r12, %rdi")?;
-    writeln!(file, "    call *%r14")?;
-    writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
-    writeln!(file, "    movl %r15d, 8(%rsp)")?;
-    emit_after_step(&mut file)?;
+    emit_after_native_step(&mut file)?;
     Ok(())
 }
 
@@ -1087,11 +1132,7 @@ fn emit_native_memory(mut file: impl Write, pc: u32, insn: Instruction) -> Resul
         }
         _ => unreachable!("unsupported native memory instruction: {:?}", insn.kind),
     }
-    writeln!(file, "    movq %r12, %rdi")?;
-    writeln!(file, "    call *%r14")?;
-    writeln!(file, "    movl {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12), %r15d")?;
-    writeln!(file, "    movl %r15d, 8(%rsp)")?;
-    emit_after_step(&mut file)?;
+    emit_after_native_step(&mut file)?;
     writeln!(file, "    jmp {done_label}")?;
     writeln!(file, "{slow_label}:")?;
     emit_call_one(&mut file, pc)?;
@@ -1214,12 +1255,9 @@ unsafe extern "C" fn aot_trace_native_compute<T: Tracer>(context: *mut AotRuntim
     let pc = ByteAddr(context.trace_pc);
     vm.set_pc(pc);
     let result = (|| -> Result<()> {
-        let Some(insn) = vm.fetch(pc.waddr()) else {
-            vm.trap(TrapCause::InstructionAccessFault)?;
-            bail!(
-                "Fatal: could not fetch instruction at pc={pc:?}, ELF does not have instructions there."
-            );
-        };
+        let idx = pc.0.wrapping_sub(context.program_base) / PC_STEP_SIZE as u32;
+        let insn = unsafe { *context.instructions.add(idx as usize) };
+        vm.trace_fetch_known(pc.waddr(), insn);
         if !supports_native_compute(insn.kind)
             && !supports_native_control_flow(insn.kind)
             && !supports_native_memory(insn.kind)
@@ -1264,7 +1302,10 @@ unsafe extern "C" fn aot_trace_native_compute<T: Tracer>(context: *mut AotRuntim
         vm.set_pc(ByteAddr(context.trace_next_pc));
         vm.on_normal_end(&insn);
         let step = vm.tracer_mut().advance();
-        if vm.tracer().is_busy_loop(&step) && !vm.halted() {
+        if context.trace_next_pc == context.trace_pc
+            && vm.tracer().is_busy_loop(&step)
+            && !vm.halted()
+        {
             bail!("Stuck in loop {}", "{}");
         }
         Ok(())
@@ -1651,6 +1692,87 @@ mod tests {
         assert_eq!(
             aot_vm.tracer().recorded_steps(),
             interp.tracer().recorded_steps()
+        );
+    }
+
+    #[test]
+    fn aot_pure_execution_updates_state_without_native_trace_callbacks() {
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 0),
+            encode_rv32(InsnKind::ADD, 2, 1, 2, 0),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+            encode_rv32(InsnKind::BNE, 1, 0, 0, -8),
+            encode_rv32(InsnKind::SW, 20, 2, 0, 0),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::new(CENO_PLATFORM.clone(), program.clone());
+        interp.init_register_unsafe(20, base);
+        interp.init_memory(ByteAddr(base).waddr(), 0);
+        while interp.next_step_record().unwrap().is_some() {}
+
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let mut aot_vm = VMState::new(CENO_PLATFORM.clone(), program);
+        aot_vm.init_register_unsafe(20, base);
+        aot_vm.init_memory(ByteAddr(base).waddr(), 0);
+        let report = aot.run_pure_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        assert!(aot_vm.halted());
+        assert_eq!(aot_vm.peek_register(1), interp.peek_register(1));
+        assert_eq!(aot_vm.peek_register(2), interp.peek_register(2));
+        assert_eq!(
+            aot_vm.peek_memory(ByteAddr(base).waddr()),
+            interp.peek_memory(ByteAddr(base).waddr())
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn aot_pure_perf_probe() {
+        let iterations = 1_000_000u32;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, iterations as i32),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 0),
+            encode_rv32(InsnKind::ADD, 2, 1, 2, 0),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+            encode_rv32(InsnKind::BNE, 1, 0, 0, -8),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let mut interp = VMState::<crate::PreflightTracer>::new_with_tracer(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+        );
+        let started = Instant::now();
+        while interp.next_step_record().unwrap().is_some() {}
+        let interp_time = started.elapsed();
+
+        let aot_started = Instant::now();
+        let aot = AotProgram::compile(program.clone()).unwrap();
+        let compile_time = aot_started.elapsed();
+
+        let mut traced = VMState::<crate::PreflightTracer>::new_with_tracer(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+        );
+        let traced = aot.run_to_halt(&mut traced, usize::MAX).unwrap();
+
+        let mut pure =
+            VMState::<crate::PreflightTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
+        let pure = aot.run_pure_to_halt(&mut pure, usize::MAX).unwrap();
+
+        println!(
+            "loop-heavy: steps={}, compile={:?}, interp={:?}, traced_aot={:?} ({:.3}x), pure_aot={:?} ({:.3}x)",
+            traced.executed_steps,
+            compile_time,
+            interp_time,
+            traced.execute_time,
+            interp_time.as_secs_f64() / traced.execute_time.as_secs_f64(),
+            pure.execute_time,
+            interp_time.as_secs_f64() / pure.execute_time.as_secs_f64(),
         );
     }
 

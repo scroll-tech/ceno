@@ -41,6 +41,8 @@
 - Added differential unit coverage for native multiply low-word and signed/unsigned high-word behavior, register parity, and `StepRecord` parity.
 - Added differential unit coverage for native divide/remainder, divide-by-zero behavior, signed-overflow behavior, register parity, and `StepRecord` parity.
 - Added feature-gated differential unit coverage for native `LUI/AUIPC`.
+- Added pure native AOT execution mode that skips per-instruction Rust trace callbacks.
+- Added an ignored loop-heavy perf probe that reports compile time separately from interpreter, traced AOT, and pure AOT execution.
 - Added differential unit coverage for native `LW/SW`, dense memory writes, memory `StepRecord` parity, and exact slow-path misalignment traps.
 - Added differential unit coverage for byte/halfword load sign extension, zero extension, byte/halfword stores, range access faults, register parity, and memory `StepRecord` parity.
 - Split native opcode dispatch into explicit compute, control-flow, and memory families.
@@ -51,6 +53,15 @@
 - `cargo test -p ceno_emul --features aot-x86_64 aot::tests -- --nocapture`
 - `cargo check -p ceno_emul --features aot-x86_64`
 - `RUST_MIN_STACK=33554432 cargo test -p ceno_zkvm --features aot-x86_64 fibonacci_guest_aot_emulates -- --nocapture`
+- `cargo test -p ceno_emul --features aot-x86_64 aot::tests::aot_pure_perf_probe -- --ignored --nocapture`
+
+Latest loop-heavy micro probe:
+
+- steps: 3,000,003
+- compile/load: 18.91 ms
+- interpreter: 62.77 ms
+- traced AOT execution: 44.11 ms, 1.42x faster than interpreter
+- pure AOT execution: 5.81 ms, 10.80x faster than interpreter
 
 Note: the Fibonacci AOT e2e overflowed the default Rust test-thread stack without `RUST_MIN_STACK`, then passed with a 32 MiB stack.
 
@@ -108,6 +119,8 @@ Target: support all RV32IM instructions in native AOT except `ECALL`. Done.
 
 9. Broaden tracer coverage.
    - Keep `PreflightTracer` as the first-class throughput path.
+   - Pure AOT now exceeds the 10x loop-heavy target; traced AOT is still limited by per-instruction Rust trace callbacks.
+   - Next performance gap: native or batched `PreflightTracer` emission to close traced AOT toward pure AOT.
    - Add full `FullTracer` byte-for-byte `StepRecord` differential tests across native ALU, branch, multiply, and memory tiers.
    - Keep syscall witnesses Rust-owned through slow-path helpers.
 

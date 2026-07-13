@@ -169,12 +169,21 @@ impl<T: Tracer> VMState<T> {
         self.registers.as_mut_ptr()
     }
 
+    pub(crate) fn pc_mut_ptr(&mut self) -> *mut Word {
+        &mut self.pc
+    }
+
     pub(crate) fn memory_cells_mut_ptr(&mut self) -> *mut Word {
         self.memory.cells_mut_ptr()
     }
 
     pub(crate) fn memory_base_word(&self) -> WordAddr {
         self.memory.base()
+    }
+
+    pub(crate) fn trace_fetch_known(&mut self, pc: WordAddr, insn: Instruction) {
+        self.tracer.fetch(pc, insn);
+        self.tracer.track_mmu_maxtouch_before();
     }
 
     fn halt(&mut self, exit_code: u32) {
