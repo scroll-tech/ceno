@@ -1242,7 +1242,6 @@ impl PreflightTracer {
         self.pc.before = pc_before;
         self.last_kind = kind;
         self.last_rs1 = None;
-        self.register_reads_tracked = 0;
 
         if flags & NATIVE_TRACE_READ_RS1 != 0 {
             self.track_access(Platform::register_vma(rs1_idx).into(), Self::SUBCYCLE_RS1);
