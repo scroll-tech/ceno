@@ -105,6 +105,7 @@ parallel = [
   "mpcs/parallel",
 ]
 sanity-check = ["mpcs/sanity-check"]
+aot-x86_64 = ["ceno_emul/aot-x86_64"]
 u16limb_circuit = ["ceno_emul/u16limb_circuit"]
 
 [[bench]]

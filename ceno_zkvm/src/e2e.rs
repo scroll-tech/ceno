@@ -22,10 +22,11 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, IterAddresses,
-    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
-    StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
-    WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, EmulatorBackend, FullTracer,
+    FullTracerConfig, IterAddresses, NextCycleAccess, Platform, PreflightTracer,
+    PreflightTracerConfig, Program, RegIdx, StepCellExtractor, StepIndex, StepRecord,
+    SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
+    host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -841,6 +842,9 @@ pub trait StepSource: Iterator<Item = StepIndex> {
 struct StepReplay {
     vm: VMState<FullTracer>,
     remaining_steps: usize,
+    backend: EmulatorBackend,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    aot_program: Option<ceno_emul::aot::AotProgram>,
 }
 
 impl StepReplay {
@@ -851,14 +855,34 @@ impl StepReplay {
         remaining_steps: usize,
         max_step_shard: usize,
     ) -> Self {
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        let aot_source = program.clone();
         let mut vm =
             VMState::new_with_tracer_config(platform, program, FullTracerConfig { max_step_shard });
         for record in init_mem_state.hints.iter() {
             vm.init_memory(record.addr.into(), record.value);
         }
+        let backend = EmulatorBackend::from_env()
+            .unwrap_or_else(|err| panic!("invalid emulator backend for witness replay: {err}"));
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        let aot_program = match backend {
+            EmulatorBackend::Interp => None,
+            EmulatorBackend::Aot => Some(
+                ceno_emul::aot::AotProgram::compile(aot_source).unwrap_or_else(|err| {
+                    panic!("AOT compile failed during witness replay: {err}")
+                }),
+            ),
+        };
+        #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
+        if backend == EmulatorBackend::Aot {
+            panic!("CENO_EMULATOR_BACKEND=aot requires feature aot-x86_64 on Linux x86-64");
+        }
         StepReplay {
             vm,
             remaining_steps,
+            backend,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            aot_program,
         }
     }
 
@@ -878,16 +902,47 @@ impl Iterator for StepReplay {
         if self.remaining_steps == 0 {
             return None;
         }
-        match self.vm.next_step_record() {
-            Ok(Some(step)) => {
-                self.remaining_steps -= 1;
-                Some(step)
+        match self.backend {
+            EmulatorBackend::Interp => match self.vm.next_step_record() {
+                Ok(Some(step)) => {
+                    self.remaining_steps -= 1;
+                    Some(step)
+                }
+                Ok(None) => {
+                    self.remaining_steps = 0;
+                    None
+                }
+                Err(err) => panic!("vm exec failed during witness replay: {err:?}"),
+            },
+            EmulatorBackend::Aot => {
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                {
+                    let before = self.vm.tracer().executed_insts();
+                    let report = self
+                        .aot_program
+                        .as_ref()
+                        .expect("AOT backend selected without compiled program")
+                        .run_to_halt(&mut self.vm, 1)
+                        .unwrap_or_else(|err| {
+                            panic!("AOT exec failed during witness replay: {err:?}")
+                        });
+                    if report.executed_steps == 0 {
+                        self.remaining_steps = 0;
+                        None
+                    } else {
+                        self.remaining_steps -= 1;
+                        Some(before)
+                    }
+                }
+                #[cfg(not(all(
+                    feature = "aot-x86_64",
+                    target_arch = "x86_64",
+                    target_os = "linux"
+                )))]
+                {
+                    panic!("CENO_EMULATOR_BACKEND=aot requires feature aot-x86_64 on Linux x86-64");
+                }
             }
-            Ok(None) => {
-                self.remaining_steps = 0;
-                None
-            }
-            Err(err) => panic!("vm exec failed during witness replay: {err:?}"),
         }
     }
 }
@@ -939,9 +994,10 @@ pub fn emulate_program<'a>(
         multi_prover.max_cycle_per_shard,
     )
     .with_step_cell_extractor(step_cell_extractor);
+    let preflight_program = program.clone();
     let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
         .in_scope(move || {
-            VMState::new_with_tracer_config(platform.clone(), program.clone(), tracer_config)
+            VMState::new_with_tracer_config(platform.clone(), preflight_program, tracer_config)
         });
 
     info_span!("[ceno] emulator.init_mem").in_scope(|| {
@@ -950,18 +1006,68 @@ pub fn emulate_program<'a>(
         }
     });
 
+    let backend = EmulatorBackend::from_env()
+        .unwrap_or_else(|err| panic!("invalid emulator backend for preflight: {err}"));
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let aot_program = match backend {
+        EmulatorBackend::Interp => None,
+        EmulatorBackend::Aot => {
+            let aot = ceno_emul::aot::AotProgram::compile(program.clone())
+                .unwrap_or_else(|err| panic!("AOT compile failed during preflight: {err}"));
+            let report = aot.report();
+            tracing::info!(
+                "AOT compile/load completed in {:?}; blocks={}, reachable_instructions={}",
+                report.compile_load_time,
+                report.block_count,
+                report.reachable_instruction_count
+            );
+            Some(aot)
+        }
+    };
+    #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
+    if backend == EmulatorBackend::Aot {
+        panic!("CENO_EMULATOR_BACKEND=aot requires feature aot-x86_64 on Linux x86-64");
+    }
+
     let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
-        let mut steps = 0usize;
-        loop {
-            if steps >= max_steps {
-                break;
-            }
-            match vm.next_step_record() {
-                Ok(Some(_)) => {
-                    steps += 1;
+        match backend {
+            EmulatorBackend::Interp => {
+                let mut steps = 0usize;
+                loop {
+                    if steps >= max_steps {
+                        break;
+                    }
+                    match vm.next_step_record() {
+                        Ok(Some(_)) => {
+                            steps += 1;
+                        }
+                        Ok(None) => break,
+                        Err(err) => panic!("emulator trapped before halt: {err}"),
+                    }
                 }
-                Ok(None) => break,
-                Err(err) => panic!("emulator trapped before halt: {err}"),
+            }
+            EmulatorBackend::Aot => {
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                {
+                    let report = aot_program
+                        .as_ref()
+                        .expect("AOT backend selected without compiled program")
+                        .run_to_halt(&mut vm, max_steps)
+                        .unwrap_or_else(|err| panic!("AOT emulator trapped before halt: {err}"));
+                    tracing::info!(
+                        "AOT preflight executed {} instructions in {:?}",
+                        report.executed_steps,
+                        report.execute_time
+                    );
+                }
+                #[cfg(not(all(
+                    feature = "aot-x86_64",
+                    target_arch = "x86_64",
+                    target_os = "linux"
+                )))]
+                {
+                    panic!("CENO_EMULATOR_BACKEND=aot requires feature aot-x86_64 on Linux x86-64");
+                }
             }
         }
         vm.halted_state().map(|halt_state| halt_state.exit_code)
@@ -2460,9 +2566,13 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 
 #[cfg(test)]
 mod tests {
-    use crate::e2e::{MultiProver, ShardContextBuilder};
+    use crate::e2e::{
+        MultiProver, Preset, ShardContextBuilder, emulate_program, public_io_words_to_digest_words,
+        setup_platform_debug, setup_program,
+    };
     use ceno_emul::{
-        CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepIndex, StepRecord, SyscallWitness,
+        CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, Program, StepCellExtractor, StepIndex,
+        StepRecord, SyscallWitness,
     };
     use itertools::Itertools;
     use std::sync::Arc;
@@ -2630,5 +2740,128 @@ mod tests {
             super::public_io_words_to_digest_words(&[]),
             super::KECCAK_EMPTY_WORDS
         );
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    fn emulate_guest_aot(
+        name: &str,
+        elf: &[u8],
+        hints: &[u32],
+        public_io: &[u32],
+        max_steps: usize,
+    ) -> (usize, std::time::Duration) {
+        emulate_guest_with_backend(name, "aot", elf, hints, public_io, max_steps)
+    }
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    fn emulate_guest_with_backend(
+        name: &str,
+        backend: &str,
+        elf: &[u8],
+        hints: &[u32],
+        public_io: &[u32],
+        max_steps: usize,
+    ) -> (usize, std::time::Duration) {
+        use ff_ext::BabyBearExt4;
+
+        unsafe {
+            std::env::set_var("CENO_EMULATOR_BACKEND", backend);
+        }
+        let program = Program::load_elf(elf, u32::MAX).unwrap();
+        let platform =
+            setup_platform_debug(Preset::Ceno, &program, 2 * 1024 * 1024, 2 * 1024 * 1024);
+        let ctx = setup_program::<BabyBearExt4>(program, platform, MultiProver::default());
+        let init_mem = ctx.setup_init_mem(hints);
+        let step_cell_extractor: Arc<dyn StepCellExtractor> = ctx.system_config.config.clone();
+        let public_io_digest = public_io_words_to_digest_words(public_io);
+
+        let started = std::time::Instant::now();
+        let result = emulate_program(
+            ctx.program.clone(),
+            max_steps,
+            &init_mem,
+            public_io_digest,
+            &ctx.platform,
+            &ctx.multi_prover,
+            step_cell_extractor,
+        );
+        assert_eq!(
+            result.exit_code,
+            Some(0),
+            "{name} did not halt successfully"
+        );
+        assert!(
+            result.executed_steps > 0,
+            "{name} produced an empty execution trace"
+        );
+        (result.executed_steps, started.elapsed())
+    }
+
+    #[test]
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    fn fibonacci_guest_aot_emulates() {
+        use ceno_host::CenoStdin;
+
+        let mut hints = CenoStdin::default();
+        let _ = hints.write(&10u32).unwrap();
+        let hints: Vec<u32> = (&hints).into();
+        let _ = emulate_guest_aot(
+            "fibonacci",
+            ceno_examples::fibonacci,
+            &hints,
+            &[4191],
+            100_000,
+        );
+    }
+
+    #[test]
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    fn keccak_syscall_guest_aot_emulates() {
+        let _ = emulate_guest_aot(
+            "keccak_syscall",
+            ceno_examples::keccak_syscall,
+            &[],
+            &[],
+            1_000_000,
+        );
+    }
+
+    #[test]
+    #[ignore]
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    fn aot_guest_perf_probe() {
+        use ceno_host::CenoStdin;
+
+        let mut fib_hints = CenoStdin::default();
+        let _ = fib_hints.write(&10u32).unwrap();
+        let fib_hints: Vec<u32> = (&fib_hints).into();
+        for (name, elf, hints, public_io, max_steps) in [
+            (
+                "fibonacci",
+                ceno_examples::fibonacci,
+                fib_hints.as_slice(),
+                [4191u32].as_slice(),
+                100_000usize,
+            ),
+            (
+                "keccak_syscall",
+                ceno_examples::keccak_syscall,
+                [].as_slice(),
+                [].as_slice(),
+                1_000_000usize,
+            ),
+        ] {
+            let (interp_steps, interp_time) =
+                emulate_guest_with_backend(name, "interp", elf, hints, public_io, max_steps);
+            let (aot_steps, aot_time) =
+                emulate_guest_with_backend(name, "aot", elf, hints, public_io, max_steps);
+            assert_eq!(interp_steps, aot_steps, "{name} executed step mismatch");
+            println!(
+                "{name}: steps={interp_steps}, interp={:?}, aot={:?}, speedup={:.3}x",
+                interp_time,
+                aot_time,
+                interp_time.as_secs_f64() / aot_time.as_secs_f64()
+            );
+        }
     }
 }
