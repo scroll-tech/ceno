@@ -1093,6 +1093,14 @@ pub(crate) struct PreflightNativeTraceState {
     pub pc_after: *mut ByteAddr,
     pub last_kind: *mut InsnKind,
     pub current_shard_start_cycle: *const Cycle,
+    pub planner_cur_cells: *mut u64,
+    pub planner_cur_cycle_in_shard: *mut Cycle,
+    pub planner_cur_step_count: *mut usize,
+    pub planner_max_step_shard: *mut usize,
+    pub planner_shard_id: *mut usize,
+    pub planner_max_cell_per_shard: u64,
+    pub planner_target_cell_first_shard: u64,
+    pub planner_max_cycle_per_shard: Cycle,
 }
 
 #[derive(Clone)]
@@ -1233,13 +1241,12 @@ impl PreflightTracer {
     }
 
     pub(crate) fn supports_direct_native_trace(&self) -> bool {
-        self.config.step_cell_extractor.is_none()
-            && self.config.max_cell_per_shard == u64::MAX
-            && self.config.max_cycle_per_shard == Cycle::MAX
+        self.planner.is_some()
     }
 
     pub(crate) fn native_trace_state(&mut self) -> PreflightNativeTraceState {
         debug_assert!(self.supports_direct_native_trace());
+        let planner = self.planner.as_mut().expect("shard planner missing");
         PreflightNativeTraceState {
             latest_cells: self.latest_accesses.cells_mut_ptr(),
             latest_base: self.latest_accesses.base(),
@@ -1248,7 +1255,37 @@ impl PreflightTracer {
             pc_after: &mut self.pc.after,
             last_kind: &mut self.last_kind,
             current_shard_start_cycle: &self.current_shard_start_cycle,
+            planner_cur_cells: &mut planner.cur_cells,
+            planner_cur_cycle_in_shard: &mut planner.cur_cycle_in_shard,
+            planner_cur_step_count: &mut planner.cur_step_count,
+            planner_max_step_shard: &mut planner.max_step_shard,
+            planner_shard_id: &mut planner.shard_id,
+            planner_max_cell_per_shard: planner.max_cell_per_shard,
+            planner_target_cell_first_shard: planner.target_cell_first_shard,
+            planner_max_cycle_per_shard: planner.max_cycle_per_shard,
         }
+    }
+
+    pub(crate) fn native_step_cells_for_kind(&self, kind: InsnKind) -> u64 {
+        self.config
+            .step_cell_extractor
+            .as_ref()
+            .map(|extractor| extractor.cells_for_kind(kind, None))
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn native_mmio_bound_ptrs(
+        &mut self,
+        start_addr: WordAddr,
+    ) -> (*mut WordAddr, *mut WordAddr) {
+        let Some((_, _, min_addr, max_addr)) = self
+            .mmio_min_max_access
+            .as_mut()
+            .and_then(|mmio_max_access| mmio_max_access.get_mut(&start_addr))
+        else {
+            return (std::ptr::null_mut(), std::ptr::null_mut());
+        };
+        (min_addr as *mut WordAddr, max_addr as *mut WordAddr)
     }
 
     pub(crate) fn record_native_access_side_effects(
@@ -1270,12 +1307,20 @@ impl PreflightTracer {
 
     pub(crate) fn observe_native_steps(&mut self, steps: u64) {
         debug_assert!(self.supports_direct_native_trace());
-        if let Some(planner) = self.planner.as_mut() {
-            planner.cur_cycle_in_shard = planner
-                .cur_cycle_in_shard
-                .saturating_add(steps.saturating_mul(Self::SUBCYCLES_PER_INSN));
-            planner.cur_step_count = planner.cur_step_count.saturating_add(steps as usize);
-        }
+        let _ = steps;
+    }
+
+    pub(crate) fn record_native_shard_split(&mut self) {
+        let planner = self.planner.as_mut().expect("shard planner missing");
+        let next_shard_cycle = self.cycle;
+        planner.push_boundary(next_shard_cycle);
+        planner.shard_id += 1;
+        planner.current_shard_start_cycle = next_shard_cycle;
+        planner.max_step_shard = planner.max_step_shard.max(planner.cur_step_count);
+        planner.cur_cells = 0;
+        planner.cur_cycle_in_shard = 0;
+        planner.cur_step_count = 0;
+        self.current_shard_start_cycle = next_shard_cycle;
     }
 
     #[inline(always)]

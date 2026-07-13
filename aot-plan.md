@@ -2,6 +2,45 @@
 
 ## Implemented In This Pass
 
+Current base commit: `bb1ba1f0 Emit Preflight dense trace updates natively`.
+
+- Extended direct native `PreflightTracer` support to shard-planned configs instead of only the default full-shard config.
+  - Direct mode now works with finite `max_cycle_per_shard`.
+  - Direct mode now works with finite `max_cell_per_shard`.
+  - Direct mode now works when a `StepCellExtractor` is present for native non-`ECALL` instructions.
+- Added runtime per-instruction step-cell metadata for AOT Preflight runs.
+  - AOT compilation remains program-only.
+  - `run_to_halt` builds a dense step-cell table from the active `PreflightTracer` config.
+  - Native emitted code loads the current instruction's static step-cell cost from that table.
+- Kept `ECALL` and syscall witness behavior Rust-owned.
+- Added native shard-planner counter updates for direct Preflight:
+  - current cells
+  - current cycle-in-shard
+  - current step count
+  - shard id / first-shard cell target
+  - max cycle and max cell limits
+- Kept shard boundary vector mutation Rust-owned.
+  - Native code calls a narrow helper only when a split is detected.
+  - The helper pushes the boundary, updates `current_shard_start_cycle`, updates `max_step_shard`, and resets current-shard counters.
+- Kept `NextCycleAccess` map mutation Rust-owned.
+  - Native code still updates dense latest-access cells directly.
+  - Native code calls the access helper only for first touches or accesses whose previous cycle is before the current shard start.
+- Added direct native Preflight memory support for stores.
+  - Native `SB`, `SH`, and `SW` now record Preflight memory accesses directly on the heap/stack/hints fast path.
+  - Native loads and stores update heap/stack/hints min/max range state directly so zkVM final-memory collection sees stack/heap/hint ranges.
+  - Misaligned, `prog_data`, and non-standard memory ranges continue to fall back to Rust slow paths.
+- Limited AOT basic-block emission to statically reachable blocks from the ELF entry.
+  - This prevents Reth-sized guests from spending minutes writing multi-GB assembly for unreachable instruction space.
+  - Indirect `JALR` targets not in the static graph continue through the existing dynamic Rust single-step fallback.
+- Fixed AOT witness replay shard indexing.
+  - Replay now returns local `FullTracer` step indices after `start_new_shard()`.
+  - This fixes the Reth shard-1 panic: `step index 15915783 out of bounds 1`.
+- Added shard-aware direct Preflight tests:
+  - finite cycle shard parity
+  - finite cell shard parity with a test `StepCellExtractor`
+  - native store final-access parity
+  - shard boundaries and `max_step_shard` parity
+
 - Added a Ceno-side `AotRuntimeContext` and `AotInstance` alias.
 - Changed the generated native entry ABI to receive runtime context, slow-path helper, and native trace helper.
 - Exposed a crate-private VM register pointer for AOT codegen.
@@ -52,18 +91,62 @@
 
 - `cargo test -p ceno_emul --features aot-x86_64 aot::tests -- --nocapture`
 - `cargo check -p ceno_emul --features aot-x86_64`
-- `RUST_MIN_STACK=33554432 cargo test -p ceno_zkvm --features aot-x86_64 fibonacci_guest_aot_emulates -- --nocapture`
-- `cargo test -p ceno_emul --features aot-x86_64 aot::tests::aot_pure_perf_probe -- --ignored --nocapture`
+- `cargo check -p ceno_zkvm --features aot-x86_64`
+- `RUST_MIN_STACK=536870912 cargo test -p ceno_zkvm --features aot-x86_64 'e2e::tests::fibonacci_guest_aot_emulates' -- --nocapture`
+- `RUST_MIN_STACK=33554432 cargo test -p ceno_zkvm --features aot-x86_64 keccak_syscall_guest_aot_emulates -- --nocapture`
+- `cargo test -p ceno_emul --release --features aot-x86_64 aot::tests::aot_pure_perf_probe -- --ignored --nocapture`
+- Reth 23587691, `CENO_MAX_CELL_PER_SHARD=805306368`, CPU witgen, GPU proving, cache level 1, `CENO_GPU_JAGGED_RESHAPE_LOG_HEIGHT=23`.
 
 Latest loop-heavy micro probe:
 
 - steps: 3,000,003
-- compile/load: 18.91 ms
-- interpreter: 62.77 ms
-- traced AOT execution: 44.11 ms, 1.42x faster than interpreter
-- pure AOT execution: 5.81 ms, 10.80x faster than interpreter
+- compile/load: 26.35 ms
+- interpreter: 60.72 ms
+- traced AOT execution: 38.56 ms, 1.575x faster than interpreter
+- pure AOT execution: 7.54 ms, 8.056x faster than interpreter
 
-Note: the Fibonacci AOT e2e overflowed the default Rust test-thread stack without `RUST_MIN_STACK`, then passed with a 32 MiB stack.
+Note: the keccak AOT e2e overflowed the default Rust test-thread stack without `RUST_MIN_STACK`, then passed with a 32 MiB stack after the native memory-bound fix.
+
+Reth 23587691 two-shard run:
+
+- Interpreter baseline log: `sanity_23587691_interp_aotcmp_aotfeat_witgen0_cache1_h23_maxcell6_20260713_163422.log`
+  - preflight-execute: 799 ms
+  - program executed: 24,790,776 instructions / 99,163,108 cycles
+  - shards: 2, boundaries `[4, 63663136, 99163108]`
+  - app create_proof: 12.828576875 s
+  - recursion create_proof: 2.368983105 s
+  - total create_proof: 15.22831466 s
+- AOT profile-root log: `sanity_23587691_aot_directnopcmirror_fullprofile_witgen0_cache1_h23_maxcell6_20260713_174927.log`
+  - AOT profile sampled: 24,790,776 steps in 846.289728 ms, roots=5359 selected_roots=5359
+  - AOT compile/load: 54.816362632 s, blocks=15196, reachable_instructions=133818
+  - preflight-execute: 589 ms
+  - AOT execution time inside preflight: 589.324545 ms
+  - fallback_steps: 243,501 (0.98%)
+  - program executed: 24,790,776 instructions / 99,163,108 cycles
+  - shards: 2, boundaries `[4, 63663136, 99163108]`
+  - app create_proof including AOT profile/compile: 70.088989506 s
+  - app create_proof excluding AOT profile/compile setup: about 14.426337146 s
+  - recursion create_proof: 2.35438281 s
+  - total create_proof including AOT setup: 72.475381522 s
+- AOT register-static access experiment: `sanity_23587691_aot_regstatic_fullprofile_witgen0_cache1_h23_maxcell6_20260713_175903.log`
+  - AOT profile sampled: 24,790,776 steps in 865.003249 ms, roots=5359 selected_roots=5359
+  - AOT compile/load: 53.548994192 s, blocks=15196, reachable_instructions=133818
+  - preflight-execute: 594 ms
+  - AOT execution time inside preflight: 593.891493 ms
+  - fallback_steps: 243,501 (0.98%)
+  - app create_proof including AOT profile/compile: 69.133466161 s
+  - recursion create_proof: 2.382841375 s
+  - total create_proof including AOT setup: 71.548594398 s
+- Non-AOT control run accidentally using `CENO_AOT=1` without `CENO_EMULATOR_BACKEND=aot`: `sanity_23587691_aot_regstatic_fullprofile_witgen0_cache1_h23_maxcell6_20260713_175549.log`
+  - preflight-execute: 803 ms
+  - app create_proof: 12.151200913 s
+  - total create_proof: 14.626959181 s
+- Setup-time static-leader compile experiment: `sanity_23587691_aot_setupstatic_witgen0_cache1_h23_maxcell6_20260713_181007.log`
+  - failed during base setup with `AOT setup compile failed: No space left on device (os error 28)`
+  - large `/tmp/ceno-aot-*` temp directories were removed after the failure
+  - interpretation: compiling every static leader is not viable for Reth 23587691 in the current assembly/object pipeline; keep the setup compile path gated and do not use it as the default.
+
+Current Reth interpretation: the original apparent hang was compile/codegen blowup, not a native execution infinite loop. Profile-root AOT now keeps fallback under 1%, but direct Preflight still only reaches about `799 / 589 = 1.36x` over interpreter on this Reth shape. The remaining bottleneck is native direct Preflight bookkeeping itself, not Rust fallback coverage. Setup-time compile is architecturally desirable, but a no-profile static leader candidate set is too large for the current codegen path.
 
 ## Next Steps
 
