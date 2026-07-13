@@ -39,6 +39,7 @@ enum AssemblyTraceStyle {
     Generic,
     PreflightDirect,
     PreflightDirectBlockPlan,
+    PreflightDirectBlockPlanExactAccess,
 }
 
 impl AssemblyTraceStyle {
@@ -47,7 +48,12 @@ impl AssemblyTraceStyle {
     }
 
     fn is_preflight_direct(self) -> bool {
-        matches!(self, Self::PreflightDirect | Self::PreflightDirectBlockPlan)
+        matches!(
+            self,
+            Self::PreflightDirect
+                | Self::PreflightDirectBlockPlan
+                | Self::PreflightDirectBlockPlanExactAccess
+        )
     }
 }
 
@@ -812,29 +818,40 @@ fn write_assembly(
     for (block_idx, block) in blocks.iter().enumerate() {
         let label = labels.get(&block.start_pc).expect("block label must exist");
         writeln!(file, "{label}:")?;
-        let block_plan = trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan
-            && block_supports_preflight_block_plan(program, block)?;
-        if block_plan {
+        let block_plan = if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
+            preflight_block_plan_kind(program, block)?
+        } else {
+            None
+        };
+        if block_plan.is_some() {
             emit_preflight_direct_block_budget_guard(&mut file, block)?;
+            if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
+                emit_preflight_direct_block_memory_fast_path_guard(&mut file, program, block)?;
+            }
             emit_preflight_direct_block_plan_entry(&mut file, block_idx, block)?;
-            emit_preflight_direct_block_access_entry(&mut file, program, block_idx, block)?;
+            if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
+                emit_preflight_direct_block_access_entry(&mut file, program, block_idx, block)?;
+            }
         }
         let mut pc = block.start_pc;
         while pc < block.end_pc {
             let insn = instruction_at(program, pc)?;
-            let step_trace_style = if block_plan {
-                AssemblyTraceStyle::PreflightDirectBlockPlan
-            } else if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
-                AssemblyTraceStyle::PreflightDirect
-            } else {
-                trace_style
-            };
+            let step_trace_style =
+                if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
+                    AssemblyTraceStyle::PreflightDirectBlockPlan
+                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
+                    AssemblyTraceStyle::PreflightDirectBlockPlanExactAccess
+                } else if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
+                    AssemblyTraceStyle::PreflightDirect
+                } else {
+                    trace_style
+                };
             emit_instruction_body(&mut file, program, pc, insn, step_trace_style)?;
             pc = pc.wrapping_add(PC_STEP_SIZE as u32);
         }
         if let Some(prev_pc) = pc.checked_sub(PC_STEP_SIZE as u32) {
             let insn = instruction_at(program, prev_pc)?;
-            if block_plan {
+            if block_plan.is_some() {
                 emit_preflight_direct_block_plan_exit(&mut file, block_idx, block)?;
             }
             emit_successor_jump(&mut file, program, &labels, prev_pc, insn)?;
@@ -1045,7 +1062,26 @@ struct PreflightBlockAccess {
     cycle_offset: u64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PreflightBlockPlanKind {
+    RegisterOnly,
+    MemoryExactAccess,
+}
+
+#[cfg(test)]
 fn block_supports_preflight_block_plan(program: &Program, block: &BasicBlock) -> Result<bool> {
+    Ok(matches!(
+        preflight_block_plan_kind(program, block)?,
+        Some(PreflightBlockPlanKind::RegisterOnly)
+    ))
+}
+
+fn preflight_block_plan_kind(
+    program: &Program,
+    block: &BasicBlock,
+) -> Result<Option<PreflightBlockPlanKind>> {
+    let mut has_memory = false;
+    let mut written_regs = BTreeSet::new();
     let mut pc = block.start_pc;
     while pc < block.end_pc {
         let insn = instruction_at(program, pc)?;
@@ -1053,14 +1089,27 @@ fn block_supports_preflight_block_plan(program: &Program, block: &BasicBlock) ->
             Some(NativeOpcodeFamily::Compute) => {}
             Some(NativeOpcodeFamily::ControlFlow) => {
                 if matches!(insn.kind, InsnKind::JALR) {
-                    return Ok(false);
+                    return Ok(None);
                 }
             }
-            Some(NativeOpcodeFamily::Memory) | None => return Ok(false),
+            Some(NativeOpcodeFamily::Memory) => {
+                has_memory = true;
+                if written_regs.contains(&insn.rs1) {
+                    return Ok(None);
+                }
+            }
+            None => return Ok(None),
+        }
+        if native_step_writes_rd(insn.kind) {
+            written_regs.insert(insn.rd_internal() as RegIdx);
         }
         pc = pc.wrapping_add(PC_STEP_SIZE as u32);
     }
-    Ok(true)
+    Ok(Some(if has_memory {
+        PreflightBlockPlanKind::MemoryExactAccess
+    } else {
+        PreflightBlockPlanKind::RegisterOnly
+    }))
 }
 
 fn preflight_static_register_accesses(insn: Instruction) -> Vec<(u32, PreflightSubcycle)> {
@@ -1109,6 +1158,77 @@ fn emit_preflight_direct_block_budget_guard(
     writeln!(file, "    addq ${block_steps}, %rax")?;
     writeln!(file, "    cmpq %rbp, %rax")?;
     writeln!(file, "    ja L_dynamic")?;
+    Ok(())
+}
+
+fn emit_preflight_direct_block_memory_fast_path_guard(
+    mut file: impl Write,
+    program: &Program,
+    block: &BasicBlock,
+) -> Result<()> {
+    let mut pc = block.start_pc;
+    while pc < block.end_pc {
+        let insn = instruction_at(program, pc)?;
+        if matches!(
+            native_opcode_family(insn.kind),
+            Some(NativeOpcodeFamily::Memory)
+        ) {
+            emit_preflight_direct_memory_fast_path_guard(&mut file, pc, insn)?;
+        }
+        pc = pc.wrapping_add(PC_STEP_SIZE as u32);
+    }
+    Ok(())
+}
+
+fn emit_preflight_direct_memory_fast_path_guard(
+    mut file: impl Write,
+    pc: u32,
+    insn: Instruction,
+) -> Result<()> {
+    let heap_ok_label = format!(".L_block_memory_heap_ok_{pc:x}");
+    let stack_ok_label = format!(".L_block_memory_stack_ok_{pc:x}");
+    let hints_ok_label = format!(".L_block_memory_hints_ok_{pc:x}");
+    let done_label = format!(".L_block_memory_guard_done_{pc:x}");
+
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
+    writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
+    writeln!(file, "    leal {}(%rax), %edx", insn.imm)?;
+    match insn.kind {
+        InsnKind::LH | InsnKind::LHU | InsnKind::SH => {
+            writeln!(file, "    testl $1, %edx")?;
+            writeln!(file, "    jne L_dynamic")?;
+        }
+        InsnKind::LW | InsnKind::SW => {
+            writeln!(file, "    testl $3, %edx")?;
+            writeln!(file, "    jne L_dynamic")?;
+        }
+        _ => {}
+    }
+    emit_native_range_check(
+        &mut file,
+        AOT_CTX_HEAP_START_OFFSET,
+        AOT_CTX_HEAP_END_OFFSET,
+        &heap_ok_label,
+    )?;
+    emit_native_range_check(
+        &mut file,
+        AOT_CTX_STACK_START_OFFSET,
+        AOT_CTX_STACK_END_OFFSET,
+        &stack_ok_label,
+    )?;
+    emit_native_range_check(
+        &mut file,
+        AOT_CTX_HINTS_START_OFFSET,
+        AOT_CTX_HINTS_END_OFFSET,
+        &hints_ok_label,
+    )?;
+    writeln!(file, "    jmp L_dynamic")?;
+    writeln!(file, "{heap_ok_label}:")?;
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{stack_ok_label}:")?;
+    writeln!(file, "    jmp {done_label}")?;
+    writeln!(file, "{hints_ok_label}:")?;
+    writeln!(file, "{done_label}:")?;
     Ok(())
 }
 
@@ -1332,12 +1452,31 @@ fn emit_preflight_direct_step_static(
                 emit_preflight_direct_access_cache_load(&mut file)?;
             }
 
-            for (reg_idx, subcycle) in preflight_static_register_accesses(insn) {
-                emit_preflight_direct_register_access_cached(&mut file, reg_idx, subcycle)?;
-            }
-            if has_memory_access {
+            if native_step_loads_memory(insn.kind) {
+                if native_step_reads_rs1(insn.kind) {
+                    emit_preflight_direct_register_access_cached(
+                        &mut file,
+                        insn.rs1 as u32,
+                        PreflightSubcycle::Rs1,
+                    )?;
+                }
                 writeln!(file, "    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %eax")?;
                 emit_preflight_direct_access_cached(&mut file, "%eax", PreflightSubcycle::Mem)?;
+                if native_step_writes_rd(insn.kind) {
+                    emit_preflight_direct_register_access_cached(
+                        &mut file,
+                        insn.rd_internal(),
+                        PreflightSubcycle::Rd,
+                    )?;
+                }
+            } else {
+                for (reg_idx, subcycle) in preflight_static_register_accesses(insn) {
+                    emit_preflight_direct_register_access_cached(&mut file, reg_idx, subcycle)?;
+                }
+                if has_memory_access {
+                    writeln!(file, "    movl {AOT_CTX_TRACE_MEM_ADDR_OFFSET}(%r12), %eax")?;
+                    emit_preflight_direct_access_cached(&mut file, "%eax", PreflightSubcycle::Mem)?;
+                }
             }
         }
         PreflightAccessMode::BlockAtomic => {
@@ -3162,7 +3301,23 @@ mod tests {
             start_pc: memory.base_address,
             end_pc: memory.base_address + 4,
         };
-        assert!(!block_supports_preflight_block_plan(&memory, &block).unwrap());
+        assert_eq!(
+            preflight_block_plan_kind(&memory, &block).unwrap(),
+            Some(PreflightBlockPlanKind::MemoryExactAccess)
+        );
+
+        let dynamic_memory_base = program(vec![
+            encode_rv32(InsnKind::ADDI, 20, 0, 20, 4),
+            encode_rv32(InsnKind::LW, 20, 0, 1, 0),
+        ]);
+        let block = BasicBlock {
+            start_pc: dynamic_memory_base.base_address,
+            end_pc: dynamic_memory_base.base_address + 8,
+        };
+        assert_eq!(
+            preflight_block_plan_kind(&dynamic_memory_base, &block).unwrap(),
+            None
+        );
 
         let jalr = program(vec![encode_rv32(InsnKind::JALR, 1, 0, 0, 0)]);
         let block = BasicBlock {
@@ -3177,6 +3332,88 @@ mod tests {
             end_pc: ecall.base_address + 4,
         };
         assert!(!block_supports_preflight_block_plan(&ecall, &block).unwrap());
+    }
+
+    #[test]
+    fn aot_preflight_block_plan_simple_memory_keeps_exact_accesses() {
+        with_block_shard_plan_env(|| {
+            let base = CENO_PLATFORM.heap.start;
+            let program = Arc::new(program(vec![
+                encode_rv32(InsnKind::LW, 20, 0, 1, 0),
+                encode_rv32(InsnKind::ADDI, 1, 0, 2, 1),
+                encode_rv32(InsnKind::SW, 20, 2, 0, 4),
+                encode_rv32(InsnKind::ADDI, 2, 0, 3, 1),
+                encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+            ]));
+            let config = crate::PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
+                .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
+
+            let mut interp = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+                CENO_PLATFORM.clone(),
+                program.clone(),
+                config.clone(),
+            );
+            interp.init_register_unsafe(20, base);
+            interp.init_memory(ByteAddr(base).waddr(), 41);
+            interp.init_memory(ByteAddr(base + 4).waddr(), 0);
+            while interp.next_step_record().unwrap().is_some() {}
+
+            let aot =
+                AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                    .unwrap();
+            let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+                CENO_PLATFORM.clone(),
+                program,
+                config,
+            );
+            aot_vm.init_register_unsafe(20, base);
+            aot_vm.init_memory(ByteAddr(base).waddr(), 41);
+            aot_vm.init_memory(ByteAddr(base + 4).waddr(), 0);
+            let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+            assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+            for idx in 0..VMState::<crate::PreflightTracer>::REG_COUNT as u8 {
+                assert_eq!(
+                    aot_vm.peek_register(idx),
+                    interp.peek_register(idx),
+                    "register x{idx} mismatch"
+                );
+            }
+            assert_eq!(
+                aot_vm.peek_memory(ByteAddr(base + 4).waddr()),
+                interp.peek_memory(ByteAddr(base + 4).waddr())
+            );
+
+            let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
+            let (aot_plan, aot_next) = aot_vm.take_tracer().into_shard_plan();
+            assert_eq!(aot_next, interp_next);
+            assert_eq!(
+                aot_plan.shard_cycle_boundaries(),
+                interp_plan.shard_cycle_boundaries()
+            );
+            assert_eq!(aot_plan.max_step_shard(), interp_plan.max_step_shard());
+        });
+    }
+
+    #[test]
+    fn aot_preflight_block_plan_memory_guard_falls_back_to_exact_path() {
+        with_block_shard_plan_env(|| {
+            let base = CENO_PLATFORM.heap.start;
+            let program = Arc::new(program(vec![
+                encode_rv32(InsnKind::LW, 20, 0, 1, 1),
+                encode_rv32(InsnKind::ADDI, 1, 0, 2, 1),
+            ]));
+            let aot =
+                AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                    .unwrap();
+            let mut aot_vm =
+                VMState::<crate::PreflightTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
+            aot_vm.init_register_unsafe(20, base);
+
+            let err = aot.run_to_halt(&mut aot_vm, 10).unwrap_err().to_string();
+
+            assert!(err.contains("LoadAddressMisaligned"));
+        });
     }
 
     fn assert_preflight_aot_matches_interpreter(
