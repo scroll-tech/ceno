@@ -242,36 +242,11 @@ impl AotProgram {
         program: Arc<Program>,
         extra_roots: Vec<u32>,
     ) -> Result<Self> {
-        let trace_style = if std::env::var("CENO_AOT_BLOCK_SHARD_PLAN").is_ok() {
-            AssemblyTraceStyle::PreflightDirectBlockPlan
-        } else {
-            AssemblyTraceStyle::PreflightDirect
-        };
-        Self::compile_with_extra_roots_and_trace_style(program, extra_roots, trace_style)
-    }
-
-    pub fn compile_preflight_direct_all_static_leaders(program: Arc<Program>) -> Result<Self> {
-        Self::compile_with_static_leaders_and_trace_style(
+        Self::compile_with_extra_roots_and_trace_style(
             program,
-            AssemblyTraceStyle::PreflightDirect,
+            extra_roots,
+            AssemblyTraceStyle::PreflightDirectBlockPlan,
         )
-    }
-
-    fn compile_with_static_leaders_and_trace_style(
-        program: Arc<Program>,
-        trace_style: AssemblyTraceStyle,
-    ) -> Result<Self> {
-        let started = Instant::now();
-        let blocks = partition_basic_blocks_all_static_leaders(&program)?;
-        let (library, entry) = compile_and_load_native(&program, &blocks, trace_style)?;
-        Ok(Self {
-            program,
-            blocks,
-            _library: library,
-            entry,
-            compile_load_time: started.elapsed(),
-            trace_style,
-        })
     }
 
     fn compile_with_extra_roots_and_trace_style(
@@ -514,18 +489,12 @@ impl AotProgram {
         } else {
             std::ptr::null()
         };
-        let debug_max_steps = std::env::var("CENO_AOT_DEBUG_MAX_STEPS")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok());
-        let effective_max_steps = debug_max_steps
-            .map(|debug_max_steps| max_steps.min(debug_max_steps))
-            .unwrap_or(max_steps);
         let native_status = unsafe {
             (self.entry)(
                 &mut context,
                 aot_exec_one::<T>,
                 trace_fn,
-                effective_max_steps as u64,
+                max_steps as u64,
                 &mut executed_steps,
                 vm.get_pc().0,
             )
@@ -538,17 +507,6 @@ impl AotProgram {
         }
         if native_status != AOT_STATUS_HALTED {
             bail!("AOT native entry returned invalid status {native_status}");
-        }
-        if let Some(debug_max_steps) = debug_max_steps
-            && !vm.halted()
-            && executed_steps as usize >= debug_max_steps
-        {
-            bail!(
-                "AOT debug step cap reached: steps={}, pc={:#010x}, halted={}",
-                executed_steps,
-                vm.get_pc().0,
-                vm.halted()
-            );
         }
         Ok(AotRunReport {
             executed_steps: executed_steps as usize,
@@ -573,17 +531,12 @@ pub fn partition_basic_blocks_with_roots(
     program: &Program,
     extra_roots: Vec<u32>,
 ) -> Result<Vec<BasicBlock>> {
-    partition_basic_blocks_inner(program, extra_roots, false)
-}
-
-pub fn partition_basic_blocks_all_static_leaders(program: &Program) -> Result<Vec<BasicBlock>> {
-    partition_basic_blocks_inner(program, Vec::new(), true)
+    partition_basic_blocks_inner(program, extra_roots)
 }
 
 fn partition_basic_blocks_inner(
     program: &Program,
     extra_roots: Vec<u32>,
-    include_all_static_leaders: bool,
 ) -> Result<Vec<BasicBlock>> {
     if program.instructions.is_empty() {
         bail!("AOT program has no instructions");
@@ -628,16 +581,12 @@ fn partition_basic_blocks_inner(
 
     let mut reachable_leaders = BTreeSet::new();
     let mut pending = vec![program.entry];
-    if include_all_static_leaders {
-        pending.extend(valid_leaders.iter().copied());
-    } else {
-        pending.extend(
-            valid_leaders
-                .iter()
-                .copied()
-                .filter(|pc| extra_roots.contains(pc)),
-        );
-    }
+    pending.extend(
+        valid_leaders
+            .iter()
+            .copied()
+            .filter(|pc| extra_roots.contains(pc)),
+    );
     let mut blocks = Vec::new();
     while let Some(start_pc) = pending.pop() {
         if !valid_leaders.contains(&start_pc) || !reachable_leaders.insert(start_pc) {
@@ -2977,44 +2926,7 @@ unsafe extern "C" fn aot_preflight_direct_helper(context: *mut AotRuntimeContext
 mod tests {
     use super::*;
     use crate::{CENO_PLATFORM, EmuContext, encode_rv32};
-    use std::sync::{Arc, Mutex, OnceLock};
-
-    static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    struct EnvVarGuard {
-        key: &'static str,
-        old_value: Option<std::ffi::OsString>,
-    }
-
-    impl EnvVarGuard {
-        fn set(key: &'static str, value: &'static str) -> Self {
-            let old_value = std::env::var_os(key);
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, old_value }
-        }
-    }
-
-    impl Drop for EnvVarGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.old_value {
-                    Some(value) => std::env::set_var(self.key, value),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-
-    fn with_block_shard_plan_env(result: impl FnOnce()) {
-        let _lock = ENV_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock poisoned");
-        let _env = EnvVarGuard::set("CENO_AOT_BLOCK_SHARD_PLAN", "1");
-        result();
-    }
+    use std::sync::Arc;
 
     fn program(instructions: Vec<Instruction>) -> Program {
         Program::new(
@@ -3239,63 +3151,61 @@ mod tests {
 
     #[test]
     fn aot_preflight_block_plan_matches_without_shard_cuts() {
-        with_block_shard_plan_env(|| {
-            let program = Arc::new(program(vec![
-                encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
-                encode_rv32(InsnKind::ADDI, 0, 0, 2, 0),
-                encode_rv32(InsnKind::ADD, 2, 1, 2, 0),
-                encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
-                encode_rv32(InsnKind::BNE, 1, 0, 0, -8),
-                encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-            ]));
-            let config = crate::PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
-                .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 7),
+            encode_rv32(InsnKind::ADDI, 0, 0, 2, 0),
+            encode_rv32(InsnKind::ADD, 2, 1, 2, 0),
+            encode_rv32(InsnKind::ADDI, 1, 0, 1, -1),
+            encode_rv32(InsnKind::BNE, 1, 0, 0, -8),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let config = crate::PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
 
-            let mut interp = VMState::<crate::PreflightTracer>::new_with_tracer_config(
-                CENO_PLATFORM.clone(),
-                program.clone(),
-                config.clone(),
-            );
-            while interp.next_step_record().unwrap().is_some() {}
+        let mut interp = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            config.clone(),
+        );
+        while interp.next_step_record().unwrap().is_some() {}
 
-            let aot =
-                AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
-                    .unwrap();
+        let aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        assert_eq!(
+            aot.trace_style,
+            AssemblyTraceStyle::PreflightDirectBlockPlan
+        );
+        let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        assert_eq!(aot_vm.peek_register(1), interp.peek_register(1));
+        assert_eq!(aot_vm.peek_register(2), interp.peek_register(2));
+        assert_eq!(
+            aot_vm.tracer().final_accesses().len(),
+            interp.tracer().final_accesses().len()
+        );
+        for addr in interp.tracer().final_accesses().addresses() {
             assert_eq!(
-                aot.trace_style,
-                AssemblyTraceStyle::PreflightDirectBlockPlan
+                aot_vm.tracer().final_accesses().cycle(*addr),
+                interp.tracer().final_accesses().cycle(*addr),
+                "final access mismatch at {addr:?}"
             );
-            let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
-                CENO_PLATFORM.clone(),
-                program,
-                config,
-            );
-            let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+        }
 
-            assert_eq!(report.executed_steps, interp.tracer().executed_insts());
-            assert_eq!(aot_vm.peek_register(1), interp.peek_register(1));
-            assert_eq!(aot_vm.peek_register(2), interp.peek_register(2));
-            assert_eq!(
-                aot_vm.tracer().final_accesses().len(),
-                interp.tracer().final_accesses().len()
-            );
-            for addr in interp.tracer().final_accesses().addresses() {
-                assert_eq!(
-                    aot_vm.tracer().final_accesses().cycle(*addr),
-                    interp.tracer().final_accesses().cycle(*addr),
-                    "final access mismatch at {addr:?}"
-                );
-            }
-
-            let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
-            let (aot_plan, aot_next) = aot_vm.take_tracer().into_shard_plan();
-            assert_eq!(aot_next, interp_next);
-            assert_eq!(
-                aot_plan.shard_cycle_boundaries(),
-                interp_plan.shard_cycle_boundaries()
-            );
-            assert_eq!(aot_plan.max_step_shard(), interp_plan.max_step_shard());
-        });
+        let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
+        let (aot_plan, aot_next) = aot_vm.take_tracer().into_shard_plan();
+        assert_eq!(aot_next, interp_next);
+        assert_eq!(
+            aot_plan.shard_cycle_boundaries(),
+            interp_plan.shard_cycle_boundaries()
+        );
+        assert_eq!(aot_plan.max_step_shard(), interp_plan.max_step_shard());
     }
 
     #[test]
@@ -3350,84 +3260,80 @@ mod tests {
 
     #[test]
     fn aot_preflight_block_plan_simple_memory_keeps_exact_accesses() {
-        with_block_shard_plan_env(|| {
-            let base = CENO_PLATFORM.heap.start;
-            let program = Arc::new(program(vec![
-                encode_rv32(InsnKind::LW, 20, 0, 1, 0),
-                encode_rv32(InsnKind::ADDI, 1, 0, 2, 1),
-                encode_rv32(InsnKind::SW, 20, 2, 0, 4),
-                encode_rv32(InsnKind::ADDI, 2, 0, 3, 1),
-                encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
-            ]));
-            let config = crate::PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
-                .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::LW, 20, 0, 1, 0),
+            encode_rv32(InsnKind::ADDI, 1, 0, 2, 1),
+            encode_rv32(InsnKind::SW, 20, 2, 0, 4),
+            encode_rv32(InsnKind::ADDI, 2, 0, 3, 1),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+        let config = crate::PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
 
-            let mut interp = VMState::<crate::PreflightTracer>::new_with_tracer_config(
-                CENO_PLATFORM.clone(),
-                program.clone(),
-                config.clone(),
-            );
-            interp.init_register_unsafe(20, base);
-            interp.init_memory(ByteAddr(base).waddr(), 41);
-            interp.init_memory(ByteAddr(base + 4).waddr(), 0);
-            while interp.next_step_record().unwrap().is_some() {}
+        let mut interp = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program.clone(),
+            config.clone(),
+        );
+        interp.init_register_unsafe(20, base);
+        interp.init_memory(ByteAddr(base).waddr(), 41);
+        interp.init_memory(ByteAddr(base + 4).waddr(), 0);
+        while interp.next_step_record().unwrap().is_some() {}
 
-            let aot =
-                AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
-                    .unwrap();
-            let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
-                CENO_PLATFORM.clone(),
-                program,
-                config,
-            );
-            aot_vm.init_register_unsafe(20, base);
-            aot_vm.init_memory(ByteAddr(base).waddr(), 41);
-            aot_vm.init_memory(ByteAddr(base + 4).waddr(), 0);
-            let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
+        let aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
+        aot_vm.init_register_unsafe(20, base);
+        aot_vm.init_memory(ByteAddr(base).waddr(), 41);
+        aot_vm.init_memory(ByteAddr(base + 4).waddr(), 0);
+        let report = aot.run_to_halt(&mut aot_vm, 100).unwrap();
 
-            assert_eq!(report.executed_steps, interp.tracer().executed_insts());
-            for idx in 0..VMState::<crate::PreflightTracer>::REG_COUNT as u8 {
-                assert_eq!(
-                    aot_vm.peek_register(idx),
-                    interp.peek_register(idx),
-                    "register x{idx} mismatch"
-                );
-            }
+        assert_eq!(report.executed_steps, interp.tracer().executed_insts());
+        for idx in 0..VMState::<crate::PreflightTracer>::REG_COUNT as u8 {
             assert_eq!(
-                aot_vm.peek_memory(ByteAddr(base + 4).waddr()),
-                interp.peek_memory(ByteAddr(base + 4).waddr())
+                aot_vm.peek_register(idx),
+                interp.peek_register(idx),
+                "register x{idx} mismatch"
             );
+        }
+        assert_eq!(
+            aot_vm.peek_memory(ByteAddr(base + 4).waddr()),
+            interp.peek_memory(ByteAddr(base + 4).waddr())
+        );
 
-            let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
-            let (aot_plan, aot_next) = aot_vm.take_tracer().into_shard_plan();
-            assert_eq!(aot_next, interp_next);
-            assert_eq!(
-                aot_plan.shard_cycle_boundaries(),
-                interp_plan.shard_cycle_boundaries()
-            );
-            assert_eq!(aot_plan.max_step_shard(), interp_plan.max_step_shard());
-        });
+        let (interp_plan, interp_next) = interp.take_tracer().into_shard_plan();
+        let (aot_plan, aot_next) = aot_vm.take_tracer().into_shard_plan();
+        assert_eq!(aot_next, interp_next);
+        assert_eq!(
+            aot_plan.shard_cycle_boundaries(),
+            interp_plan.shard_cycle_boundaries()
+        );
+        assert_eq!(aot_plan.max_step_shard(), interp_plan.max_step_shard());
     }
 
     #[test]
     fn aot_preflight_block_plan_memory_guard_falls_back_to_exact_path() {
-        with_block_shard_plan_env(|| {
-            let base = CENO_PLATFORM.heap.start;
-            let program = Arc::new(program(vec![
-                encode_rv32(InsnKind::LW, 20, 0, 1, 1),
-                encode_rv32(InsnKind::ADDI, 1, 0, 2, 1),
-            ]));
-            let aot =
-                AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
-                    .unwrap();
-            let mut aot_vm =
-                VMState::<crate::PreflightTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
-            aot_vm.init_register_unsafe(20, base);
+        let base = CENO_PLATFORM.heap.start;
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::LW, 20, 0, 1, 1),
+            encode_rv32(InsnKind::ADDI, 1, 0, 2, 1),
+        ]));
+        let aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        let mut aot_vm =
+            VMState::<crate::PreflightTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
+        aot_vm.init_register_unsafe(20, base);
 
-            let err = aot.run_to_halt(&mut aot_vm, 10).unwrap_err().to_string();
+        let err = aot.run_to_halt(&mut aot_vm, 10).unwrap_err().to_string();
 
-            assert!(err.contains("LoadAddressMisaligned"));
-        });
+        assert!(err.contains("LoadAddressMisaligned"));
     }
 
     fn assert_preflight_aot_matches_interpreter(

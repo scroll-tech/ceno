@@ -40,7 +40,7 @@ Current base commit before block-boundary planner work: `8d5cf094 Make Preflight
   - finite cell shard parity with a test `StepCellExtractor`
   - native store final-access parity
   - shard boundaries and `max_step_shard` parity
-- Added opt-in direct Preflight block-boundary shard planning behind `CENO_AOT_BLOCK_SHARD_PLAN`.
+- Added direct Preflight block-boundary shard planning, now the default direct Preflight path.
   - Native code still updates exact per-instruction Preflight access cycles.
   - Eligible compute/control basic blocks batch only planner cell/cycle/step counter updates.
   - Shard-limit checks move from every instruction to basic-block entry for eligible blocks.
@@ -54,6 +54,26 @@ Current base commit before block-boundary planner work: `8d5cf094 Make Preflight
   - Native code loads the dense latest-access base pointer, current cycle, and current shard start once per step.
   - Register and memory access updates reuse those cached values.
   - The rare first-touch or next-cycle-boundary helper path reloads the cache after returning.
+- Extended the Step 5 simple-memory block direction with additional basic-block-boundary guard hoisting.
+  - Commit: `7521b744 Hoist AOT preflight block guards`.
+  - Follow-up cleanup: removed the `CENO_AOT_BLOCK_SHARD_PLAN` gate and made the fastest accepted block-planned path unconditional.
+  - Follow-up cleanup also removed AOT env knobs for profile sample size, profile root cap, setup-time all-static compile, and debug max-step override. Profile sampling now uses fixed defaults of `30_000_000` steps and `8192` roots.
+  - For block-planned AOT Preflight blocks, the `trace_next_pc == pc` busy-loop guard now runs once at basic-block exit instead of after every native step.
+  - The per-step busy-loop guard remains on exact/non-block-planned paths.
+  - This is valid for the existing block-planned path because basic-block partitioning already terminates blocks at static branches, `JAL`, `JALR`, `ECALL`, and invalid instructions, and eligible planned blocks exclude dynamic mid-block control flow.
+  - The memory fast-path guard now hoists the register-array pointer load once per block instead of once per memory access guard.
+  - Validation:
+    - `cargo fmt --check`
+    - `cargo test -p ceno_emul --features aot-x86_64 aot::tests -- --nocapture`
+    - `cargo check -p ceno_zkvm --features aot-x86_64`
+  - Reth measurements versus the Step 5 baseline:
+    - Block `23587691`: `494.768628ms` -> `494.567954ms`, effectively neutral.
+    - Block `23817600`: `6843.316513ms` -> `6568.146808ms`, about `4.0%` faster.
+  - Keep rationale: meets the acceptance policy because one block improves by more than `1%` and the other is not slower by more than `0.5%`.
+  - Other guards considered:
+    - `max_steps` is already partially protected by `emit_preflight_direct_block_budget_guard`; fully removing per-step handling requires splitting `emit_after_step` because it also handles halt/error and step count updates.
+    - cycle/pending-step updates may be movable for register-only block-atomic paths, but memory-exact blocks still need exact access-cycle bookkeeping.
+    - memory bounds are already moved/suppressed for Step 5 eligible memory blocks, so further work there should focus on exactness-preserving reductions only.
 
 - Added a Ceno-side `AotRuntimeContext` and `AotInstance` alias.
 - Changed the generated native entry ABI to receive runtime context, slow-path helper, and native trace helper.
@@ -154,7 +174,7 @@ Reth 23587691 two-shard run:
   - recursion create_proof: 2.382841375 s
   - total create_proof including AOT setup: 71.548594398 s
 - AOT block-boundary shard planner experiment: `sanity_23587691_aot_blockplan_fullprofile_witgen0_cache1_h23_maxcell6_20260713_184117.log`
-  - env: `CENO_AOT_BLOCK_SHARD_PLAN=1`
+  - historical env: `CENO_AOT_BLOCK_SHARD_PLAN=1`; this path is now default.
   - AOT profile sampled: 24,790,776 steps in 843.246204 ms, roots=5359 selected_roots=5359
   - AOT compile/load: 53.004060935 s, blocks=15196, reachable_instructions=133818
   - preflight-execute: 570 ms
@@ -168,7 +188,7 @@ Reth 23587691 two-shard run:
   - preflight speedup over interpreter: `799 / 570.282164 = 1.40x`
   - preflight improvement over direct per-instruction shard planner AOT: `589.324545 / 570.282164 = 1.03x`
 - AOT block planner plus fused memory-bound update: `sanity_23587691_aot_blockplan_memfuse_fullprofile_witgen0_cache1_h23_maxcell6_20260713_185252.log`
-  - env: `CENO_AOT_BLOCK_SHARD_PLAN=1`
+  - historical env: `CENO_AOT_BLOCK_SHARD_PLAN=1`; this path is now default.
   - AOT profile sampled: 24,790,776 steps in 850.078361 ms, roots=5359 selected_roots=5359
   - AOT compile/load: 53.531814868 s, blocks=15196, reachable_instructions=133818
   - preflight-execute: 545 ms
@@ -182,7 +202,7 @@ Reth 23587691 two-shard run:
   - preflight speedup over interpreter: `799 / 545.429258 = 1.46x`
   - preflight improvement over block-boundary planner: `570.282164 / 545.429258 = 1.05x`
 - AOT block planner plus fused memory bounds plus cached access bookkeeping: `sanity_23587691_aot_blockplan_memfuse_accesscache_fullprofile_witgen0_cache1_h23_maxcell6_20260713_185858.log`
-  - env: `CENO_AOT_BLOCK_SHARD_PLAN=1`
+  - historical env: `CENO_AOT_BLOCK_SHARD_PLAN=1`; this path is now default.
   - AOT profile sampled: 24,790,776 steps in 848.554958 ms, roots=5359 selected_roots=5359
   - AOT compile/load: 55.723621655 s, blocks=15196, reachable_instructions=133818
   - preflight-execute: 533 ms
@@ -202,9 +222,9 @@ Reth 23587691 two-shard run:
 - Setup-time static-leader compile experiment: `sanity_23587691_aot_setupstatic_witgen0_cache1_h23_maxcell6_20260713_181007.log`
   - failed during base setup with `AOT setup compile failed: No space left on device (os error 28)`
   - large `/tmp/ceno-aot-*` temp directories were removed after the failure
-  - interpretation: compiling every static leader is not viable for Reth 23587691 in the current assembly/object pipeline; keep the setup compile path gated and do not use it as the default.
+  - interpretation: compiling every static leader is not viable for Reth 23587691 in the current assembly/object pipeline; the setup compile path has been removed.
 
-Current Reth interpretation: the original apparent hang was compile/codegen blowup, not a native execution infinite loop. Profile-root AOT now keeps fallback under 1%, but direct Preflight still only reaches about `799 / 589 = 1.36x` over interpreter on this Reth shape. The remaining bottleneck is native direct Preflight bookkeeping itself, not Rust fallback coverage. Setup-time compile is architecturally desirable, but a no-profile static leader candidate set is too large for the current codegen path.
+Current Reth interpretation: the original apparent hang was compile/codegen blowup, not a native execution infinite loop. Profile-root AOT now keeps fallback under 1%, but direct Preflight still only reaches about `799 / 589 = 1.36x` over interpreter on this Reth shape. The remaining bottleneck is native direct Preflight bookkeeping itself, not Rust fallback coverage. Setup-time all-static compile remains architecturally interesting, but a no-profile static leader candidate set is too large for the current codegen path and is no longer kept as a runtime switch.
 
 ## Next Steps
 

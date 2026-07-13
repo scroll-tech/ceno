@@ -971,24 +971,17 @@ impl StepSource for StepReplay {
 }
 
 #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+const AOT_PROFILE_STEPS: usize = 30_000_000;
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+const AOT_PROFILE_ROOTS: usize = 8192;
+
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
 fn sample_aot_roots(
     platform: &Platform,
     program: Arc<Program>,
     hints_init: &[MemInitRecord],
     tracer_config: PreflightTracerConfig,
 ) -> Vec<u32> {
-    let sample_steps = std::env::var("CENO_AOT_PROFILE_STEPS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(30_000_000);
-    if sample_steps == 0 {
-        return Vec::new();
-    }
-    let max_roots = std::env::var("CENO_AOT_PROFILE_ROOTS")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .unwrap_or(8192);
-
     let started = std::time::Instant::now();
     let mut vm = VMState::<PreflightTracer>::new_with_tracer_config(
         platform.clone(),
@@ -1003,7 +996,7 @@ fn sample_aot_roots(
     root_counts.insert(program.entry, usize::MAX);
     let text_end = program.base_address + (program.instructions.len() * WORD_SIZE) as u32;
     let mut steps = 0usize;
-    while steps < sample_steps && !vm.halted() {
+    while steps < AOT_PROFILE_STEPS && !vm.halted() {
         let pc = vm.get_pc();
         match vm.next_step_record() {
             Ok(Some(_)) => {
@@ -1026,12 +1019,12 @@ fn sample_aot_roots(
         steps,
         started.elapsed(),
         root_counts.len(),
-        max_roots.min(root_counts.len())
+        AOT_PROFILE_ROOTS.min(root_counts.len())
     );
     root_counts
         .into_iter()
         .sorted_by_key(|(pc, count)| (std::cmp::Reverse(*count), *pc))
-        .take(max_roots)
+        .take(AOT_PROFILE_ROOTS)
         .map(|(pc, _)| pc)
         .collect()
 }
@@ -2006,20 +1999,6 @@ pub fn setup_program<E: ExtensionField>(
         .unwrap_or_else(|err| panic!("invalid emulator backend for setup: {err}"))
     {
         EmulatorBackend::Interp => None,
-        EmulatorBackend::Aot if std::env::var("CENO_AOT_SETUP_COMPILE").is_ok() => {
-            let aot = ceno_emul::aot::AotProgram::compile_preflight_direct_all_static_leaders(
-                program.clone(),
-            )
-            .unwrap_or_else(|err| panic!("AOT setup compile failed: {err}"));
-            let report = aot.report();
-            tracing::info!(
-                "AOT setup compile/load completed in {:?}; blocks={}, reachable_instructions={}",
-                report.compile_load_time,
-                report.block_count,
-                report.reachable_instruction_count
-            );
-            Some(Arc::new(aot))
-        }
         EmulatorBackend::Aot => None,
     };
 
