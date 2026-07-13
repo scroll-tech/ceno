@@ -853,6 +853,7 @@ fn write_assembly(
             let insn = instruction_at(program, prev_pc)?;
             if block_plan.is_some() {
                 emit_preflight_direct_block_plan_exit(&mut file, block_idx, block)?;
+                emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
             }
             emit_successor_jump(&mut file, program, &labels, prev_pc, insn)?;
         }
@@ -981,6 +982,7 @@ fn emit_after_native_step(
             } else {
                 PreflightAccessMode::Exact
             },
+            matches!(trace_style, AssemblyTraceStyle::PreflightDirect),
         )?;
         emit_after_step(&mut file)?;
         return Ok(());
@@ -1017,6 +1019,7 @@ fn emit_after_native_step(
         true,
         false,
         PreflightAccessMode::Exact,
+        true,
     )?;
     writeln!(file, "{done_label}:")?;
     emit_after_step(&mut file)?;
@@ -1166,6 +1169,7 @@ fn emit_preflight_direct_block_memory_fast_path_guard(
     program: &Program,
     block: &BasicBlock,
 ) -> Result<()> {
+    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
     let mut pc = block.start_pc;
     while pc < block.end_pc {
         let insn = instruction_at(program, pc)?;
@@ -1190,7 +1194,6 @@ fn emit_preflight_direct_memory_fast_path_guard(
     let hints_ok_label = format!(".L_block_memory_hints_ok_{pc:x}");
     let done_label = format!(".L_block_memory_guard_done_{pc:x}");
 
-    writeln!(file, "    movq {AOT_CTX_REGISTERS_OFFSET}(%r12), %r10")?;
     writeln!(file, "    movl {}(%r10), %eax", insn.rs1 as usize * 4)?;
     writeln!(file, "    leal {}(%rax), %edx", insn.imm)?;
     match insn.kind {
@@ -1434,6 +1437,7 @@ fn emit_preflight_direct_step_static(
     update_planner: bool,
     preflight_memory_bounds_updated: bool,
     access_mode: PreflightAccessMode,
+    check_busy_loop: bool,
 ) -> Result<()> {
     let has_memory_access =
         native_step_loads_memory(insn.kind) || native_step_stores_memory(insn.kind);
@@ -1517,21 +1521,31 @@ fn emit_preflight_direct_step_static(
     if update_planner {
         emit_preflight_direct_planner_step_static(&mut file, program, pc)?;
     }
+    if check_busy_loop {
+        emit_preflight_direct_busy_loop_guard(&mut file, pc)?;
+    }
+    writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
+    Ok(())
+}
+
+fn emit_preflight_direct_busy_loop_guard(mut file: impl Write, pc: u32) -> Result<()> {
+    let done_label = format!(".L_preflight_busy_loop_done_{pc:x}");
     writeln!(
         file,
         "    cmpl ${pc:#010x}, {AOT_CTX_TRACE_NEXT_PC_OFFSET}(%r12)"
     )?;
-    writeln!(file, "    jne 5f")?;
+    writeln!(file, "    jne {done_label}")?;
     writeln!(
         file,
         "    movl ${AOT_PREFLIGHT_HELPER_BUSY_LOOP}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
     )?;
     writeln!(file, "    movq %r12, %rdi")?;
     writeln!(file, "    call *%r14")?;
-    writeln!(file, "    jmp 6f")?;
-    writeln!(file, "5:")?;
-    writeln!(file, "    movl ${AOT_STATUS_CONTINUE}, %eax")?;
-    writeln!(file, "6:")?;
+    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
+    writeln!(file, "    je L_error")?;
+    writeln!(file, "    cmpl ${AOT_STATUS_HALTED}, %eax")?;
+    writeln!(file, "    je L_done")?;
+    writeln!(file, "{done_label}:")?;
     Ok(())
 }
 
