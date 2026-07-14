@@ -119,7 +119,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
             vm_state.ts,
         )?;
 
-        let sign_bit_value = layout.layer_exprs.wits.sign_bit;
+        let sign_bit_value = layout.sign_bit_wit();
         let sign_bit = OpFixedRS::<_, { Platform::reg_arg1() }, true>::construct_circuit(
             cb,
             [sign_bit_value.expr(), Expression::ZERO],

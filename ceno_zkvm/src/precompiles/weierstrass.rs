@@ -2,6 +2,7 @@ use generic_array::GenericArray;
 use num::BigUint;
 use sp1_curves::params::NumWords;
 
+pub mod compact_field_relation;
 pub mod test_utils;
 pub mod weierstrass_add;
 pub mod weierstrass_decompress;
