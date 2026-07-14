@@ -2,8 +2,15 @@ use anyhow::{Result, bail};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum EmulatorBackend {
-    #[default]
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        default
+    )]
     Interp,
+    #[cfg_attr(
+        all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"),
+        default
+    )]
     Aot,
 }
 
@@ -15,7 +22,7 @@ impl EmulatorBackend {
             Ok(value) => {
                 bail!("unsupported CENO_EMULATOR_BACKEND={value:?}; expected \"interp\" or \"aot\"")
             }
-            Err(std::env::VarError::NotPresent) => Ok(Self::Interp),
+            Err(std::env::VarError::NotPresent) => Ok(Self::default()),
             Err(err) => bail!("could not read CENO_EMULATOR_BACKEND: {err}"),
         }
     }

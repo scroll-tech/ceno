@@ -919,65 +919,6 @@ impl StepSource for StepReplay {
     }
 }
 
-#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-const AOT_PROFILE_STEPS: usize = 30_000_000;
-#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-const AOT_PROFILE_ROOTS: usize = 8192;
-
-#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-fn sample_aot_roots(
-    platform: &Platform,
-    program: Arc<Program>,
-    hints_init: &[MemInitRecord],
-    tracer_config: PreflightTracerConfig,
-) -> Vec<u32> {
-    let started = std::time::Instant::now();
-    let mut vm = VMState::<PreflightTracer>::new_with_tracer_config(
-        platform.clone(),
-        program.clone(),
-        tracer_config,
-    );
-    for record in hints_init {
-        vm.init_memory(record.addr.into(), record.value);
-    }
-
-    let mut root_counts = BTreeMap::new();
-    root_counts.insert(program.entry, usize::MAX);
-    let text_end = program.base_address + (program.instructions.len() * WORD_SIZE) as u32;
-    let mut steps = 0usize;
-    while steps < AOT_PROFILE_STEPS && !vm.halted() {
-        let pc = vm.get_pc();
-        match vm.next_step_record() {
-            Ok(Some(_)) => {
-                steps += 1;
-                let next_pc = vm.get_pc().0;
-                if next_pc != pc.0.wrapping_add(WORD_SIZE as u32)
-                    && next_pc >= program.base_address
-                    && next_pc < text_end
-                    && next_pc.is_multiple_of(WORD_SIZE as u32)
-                {
-                    *root_counts.entry(next_pc).or_insert(0) += 1;
-                }
-            }
-            Ok(None) => break,
-            Err(err) => panic!("AOT profile sampling trapped: {err}"),
-        }
-    }
-    tracing::info!(
-        "AOT profile sampled {} steps in {:?}; roots={} selected_roots={}",
-        steps,
-        started.elapsed(),
-        root_counts.len(),
-        AOT_PROFILE_ROOTS.min(root_counts.len())
-    );
-    root_counts
-        .into_iter()
-        .sorted_by_key(|(pc, count)| (std::cmp::Reverse(*count), *pc))
-        .take(AOT_PROFILE_ROOTS)
-        .map(|(pc, _)| pc)
-        .collect()
-}
-
 pub fn emulate_program<'a>(
     program: Arc<Program>,
     max_steps: usize,
@@ -1026,8 +967,14 @@ pub fn emulate_program<'a>(
         EmulatorBackend::Aot => match precompiled_aot {
             Some(aot) => Some(aot),
             None => {
-                let roots =
-                    sample_aot_roots(platform, program.clone(), hints_init, profile_tracer_config);
+                let roots = ceno_emul::aot::sample_preflight_roots(
+                    platform,
+                    program.clone(),
+                    hints_init
+                        .iter()
+                        .map(|record| (record.addr.into(), record.value)),
+                    profile_tracer_config,
+                );
                 let aot = ceno_emul::aot::AotProgram::compile_preflight_direct_with_extra_roots(
                     program.clone(),
                     roots,
@@ -2618,18 +2565,6 @@ mod tests {
     use std::sync::Arc;
     use tiny_keccak::{Hasher, Keccak};
 
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    use crate::e2e::{
-        Preset, emulate_program, public_io_words_to_digest_words, setup_platform_debug,
-        setup_program,
-    };
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    use ceno_emul::{Program, StepCellExtractor};
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    use gkr_iop::RAMType;
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    use std::sync::{Mutex, OnceLock};
-
     #[test]
     fn test_single_prover_shard_ctx() {
         for (name, max_cycle_per_shard, executed_instruction, expected_shard) in [
@@ -2792,236 +2727,5 @@ mod tests {
             super::public_io_words_to_digest_words(&[]),
             super::KECCAK_EMPTY_WORDS
         );
-    }
-
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    #[derive(Debug)]
-    struct PreflightRun {
-        executed_steps: usize,
-        elapsed: std::time::Duration,
-        max_cycle: Cycle,
-        max_step_shard: usize,
-        shard_cycle_boundaries: Vec<Cycle>,
-        final_mem_state: Vec<(RAMType, u32, Cycle, u32, u32)>,
-    }
-
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    impl PreflightRun {
-        fn steps_and_elapsed(&self) -> (usize, std::time::Duration) {
-            (self.executed_steps, self.elapsed)
-        }
-    }
-
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    fn emulator_backend_env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    fn emulate_guest_aot(
-        name: &str,
-        elf: &[u8],
-        hints: &[u32],
-        public_io: &[u32],
-        max_steps: usize,
-    ) -> (usize, std::time::Duration) {
-        let run = emulate_guest_with_backend(
-            name,
-            "aot",
-            elf,
-            hints,
-            public_io,
-            max_steps,
-            MultiProver::default(),
-        );
-        (run.executed_steps, run.elapsed)
-    }
-
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    fn emulate_guest_with_backend(
-        name: &str,
-        backend: &str,
-        elf: &[u8],
-        hints: &[u32],
-        public_io: &[u32],
-        max_steps: usize,
-        multi_prover: MultiProver,
-    ) -> PreflightRun {
-        use ff_ext::BabyBearExt4;
-
-        let _env_guard = emulator_backend_env_lock().lock().unwrap();
-        unsafe {
-            std::env::set_var("CENO_EMULATOR_BACKEND", backend);
-        }
-        let program = Program::load_elf(elf, u32::MAX).unwrap();
-        let platform =
-            setup_platform_debug(Preset::Ceno, &program, 2 * 1024 * 1024, 2 * 1024 * 1024);
-        let ctx = setup_program::<BabyBearExt4>(program, platform, multi_prover);
-        let init_mem = ctx.setup_init_mem(hints);
-        let step_cell_extractor: Arc<dyn StepCellExtractor> = ctx.system_config.config.clone();
-        let public_io_digest = public_io_words_to_digest_words(public_io);
-
-        let started = std::time::Instant::now();
-        let result = emulate_program(
-            ctx.program.clone(),
-            max_steps,
-            &init_mem,
-            public_io_digest,
-            &ctx.platform,
-            &ctx.multi_prover,
-            step_cell_extractor,
-            ctx.preflight_aot_program.clone(),
-        );
-        assert_eq!(
-            result.exit_code,
-            Some(0),
-            "{name} did not halt successfully"
-        );
-        assert!(
-            result.executed_steps > 0,
-            "{name} produced an empty execution trace"
-        );
-        let final_mem_state = result
-            .final_mem_state
-            .reg
-            .iter()
-            .chain(&result.final_mem_state.io)
-            .chain(&result.final_mem_state.mem)
-            .chain(&result.final_mem_state.hints)
-            .chain(&result.final_mem_state.stack)
-            .chain(&result.final_mem_state.heap)
-            .map(|record| {
-                (
-                    record.ram_type,
-                    record.addr,
-                    record.cycle,
-                    record.value,
-                    record.init_value,
-                )
-            })
-            .collect();
-        PreflightRun {
-            executed_steps: result.executed_steps,
-            elapsed: started.elapsed(),
-            max_cycle: result.pi.end_cycle,
-            max_step_shard: result.max_step_shard,
-            shard_cycle_boundaries: result.shard_cycle_boundaries.as_ref().clone(),
-            final_mem_state,
-        }
-    }
-
-    #[test]
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    fn fibonacci_guest_aot_emulates() {
-        use ceno_host::CenoStdin;
-
-        let mut hints = CenoStdin::default();
-        let _ = hints.write(&10u32).unwrap();
-        let hints: Vec<u32> = (&hints).into();
-        let _ = emulate_guest_aot(
-            "fibonacci",
-            ceno_examples::fibonacci,
-            &hints,
-            &[4191],
-            100_000,
-        );
-    }
-
-    #[test]
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    fn keccak_syscall_guest_aot_emulates() {
-        let _ = emulate_guest_aot(
-            "keccak_syscall",
-            ceno_examples::keccak_syscall,
-            &[],
-            &[],
-            1_000_000,
-        );
-    }
-
-    #[test]
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    fn keccak_syscall_preflight_aot_matches_interpreter_shard_plan() {
-        let multi_prover = MultiProver::new(0, 1, 50_000, Cycle::MAX);
-        let interp = emulate_guest_with_backend(
-            "keccak_syscall",
-            "interp",
-            ceno_examples::keccak_syscall,
-            &[],
-            &[],
-            1_000_000,
-            multi_prover.clone(),
-        );
-        let aot = emulate_guest_with_backend(
-            "keccak_syscall",
-            "aot",
-            ceno_examples::keccak_syscall,
-            &[],
-            &[],
-            1_000_000,
-            multi_prover,
-        );
-
-        assert_eq!(aot.executed_steps, interp.executed_steps);
-        assert_eq!(aot.max_cycle, interp.max_cycle);
-        assert_eq!(aot.max_step_shard, interp.max_step_shard);
-        assert_eq!(aot.shard_cycle_boundaries, interp.shard_cycle_boundaries);
-        assert_eq!(aot.final_mem_state, interp.final_mem_state);
-    }
-
-    #[test]
-    #[ignore]
-    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-    fn aot_guest_perf_probe() {
-        use ceno_host::CenoStdin;
-
-        let mut fib_hints = CenoStdin::default();
-        let _ = fib_hints.write(&10u32).unwrap();
-        let fib_hints: Vec<u32> = (&fib_hints).into();
-        for (name, elf, hints, public_io, max_steps) in [
-            (
-                "fibonacci",
-                ceno_examples::fibonacci,
-                fib_hints.as_slice(),
-                [4191u32].as_slice(),
-                100_000usize,
-            ),
-            (
-                "keccak_syscall",
-                ceno_examples::keccak_syscall,
-                [].as_slice(),
-                [].as_slice(),
-                1_000_000usize,
-            ),
-        ] {
-            let (interp_steps, interp_time) = emulate_guest_with_backend(
-                name,
-                "interp",
-                elf,
-                hints,
-                public_io,
-                max_steps,
-                MultiProver::default(),
-            )
-            .steps_and_elapsed();
-            let (aot_steps, aot_time) = emulate_guest_with_backend(
-                name,
-                "aot",
-                elf,
-                hints,
-                public_io,
-                max_steps,
-                MultiProver::default(),
-            )
-            .steps_and_elapsed();
-            assert_eq!(interp_steps, aot_steps, "{name} executed step mismatch");
-            println!(
-                "{name}: steps={interp_steps}, interp={:?}, aot={:?}, speedup={:.3}x",
-                interp_time,
-                aot_time,
-                interp_time.as_secs_f64() / aot_time.as_secs_f64()
-            );
-        }
     }
 }

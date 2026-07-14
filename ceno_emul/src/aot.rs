@@ -1,7 +1,7 @@
 use crate::{
-    Change, EmuContext, InsnKind, Instruction, PC_STEP_SIZE, PreflightTracer, Program, Tracer,
-    VMState,
-    addr::{ByteAddr, Cycle, RegIdx, WordAddr},
+    Change, EmuContext, InsnKind, Instruction, PC_STEP_SIZE, Platform, PreflightTracer,
+    PreflightTracerConfig, Program, Tracer, VMState,
+    addr::{ByteAddr, Cycle, RegIdx, WORD_SIZE, Word, WordAddr},
     rv32im::TrapCause,
     tracer::{
         NATIVE_TRACE_LOAD_MEM, NATIVE_TRACE_READ_RS1, NATIVE_TRACE_READ_RS2,
@@ -218,6 +218,64 @@ pub struct AotProgram {
 }
 
 pub type AotInstance = AotProgram;
+
+const AOT_PROFILE_STEPS: usize = 30_000_000;
+const AOT_PROFILE_ROOTS: usize = 8192;
+
+pub fn sample_preflight_roots(
+    platform: &Platform,
+    program: Arc<Program>,
+    init_memory: impl IntoIterator<Item = (WordAddr, Word)>,
+    tracer_config: PreflightTracerConfig,
+) -> Vec<u32> {
+    let started = Instant::now();
+    let mut vm = VMState::<PreflightTracer>::new_with_tracer_config(
+        platform.clone(),
+        program.clone(),
+        tracer_config,
+    );
+    for (addr, value) in init_memory {
+        vm.init_memory(addr, value);
+    }
+
+    let mut root_counts = BTreeMap::new();
+    root_counts.insert(program.entry, usize::MAX);
+    let text_end = program.base_address + (program.instructions.len() * WORD_SIZE) as u32;
+    let mut steps = 0usize;
+    while steps < AOT_PROFILE_STEPS && !vm.halted() {
+        let pc = vm.get_pc();
+        match vm.next_step_record() {
+            Ok(Some(_)) => {
+                steps += 1;
+                let next_pc = vm.get_pc().0;
+                if next_pc != pc.0.wrapping_add(WORD_SIZE as u32)
+                    && next_pc >= program.base_address
+                    && next_pc < text_end
+                    && next_pc.is_multiple_of(WORD_SIZE as u32)
+                {
+                    *root_counts.entry(next_pc).or_insert(0) += 1;
+                }
+            }
+            Ok(None) => break,
+            Err(err) => panic!("AOT profile sampling trapped: {err}"),
+        }
+    }
+    tracing::info!(
+        "AOT profile sampled {} steps in {:?}; roots={} selected_roots={}",
+        steps,
+        started.elapsed(),
+        root_counts.len(),
+        AOT_PROFILE_ROOTS.min(root_counts.len())
+    );
+
+    let mut roots = root_counts.into_iter().collect::<Vec<_>>();
+    roots.sort_by_key(|(pc, count)| (std::cmp::Reverse(*count), *pc));
+    roots
+        .into_iter()
+        .take(AOT_PROFILE_ROOTS)
+        .map(|(pc, _)| pc)
+        .collect()
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BasicBlock {
@@ -2935,6 +2993,34 @@ mod tests {
             instructions,
             Default::default(),
         )
+    }
+
+    #[test]
+    fn feature_enabled_backend_defaults_to_aot() {
+        assert_eq!(
+            crate::EmulatorBackend::default(),
+            crate::EmulatorBackend::Aot
+        );
+    }
+
+    #[test]
+    fn sample_preflight_roots_selects_entry_and_static_jump_target() {
+        let base = CENO_PLATFORM.pc_base();
+        let program = Arc::new(program(vec![
+            encode_rv32(InsnKind::JAL, 0, 0, 0, 8),
+            encode_rv32(InsnKind::ADDI, 0, 0, 1, 1),
+            encode_rv32(InsnKind::ECALL, 0, 0, 0, 0),
+        ]));
+
+        let roots = sample_preflight_roots(
+            &CENO_PLATFORM,
+            program,
+            [],
+            crate::PreflightTracerConfig::default(),
+        );
+
+        assert_eq!(roots[0], base);
+        assert!(roots.contains(&(base + 8)));
     }
 
     #[test]
