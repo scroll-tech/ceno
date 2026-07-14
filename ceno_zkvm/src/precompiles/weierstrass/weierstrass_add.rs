@@ -336,7 +336,7 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
             blu_events,
             &y_lhs,
             &y_rhs,
-            &modulus,
+            &(&BigUint::from(2u32) * &modulus),
             &(&y3 + &p_y),
             &(&slope * (&p_x + &modulus - &x3)),
         );
@@ -452,7 +452,8 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E>
 
                 let y_lhs = &p_y3 + &p_p_y;
                 let y_rhs = poly_mul_expr(&p_slope, &(&p_p_x + &p_modulus - &p_x3));
-                wits.y_relation.eval(cb, &y_lhs, &y_rhs, &modulus)?;
+                wits.y_relation
+                    .eval(cb, &y_lhs, &y_rhs, &(BigUint::from(2u32) * &modulus))?;
 
                 (
                     &wits.p_x, &wits.p_y, &wits.q_x, &wits.q_y, &wits.x3, &wits.y3,
@@ -1009,10 +1010,82 @@ mod tests {
     use crate::precompiles::weierstrass::test_utils::random_point_pairs;
     use ff_ext::BabyBearExt4;
     use mpcs::BasefoldDefault;
-    use sp1_curves::weierstrass::{
-        SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254, secp256k1::Secp256k1,
-        secp256r1::Secp256r1,
+    use sp1_curves::{
+        EllipticCurveParameters,
+        weierstrass::{
+            SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254,
+            secp256k1::Secp256k1, secp256r1::Secp256r1,
+        },
     };
+
+    fn compact_secp256k1_zero_cols() -> CompactSecp256k1AddAssignWitCols<
+        <BabyBearExt4 as ExtensionField>::BaseField,
+        <SwCurve<Secp256k1> as EllipticCurveParameters>::BaseField,
+    > {
+        type F = <BabyBearExt4 as ExtensionField>::BaseField;
+        type P = <SwCurve<Secp256k1> as EllipticCurveParameters>::BaseField;
+
+        let zero_p = P::to_limbs_field::<F, _>(&BigUint::from(0u32));
+        let zero_u63 = Limbs(GenericArray::generate(|_| F::from_u8(0)));
+        let zero_relation = CompactFieldRelationCols {
+            quotient: zero_u63.clone(),
+            witness_low: zero_u63.clone(),
+            witness_high: zero_u63,
+            _marker: std::marker::PhantomData,
+        };
+
+        CompactSecp256k1AddAssignWitCols {
+            p_x: zero_p.clone(),
+            p_y: zero_p.clone(),
+            q_x: zero_p.clone(),
+            q_y: zero_p.clone(),
+            slope: zero_p.clone(),
+            x3: zero_p.clone(),
+            y3: zero_p,
+            slope_relation: zero_relation.clone(),
+            x_relation: zero_relation.clone(),
+            y_relation: zero_relation,
+        }
+    }
+
+    fn hex_biguint(s: &[u8]) -> BigUint {
+        BigUint::parse_bytes(s, 16).unwrap()
+    }
+
+    #[test]
+    fn test_compact_secp256k1_add_y_relation_uses_two_modulus_offset() {
+        type E = BabyBearExt4;
+        type EC = SwCurve<Secp256k1>;
+
+        let p_x = hex_biguint(b"f72f2bb83586fca7fa0b85188296f5eabaeb41a5e65a814940e2a20a1bd7ce73");
+        let p_y = hex_biguint(b"65b675cd0492c4f539b21c95055455e8f9bddea5d12982e46e80fa489b0bca16");
+        let q_x = hex_biguint(b"819d7ca7b46108cc721754ef2904acecf5bb9188b80599e9090b20bb257e8454");
+        let q_y = hex_biguint(b"a17a4340f9c08feffa1b1bf13879399bd50e00978b7199cd6d39eb43ad9cedde");
+
+        let modulus = <EC as EllipticCurveParameters>::BaseField::modulus();
+        let slope_denominator = (&q_x + &modulus - &p_x) % &modulus;
+        let slope_numerator = (&q_y + &modulus - &p_y) % &modulus;
+        let slope = (&slope_numerator
+            * slope_denominator.modpow(&(modulus.clone() - 2u32), &modulus))
+            % &modulus;
+        let x3 = (&slope * &slope + &modulus - ((&p_x + &q_x) % &modulus)) % &modulus;
+        let y3 = (&slope * ((&p_x + &modulus - &x3) % &modulus) + &modulus - &p_y) % &modulus;
+
+        let y_lhs_eval = &y3 + &p_y;
+        let y_rhs_eval = &slope * (&p_x + &modulus - &x3);
+        assert!(y_lhs_eval + &modulus * &modulus < y_rhs_eval);
+
+        let mut record = LkMultiplicity::default();
+        let mut cols = compact_secp256k1_zero_cols();
+        WeierstrassAddAssignLayout::<E, EC>::populate_compact_secp256k1_field_ops(
+            &mut record,
+            &mut cols,
+            p_x,
+            p_y,
+            q_x,
+            q_y,
+        );
+    }
 
     fn test_weierstrass_add_helper<WP: WeierstrassParameters>() {
         type E = BabyBearExt4;
