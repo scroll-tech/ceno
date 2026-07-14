@@ -93,7 +93,7 @@ where
 {
     let mut bytes = x.to_bytes_le();
     bytes.resize(U63::USIZE, 0);
-    limbs_from_vec(bytes.into_iter().map(|x| F::from_u8(x).into()).collect())
+    limbs_from_vec(bytes.into_iter().map(F::from_u8).collect())
 }
 
 fn to_compact_relation_limbs_expr<E>(x: &BigUint) -> Limbs<Expression<E>, U63>
