@@ -967,6 +967,8 @@ pub fn emulate_program<'a>(
         EmulatorBackend::Aot => match precompiled_aot {
             Some(aot) => Some(aot),
             None => {
+                // Preflight AOT compiles static blocks plus hot dynamic roots sampled
+                // from an interpreter pass over the same initial hint memory.
                 let roots = ceno_emul::aot::sample_preflight_roots(
                     platform,
                     program.clone(),

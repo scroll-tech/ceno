@@ -1,3 +1,12 @@
+//! AOT support for emulator execution.
+//!
+//! The AOT backend compiles statically reachable RISC-V basic blocks into a
+//! small x86_64 shared object, loads it, and executes it against `VMState`.
+//! Unsupported instructions, dynamic control flow, traps, syscalls, and guarded
+//! memory cases fall back to the normal interpreter. The preflight mode uses
+//! this to speed up shard planning while keeping witness replay interpreter
+//! backed elsewhere.
+
 use crate::{
     Change, EmuContext, InsnKind, Instruction, PC_STEP_SIZE, Platform, PreflightTracer,
     PreflightTracerConfig, Program, Tracer, VMState,
@@ -36,9 +45,17 @@ type AotTraceFn = unsafe extern "C" fn(*mut AotRuntimeContext) -> u32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum AssemblyTraceStyle {
+    /// Generic AOT execution calls back into Rust after each native step so the
+    /// active tracer can observe register and memory values.
     Generic,
+    /// Native code updates `PreflightTracer` state directly for per-step access
+    /// accounting, avoiding the generic callback value path.
     PreflightDirect,
+    /// Native code additionally maintains shard planner counters for blocks
+    /// that have statically known access cost.
     PreflightDirectBlockPlan,
+    /// Block planner mode for simple memory blocks where the native code can
+    /// update exact latest-access state without falling back per instruction.
     PreflightDirectBlockPlanExactAccess,
 }
 
@@ -133,6 +150,12 @@ thread_local! {
     static LAST_AOT_ERROR: RefCell<Option<anyhow::Error>> = const { RefCell::new(None) };
 }
 
+/// Raw state shared between generated assembly and Rust fallback helpers.
+///
+/// The generated assembly uses hard-coded byte offsets into this struct, so any
+/// layout change must update the `AOT_CTX_*_OFFSET` constants and the offset
+/// regression test. Fields near the top are generic VM execution state; the
+/// `preflight_*` fields are only used by direct preflight trace modes.
 #[repr(C)]
 struct AotRuntimeContext {
     vm: *mut c_void,
@@ -208,6 +231,12 @@ pub struct AotCompileReport {
     pub compile_load_time: Duration,
 }
 
+/// Loaded native image for one guest program.
+///
+/// `AotProgram` owns the generated shared library so the entry symbol stays
+/// valid. It can execute against any compatible `VMState` for the same
+/// `Program`; execution still uses Rust callbacks/fallbacks for cases outside
+/// the selected `AssemblyTraceStyle`.
 pub struct AotProgram {
     program: Arc<Program>,
     blocks: Vec<BasicBlock>,
@@ -222,6 +251,17 @@ pub type AotInstance = AotProgram;
 const AOT_PROFILE_STEPS: usize = 30_000_000;
 const AOT_PROFILE_ROOTS: usize = 8192;
 
+/// Samples interpreter execution to discover dynamic block roots worth compiling.
+///
+/// Static block discovery starts at the ELF entry point. Guest programs also
+/// reach code through indirect branches, syscall returns, and other dynamic
+/// targets that are not visible from static control-flow alone. This profiler
+/// runs a bounded preflight interpreter pass, counts non-fallthrough targets
+/// inside the text section, and returns the hottest targets as extra AOT roots.
+///
+/// The input memory is intentionally generic so callers outside `ceno_emul` can
+/// pass their own init-record shape without making this crate depend on zkVM
+/// table types.
 pub fn sample_preflight_roots(
     platform: &Platform,
     program: Arc<Program>,
@@ -277,6 +317,11 @@ pub fn sample_preflight_roots(
         .collect()
 }
 
+/// Half-open interval of guest PCs that can be entered as one native block.
+///
+/// A block is compiled only when all instructions in `[start_pc, end_pc)` can
+/// be emitted for the selected trace style. Control transfers to unsupported or
+/// unknown targets return to Rust dispatch/fallback.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BasicBlock {
     pub start_pc: u32,
