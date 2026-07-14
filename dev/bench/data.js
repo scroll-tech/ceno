@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784017284061,
+  "lastUpdate": 1784028920736,
   "repoUrl": "https://github.com/scroll-tech/ceno",
   "entries": {
     "GPU proving time": [
@@ -57,6 +57,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "keccak_syscall proving time",
             "value": 0.705,
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "hero78119@gmail.com",
+            "name": "Ming",
+            "username": "hero78119"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": false,
+          "id": "722cd60f74e66b2899b19f2656545d8c29c00945",
+          "message": "Optimize Secp256k1 double circuit (#1385)\n\n## Problem\n\n`Ecall_WeierstrassDoubleAssign_Secp256k1` used the generic Weierstrass\ndouble layout, which materialized 11 separate `FieldOpCols` operations\nfor one point double. This added avoidable witness columns and zero\nconstraints in the prover path.\n\n## Design Rationale\n\nReplace the Secp256k1 double arithmetic layout with three fused modular\nrelations:\n\n- `slope * (2*y) = 3*x^2`\n- `x3 + 2*x = slope^2`\n- `y3 + y = slope * (x - x3)`\n\nThe syscall ABI, opcode name, memory records, and guest-visible behavior\nare unchanged. Non-Secp256k1 double circuits keep the generic layout.\n\nThe compact relation uses 63-byte quotient/root witnesses instead of the\nfield gadget's 62-byte witnesses to cover fused raw relation offsets.\nThis increases witness length only; AIR expression degree does not\nincrease.\n\n## Change Highlights\n\n- `ceno_zkvm`: add a compact internal field-relation helper for\nSecp256k1 double.\n- `ceno_zkvm`: route only `CurveType::Secp256k1` double through the\ncompact layout.\n- `ceno_zkvm`: preserve the generic Weierstrass double layout for other\ncurves.\n- `ceno_zkvm`: expose existing gadget polynomial helpers as `pub(crate)`\nfor reuse by the compact helper.\n\n## Benchmark / Performance Impact\n\nStructural measurements for `Ecall_WeierstrassDoubleAssign_Secp256k1`\nafter restoring compact-limb byte checks:\n\n| Metric | Before PR | This PR | Delta |\n|--------|-----------|---------|-------|\n| Witness columns | 2192 | 787 | -1405 (-64.1%) |\n| Lookup operations | 1073 | 407 | -666 (-62.1%) |\n| Total zero constraints | 711 | 300 | -411 (-57.8%) |\n| Max zero-constraint degree | 2 | 2 | unchanged |\n| Main zerocheck sumcheck degree | 3 | 3 | unchanged |\n\nCI benchmark on block `23817600`:\n\n| Metric | Baseline | This PR | Delta |\n|--------|----------|---------|-------|\n| Run |\n[29304138526](https://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29304138526)\n|\n[29321553436](https://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29321553436)\n| - |\n| Ceno version | `feat/preflight-aot` |\n`abaa2ca027b7bc5af06b5474933515030dba7ded` | - |\n| E2E total time | 190.000s | 187.000s | -3.000s (-1.6%) |\n| Profiled total | 75.250s | 72.700s | -2.550s (-3.4%) |\n| App prove | 58.000s | 55.600s | -2.400s (-4.1%) |\n| Recursion | 10.700s | 10.500s | -0.200s (-1.9%) |\n| Total create proof | 186.422s | 183.645s | -2.777s (-1.5%) |\n| Prove tower relation GPU | 210.690s | 179.100s | -31.590s (-15.0%) |\n| App prove breakdown total | 270.043s | 235.889s | -34.154s (-12.6%) |\n\nOOM regression check:\n\n| Block | This PR run | Result | E2E total | Total create proof |\n|-------|-------------|--------|-----------|--------------------|\n| `25529400` |\n[29322399330](https://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29322399330)\n| Passed; previous `Remaining tasks are too big for the memory pool`\nerror did not appear. | 164.000s | 159.011s |\n\nRaw summaries:\n\n- Baseline:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/blob/gh-pages/benchmarks-dispatch/refs/heads/feat/preflight/mainnet23817600-20260714-114440_summary.md\n- This PR, block `23817600`:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/blob/gh-pages/benchmarks-dispatch/refs/heads/feat/preflight/mainnet23817600-20260714-172621_summary.md\n- This PR, block `25529400`:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/blob/gh-pages/benchmarks-dispatch/refs/heads/feat/preflight/mainnet25529400-20260714-173957_summary.md\n\n### Operation\n\n| Operation | master (s) | this PR (s) | Improve (master -> this PR) |\n|-----------|------------|-------------|-----------------------------|\n| Secp256k1 double syscall | N/A | N/A | Structural circuit reduction\nmeasured above. |\n\n### Layer\n\n| Layer | master (s) | this PR (s) | Improve (master -> this PR) |\n|-------|------------|-------------|-----------------------------|\n| App prove, block `23817600` | 58.000 | 55.600 | -2.400s (-4.1%) |\n| Recursion, block `23817600` | 10.700 | 10.500 | -0.200s (-1.9%) |\n| E2E total, block `23817600` | 190.000 | 187.000 | -3.000s (-1.6%) |\n\nBenchmark command(s):\n\n```sh\n# GitHub Actions workflow_dispatch: Ceno Benchmark v2\n# Baseline: block_number=23817600, CENO_PINNED_REF_VALUE=feat/preflight-aot\n# This PR: block_number=23817600, ceno_version=abaa2ca027b7bc5af06b5474933515030dba7ded\n# OOM check: block_number=25529400, ceno_version=abaa2ca027b7bc5af06b5474933515030dba7ded\n```\n\nEnvironment (CPU/GPU, core count, rust toolchain, commit hash):\n\nGitHub Actions `scroll-tech/ceno-reth-benchmark` workflow `Ceno\nBenchmark v2`; same launch parameters as run `29304138526` except\n`block_number` and `ceno_version` where noted above.\n\nraw data:\n\n- master:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29304138526\n- this PR, block `23817600`:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29321553436\n- this PR, block `25529400`:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29322399330\n\n## Testing\n\n```sh\ncargo check -p ceno_zkvm --tests\nRUST_MIN_STACK=33554432 cargo test -p ceno_zkvm precompiles::weierstrass::weierstrass_double::tests::test_weierstrass_double_secp256k1 -- --nocapture\nRUST_MIN_STACK=33554432 cargo test -p ceno_zkvm precompiles::weierstrass::weierstrass_double::tests::test_weierstrass_double_nonpow2_secp256k1 -- --nocapture\nRUST_MIN_STACK=33554432 cargo test -p ceno_zkvm precompiles::weierstrass::weierstrass_double::tests::test_weierstrass_double_bn254 -- --nocapture\nulimit -s unlimited && target/release/e2e examples/target/riscv32im-ceno-zkvm-elf/release/examples/secp256k1_double_syscall --platform=ceno --profiling=1\n```\n\n## Risks and Rollout\n\nRisk is limited to the Secp256k1 double precompile circuit. Rollback is\nto restore the generic double layout for `CurveType::Secp256k1`.\n\n## Follow-ups (optional)\n\n- Consider reusing the compact relation helper elsewhere only after this\nchange is validated.\n\n## Copilot Reviewer Directive (keep this section)\n\nWhen Copilot reviews this PR, apply `.github/copilot-instructions.md`\nstrictly.",
+          "timestamp": "2026-07-14T11:04:13Z",
+          "tree_id": "ec9ed8c3b0c0c8f53e26ffbd4ac7113c82212bff",
+          "url": "https://github.com/scroll-tech/ceno/commit/722cd60f74e66b2899b19f2656545d8c29c00945"
+        },
+        "date": 1784028919820,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "keccak_syscall proving time",
+            "value": 0.732,
             "unit": "s"
           }
         ]
