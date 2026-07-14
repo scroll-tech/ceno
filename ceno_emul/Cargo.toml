@@ -16,6 +16,7 @@ ceno_syscall.workspace = true
 elf = "0.7"
 ff_ext.workspace = true
 itertools.workspace = true
+libloading = { version = "0.8", optional = true }
 multilinear_extensions.workspace = true
 num.workspace = true
 num-derive.workspace = true
@@ -24,7 +25,6 @@ once_cell.workspace = true
 rayon.workspace = true
 rrs_lib = { package = "rrs-succinct", version = "0.1.0" }
 rustc-hash.workspace = true
-libloading = { version = "0.8", optional = true }
 # TODO clean up secp and only use k256 from elliptic-curves
 k256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa"] }
 p256 = { git = "https://github.com/scroll-tech/elliptic-curves", branch = "ceno/k256-13.4", default-features = false, features = ["std", "ecdsa", "arithmetic"] }
@@ -35,13 +35,13 @@ sp1-curves.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 substrate-bn.workspace = true
+tempfile = { version = "3.14", optional = true }
 tiny-keccak.workspace = true
 tracing.workspace = true
 typenum.workspace = true
-tempfile = { version = "3.14", optional = true }
 
 [features]
-default = ["forbid_overflow"]
 aot-x86_64 = ["dep:libloading", "dep:tempfile"]
+default = ["forbid_overflow"]
 forbid_overflow = []
 u16limb_circuit = []
