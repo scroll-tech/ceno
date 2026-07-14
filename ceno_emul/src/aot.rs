@@ -5,7 +5,7 @@ use crate::{
     rv32im::TrapCause,
     tracer::{
         NATIVE_TRACE_LOAD_MEM, NATIVE_TRACE_READ_RS1, NATIVE_TRACE_READ_RS2,
-        NATIVE_TRACE_STORE_MEM, NATIVE_TRACE_WRITE_RD,
+        NATIVE_TRACE_STORE_MEM, NATIVE_TRACE_WRITE_RD, NativeTraceStep,
     },
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -2850,18 +2850,17 @@ unsafe extern "C" fn aot_trace_native_preflight(context: *mut AotRuntimeContext)
         return AOT_STATUS_HALTED;
     }
 
-    let pc = ByteAddr(context.trace_pc);
-    let kind = native_trace_kind(context.trace_kind);
-    let busy_loop = vm.trace_preflight_native_step(
-        pc,
-        kind,
-        context.trace_flags,
-        context.trace_rs1_idx as RegIdx,
-        context.trace_rs2_idx as RegIdx,
-        context.trace_rd_idx as RegIdx,
-        WordAddr(context.trace_mem_addr),
-        ByteAddr(context.trace_next_pc),
-    );
+    let step = NativeTraceStep {
+        pc_before: ByteAddr(context.trace_pc),
+        pc_after: ByteAddr(context.trace_next_pc),
+        kind: native_trace_kind(context.trace_kind),
+        flags: context.trace_flags,
+        rs1_idx: context.trace_rs1_idx as RegIdx,
+        rs2_idx: context.trace_rs2_idx as RegIdx,
+        rd_idx: context.trace_rd_idx as RegIdx,
+        memory_addr: WordAddr(context.trace_mem_addr),
+    };
+    let busy_loop = vm.trace_preflight_native_step(step);
     if busy_loop && !vm.halted() {
         context.trace_next_pc = vm.get_pc().0;
         LAST_AOT_ERROR.with(|slot| *slot.borrow_mut() = Some(anyhow!("Stuck in loop {}", "{}")));

@@ -4,9 +4,9 @@ use crate::{
     addr::{ByteAddr, RegIdx, Word, WordAddr},
     dense_addr_space::DenseAddrSpace,
     platform::Platform,
-    rv32im::{InsnKind, Instruction, TrapCause},
+    rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
-    tracer::{Change, FullTracer, PreflightTracer, Tracer},
+    tracer::{Change, FullTracer, NativeTraceStep, PreflightTracer, Tracer},
 };
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
@@ -46,28 +46,9 @@ impl VMState<PreflightTracer> {
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
     )]
-    pub(crate) fn trace_preflight_native_step(
-        &mut self,
-        pc_before: ByteAddr,
-        kind: InsnKind,
-        flags: u32,
-        rs1_idx: RegIdx,
-        rs2_idx: RegIdx,
-        rd_idx: RegIdx,
-        memory_addr: WordAddr,
-        pc_after: ByteAddr,
-    ) -> bool {
-        self.pc = pc_after.0;
-        self.tracer.trace_native_step(
-            pc_before,
-            pc_after,
-            kind,
-            flags,
-            rs1_idx,
-            rs2_idx,
-            rd_idx,
-            memory_addr,
-        )
+    pub(crate) fn trace_preflight_native_step(&mut self, step: NativeTraceStep) -> bool {
+        self.pc = step.pc_after.0;
+        self.tracer.trace_native_step(step)
     }
 }
 

@@ -2610,18 +2610,25 @@ pub fn verify<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + serde::Ser
 
 #[cfg(test)]
 mod tests {
-    use crate::e2e::{
-        MultiProver, Preset, ShardContextBuilder, emulate_program, public_io_words_to_digest_words,
-        setup_platform_debug, setup_program,
-    };
+    use crate::e2e::{MultiProver, ShardContextBuilder};
     use ceno_emul::{
-        CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, Program, StepCellExtractor, StepIndex,
-        StepRecord, SyscallWitness,
+        CENO_PLATFORM, Cycle, FullTracer, NextCycleAccess, StepIndex, StepRecord, SyscallWitness,
     };
-    use gkr_iop::RAMType;
     use itertools::Itertools;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::Arc;
     use tiny_keccak::{Hasher, Keccak};
+
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    use crate::e2e::{
+        Preset, emulate_program, public_io_words_to_digest_words, setup_platform_debug,
+        setup_program,
+    };
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    use ceno_emul::{Program, StepCellExtractor};
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    use gkr_iop::RAMType;
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    use std::sync::{Mutex, OnceLock};
 
     #[test]
     fn test_single_prover_shard_ctx() {

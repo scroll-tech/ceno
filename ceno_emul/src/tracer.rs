@@ -1121,6 +1121,21 @@ pub(crate) const NATIVE_TRACE_STORE_MEM: u32 = 1 << 4;
     not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
     allow(dead_code)
 )]
+pub(crate) struct NativeTraceStep {
+    pub pc_before: ByteAddr,
+    pub pc_after: ByteAddr,
+    pub kind: InsnKind,
+    pub flags: u32,
+    pub rs1_idx: RegIdx,
+    pub rs2_idx: RegIdx,
+    pub rd_idx: RegIdx,
+    pub memory_addr: WordAddr,
+}
+
+#[cfg_attr(
+    not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+    allow(dead_code)
+)]
 pub(crate) struct PreflightNativeTraceState {
     pub latest_cells: *mut Cycle,
     pub latest_base: WordAddr,
@@ -1415,40 +1430,39 @@ impl PreflightTracer {
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
     )]
-    pub(crate) fn trace_native_step(
-        &mut self,
-        pc_before: ByteAddr,
-        pc_after: ByteAddr,
-        kind: InsnKind,
-        flags: u32,
-        rs1_idx: RegIdx,
-        rs2_idx: RegIdx,
-        rd_idx: RegIdx,
-        memory_addr: WordAddr,
-    ) -> bool {
-        self.pc.before = pc_before;
-        self.last_kind = kind;
+    pub(crate) fn trace_native_step(&mut self, step: NativeTraceStep) -> bool {
+        self.pc.before = step.pc_before;
+        self.last_kind = step.kind;
         self.last_rs1 = None;
 
-        if flags & NATIVE_TRACE_READ_RS1 != 0 {
-            self.track_access(Platform::register_vma(rs1_idx).into(), Self::SUBCYCLE_RS1);
+        if step.flags & NATIVE_TRACE_READ_RS1 != 0 {
+            self.track_access(
+                Platform::register_vma(step.rs1_idx).into(),
+                Self::SUBCYCLE_RS1,
+            );
         }
-        if flags & NATIVE_TRACE_READ_RS2 != 0 {
-            self.track_access(Platform::register_vma(rs2_idx).into(), Self::SUBCYCLE_RS2);
+        if step.flags & NATIVE_TRACE_READ_RS2 != 0 {
+            self.track_access(
+                Platform::register_vma(step.rs2_idx).into(),
+                Self::SUBCYCLE_RS2,
+            );
         }
-        if flags & NATIVE_TRACE_WRITE_RD != 0 {
-            self.track_access(Platform::register_vma(rd_idx).into(), Self::SUBCYCLE_RD);
+        if step.flags & NATIVE_TRACE_WRITE_RD != 0 {
+            self.track_access(
+                Platform::register_vma(step.rd_idx).into(),
+                Self::SUBCYCLE_RD,
+            );
         }
-        if flags & NATIVE_TRACE_LOAD_MEM != 0 {
-            self.track_access(memory_addr, Self::SUBCYCLE_MEM);
-        } else if flags & NATIVE_TRACE_STORE_MEM != 0 {
-            self.update_mmio_bounds(memory_addr);
-            self.track_access(memory_addr, Self::SUBCYCLE_MEM);
+        if step.flags & NATIVE_TRACE_LOAD_MEM != 0 {
+            self.track_access(step.memory_addr, Self::SUBCYCLE_MEM);
+        } else if step.flags & NATIVE_TRACE_STORE_MEM != 0 {
+            self.update_mmio_bounds(step.memory_addr);
+            self.track_access(step.memory_addr, Self::SUBCYCLE_MEM);
         }
 
-        self.pc.after = pc_after;
+        self.pc.after = step.pc_after;
         self.advance();
-        pc_before == pc_after
+        step.pc_before == step.pc_after
     }
 }
 
