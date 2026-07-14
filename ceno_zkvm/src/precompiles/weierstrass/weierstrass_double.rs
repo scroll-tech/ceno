@@ -253,6 +253,17 @@ pub struct WeierstrassDoubleAssignLayout<E: ExtensionField, EC: EllipticCurve> {
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
     WeierstrassDoubleAssignLayout<E, EC>
 {
+    fn assert_compact_secp256k1_limb_bytes(
+        blu_events: &mut LkMultiplicity,
+        cols: &CompactSecp256k1DoubleAssignWitCols<E::BaseField, EC::BaseField>,
+    ) {
+        blu_events.assert_byte_fields(&cols.p_x.0);
+        blu_events.assert_byte_fields(&cols.p_y.0);
+        blu_events.assert_byte_fields(&cols.slope.0);
+        blu_events.assert_byte_fields(&cols.x3.0);
+        blu_events.assert_byte_fields(&cols.y3.0);
+    }
+
     fn new(cb: &mut CircuitBuilder<E>) -> Self {
         let wits = match EC::CURVE_TYPE {
             CurveType::Secp256k1 => WeierstrassDoubleAssignLayer::CompactSecp256k1(
@@ -574,6 +585,12 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
                 )
             }
             WeierstrassDoubleAssignLayer::CompactSecp256k1(wits) => {
+                cb.assert_bytes(|| "compact secp256k1 double p_x", &wits.p_x.0)?;
+                cb.assert_bytes(|| "compact secp256k1 double p_y", &wits.p_y.0)?;
+                cb.assert_bytes(|| "compact secp256k1 double slope", &wits.slope.0)?;
+                cb.assert_bytes(|| "compact secp256k1 double x3", &wits.x3.0)?;
+                cb.assert_bytes(|| "compact secp256k1 double y3", &wits.y3.0)?;
+
                 let p_slope: Polynomial<Expression<E>> = wits.slope.clone().into();
                 let p_x: Polynomial<Expression<E>> = wits.p_x.clone().into();
                 let p_y: Polynomial<Expression<E>> = wits.p_y.clone().into();
@@ -747,6 +764,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
         cols.p_y = EC::BaseField::to_limbs_field(&p_y);
 
         Self::populate_compact_secp256k1_field_ops(new_byte_lookup_events, cols, p_x, p_y);
+        Self::assert_compact_secp256k1_limb_bytes(new_byte_lookup_events, cols);
     }
 
     fn populate_row_from_slice(
