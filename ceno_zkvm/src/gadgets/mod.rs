@@ -9,8 +9,8 @@ mod poseidon2;
 mod signed;
 mod signed_ext;
 mod signed_limbs;
-mod util;
-mod util_expr;
+pub(crate) mod util;
+pub(crate) mod util_expr;
 mod word;
 mod xor;
 
