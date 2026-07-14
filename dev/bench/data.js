@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1783866018963,
+  "lastUpdate": 1784017284061,
   "repoUrl": "https://github.com/scroll-tech/ceno",
   "entries": {
     "GPU proving time": [
@@ -28,6 +28,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "keccak_syscall proving time",
             "value": 0.722,
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "hero78119@gmail.com",
+            "name": "Ming",
+            "username": "hero78119"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "314db14cd9ed4c9d05e154578de93b215c3a4f8e",
+          "message": "Introduce Ahead-of-time (AOT) to accelerate emulation (#1384)\n\n## Problem\n\nEmulation preflight is on the critical path for proving. It executes the\nguest program before witness generation to compute memory access\nmetadata, shard boundaries, cycle counts, and final memory state. The\ninterpreter is simple and exact, but its per-instruction dispatch\noverhead is visible on large blocks.\n\nThis PR introduces ahead-of-time (AOT) native execution as an emulator\nacceleration path, while keeping witness replay on the interpreter where\nexact `FullTracer` records are required.\n\n## Design Rationale\n\nAhead-of-time compilation is introduced at the emulator layer because\nthe emulator already owns instruction semantics, memory state, trap\nbehavior, and tracer updates. The AOT backend partitions statically\nreachable RISC-V basic blocks, lowers supported blocks into x86_64\nassembly, loads the generated shared object, and executes it against the\nexisting `VMState`. This keeps the optimization close to the interpreter\ninstead of duplicating semantics in the zkVM layer.\n\nThe design is intentionally hybrid. Native code is used for hot\nstraight-line instruction blocks where register arithmetic, branches,\nand simple memory accounting can avoid repeated interpreter dispatch.\nUnsupported instructions, syscalls, traps, dynamic control flow, guarded\nmemory cases, and other uncertain paths fall back to the original\ninterpreter. Dynamic block roots are sampled from a bounded preflight\ninterpreter pass so indirect targets that are not visible from static\ncontrol flow can still be compiled when they are hot.\n\nPreflight is the first consumer because it needs fast execution and\naggregate accounting, not exact witness records. The direct preflight\nAOT path updates `PreflightTracer` state from native execution,\nincluding access/cycle/cell accounting used for shard planning. This is\nwhere the measured win appears: on block 23817600, the emulator layer\nmoves from 10.200s to 6.550s, or 1.56x faster.\n\nWitness replay remains interpreter-backed. `FullTracer` replay is\nresponsible for exact step records, syscall witnesses, and shard-local\ntrace shape; changing that path would couple performance work to witness\ncorrectness. Keeping replay on the interpreter isolates AOT to preflight\nplanning and makes rollback straightforward.\n\nWith `aot-x86_64` enabled on Linux x86_64, AOT becomes the default\nemulator backend. `CENO_EMULATOR_BACKEND=interp` remains available for\nparity checks, debugging, and emergency rollback. No new runtime flag is\nadded.\n\nThe trade-off is explicit: this PR accelerates emulation preflight now,\nwhile deferring FullTracer AOT replay until record parity and\nshard-boundary parity can be proven independently.\n\n## Change Highlights\n\n- `ceno_zkvm`: replay uses interpreter-backed `StepReplay` for shard\nwitness generation.\n- `ceno_zkvm`: AOT/interpreter preflight parity coverage was added for\nshard planning.\n- `ceno_emul`: native preflight trace plumbing was kept explicit and\nclippy-clean.\n\n## Benchmark / Performance Impact\n\nBlock: mainnet 23817600. Baseline is `feat/recursion-v2`; this PR is\nbenchmark run 29304138526.\n\n### Layer\n\n| Layer | baseline (s) | this PR (s) | Change |\n|-------|--------------|-------------|--------|\n| emulator | 10.200 | 6.550 | 1.56x faster |\n| app_prove | 57.400 | 58.000 | noise |\n| recursion | 10.300 | 10.700 | noise |\n| total | 77.900 | 75.250 | 3.40% faster |\n\nBenchmark command(s):\n\n```sh\nceno-reth-benchmark workflow_dispatch, block 23817600, GPU enabled\n```\n\nEnvironment: GitHub benchmark runner, CUDA backend enabled,\n`CENO_MAX_CELL_PER_SHARD=1207959552`.\n\nraw data:\n\n- baseline:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/blob/gh-pages/benchmarks-dispatch/refs/heads/feat/recursion-v2/mainnet23817600-20260712-143311_summary.md\n- this PR:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29304138526\n\n## Testing\n\n```sh\ncargo fmt --check\ncargo make clippy\ncargo test -p ceno_emul --features aot-x86_64 aot::tests -- --nocapture\ncargo check -p ceno_zkvm --features aot-x86_64\n```\n\n## Risks and Rollout\n\nThe main risk is AOT/interpreter shard-boundary drift in preflight\nplanning. Replay remains interpreter-backed to limit witness risk. If\nparity issues appear, the optimization can be rolled back by disabling\nAOT preflight selection.\n\n## Follow-ups (optional)\n\n- Prove and optimize FullTracer AOT replay separately before re-enabling\nit.\n- Fix any remaining native preflight accounting drift before relying on\nAOT shard boundaries.\n\n## Copilot Reviewer Directive (keep this section)\n\nWhen Copilot reviews this PR, apply `.github/copilot-instructions.md`\nstrictly.\n\n---------\n\nCo-authored-by: Ray Gao <qg2153@columbia.edu>\nCo-authored-by: kunxian xia <xiakunxian130@gmail.com>\nCo-authored-by: Claude Opus 4.6 <noreply@anthropic.com>",
+          "timestamp": "2026-07-14T07:47:59Z",
+          "tree_id": "3aae1ed401b5fbb9c948a8697bb3a4fb4ca93c13",
+          "url": "https://github.com/scroll-tech/ceno/commit/314db14cd9ed4c9d05e154578de93b215c3a4f8e"
+        },
+        "date": 1784017283143,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "keccak_syscall proving time",
+            "value": 0.705,
             "unit": "s"
           }
         ]
