@@ -6,7 +6,7 @@ use crate::{
     platform::Platform,
     rv32im::{Instruction, TrapCause},
     syscalls::{SyscallEffects, handle_syscall},
-    tracer::{Change, FullTracer, Tracer},
+    tracer::{Change, FullTracer, NativeTraceStep, PreflightTracer, Tracer},
 };
 use anyhow::{Result, anyhow};
 use std::{iter::from_fn, ops::Deref, sync::Arc};
@@ -38,6 +38,17 @@ impl VMState<FullTracer> {
 
     pub fn new_from_elf(platform: Platform, elf: &[u8]) -> Result<Self> {
         VMState::<FullTracer>::new_from_elf_with_tracer(platform, elf)
+    }
+}
+
+impl VMState<PreflightTracer> {
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn trace_preflight_native_step(&mut self, step: NativeTraceStep) -> bool {
+        self.pc = step.pc_after.0;
+        self.tracer.trace_native_step(step)
     }
 }
 
@@ -151,7 +162,7 @@ impl<T: Tracer> VMState<T> {
         self.step().map(Some)
     }
 
-    fn step(&mut self) -> Result<T::Record> {
+    pub(crate) fn step(&mut self) -> Result<T::Record> {
         crate::rv32im::step(self)?;
         let step = self.tracer.advance();
         if self.tracer.is_busy_loop(&step) && !self.halted() {
@@ -163,6 +174,47 @@ impl<T: Tracer> VMState<T> {
 
     pub fn init_register_unsafe(&mut self, idx: RegIdx, value: Word) {
         self.registers[idx as usize] = value;
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn registers_mut_ptr(&mut self) -> *mut Word {
+        self.registers.as_mut_ptr()
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn pc_mut_ptr(&mut self) -> *mut Word {
+        &mut self.pc
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn memory_cells_mut_ptr(&mut self) -> *mut Word {
+        self.memory.cells_mut_ptr()
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn memory_base_word(&self) -> WordAddr {
+        self.memory.base()
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn trace_fetch_known(&mut self, pc: WordAddr, insn: Instruction) {
+        self.tracer.fetch(pc, insn);
+        self.tracer.track_mmu_maxtouch_before();
     }
 
     fn halt(&mut self, exit_code: u32) {

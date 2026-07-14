@@ -22,10 +22,11 @@ use crate::{
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, IterAddresses,
-    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
-    StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
-    WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, EmulatorBackend, FullTracer,
+    FullTracerConfig, IterAddresses, NextCycleAccess, Platform, PreflightTracer,
+    PreflightTracerConfig, Program, RegIdx, StepCellExtractor, StepIndex, StepRecord,
+    SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
+    host_utils::read_all_messages,
 };
 use clap::ValueEnum;
 use either::Either;
@@ -856,6 +857,9 @@ impl StepReplay {
         for record in init_mem_state.hints.iter() {
             vm.init_memory(record.addr.into(), record.value);
         }
+        // Witness replay is intentionally interpreter-backed. FullTracer records
+        // are the source for shard witnesses, so keep this path exact and stable
+        // even when preflight planning uses AOT.
         StepReplay {
             vm,
             remaining_steps,
@@ -923,6 +927,8 @@ pub fn emulate_program<'a>(
     platform: &Platform,
     multi_prover: &MultiProver,
     step_cell_extractor: Arc<dyn StepCellExtractor>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
 ) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
@@ -939,9 +945,12 @@ pub fn emulate_program<'a>(
         multi_prover.max_cycle_per_shard,
     )
     .with_step_cell_extractor(step_cell_extractor);
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let profile_tracer_config = tracer_config.clone();
+    let preflight_program = program.clone();
     let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
         .in_scope(move || {
-            VMState::new_with_tracer_config(platform.clone(), program.clone(), tracer_config)
+            VMState::new_with_tracer_config(platform.clone(), preflight_program, tracer_config)
         });
 
     info_span!("[ceno] emulator.init_mem").in_scope(|| {
@@ -950,18 +959,86 @@ pub fn emulate_program<'a>(
         }
     });
 
-    let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
-        let mut steps = 0usize;
-        loop {
-            if steps >= max_steps {
-                break;
+    let backend = EmulatorBackend::from_env()
+        .unwrap_or_else(|err| panic!("invalid emulator backend for preflight: {err}"));
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let aot_program = match backend {
+        EmulatorBackend::Interp => None,
+        EmulatorBackend::Aot => match precompiled_aot {
+            Some(aot) => Some(aot),
+            None => {
+                // Preflight AOT compiles static blocks plus hot dynamic roots sampled
+                // from an interpreter pass over the same initial hint memory.
+                let roots = ceno_emul::aot::sample_preflight_roots(
+                    platform,
+                    program.clone(),
+                    hints_init
+                        .iter()
+                        .map(|record| (record.addr.into(), record.value)),
+                    profile_tracer_config,
+                );
+                let aot = ceno_emul::aot::AotProgram::compile_preflight_direct_with_extra_roots(
+                    program.clone(),
+                    roots,
+                )
+                .unwrap_or_else(|err| panic!("AOT compile failed during preflight: {err}"));
+                let report = aot.report();
+                tracing::info!(
+                    "AOT compile/load completed in {:?}; blocks={}, reachable_instructions={}",
+                    report.compile_load_time,
+                    report.block_count,
+                    report.reachable_instruction_count
+                );
+                Some(Arc::new(aot))
             }
-            match vm.next_step_record() {
-                Ok(Some(_)) => {
-                    steps += 1;
+        },
+    };
+    #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
+    if backend == EmulatorBackend::Aot {
+        panic!("CENO_EMULATOR_BACKEND=aot requires feature aot-x86_64 on Linux x86-64");
+    }
+
+    let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
+        match backend {
+            EmulatorBackend::Interp => {
+                let mut steps = 0usize;
+                loop {
+                    if steps >= max_steps {
+                        break;
+                    }
+                    match vm.next_step_record() {
+                        Ok(Some(_)) => {
+                            steps += 1;
+                        }
+                        Ok(None) => break,
+                        Err(err) => panic!("emulator trapped before halt: {err}"),
+                    }
                 }
-                Ok(None) => break,
-                Err(err) => panic!("emulator trapped before halt: {err}"),
+            }
+            EmulatorBackend::Aot => {
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                {
+                    let report = aot_program
+                        .as_ref()
+                        .expect("AOT backend selected without compiled program")
+                        .run_to_halt(&mut vm, max_steps)
+                        .unwrap_or_else(|err| panic!("AOT emulator trapped before halt: {err}"));
+                    tracing::info!(
+                        "AOT preflight executed {} instructions in {:?}; fallback_steps={} ({:.2}%)",
+                        report.executed_steps,
+                        report.execute_time,
+                        report.fallback_steps,
+                        report.fallback_steps as f64 * 100.0 / report.executed_steps.max(1) as f64
+                    );
+                }
+                #[cfg(not(all(
+                    feature = "aot-x86_64",
+                    target_arch = "x86_64",
+                    target_os = "linux"
+                )))]
+                {
+                    panic!("CENO_EMULATOR_BACKEND=aot requires feature aot-x86_64 on Linux x86-64");
+                }
             }
         }
         vm.halted_state().map(|halt_state| halt_state.exit_code)
@@ -1774,6 +1851,8 @@ pub struct E2EProgramCtx<E: ExtensionField> {
     pub system_config: ConstraintSystemConfig<E>,
     pub reg_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub preflight_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
 }
 
 /// end-to-end pipeline result, stopping at a certain checkpoint
@@ -1813,9 +1892,17 @@ pub fn setup_program<E: ExtensionField>(
     // Generate fixed traces
     let zkvm_fixed_traces =
         generate_fixed_traces(&system_config, &reg_init, &static_addrs, &program);
+    let program = Arc::new(program);
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let preflight_aot_program = match EmulatorBackend::from_env()
+        .unwrap_or_else(|err| panic!("invalid emulator backend for setup: {err}"))
+    {
+        EmulatorBackend::Interp => None,
+        EmulatorBackend::Aot => None,
+    };
 
     E2EProgramCtx {
-        program: Arc::new(program),
+        program,
         platform,
         multi_prover,
         static_addrs,
@@ -1823,6 +1910,8 @@ pub fn setup_program<E: ExtensionField>(
         system_config,
         reg_init,
         zkvm_fixed_traces,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        preflight_aot_program,
     }
 }
 
@@ -1971,6 +2060,14 @@ pub fn run_e2e_with_checkpoint<
         &prover.pk.program_ctx.as_ref().unwrap().platform,
         &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
         step_cell_extractor,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        prover
+            .pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .preflight_aot_program
+            .clone(),
     );
     tracing::debug!("emulate done in {:?}", start.elapsed());
 
@@ -2083,6 +2180,8 @@ pub fn run_e2e_proof<
         &ctx.platform,
         &ctx.multi_prover,
         step_cell_extractor,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        ctx.preflight_aot_program.clone(),
     );
     create_proofs_streaming(
         emul_result,

@@ -16,6 +16,7 @@ ceno_syscall.workspace = true
 elf = "0.7"
 ff_ext.workspace = true
 itertools.workspace = true
+libloading = { version = "0.8", optional = true }
 multilinear_extensions.workspace = true
 num.workspace = true
 num-derive.workspace = true
@@ -34,11 +35,13 @@ sp1-curves.workspace = true
 strum.workspace = true
 strum_macros.workspace = true
 substrate-bn.workspace = true
+tempfile = { version = "3.14", optional = true }
 tiny-keccak.workspace = true
 tracing.workspace = true
 typenum.workspace = true
 
 [features]
+aot-x86_64 = ["dep:libloading", "dep:tempfile"]
 default = ["forbid_overflow"]
 forbid_overflow = []
 u16limb_circuit = []
