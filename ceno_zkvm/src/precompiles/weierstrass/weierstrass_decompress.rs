@@ -72,15 +72,18 @@ use crate::{
     error::ZKVMError,
     gadgets::{
         FieldOperation, field_inner_product::FieldInnerProductCols, field_op::FieldOpCols,
-        field_sqrt::FieldSqrtCols, range::FieldLtCols,
+        field_sqrt::FieldSqrtCols, range::FieldLtCols, util_expr::poly_mul_expr,
     },
     instructions::riscv::{
         constants::UINT_LIMBS,
         insn_base::{StateInOut, WriteMEM},
     },
     precompiles::{
-        SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
-        weierstrass::EllipticCurveDecompressInstance,
+        SelectorTypeLayout,
+        utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
+        weierstrass::{
+            EllipticCurveDecompressInstance, compact_field_relation::CompactFieldRelationCols,
+        },
     },
     scheme::utils::gkr_witness,
     structs::PointAndEval,
@@ -105,11 +108,28 @@ pub struct WeierstrassDecompressWitCols<WitT, P: FieldParameters + NumLimbs + Nu
     pub(crate) neg_y: FieldOpCols<WitT, P>,
 }
 
+#[derive(Clone, Debug, AlignedBorrow)]
+#[repr(C)]
+pub struct CompactSecp256k1DecompressWitCols<WitT, P: FieldParameters + NumLimbs + NumWords> {
+    pub sign_bit: WitT,
+    pub(crate) x_limbs: Limbs<WitT, P::Limbs>,
+    pub(crate) y_limbs: Limbs<WitT, P::Limbs>,
+    pub(crate) old_output32: GenericArray<[WitT; UINT_LIMBS], P::WordsFieldElement>,
+    pub(crate) range_x: FieldLtCols<WitT, P>,
+    pub(crate) neg_y_range_check: FieldLtCols<WitT, P>,
+    pub(crate) x_2: Limbs<WitT, P::Limbs>,
+    pub(crate) rhs: Limbs<WitT, P::Limbs>,
+    pub(crate) x_2_relation: CompactFieldRelationCols<WitT, P>,
+    pub(crate) rhs_relation: CompactFieldRelationCols<WitT, P>,
+    pub(crate) pos_y: FieldSqrtCols<WitT, P>,
+    pub(crate) neg_y: FieldOpCols<WitT, P>,
+}
+
 /// Weierstrass decompress is implemented by a single layer.
 #[derive(Clone, Debug)]
-#[repr(C)]
-pub struct WeierstrassDecompressLayer<WitT, P: FieldParameters + NumWords> {
-    pub wits: WeierstrassDecompressWitCols<WitT, P>,
+pub enum WeierstrassDecompressLayer<WitT, P: FieldParameters + NumWords> {
+    Generic(WeierstrassDecompressWitCols<WitT, P>),
+    CompactSecp256k1(CompactSecp256k1DecompressWitCols<WitT, P>),
 }
 
 #[derive(Clone, Debug)]
@@ -128,27 +148,60 @@ pub struct WeierstrassDecompressLayout<E: ExtensionField, EC: EllipticCurve> {
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
     WeierstrassDecompressLayout<E, EC>
 {
+    fn assert_compact_secp256k1_limb_bytes(
+        record: &mut LkMultiplicity,
+        cols: &CompactSecp256k1DecompressWitCols<E::BaseField, EC::BaseField>,
+    ) {
+        record.assert_byte_fields(&cols.x_limbs.0);
+        record.assert_byte_fields(&cols.x_2.0);
+        record.assert_byte_fields(&cols.rhs.0);
+        record.assert_byte_fields(&cols.y_limbs.0);
+    }
+
     fn new(cb: &mut CircuitBuilder<E>) -> Self {
         match EC::CURVE_TYPE {
             CurveType::Secp256k1 | CurveType::Secp256r1 => {}
             _ => panic!("Unsupported curve"),
         }
 
-        let wits = WeierstrassDecompressWitCols {
-            sign_bit: cb.create_bit(|| "sign_bit").unwrap(),
-            x_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "x"))),
-            y_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "y"))),
-            old_output32: GenericArray::generate(|i| {
-                array::from_fn(|j| cb.create_witin(|| format!("old_output32_{}_{}", i, j)))
-            }),
-            range_x: FieldLtCols::create(cb, || "range_x"),
-            neg_y_range_check: FieldLtCols::create(cb, || "neg_y_range_check"),
-            x_2: FieldOpCols::create(cb, || "x_2"),
-            x_3: FieldOpCols::create(cb, || "x_3"),
-            ax_plus_b: FieldInnerProductCols::create(cb, || "ax_plus_b"),
-            x_3_plus_b_plus_ax: FieldOpCols::create(cb, || "x_3_plus_b_plus_ax"),
-            pos_y: FieldSqrtCols::create(cb, || "y"),
-            neg_y: FieldOpCols::create(cb, || "neg_y"),
+        let wits = match EC::CURVE_TYPE {
+            CurveType::Secp256k1 => {
+                WeierstrassDecompressLayer::CompactSecp256k1(CompactSecp256k1DecompressWitCols {
+                    sign_bit: cb.create_bit(|| "sign_bit").unwrap(),
+                    x_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "x"))),
+                    y_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "y"))),
+                    old_output32: GenericArray::generate(|i| {
+                        array::from_fn(|j| cb.create_witin(|| format!("old_output32_{}_{}", i, j)))
+                    }),
+                    range_x: FieldLtCols::create(cb, || "range_x"),
+                    neg_y_range_check: FieldLtCols::create(cb, || "neg_y_range_check"),
+                    x_2: Limbs(GenericArray::generate(|_| cb.create_witin(|| "x_2"))),
+                    rhs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "rhs"))),
+                    x_2_relation: CompactFieldRelationCols::create(cb, || "x_2_relation"),
+                    rhs_relation: CompactFieldRelationCols::create(cb, || "rhs_relation"),
+                    pos_y: FieldSqrtCols::create(cb, || "y"),
+                    neg_y: FieldOpCols::create(cb, || "neg_y"),
+                })
+            }
+            CurveType::Secp256r1 => {
+                WeierstrassDecompressLayer::Generic(WeierstrassDecompressWitCols {
+                    sign_bit: cb.create_bit(|| "sign_bit").unwrap(),
+                    x_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "x"))),
+                    y_limbs: Limbs(GenericArray::generate(|_| cb.create_witin(|| "y"))),
+                    old_output32: GenericArray::generate(|i| {
+                        array::from_fn(|j| cb.create_witin(|| format!("old_output32_{}_{}", i, j)))
+                    }),
+                    range_x: FieldLtCols::create(cb, || "range_x"),
+                    neg_y_range_check: FieldLtCols::create(cb, || "neg_y_range_check"),
+                    x_2: FieldOpCols::create(cb, || "x_2"),
+                    x_3: FieldOpCols::create(cb, || "x_3"),
+                    ax_plus_b: FieldInnerProductCols::create(cb, || "ax_plus_b"),
+                    x_3_plus_b_plus_ax: FieldOpCols::create(cb, || "x_3_plus_b_plus_ax"),
+                    pos_y: FieldSqrtCols::create(cb, || "y"),
+                    neg_y: FieldOpCols::create(cb, || "neg_y"),
+                })
+            }
+            _ => panic!("Unsupported curve"),
         };
 
         let eq = cb.create_placeholder_structural_witin(|| "weierstrass_decompress_eq");
@@ -175,7 +228,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
         > = GenericArray::generate(|_| array::from_fn(|_| Expression::WitIn(0)));
 
         Self {
-            layer_exprs: WeierstrassDecompressLayer { wits },
+            layer_exprs: wits,
             selector_type_layout,
             input32_exprs,
             old_output32_exprs,
@@ -234,6 +287,68 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
             cols.y_limbs = EC::BaseField::to_limbs_field(&neg_y);
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn populate_compact_secp256k1(
+        record: &mut LkMultiplicity,
+        cols: &mut CompactSecp256k1DecompressWitCols<E::BaseField, EC::BaseField>,
+        instance: &EllipticCurveDecompressInstance<EC::BaseField>,
+    ) {
+        cols.sign_bit = E::BaseField::from_bool(instance.sign_bit);
+        cols.old_output32 = GenericArray::generate(|i| {
+            [
+                E::BaseField::from_u32(instance.old_y_words[i] & ((1 << 16) - 1)),
+                E::BaseField::from_u32((instance.old_y_words[i] >> 16) & ((1 << 16) - 1)),
+            ]
+        });
+
+        let x = &instance.x;
+        let modulus = EC::BaseField::modulus();
+        cols.x_limbs = EC::BaseField::to_limbs_field(x);
+        cols.range_x.populate(record, x, &modulus);
+
+        let x_2 = (x * x) % &modulus;
+        let rhs = (&x_2 * x + BigUint::from(7u32)) % &modulus;
+        cols.x_2 = EC::BaseField::to_limbs_field(&x_2);
+        cols.rhs = EC::BaseField::to_limbs_field(&rhs);
+
+        let p_x: Polynomial<E::BaseField> = cols.x_limbs.clone().into();
+        let p_x_2: Polynomial<E::BaseField> = cols.x_2.clone().into();
+        let p_rhs: Polynomial<E::BaseField> = cols.rhs.clone().into();
+        let p_seven = Polynomial::from_coefficients(&[E::BaseField::from_u8(7)]);
+
+        cols.x_2_relation.populate_with_evals(
+            record,
+            &p_x_2,
+            &(&p_x * &p_x),
+            &modulus,
+            &x_2,
+            &(x * x),
+        );
+
+        cols.rhs_relation.populate_with_evals(
+            record,
+            &p_rhs,
+            &(&p_x_2 * &p_x + &p_seven),
+            &modulus,
+            &rhs,
+            &(&x_2 * x + BigUint::from(7u32)),
+        );
+
+        let y = cols.pos_y.populate(record, &rhs, secp256k1_sqrt);
+
+        let zero = BigUint::zero();
+        let neg_y = cols.neg_y.populate(record, &zero, &y, FieldOperation::Sub);
+        cols.neg_y_range_check.populate(record, &neg_y, &modulus);
+
+        if cols.pos_y.lsb.to_canonical_u64() == instance.sign_bit as u64 {
+            cols.y_limbs = EC::BaseField::to_limbs_field(&y);
+        } else {
+            cols.y_limbs = EC::BaseField::to_limbs_field(&neg_y);
+        }
+
+        Self::assert_compact_secp256k1_limb_bytes(record, cols);
+    }
 }
 
 impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuilder<E>
@@ -249,80 +364,127 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
             CurveType::Secp256k1 | CurveType::Secp256r1 => WeierstrassDecompressLayout::new(cb),
             _ => panic!("Unsupported curve"),
         };
-        let wits = &layout.layer_exprs.wits;
+        let (x_limbs, y_limbs, old_output32) = match &layout.layer_exprs {
+            WeierstrassDecompressLayer::Generic(wits) => {
+                let x_limbs = &wits.x_limbs;
+                let max_num_limbs = EC::BaseField::to_limbs_expr(&EC::BaseField::modulus());
 
-        let x_limbs = &wits.x_limbs;
-        let max_num_limbs = EC::BaseField::to_limbs_expr(&EC::BaseField::modulus());
+                wits.range_x.eval(cb, x_limbs, &max_num_limbs)?;
+                wits.x_2.eval(cb, x_limbs, x_limbs, FieldOperation::Mul)?;
+                wits.x_3
+                    .eval(cb, &wits.x_2.result, x_limbs, FieldOperation::Mul)?;
 
-        wits.range_x.eval(cb, x_limbs, &max_num_limbs)?;
-        wits.x_2.eval(cb, x_limbs, x_limbs, FieldOperation::Mul)?;
-        wits.x_3
-            .eval(cb, &wits.x_2.result, x_limbs, FieldOperation::Mul)?;
+                let b_const = EC::BaseField::to_limbs_expr::<E>(&EC::b_int());
+                let a_const = EC::BaseField::to_limbs_expr::<E>(&EC::a_int());
+                let params = [a_const, b_const];
+                let p_x: Polynomial<Expression<E>> = x_limbs.clone().into();
+                let p_one: Polynomial<Expression<E>> =
+                    EC::BaseField::to_limbs_expr::<E>(&BigUint::one()).into();
+                wits.ax_plus_b.eval(cb, &params, &[p_x, p_one])?;
+                wits.x_3_plus_b_plus_ax.eval(
+                    cb,
+                    &wits.x_3.result,
+                    &wits.ax_plus_b.result,
+                    FieldOperation::Add,
+                )?;
 
-        let b_const = EC::BaseField::to_limbs_expr::<E>(&EC::b_int());
-        let a_const = EC::BaseField::to_limbs_expr::<E>(&EC::a_int());
-        let params = [a_const, b_const];
-        let p_x: Polynomial<Expression<E>> = x_limbs.clone().into();
-        let p_one: Polynomial<Expression<E>> =
-            EC::BaseField::to_limbs_expr::<E>(&BigUint::one()).into();
-        wits.ax_plus_b.eval(cb, &params, &[p_x, p_one])?;
-        wits.x_3_plus_b_plus_ax.eval(
-            cb,
-            &wits.x_3.result,
-            &wits.ax_plus_b.result,
-            FieldOperation::Add,
-        )?;
+                wits.neg_y.eval(
+                    cb,
+                    &[Expression::<E>::ZERO].iter(),
+                    &wits.pos_y.multiplication.result,
+                    FieldOperation::Sub,
+                )?;
+                let modulus_limbs = EC::BaseField::to_limbs_expr(&EC::BaseField::modulus());
+                wits.neg_y_range_check
+                    .eval(cb, &wits.neg_y.result, &modulus_limbs)?;
 
-        wits.neg_y.eval(
-            cb,
-            &[Expression::<E>::ZERO].iter(),
-            &wits.pos_y.multiplication.result,
-            FieldOperation::Sub,
-        )?;
-        // Range check the `neg_y.result` to be canonical.
-        let modulus_limbs = EC::BaseField::to_limbs_expr(&EC::BaseField::modulus());
-        wits.neg_y_range_check
-            .eval(cb, &wits.neg_y.result, &modulus_limbs)?;
+                wits.pos_y
+                    .eval(cb, &wits.x_3_plus_b_plus_ax.result, wits.pos_y.lsb)?;
 
-        // Constrain that `y` is a square root. Note that `y.multiplication.result` is constrained
-        // to be canonical here. Since `y_limbs` is constrained to be either
-        // `y.multiplication.result` or `neg_y.result`, `y_limbs` will be canonical.
-        wits.pos_y
-            .eval(cb, &wits.x_3_plus_b_plus_ax.result, wits.pos_y.lsb)?;
+                let cond: Expression<E> = 1
+                    - (wits.pos_y.lsb.expr() + wits.sign_bit.expr()
+                        - 2 * wits.pos_y.lsb.expr() * wits.sign_bit.expr());
+                for (y, sqrt_y, neg_sqrt_y) in izip!(
+                    wits.y_limbs.0.iter(),
+                    wits.pos_y.multiplication.result.0.iter(),
+                    wits.neg_y.result.0.iter()
+                ) {
+                    cb.condition_require_equal(
+                        || "when lsb == sign_bit, y_limbs = sqrt(y), otherwise y_limbs = -sqrt(y)",
+                        cond.expr(),
+                        y.expr(),
+                        sqrt_y.expr(),
+                        neg_sqrt_y.expr(),
+                    )?;
+                }
 
-        // When the sign rule is LeastSignificantBit, the sign_bit should match the parity
-        // of the result. The parity of the square root result is given by the wits.y.lsb
-        // value. Thus, if the sign_bit matches the wits.y.lsb value, then the result
-        // should be the square root of the y value. Otherwise, the result should be the
-        // negative square root of the y value.
-        let cond: Expression<E> = 1
-            - (wits.pos_y.lsb.expr() + wits.sign_bit.expr()
-                - 2 * wits.pos_y.lsb.expr() * wits.sign_bit.expr());
-        for (y, sqrt_y, neg_sqrt_y) in izip!(
-            wits.y_limbs.0.iter(),
-            wits.pos_y.multiplication.result.0.iter(),
-            wits.neg_y.result.0.iter()
-        ) {
-            cb.condition_require_equal(
-                || "when lsb == sign_bit, y_limbs = sqrt(y), otherwise y_limbs = -sqrt(y)",
-                cond.expr(),
-                y.expr(),
-                sqrt_y.expr(),
-                neg_sqrt_y.expr(),
-            )?;
-        }
+                (&wits.x_limbs, &wits.y_limbs, &wits.old_output32)
+            }
+            WeierstrassDecompressLayer::CompactSecp256k1(wits) => {
+                cb.assert_bytes(|| "compact secp256k1 decompress x", &wits.x_limbs.0)?;
+                cb.assert_bytes(|| "compact secp256k1 decompress x_2", &wits.x_2.0)?;
+                cb.assert_bytes(|| "compact secp256k1 decompress rhs", &wits.rhs.0)?;
+                cb.assert_bytes(|| "compact secp256k1 decompress y", &wits.y_limbs.0)?;
+
+                let max_num_limbs = EC::BaseField::to_limbs_expr(&EC::BaseField::modulus());
+                wits.range_x.eval(cb, &wits.x_limbs, &max_num_limbs)?;
+
+                let p_x: Polynomial<Expression<E>> = wits.x_limbs.clone().into();
+                let p_x_2: Polynomial<Expression<E>> = wits.x_2.clone().into();
+                let p_rhs: Polynomial<Expression<E>> = wits.rhs.clone().into();
+                let p_seven = Polynomial::new(vec![E::BaseField::from_u8(7).expr()]);
+                let modulus = EC::BaseField::modulus();
+
+                let x_2_rhs = poly_mul_expr(&p_x, &p_x);
+                wits.x_2_relation.eval(cb, &p_x_2, &x_2_rhs, &modulus)?;
+
+                let rhs_rhs = poly_mul_expr(&p_x_2, &p_x) + &p_seven;
+                wits.rhs_relation.eval(cb, &p_rhs, &rhs_rhs, &modulus)?;
+
+                wits.neg_y.eval(
+                    cb,
+                    &[Expression::<E>::ZERO].iter(),
+                    &wits.pos_y.multiplication.result,
+                    FieldOperation::Sub,
+                )?;
+                let modulus_limbs = EC::BaseField::to_limbs_expr(&modulus);
+                wits.neg_y_range_check
+                    .eval(cb, &wits.neg_y.result, &modulus_limbs)?;
+
+                wits.pos_y.eval(cb, &wits.rhs, wits.pos_y.lsb)?;
+
+                let cond: Expression<E> = 1
+                    - (wits.pos_y.lsb.expr() + wits.sign_bit.expr()
+                        - 2 * wits.pos_y.lsb.expr() * wits.sign_bit.expr());
+                for (y, sqrt_y, neg_sqrt_y) in izip!(
+                    wits.y_limbs.0.iter(),
+                    wits.pos_y.multiplication.result.0.iter(),
+                    wits.neg_y.result.0.iter()
+                ) {
+                    cb.condition_require_equal(
+                        || "when lsb == sign_bit, y_limbs = sqrt(y), otherwise y_limbs = -sqrt(y)",
+                        cond.expr(),
+                        y.expr(),
+                        sqrt_y.expr(),
+                        neg_sqrt_y.expr(),
+                    )?;
+                }
+
+                (&wits.x_limbs, &wits.y_limbs, &wits.old_output32)
+            }
+        };
 
         let mut output32 =
             Vec::with_capacity(<EC::BaseField as NumWords>::WordsFieldElement::USIZE);
         merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(
-            &wits.y_limbs.0.iter().rev().cloned().collect::<Vec<_>>(),
+            &y_limbs.0.iter().rev().cloned().collect::<Vec<_>>(),
             &mut output32,
         );
         let output32 = output32.try_into().unwrap();
 
         let mut input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsFieldElement::USIZE);
         merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(
-            &wits.x_limbs.0.iter().rev().cloned().collect::<Vec<_>>(),
+            &x_limbs.0.iter().rev().cloned().collect::<Vec<_>>(),
             &mut input32,
         );
         let input32 = input32.try_into().unwrap();
@@ -331,7 +493,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolBuild
         layout.input32_exprs = input32;
         layout.output32_exprs = output32;
         layout.old_output32_exprs =
-            GenericArray::generate(|i| array::from_fn(|j| wits.old_output32[i][j].expr()));
+            GenericArray::generate(|i| array::from_fn(|j| old_output32[i][j].expr()));
 
         Ok(layout)
     }
@@ -396,8 +558,8 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
         let nthreads = max_usable_threads();
         let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
 
-        // The number of columns used for weierstrass decompress subcircuit.
-        let num_main_wit_cols = size_of::<WeierstrassDecompressWitCols<u8, EC::BaseField>>();
+        let first_wit_id = self.first_wit_id();
+        let num_main_wit_cols = self.num_arithmetic_wit_cols();
 
         let [wits, structural_wits] = wits;
         let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
@@ -411,16 +573,73 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> ProtocolWitne
                     .zip_eq(eqs.chunks_mut(self.n_structural_witin))
                     .zip_eq(phase1_instances)
                     .for_each(|((row, eqs), phase1_instance)| {
-                        let cols: &mut WeierstrassDecompressWitCols<E::BaseField, EC::BaseField> =
-                            row[self.layer_exprs.wits.sign_bit.id as usize..][..num_main_wit_cols] // TODO: Find a better way to write it.
-                                .borrow_mut();
-                        Self::populate(&mut lk_multiplicity, cols, phase1_instance);
+                        self.populate_row_from_slice(
+                            &mut lk_multiplicity,
+                            &mut row[first_wit_id..][..num_main_wit_cols],
+                            phase1_instance,
+                        );
 
                         for x in eqs.iter_mut() {
                             *x = E::BaseField::ONE;
                         }
                     });
             });
+    }
+}
+
+impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters>
+    WeierstrassDecompressLayout<E, EC>
+{
+    fn populate_row_from_slice(
+        &self,
+        record: &mut LkMultiplicity,
+        row: &mut [E::BaseField],
+        instance: &EllipticCurveDecompressInstance<EC::BaseField>,
+    ) {
+        match &self.layer_exprs {
+            WeierstrassDecompressLayer::Generic(_) => {
+                let cols: &mut WeierstrassDecompressWitCols<E::BaseField, EC::BaseField> =
+                    row.borrow_mut();
+                Self::populate(record, cols, instance);
+            }
+            WeierstrassDecompressLayer::CompactSecp256k1(_) => {
+                let cols: &mut CompactSecp256k1DecompressWitCols<E::BaseField, EC::BaseField> =
+                    row.borrow_mut();
+                Self::populate_compact_secp256k1(record, cols, instance);
+            }
+        }
+    }
+
+    fn first_wit_id(&self) -> usize {
+        match &self.layer_exprs {
+            WeierstrassDecompressLayer::Generic(wits) => wits.sign_bit.id as usize,
+            WeierstrassDecompressLayer::CompactSecp256k1(wits) => wits.sign_bit.id as usize,
+        }
+    }
+
+    fn num_arithmetic_wit_cols(&self) -> usize {
+        match &self.layer_exprs {
+            WeierstrassDecompressLayer::Generic(_) => {
+                size_of::<WeierstrassDecompressWitCols<u8, EC::BaseField>>()
+            }
+            WeierstrassDecompressLayer::CompactSecp256k1(_) => {
+                size_of::<CompactSecp256k1DecompressWitCols<u8, EC::BaseField>>()
+            }
+        }
+    }
+
+    pub(crate) fn sign_bit_wit(&self) -> WitIn {
+        match &self.layer_exprs {
+            WeierstrassDecompressLayer::Generic(wits) => wits.sign_bit,
+            WeierstrassDecompressLayer::CompactSecp256k1(wits) => wits.sign_bit,
+        }
+    }
+
+    fn y_output_limb_start_id(&self) -> usize {
+        match &self.layer_exprs {
+            WeierstrassDecompressLayer::Generic(wits) => wits.y_limbs.0[0].id as usize,
+            WeierstrassDecompressLayer::CompactSecp256k1(wits) => wits.y_limbs.0[0].id as usize,
+        }
     }
 }
 
@@ -613,7 +832,7 @@ pub fn run_weierstrass_decompress<
             )
             .collect_vec();
 
-        let y_output_index_start = layout.layout.layer_exprs.wits.y_limbs.0[0].id as usize;
+        let y_output_index_start = layout.layout.y_output_limb_start_id();
         let got_outputs = phase1_witness
             .iter_rows()
             .take(num_instances)

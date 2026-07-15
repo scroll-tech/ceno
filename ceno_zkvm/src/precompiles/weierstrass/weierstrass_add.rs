@@ -52,8 +52,9 @@ use rayon::{
     prelude::{IntoParallelRefIterator, ParallelSlice},
 };
 use sp1_curves::{
-    AffinePoint, EllipticCurve,
+    AffinePoint, CurveType, EllipticCurve,
     params::{FieldParameters, Limbs, NumLimbs, NumWords},
+    polynomial::Polynomial,
 };
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -66,11 +67,12 @@ use crate::{
     chip_handler::MemoryExpr,
     e2e::ShardContext,
     error::ZKVMError,
-    gadgets::{FieldOperation, field_op::FieldOpCols},
+    gadgets::{FieldOperation, field_op::FieldOpCols, util_expr::poly_mul_expr},
     instructions::riscv::insn_base::{StateInOut, WriteMEM},
     precompiles::{
-        SelectorTypeLayout, utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
-        weierstrass::EllipticCurveAddInstance,
+        SelectorTypeLayout,
+        utils::merge_u8_slice_to_u16_limbs_pairs_and_extend,
+        weierstrass::{EllipticCurveAddInstance, compact_field_relation::CompactFieldRelationCols},
     },
     scheme::utils::gkr_witness,
     structs::PointAndEval,
@@ -96,11 +98,26 @@ pub struct WeierstrassAddAssignWitCols<WitT, P: FieldParameters + NumLimbs> {
     pub(crate) slope_times_p_x_minus_x: FieldOpCols<WitT, P>,
 }
 
+#[derive(Clone, Debug, AlignedBorrow)]
+#[repr(C)]
+pub struct CompactSecp256k1AddAssignWitCols<WitT, P: FieldParameters + NumLimbs> {
+    pub p_x: Limbs<WitT, P::Limbs>,
+    pub p_y: Limbs<WitT, P::Limbs>,
+    pub q_x: Limbs<WitT, P::Limbs>,
+    pub q_y: Limbs<WitT, P::Limbs>,
+    pub(crate) slope: Limbs<WitT, P::Limbs>,
+    pub(crate) x3: Limbs<WitT, P::Limbs>,
+    pub(crate) y3: Limbs<WitT, P::Limbs>,
+    pub(crate) slope_relation: CompactFieldRelationCols<WitT, P>,
+    pub(crate) x_relation: CompactFieldRelationCols<WitT, P>,
+    pub(crate) y_relation: CompactFieldRelationCols<WitT, P>,
+}
+
 /// Weierstrass addition is implemented by a single layer.
 #[derive(Clone, Debug)]
-#[repr(C)]
-pub struct WeierstrassAddAssignLayer<WitT, P: FieldParameters + NumWords> {
-    pub wits: WeierstrassAddAssignWitCols<WitT, P>,
+pub enum WeierstrassAddAssignLayer<WitT, P: FieldParameters + NumWords> {
+    Generic(WeierstrassAddAssignWitCols<WitT, P>),
+    CompactSecp256k1(CompactSecp256k1AddAssignWitCols<WitT, P>),
 }
 
 #[derive(Clone, Debug)]
@@ -116,21 +133,50 @@ pub struct WeierstrassAddAssignLayout<E: ExtensionField, EC: EllipticCurve> {
 }
 
 impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
+    fn assert_compact_secp256k1_limb_bytes(
+        blu_events: &mut LkMultiplicity,
+        cols: &CompactSecp256k1AddAssignWitCols<E::BaseField, EC::BaseField>,
+    ) {
+        blu_events.assert_byte_fields(&cols.p_x.0);
+        blu_events.assert_byte_fields(&cols.p_y.0);
+        blu_events.assert_byte_fields(&cols.q_x.0);
+        blu_events.assert_byte_fields(&cols.q_y.0);
+        blu_events.assert_byte_fields(&cols.slope.0);
+        blu_events.assert_byte_fields(&cols.x3.0);
+        blu_events.assert_byte_fields(&cols.y3.0);
+    }
+
     fn new(cb: &mut CircuitBuilder<E>) -> Self {
-        let wits = WeierstrassAddAssignWitCols {
-            p_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_x"))),
-            p_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_y"))),
-            q_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "q_x"))),
-            q_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "q_y"))),
-            slope_denominator: FieldOpCols::create(cb, || "slope_denominator"),
-            slope_numerator: FieldOpCols::create(cb, || "slope_numerator"),
-            slope: FieldOpCols::create(cb, || "slope"),
-            slope_squared: FieldOpCols::create(cb, || "slope_squared"),
-            p_x_plus_q_x: FieldOpCols::create(cb, || "p_x_plus_q_x"),
-            x3_ins: FieldOpCols::create(cb, || "x3_ins"),
-            p_x_minus_x: FieldOpCols::create(cb, || "p_x_minus_x"),
-            y3_ins: FieldOpCols::create(cb, || "y3_ins"),
-            slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
+        let wits = match EC::CURVE_TYPE {
+            CurveType::Secp256k1 => {
+                WeierstrassAddAssignLayer::CompactSecp256k1(CompactSecp256k1AddAssignWitCols {
+                    p_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_x"))),
+                    p_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_y"))),
+                    q_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "q_x"))),
+                    q_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "q_y"))),
+                    slope: Limbs(GenericArray::generate(|_| cb.create_witin(|| "slope"))),
+                    x3: Limbs(GenericArray::generate(|_| cb.create_witin(|| "x3"))),
+                    y3: Limbs(GenericArray::generate(|_| cb.create_witin(|| "y3"))),
+                    slope_relation: CompactFieldRelationCols::create(cb, || "slope_relation"),
+                    x_relation: CompactFieldRelationCols::create(cb, || "x_relation"),
+                    y_relation: CompactFieldRelationCols::create(cb, || "y_relation"),
+                })
+            }
+            _ => WeierstrassAddAssignLayer::Generic(WeierstrassAddAssignWitCols {
+                p_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_x"))),
+                p_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "p_y"))),
+                q_x: Limbs(GenericArray::generate(|_| cb.create_witin(|| "q_x"))),
+                q_y: Limbs(GenericArray::generate(|_| cb.create_witin(|| "q_y"))),
+                slope_denominator: FieldOpCols::create(cb, || "slope_denominator"),
+                slope_numerator: FieldOpCols::create(cb, || "slope_numerator"),
+                slope: FieldOpCols::create(cb, || "slope"),
+                slope_squared: FieldOpCols::create(cb, || "slope_squared"),
+                p_x_plus_q_x: FieldOpCols::create(cb, || "p_x_plus_q_x"),
+                x3_ins: FieldOpCols::create(cb, || "x3_ins"),
+                p_x_minus_x: FieldOpCols::create(cb, || "p_x_minus_x"),
+                y3_ins: FieldOpCols::create(cb, || "y3_ins"),
+                slope_times_p_x_minus_x: FieldOpCols::create(cb, || "slope_times_p_x_minus_x"),
+            }),
         };
 
         let eq = cb.create_placeholder_structural_witin(|| "weierstrass_add_eq");
@@ -155,7 +201,7 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
         > = GenericArray::generate(|_| array::from_fn(|_| Expression::WitIn(0)));
 
         Self {
-            layer_exprs: WeierstrassAddAssignLayer { wits },
+            layer_exprs: wits,
             selector_type_layout,
             input32_exprs,
             output32_exprs,
@@ -230,6 +276,71 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
             );
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn populate_compact_secp256k1_field_ops(
+        blu_events: &mut LkMultiplicity,
+        cols: &mut CompactSecp256k1AddAssignWitCols<E::BaseField, EC::BaseField>,
+        p_x: BigUint,
+        p_y: BigUint,
+        q_x: BigUint,
+        q_y: BigUint,
+    ) {
+        let modulus = EC::BaseField::modulus();
+        let slope_denominator = (&q_x + &modulus - &p_x) % &modulus;
+        let slope_numerator = (&q_y + &modulus - &p_y) % &modulus;
+        let slope = (&slope_numerator
+            * slope_denominator.modpow(&(modulus.clone() - 2u32), &modulus))
+            % &modulus;
+        let x3 = (&slope * &slope + &modulus - ((&p_x + &q_x) % &modulus)) % &modulus;
+        let y3 = (&slope * ((&p_x + &modulus - &x3) % &modulus) + &modulus - &p_y) % &modulus;
+
+        cols.slope = EC::BaseField::to_limbs_field(&slope);
+        cols.x3 = EC::BaseField::to_limbs_field(&x3);
+        cols.y3 = EC::BaseField::to_limbs_field(&y3);
+
+        let p_slope: Polynomial<E::BaseField> = cols.slope.clone().into();
+        let p_p_x: Polynomial<E::BaseField> = EC::BaseField::to_limbs_field(&p_x).into();
+        let p_p_y: Polynomial<E::BaseField> = EC::BaseField::to_limbs_field(&p_y).into();
+        let p_q_x: Polynomial<E::BaseField> = EC::BaseField::to_limbs_field(&q_x).into();
+        let p_q_y: Polynomial<E::BaseField> = EC::BaseField::to_limbs_field(&q_y).into();
+        let p_x3: Polynomial<E::BaseField> = cols.x3.clone().into();
+        let p_y3: Polynomial<E::BaseField> = cols.y3.clone().into();
+        let p_modulus = Polynomial::from_iter(EC::BaseField::modulus_field_iter::<E::BaseField>());
+
+        let slope_lhs = &p_slope * &(&p_q_x + &p_modulus - &p_p_x);
+        let slope_rhs = &p_q_y + &p_modulus - &p_p_y;
+        cols.slope_relation.populate_with_evals(
+            blu_events,
+            &slope_lhs,
+            &slope_rhs,
+            &modulus,
+            &(&slope * (&q_x + &modulus - &p_x)),
+            &(&q_y + &modulus - &p_y),
+        );
+
+        let x_lhs = &p_x3 + &p_p_x + &p_q_x;
+        let x_rhs = &p_slope * &p_slope;
+        cols.x_relation.populate_with_evals(
+            blu_events,
+            &x_lhs,
+            &x_rhs,
+            &modulus,
+            &(&x3 + &p_x + &q_x),
+            &(&slope * &slope),
+        );
+
+        let y_lhs = &p_y3 + &p_p_y;
+        let y_rhs = &p_slope * &(&p_p_x + &p_modulus - &p_x3);
+        cols.y_relation.populate_with_evals(
+            blu_events,
+            &y_lhs,
+            &y_rhs,
+            &(&BigUint::from(2u32) * &modulus),
+            &(&y3 + &p_y),
+            &(&slope * (&p_x + &modulus - &x3)),
+        );
+    }
 }
 
 impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E>
@@ -242,79 +353,129 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolBuilder<E>
         _params: Self::Params,
     ) -> Result<Self, CircuitBuilderError> {
         let mut layout = WeierstrassAddAssignLayout::new(cb);
-        let wits = &layout.layer_exprs.wits;
+        let (p_x, p_y, q_x, q_y, x3, y3) = match &layout.layer_exprs {
+            WeierstrassAddAssignLayer::Generic(wits) => {
+                // slope = (q.y - p.y) / (q.x - p.x).
+                let slope = {
+                    wits.slope_numerator
+                        .eval(cb, &wits.q_y, &wits.p_y, FieldOperation::Sub)?;
 
-        // slope = (q.y - p.y) / (q.x - p.x).
-        let slope = {
-            wits.slope_numerator
-                .eval(cb, &wits.q_y, &wits.p_y, FieldOperation::Sub)?;
+                    wits.slope_denominator
+                        .eval(cb, &wits.q_x, &wits.p_x, FieldOperation::Sub)?;
 
-            wits.slope_denominator
-                .eval(cb, &wits.q_x, &wits.p_x, FieldOperation::Sub)?;
+                    wits.slope.eval(
+                        cb,
+                        &wits.slope_numerator.result,
+                        &wits.slope_denominator.result,
+                        FieldOperation::Div,
+                    )?;
 
-            wits.slope.eval(
-                cb,
-                &wits.slope_numerator.result,
-                &wits.slope_denominator.result,
-                FieldOperation::Div,
-            )?;
+                    &wits.slope.result
+                };
 
-            &wits.slope.result
+                // x = slope * slope - self.x - other.x.
+                let x = {
+                    wits.slope_squared
+                        .eval(cb, slope, slope, FieldOperation::Mul)?;
+
+                    wits.p_x_plus_q_x
+                        .eval(cb, &wits.p_x, &wits.q_x, FieldOperation::Add)?;
+
+                    wits.x3_ins.eval(
+                        cb,
+                        &wits.slope_squared.result,
+                        &wits.p_x_plus_q_x.result,
+                        FieldOperation::Sub,
+                    )?;
+
+                    &wits.x3_ins.result
+                };
+
+                // y = slope * (p.x - x_3n) - q.y.
+                {
+                    wits.p_x_minus_x
+                        .eval(cb, &wits.p_x, x, FieldOperation::Sub)?;
+
+                    wits.slope_times_p_x_minus_x.eval(
+                        cb,
+                        slope,
+                        &wits.p_x_minus_x.result,
+                        FieldOperation::Mul,
+                    )?;
+
+                    wits.y3_ins.eval(
+                        cb,
+                        &wits.slope_times_p_x_minus_x.result,
+                        &wits.p_y,
+                        FieldOperation::Sub,
+                    )?;
+                }
+
+                (
+                    &wits.p_x,
+                    &wits.p_y,
+                    &wits.q_x,
+                    &wits.q_y,
+                    &wits.x3_ins.result,
+                    &wits.y3_ins.result,
+                )
+            }
+            WeierstrassAddAssignLayer::CompactSecp256k1(wits) => {
+                cb.assert_bytes(|| "compact secp256k1 add p_x", &wits.p_x.0)?;
+                cb.assert_bytes(|| "compact secp256k1 add p_y", &wits.p_y.0)?;
+                cb.assert_bytes(|| "compact secp256k1 add q_x", &wits.q_x.0)?;
+                cb.assert_bytes(|| "compact secp256k1 add q_y", &wits.q_y.0)?;
+                cb.assert_bytes(|| "compact secp256k1 add slope", &wits.slope.0)?;
+                cb.assert_bytes(|| "compact secp256k1 add x3", &wits.x3.0)?;
+                cb.assert_bytes(|| "compact secp256k1 add y3", &wits.y3.0)?;
+
+                let p_slope: Polynomial<Expression<E>> = wits.slope.clone().into();
+                let p_p_x: Polynomial<Expression<E>> = wits.p_x.clone().into();
+                let p_p_y: Polynomial<Expression<E>> = wits.p_y.clone().into();
+                let p_q_x: Polynomial<Expression<E>> = wits.q_x.clone().into();
+                let p_q_y: Polynomial<Expression<E>> = wits.q_y.clone().into();
+                let p_x3: Polynomial<Expression<E>> = wits.x3.clone().into();
+                let p_y3: Polynomial<Expression<E>> = wits.y3.clone().into();
+                let p_modulus = Polynomial::from_iter(
+                    EC::BaseField::modulus_field_iter::<E::BaseField>().map(|x| x.expr()),
+                );
+                let modulus = EC::BaseField::modulus();
+
+                let slope_lhs = poly_mul_expr(&p_slope, &(&p_q_x + &p_modulus - &p_p_x));
+                let slope_rhs = &p_q_y + &p_modulus - &p_p_y;
+                wits.slope_relation
+                    .eval(cb, &slope_lhs, &slope_rhs, &modulus)?;
+
+                let x_lhs = &p_x3 + &p_p_x + &p_q_x;
+                let x_rhs = poly_mul_expr(&p_slope, &p_slope);
+                wits.x_relation.eval(cb, &x_lhs, &x_rhs, &modulus)?;
+
+                let y_lhs = &p_y3 + &p_p_y;
+                let y_rhs = poly_mul_expr(&p_slope, &(&p_p_x + &p_modulus - &p_x3));
+                wits.y_relation
+                    .eval(cb, &y_lhs, &y_rhs, &(BigUint::from(2u32) * &modulus))?;
+
+                (
+                    &wits.p_x, &wits.p_y, &wits.q_x, &wits.q_y, &wits.x3, &wits.y3,
+                )
+            }
         };
-
-        // x = slope * slope - self.x - other.x.
-        let x = {
-            wits.slope_squared
-                .eval(cb, slope, slope, FieldOperation::Mul)?;
-
-            wits.p_x_plus_q_x
-                .eval(cb, &wits.p_x, &wits.q_x, FieldOperation::Add)?;
-
-            wits.x3_ins.eval(
-                cb,
-                &wits.slope_squared.result,
-                &wits.p_x_plus_q_x.result,
-                FieldOperation::Sub,
-            )?;
-
-            &wits.x3_ins.result
-        };
-
-        // y = slope * (p.x - x_3n) - q.y.
-        {
-            wits.p_x_minus_x
-                .eval(cb, &wits.p_x, x, FieldOperation::Sub)?;
-
-            wits.slope_times_p_x_minus_x.eval(
-                cb,
-                slope,
-                &wits.p_x_minus_x.result,
-                FieldOperation::Mul,
-            )?;
-
-            wits.y3_ins.eval(
-                cb,
-                &wits.slope_times_p_x_minus_x.result,
-                &wits.p_y,
-                FieldOperation::Sub,
-            )?;
-        }
 
         // Constraint output32 from wits.x3_ins || wits.y3_ins by converting 8-bit limbs to 2x16-bit felts
         let mut output32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
-        for limbs in [&wits.x3_ins.result, &wits.y3_ins.result] {
+        for limbs in [x3, y3] {
             merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(&limbs.0, &mut output32);
         }
         let output32 = output32.try_into().unwrap();
 
         let mut p_input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
-        for limbs in [&wits.p_x, &wits.p_y] {
+        for limbs in [p_x, p_y] {
             merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(&limbs.0, &mut p_input32);
         }
         let p_input32 = p_input32.try_into().unwrap();
 
         let mut q_input32 = Vec::with_capacity(<EC::BaseField as NumWords>::WordsCurvePoint::USIZE);
-        for limbs in [&wits.q_x, &wits.q_y] {
+        for limbs in [q_x, q_y] {
             merge_u8_slice_to_u16_limbs_pairs_and_extend::<E>(&limbs.0, &mut q_input32);
         }
         let q_input32 = q_input32.try_into().unwrap();
@@ -384,7 +545,8 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolWitnessGenerator<E>
         let num_instances = wits[0].num_instances();
         let nthreads = max_usable_threads();
         let num_instance_per_batch = num_instances.div_ceil(nthreads).max(1);
-        let num_wit_cols = size_of::<WeierstrassAddAssignWitCols<u8, EC::BaseField>>();
+        let first_wit_id = self.first_wit_id();
+        let num_wit_cols = self.num_arithmetic_wit_cols();
         let [wits, structural_wits] = wits;
         let raw_witin_iter = wits.par_batch_iter_mut(num_instance_per_batch);
         let raw_structural_wits_iter = structural_wits.par_batch_iter_mut(num_instance_per_batch);
@@ -397,10 +559,11 @@ impl<E: ExtensionField, EC: EllipticCurve> ProtocolWitnessGenerator<E>
                     .zip_eq(eqs.chunks_mut(self.n_structural_witin))
                     .zip_eq(phase1_instances)
                     .for_each(|((row, eqs), phase1_instance)| {
-                        let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
-                            row[self.layer_exprs.wits.p_x.0[0].id as usize..][..num_wit_cols] // TODO: Find a better way to write it.
-                                .borrow_mut();
-                        Self::populate_row(phase1_instance, cols, &mut lk_multiplicity);
+                        self.populate_row_from_slice(
+                            phase1_instance,
+                            &mut row[first_wit_id..][..num_wit_cols],
+                            &mut lk_multiplicity,
+                        );
                         for x in eqs.iter_mut() {
                             *x = E::BaseField::ONE;
                         }
@@ -430,6 +593,84 @@ impl<E: ExtensionField, EC: EllipticCurve> WeierstrassAddAssignLayout<E, EC> {
         cols.q_y = EC::BaseField::to_limbs_field(&q_y);
 
         Self::populate_field_ops(new_byte_lookup_events, cols, p_x, p_y, q_x, q_y);
+    }
+
+    fn populate_compact_secp256k1_row(
+        event: &EllipticCurveAddInstance<EC::BaseField>,
+        cols: &mut CompactSecp256k1AddAssignWitCols<E::BaseField, EC::BaseField>,
+        new_byte_lookup_events: &mut LkMultiplicity,
+    ) {
+        let p = &event.p;
+        let p = AffinePoint::<EC>::from_words_le(p);
+        let (p_x, p_y) = (p.x, p.y);
+        let q = &event.q;
+        let q = AffinePoint::<EC>::from_words_le(q);
+        let (q_x, q_y) = (q.x, q.y);
+
+        cols.p_x = EC::BaseField::to_limbs_field(&p_x);
+        cols.p_y = EC::BaseField::to_limbs_field(&p_y);
+        cols.q_x = EC::BaseField::to_limbs_field(&q_x);
+        cols.q_y = EC::BaseField::to_limbs_field(&q_y);
+
+        Self::populate_compact_secp256k1_field_ops(
+            new_byte_lookup_events,
+            cols,
+            p_x,
+            p_y,
+            q_x,
+            q_y,
+        );
+        Self::assert_compact_secp256k1_limb_bytes(new_byte_lookup_events, cols);
+    }
+
+    fn populate_row_from_slice(
+        &self,
+        event: &EllipticCurveAddInstance<EC::BaseField>,
+        row: &mut [E::BaseField],
+        new_byte_lookup_events: &mut LkMultiplicity,
+    ) {
+        match &self.layer_exprs {
+            WeierstrassAddAssignLayer::Generic(_) => {
+                let cols: &mut WeierstrassAddAssignWitCols<E::BaseField, EC::BaseField> =
+                    row.borrow_mut();
+                Self::populate_row(event, cols, new_byte_lookup_events);
+            }
+            WeierstrassAddAssignLayer::CompactSecp256k1(_) => {
+                let cols: &mut CompactSecp256k1AddAssignWitCols<E::BaseField, EC::BaseField> =
+                    row.borrow_mut();
+                Self::populate_compact_secp256k1_row(event, cols, new_byte_lookup_events);
+            }
+        }
+    }
+
+    fn first_wit_id(&self) -> usize {
+        match &self.layer_exprs {
+            WeierstrassAddAssignLayer::Generic(wits) => wits.p_x.0[0].id as usize,
+            WeierstrassAddAssignLayer::CompactSecp256k1(wits) => wits.p_x.0[0].id as usize,
+        }
+    }
+
+    fn num_arithmetic_wit_cols(&self) -> usize {
+        match &self.layer_exprs {
+            WeierstrassAddAssignLayer::Generic(_) => {
+                size_of::<WeierstrassAddAssignWitCols<u8, EC::BaseField>>()
+            }
+            WeierstrassAddAssignLayer::CompactSecp256k1(_) => {
+                size_of::<CompactSecp256k1AddAssignWitCols<u8, EC::BaseField>>()
+            }
+        }
+    }
+
+    fn output_limb_start_ids(&self) -> (usize, usize) {
+        match &self.layer_exprs {
+            WeierstrassAddAssignLayer::Generic(wits) => (
+                wits.x3_ins.result[0].id as usize,
+                wits.y3_ins.result[0].id as usize,
+            ),
+            WeierstrassAddAssignLayer::CompactSecp256k1(wits) => {
+                (wits.x3[0].id as usize, wits.y3[0].id as usize)
+            }
+        }
     }
 }
 
@@ -622,8 +863,7 @@ pub fn run_weierstrass_add<
             })
             .collect_vec();
 
-        let x_output_index_start = layout.layout.layer_exprs.wits.x3_ins.result[0].id as usize;
-        let y_output_index_start = layout.layout.layer_exprs.wits.y3_ins.result[0].id as usize;
+        let (x_output_index_start, y_output_index_start) = layout.layout.output_limb_start_ids();
         let got_outputs = phase1_witness
             .iter_rows()
             .take(num_instances)
@@ -770,10 +1010,82 @@ mod tests {
     use crate::precompiles::weierstrass::test_utils::random_point_pairs;
     use ff_ext::BabyBearExt4;
     use mpcs::BasefoldDefault;
-    use sp1_curves::weierstrass::{
-        SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254, secp256k1::Secp256k1,
-        secp256r1::Secp256r1,
+    use sp1_curves::{
+        EllipticCurveParameters,
+        weierstrass::{
+            SwCurve, WeierstrassParameters, bls12_381::Bls12381, bn254::Bn254,
+            secp256k1::Secp256k1, secp256r1::Secp256r1,
+        },
     };
+
+    fn compact_secp256k1_zero_cols() -> CompactSecp256k1AddAssignWitCols<
+        <BabyBearExt4 as ExtensionField>::BaseField,
+        <SwCurve<Secp256k1> as EllipticCurveParameters>::BaseField,
+    > {
+        type F = <BabyBearExt4 as ExtensionField>::BaseField;
+        type P = <SwCurve<Secp256k1> as EllipticCurveParameters>::BaseField;
+
+        let zero_p = P::to_limbs_field::<F, _>(&BigUint::from(0u32));
+        let zero_u63 = Limbs(GenericArray::generate(|_| F::from_u8(0)));
+        let zero_relation = CompactFieldRelationCols {
+            quotient: zero_u63,
+            witness_low: zero_u63,
+            witness_high: zero_u63,
+            _marker: std::marker::PhantomData,
+        };
+
+        CompactSecp256k1AddAssignWitCols {
+            p_x: zero_p,
+            p_y: zero_p,
+            q_x: zero_p,
+            q_y: zero_p,
+            slope: zero_p,
+            x3: zero_p,
+            y3: zero_p,
+            slope_relation: zero_relation.clone(),
+            x_relation: zero_relation.clone(),
+            y_relation: zero_relation,
+        }
+    }
+
+    fn hex_biguint(s: &[u8]) -> BigUint {
+        BigUint::parse_bytes(s, 16).unwrap()
+    }
+
+    #[test]
+    fn test_compact_secp256k1_add_y_relation_uses_two_modulus_offset() {
+        type E = BabyBearExt4;
+        type EC = SwCurve<Secp256k1>;
+
+        let p_x = hex_biguint(b"f72f2bb83586fca7fa0b85188296f5eabaeb41a5e65a814940e2a20a1bd7ce73");
+        let p_y = hex_biguint(b"65b675cd0492c4f539b21c95055455e8f9bddea5d12982e46e80fa489b0bca16");
+        let q_x = hex_biguint(b"819d7ca7b46108cc721754ef2904acecf5bb9188b80599e9090b20bb257e8454");
+        let q_y = hex_biguint(b"a17a4340f9c08feffa1b1bf13879399bd50e00978b7199cd6d39eb43ad9cedde");
+
+        let modulus = <EC as EllipticCurveParameters>::BaseField::modulus();
+        let slope_denominator = (&q_x + &modulus - &p_x) % &modulus;
+        let slope_numerator = (&q_y + &modulus - &p_y) % &modulus;
+        let slope = (&slope_numerator
+            * slope_denominator.modpow(&(modulus.clone() - 2u32), &modulus))
+            % &modulus;
+        let x3 = (&slope * &slope + &modulus - ((&p_x + &q_x) % &modulus)) % &modulus;
+        let y3 = (&slope * ((&p_x + &modulus - &x3) % &modulus) + &modulus - &p_y) % &modulus;
+
+        let y_lhs_eval = &y3 + &p_y;
+        let y_rhs_eval = &slope * (&p_x + &modulus - &x3);
+        assert!(y_lhs_eval + &modulus * &modulus < y_rhs_eval);
+
+        let mut record = LkMultiplicity::default();
+        let mut cols = compact_secp256k1_zero_cols();
+        WeierstrassAddAssignLayout::<E, EC>::populate_compact_secp256k1_field_ops(
+            &mut record,
+            &mut cols,
+            p_x,
+            p_y,
+            q_x,
+            q_y,
+        );
+    }
 
     fn test_weierstrass_add_helper<WP: WeierstrassParameters>() {
         type E = BabyBearExt4;

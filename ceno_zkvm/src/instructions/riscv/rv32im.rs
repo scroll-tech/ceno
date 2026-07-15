@@ -246,7 +246,14 @@ impl InstructionDispatchBuilder {
     }
 }
 
-const KECCAK_CELL_BLOWUP_FACTOR: u64 = 2;
+const KECCAK_CELL_BLOWUP_NUMERATOR: u64 = 33;
+const KECCAK_CELL_BLOWUP_DENOMINATOR: u64 = 16;
+
+fn estimate_keccak_cells(base_cells: u64) -> u64 {
+    base_cells
+        .saturating_mul(KECCAK_CELL_BLOWUP_NUMERATOR)
+        .div_ceil(KECCAK_CELL_BLOWUP_DENOMINATOR)
+}
 
 impl<E: ExtensionField> Rv32imConfig<E> {
     pub fn construct_circuits(
@@ -373,31 +380,34 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         // substantial memory overhead which not reflected on basic column count.
         //
         // We estimate this effect by applying an extra scaling factor that models
-        // tower-witness blowup proportional to the number of base columns.
+        // tower-witness blowup proportional to the number of base columns. Keep
+        // this fractional so the shard planner can avoid Keccak padding cliffs
+        // without the capacity loss of a coarse integer multiplier.
         let keccak_ecall_config = cs.register_opcode_circuit::<KeccakEcallInstruction<E>>();
         let keccak_core_config = cs.register_opcode_circuit::<KeccakCoreInstruction<E>>();
         assert!(
             ecall_cells_map
                 .insert(
                     <KeccakCoreInstruction<E>>::name(),
-                    [
-                        <KeccakEcallInstruction<E>>::name(),
-                        <KeccakCoreInstruction<E>>::name(),
-                    ]
-                    .into_iter()
-                    .map(|name| {
-                        cs.get_cs(&name)
-                            .as_ref()
-                            .map(|cs| {
-                                (cs.zkvm_v1_css.num_witin as u64
-                                    + cs.zkvm_v1_css.num_structural_witin as u64
-                                    + cs.zkvm_v1_css.num_fixed as u64)
-                                    * (1 << cs.rotation_vars().unwrap_or(0))
-                            })
-                            .unwrap_or_default()
-                    })
-                    .sum::<u64>()
-                        * KECCAK_CELL_BLOWUP_FACTOR,
+                    estimate_keccak_cells(
+                        [
+                            <KeccakEcallInstruction<E>>::name(),
+                            <KeccakCoreInstruction<E>>::name(),
+                        ]
+                        .into_iter()
+                        .map(|name| {
+                            cs.get_cs(&name)
+                                .as_ref()
+                                .map(|cs| {
+                                    (cs.zkvm_v1_css.num_witin as u64
+                                        + cs.zkvm_v1_css.num_structural_witin as u64
+                                        + cs.zkvm_v1_css.num_fixed as u64)
+                                        * (1 << cs.rotation_vars().unwrap_or(0))
+                                })
+                                .unwrap_or_default()
+                        })
+                        .sum::<u64>(),
+                    ),
                 )
                 .is_none()
         );
@@ -1190,5 +1200,18 @@ impl<E: ExtensionField> StepCellExtractor for Rv32imConfig<E> {
     #[inline(always)]
     fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64 {
         self.cells_for(kind, rs1_value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keccak_cell_estimate_uses_fractional_ceiling() {
+        assert_eq!(estimate_keccak_cells(0), 0);
+        assert_eq!(estimate_keccak_cells(16), 33);
+        assert_eq!(estimate_keccak_cells(17), 36);
+        assert_eq!(estimate_keccak_cells(u64::MAX), u64::MAX.div_ceil(16));
     }
 }
