@@ -17,7 +17,7 @@ use crate::{
         INIT_CYCLE_IDX, INIT_PC_IDX,
     },
     scheme::{
-        constants::{MAX_NUM_INSTANCES, MAX_NUM_VARIABLES, NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        constants::{MAX_NUM_INSTANCE_BITS, MAX_NUM_INSTANCES, NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
         utils::{assign_group_evals, derive_ecc_bridge_claims, first_layer_selector_contexts},
     },
@@ -65,12 +65,12 @@ type BatchedMainOpeningEvals<E> = Vec<(Point<E>, Vec<E>, Vec<E>)>;
 
 fn validate_num_instances_bound(name: &str, num_instances: &[usize]) -> Result<usize, ZKVMError> {
     // `num_instances` is proof-controlled and later summed before powering/padding logic.
-    // Bound each entry and the total against the PCS-backed trace capacity before use.
+    // The raw per-entry proof-data bound is intentionally separate from PCS reshape capacity.
     for &n in num_instances {
-        if n > MAX_NUM_INSTANCES {
+        if n >= MAX_NUM_INSTANCES {
             return Err(ZKVMError::InvalidProof(
                 format!(
-                    "{name} num_instances entry {n} exceeds max {MAX_NUM_INSTANCES} (2^{MAX_NUM_VARIABLES})"
+                    "{name} num_instances entry {n} exceeds exclusive max {MAX_NUM_INSTANCES} (2^{MAX_NUM_INSTANCE_BITS})"
                 )
                 .into(),
             ));
@@ -81,14 +81,7 @@ fn validate_num_instances_bound(name: &str, num_instances: &[usize]) -> Result<u
             ZKVMError::InvalidProof(format!("{name} total num_instances overflow").into())
         })
     })?;
-    if total > MAX_NUM_INSTANCES {
-        return Err(ZKVMError::InvalidProof(
-            format!(
-                "{name} total num_instances {total} exceeds max {MAX_NUM_INSTANCES} (2^{MAX_NUM_VARIABLES})"
-            )
-            .into(),
-        ));
-    }
+
     Ok(total)
 }
 
@@ -1883,5 +1876,21 @@ impl EccVerifier {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn num_instances_bound_is_exclusive_per_entry() {
+        let accepted =
+            validate_num_instances_bound("test", &[MAX_NUM_INSTANCES - 1, MAX_NUM_INSTANCES - 1])
+                .expect("entries below raw bound are valid");
+        assert_eq!(accepted, (MAX_NUM_INSTANCES - 1) * 2);
+
+        let err = validate_num_instances_bound("test", &[MAX_NUM_INSTANCES]).unwrap_err();
+        assert!(matches!(err, ZKVMError::InvalidProof(_)));
     }
 }

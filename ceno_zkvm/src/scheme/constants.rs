@@ -4,8 +4,9 @@ pub const NUM_FANIN: usize = 2;
 pub const NUM_FANIN_LOGUP: usize = 2;
 
 pub const MAX_NUM_VARIABLES: usize = 24;
-/// Inclusive upper bound for proof-controlled instance counts backed by the PCS setup.
-pub const MAX_NUM_INSTANCES: usize = 1usize << MAX_NUM_VARIABLES;
+pub const MAX_NUM_INSTANCE_BITS: usize = 29;
+/// Exclusive raw per-entry proof-data bound for proof-controlled instance counts.
+pub const MAX_NUM_INSTANCES: usize = 1usize << MAX_NUM_INSTANCE_BITS;
 
 pub const DYNAMIC_RANGE_MAX_BITS: usize = 18;
 
