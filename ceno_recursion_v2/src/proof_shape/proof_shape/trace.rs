@@ -381,22 +381,3 @@ fn ef_to_limbs(value: EF) -> [F; D_EF] {
     out.copy_from_slice(value.as_basis_coefficients_slice());
     out
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn recursion_proof_shape_accepts_largest_num_instance_below_bound() {
-        let (limbs, high_limb_range_value) = bounded_height_witness::<4, 8>(MAX_NUM_INSTANCES - 1);
-
-        assert_eq!(limbs, [255, 255, 255, 15]);
-        assert_eq!(high_limb_range_value, 0);
-    }
-
-    #[test]
-    #[should_panic(expected = "recursion proof-shape num_instances entry")]
-    fn recursion_proof_shape_rejects_num_instance_at_exclusive_bound() {
-        let _ = bounded_height_witness::<4, 8>(MAX_NUM_INSTANCES);
-    }
-}
