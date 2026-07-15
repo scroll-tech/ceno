@@ -10,7 +10,7 @@ These instructions apply only to pull request or diff review tasks in this repos
 
 ## Repository context
 
-- Workspace: multi-crate Rust workspace (for example `ceno_zkvm`, `ceno_emul`, `ceno_recursion`, `ceno_cli`, `examples`).
+- Workspace: multi-crate Rust workspace (for example `ceno_zkvm`, `ceno_emul`, `ceno_recursion_v2`, `ceno_cli`, `examples`).
 - Toolchain: `nightly-2025-11-20` (see `rust-toolchain.toml`).
 - CI expectations (see `.github/workflows/`):
   - `cargo fmt --all --check`

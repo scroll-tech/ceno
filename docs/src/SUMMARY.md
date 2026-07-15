@@ -18,6 +18,7 @@
   - [Differences from RISC-V](./differences-from-risc-v.md)
 - [Technical Overview](./technical-overview.md)
   - [Architecture Overview](./architecture-overview.md)
+  - [Recursion V2 Design Principles](./recursion-v2-design-principles.md)
   - [Memory Continuation Checks](./memory-continuation-checks.md)
   - [Prover Workflow](./prover-workflow.md)
   - [Optimizations](./optimizations.md)

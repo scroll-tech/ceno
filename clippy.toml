@@ -26,4 +26,8 @@ allowed-duplicate-crates = [
   "p256",
   "primeorder",
   "ecdsa",
+  "rand",
+  "rand_chacha",
+  "rand_core",
+  "spin",
 ]

@@ -67,13 +67,13 @@ impl FixedShiftRightOperation<WitIn> {
 
 impl<F: SmallField> FixedShiftRightOperation<F> {
     pub fn populate(&mut self, record: &mut LkMultiplicity, input: u32, rotation: usize) -> u32 {
-        let input_bytes = input.to_le_bytes().map(F::from_canonical_u8);
+        let input_bytes = input.to_le_bytes().map(F::from_u8);
         let expected = input >> rotation;
 
         // Compute some constants with respect to the rotation needed for the rotation.
         let nb_bytes_to_shift = Self::nb_bytes_to_shift(rotation);
         let nb_bits_to_shift = Self::nb_bits_to_shift(rotation);
-        let carry_multiplier = F::from_canonical_u32(Self::carry_multiplier(rotation));
+        let carry_multiplier = F::from_u32(Self::carry_multiplier(rotation));
 
         // Perform the byte shift.
         let mut word = [F::ZERO; WORD_SIZE];
@@ -95,8 +95,8 @@ impl<F: SmallField> FixedShiftRightOperation<F> {
 
             record.lookup_shr_byte(shift as u64, carry as u64, nb_bits_to_shift as u64);
 
-            self.shift[i] = F::from_canonical_u8(shift);
-            self.carry[i] = F::from_canonical_u8(carry);
+            self.shift[i] = F::from_u8(shift);
+            self.carry[i] = F::from_u8(carry);
 
             if i == WORD_SIZE - 1 {
                 first_shift = self.shift[i];

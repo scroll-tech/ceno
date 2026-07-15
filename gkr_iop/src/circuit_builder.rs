@@ -4,6 +4,7 @@ use multilinear_extensions::{
     Expression, Fixed, Instance, StructuralWitIn, StructuralWitInType, ToExpr, WitIn, WitnessId,
     rlc_chip_record,
 };
+use p3_field::PrimeCharacteristicRing;
 use serde::de::DeserializeOwned;
 use std::{collections::HashMap, iter::once, marker::PhantomData};
 
@@ -14,8 +15,6 @@ use crate::{
     selector::SelectorType,
     tables::LookupTable,
 };
-use p3::field::FieldAlgebra;
-
 pub mod ram;
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -297,7 +296,7 @@ impl<E: ExtensionField> ConstraintSystem<E> {
         record: Vec<Expression<E>>,
     ) -> Result<(), CircuitBuilderError> {
         let rlc_record = self.rlc_chip_record(
-            std::iter::once(E::BaseField::from_canonical_u64(rom_type as u64).expr())
+            std::iter::once(E::BaseField::from_u64(rom_type as u64).expr())
                 .chain(record.clone())
                 .collect(),
         );
@@ -1017,7 +1016,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                     cb.lk_record(
                         name_fn,
                         LookupTable::Dynamic,
-                        vec![expr, E::BaseField::from_canonical_usize(max_bits).expr()],
+                        vec![expr, E::BaseField::from_usize(max_bits).expr()],
                     )
                 },
             )
@@ -1039,7 +1038,7 @@ impl<'a, E: ExtensionField> CircuitBuilder<'a, E> {
                 cb.lk_record(
                     name_fn,
                     LookupTable::Dynamic,
-                    vec![expr, E::BaseField::from_canonical_usize(8).expr()],
+                    vec![expr, E::BaseField::from_usize(8).expr()],
                 )
             },
         )
@@ -1443,7 +1442,7 @@ pub fn expansion_expr<E: ExtensionField, const SIZE: usize>(
             .fold((0, E::BaseField::ZERO.expr()), |acc, (sz, felt)| {
                 (
                     acc.0 + sz,
-                    acc.1 * E::BaseField::from_canonical_u64(1 << sz).expr() + felt.expr(),
+                    acc.1 * E::BaseField::from_u64(1 << sz).expr() + felt.expr(),
                 )
             });
 

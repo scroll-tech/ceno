@@ -3,12 +3,10 @@ use ff_ext::ExtensionField;
 use gkr_iop::gkr::{GKRProof, layer::sumcheck_layer::SumcheckLayerProof};
 use itertools::Itertools;
 use mpcs::PolynomialCommitmentScheme;
-use p3::field::FieldAlgebra;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::{self, Debug},
-    iter,
     ops::Div,
     sync::Arc,
 };
@@ -30,7 +28,7 @@ use crate::{
     scheme::constants::SEPTIC_EXTENSION_DEGREE,
     structs::{TowerProofs, ZKVMVerifyingKey},
 };
-
+use p3::field::PrimeCharacteristicRing;
 pub mod constants;
 pub mod cpu;
 #[cfg(feature = "gpu")]
@@ -63,6 +61,8 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     pub r_out_evals: Vec<Vec<E>>,
     pub w_out_evals: Vec<Vec<E>>,
     pub lk_out_evals: Vec<Vec<E>>,
+    // Main-GKR seed evaluations at the instance-domain tower prefix point.
+    pub main_out_evals: Vec<E>,
 
     pub main_sumcheck_proofs: Option<Vec<IOPProverMessage<E>>>,
     pub gkr_iop_proof: Option<GKRProof<E>>,
@@ -81,6 +81,7 @@ pub struct ZKVMChipProof<E: ExtensionField> {
     deserialize = "E::BaseField: DeserializeOwned"
 ))]
 pub struct MainConstraintProof<E: ExtensionField> {
+    pub claimed_sum: E,
     pub proof: SumcheckLayerProof<E>,
 }
 
@@ -106,30 +107,28 @@ impl PublicValues {
         PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS
     }
 
-    pub fn iter_field<'a, Base: FieldAlgebra + 'a>(&'a self) -> impl Iterator<Item = Base> + 'a {
+    pub fn iter_field<'a, Base: PrimeCharacteristicRing + 'a>(
+        &'a self,
+    ) -> impl Iterator<Item = Base> + 'a {
         [
-            Base::from_canonical_u32(self.exit_code & 0xffff),
-            Base::from_canonical_u32((self.exit_code >> 16) & 0xffff),
-            Base::from_canonical_u32(self.init_pc),
-            Base::from_canonical_u64(self.init_cycle),
-            Base::from_canonical_u32(self.end_pc),
-            Base::from_canonical_u64(self.end_cycle),
-            Base::from_canonical_u32(self.shard_id),
-            Base::from_canonical_u32(self.heap_start_addr),
-            Base::from_canonical_u32(self.heap_shard_len),
-            Base::from_canonical_u32(self.hint_start_addr),
-            Base::from_canonical_u32(self.hint_shard_len),
+            Base::from_u32(self.exit_code & 0xffff),
+            Base::from_u32((self.exit_code >> 16) & 0xffff),
+            Base::from_u32(self.init_pc),
+            Base::from_u64(self.init_cycle),
+            Base::from_u32(self.end_pc),
+            Base::from_u64(self.end_cycle),
+            Base::from_u32(self.shard_id),
+            Base::from_u32(self.heap_start_addr),
+            Base::from_u32(self.heap_shard_len),
+            Base::from_u32(self.hint_start_addr),
+            Base::from_u32(self.hint_shard_len),
         ]
         .into_iter()
-        .chain(
-            self.shard_rw_sum
-                .iter()
-                .map(|value| Base::from_canonical_u32(*value)),
-        )
+        .chain(self.shard_rw_sum.iter().map(|value| Base::from_u32(*value)))
         .chain(self.public_io_digest.iter().flat_map(|word| {
             [
-                Base::from_canonical_u32(word & 0xffff),
-                Base::from_canonical_u32((word >> 16) & 0xffff),
+                Base::from_u32(word & 0xffff),
+                Base::from_u32((word >> 16) & 0xffff),
             ]
         }))
     }
@@ -166,23 +165,23 @@ impl PublicValues {
     }
     pub fn query_by_index<E: ExtensionField>(&self, index: usize) -> E::BaseField {
         match index {
-            EXIT_CODE_IDX => E::BaseField::from_canonical_u32(self.exit_code & 0xffff),
+            EXIT_CODE_IDX => E::BaseField::from_u32(self.exit_code & 0xffff),
             idx if idx == EXIT_CODE_IDX + 1 => {
-                E::BaseField::from_canonical_u32((self.exit_code >> 16) & 0xffff)
+                E::BaseField::from_u32((self.exit_code >> 16) & 0xffff)
             }
-            INIT_PC_IDX => E::BaseField::from_canonical_u32(self.init_pc),
-            INIT_CYCLE_IDX => E::BaseField::from_canonical_u64(self.init_cycle),
-            END_PC_IDX => E::BaseField::from_canonical_u32(self.end_pc),
-            END_CYCLE_IDX => E::BaseField::from_canonical_u64(self.end_cycle),
-            SHARD_ID_IDX => E::BaseField::from_canonical_u32(self.shard_id),
-            HEAP_START_ADDR_IDX => E::BaseField::from_canonical_u32(self.heap_start_addr),
-            HEAP_LENGTH_IDX => E::BaseField::from_canonical_u32(self.heap_shard_len),
-            HINT_START_ADDR_IDX => E::BaseField::from_canonical_u32(self.hint_start_addr),
-            HINT_LENGTH_IDX => E::BaseField::from_canonical_u32(self.hint_shard_len),
+            INIT_PC_IDX => E::BaseField::from_u32(self.init_pc),
+            INIT_CYCLE_IDX => E::BaseField::from_u64(self.init_cycle),
+            END_PC_IDX => E::BaseField::from_u32(self.end_pc),
+            END_CYCLE_IDX => E::BaseField::from_u64(self.end_cycle),
+            SHARD_ID_IDX => E::BaseField::from_u32(self.shard_id),
+            HEAP_START_ADDR_IDX => E::BaseField::from_u32(self.heap_start_addr),
+            HEAP_LENGTH_IDX => E::BaseField::from_u32(self.heap_shard_len),
+            HINT_START_ADDR_IDX => E::BaseField::from_u32(self.hint_start_addr),
+            HINT_LENGTH_IDX => E::BaseField::from_u32(self.hint_shard_len),
             idx if (SHARD_RW_SUM_IDX..(SHARD_RW_SUM_IDX + SEPTIC_EXTENSION_DEGREE * 2))
                 .contains(&idx) =>
             {
-                E::BaseField::from_canonical_u32(self.shard_rw_sum[idx - SHARD_RW_SUM_IDX])
+                E::BaseField::from_u32(self.shard_rw_sum[idx - SHARD_RW_SUM_IDX])
             }
             idx if (PUBIO_DIGEST_IDX..(PUBIO_DIGEST_IDX + PUBIO_DIGEST_U16_LIMBS))
                 .contains(&idx) =>
@@ -190,7 +189,7 @@ impl PublicValues {
                 let digest_limb_idx = idx - PUBIO_DIGEST_IDX;
                 let word_idx = digest_limb_idx / UINT_LIMBS;
                 let limb_idx = digest_limb_idx % UINT_LIMBS;
-                E::BaseField::from_canonical_u32(
+                E::BaseField::from_u32(
                     (self.public_io_digest[word_idx] >> (limb_idx * LIMB_BITS)) & LIMB_MASK,
                 )
             }
@@ -209,8 +208,8 @@ impl PublicValues {
 ))]
 pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
     pub public_values: PublicValues,
-    // each circuit may have multiple proof instances
-    pub chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+    // each circuit has exactly one proof entry
+    pub chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
     pub main_constraint_proof: MainConstraintProof<E>,
     pub witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
     pub opening_proof: PCS::Proof,
@@ -219,7 +218,7 @@ pub struct ZKVMProof<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> {
 impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
     pub fn new(
         public_values: PublicValues,
-        chip_proofs: BTreeMap<usize, Vec<ZKVMChipProof<E>>>,
+        chip_proofs: BTreeMap<usize, ZKVMChipProof<E>>,
         main_constraint_proof: MainConstraintProof<E>,
         witin_commit: <PCS as PolynomialCommitmentScheme<E>>::Commitment,
         opening_proof: PCS::Proof,
@@ -246,13 +245,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> ZKVMProof<E, PCS> {
         let halt_instance_count = self
             .chip_proofs
             .get(&halt_circuit_index)
-            .map_or(0, |proofs| {
-                proofs
-                    .iter()
-                    .flat_map(|proof| &proof.num_instances)
-                    .copied()
-                    .sum()
-            });
+            .map_or(0, |proof| proof.num_instances.iter().copied().sum());
         if halt_instance_count > 0 {
             assert_eq!(
                 halt_instance_count, 1,
@@ -287,9 +280,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let tower_proof = self
             .chip_proofs
             .iter()
-            .flat_map(|(circuit_index, proofs)| {
-                iter::repeat_n(circuit_index, proofs.len()).zip(proofs)
-            })
             .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.tower_proof);
                 size.inspect(|size| {
@@ -304,9 +294,6 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + Serialize> fmt::Dis
         let main_sumcheck = self
             .chip_proofs
             .iter()
-            .flat_map(|(circuit_index, proofs)| {
-                iter::repeat_n(circuit_index, proofs.len()).zip(proofs)
-            })
             .map(|(circuit_index, proof)| {
                 let size = bincode::serialized_size(&proof.main_sumcheck_proofs);
                 size.inspect(|size| {

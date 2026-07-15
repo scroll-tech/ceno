@@ -53,7 +53,7 @@ generic-array.workspace = true
 generic_static = "0.2"
 metrics.workspace = true
 num.workspace = true
-num-bigint = "0.4.6"
+num-bigint = { workspace = true, features = ["rand"] }
 parse-size = "1.1"
 rand.workspace = true
 sp1-curves.workspace = true
@@ -75,6 +75,7 @@ ceno-examples = { path = "../examples-builder" }
 glob = "0.3"
 
 [features]
+aot-x86_64 = ["ceno_emul/aot-x86_64"]
 bigint-rug = ["sp1-curves/bigint-rug"]
 default = [
   "forbid_overflow",

@@ -11,8 +11,8 @@ use crate::{
 };
 use ff_ext::FieldInto;
 use multilinear_extensions::{ToExpr, WitIn};
+use p3::field::PrimeCharacteristicRing;
 #[cfg(feature = "u16limb_circuit")]
-use p3::field::FieldAlgebra;
 use witness::set_val;
 
 #[derive(Debug)]

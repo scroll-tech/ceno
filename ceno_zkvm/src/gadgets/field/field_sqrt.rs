@@ -100,7 +100,7 @@ impl<F: SmallField, P: FieldParameters> FieldSqrtCols<F, P> {
         self.range.populate(record, &sqrt, &modulus);
 
         let sqrt_bytes = P::to_limbs(&sqrt);
-        self.lsb = F::from_canonical_u8(sqrt_bytes[0] & 1);
+        self.lsb = F::from_u8(sqrt_bytes[0] & 1);
 
         record.lookup_and_byte(sqrt_bytes[0] as u64, 1);
 

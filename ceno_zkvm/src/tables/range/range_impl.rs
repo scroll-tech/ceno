@@ -74,14 +74,14 @@ impl DynamicRangeTableConfig {
         }
 
         let range_content = std::iter::once(F::ZERO)
-            .chain((0..=max_bits).flat_map(|i| (0..(1 << i)).map(|j| F::from_canonical_usize(j))))
+            .chain((0..=max_bits).flat_map(|i| (0..(1 << i)).map(|j| F::from_usize(j))))
             .collect::<Vec<_>>();
-        let bits_content =
-            std::iter::once(F::ZERO)
-                .chain((0..=max_bits).flat_map(|i| {
-                    std::iter::repeat_n(i, 1 << i).map(|j| F::from_canonical_usize(j))
-                }))
-                .collect::<Vec<_>>();
+        let bits_content = std::iter::once(F::ZERO)
+            .chain(
+                (0..=max_bits)
+                    .flat_map(|i| std::iter::repeat_n(i, 1 << i).map(|j| F::from_usize(j))),
+            )
+            .collect::<Vec<_>>();
 
         witness
             .par_rows_mut()
@@ -90,7 +90,7 @@ impl DynamicRangeTableConfig {
             .zip(range_content.par_iter())
             .zip(bits_content.par_iter())
             .for_each(|((((row, structural_row), mlt), i), b)| {
-                set_val!(row, self.mlt, F::from_canonical_u64(*mlt as u64));
+                set_val!(row, self.mlt, F::from_u64(*mlt as u64));
                 set_val!(structural_row, self.range, i);
                 set_val!(structural_row, self.bits, b);
                 *structural_row.last_mut().unwrap() = F::ONE;
@@ -181,9 +181,9 @@ impl DoubleRangeTableConfig {
             .for_each(|((row, structural_row), (idx, mlt))| {
                 let a = idx >> self.range_a_bits;
                 let b = idx & ((1 << self.range_a_bits) - 1);
-                set_val!(row, self.mlt, F::from_canonical_u64(*mlt as u64));
-                set_val!(structural_row, self.range_a, F::from_canonical_usize(a));
-                set_val!(structural_row, self.range_b, F::from_canonical_usize(b));
+                set_val!(row, self.mlt, F::from_u64(*mlt as u64));
+                set_val!(structural_row, self.range_a, F::from_usize(a));
+                set_val!(structural_row, self.range_b, F::from_usize(b));
                 *structural_row.last_mut().unwrap() = F::ONE;
             });
 

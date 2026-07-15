@@ -25,8 +25,36 @@
 use ff_ext::ExtensionField;
 use gkr_iop::{circuit_builder::CircuitBuilder, error::CircuitBuilderError};
 use multilinear_extensions::{Expression, ToExpr};
-use p3::field::FieldAlgebra;
+
+use p3::field::PrimeCharacteristicRing;
 use sp1_curves::{params::FieldParameters, polynomial::Polynomial};
+
+pub fn poly_mul_expr<E: ExtensionField>(
+    a: &Polynomial<Expression<E>>,
+    b: &Polynomial<Expression<E>>,
+) -> Polynomial<Expression<E>> {
+    let mut coeffs =
+        vec![Expression::<E>::ZERO; a.coefficients().len() + b.coefficients().len() - 1];
+    for (i, coeff_a) in a.coefficients().iter().enumerate() {
+        for (j, coeff_b) in b.coefficients().iter().enumerate() {
+            coeffs[i + j] = coeffs[i + j].clone() + coeff_a.clone() * coeff_b.clone();
+        }
+    }
+    Polynomial::new(coeffs)
+}
+
+pub fn poly_scale_expr<E: ExtensionField>(
+    poly: &Polynomial<Expression<E>>,
+    scalar: Expression<E>,
+) -> Polynomial<Expression<E>> {
+    Polynomial::new(
+        poly.coefficients()
+            .iter()
+            .cloned()
+            .map(|c| c * scalar.clone())
+            .collect(),
+    )
+}
 
 pub fn eval_field_operation<E: ExtensionField, P: FieldParameters>(
     builder: &mut CircuitBuilder<E>,
@@ -35,21 +63,20 @@ pub fn eval_field_operation<E: ExtensionField, P: FieldParameters>(
     p_witness_high: &Polynomial<Expression<E>>,
 ) -> Result<(), CircuitBuilderError> {
     // Reconstruct and shift back the witness polynomial
-    let limb: Expression<E> =
-        E::BaseField::from_canonical_u32(2u32.pow(P::NB_BITS_PER_LIMB as u32)).expr();
+    let limb: Expression<E> = E::BaseField::from_u32(2u32.pow(P::NB_BITS_PER_LIMB as u32)).expr();
 
-    let p_witness_shifted = p_witness_low + &(p_witness_high * limb.clone());
+    let p_witness_shifted = p_witness_low + &poly_scale_expr(p_witness_high, limb.clone());
 
     // Shift down the witness polynomial. Shifting is needed to range check that each
     // coefficient w_i of the witness polynomial satisfies |w_i| < 2^WITNESS_OFFSET.
-    let offset: Expression<E> = E::BaseField::from_canonical_u32(P::WITNESS_OFFSET as u32).expr();
+    let offset: Expression<E> = E::BaseField::from_u32(P::WITNESS_OFFSET as u32).expr();
     let len = p_witness_shifted.coefficients().len();
     let p_witness = p_witness_shifted - Polynomial::new(vec![offset; len]);
 
     // Multiply by (x-2^NB_BITS_PER_LIMB) and make the constraint
     let root_monomial = Polynomial::new(vec![-limb, E::BaseField::ONE.expr()]);
 
-    let constraints = p_vanishing - &(p_witness * root_monomial);
+    let constraints = p_vanishing - &poly_mul_expr(&p_witness, &root_monomial);
     for constr in constraints.as_coefficients() {
         builder.require_zero(|| "eval_field_operation require zero", constr)?;
     }

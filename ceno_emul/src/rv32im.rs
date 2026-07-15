@@ -293,17 +293,23 @@ pub fn step<C: EmuContext>(ctx: &mut C) -> Result<()> {
         ));
     };
 
+    step_fetched(ctx, &insn)
+}
+
+pub(crate) fn step_fetched<C: EmuContext>(ctx: &mut C, insn: &Instruction) -> Result<()> {
+    let pc = ctx.get_pc();
+
     tracing::trace!("pc: {:x}, kind: {:?}", pc.0, insn.kind);
 
     if match InsnCategory::from(insn.kind) {
-        InsnCategory::Compute => step_compute(ctx, insn.kind, &insn)?,
-        InsnCategory::Branch => step_branch(ctx, insn.kind, &insn)?,
-        InsnCategory::Load => step_load(ctx, insn.kind, &insn)?,
-        InsnCategory::Store => step_store(ctx, insn.kind, &insn)?,
-        InsnCategory::System => step_system(ctx, insn.kind, &insn)?,
+        InsnCategory::Compute => step_compute(ctx, insn.kind, insn)?,
+        InsnCategory::Branch => step_branch(ctx, insn.kind, insn)?,
+        InsnCategory::Load => step_load(ctx, insn.kind, insn)?,
+        InsnCategory::Store => step_store(ctx, insn.kind, insn)?,
+        InsnCategory::System => step_system(ctx, insn.kind, insn)?,
         InsnCategory::Invalid => ctx.trap(TrapCause::IllegalInstruction(insn.raw))?,
     } {
-        ctx.on_normal_end(&insn);
+        ctx.on_normal_end(insn);
     };
 
     Ok(())

@@ -1,0 +1,291 @@
+use std::{fs, path::PathBuf, sync::Arc};
+
+use ceno_emul::{IterAddresses, Program, WORD_SIZE, Word};
+use ceno_host::{CenoStdin, memory_from_file};
+use ceno_recursion_v2::{
+    circuit::inner::InnerTraceGenImpl,
+    continuation::prover::{AggProver, AggregationOptions, RootProof, SystemParams},
+    system::{
+        RecursionField, RecursionPcs, utils::test_system_params_zero_pow,
+        warm_child_vk_digest_cache,
+    },
+};
+use ceno_zkvm::{
+    e2e::{
+        Checkpoint, MultiProver, Preset, public_io_words_to_digest_words, run_e2e_with_checkpoint,
+        setup_platform, setup_platform_debug,
+    },
+    scheme::{constants::MAX_NUM_VARIABLES, create_backend, create_prover, hal::ProverDevice},
+};
+use clap::Parser;
+use eyre::{Context, ContextCompat, Result, eyre};
+use gkr_iop::hal::ProverBackend;
+use mpcs::SecurityLevel;
+#[cfg(feature = "cuda")]
+use openvm_cuda_backend::{BabyBearPoseidon2GpuEngine, GpuBackend as OpenVmGpuBackend};
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2Config;
+#[cfg(not(feature = "cuda"))]
+use openvm_stark_sdk::config::baby_bear_poseidon2::BabyBearPoseidon2CpuEngine;
+
+const RETH_RECURSION_L_SKIP: usize = 5;
+const RETH_RECURSION_LEAF_N_STACK: usize = 17;
+const RETH_RECURSION_INTERNAL_N_STACK: usize = 17;
+const RETH_RECURSION_ROOT_N_STACK: usize = 16;
+const RETH_RECURSION_K_WHIR: usize = 3;
+
+fn parse_size(s: &str) -> Result<u32, parse_size::Error> {
+    parse_size::Config::new()
+        .with_binary()
+        .parse_size(s)
+        .map(|size| size as u32)
+}
+
+/// Generate Ceno base proofs for an ELF and aggregate them with recursion v2.
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// The path to the ELF file to execute.
+    elf: PathBuf,
+
+    /// The preset configuration to use.
+    #[arg(long, value_enum, default_value_t = Preset::Ceno)]
+    platform: Preset,
+
+    /// The maximum number of steps to execute the program.
+    #[arg(short, long)]
+    max_steps: Option<usize>,
+
+    /// Prover-private unconstrained input from a raw memory file.
+    #[arg(long, conflicts_with = "hints")]
+    hints_file: Option<PathBuf>,
+
+    /// Prover-private unconstrained input as u32 words.
+    #[arg(long, conflicts_with = "hints_file", value_parser, num_args = 1.., value_delimiter = ',')]
+    hints: Option<Vec<Word>>,
+
+    /// Public constrained input as u32 words.
+    #[arg(long, value_parser, num_args = 1.., value_delimiter = ',')]
+    public_io: Option<Vec<Word>>,
+
+    /// Stack size in bytes.
+    #[arg(long, default_value = "2M", value_parser = parse_size)]
+    stack_size: u32,
+
+    /// Heap size in bytes.
+    #[arg(long, default_value = "2M", value_parser = parse_size)]
+    heap_size: u32,
+
+    /// Max number of PCS variables.
+    #[arg(long, default_value_t = MAX_NUM_VARIABLES)]
+    max_num_variables: usize,
+
+    /// The security level to use.
+    #[arg(short, long, value_enum, default_value_t = SecurityLevel::default())]
+    security_level: SecurityLevel,
+
+    /// Prover id.
+    #[arg(long, default_value_t = 0)]
+    prover_id: u32,
+
+    /// Number of available provers.
+    #[arg(long, default_value_t = 1)]
+    num_provers: u32,
+
+    /// Max cycles per shard.
+    #[arg(long, default_value_t = 536_870_912)]
+    max_cycle_per_shard: u64,
+
+    /// Max cells per shard.
+    #[arg(long, default_value_t = 2_147_483_648)]
+    max_cell_per_shard: u64,
+
+    /// Only generate and aggregate a specific shard.
+    #[arg(long)]
+    shard_id: Option<u64>,
+}
+
+fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init()
+        .ok();
+
+    let mut args = Args::parse();
+    args.stack_size = args.stack_size.next_multiple_of(WORD_SIZE as u32);
+    args.heap_size = args.heap_size.next_multiple_of(WORD_SIZE as u32);
+
+    let elf_bytes = fs::read(&args.elf).wrap_err_with(|| {
+        format!(
+            "failed to read ELF for recursion-v2 aggregation: {}",
+            args.elf.display()
+        )
+    })?;
+    let program = Program::load_elf(&elf_bytes, u32::MAX)
+        .map_err(|err| eyre!("failed to load ELF: {err:#}"))?;
+    let platform = if cfg!(debug_assertions) {
+        setup_platform_debug(args.platform, &program, args.stack_size, args.heap_size)
+    } else {
+        setup_platform(args.platform, &program, args.stack_size, args.heap_size)
+    };
+
+    let hints = read_hints(&args, &platform)?;
+    let public_io = args.public_io.as_deref().unwrap_or_default();
+    let public_io_digest = public_io_words_to_digest_words(public_io);
+    let multi_prover = MultiProver::new(
+        args.prover_id as usize,
+        args.num_provers as usize,
+        args.max_cell_per_shard,
+        args.max_cycle_per_shard,
+    );
+    let backend = create_backend(args.max_num_variables, args.security_level);
+    let prover = create_prover(backend);
+
+    run_aggregate(
+        prover,
+        program,
+        platform,
+        multi_prover,
+        &hints,
+        public_io_digest,
+        args.max_steps.unwrap_or(usize::MAX),
+        args.shard_id.map(|v| v as usize),
+    )
+}
+
+fn read_hints(args: &Args, platform: &ceno_emul::Platform) -> Result<Vec<u32>> {
+    if let Some(file_path) = args.hints_file.as_ref() {
+        let hints = memory_from_file(file_path)
+            .wrap_err_with(|| format!("failed to read hints file {}", file_path.display()))?;
+        ensure_hints_fit(&hints, platform);
+        return Ok(hints);
+    }
+
+    let Some(hints) = args.hints.as_ref() else {
+        return Ok(Vec::new());
+    };
+
+    let mut stdin = CenoStdin::default();
+    if hints.len() == 1 {
+        stdin.write(&hints[0])
+    } else {
+        stdin.write(hints)
+    }
+    .map_err(|err| eyre!("failed to encode hints: {err:#}"))?;
+    let encoded = Vec::<u32>::from(&stdin);
+
+    ensure_hints_fit(&encoded, platform);
+    Ok(encoded)
+}
+
+fn ensure_hints_fit(hints: &[u32], platform: &ceno_emul::Platform) {
+    assert!(
+        hints.len() <= platform.hints.iter_addresses().len(),
+        "hints must fit in {} bytes",
+        platform.hints.len()
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_aggregate<PB, PD>(
+    pd: PD,
+    program: Program,
+    platform: ceno_emul::Platform,
+    multi_prover: MultiProver,
+    hints: &[u32],
+    public_io_digest: [u32; 8],
+    max_steps: usize,
+    target_shard_id: Option<usize>,
+) -> Result<()>
+where
+    PB: ProverBackend<E = RecursionField, Pcs = RecursionPcs> + 'static,
+    PD: ProverDevice<PB> + 'static,
+{
+    let result = run_e2e_with_checkpoint::<RecursionField, RecursionPcs, _, _>(
+        pd,
+        program,
+        platform,
+        multi_prover,
+        hints,
+        public_io_digest,
+        max_steps,
+        Checkpoint::Complete,
+        target_shard_id,
+    );
+
+    let shard_proofs = result
+        .proofs
+        .wrap_err("base proving did not return proofs")?;
+    let child_vk = Arc::new(result.vk.wrap_err("base proving did not return a vk")?);
+    warm_child_vk_digest_cache(&child_vk);
+    let options = aggregation_options();
+    let root_proof = prove_and_verify_aggregation(child_vk, options, &shard_proofs)?;
+    let proof_bytes = bincode2::serde::encode_to_vec(&root_proof, bincode2::config::standard())?;
+    let proof_size = proof_bytes.len();
+    println!(
+        "ceno root proof size: {proof_size} bytes ({:.2} MiB)",
+        proof_size as f64 / (1024.0 * 1024.0)
+    );
+    let legacy_proof_size = bincode::serialized_size(&root_proof)?;
+    println!(
+        "recursion-v2 root proof size (bincode-v1 legacy): {legacy_proof_size} bytes ({:.2} MiB)",
+        legacy_proof_size as f64 / (1024.0 * 1024.0)
+    );
+
+    tracing::info!(
+        shard_count = shard_proofs.len(),
+        proof_size_bytes = proof_size,
+        "recursion-v2 aggregation produced a root proof"
+    );
+    Ok(())
+}
+
+fn aggregation_system_params(n_stack: usize) -> SystemParams {
+    test_system_params_zero_pow(RETH_RECURSION_L_SKIP, n_stack, RETH_RECURSION_K_WHIR)
+}
+
+fn aggregation_options() -> AggregationOptions {
+    let leaf_params = aggregation_system_params(RETH_RECURSION_LEAF_N_STACK);
+    let internal_params = aggregation_system_params(RETH_RECURSION_INTERNAL_N_STACK);
+    let root_params = aggregation_system_params(RETH_RECURSION_ROOT_N_STACK);
+    AggregationOptions::new(leaf_params)
+        .with_internal_system_params(internal_params)
+        .with_root_system_params(root_params)
+}
+
+#[cfg(not(feature = "cuda"))]
+fn prove_and_verify_aggregation(
+    child_vk: Arc<ceno_recursion_v2::system::RecursionVk>,
+    options: AggregationOptions,
+    shard_proofs: &[ceno_recursion_v2::system::RecursionProof],
+) -> Result<RootProof> {
+    let prover = AggProver::<
+        2,
+        2,
+        BabyBearPoseidon2Config,
+        openvm_cpu_backend::CpuBackend<BabyBearPoseidon2Config>,
+        InnerTraceGenImpl,
+        BabyBearPoseidon2CpuEngine,
+    >::new(child_vk, options);
+    let root_output = prover.prove_with_root_vk(shard_proofs)?;
+    prover.verify_root_proof(&root_output.root_vk, &root_output.root_proof)?;
+    Ok(root_output.root_proof)
+}
+
+#[cfg(feature = "cuda")]
+fn prove_and_verify_aggregation(
+    child_vk: Arc<ceno_recursion_v2::system::RecursionVk>,
+    options: AggregationOptions,
+    shard_proofs: &[ceno_recursion_v2::system::RecursionProof],
+) -> Result<RootProof> {
+    let prover = AggProver::<
+        2,
+        2,
+        BabyBearPoseidon2Config,
+        OpenVmGpuBackend,
+        InnerTraceGenImpl,
+        BabyBearPoseidon2GpuEngine,
+    >::new(child_vk, options);
+    let root_output = prover.prove_with_root_vk(shard_proofs)?;
+    prover.verify_root_proof(&root_output.root_vk, &root_output.root_proof)?;
+    Ok(root_output.root_proof)
+}

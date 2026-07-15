@@ -12,7 +12,6 @@ use gkr_iop::{
 };
 use itertools::{Itertools, izip};
 use multilinear_extensions::{ToExpr, util::max_usable_threads};
-use p3::field::FieldAlgebra;
 use rayon::{
     iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator},
     slice::ParallelSlice,
@@ -40,6 +39,7 @@ use crate::{
     tables::{InsnRecord, RMMCollections},
     witness::LkMultiplicity,
 };
+use p3::field::PrimeCharacteristicRing;
 
 #[derive(Debug)]
 pub struct EcallWeierstrassDoubleAssignConfig<
@@ -138,10 +138,7 @@ impl<E: ExtensionField, EC: EllipticCurve + WeierstrassParameters> Instruction<E
                     cb,
                     // mem address := point_ptr + i
                     point_ptr.prev_value.as_ref().unwrap().value()
-                        + E::BaseField::from_canonical_u32(
-                            ByteAddr::from((i * WORD_SIZE) as u32).0,
-                        )
-                        .expr(),
+                        + E::BaseField::from_u32(ByteAddr::from((i * WORD_SIZE) as u32).0).expr(),
                     val_before.clone(),
                     val_after.clone(),
                     vm_state.ts,

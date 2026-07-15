@@ -5,7 +5,7 @@ use ceno_emul::{
 };
 use ff_ext::ExtensionField;
 use multilinear_extensions::ToExpr;
-use p3::field::FieldAlgebra;
+use p3::field::PrimeCharacteristicRing;
 
 use crate::{
     chip_handler::general::InstFetch,
@@ -89,7 +89,7 @@ impl<E: ExtensionField> Instruction<E> for PubIoCommitInstruction<E> {
                 WriteMEM::construct_circuit(
                     cb,
                     digest_ptr.prev_value.as_ref().unwrap().value()
-                        + E::BaseField::from_canonical_u32((i * WORD_SIZE) as u32).expr(),
+                        + E::BaseField::from_u32((i * WORD_SIZE) as u32).expr(),
                     layout.digest_words[i].clone(),
                     layout.digest_words[i].clone(),
                     vm_state.ts,

@@ -236,10 +236,7 @@ impl LatestAccesses {
     }
 
     fn track(&mut self, addr: WordAddr, cycle: Cycle) -> Cycle {
-        let prev = self
-            .store
-            .replace(addr, cycle)
-            .unwrap_or_else(|| panic!("addr {addr:?} outside tracked address space"));
+        let prev = self.store.replace_in_bounds(addr, cycle);
         if prev == Cycle::default() {
             self.len += 1;
             #[cfg(any(test, debug_assertions))]
@@ -248,6 +245,36 @@ impl LatestAccesses {
             }
         }
         prev
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    fn cells_mut_ptr(&mut self) -> *mut Cycle {
+        self.store.cells_mut_ptr()
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    fn base(&self) -> WordAddr {
+        self.store.base()
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    fn record_native_first_touch(&mut self, addr: WordAddr) {
+        self.len += 1;
+        #[cfg(not(any(test, debug_assertions)))]
+        let _ = addr;
+        #[cfg(any(test, debug_assertions))]
+        {
+            self.touched.push(addr);
+        }
     }
 
     pub fn cycle(&self, addr: WordAddr) -> Cycle {
@@ -1064,6 +1091,69 @@ pub struct PreflightTracer {
     config: PreflightTracerConfig,
 }
 
+#[cfg_attr(
+    not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+    allow(dead_code)
+)]
+pub(crate) const NATIVE_TRACE_READ_RS1: u32 = 1 << 0;
+#[cfg_attr(
+    not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+    allow(dead_code)
+)]
+pub(crate) const NATIVE_TRACE_READ_RS2: u32 = 1 << 1;
+#[cfg_attr(
+    not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+    allow(dead_code)
+)]
+pub(crate) const NATIVE_TRACE_WRITE_RD: u32 = 1 << 2;
+#[cfg_attr(
+    not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+    allow(dead_code)
+)]
+pub(crate) const NATIVE_TRACE_LOAD_MEM: u32 = 1 << 3;
+#[cfg_attr(
+    not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+    allow(dead_code)
+)]
+pub(crate) const NATIVE_TRACE_STORE_MEM: u32 = 1 << 4;
+
+#[cfg_attr(
+    not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+    allow(dead_code)
+)]
+pub(crate) struct NativeTraceStep {
+    pub pc_before: ByteAddr,
+    pub pc_after: ByteAddr,
+    pub kind: InsnKind,
+    pub flags: u32,
+    pub rs1_idx: RegIdx,
+    pub rs2_idx: RegIdx,
+    pub rd_idx: RegIdx,
+    pub memory_addr: WordAddr,
+}
+
+#[cfg_attr(
+    not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+    allow(dead_code)
+)]
+pub(crate) struct PreflightNativeTraceState {
+    pub latest_cells: *mut Cycle,
+    pub latest_base: WordAddr,
+    pub cycle: *mut Cycle,
+    pub pc_before: *mut ByteAddr,
+    pub pc_after: *mut ByteAddr,
+    pub last_kind: *mut InsnKind,
+    pub current_shard_start_cycle: *const Cycle,
+    pub planner_cur_cells: *mut u64,
+    pub planner_cur_cycle_in_shard: *mut Cycle,
+    pub planner_cur_step_count: *mut usize,
+    pub planner_max_step_shard: *mut usize,
+    pub planner_shard_id: *mut usize,
+    pub planner_max_cell_per_shard: u64,
+    pub planner_target_cell_first_shard: u64,
+    pub planner_max_cycle_per_shard: Cycle,
+}
+
 #[derive(Clone)]
 pub struct PreflightTracerConfig {
     record_next_accesses: bool,
@@ -1201,6 +1291,117 @@ impl PreflightTracer {
         (planner, self.next_accesses)
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn supports_direct_native_trace(&self) -> bool {
+        self.planner.is_some()
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn native_trace_state(&mut self) -> PreflightNativeTraceState {
+        debug_assert!(self.supports_direct_native_trace());
+        let planner = self.planner.as_mut().expect("shard planner missing");
+        PreflightNativeTraceState {
+            latest_cells: self.latest_accesses.cells_mut_ptr(),
+            latest_base: self.latest_accesses.base(),
+            cycle: &mut self.cycle,
+            pc_before: &mut self.pc.before,
+            pc_after: &mut self.pc.after,
+            last_kind: &mut self.last_kind,
+            current_shard_start_cycle: &self.current_shard_start_cycle,
+            planner_cur_cells: &mut planner.cur_cells,
+            planner_cur_cycle_in_shard: &mut planner.cur_cycle_in_shard,
+            planner_cur_step_count: &mut planner.cur_step_count,
+            planner_max_step_shard: &mut planner.max_step_shard,
+            planner_shard_id: &mut planner.shard_id,
+            planner_max_cell_per_shard: planner.max_cell_per_shard,
+            planner_target_cell_first_shard: planner.target_cell_first_shard,
+            planner_max_cycle_per_shard: planner.max_cycle_per_shard,
+        }
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn native_step_cells_for_kind(&self, kind: InsnKind) -> u64 {
+        self.config
+            .step_cell_extractor
+            .as_ref()
+            .map(|extractor| extractor.cells_for_kind(kind, None))
+            .unwrap_or(0)
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn native_mmio_bound_ptrs(
+        &mut self,
+        start_addr: WordAddr,
+    ) -> (*mut WordAddr, *mut WordAddr) {
+        let Some((_, _, min_addr, max_addr)) = self
+            .mmio_min_max_access
+            .as_mut()
+            .and_then(|mmio_max_access| mmio_max_access.get_mut(&start_addr))
+        else {
+            return (std::ptr::null_mut(), std::ptr::null_mut());
+        };
+        (min_addr as *mut WordAddr, max_addr as *mut WordAddr)
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn record_native_access_side_effects(
+        &mut self,
+        addr: WordAddr,
+        prev_cycle: Cycle,
+        cur_cycle: Cycle,
+    ) {
+        if prev_cycle == Cycle::default() {
+            self.latest_accesses.record_native_first_touch(addr);
+        }
+        if self.config.record_next_accesses && prev_cycle < self.current_shard_start_cycle {
+            self.next_accesses
+                .entry(prev_cycle)
+                .or_default()
+                .push((addr, cur_cycle));
+        }
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn observe_native_steps(&mut self, steps: u64) {
+        debug_assert!(self.supports_direct_native_trace());
+        let _ = steps;
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn record_native_shard_split(&mut self) {
+        let planner = self.planner.as_mut().expect("shard planner missing");
+        let next_shard_cycle = self.cycle;
+        planner.push_boundary(next_shard_cycle);
+        planner.shard_id += 1;
+        planner.current_shard_start_cycle = next_shard_cycle;
+        planner.max_step_shard = planner.max_step_shard.max(planner.cur_step_count);
+        planner.cur_cells = 0;
+        planner.cur_cycle_in_shard = 0;
+        planner.cur_step_count = 0;
+        self.current_shard_start_cycle = next_shard_cycle;
+    }
+
     #[inline(always)]
     fn update_mmio_bounds(&mut self, addr: WordAddr) {
         if let Some((_, (_, end_addr, min_addr, max_addr))) = self
@@ -1223,6 +1424,45 @@ impl PreflightTracer {
     #[inline(always)]
     fn reset_register_tracking(&mut self) {
         self.register_reads_tracked = 0;
+    }
+
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
+    pub(crate) fn trace_native_step(&mut self, step: NativeTraceStep) -> bool {
+        self.pc.before = step.pc_before;
+        self.last_kind = step.kind;
+        self.last_rs1 = None;
+
+        if step.flags & NATIVE_TRACE_READ_RS1 != 0 {
+            self.track_access(
+                Platform::register_vma(step.rs1_idx).into(),
+                Self::SUBCYCLE_RS1,
+            );
+        }
+        if step.flags & NATIVE_TRACE_READ_RS2 != 0 {
+            self.track_access(
+                Platform::register_vma(step.rs2_idx).into(),
+                Self::SUBCYCLE_RS2,
+            );
+        }
+        if step.flags & NATIVE_TRACE_WRITE_RD != 0 {
+            self.track_access(
+                Platform::register_vma(step.rd_idx).into(),
+                Self::SUBCYCLE_RD,
+            );
+        }
+        if step.flags & NATIVE_TRACE_LOAD_MEM != 0 {
+            self.track_access(step.memory_addr, Self::SUBCYCLE_MEM);
+        } else if step.flags & NATIVE_TRACE_STORE_MEM != 0 {
+            self.update_mmio_bounds(step.memory_addr);
+            self.track_access(step.memory_addr, Self::SUBCYCLE_MEM);
+        }
+
+        self.pc.after = step.pc_after;
+        self.advance();
+        step.pc_before == step.pc_after
     }
 }
 

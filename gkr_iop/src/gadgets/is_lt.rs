@@ -2,7 +2,7 @@ use crate::utils::i64_to_base;
 use ff_ext::{ExtensionField, FieldInto, SmallField};
 use itertools::izip;
 use multilinear_extensions::{Expression, ToExpr, WitIn, power_sequence};
-use p3::field::Field;
+use p3_field::Field;
 use std::fmt::Display;
 use witness::set_val;
 
@@ -220,13 +220,7 @@ impl InnerLtConfig {
         lhs: u64,
         rhs: u64,
     ) -> Result<(), CircuitBuilderError> {
-        self.assign_instance_field(
-            instance,
-            lkm,
-            F::from_canonical_u64(lhs),
-            F::from_canonical_u64(rhs),
-            lhs < rhs,
-        )
+        self.assign_instance_field(instance, lkm, F::from_u64(lhs), F::from_u64(rhs), lhs < rhs)
     }
 
     /// Assign instance values to this configuration where the ordering is

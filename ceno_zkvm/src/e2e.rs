@@ -17,18 +17,17 @@ use crate::{
         ZKVMWitnesses,
     },
     tables::{
-        MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig, ShardRamCircuit,
-        TableCircuit,
+        MemFinalRecord, MemInitRecord, ProgramTableCircuit, ProgramTableConfig,
+        ShardRamEcTreeCircuit, TableCircuit,
     },
 };
 use ceno_emul::{
-    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, FullTracer, FullTracerConfig, IterAddresses,
-    NextCycleAccess, Platform, PreflightTracer, PreflightTracerConfig, Program, RegIdx,
-    StepCellExtractor, StepIndex, StepRecord, SyscallWitness, Tracer, VM_REG_COUNT, VMState,
-    WORD_SIZE, Word, WordAddr, host_utils::read_all_messages,
+    Addr, ByteAddr, CENO_PLATFORM, Cycle, EmuContext, EmulatorBackend, FullTracer,
+    FullTracerConfig, IterAddresses, NextCycleAccess, Platform, PreflightTracer,
+    PreflightTracerConfig, Program, RegIdx, StepCellExtractor, StepIndex, StepRecord,
+    SyscallWitness, Tracer, VM_REG_COUNT, VMState, WORD_SIZE, Word, WordAddr,
+    host_utils::read_all_messages,
 };
-#[cfg(feature = "gpu")]
-use ceno_gpu::CudaHal;
 use clap::ValueEnum;
 use either::Either;
 use ff_ext::{ExtensionField, SmallField};
@@ -59,7 +58,6 @@ use witness::next_pow2_instance_padding;
 // default value: 16GB VRAM, each cell 4 byte, log explosion 2
 pub const DEFAULT_MAX_CELLS_PER_SHARDS: u64 = (1 << 30) * 16 / 4 / 2;
 pub const DEFAULT_MAX_CYCLE_PER_SHARDS: Cycle = 1 << 29;
-pub const DEFAULT_CROSS_SHARD_ACCESS_LIMIT: usize = 1 << 20;
 /// Keccak-256 digest of the empty string (""), in big-endian byte form.
 pub const KECCAK_EMPTY: [u8; 32] = [
     0xc5, 0xd2, 0x46, 0x01, 0x86, 0xf7, 0x23, 0x3c, 0x92, 0x7e, 0x7d, 0xb2, 0xdc, 0xc7, 0x03, 0xc0,
@@ -221,7 +219,6 @@ pub struct ShardContext<'a> {
         Either<Vec<BTreeMap<WordAddr, RAMRecord>>, &'a mut BTreeMap<WordAddr, RAMRecord>>,
     pub cur_shard_cycle_range: std::ops::Range<usize>,
     pub expected_inst_per_shard: usize,
-    pub max_num_cross_shard_accesses: usize,
     // shard 0: [v[0], v[1]), shard 1: [v[1], v[2]), shard 2: [v[2], v[3])
     pub prev_shard_cycle_range: Vec<Cycle>,
     pub prev_shard_heap_range: Vec<Addr>,
@@ -237,9 +234,6 @@ pub struct ShardContext<'a> {
 impl<'a> Default for ShardContext<'a> {
     fn default() -> Self {
         let max_threads = max_usable_threads();
-        let max_num_cross_shard_accesses = std::env::var("CENO_CROSS_SHARD_LIMIT")
-            .map(|v| v.parse().unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT))
-            .unwrap_or(DEFAULT_CROSS_SHARD_ACCESS_LIMIT);
 
         Self {
             shard_id: 0,
@@ -259,7 +253,6 @@ impl<'a> Default for ShardContext<'a> {
             ),
             cur_shard_cycle_range: FullTracer::SUBCYCLES_PER_INSN as usize..usize::MAX,
             expected_inst_per_shard: usize::MAX,
-            max_num_cross_shard_accesses,
             prev_shard_cycle_range: vec![],
             prev_shard_heap_range: vec![],
             prev_shard_hint_range: vec![],
@@ -304,7 +297,6 @@ impl<'a> ShardContext<'a> {
             ),
             cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
             expected_inst_per_shard: self.expected_inst_per_shard,
-            max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
             prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
             prev_shard_heap_range: self.prev_shard_heap_range.clone(),
             prev_shard_hint_range: self.prev_shard_hint_range.clone(),
@@ -339,7 +331,6 @@ impl<'a> ShardContext<'a> {
                     write_records_tbs: Either::Right(write),
                     cur_shard_cycle_range: self.cur_shard_cycle_range.clone(),
                     expected_inst_per_shard: self.expected_inst_per_shard,
-                    max_num_cross_shard_accesses: self.max_num_cross_shard_accesses,
                     prev_shard_cycle_range: self.prev_shard_cycle_range.clone(),
                     prev_shard_heap_range: self.prev_shard_heap_range.clone(),
                     prev_shard_hint_range: self.prev_shard_hint_range.clone(),
@@ -866,6 +857,9 @@ impl StepReplay {
         for record in init_mem_state.hints.iter() {
             vm.init_memory(record.addr.into(), record.value);
         }
+        // Witness replay is intentionally interpreter-backed. FullTracer records
+        // are the source for shard witnesses, so keep this path exact and stable
+        // even when preflight planning uses AOT.
         StepReplay {
             vm,
             remaining_steps,
@@ -933,6 +927,8 @@ pub fn emulate_program<'a>(
     platform: &Platform,
     multi_prover: &MultiProver,
     step_cell_extractor: Arc<dyn StepCellExtractor>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
 ) -> EmulationResult<'a> {
     let InitMemState {
         mem: mem_init,
@@ -949,9 +945,12 @@ pub fn emulate_program<'a>(
         multi_prover.max_cycle_per_shard,
     )
     .with_step_cell_extractor(step_cell_extractor);
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let profile_tracer_config = tracer_config.clone();
+    let preflight_program = program.clone();
     let mut vm: VMState<PreflightTracer> = info_span!("[ceno] emulator.new-preflight-tracer")
         .in_scope(move || {
-            VMState::new_with_tracer_config(platform.clone(), program.clone(), tracer_config)
+            VMState::new_with_tracer_config(platform.clone(), preflight_program, tracer_config)
         });
 
     info_span!("[ceno] emulator.init_mem").in_scope(|| {
@@ -960,18 +959,86 @@ pub fn emulate_program<'a>(
         }
     });
 
-    let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
-        let mut steps = 0usize;
-        loop {
-            if steps >= max_steps {
-                break;
+    let backend = EmulatorBackend::from_env()
+        .unwrap_or_else(|err| panic!("invalid emulator backend for preflight: {err}"));
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let aot_program = match backend {
+        EmulatorBackend::Interp => None,
+        EmulatorBackend::Aot => match precompiled_aot {
+            Some(aot) => Some(aot),
+            None => {
+                // Preflight AOT compiles static blocks plus hot dynamic roots sampled
+                // from an interpreter pass over the same initial hint memory.
+                let roots = ceno_emul::aot::sample_preflight_roots(
+                    platform,
+                    program.clone(),
+                    hints_init
+                        .iter()
+                        .map(|record| (record.addr.into(), record.value)),
+                    profile_tracer_config,
+                );
+                let aot = ceno_emul::aot::AotProgram::compile_preflight_direct_with_extra_roots(
+                    program.clone(),
+                    roots,
+                )
+                .unwrap_or_else(|err| panic!("AOT compile failed during preflight: {err}"));
+                let report = aot.report();
+                tracing::info!(
+                    "AOT compile/load completed in {:?}; blocks={}, reachable_instructions={}",
+                    report.compile_load_time,
+                    report.block_count,
+                    report.reachable_instruction_count
+                );
+                Some(Arc::new(aot))
             }
-            match vm.next_step_record() {
-                Ok(Some(_)) => {
-                    steps += 1;
+        },
+    };
+    #[cfg(not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")))]
+    if backend == EmulatorBackend::Aot {
+        panic!("CENO_EMULATOR_BACKEND=aot requires feature aot-x86_64 on Linux x86-64");
+    }
+
+    let exit_code = info_span!("[ceno] preflight-execute").in_scope(|| {
+        match backend {
+            EmulatorBackend::Interp => {
+                let mut steps = 0usize;
+                loop {
+                    if steps >= max_steps {
+                        break;
+                    }
+                    match vm.next_step_record() {
+                        Ok(Some(_)) => {
+                            steps += 1;
+                        }
+                        Ok(None) => break,
+                        Err(err) => panic!("emulator trapped before halt: {err}"),
+                    }
                 }
-                Ok(None) => break,
-                Err(err) => panic!("emulator trapped before halt: {err}"),
+            }
+            EmulatorBackend::Aot => {
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                {
+                    let report = aot_program
+                        .as_ref()
+                        .expect("AOT backend selected without compiled program")
+                        .run_to_halt(&mut vm, max_steps)
+                        .unwrap_or_else(|err| panic!("AOT emulator trapped before halt: {err}"));
+                    tracing::info!(
+                        "AOT preflight executed {} instructions in {:?}; fallback_steps={} ({:.2}%)",
+                        report.executed_steps,
+                        report.execute_time,
+                        report.fallback_steps,
+                        report.fallback_steps as f64 * 100.0 / report.executed_steps.max(1) as f64
+                    );
+                }
+                #[cfg(not(all(
+                    feature = "aot-x86_64",
+                    target_arch = "x86_64",
+                    target_os = "linux"
+                )))]
+                {
+                    panic!("CENO_EMULATOR_BACKEND=aot requires feature aot-x86_64 on Linux x86-64");
+                }
             }
         }
         vm.halted_state().map(|halt_state| halt_state.exit_code)
@@ -1692,20 +1759,21 @@ pub fn generate_witness<'a, E: ExtensionField>(
                     )
             }).unwrap();
 
-            if let Some(shard_ram_witnesses) =
-                zkvm_witness.get_witness(&ShardRamCircuit::<E>::name())
+            if let Some(shard_ram_ec_tree_witnesses) =
+                zkvm_witness.get_witness(&ShardRamEcTreeCircuit::<E>::name())
             {
                 info_span!("shard_ram_ec_sum").in_scope(|| {
-                    let shard_ram_ec_sum: SepticPoint<E::BaseField> = shard_ram_witnesses
-                        .iter()
-                        .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
-                        .map(|shard_ram_witness| {
-                            ShardRamCircuit::<E>::extract_ec_sum(
-                                &system_config.mmu_config.ram_bus_circuit,
-                                &shard_ram_witness.witness_rmms[0],
-                            )
-                        })
-                        .sum();
+                    let shard_ram_ec_sum: SepticPoint<E::BaseField> =
+                        shard_ram_ec_tree_witnesses
+                            .iter()
+                            .filter(|shard_ram_witness| shard_ram_witness.num_instances[0] > 0)
+                            .map(|shard_ram_witness| {
+                                ShardRamEcTreeCircuit::<E>::extract_ec_sum(
+                                    &system_config.mmu_config.ram_bus_ec_tree_circuit,
+                                    &shard_ram_witness.witness_rmms[0],
+                                )
+                            })
+                            .sum();
 
                     let xy = shard_ram_ec_sum
                         .x
@@ -1783,6 +1851,8 @@ pub struct E2EProgramCtx<E: ExtensionField> {
     pub system_config: ConstraintSystemConfig<E>,
     pub reg_init: Vec<MemInitRecord>,
     pub zkvm_fixed_traces: ZKVMFixedTraces<E>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub preflight_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
 }
 
 /// end-to-end pipeline result, stopping at a certain checkpoint
@@ -1822,9 +1892,17 @@ pub fn setup_program<E: ExtensionField>(
     // Generate fixed traces
     let zkvm_fixed_traces =
         generate_fixed_traces(&system_config, &reg_init, &static_addrs, &program);
+    let program = Arc::new(program);
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    let preflight_aot_program = match EmulatorBackend::from_env()
+        .unwrap_or_else(|err| panic!("invalid emulator backend for setup: {err}"))
+    {
+        EmulatorBackend::Interp => None,
+        EmulatorBackend::Aot => None,
+    };
 
     E2EProgramCtx {
-        program: Arc::new(program),
+        program,
         platform,
         multi_prover,
         static_addrs,
@@ -1832,6 +1910,8 @@ pub fn setup_program<E: ExtensionField>(
         system_config,
         reg_init,
         zkvm_fixed_traces,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        preflight_aot_program,
     }
 }
 
@@ -1980,6 +2060,14 @@ pub fn run_e2e_with_checkpoint<
         &prover.pk.program_ctx.as_ref().unwrap().platform,
         &prover.pk.program_ctx.as_ref().unwrap().multi_prover,
         step_cell_extractor,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        prover
+            .pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .preflight_aot_program
+            .clone(),
     );
     tracing::debug!("emulate done in {:?}", start.elapsed());
 
@@ -2092,6 +2180,8 @@ pub fn run_e2e_proof<
         &ctx.platform,
         &ctx.multi_prover,
         step_cell_extractor,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        ctx.preflight_aot_program.clone(),
     );
     create_proofs_streaming(
         emul_result,

@@ -7,7 +7,7 @@ use multilinear_extensions::{
     mle::{MultilinearExtension, Point, PointAndEval},
     util::ceil_log2,
 };
-use p3::{field::FieldAlgebra, util::indices_arr};
+use p3::{field::PrimeCharacteristicRing as FieldAlgebra, util::indices_arr};
 use std::{array::from_fn, mem::transmute, sync::Arc};
 use sumcheck::{
     macros::{entered_span, exit_span},
@@ -52,7 +52,7 @@ fn not_expr<E: ExtensionField>(a: Expression<E>) -> Expression<E> {
 }
 
 fn xor_expr<E: ExtensionField>(a: Expression<E>, b: Expression<E>) -> Expression<E> {
-    a.clone() + b.clone() - E::BaseField::from_canonical_u32(2).expr() * a * b
+    a.clone() + b.clone() - E::BaseField::from_u32(2).expr() * a * b
 }
 
 fn zero_expr<E: ExtensionField>() -> Expression<E> {
@@ -411,7 +411,7 @@ fn iota_layer<E: ExtensionField>(
     let sel_type = SelectorType::Whole(layer.eq.expr());
     iota_out_evals.iter().enumerate().for_each(|(i, out_eval)| {
         let expr = {
-            let round_bit = E::BaseField::from_canonical_u64((round_value >> i) & 1).expr();
+            let round_bit = E::BaseField::from_u64((round_value >> i) & 1).expr();
             xor_expr(bits[i].clone(), round_bit)
         };
         system.add_non_zero_constraint(

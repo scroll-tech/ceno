@@ -290,7 +290,7 @@ fn convert_compact_shard_records<E: ff_ext::ExtensionField>(
             tables::{ECPoint, ShardRamInput, ShardRamRecord},
         };
         use gkr_iop::RAMType;
-        use p3::field::FieldAlgebra;
+        use p3::field::PrimeCharacteristicRing as FieldAlgebra;
 
         let base = i * GPU_SHARD_RAM_RECORD_SIZE;
         let r = &raw[base..base + GPU_SHARD_RAM_RECORD_SIZE];
@@ -312,10 +312,10 @@ fn convert_compact_shard_records<E: ff_ext::ExtensionField>(
         let mut point_x_arr = [E::BaseField::ZERO; 7];
         let mut point_y_arr = [E::BaseField::ZERO; 7];
         for j in 0..7 {
-            point_x_arr[j] = E::BaseField::from_canonical_u32(u32::from_le_bytes(
+            point_x_arr[j] = E::BaseField::from_u32(u32::from_le_bytes(
                 r[48 + j * 4..52 + j * 4].try_into().unwrap(),
             ));
-            point_y_arr[j] = E::BaseField::from_canonical_u32(u32::from_le_bytes(
+            point_y_arr[j] = E::BaseField::from_u32(u32::from_le_bytes(
                 r[76 + j * 4..80 + j * 4].try_into().unwrap(),
             ));
         }

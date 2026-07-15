@@ -7,7 +7,7 @@ use multilinear_extensions::{
     mle::{Point, PointAndEval},
     monomial::Term,
 };
-use p3::field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{ops::Neg, sync::Arc, vec::IntoIter};
