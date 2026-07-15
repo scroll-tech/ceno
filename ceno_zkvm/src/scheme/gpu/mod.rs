@@ -153,6 +153,11 @@ where
         "Jagged GPU commitment wrapper called for non-Jagged PCS: {}",
         std::any::type_name::<PCS>(),
     );
+    assert!(
+        reshape_log_height <= crate::scheme::constants::MAX_NUM_VARIABLES,
+        "Jagged reshape_log_height {reshape_log_height} exceeds max {}",
+        crate::scheme::constants::MAX_NUM_VARIABLES
+    );
     let jagged_commitment = mpcs::JaggedCommitment::<BB31Ext, BabyBearBasefold> {
         inner: inner_commit,
         cumulative_heights,
@@ -3433,6 +3438,12 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E> + 'static>
         if is_jagged_pcs {
             let jagged_commitment: &mpcs::JaggedCommitmentWithWitness<BB31Ext, BabyBearBasefold> =
                 unsafe { std::mem::transmute_copy(&pcs_data_original.as_ref()) };
+            assert!(
+                jagged_commitment.reshape_log_height <= crate::scheme::constants::MAX_NUM_VARIABLES,
+                "Jagged fixed reshape_log_height {} exceeds max {}",
+                jagged_commitment.reshape_log_height,
+                crate::scheme::constants::MAX_NUM_VARIABLES
+            );
             let pcs_data_basefold = convert_ceno_to_gpu_basefold_commitment::<
                 CudaHalBB31,
                 BB31Ext,

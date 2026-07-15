@@ -1,5 +1,6 @@
 use ceno_zkvm::{
     instructions::riscv::constants::{LIMB_BITS, LIMB_MASK, PUBIO_DIGEST_U16_LIMBS, UINT_LIMBS},
+    scheme::constants::MAX_NUM_VARIABLES,
     structs::VK_DIGEST_LEN,
 };
 use openvm_cpu_backend::CpuBackend;
@@ -14,7 +15,11 @@ use std::borrow::BorrowMut;
 use crate::{
     circuit::inner::{
         ProofsType,
-        vm_pvs::{VmPvs, air::VmPvsCols, recursion_commit_digest},
+        vm_pvs::{
+            VmPvs,
+            air::{RESHAPE_LOG_HEIGHT_DIFF_BITS, VmPvsCols},
+            recursion_commit_digest,
+        },
     },
     system::{Preflight, RecursionProof, RecursionVk},
 };
@@ -78,6 +83,9 @@ pub fn generate_proving_ctx(
                 .unwrap_or_default();
             cols.fixed_commit_log2_max_codeword_size = fixed_meta[0];
             cols.fixed_commit_reshape_log_height = fixed_meta[1];
+            if let Some(commitment) = child_vk.fixed_commit.as_ref() {
+                assert_reshape_log_height_capacity(commitment.reshape_log_height);
+            }
             cols.fixed_commit_cumulative_heights_len = fixed_meta[2];
             let fixed_no_omc_meta = child_vk
                 .fixed_no_omc_init_commit
@@ -86,10 +94,15 @@ pub fn generate_proving_ctx(
                 .unwrap_or_default();
             cols.fixed_no_omc_init_commit_log2_max_codeword_size = fixed_no_omc_meta[0];
             cols.fixed_no_omc_init_commit_reshape_log_height = fixed_no_omc_meta[1];
+            if let Some(commitment) = child_vk.fixed_no_omc_init_commit.as_ref() {
+                assert_reshape_log_height_capacity(commitment.reshape_log_height);
+            }
             cols.fixed_no_omc_init_commit_cumulative_heights_len = fixed_no_omc_meta[2];
             let witness_meta = commit_fixed_metadata(&proof.witin_commit);
             cols.witness_commit_log2_max_codeword_size = witness_meta[0];
             cols.witness_commit_reshape_log_height = witness_meta[1];
+            cols.witness_commit_reshape_log_height_diff_bits =
+                reshape_log_height_diff_bits(proof.witin_commit.reshape_log_height);
             cols.witness_commit_cumulative_heights_len = witness_meta[2];
             cols.lookup_challenge_alpha_lookup_count =
                 F::from_usize(preflight.vm_pvs.lookup_challenge_alpha_lookup_count);
@@ -231,6 +244,19 @@ fn commit_fixed_metadata(commitment: &super::RecursionCommitment) -> [F; 3] {
         F::from_u64(commitment.reshape_log_height as u64),
         F::from_u64(commitment.cumulative_heights.len() as u64),
     ]
+}
+
+fn reshape_log_height_diff_bits(reshape_log_height: usize) -> [F; RESHAPE_LOG_HEIGHT_DIFF_BITS] {
+    assert_reshape_log_height_capacity(reshape_log_height);
+    let diff = MAX_NUM_VARIABLES - reshape_log_height;
+    core::array::from_fn(|idx| F::from_bool(((diff >> idx) & 1) == 1))
+}
+
+fn assert_reshape_log_height_capacity(reshape_log_height: usize) {
+    assert!(
+        reshape_log_height <= MAX_NUM_VARIABLES,
+        "recursion commitment reshape_log_height {reshape_log_height} exceeds max {MAX_NUM_VARIABLES}"
+    );
 }
 
 fn split_u32_lo_hi(value: u32) -> [F; 2] {

@@ -1,5 +1,6 @@
 use std::{borrow::Borrow, sync::Arc};
 
+use ceno_zkvm::scheme::constants::MAX_NUM_INSTANCE_BITS;
 use itertools::fold;
 use openvm_circuit_primitives::{
     SubAir,
@@ -601,6 +602,20 @@ where
         builder
             .when(local.is_valid)
             .assert_eq(local.height_2, raw_height_2);
+
+        // Enforce height_1, height_2 < 2^MAX_NUM_INSTANCE_BITS.
+        let high_limb_idx = MAX_NUM_INSTANCE_BITS / LIMB_BITS;
+        let high_limb_exclusive_max = 1usize << (MAX_NUM_INSTANCE_BITS % LIMB_BITS);
+        for limbs in [&local.height_1_limbs, &local.height_2_limbs] {
+            self.range_bus.lookup_key(
+                builder,
+                RangeCheckerBusMessage {
+                    value: AB::Expr::from_usize(high_limb_exclusive_max - 1) - limbs[high_limb_idx],
+                    max_bits: AB::Expr::from_usize(LIMB_BITS),
+                },
+                local.is_valid,
+            );
+        }
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HEIGHT + GKR MESSAGE
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -676,5 +691,121 @@ where
 pub(super) fn borrow_var_cols<F>(slice: &[F], idx_flags: usize) -> ProofShapeVarCols<'_, F> {
     ProofShapeVarCols {
         idx_flags: &slice[..idx_flags],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{borrow::Borrow, panic::AssertUnwindSafe};
+
+    use continuations_v2::{circuit::Circuit, prover::debug_constraints};
+    use openvm_cpu_backend::CpuBackend;
+    use openvm_stark_backend::{
+        AirRef, BaseAirWithPublicValues, PartitionedBaseAir, StarkEngine,
+        interaction::InteractionBuilder,
+        p3_air::{Air, AirBuilder, BaseAir},
+        prover::{AirProvingContext, ProvingContext},
+    };
+    use openvm_stark_sdk::config::baby_bear_poseidon2::{
+        BabyBearPoseidon2Config, BabyBearPoseidon2CpuEngine, DuplexSponge, F,
+    };
+    use p3_field::{Field, PrimeCharacteristicRing};
+    use p3_matrix::{Matrix, dense::RowMajorMatrix};
+    use recursion_circuit::primitives::{
+        bus::{RangeCheckerBus, RangeCheckerBusMessage},
+        range::{RangeCheckerAir, RangeCheckerCpuTraceGenerator},
+    };
+    use stark_recursion_circuit_derive::AlignedBorrow;
+
+    use ceno_zkvm::scheme::constants::{MAX_NUM_INSTANCE_BITS, MAX_NUM_INSTANCES};
+
+    use crate::system::utils::test_system_params_zero_pow;
+
+    #[repr(C)]
+    #[derive(AlignedBorrow)]
+    struct HighLimbBoundCols<T> {
+        is_valid: T,
+        high_limb: T,
+    }
+
+    struct HighLimbBoundAir {
+        range_bus: RangeCheckerBus,
+    }
+
+    struct TestCircuit {
+        airs: Vec<AirRef<BabyBearPoseidon2Config>>,
+    }
+
+    impl Circuit<BabyBearPoseidon2Config> for TestCircuit {
+        fn airs(&self) -> Vec<AirRef<BabyBearPoseidon2Config>> {
+            self.airs.clone()
+        }
+    }
+
+    impl<F: Field> BaseAir<F> for HighLimbBoundAir {
+        fn width(&self) -> usize {
+            HighLimbBoundCols::<F>::width()
+        }
+    }
+
+    impl<F: Field> BaseAirWithPublicValues<F> for HighLimbBoundAir {}
+    impl<F: Field> PartitionedBaseAir<F> for HighLimbBoundAir {}
+
+    impl<AB: AirBuilder + InteractionBuilder> Air<AB> for HighLimbBoundAir {
+        fn eval(&self, builder: &mut AB) {
+            let main = builder.main();
+            let local = main.row_slice(0).expect("trace has at least one row");
+            let local: &HighLimbBoundCols<AB::Var> = (*local).borrow();
+
+            self.range_bus.lookup_key(
+                builder,
+                RangeCheckerBusMessage {
+                    value: AB::Expr::from_usize((1usize << (MAX_NUM_INSTANCE_BITS % 8)) - 1)
+                        - local.high_limb,
+                    max_bits: AB::Expr::from_usize(8),
+                },
+                local.is_valid,
+            );
+        }
+    }
+
+    fn test_engine() -> BabyBearPoseidon2CpuEngine<DuplexSponge> {
+        BabyBearPoseidon2CpuEngine::new(test_system_params_zero_pow(2, 10, 3))
+    }
+
+    #[test]
+    fn debug_constraints_reject_num_instance_larger_than_bound() {
+        let range_bus = RangeCheckerBus::new(0);
+        let circuit = TestCircuit {
+            airs: vec![
+                std::sync::Arc::new(HighLimbBoundAir { range_bus }) as AirRef<_>,
+                std::sync::Arc::new(RangeCheckerAir::<8> { bus: range_bus }) as AirRef<_>,
+            ],
+        };
+
+        let oversized = MAX_NUM_INSTANCES;
+        let oversized_high_limb = oversized >> 24;
+        assert_eq!(oversized_high_limb, 1usize << (MAX_NUM_INSTANCE_BITS % 8));
+        let bound_trace = RowMajorMatrix::new(vec![F::ONE, F::from_usize(oversized_high_limb)], 2);
+        let range_checker = RangeCheckerCpuTraceGenerator::<8>::default();
+        let range_trace = range_checker.generate_trace_row_major();
+
+        let ctx: ProvingContext<CpuBackend<BabyBearPoseidon2Config>> = ProvingContext::new(
+            [
+                (0, AirProvingContext::simple_no_pis(bound_trace)),
+                (1, AirProvingContext::simple_no_pis(range_trace)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        let engine = test_engine();
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            debug_constraints::<BabyBearPoseidon2Config, _, _>(&circuit, &ctx, &engine)
+        }));
+        assert!(
+            result.is_err(),
+            "debug constraints should reject num_instances above PCS capacity"
+        );
     }
 }

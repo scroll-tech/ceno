@@ -17,7 +17,7 @@ use crate::{
         INIT_CYCLE_IDX, INIT_PC_IDX,
     },
     scheme::{
-        constants::{NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
+        constants::{MAX_NUM_INSTANCE_BITS, MAX_NUM_INSTANCES, NUM_FANIN, SEPTIC_EXTENSION_DEGREE},
         septic_curve::{SepticExtension, SepticPoint},
         utils::{assign_group_evals, derive_ecc_bridge_claims, first_layer_selector_contexts},
     },
@@ -62,6 +62,28 @@ use witness::next_pow2_instance_padding;
 pub use crate::structs::RV32imMemStateConfig;
 
 type BatchedMainOpeningEvals<E> = Vec<(Point<E>, Vec<E>, Vec<E>)>;
+
+fn validate_num_instances_bound(name: &str, num_instances: &[usize]) -> Result<usize, ZKVMError> {
+    // `num_instances` is proof-controlled and later summed before powering/padding logic.
+    // The raw per-entry proof-data bound is intentionally separate from PCS reshape capacity.
+    for &n in num_instances {
+        if n >= MAX_NUM_INSTANCES {
+            return Err(ZKVMError::InvalidProof(
+                format!(
+                    "{name} num_instances entry {n} exceeds exclusive max {MAX_NUM_INSTANCES} (2^{MAX_NUM_INSTANCE_BITS})"
+                )
+                .into(),
+            ));
+        }
+    }
+    let total = num_instances.iter().try_fold(0usize, |acc, &n| {
+        acc.checked_add(n).ok_or_else(|| {
+            ZKVMError::InvalidProof(format!("{name} total num_instances overflow").into())
+        })
+    })?;
+
+    Ok(total)
+}
 
 pub struct ZKVMVerifier<
     E: ExtensionField,
@@ -582,7 +604,10 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             .zip_eq(forked_transcripts.iter_mut())
             .enumerate()
         {
-            let num_instance: usize = proof.num_instances.iter().sum();
+            let num_instance = validate_num_instances_bound(
+                &format!("{shard_id}th shard chip {index}"),
+                &proof.num_instances,
+            )?;
             if num_instance == 0 {
                 return Err(ZKVMError::InvalidProof(
                     format!("{shard_id}th shard chip {index} has zero instances").into(),
@@ -844,7 +869,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>>
             zkvm_v1_css: cs,
             gkr_circuit,
         } = &composed_cs;
-        let num_instances = proof.num_instances.iter().sum();
+        let num_instances = validate_num_instances_bound(_name, &proof.num_instances)?;
         let (r_counts_per_instance, w_counts_per_instance, lk_counts_per_instance) = (
             cs.r_expressions.len() + cs.r_table_expressions.len(),
             cs.w_expressions.len() + cs.w_table_expressions.len(),
@@ -1851,5 +1876,21 @@ impl EccVerifier {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn num_instances_bound_is_exclusive_per_entry() {
+        let accepted =
+            validate_num_instances_bound("test", &[MAX_NUM_INSTANCES - 1, MAX_NUM_INSTANCES - 1])
+                .expect("entries below raw bound are valid");
+        assert_eq!(accepted, (MAX_NUM_INSTANCES - 1) * 2);
+
+        let err = validate_num_instances_bound("test", &[MAX_NUM_INSTANCES]).unwrap_err();
+        assert!(matches!(err, ZKVMError::InvalidProof(_)));
     }
 }

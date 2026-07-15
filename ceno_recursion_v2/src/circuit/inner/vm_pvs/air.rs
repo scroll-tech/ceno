@@ -1,10 +1,13 @@
 use std::{borrow::Borrow, sync::Arc};
 
 use ceno_emul::{FullTracer as Tracer, WORD_SIZE};
-use ceno_zkvm::instructions::riscv::constants::{
-    END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, EXIT_PC, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
-    HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBIO_DIGEST_IDX,
-    PUBIO_DIGEST_U16_LIMBS, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
+use ceno_zkvm::{
+    instructions::riscv::constants::{
+        END_CYCLE_IDX, END_PC_IDX, EXIT_CODE_IDX, EXIT_PC, HEAP_LENGTH_IDX, HEAP_START_ADDR_IDX,
+        HINT_LENGTH_IDX, HINT_START_ADDR_IDX, INIT_CYCLE_IDX, INIT_PC_IDX, PUBIO_DIGEST_IDX,
+        PUBIO_DIGEST_U16_LIMBS, SHARD_ID_IDX, SHARD_RW_SUM_IDX,
+    },
+    scheme::constants::MAX_NUM_VARIABLES,
 };
 use openvm_circuit_primitives::utils::{and, assert_array_eq, not};
 use openvm_stark_backend::{
@@ -26,6 +29,8 @@ use crate::{
         vm_pvs::VmPvs,
     },
 };
+
+pub(super) const RESHAPE_LOG_HEIGHT_DIFF_BITS: usize = 5;
 
 #[repr(C)]
 #[derive(AlignedBorrow)]
@@ -51,6 +56,7 @@ pub struct VmPvsCols<F> {
     pub fixed_no_omc_init_commit_cumulative_heights_len: F,
     pub witness_commit_log2_max_codeword_size: F,
     pub witness_commit_reshape_log_height: F,
+    pub witness_commit_reshape_log_height_diff_bits: [F; RESHAPE_LOG_HEIGHT_DIFF_BITS],
     pub witness_commit_cumulative_heights_len: F,
     pub lookup_challenge_alpha_lookup_count: F,
     pub lookup_challenge_beta_lookup_count: F,
@@ -141,6 +147,12 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
         builder.assert_bool(local.has_verifier_pvs);
         builder.assert_bool(local.fixed_commit_present);
         builder.assert_bool(local.fixed_no_omc_init_commit_present);
+        enforce_reshape_log_height_capacity(
+            builder,
+            local.witness_commit_reshape_log_height,
+            &local.witness_commit_reshape_log_height_diff_bits,
+            local.is_valid.into(),
+        );
         builder
             .when(local.has_verifier_pvs)
             .assert_one(local.is_valid);
@@ -465,6 +477,23 @@ impl<AB: AirBuilder + InteractionBuilder + AirBuilderWithPublicValues> Air<AB> f
             witness_commit,
         );
     }
+}
+
+fn enforce_reshape_log_height_capacity<AB: AirBuilder>(
+    builder: &mut AB,
+    reshape_log_height: AB::Var,
+    diff_bits: &[AB::Var; RESHAPE_LOG_HEIGHT_DIFF_BITS],
+    enabled: AB::Expr,
+) {
+    let mut diff = AB::Expr::ZERO;
+    for (idx, bit) in diff_bits.iter().enumerate() {
+        builder.when(enabled.clone()).assert_bool(bit.clone());
+        diff += AB::Expr::from_usize(1usize << idx) * bit.clone();
+    }
+    builder.when(enabled).assert_eq(
+        reshape_log_height + diff,
+        AB::Expr::from_usize(MAX_NUM_VARIABLES),
+    );
 }
 
 fn vm_public_value_by_index<AB>(local: &VmPvsCols<AB::Var>, index: usize) -> AB::Expr

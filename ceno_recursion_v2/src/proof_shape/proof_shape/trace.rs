@@ -1,5 +1,6 @@
 use std::{borrow::BorrowMut, sync::Arc};
 
+use ceno_zkvm::scheme::constants::{MAX_NUM_INSTANCE_BITS, MAX_NUM_INSTANCES};
 use openvm_circuit_primitives::encoder::Encoder;
 use openvm_stark_sdk::config::baby_bear_poseidon2::{D_EF, EF, F};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
@@ -33,6 +34,28 @@ fn decompose_usize<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
         value >>= LIMB_BITS;
         limb
     })
+}
+
+fn bounded_height_witness<const NUM_LIMBS: usize, const LIMB_BITS: usize>(
+    height: usize,
+) -> ([usize; NUM_LIMBS], usize) {
+    // This is the tracegen mirror of the ProofShapeAir constraint below:
+    // height < 2^MAX_NUM_INSTANCE_BITS is encoded with four u8 limbs by checking the
+    // high limb against the exclusive raw per-entry bound.
+    assert!(
+        height < MAX_NUM_INSTANCES,
+        "recursion proof-shape num_instances value {height} exceeds exclusive max {MAX_NUM_INSTANCES} (2^{MAX_NUM_INSTANCE_BITS})"
+    );
+
+    let limbs = decompose_usize::<NUM_LIMBS, LIMB_BITS>(height);
+    let high_limb_idx = MAX_NUM_INSTANCE_BITS / LIMB_BITS;
+    let high_limb_exclusive_max = 1usize << (MAX_NUM_INSTANCE_BITS % LIMB_BITS);
+    assert!(
+        high_limb_idx < NUM_LIMBS,
+        "proof-shape height bound needs enough limbs to represent 2^{MAX_NUM_INSTANCE_BITS}"
+    );
+
+    (limbs, high_limb_exclusive_max - 1 - limbs[high_limb_idx])
 }
 
 fn two_instance_heights_from_chip_proof(instance: &impl BorrowNumInstances) -> (usize, usize) {
@@ -203,8 +226,10 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.height_1 = F::from_usize(height_1);
                 cols.height_2 = F::from_usize(height_2);
                 cols.num_present = F::from_usize(num_present);
-                let height_1_limbs = decompose_usize::<NUM_LIMBS, LIMB_BITS>(height_1);
-                let height_2_limbs = decompose_usize::<NUM_LIMBS, LIMB_BITS>(height_2);
+                let (height_1_limbs, height_1_high_limb_range_value) =
+                    bounded_height_witness::<NUM_LIMBS, LIMB_BITS>(height_1);
+                let (height_2_limbs, height_2_high_limb_range_value) =
+                    bounded_height_witness::<NUM_LIMBS, LIMB_BITS>(height_2);
                 cols.height_1_limbs = height_1_limbs.map(F::from_usize);
                 cols.height_2_limbs = height_2_limbs.map(F::from_usize);
                 for limb in height_1_limbs {
@@ -213,6 +238,8 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 for limb in height_2_limbs {
                     self.range_checker.add_count(limb);
                 }
+                self.range_checker.add_count(height_1_high_limb_range_value);
+                self.range_checker.add_count(height_2_high_limb_range_value);
                 cols.n_max = F::from_usize(preflight.proof_shape.n_max);
                 cols.is_n_max_greater = F::ZERO;
                 cols.lookup_challenge_alpha = preflight.proof_shape.lookup_challenge_alpha;
@@ -269,6 +296,10 @@ impl<const NUM_LIMBS: usize, const LIMB_BITS: usize> RowMajorChip<F>
                 cols.height_2_limbs = [F::ZERO; NUM_LIMBS];
                 for _ in 0..(2 * NUM_LIMBS) {
                     self.range_checker.add_count(0);
+                }
+                let high_limb_exclusive_max = 1usize << (MAX_NUM_INSTANCE_BITS % LIMB_BITS);
+                for _ in 0..2 {
+                    self.range_checker.add_count(high_limb_exclusive_max - 1);
                 }
                 cols.n_max = F::from_usize(preflight.proof_shape.n_max);
                 cols.is_n_max_greater = F::ZERO;
