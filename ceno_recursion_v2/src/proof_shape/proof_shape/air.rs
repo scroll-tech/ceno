@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, sync::Arc};
 
-use ceno_zkvm::scheme::constants::MAX_NUM_INSTANCE_BITS;
+use ceno_zkvm::scheme::constants::MAX_NUM_VARIABLES;
 use itertools::fold;
 use openvm_circuit_primitives::{
     SubAir,
@@ -73,6 +73,10 @@ pub struct ProofShapeCols<F, const NUM_LIMBS: usize> {
     /// Limb decomposition of per-instance heights used for range/decomposition checks.
     pub height_1_limbs: [F; NUM_LIMBS],
     pub height_2_limbs: [F; NUM_LIMBS],
+    pub total_height_limbs: [F; NUM_LIMBS],
+    pub height_1_at_max: F,
+    pub height_2_at_max: F,
+    pub total_height_at_max: F,
 
     /// The maximum hypercube dimension across all present AIR traces, or zero.
     /// Computed as max(0, n0, n1, ...) where ni = log_height_i for each present trace.
@@ -596,35 +600,85 @@ where
             AB::Expr::ZERO,
             |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
         );
+        let raw_total_height = fold(
+            local.total_height_limbs.iter().enumerate(),
+            AB::Expr::ZERO,
+            |acc, (i, limb)| acc + (AB::Expr::from_u32(1 << (i * LIMB_BITS)) * *limb),
+        );
         builder
             .when(local.is_valid)
             .assert_eq(local.height_1, raw_height_1);
         builder
             .when(local.is_valid)
             .assert_eq(local.height_2, raw_height_2);
+        builder
+            .when(local.is_valid)
+            .assert_eq(local.height_1 + local.height_2, raw_total_height);
 
-        // Enforce height_i < 2^28 using the existing u8 range table. With four u8 limbs,
-        // this is equivalent to constraining the high limb to be at most 15.
-        let max_limb_idx = MAX_NUM_INSTANCE_BITS / LIMB_BITS;
-        let max_limb_value = 1usize << (MAX_NUM_INSTANCE_BITS % LIMB_BITS);
-        self.range_bus.lookup_key(
-            builder,
-            RangeCheckerBusMessage {
-                value: AB::Expr::from_usize(max_limb_value - 1)
-                    - local.height_1_limbs[max_limb_idx],
-                max_bits: AB::Expr::from_usize(LIMB_BITS),
-            },
-            local.is_valid,
+        // Enforce height_1, height_2, and height_1 + height_2 <= 2^MAX_NUM_VARIABLES.
+        // The inclusive power-of-two boundary preserves full PCS capacity when one entry is zero:
+        // for MAX_NUM_VARIABLES=24, 2^24 is high limb 1 with all lower limbs zero.
+        let max_limb_idx = MAX_NUM_VARIABLES / LIMB_BITS;
+        let max_limb_value = 1usize << (MAX_NUM_VARIABLES % LIMB_BITS);
+        let height_1_lower_limbs = fold(
+            local.height_1_limbs[..max_limb_idx].iter(),
+            AB::Expr::ZERO,
+            |acc, limb| acc + *limb,
         );
-        self.range_bus.lookup_key(
-            builder,
-            RangeCheckerBusMessage {
-                value: AB::Expr::from_usize(max_limb_value - 1)
-                    - local.height_2_limbs[max_limb_idx],
-                max_bits: AB::Expr::from_usize(LIMB_BITS),
-            },
-            local.is_valid,
+        let height_2_lower_limbs = fold(
+            local.height_2_limbs[..max_limb_idx].iter(),
+            AB::Expr::ZERO,
+            |acc, limb| acc + *limb,
         );
+        let total_height_lower_limbs = fold(
+            local.total_height_limbs[..max_limb_idx].iter(),
+            AB::Expr::ZERO,
+            |acc, limb| acc + *limb,
+        );
+        builder.assert_bool(local.height_1_at_max);
+        builder.assert_bool(local.height_2_at_max);
+        builder.assert_bool(local.total_height_at_max);
+        builder
+            .when(local.is_valid * local.height_1_at_max)
+            .assert_eq(
+                local.height_1_limbs[max_limb_idx],
+                AB::F::from_usize(max_limb_value),
+            );
+        builder
+            .when(local.is_valid * local.height_1_at_max)
+            .assert_zero(height_1_lower_limbs);
+        builder
+            .when(local.is_valid * local.height_2_at_max)
+            .assert_eq(
+                local.height_2_limbs[max_limb_idx],
+                AB::F::from_usize(max_limb_value),
+            );
+        builder
+            .when(local.is_valid * local.height_2_at_max)
+            .assert_zero(height_2_lower_limbs);
+        builder
+            .when(local.is_valid * local.total_height_at_max)
+            .assert_eq(
+                local.total_height_limbs[max_limb_idx],
+                AB::F::from_usize(max_limb_value),
+            );
+        builder
+            .when(local.is_valid * local.total_height_at_max)
+            .assert_zero(total_height_lower_limbs);
+        for (limbs, at_max) in [
+            (&local.height_1_limbs, local.height_1_at_max),
+            (&local.height_2_limbs, local.height_2_at_max),
+            (&local.total_height_limbs, local.total_height_at_max),
+        ] {
+            self.range_bus.lookup_key(
+                builder,
+                RangeCheckerBusMessage {
+                    value: AB::Expr::from_usize(max_limb_value - 1) - limbs[max_limb_idx],
+                    max_bits: AB::Expr::from_usize(LIMB_BITS),
+                },
+                local.is_valid * not(at_max),
+            );
+        }
         ///////////////////////////////////////////////////////////////////////////////////////////
         // HEIGHT + GKR MESSAGE
         ///////////////////////////////////////////////////////////////////////////////////////////
@@ -641,6 +695,14 @@ where
                 builder,
                 RangeCheckerBusMessage {
                     value: local.height_2_limbs[i].into(),
+                    max_bits: AB::Expr::from_usize(LIMB_BITS),
+                },
+                local.is_valid,
+            );
+            self.range_bus.lookup_key(
+                builder,
+                RangeCheckerBusMessage {
+                    value: local.total_height_limbs[i].into(),
                     max_bits: AB::Expr::from_usize(LIMB_BITS),
                 },
                 local.is_valid,
@@ -708,6 +770,7 @@ mod tests {
     use std::{borrow::Borrow, panic::AssertUnwindSafe};
 
     use continuations_v2::{circuit::Circuit, prover::debug_constraints};
+    use openvm_circuit_primitives::utils::not;
     use openvm_cpu_backend::CpuBackend;
     use openvm_stark_backend::{
         AirRef, BaseAirWithPublicValues, PartitionedBaseAir, StarkEngine,
@@ -734,6 +797,8 @@ mod tests {
     #[derive(AlignedBorrow)]
     struct HighLimbBoundCols<T> {
         is_valid: T,
+        is_at_max: T,
+        lower_sum: T,
         high_limb: T,
     }
 
@@ -766,15 +831,23 @@ mod tests {
             let local = main.row_slice(0).expect("trace has at least one row");
             let local: &HighLimbBoundCols<AB::Var> = (*local).borrow();
 
-            // Same range-bus shape used by ProofShapeAir for num_instances < 2^28:
-            // the high byte must be at most 15, so 15 - high_limb must be in u8 range.
+            // Same inclusive boundary shape used by ProofShapeAir:
+            // 2^MAX_NUM_VARIABLES is allowed only when the high limb is exactly 1
+            // and all lower limbs are zero.
+            builder.assert_bool(local.is_at_max);
+            builder
+                .when(local.is_valid * local.is_at_max)
+                .assert_one(local.high_limb);
+            builder
+                .when(local.is_valid * local.is_at_max)
+                .assert_zero(local.lower_sum);
             self.range_bus.lookup_key(
                 builder,
                 RangeCheckerBusMessage {
-                    value: AB::Expr::from_usize(15) - local.high_limb,
+                    value: AB::Expr::ZERO - local.high_limb,
                     max_bits: AB::Expr::from_usize(8),
                 },
-                local.is_valid,
+                local.is_valid * not(local.is_at_max),
             );
         }
     }
@@ -793,9 +866,20 @@ mod tests {
             ],
         };
 
-        let oversized_high_limb = (MAX_NUM_INSTANCES + 1) >> 24;
-        assert_eq!(oversized_high_limb, 16);
-        let bound_trace = RowMajorMatrix::new(vec![F::ONE, F::from_usize(oversized_high_limb)], 2);
+        let oversized = MAX_NUM_INSTANCES + 1;
+        let oversized_high_limb = oversized >> 24;
+        let oversized_lower_sum = oversized & ((1usize << 24) - 1);
+        assert_eq!(oversized_high_limb, 1);
+        assert_eq!(oversized_lower_sum, 1);
+        let bound_trace = RowMajorMatrix::new(
+            vec![
+                F::ONE,
+                F::ONE,
+                F::from_usize(oversized_lower_sum),
+                F::from_usize(oversized_high_limb),
+            ],
+            4,
+        );
         let range_checker = RangeCheckerCpuTraceGenerator::<8>::default();
         let range_trace = range_checker.generate_trace_row_major();
 
@@ -814,7 +898,7 @@ mod tests {
         }));
         assert!(
             result.is_err(),
-            "debug constraints should reject num_instances > 2^28"
+            "debug constraints should reject num_instances above PCS capacity"
         );
     }
 }
