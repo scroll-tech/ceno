@@ -1028,19 +1028,19 @@ mod tests {
         let zero_p = P::to_limbs_field::<F, _>(&BigUint::from(0u32));
         let zero_u63 = Limbs(GenericArray::generate(|_| F::from_u8(0)));
         let zero_relation = CompactFieldRelationCols {
-            quotient: zero_u63.clone(),
-            witness_low: zero_u63.clone(),
+            quotient: zero_u63,
+            witness_low: zero_u63,
             witness_high: zero_u63,
             _marker: std::marker::PhantomData,
         };
 
         CompactSecp256k1AddAssignWitCols {
-            p_x: zero_p.clone(),
-            p_y: zero_p.clone(),
-            q_x: zero_p.clone(),
-            q_y: zero_p.clone(),
-            slope: zero_p.clone(),
-            x3: zero_p.clone(),
+            p_x: zero_p,
+            p_y: zero_p,
+            q_x: zero_p,
+            q_y: zero_p,
+            slope: zero_p,
+            x3: zero_p,
             y3: zero_p,
             slope_relation: zero_relation.clone(),
             x_relation: zero_relation.clone(),
