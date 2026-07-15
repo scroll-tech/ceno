@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784028920736,
+  "lastUpdate": 1784124873786,
   "repoUrl": "https://github.com/scroll-tech/ceno",
   "entries": {
     "GPU proving time": [
@@ -86,6 +86,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "keccak_syscall proving time",
             "value": 0.732,
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "101384151+spherel@users.noreply.github.com",
+            "name": "Sphere L",
+            "username": "spherel"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "e2428402c23367db51528ecb9aeec7e0e2185024",
+          "message": "fix(soundness): bound untrusted num_instances in native + recursion verifiers (#1360)\n\n## Summary\n\n`num_instances` (per-shard, per-circuit instance counts) is read\nstraight from\nthe untrusted proof and then flows into size/shift/field arithmetic in\n**both**\nverifiers. Neither side bounded it, so a crafted proof could push these\nquantities out of range — a verifier-side DoS and a field-order\ndecoupling, i.e.\na soundness concern. This PR adds the matching upper bound on both the\nnative\nRust verifier and the recursion verifier so they stay in lockstep.\n\n## Problem\n\nIn the native verifier, `proof.num_instances` feeds:\n- `proof.num_instances.iter().sum()` — can wrap (or panic in debug);\n- `next_pow2_instance_padding` and the `1 << log2_num_instances` `usize`\nshifts —\n  can overflow / panic on attacker input (DoS);\n- the `from_canonical_usize` transcript casts — can exceed the\nbase-field modulus\n  and wrap, decoupling the transcript-bound value from the real count.\n\nThe recursion verifier (`verify_chip_proof_pre_main`) is worse: it does\nnot even\nderive `log2_num_instances`/`sum_num_instances` — it reads them as\n**untrusted\nhints**. An out-of-range `log2_num_instances` drives\n`pow_2(log2_num_instances)`\npast the BabyBear field size (~2³¹), wrapping the `next_pow2`/`next_pow2\n- sum`\noffset used by the eq selectors, which would let the recursive proof\nverify a\ndifferent statement than the native verifier.\n\n## Fix\n\nA valid proof's instance count is always bounded by the PCS setup size\n(`2^MAX_NUM_VARIABLES`, with the witness committed at `≤\n2^MAX_NUM_VARIABLES`), so\nrejecting anything larger only drops malformed proofs earlier and does\nnot change\nthe statement verified for any valid proof.\n\n- **Native** (`ceno_zkvm/src/scheme/verifier.rs`): reject any per-shard\n`num_instances` entry (and their sum) `> 2^MAX_NUM_VARIABLES`, both\nwhere the\ncount is first summed and (authoritatively) in\n`verify_chip_proof_pre_main`,\n  right before the shift/cast it protects.\n- **Recursion** (`ceno_recursion/src/zkvm_verifier/verifier.rs`): in\n`verify_chip_proof_pre_main`, before the hints feed\n`pow_2(log2_num_instances)`\n  and the offset, assert `log2_num_instances ≤ MAX_NUM_VARIABLES` and\n`sum_num_instances` / each `num_instances[i] ≤ 2^MAX_NUM_VARIABLES`. The\nbound\nlives in the verifier function (not the hint `read()`, which is not part\nof the\n  verified circuit).\n\n`2^MAX_NUM_VARIABLES = 2^24` is far below the BabyBear modulus, so the\nfield-order\nwrap is closed on both sides.\n\n## Test plan\n\n- [x] `cargo check` / `cargo clippy` clean for both `ceno_zkvm` and\n`ceno_recursion`\n- [x] Native: integration e2e subset (fibonacci + ceno_rt_alloc +\nkeccak_syscall,\ndebug MOCK + release prove/verify, single + multi-shard) — 9/9 pass;\nevery\nrelease run exercises the new bound in `verify_chip_proof_pre_main`\n- [x] Recursion: `e2e_aggregate` over multi-shard `keccak_syscall`\nverifies —\nboth leaf proofs run `verify_chip_proof_pre_main` (and thus the new\nasserts)\nfor every chip across 2 shards, then internal aggregation completes\n(final\n      height 1), confirming valid proofs are not rejected\n\n## Follow-up (out of scope)\n\nThis closes the **bound** (DoS / field-wrap). Fully *binding* the\nrecursion's\n`log2_num_instances` / bit-decomposition hints to be exactly consistent\nwith\n`num_instances` (rather than only bounding them) — which the native side\ngets for\nfree by deriving `log2` — remains a separate hardening item.\n\nCloses #1178, #1240.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---------\n\nCo-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>\nCo-authored-by: Tianyi Liu <tianyi.liu.08@gmail.com>\nCo-authored-by: sm.wu <hero78119@gmail.com>",
+          "timestamp": "2026-07-15T13:42:16Z",
+          "tree_id": "52ee7f53e5e9a9d856897d0b3a8d843497827562",
+          "url": "https://github.com/scroll-tech/ceno/commit/e2428402c23367db51528ecb9aeec7e0e2185024"
+        },
+        "date": 1784124872853,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "keccak_syscall proving time",
+            "value": 0.685,
             "unit": "s"
           }
         ]
