@@ -39,6 +39,7 @@ use itertools::Itertools;
 use itertools::{MinMaxResult, chain};
 use mpcs::{PolynomialCommitmentScheme, SecurityLevel};
 use multilinear_extensions::util::max_usable_threads;
+use p3::field::TwoAdicField;
 use rustc_hash::FxHashSet;
 use serde::Serialize;
 #[cfg(debug_assertions)]
@@ -1918,12 +1919,14 @@ pub fn setup_program<E: ExtensionField>(
 impl<E: ExtensionField> E2EProgramCtx<E> {
     pub fn keygen<PCS: PolynomialCommitmentScheme<E> + 'static>(
         self,
-        max_num_variables: usize,
+        _max_num_variables: usize,
         security_level: SecurityLevel,
     ) -> (ZKVMProvingKey<E, PCS>, ZKVMVerifyingKey<E, PCS>) {
-        let pcs_param =
-            PCS::setup(1 << max_num_variables, security_level).expect("Basefold PCS setup");
-        let (pp, vp) = PCS::trim(pcs_param, 1 << max_num_variables).expect("Basefold trim");
+        // PCS domains are limited by the base field two-adicity. Keep this independent
+        // from the verifier/backend variable cap, which may be larger for extension-field logic.
+        let pcs_max_size = 1usize << E::BaseField::TWO_ADICITY;
+        let pcs_param = PCS::setup(pcs_max_size, security_level).expect("Basefold PCS setup");
+        let (pp, vp) = PCS::trim(pcs_param, pcs_max_size).expect("Basefold trim");
         let mut pk = self
             .system_config
             .zkvm_cs
