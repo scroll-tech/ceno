@@ -319,6 +319,8 @@ pub struct ShardPlanBuilder {
     max_cycle_per_shard: Cycle,
     current_shard_start_cycle: Cycle,
     cur_cells: u64,
+    cur_ecall_counts: BTreeMap<Word, u64>,
+    cur_ecall_peak_cells: BTreeMap<Word, u64>,
     cur_cycle_in_shard: Cycle,
     cur_step_count: usize,
     max_step_shard: usize,
@@ -336,6 +338,8 @@ impl ShardPlanBuilder {
             max_cycle_per_shard,
             current_shard_start_cycle: initial_cycle,
             cur_cells: 0,
+            cur_ecall_counts: BTreeMap::new(),
+            cur_ecall_peak_cells: BTreeMap::new(),
             cur_cycle_in_shard: 0,
             cur_step_count: 0,
             max_step_shard: 0,
@@ -370,38 +374,150 @@ impl ShardPlanBuilder {
     }
 
     pub fn observe_step(&mut self, step_cycle: Cycle, step_cells: u64) {
+        self.observe_step_with_delta(step_cycle, step_cells, |planner| {
+            planner.cur_cells = planner.cur_cells.saturating_add(step_cells);
+        });
+    }
+
+    fn observe_ecall_step(&mut self, step_cycle: Cycle, ecall_code: Word, base_cells: u64) {
+        self.observe_step_with_delta(
+            step_cycle,
+            self.ecall_step_delta(ecall_code, base_cells),
+            |planner| planner.add_ecall_step(ecall_code, base_cells),
+        );
+    }
+
+    fn observe_step_with_delta(
+        &mut self,
+        step_cycle: Cycle,
+        step_delta: u64,
+        add_step: impl FnOnce(&mut Self),
+    ) {
         assert!(
             !self.finalized,
             "shard plan cannot be extended after finalization"
         );
+        if self.cur_step_count > 0 && self.step_would_exceed_shard(step_delta) {
+            self.finish_current_shard(step_cycle);
+        }
+
+        add_step(self);
+        self.cur_cycle_in_shard = self
+            .cur_cycle_in_shard
+            .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
+        self.cur_step_count = self.cur_step_count.saturating_add(1);
+    }
+
+    fn step_would_exceed_shard(&self, step_delta: u64) -> bool {
         let target = if self.shard_id == 0 {
             self.target_cell_first_shard
         } else {
             self.max_cell_per_shard
         };
+        self.cur_cells.saturating_add(step_delta) > target
+            || self
+                .cur_cycle_in_shard
+                .saturating_add(FullTracer::SUBCYCLES_PER_INSN)
+                >= self.max_cycle_per_shard
+    }
 
-        // always include step in current shard to simplify overall logic
-        self.cur_cells = self.cur_cells.saturating_add(step_cells);
-        self.cur_cycle_in_shard = self
-            .cur_cycle_in_shard
-            .saturating_add(FullTracer::SUBCYCLES_PER_INSN);
-        self.cur_step_count = self.cur_step_count.saturating_add(1);
+    fn finish_current_shard(&mut self, next_shard_cycle: Cycle) {
+        assert!(
+            self.cur_cells > 0 || self.cur_cycle_in_shard > 0,
+            "shard split before accumulating any steps"
+        );
+        self.push_boundary(next_shard_cycle);
+        self.shard_id += 1;
+        self.current_shard_start_cycle = next_shard_cycle;
+        self.cur_cells = 0;
+        self.cur_ecall_counts.clear();
+        self.cur_ecall_peak_cells.clear();
+        self.cur_cycle_in_shard = 0;
+        self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
+        self.cur_step_count = 0;
+    }
 
-        let cycle_limit_hit = self.cur_cycle_in_shard >= self.max_cycle_per_shard;
-        let should_split = self.cur_cells >= target || cycle_limit_hit;
-        if should_split {
-            assert!(
-                self.cur_cells > 0 || self.cur_cycle_in_shard > 0,
-                "shard split before accumulating any steps"
-            );
-            let next_shard_cycle = step_cycle + FullTracer::SUBCYCLES_PER_INSN;
-            self.push_boundary(next_shard_cycle);
-            self.shard_id += 1;
-            self.current_shard_start_cycle = next_shard_cycle;
-            self.cur_cells = 0;
-            self.cur_cycle_in_shard = 0;
-            self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
-            self.cur_step_count = 0;
+    fn add_ecall_step(&mut self, ecall_code: Word, base_cells: u64) {
+        let old_count = self
+            .cur_ecall_counts
+            .get(&ecall_code)
+            .copied()
+            .unwrap_or_default();
+        let new_count = old_count.saturating_add(1);
+        let old_peak = self
+            .cur_ecall_peak_cells
+            .get(&ecall_code)
+            .copied()
+            .unwrap_or_default();
+        let new_peak = ecall_peak_cells(base_cells, new_count);
+        self.cur_ecall_counts.insert(ecall_code, new_count);
+        self.cur_ecall_peak_cells.insert(ecall_code, new_peak);
+        self.cur_cells = self
+            .cur_cells
+            .saturating_add(new_peak.saturating_sub(old_peak));
+    }
+
+    fn ecall_step_delta(&self, ecall_code: Word, base_cells: u64) -> u64 {
+        let old_count = self
+            .cur_ecall_counts
+            .get(&ecall_code)
+            .copied()
+            .unwrap_or_default();
+        let old_peak = self
+            .cur_ecall_peak_cells
+            .get(&ecall_code)
+            .copied()
+            .unwrap_or_default();
+        let new_peak = ecall_peak_cells(base_cells, old_count.saturating_add(1));
+        new_peak.saturating_sub(old_peak)
+    }
+
+    #[cfg(test)]
+    fn ecall_count(&self, ecall_code: Word) -> u64 {
+        self.cur_ecall_counts
+            .get(&ecall_code)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    fn ecall_peak_cells(&self, ecall_code: Word) -> u64 {
+        self.cur_ecall_peak_cells
+            .get(&ecall_code)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    fn cur_cells(&self) -> u64 {
+        self.cur_cells
+    }
+
+    #[cfg(test)]
+    fn cur_step_count(&self) -> usize {
+        self.cur_step_count
+    }
+
+    #[cfg(test)]
+    fn current_shard_id(&self) -> usize {
+        self.shard_id
+    }
+
+    #[cfg(test)]
+    fn ecall_delta_for(&self, ecall_code: Word, base_cells: u64) -> u64 {
+        self.ecall_step_delta(ecall_code, base_cells)
+    }
+
+    fn reset_after_native_shard_split(&mut self) {
+        self.cur_ecall_counts.clear();
+        self.cur_ecall_peak_cells.clear();
+    }
+
+    fn padded_ecall_count(count: u64) -> u64 {
+        if count <= 1 {
+            count
+        } else {
+            count.checked_next_power_of_two().unwrap_or(u64::MAX)
         }
     }
 
@@ -427,6 +543,10 @@ impl ShardPlanBuilder {
             self.shard_cycle_boundaries.push(cycle);
         }
     }
+}
+
+fn ecall_peak_cells(base_cells: u64, count: u64) -> u64 {
+    base_cells.saturating_mul(ShardPlanBuilder::padded_ecall_count(count))
 }
 
 #[cfg(any(test, debug_assertions))]
@@ -1397,6 +1517,7 @@ impl PreflightTracer {
         planner.current_shard_start_cycle = next_shard_cycle;
         planner.max_step_shard = planner.max_step_shard.max(planner.cur_step_count);
         planner.cur_cells = 0;
+        planner.reset_after_native_shard_split();
         planner.cur_cycle_in_shard = 0;
         planner.cur_step_count = 0;
         self.current_shard_start_cycle = next_shard_cycle;
@@ -1484,7 +1605,15 @@ impl Tracer for PreflightTracer {
                 .as_ref()
                 .map(|extractor| extractor.cells_for_kind(self.last_kind, self.last_rs1))
                 .unwrap_or(0);
-            planner.observe_step(self.cycle, step_cells);
+            if matches!(self.last_kind, InsnKind::ECALL) {
+                planner.observe_ecall_step(
+                    self.cycle,
+                    self.last_rs1.unwrap_or_default(),
+                    step_cells,
+                );
+            } else {
+                planner.observe_step(self.cycle, step_cells);
+            }
             self.current_shard_start_cycle = planner.current_shard_start_cycle();
         }
         self.cycle += Self::SUBCYCLES_PER_INSN;
@@ -1801,5 +1930,78 @@ mod tests {
             mem::size_of::<StepRecord>(),
             mem::align_of::<StepRecord>()
         );
+    }
+
+    #[test]
+    fn ecall_peak_cells_is_monotonic_and_padded() {
+        let base = 7;
+        let mut prev = 0;
+        for count in 0..10_000 {
+            let peak = ecall_peak_cells(base, count);
+            assert!(peak >= prev);
+            prev = peak;
+        }
+
+        assert_eq!(ecall_peak_cells(base, 0), 0);
+        assert_eq!(ecall_peak_cells(base, 1), base);
+        assert_eq!(ecall_peak_cells(base, 2), base * 2);
+        assert_eq!(ecall_peak_cells(base, 3), base * 4);
+        assert_eq!(ecall_peak_cells(base, 8192), base * 8192);
+        assert_eq!(ecall_peak_cells(base, 8193), base * 16384);
+    }
+
+    #[test]
+    fn ecall_boundary_crossing_charges_padded_bucket_delta() {
+        let code = 0x1234;
+        let base = 7;
+        let mut planner = ShardPlanBuilder::new(u64::MAX, Cycle::MAX);
+        for i in 0..8192 {
+            planner.observe_ecall_step(FullTracer::SUBCYCLES_PER_INSN * (i + 1), code, base);
+        }
+
+        assert_eq!(planner.ecall_count(code), 8192);
+        assert_eq!(planner.ecall_peak_cells(code), base * 8192);
+        assert_eq!(planner.ecall_delta_for(code, base), base * 8192);
+    }
+
+    #[test]
+    fn ecall_over_budget_step_splits_before_adding_step() {
+        let code = 0x1234;
+        let base = 1;
+        let mut planner = ShardPlanBuilder::new(10, Cycle::MAX);
+        for i in 0..8 {
+            planner.observe_ecall_step(FullTracer::SUBCYCLES_PER_INSN * (i + 1), code, base);
+        }
+        planner.observe_ecall_step(FullTracer::SUBCYCLES_PER_INSN * 9, code, base);
+
+        assert_eq!(
+            planner.shard_cycle_boundaries(),
+            &[FullTracer::SUBCYCLES_PER_INSN, 36]
+        );
+        assert_eq!(planner.current_shard_id(), 1);
+        assert_eq!(planner.cur_step_count(), 1);
+        assert_eq!(planner.ecall_count(code), 1);
+        assert_eq!(planner.cur_cells(), base);
+    }
+
+    #[test]
+    fn repeated_non_keccak_ecall_splits_at_padded_bucket_boundary() {
+        let code = 0x5678;
+        let base = 2;
+        let mut planner = ShardPlanBuilder::new(base * 8192, Cycle::MAX);
+        for i in 0..8192 {
+            planner.observe_ecall_step(FullTracer::SUBCYCLES_PER_INSN * (i + 1), code, base);
+        }
+        planner.observe_ecall_step(FullTracer::SUBCYCLES_PER_INSN * 8193, code, base);
+
+        assert_eq!(
+            planner.shard_cycle_boundaries(),
+            &[
+                FullTracer::SUBCYCLES_PER_INSN,
+                FullTracer::SUBCYCLES_PER_INSN * 8193
+            ]
+        );
+        assert_eq!(planner.ecall_count(code), 1);
+        assert_eq!(planner.cur_cells(), base);
     }
 }
