@@ -2203,7 +2203,6 @@ pub fn run_e2e_proof<
     // for debug purpose
     target_shard_id: Option<usize>,
 ) -> Vec<ZKVMProof<E, PCS>> {
-    let ctx = prover.pk.program_ctx.as_ref().unwrap();
     run_e2e_proof_with_precompiled_aot(
         prover,
         init_full_mem,
@@ -2212,7 +2211,13 @@ pub fn run_e2e_proof<
         is_mock_proving,
         target_shard_id,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        ctx.preflight_aot_program.clone(),
+        prover
+            .pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .preflight_aot_program
+            .clone(),
     )
 }
 
