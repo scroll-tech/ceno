@@ -1457,6 +1457,24 @@ impl PreflightTracer {
             .unwrap_or(0)
     }
 
+    #[inline(always)]
+    fn observe_current_step(&mut self, ecall_code: Option<Word>) {
+        if let Some(planner) = self.planner.as_mut() {
+            let step_cells = self
+                .config
+                .step_cell_extractor
+                .as_ref()
+                .map(|extractor| extractor.cells_for_kind(self.last_kind, ecall_code))
+                .unwrap_or(0);
+            if let Some(ecall_code) = ecall_code {
+                planner.observe_ecall_step(self.cycle, ecall_code, step_cells);
+            } else {
+                planner.observe_step(self.cycle, step_cells);
+            }
+            self.current_shard_start_cycle = planner.current_shard_start_cycle();
+        }
+    }
+
     #[cfg_attr(
         not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
         allow(dead_code)
@@ -1555,6 +1573,8 @@ impl PreflightTracer {
         self.pc.before = step.pc_before;
         self.last_kind = step.kind;
         self.last_rs1 = None;
+        debug_assert!(!matches!(step.kind, InsnKind::ECALL));
+        self.observe_current_step(None);
 
         if step.flags & NATIVE_TRACE_READ_RS1 != 0 {
             self.track_access(
@@ -1597,25 +1617,6 @@ impl Tracer for PreflightTracer {
 
     #[inline(always)]
     fn advance(&mut self) -> Self::Record {
-        if let Some(planner) = self.planner.as_mut() {
-            // compute whether next step should bump the cycle
-            let step_cells = self
-                .config
-                .step_cell_extractor
-                .as_ref()
-                .map(|extractor| extractor.cells_for_kind(self.last_kind, self.last_rs1))
-                .unwrap_or(0);
-            if matches!(self.last_kind, InsnKind::ECALL) {
-                planner.observe_ecall_step(
-                    self.cycle,
-                    self.last_rs1.unwrap_or_default(),
-                    step_cells,
-                );
-            } else {
-                planner.observe_step(self.cycle, step_cells);
-            }
-            self.current_shard_start_cycle = planner.current_shard_start_cycle();
-        }
         self.cycle += Self::SUBCYCLES_PER_INSN;
         self.reset_register_tracking();
     }
@@ -1634,6 +1635,9 @@ impl Tracer for PreflightTracer {
         self.pc.before = pc.baddr();
         self.last_kind = value.kind;
         self.last_rs1 = None;
+        if !matches!(value.kind, InsnKind::ECALL) {
+            self.observe_current_step(None);
+        }
     }
 
     #[inline(always)]
@@ -1653,6 +1657,7 @@ impl Tracer for PreflightTracer {
         self.register_reads_tracked += 1;
         if matches!(self.last_kind, InsnKind::ECALL) && idx == Platform::reg_ecall() {
             self.last_rs1 = Some(value);
+            self.observe_current_step(Some(value));
         }
         self.track_access(addr, subcycle);
     }
@@ -1847,6 +1852,42 @@ impl<T: fmt::Debug> fmt::Debug for Change<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[derive(Debug)]
+    struct OneCellPerStep;
+
+    impl StepCellExtractor for OneCellPerStep {
+        fn cells_for_kind(&self, _kind: InsnKind, _rs1_value: Option<Word>) -> u64 {
+            1
+        }
+    }
+
+    #[test]
+    fn preflight_splits_before_tracking_current_step_accesses() {
+        let config = PreflightTracerConfig::new(true, 1, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerStep));
+        let mut tracer = PreflightTracer::new(&CENO_PLATFORM, config);
+        let insn = Instruction {
+            kind: InsnKind::ADDI,
+            ..Default::default()
+        };
+
+        tracer.fetch(0u32.into(), insn);
+        tracer.load_register(1, 0);
+        tracer.advance();
+
+        tracer.fetch(WordAddr::from(PC_STEP_SIZE as u32), insn);
+        tracer.load_register(1, 0);
+
+        assert_eq!(
+            tracer.planner.as_ref().unwrap().shard_cycle_boundaries(),
+            &[PreflightTracer::SUBCYCLES_PER_INSN, 8]
+        );
+        assert_eq!(
+            tracer.next_accesses.get(&4).map(SmallVec::as_slice),
+            Some(&[(Platform::register_vma(1).into(), 8)][..])
+        );
+    }
 
     #[test]
     fn test_step_record_is_copy_and_compact() {
