@@ -1827,6 +1827,43 @@ fn assert_witgen_mem_released(shard_id: usize, baseline: u64) {
     );
 }
 
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+pub fn prepare_preflight_aot_program(
+    program: Arc<Program>,
+    platform: &Platform,
+    multi_prover: &MultiProver,
+    step_cell_extractor: Arc<dyn StepCellExtractor>,
+    init_mem_state: &InitMemState,
+) -> Arc<ceno_emul::aot::AotProgram> {
+    let InitMemState {
+        hints: hints_init, ..
+    } = init_mem_state;
+    let tracer_config = PreflightTracerConfig::new(
+        true,
+        multi_prover.max_cell_per_shard,
+        multi_prover.max_cycle_per_shard,
+    )
+    .with_step_cell_extractor(step_cell_extractor);
+    let roots = ceno_emul::aot::sample_preflight_roots(
+        platform,
+        program.clone(),
+        hints_init
+            .iter()
+            .map(|record| (record.addr.into(), record.value)),
+        tracer_config,
+    );
+    let aot = ceno_emul::aot::AotProgram::compile_preflight_direct_with_extra_roots(program, roots)
+        .unwrap_or_else(|err| panic!("AOT compile failed during preflight preparation: {err}"));
+    let report = aot.report();
+    tracing::info!(
+        "AOT compile/load completed in {:?}; blocks={}, reachable_instructions={}",
+        report.compile_load_time,
+        report.block_count,
+        report.reachable_instruction_count
+    );
+    Arc::new(aot)
+}
+
 // Encodes useful early return points of the e2e pipeline
 #[derive(Default, Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub enum Checkpoint {
@@ -2151,8 +2188,6 @@ pub fn run_e2e_with_checkpoint<
     }
 }
 
-// Runs program emulation + witness generation + proving
-#[tracing::instrument(skip_all, name = "run_e2e_proof", fields(profiling_1), level = "trace")]
 #[allow(clippy::too_many_arguments)]
 pub fn run_e2e_proof<
     E: ExtensionField + LkMultiplicityKey,
@@ -2168,6 +2203,42 @@ pub fn run_e2e_proof<
     // for debug purpose
     target_shard_id: Option<usize>,
 ) -> Vec<ZKVMProof<E, PCS>> {
+    run_e2e_proof_with_precompiled_aot(
+        prover,
+        init_full_mem,
+        public_io_digest,
+        max_steps,
+        is_mock_proving,
+        target_shard_id,
+        #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+        prover
+            .pk
+            .program_ctx
+            .as_ref()
+            .unwrap()
+            .preflight_aot_program
+            .clone(),
+    )
+}
+
+#[tracing::instrument(skip_all, name = "run_e2e_proof", fields(profiling_1), level = "trace")]
+#[allow(clippy::too_many_arguments)]
+pub fn run_e2e_proof_with_precompiled_aot<
+    E: ExtensionField + LkMultiplicityKey,
+    PCS: PolynomialCommitmentScheme<E> + Serialize + 'static,
+    PB: ProverBackend<E = E, Pcs = PCS> + 'static,
+    PD: ProverDevice<PB> + 'static,
+>(
+    prover: &ZKVMProver<E, PCS, PB, PD>,
+    init_full_mem: &InitMemState,
+    public_io_digest: [u32; 8],
+    max_steps: usize,
+    is_mock_proving: bool,
+    // for debug purpose
+    target_shard_id: Option<usize>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    precompiled_aot: Option<Arc<ceno_emul::aot::AotProgram>>,
+) -> Vec<ZKVMProof<E, PCS>> {
     let ctx = prover.pk.program_ctx.as_ref().unwrap();
     // Emulate program
     let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
@@ -2181,7 +2252,7 @@ pub fn run_e2e_proof<
         &ctx.multi_prover,
         step_cell_extractor,
         #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
-        ctx.preflight_aot_program.clone(),
+        precompiled_aot,
     );
     create_proofs_streaming(
         emul_result,
