@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1784124873786,
+  "lastUpdate": 1784540788382,
   "repoUrl": "https://github.com/scroll-tech/ceno",
   "entries": {
     "GPU proving time": [
@@ -115,6 +115,35 @@ window.BENCHMARK_DATA = {
           {
             "name": "keccak_syscall proving time",
             "value": 0.685,
+            "unit": "s"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "hero78119@gmail.com",
+            "name": "Ming",
+            "username": "hero78119"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "c03ee97f0b76db83f36d72b30ab048fe18bc2751",
+          "message": "Use peak-cell ecall accounting for shard planning (#1387)\n\n## Problem\n\n`max_cell_per_shard` was accounting ecall-heavy shards as flat\ntrace-cell cost. That let Keccak-heavy shards cross GPU peak-memory\ncliffs and fail on 24GB-class GPUs, for example block `25551700` with a\nKeccakCore memory-pool deadlock.\n\n## Design Rationale\n\nShard planning should approximate peak prover memory, not only\naccumulated trace cells. This PR keeps native opcode costs static, but\naccounts ecalls by the marginal delta of a padded cumulative peak\nestimate. The planner previews the next step before adding it, so a\nboundary-crossing ecall can split before entering the oversized shard.\nThis keeps preflight deterministic and cheap: static lookups, counters,\n`next_power_of_two`, and integer subtraction only.\n\nThe Keccak-specific multiplier is removed because ecall memory pressure\nis now handled by the generic ecall accounting path. AOT direct-block\nsplitting uses the same “exceeds target” semantics as the interpreter,\nso exact-fill blocks are not split early by AOT.\n\n## Change Highlights\n\n- `ceno_emul`: add per-shard ecall count/peak state and\npreview-before-add shard splitting.\n- `ceno_emul`: route ECALL preflight through marginal peak-cell\naccounting; keep native opcode accounting unchanged.\n- `ceno_emul`: align AOT direct-block cell comparison with interpreter\nexact-fill behavior.\n- `ceno_zkvm`: remove the Keccak-only flat cell multiplier and rely on\ngeneric ecall peak accounting.\n\n## Benchmark / Performance Impact\n\n### Operation\n\n| Operation | master (s) | this PR (s) | Improve (master -> this PR) |\n|-----------|------------|-------------|-----------------------------|\n| `23817600` app `create_proof` | 177.035 | 178.823 | -1.788s (-1.01%) |\n| `23817600` recursion `create_proof` | 6.444 | 5.710 | +0.735s\n(+11.40%) |\n| `23817600` total GPU `create_proof` | 183.558 | 184.607 | -1.049s\n(-0.57%) |\n\n### Layer\n\n| Block | Run | `max_cell_per_shard` | Result | `num_shards` |\nBoundaries |\n\n|-------|-----|----------------------|--------|--------------|------------|\n| `25551700` |\n[PR](https://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29586613675)\n| `1207959552` | pass | 15 | `[4, 108214020, 225198312, 358636520,\n489603112, 621378532, 753051292, 882360216, 1013391176, 1145963932,\n1274663648, 1353540048, 1454746776, 1545875388, 1623763592, 1639398732]`\n|\n| `23817600` | [master\nbaseline](https://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29553833078)\n| `1245708288` | pass | 12 | `[4, 91097468, 193400496, 290776256,\n446266392, 577773860, 686065256, 806980972, 952698660, 1029694816,\n1117972104, 1200620460, 1247877372]` |\n| `23817600` |\n[PR](https://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29587692568)\n| `1207959552` | pass | 11 | `[4, 109214576, 242830632, 376689140,\n508543284, 639194308, 772153704, 931659244, 1015438228, 1115114760,\n1201851256, 1247492952]` |\n\nBenchmark command(s):\n\n```sh\n# GitHub Actions workflow_dispatch: ceno-reth-benchmark/.github/workflows/run-benchmark-v2.yml\n# mode=prove-stark, gpu_enable_witgen=0, gpu_cache_level=1, gpu_jagged_reshape_log_height=23,\n# concurrent_chip_proving=1, gpu_large_task_booking_margin_mb=3048\n# PR runs used ceno_version=69ea8df9594285cc09053fdaaad22b05a3228e3e and max_cell_per_shard=1207959552.\n```\n\nEnvironment: self-hosted GitHub Actions GPU runner, RTX 4090-class 24GB\nGPU, Rust nightly `2025-11-20`.\n\nraw data:\n\n- master:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29553833078\n- this PR:\nhttps://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29586613675,\nhttps://github.com/scroll-tech/ceno-reth-benchmark/actions/runs/29587692568\n\n## Testing\n\n```sh\ncargo fmt\ncargo test -p ceno_emul tracer::tests\ncargo test -p ceno_zkvm e2e::tests\n```\n\nRemote CI validation:\n\n```sh\n# 25551700 prove-stark: pass with max_cell_per_shard=1207959552\n# 23817600 prove-stark: pass with max_cell_per_shard=1207959552\n```\n\n## Risks and Rollout\n\nThis changes shard boundaries for ecall-heavy programs. Native-only\nboundaries should remain unchanged. The main rollout risk is a too-large\nshard cap on 24GB GPUs; follow-up benchmark tuning found `1207959552 =\n((1 << 30) * 9 / 4 / 2)` as the shared passing cap for `25551700` and\n`23817600`, while `1342177280` failed on `25551700`.\n\nRollback is straightforward: revert this PR or restore the previous\nKeccak-specific multiplier and add-after-split accounting.\n\n## Follow-ups (optional)\n\n- Revisit the default `max_cell_per_shard` after more 4090/24GB block\ncoverage.\n- Calibrate ecall peak components beyond the current static padded\nestimator if future blocks expose a tighter memory model need.\n\n## Copilot Reviewer Directive (keep this section)\n\nWhen Copilot reviews this PR, apply `.github/copilot-instructions.md`\nstrictly.",
+          "timestamp": "2026-07-20T09:11:50Z",
+          "tree_id": "7fd39fc14288c8f7bd4020fdca00b84abb39bf09",
+          "url": "https://github.com/scroll-tech/ceno/commit/c03ee97f0b76db83f36d72b30ab048fe18bc2751"
+        },
+        "date": 1784540787534,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "keccak_syscall proving time",
+            "value": 0.686,
             "unit": "s"
           }
         ]
