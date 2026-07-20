@@ -1,6 +1,8 @@
 use std::{marker::PhantomData, sync::Arc};
 
 use anyhow::{Context, Result};
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+use ceno_emul::StepCellExtractor;
 use ceno_emul::{Platform, Program};
 use ceno_host::CenoStdin;
 use ceno_recursion_v2::{
@@ -10,8 +12,10 @@ use ceno_recursion_v2::{
         warm_child_vk_digest_cache,
     },
 };
+#[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+use ceno_zkvm::e2e::prepare_preflight_aot_program;
 use ceno_zkvm::{
-    e2e::{MultiProver, run_e2e_proof, setup_program},
+    e2e::{MultiProver, run_e2e_proof_with_precompiled_aot, setup_program},
     scheme::{
         ZKVMProof, create_backend, create_prover, hal::ProverDevice,
         mock_prover::LkMultiplicityKey, prover::ZKVMProver, verifier::ZKVMVerifier,
@@ -76,6 +80,8 @@ where
     pub zkvm_pk: Option<Arc<ZKVMProvingKey<E, PCS>>>,
     pub zkvm_vk: Option<ZKVMVerifyingKey<E, PCS>>,
     pub zkvm_prover: Option<ZKVMProver<E, PCS, PB, PD>>,
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub preflight_aot_program: Option<Arc<ceno_emul::aot::AotProgram>>,
 
     aggregation_options: Option<AggregationOptions>,
     _phantom: PhantomData<(SC, VC)>,
@@ -97,6 +103,8 @@ where
             zkvm_pk: None,
             zkvm_vk: None,
             zkvm_prover: None,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            preflight_aot_program: None,
             aggregation_options: None,
             _phantom: PhantomData,
         }
@@ -115,6 +123,8 @@ where
             zkvm_pk: None,
             zkvm_vk: None,
             zkvm_prover: None,
+            #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+            preflight_aot_program: None,
             aggregation_options: None,
             _phantom: PhantomData,
         }
@@ -168,6 +178,33 @@ where
         self.zkvm_prover = Some(ZKVMProver::new(pk, device));
     }
 
+    #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+    pub fn prepare_preflight_aot(&mut self, hints: &CenoStdin) {
+        match ceno_emul::EmulatorBackend::from_env()
+            .unwrap_or_else(|err| panic!("invalid emulator backend for SDK AOT preparation: {err}"))
+        {
+            ceno_emul::EmulatorBackend::Interp => {
+                self.preflight_aot_program = None;
+                return;
+            }
+            ceno_emul::EmulatorBackend::Aot => {}
+        }
+        let Some(zkvm_prover) = self.zkvm_prover.as_ref() else {
+            panic!("ZKVMProver is not initialized")
+        };
+        let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(hints));
+        let ctx = zkvm_prover.pk.program_ctx.as_ref().unwrap();
+        let raw_step_cell_extractor = Arc::clone(&ctx.system_config.config);
+        let step_cell_extractor: Arc<dyn StepCellExtractor> = raw_step_cell_extractor;
+        self.preflight_aot_program = Some(prepare_preflight_aot_program(
+            ctx.program.clone(),
+            &ctx.platform,
+            &ctx.multi_prover,
+            step_cell_extractor,
+            &init_full_mem,
+        ));
+    }
+
     pub fn generate_base_proof(
         &self,
         hints: CenoStdin,
@@ -177,13 +214,15 @@ where
     ) -> Vec<ZKVMProof<E, PCS>> {
         if let Some(zkvm_prover) = self.zkvm_prover.as_ref() {
             let init_full_mem = zkvm_prover.setup_init_mem(&Vec::from(&hints));
-            run_e2e_proof::<E, PCS, PB, PD>(
+            run_e2e_proof_with_precompiled_aot::<E, PCS, PB, PD>(
                 zkvm_prover,
                 &init_full_mem,
                 public_io_digest,
                 max_steps,
                 false,
                 shard_id,
+                #[cfg(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux"))]
+                self.preflight_aot_program.clone(),
             )
         } else {
             panic!("ZKVMProver is not initialized")

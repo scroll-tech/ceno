@@ -1429,7 +1429,7 @@ fn emit_preflight_direct_block_plan_entry(
     writeln!(file, "    movq (%rax), %r9")?;
     writeln!(file, "    addq %r8, %r9")?;
     writeln!(file, "    cmpq %r10, %r9")?;
-    writeln!(file, "    jae {split_label}")?;
+    writeln!(file, "    ja {split_label}")?;
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
