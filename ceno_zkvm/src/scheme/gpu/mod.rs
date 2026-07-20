@@ -2130,7 +2130,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
     composed_cs: &ComposedConstrainSystem<E>,
-    _input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
+    input: &ProofInput<'_, GpuBackend<E, impl PolynomialCommitmentScheme<E>>>,
     records: &[ArcMultilinearExtensionGpu<'_, E>],
     challenges: &[E; 2],
     cuda_hal: &CudaHalBB31,
@@ -2179,11 +2179,8 @@ pub(crate) fn build_tower_witness_gpu<E: ExtensionField>(
         &records[offset..][..cs.lk_expressions.len()]
     };
 
-    let active_rows = records
-        .first()
-        .map(|record| record.mle.evaluations_len())
-        .unwrap_or(1);
-    let active_row_vars = ceil_log2(next_pow2_instance_padding(active_rows));
+    let active_row_vars = input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
+    let active_rows = 1usize << active_row_vars;
 
     let interleave_group_to_chunks = |group: &[ArcMultilinearExtensionGpu<'static, E>],
                                       num_limbs: usize,

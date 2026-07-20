@@ -16,6 +16,7 @@ ceno_crypto = { path = "../guest_libs/crypto" }
 ceno_crypto_primitives.workspace = true
 ceno_keccak = { path = "../guest_libs/keccak" }
 ceno_rt = { path = "../ceno_rt" }
+ceno_serde = { path = "../ceno_serde" }
 ceno_sha2 = { path = "../guest_libs/sha2" }
 ceno_syscall.workspace = true
 getrandom = { version = "0.3" }

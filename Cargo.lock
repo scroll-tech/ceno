@@ -2166,6 +2166,7 @@ dependencies = [
  "ceno_crypto_primitives",
  "ceno_keccak",
  "ceno_rt",
+ "ceno_serde",
  "ceno_sha2",
  "ceno_syscall",
  "getrandom 0.3.2",
