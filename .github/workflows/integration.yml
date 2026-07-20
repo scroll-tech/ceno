@@ -108,7 +108,7 @@ jobs:
       - name: Run multi-shards Guest Heap Alloc (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 --hints=100 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       # note: the shard ram circuit does not support goldilocks field yet
       # - name: Run Guest Heap Alloc (release + goldilocks)
@@ -119,7 +119,7 @@ jobs:
       - name: Run keccak_syscall (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --hints=100 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Run keccak_syscall one iteration (release)
         env:
@@ -129,12 +129,12 @@ jobs:
       - name: Run multi-shards keccak_syscall (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 --hints=100 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Run multi-shards keccak_syscall single shard-id (release)
         env:
           RUSTFLAGS: "-C opt-level=3"
-        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 --shard-id=1 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+        run: cargo run --release --package ceno_zkvm --bin e2e -- --platform=ceno --max-cycle-per-shard=1600 --shard-id=1 --hints=100 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Run secp256k1_add_syscall (release)
         env:
@@ -195,7 +195,7 @@ jobs:
         env:
           RUSTFLAGS: "-C opt-level=3"
           RUST_MIN_STACK: "33554432"
-        run: cargo run --release --package ceno_recursion_v2 --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
+        run: cargo run --release --package ceno_recursion_v2 --bin e2e_aggregate -- --platform=ceno --max-cycle-per-shard=1600 --hints=100 examples/target/riscv32im-ceno-zkvm-elf/release/examples/keccak_syscall
 
       - name: Install cargo make
         run: |

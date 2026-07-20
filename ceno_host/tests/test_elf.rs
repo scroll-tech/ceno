@@ -3,8 +3,8 @@ use std::{collections::BTreeSet, iter::from_fn, sync::Arc};
 use anyhow::Result;
 use ceno_emul::{
     BN254_FP_WORDS, BN254_FP2_WORDS, BN254_POINT_WORDS, CENO_PLATFORM, EmuContext, InsnKind,
-    Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, StepRecord, SyscallWitness,
-    UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
+    IterAddresses, Platform, Program, SECP256K1_ARG_WORDS, SECP256K1_COORDINATE_WORDS, StepRecord,
+    SyscallWitness, UINT256_WORDS_FIELD_ELEMENT, VMState, WORD_SIZE, Word, WordAddr, WriteOp,
     host_utils::{read_all_messages, read_all_messages_as_words},
 };
 use ceno_host::CenoStdin;
@@ -229,6 +229,11 @@ fn test_hashing() -> Result<()> {
 fn test_keccak_syscall() -> Result<()> {
     let program_elf = ceno_examples::keccak_syscall;
     let mut state = VMState::new_from_elf(unsafe_platform(), program_elf)?;
+    let hints_range = state.platform().hints.clone();
+    let empty_hints: Vec<u32> = (&CenoStdin::default()).into();
+    for (addr, value) in izip!(hints_range.iter_addresses(), empty_hints) {
+        state.init_memory(addr.into(), value);
+    }
     let (steps, syscall_witnesses) = run(&mut state)?;
 
     // Expect the program to have written successive states between Keccak permutations.
