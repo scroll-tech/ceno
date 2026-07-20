@@ -104,6 +104,31 @@ impl<'a, PB: ProverBackend> ProofInput<'a, PB> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gkr_iop::cpu::CpuBackend;
+    use mpcs::BasefoldDefault;
+
+    type E = ff_ext::BabyBearExt4;
+    type PB = CpuBackend<E, BasefoldDefault<E>>;
+
+    #[test]
+    fn one_instance_has_one_padded_instance_var() {
+        let input = ProofInput::<PB> {
+            witness: Vec::new(),
+            structural_witness: Vec::new(),
+            fixed: Vec::new(),
+            pi: Vec::new(),
+            num_instances: [1, 0],
+            has_ecc_ops: false,
+        };
+
+        assert_eq!(next_pow2_instance_padding(input.num_instances()), 2);
+        assert_eq!(input.log2_num_instances(), 1);
+    }
+}
+
 #[derive(Clone)]
 pub struct TowerProverSpec<'a, PB: ProverBackend> {
     pub witness: Vec<Vec<PB::MultilinearPoly<'a>>>,

@@ -608,7 +608,7 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
     fn build_tower_witness<'a, 'b, 'c>(
         &self,
         composed_cs: &ComposedConstrainSystem<E>,
-        _input: &ProofInput<'a, CpuBackend<E, PCS>>,
+        input: &ProofInput<'a, CpuBackend<E, PCS>>,
         records: &'c [ArcMultilinearExtension<'b, E>],
         challenges: &[E; 2],
     ) -> (
@@ -640,11 +640,8 @@ impl<E: ExtensionField, PCS: PolynomialCommitmentScheme<E>> TowerProver<CpuBacke
             &records[offset..][..cs.lk_expressions.len()]
         };
 
-        let active_rows = records
-            .first()
-            .map(|record| record.evaluations().len())
-            .unwrap_or(1);
-        let active_row_vars = ceil_log2(next_pow2_instance_padding(active_rows));
+        let active_row_vars = input.log2_num_instances() + composed_cs.rotation_vars().unwrap_or(0);
+        let active_rows = 1usize << active_row_vars;
         let group_num_vars =
             |num_ops: usize| active_row_vars + ceil_log2(num_ops.next_power_of_two());
 
