@@ -3706,7 +3706,7 @@ mod tests {
         let program = adaptive_test_program();
         // The first block exactly fills the limit and must be accepted. The
         // second block is oversized on an empty shard and must also run once.
-        let config = crate::PreflightTracerConfig::new(true, 15, Cycle::MAX)
+        let config = crate::PreflightTracerConfig::new(true, 7, Cycle::MAX)
             .with_step_cell_extractor(Arc::new(AdaptiveTestCost::new()));
         let aot =
             AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
@@ -3719,7 +3719,7 @@ mod tests {
         aot.run_to_halt(&mut vm, 100).unwrap();
         let (plan, _) = vm.take_tracer().into_shard_plan();
         assert_eq!(plan.shard_cycle_boundaries(), &[4, 16, 28, 32]);
-        assert_eq!(plan.predicted_shard_costs(), &[15, 19, 5]);
+        assert_eq!(plan.predicted_shard_costs(), &[7, 19, 1]);
     }
 
     #[test]
@@ -3738,7 +3738,7 @@ mod tests {
         aot.run_to_halt(&mut vm, 100).unwrap();
         let (plan, _) = vm.take_tracer().into_shard_plan();
         assert_eq!(plan.shard_cycle_boundaries(), &[4, 16, 28, 32]);
-        assert_eq!(plan.predicted_shard_costs(), &[15, 19, 5]);
+        assert_eq!(plan.predicted_shard_costs(), &[7, 19, 1]);
     }
 
     #[test]

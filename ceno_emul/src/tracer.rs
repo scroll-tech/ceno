@@ -167,7 +167,12 @@ impl ShardCostModel {
                     .checked_mul(rotation_size)
                     .unwrap_or(u64::MAX);
                 let trace_cells = domain_rows.saturating_mul(spec.trace_cells_per_row);
-                let main_peak = domain_rows.saturating_mul(extension_field_degree);
+                // Batched main sumcheck keeps one half-domain extension-field
+                // fold buffer for every witness, structural-witness, and fixed
+                // MLE. `trace_cells_per_row` is exactly that MLE count.
+                let main_peak = (domain_rows / 2)
+                    .saturating_mul(spec.trace_cells_per_row)
+                    .saturating_mul(extension_field_degree);
                 let tower_peak = spec.tower_peak_cells_by_bucket.as_ref().map_or_else(
                     || domain_rows.saturating_mul(spec.tower_peak_cells_per_row),
                     |tower_costs| tower_costs[bucket],
@@ -2219,6 +2224,24 @@ mod tests {
     }
 
     #[test]
+    fn shard_cost_model_counts_every_batched_main_fold_mle() {
+        let model = cost_model(vec![ChipCostSpec {
+            rotation: 0,
+            trace_cells_per_row: 9,
+            tower_peak_cells_per_row: 0,
+            tower_peak_cells_by_bucket: None,
+        }]);
+
+        assert_eq!(model.chip_cost(0, 0).main_peak, 0);
+        assert_eq!(model.chip_cost(0, 1).main_peak, 0);
+        // Nine MLEs each allocate a half-domain Ext4 fold buffer.
+        assert_eq!(model.chip_cost(0, 2).main_peak, 9 * 1 * 4);
+        assert_eq!(model.chip_cost(0, 3).main_peak, 9 * 2 * 4);
+        assert_eq!(model.chip_cost(0, 4).main_peak, 9 * 2 * 4);
+        assert_eq!(model.chip_cost(0, 5).main_peak, 9 * 4 * 4);
+    }
+
+    #[test]
     fn shard_cost_model_selects_tower_or_main_peak() {
         let model = cost_model(vec![
             ChipCostSpec {
@@ -2234,27 +2257,27 @@ mod tests {
                 tower_peak_cells_by_bucket: None,
             },
         ]);
-        assert_eq!(model.shard_cost(&[1, 0]), 11);
-        assert_eq!(model.shard_cost(&[0, 1]), 6);
+        assert_eq!(model.shard_cost(&[2, 0]), 22);
+        assert_eq!(model.shard_cost(&[0, 2]), 12);
         // Trace and main coexist across chips, while tower is the dominant
         // single-chip task rather than the sum of both tower peaks.
-        assert_eq!(model.shard_cost(&[1, 1]), 13);
+        assert_eq!(model.shard_cost(&[2, 2]), 26);
 
         let main_dominant = cost_model(vec![
             ChipCostSpec {
                 rotation: 0,
-                trace_cells_per_row: 0,
+                trace_cells_per_row: 2,
                 tower_peak_cells_per_row: 5,
                 tower_peak_cells_by_bucket: None,
             },
             ChipCostSpec {
                 rotation: 0,
-                trace_cells_per_row: 0,
+                trace_cells_per_row: 2,
                 tower_peak_cells_per_row: 5,
                 tower_peak_cells_by_bucket: None,
             },
         ]);
-        assert_eq!(main_dominant.shard_cost(&[1, 1]), 8);
+        assert_eq!(main_dominant.shard_cost(&[2, 2]), 24);
     }
 
     #[test]
@@ -2287,7 +2310,7 @@ mod tests {
         planner.observe_modeled_step(4, InsnKind::ADD, None);
         planner.observe_modeled_step(8, InsnKind::ECALL, Some(7));
         assert_eq!(planner.num_instances, vec![2]);
-        assert_eq!(planner.cur_cells(), 10);
+        assert_eq!(planner.cur_cells(), 6);
     }
 
     #[derive(Debug)]
