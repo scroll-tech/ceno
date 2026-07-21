@@ -834,16 +834,22 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
     input: &ProofInput<'_, GpuBackend<E, PCS>>,
     occupied_rows_override: Option<usize>,
 ) -> (usize, usize, usize, usize) {
-    let cs = &composed_cs.zkvm_v1_css;
-    let elem_size = std::mem::size_of::<BB31Ext>();
-    let has_logup_numerator = composed_cs.is_with_lk_table();
-
     let occupied_rows = input
         .witness
         .first()
         .map(|mle| mle.evaluations_len())
         .or(occupied_rows_override)
         .unwrap_or_else(|| input.num_instances() << composed_cs.rotation_vars().unwrap_or(0));
+    estimate_tower_stage_components_for_rows(composed_cs, occupied_rows)
+}
+
+fn estimate_tower_stage_components_for_rows<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    occupied_rows: usize,
+) -> (usize, usize, usize, usize) {
+    let cs = &composed_cs.zkvm_v1_css;
+    let elem_size = std::mem::size_of::<BB31Ext>();
+    let has_logup_numerator = composed_cs.is_with_lk_table();
     let num_reads = cs.r_expressions.len() + cs.r_table_expressions.len();
     let num_writes = cs.w_expressions.len() + cs.w_table_expressions.len();
     let num_lk_numerators = cs.lk_table_expressions.len();
@@ -969,6 +975,29 @@ fn estimate_tower_stage_components<E: ExtensionField, PCS: PolynomialCommitmentS
         tower_input_live_bytes,
         borrowed_input_bytes,
     )
+}
+
+/// Scheduler-equivalent tower peak for a chip at an already padded trace-row
+/// count, expressed in base-field cells. Read, write, and lookup operation
+/// bits are included by the virtual tower group construction above.
+pub(crate) fn estimate_tower_peak_cells_for_rows<E: ExtensionField>(
+    composed_cs: &ComposedConstrainSystem<E>,
+    occupied_rows: usize,
+) -> u64 {
+    if occupied_rows == 0 {
+        return 0;
+    }
+    let (build_bytes, prove_local_bytes, tower_input_live_bytes, borrowed_input_bytes) =
+        estimate_tower_stage_components_for_rows(composed_cs, occupied_rows);
+    let prove_bytes = tower_input_live_bytes
+        .saturating_sub(borrowed_input_bytes)
+        .saturating_add(prove_local_bytes);
+    let cell_bytes = std::mem::size_of::<E::BaseField>().max(1);
+    build_bytes
+        .max(prove_bytes)
+        .div_ceil(cell_bytes)
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 fn estimate_virtual_interleaved_tower_metadata_bytes<E: ExtensionField>(

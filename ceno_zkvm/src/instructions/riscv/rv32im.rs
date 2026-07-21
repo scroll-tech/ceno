@@ -37,7 +37,7 @@ use crate::{
     },
     scheme::constants::DYNAMIC_RANGE_MAX_BITS,
     state::GlobalState,
-    structs::{ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
+    structs::{ComposedConstrainSystem, ZKVMConstraintSystem, ZKVMFixedTraces, ZKVMWitnesses},
     tables::{
         AndTableCircuit, DoubleU8TableCircuit, DynamicRangeTableCircuit, LtuTableCircuit,
         OrTableCircuit, TableCircuit, XorTableCircuit,
@@ -78,6 +78,46 @@ pub mod mmu;
 
 const ECALL_HALT: u32 = Platform::ecall_halt();
 const ECALL_PUB_IO_COMMIT: u32 = PubIoCommitSpec::CODE;
+
+fn chip_cost_spec<E: ExtensionField>(circuit_cs: &ComposedConstrainSystem<E>) -> ChipCostSpec {
+    let cs = &circuit_cs.zkvm_v1_css;
+    let trace_cells_per_row =
+        cs.num_witin as u64 + cs.num_structural_witin as u64 + cs.num_fixed as u64;
+    let rotation = circuit_cs.rotation_vars().unwrap_or(0) as u8;
+
+    #[cfg(feature = "gpu")]
+    let tower_peak_cells_by_bucket = Some(
+        (0..ceno_emul::SHARD_COST_BUCKETS)
+            .map(|bucket| match bucket {
+                0 => 0,
+                bucket if bucket == ceno_emul::SHARD_COST_BUCKETS - 1 => u64::MAX,
+                bucket => {
+                    let padded_instances = 1u64 << (bucket - 1);
+                    padded_instances
+                        .checked_shl(rotation.into())
+                        .and_then(|rows| usize::try_from(rows).ok())
+                        // The final sentinel buckets are unreachable for a VM
+                        // trace and can exceed the estimator's shift domain.
+                        .filter(|&rows| rows <= (usize::MAX >> 16))
+                        .map_or(u64::MAX, |rows| {
+                            crate::scheme::gpu::estimate_tower_peak_cells_for_rows(circuit_cs, rows)
+                        })
+                }
+            })
+            .collect(),
+    );
+    #[cfg(not(feature = "gpu"))]
+    let tower_peak_cells_by_bucket = None;
+
+    ChipCostSpec {
+        rotation,
+        trace_cells_per_row,
+        // GPU builds use the scheduler's exact bucket table. Keep the old
+        // linear estimate only as a feature-independent compatibility fallback.
+        tower_peak_cells_per_row: trace_cells_per_row,
+        tower_peak_cells_by_bucket,
+    }
+}
 
 pub struct Rv32imConfig<E: ExtensionField> {
     // ALU Opcodes.
@@ -285,16 +325,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         rotation: 0,
                         trace_cells_per_row: 0,
                         tower_peak_cells_per_row: 0,
+                        tower_peak_cells_by_bucket: None,
                     },
-                    |circuit_cs| ChipCostSpec {
-                        rotation: circuit_cs.rotation_vars().unwrap_or(0) as u8,
-                        trace_cells_per_row: (circuit_cs.zkvm_v1_css.num_witin as u64
-                            + circuit_cs.zkvm_v1_css.num_structural_witin as u64
-                            + circuit_cs.zkvm_v1_css.num_fixed as u64),
-                        tower_peak_cells_per_row: (circuit_cs.zkvm_v1_css.num_witin as u64
-                            + circuit_cs.zkvm_v1_css.num_structural_witin as u64
-                            + circuit_cs.zkvm_v1_css.num_fixed as u64),
-                    },
+                    |circuit_cs| chip_cost_spec(circuit_cs),
                 );
                 chip_specs.push(spec);
                 for &kind in <$instruction as Instruction<E>>::inst_kinds() {
@@ -391,17 +424,9 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         rotation: 0,
                         trace_cells_per_row: 0,
                         tower_peak_cells_per_row: 0,
+                        tower_peak_cells_by_bucket: None,
                     },
-                    |circuit_cs| {
-                        let width = circuit_cs.zkvm_v1_css.num_witin as u64
-                            + circuit_cs.zkvm_v1_css.num_structural_witin as u64
-                            + circuit_cs.zkvm_v1_css.num_fixed as u64;
-                        ChipCostSpec {
-                            rotation: circuit_cs.rotation_vars().unwrap_or(0) as u8,
-                            trace_cells_per_row: width,
-                            tower_peak_cells_per_row: width,
-                        }
-                    },
+                    |circuit_cs| chip_cost_spec(circuit_cs),
                 ));
                 ecall_name_to_chips.insert(<$instruction>::name(), vec![chip]);
 
@@ -445,15 +470,8 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             <KeccakCoreInstruction<E>>::name(),
         ] {
             let circuit_cs = cs.get_cs(&name).expect("keccak circuit missing");
-            let width = circuit_cs.zkvm_v1_css.num_witin as u64
-                + circuit_cs.zkvm_v1_css.num_structural_witin as u64
-                + circuit_cs.zkvm_v1_css.num_fixed as u64;
             keccak_chips.push(chip_specs.len());
-            chip_specs.push(ChipCostSpec {
-                rotation: circuit_cs.rotation_vars().unwrap_or(0) as u8,
-                trace_cells_per_row: width,
-                tower_peak_cells_per_row: width,
-            });
+            chip_specs.push(chip_cost_spec(circuit_cs));
         }
         ecall_name_to_chips.insert(<KeccakCoreInstruction<E>>::name(), keccak_chips);
         let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
