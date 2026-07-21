@@ -45,12 +45,12 @@ use crate::{
 };
 use ceno_emul::{
     Bn254AddSpec, Bn254DoubleSpec, Bn254Fp2AddSpec, Bn254Fp2MulSpec, Bn254FpAddSpec,
-    Bn254FpMulSpec,
+    Bn254FpMulSpec, ChipCostSpec,
     InsnKind::{self, *},
     KeccakSpec, LogPcCycleSpec, Platform, PubIoCommitSpec, STATE_CONTINUATION, Secp256k1AddSpec,
     Secp256k1DecompressSpec, Secp256k1DoubleSpec, Secp256k1ScalarInvertSpec, Secp256r1AddSpec,
-    Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec, Sha256ExtendSpec, StepCellExtractor, StepIndex,
-    StepRecord, SyscallSpec, Uint256MulSpec, Word,
+    Secp256r1DoubleSpec, Secp256r1ScalarInvertSpec, Sha256ExtendSpec, ShardCostModel,
+    StepCellExtractor, StepIndex, StepRecord, SyscallSpec, Uint256MulSpec, Word,
 };
 use dummy::LargeEcallDummy;
 use ff_ext::ExtensionField;
@@ -69,6 +69,7 @@ use std::{
     any::{TypeId, type_name},
     cmp::Reverse,
     collections::{BTreeMap, HashMap},
+    sync::Arc,
 };
 use strum::{EnumCount, IntoEnumIterator};
 use tracing::info_span;
@@ -188,6 +189,7 @@ pub struct Rv32imConfig<E: ExtensionField> {
     // record opcode name -> cells
     // serve ecall/table for no InsnKind
     pub ecall_cells_map: HashMap<String, u64>,
+    pub shard_cost_model: Arc<ShardCostModel>,
 }
 
 #[derive(Clone)]
@@ -252,6 +254,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
     ) -> (Self, InstructionDispatchBuilder) {
         let mut inst_cells_map = vec![0; InsnKind::COUNT];
         let mut ecall_cells_map = HashMap::new();
+        let mut opcode_chips = vec![Vec::new(); InsnKind::COUNT];
+        let mut ecall_chips = BTreeMap::new();
+        let mut chip_specs = Vec::new();
+        let mut ecall_name_to_chips = HashMap::new();
 
         let mut inst_dispatch_builder = InstructionDispatchBuilder::new();
 
@@ -261,10 +267,10 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                     <$instruction as Instruction<E>>::inst_kinds(),
                 );
                 let config = cs.register_opcode_circuit::<$instruction>();
+                let circuit_cs = cs.get_cs(&<$instruction>::name());
 
                 // update estimated cell
-                $inst_cells_map[$insn_kind as usize] = cs
-                    .get_cs(&<$instruction>::name())
+                $inst_cells_map[$insn_kind as usize] = circuit_cs
                     .as_ref()
                     .map(|cs| {
                         (cs.zkvm_v1_css.num_witin as u64
@@ -273,6 +279,27 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                             * (1 << cs.rotation_vars().unwrap_or(0))
                     })
                     .unwrap_or_default();
+                let chip = chip_specs.len();
+                let spec = circuit_cs.as_ref().map_or(
+                    ChipCostSpec {
+                        rotation: 0,
+                        trace_cells_per_row: 0,
+                        tower_peak_cells_per_row: 0,
+                    },
+                    |circuit_cs| ChipCostSpec {
+                        rotation: circuit_cs.rotation_vars().unwrap_or(0) as u8,
+                        trace_cells_per_row: (circuit_cs.zkvm_v1_css.num_witin as u64
+                            + circuit_cs.zkvm_v1_css.num_structural_witin as u64
+                            + circuit_cs.zkvm_v1_css.num_fixed as u64),
+                        tower_peak_cells_per_row: (circuit_cs.zkvm_v1_css.num_witin as u64
+                            + circuit_cs.zkvm_v1_css.num_structural_witin as u64
+                            + circuit_cs.zkvm_v1_css.num_fixed as u64),
+                    },
+                );
+                chip_specs.push(spec);
+                for &kind in <$instruction as Instruction<E>>::inst_kinds() {
+                    opcode_chips[kind as usize] = vec![chip];
+                }
 
                 config
             }};
@@ -339,13 +366,14 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         macro_rules! register_ecall_circuit {
             ($instruction:ty, $ecall_cells_map:ident) => {{
                 let config = cs.register_opcode_circuit::<$instruction>();
+                let circuit_cs = cs.get_cs(&<$instruction>::name());
 
                 // update estimated cell
                 assert!(
                     $ecall_cells_map
                         .insert(
                             <$instruction>::name(),
-                            cs.get_cs(&<$instruction>::name())
+                            circuit_cs
                                 .as_ref()
                                 .map(|cs| {
                                     (cs.zkvm_v1_css.num_witin as u64
@@ -357,6 +385,25 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                         )
                         .is_none()
                 );
+                let chip = chip_specs.len();
+                chip_specs.push(circuit_cs.as_ref().map_or(
+                    ChipCostSpec {
+                        rotation: 0,
+                        trace_cells_per_row: 0,
+                        tower_peak_cells_per_row: 0,
+                    },
+                    |circuit_cs| {
+                        let width = circuit_cs.zkvm_v1_css.num_witin as u64
+                            + circuit_cs.zkvm_v1_css.num_structural_witin as u64
+                            + circuit_cs.zkvm_v1_css.num_fixed as u64;
+                        ChipCostSpec {
+                            rotation: circuit_cs.rotation_vars().unwrap_or(0) as u8,
+                            trace_cells_per_row: width,
+                            tower_peak_cells_per_row: width,
+                        }
+                    },
+                ));
+                ecall_name_to_chips.insert(<$instruction>::name(), vec![chip]);
 
                 config
             }};
@@ -392,6 +439,23 @@ impl<E: ExtensionField> Rv32imConfig<E> {
                 )
                 .is_none()
         );
+        let mut keccak_chips = Vec::new();
+        for name in [
+            <KeccakEcallInstruction<E>>::name(),
+            <KeccakCoreInstruction<E>>::name(),
+        ] {
+            let circuit_cs = cs.get_cs(&name).expect("keccak circuit missing");
+            let width = circuit_cs.zkvm_v1_css.num_witin as u64
+                + circuit_cs.zkvm_v1_css.num_structural_witin as u64
+                + circuit_cs.zkvm_v1_css.num_fixed as u64;
+            keccak_chips.push(chip_specs.len());
+            chip_specs.push(ChipCostSpec {
+                rotation: circuit_cs.rotation_vars().unwrap_or(0) as u8,
+                trace_cells_per_row: width,
+                tower_peak_cells_per_row: width,
+            });
+        }
+        ecall_name_to_chips.insert(<KeccakCoreInstruction<E>>::name(), keccak_chips);
         let bn254_add_config = register_ecall_circuit!(WeierstrassAddAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
         let sha_extend_config = register_ecall_circuit!(ShaExtendInstruction<E>, ecall_cells_map);
         let bn254_double_config = register_ecall_circuit!(WeierstrassDoubleAssignInstruction<E, SwCurve<Bn254>>, ecall_cells_map);
@@ -413,6 +477,78 @@ impl<E: ExtensionField> Rv32imConfig<E> {
         let secp256r1_scalar_invert =
             register_ecall_circuit!(Secp256r1InvInstruction<E>, ecall_cells_map);
         let uint256_mul_config = register_ecall_circuit!(Uint256MulInstruction<E>, ecall_cells_map);
+
+        let mut map_ecall = |code, name: String| {
+            let chips = ecall_name_to_chips
+                .get(&name)
+                .unwrap_or_else(|| panic!("missing shard cost chip for {name}"))
+                .clone();
+            assert!(ecall_chips.insert(code, chips).is_none());
+        };
+        map_ecall(ECALL_HALT, HaltInstruction::<E>::name());
+        map_ecall(ECALL_PUB_IO_COMMIT, PubIoCommitInstruction::<E>::name());
+        map_ecall(STATE_CONTINUATION, GlobalState::<E>::name());
+        map_ecall(KeccakSpec::CODE, KeccakCoreInstruction::<E>::name());
+        map_ecall(
+            Bn254AddSpec::CODE,
+            WeierstrassAddAssignInstruction::<E, SwCurve<Bn254>>::name(),
+        );
+        map_ecall(
+            Bn254DoubleSpec::CODE,
+            WeierstrassDoubleAssignInstruction::<E, SwCurve<Bn254>>::name(),
+        );
+        map_ecall(
+            Bn254FpAddSpec::CODE,
+            FpAddInstruction::<E, Bn254BaseField>::name(),
+        );
+        map_ecall(
+            Bn254FpMulSpec::CODE,
+            FpMulInstruction::<E, Bn254BaseField>::name(),
+        );
+        map_ecall(
+            Bn254Fp2AddSpec::CODE,
+            Fp2AddInstruction::<E, Bn254BaseField>::name(),
+        );
+        map_ecall(
+            Bn254Fp2MulSpec::CODE,
+            Fp2MulInstruction::<E, Bn254BaseField>::name(),
+        );
+        map_ecall(
+            Secp256k1AddSpec::CODE,
+            WeierstrassAddAssignInstruction::<E, SwCurve<Secp256k1>>::name(),
+        );
+        map_ecall(
+            Secp256k1DoubleSpec::CODE,
+            WeierstrassDoubleAssignInstruction::<E, SwCurve<Secp256k1>>::name(),
+        );
+        map_ecall(
+            Secp256k1ScalarInvertSpec::CODE,
+            Secp256k1InvInstruction::<E>::name(),
+        );
+        map_ecall(
+            Secp256k1DecompressSpec::CODE,
+            WeierstrassDecompressInstruction::<E, SwCurve<Secp256k1>>::name(),
+        );
+        map_ecall(
+            Secp256r1AddSpec::CODE,
+            WeierstrassAddAssignInstruction::<E, SwCurve<Secp256r1>>::name(),
+        );
+        map_ecall(
+            Secp256r1DoubleSpec::CODE,
+            WeierstrassDoubleAssignInstruction::<E, SwCurve<Secp256r1>>::name(),
+        );
+        map_ecall(
+            Secp256r1ScalarInvertSpec::CODE,
+            Secp256r1InvInstruction::<E>::name(),
+        );
+        map_ecall(Uint256MulSpec::CODE, Uint256MulInstruction::<E>::name());
+        map_ecall(Sha256ExtendSpec::CODE, ShaExtendInstruction::<E>::name());
+        let shard_cost_model = Arc::new(ShardCostModel::new(
+            opcode_chips,
+            ecall_chips,
+            chip_specs,
+            E::DEGREE,
+        ));
 
         // tables
         let dynamic_range_config =
@@ -510,6 +646,7 @@ impl<E: ExtensionField> Rv32imConfig<E> {
             pow_config,
             inst_cells_map,
             ecall_cells_map,
+            shard_cost_model,
         };
 
         (config, inst_dispatch_builder)
@@ -1175,11 +1312,19 @@ impl<E: ExtensionField> StepCellExtractor for &Rv32imConfig<E> {
     fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64 {
         self.cells_for(kind, rs1_value)
     }
+
+    fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
+        Some(self.shard_cost_model.clone())
+    }
 }
 
 impl<E: ExtensionField> StepCellExtractor for Rv32imConfig<E> {
     #[inline(always)]
     fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64 {
         self.cells_for(kind, rs1_value)
+    }
+
+    fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
+        Some(self.shard_cost_model.clone())
     }
 }

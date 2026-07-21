@@ -10,6 +10,7 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 use std::{collections::BTreeMap, fmt, sync::Arc};
+use strum::EnumCount;
 
 /// An instruction and its context in an execution trace. That is concrete values of registers and memory.
 ///
@@ -77,9 +78,124 @@ pub type StepIndex = usize;
 pub trait StepCellExtractor {
     fn cells_for_kind(&self, kind: InsnKind, rs1_value: Option<Word>) -> u64;
 
+    fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
+        None
+    }
+
     #[inline(always)]
     fn extract_cells(&self, step: &StepRecord) -> u64 {
         self.cells_for_kind(step.insn().kind, step.rs1().map(|op| op.value))
+    }
+}
+
+pub const SHARD_COST_BUCKETS: usize = u64::BITS as usize + 2;
+const NO_CHIP: u32 = u32::MAX;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChipCostSpec {
+    pub rotation: u8,
+    pub trace_cells_per_row: u64,
+    pub tower_peak_cells_per_row: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShardCostModel {
+    opcode_chips: Vec<Vec<u32>>,
+    ecall_chips: BTreeMap<Word, Vec<u32>>,
+    chip_specs: Vec<ChipCostSpec>,
+    cost_table: Vec<u64>,
+    extension_field_degree: u64,
+}
+
+impl ShardCostModel {
+    pub fn new(
+        opcode_chips: Vec<Vec<usize>>,
+        ecall_chips: BTreeMap<Word, Vec<usize>>,
+        chip_specs: Vec<ChipCostSpec>,
+        extension_field_degree: usize,
+    ) -> Self {
+        assert_eq!(opcode_chips.len(), InsnKind::COUNT);
+        assert!(extension_field_degree > 0);
+        assert!(chip_specs.len() < NO_CHIP as usize);
+        assert!(
+            opcode_chips
+                .iter()
+                .flatten()
+                .chain(ecall_chips.values().flatten())
+                .all(|&chip| chip < chip_specs.len()),
+            "shard cost mapping references an unknown chip"
+        );
+        let opcode_chips = opcode_chips
+            .into_iter()
+            .map(|chips| chips.into_iter().map(|chip| chip as u32).collect())
+            .collect();
+        let ecall_chips = ecall_chips
+            .into_iter()
+            .map(|(code, chips)| (code, chips.into_iter().map(|chip| chip as u32).collect()))
+            .collect();
+        let extension_field_degree = extension_field_degree as u64;
+        let mut cost_table = Vec::with_capacity(chip_specs.len() * SHARD_COST_BUCKETS);
+        for spec in &chip_specs {
+            for bucket in 0..SHARD_COST_BUCKETS {
+                let padded_instances = match bucket {
+                    0 => 0,
+                    bucket if bucket == SHARD_COST_BUCKETS - 1 => u64::MAX,
+                    bucket => 1u64 << (bucket - 1),
+                };
+                let rotation_size = 1u64.checked_shl(spec.rotation.into()).unwrap_or(u64::MAX);
+                let domain_rows = padded_instances
+                    .checked_mul(rotation_size)
+                    .unwrap_or(u64::MAX);
+                let trace_cells = domain_rows.saturating_mul(spec.trace_cells_per_row);
+                let tower_peak = domain_rows.saturating_mul(spec.tower_peak_cells_per_row);
+                let main_peak = domain_rows.saturating_mul(extension_field_degree);
+                cost_table.push(trace_cells.saturating_add(tower_peak.max(main_peak)));
+            }
+        }
+        Self {
+            opcode_chips,
+            ecall_chips,
+            chip_specs,
+            cost_table,
+            extension_field_degree,
+        }
+    }
+
+    pub fn chip_count(&self) -> usize {
+        self.chip_specs.len()
+    }
+
+    pub fn chips_for_step(&self, kind: InsnKind, ecall_code: Option<Word>) -> &[u32] {
+        if kind == InsnKind::ECALL {
+            ecall_code
+                .and_then(|code| self.ecall_chips.get(&code))
+                .map_or(&[], Vec::as_slice)
+        } else {
+            self.opcode_chips
+                .get(kind as usize)
+                .map_or(&[], Vec::as_slice)
+        }
+    }
+
+    pub fn chip_cost(&self, chip: usize, num_instances: u64) -> u64 {
+        self.cost_table[chip * SHARD_COST_BUCKETS + padded_size_bucket(num_instances)]
+    }
+
+    pub fn cost_table(&self) -> &[u64] {
+        &self.cost_table
+    }
+
+    pub fn extension_field_degree(&self) -> u64 {
+        self.extension_field_degree
+    }
+}
+
+#[inline(always)]
+fn padded_size_bucket(num_instances: u64) -> usize {
+    if num_instances == 0 {
+        0
+    } else {
+        (u64::BITS - num_instances.saturating_sub(1).leading_zeros() + 1) as usize
     }
 }
 
@@ -314,11 +430,14 @@ impl LatestAccesses {
 #[derive(Clone, Debug)]
 pub struct ShardPlanBuilder {
     shard_cycle_boundaries: Vec<Cycle>,
+    predicted_shard_costs: Vec<u64>,
     max_cell_per_shard: u64,
     target_cell_first_shard: u64,
     max_cycle_per_shard: Cycle,
     current_shard_start_cycle: Cycle,
     cur_cells: u64,
+    cost_model: Option<Arc<ShardCostModel>>,
+    num_instances: Vec<u64>,
     cur_ecall_counts: BTreeMap<Word, u64>,
     cur_ecall_peak_cells: BTreeMap<Word, u64>,
     cur_cycle_in_shard: Cycle,
@@ -330,14 +449,26 @@ pub struct ShardPlanBuilder {
 
 impl ShardPlanBuilder {
     pub fn new(max_cell_per_shard: u64, max_cycle_per_shard: Cycle) -> Self {
+        Self::new_with_cost_model(max_cell_per_shard, max_cycle_per_shard, None)
+    }
+
+    pub fn new_with_cost_model(
+        max_cell_per_shard: u64,
+        max_cycle_per_shard: Cycle,
+        cost_model: Option<Arc<ShardCostModel>>,
+    ) -> Self {
         let initial_cycle = FullTracer::SUBCYCLES_PER_INSN;
+        let num_instances = vec![0; cost_model.as_ref().map_or(0, |model| model.chip_count())];
         ShardPlanBuilder {
             shard_cycle_boundaries: vec![initial_cycle],
+            predicted_shard_costs: Vec::new(),
             max_cell_per_shard,
             target_cell_first_shard: max_cell_per_shard,
             max_cycle_per_shard,
             current_shard_start_cycle: initial_cycle,
             cur_cells: 0,
+            cost_model,
+            num_instances,
             cur_ecall_counts: BTreeMap::new(),
             cur_ecall_peak_cells: BTreeMap::new(),
             cur_cycle_in_shard: 0,
@@ -368,6 +499,10 @@ impl ShardPlanBuilder {
         self.max_step_shard
     }
 
+    pub fn predicted_shard_costs(&self) -> &[u64] {
+        &self.predicted_shard_costs
+    }
+
     pub fn into_cycle_boundaries(self) -> Vec<Cycle> {
         assert!(self.finalized, "shard plan not finalized yet");
         self.shard_cycle_boundaries
@@ -385,6 +520,48 @@ impl ShardPlanBuilder {
             self.ecall_step_delta(ecall_code, base_cells),
             |planner| planner.add_ecall_step(ecall_code, base_cells),
         );
+    }
+
+    fn observe_modeled_step(
+        &mut self,
+        step_cycle: Cycle,
+        kind: InsnKind,
+        ecall_code: Option<Word>,
+    ) {
+        let chips = self
+            .cost_model
+            .as_ref()
+            .map(|model| {
+                model
+                    .chips_for_step(kind, ecall_code)
+                    .iter()
+                    .map(|&chip| chip as usize)
+                    .collect::<SmallVec<[_; 2]>>()
+            })
+            .unwrap_or_default();
+        let delta = chips.iter().fold(0u64, |delta, &chip| {
+            delta.saturating_add(self.modeled_step_delta(chip))
+        });
+        self.observe_step_with_delta(step_cycle, delta, |planner| {
+            for chip in chips {
+                planner.add_modeled_step(chip);
+            }
+        });
+    }
+
+    fn modeled_step_delta(&self, chip: usize) -> u64 {
+        let model = self.cost_model.as_ref().expect("cost model missing");
+        let old_count = self.num_instances[chip];
+        model
+            .chip_cost(chip, old_count.saturating_add(1))
+            .saturating_sub(model.chip_cost(chip, old_count))
+    }
+
+    fn add_modeled_step(&mut self, chip: usize) {
+        let delta = self.modeled_step_delta(chip);
+        self.num_instances[chip] = self.num_instances[chip].saturating_add(1);
+        self.cur_cells = self.cur_cells.saturating_add(delta);
+        self.debug_assert_cost_invariant();
     }
 
     fn observe_step_with_delta(
@@ -426,10 +603,12 @@ impl ShardPlanBuilder {
             self.cur_cells > 0 || self.cur_cycle_in_shard > 0,
             "shard split before accumulating any steps"
         );
+        self.record_predicted_shard_cost();
         self.push_boundary(next_shard_cycle);
         self.shard_id += 1;
         self.current_shard_start_cycle = next_shard_cycle;
         self.cur_cells = 0;
+        self.num_instances.fill(0);
         self.cur_ecall_counts.clear();
         self.cur_ecall_peak_cells.clear();
         self.cur_cycle_in_shard = 0;
@@ -509,8 +688,37 @@ impl ShardPlanBuilder {
     }
 
     fn reset_after_native_shard_split(&mut self) {
+        self.num_instances.fill(0);
         self.cur_ecall_counts.clear();
         self.cur_ecall_peak_cells.clear();
+    }
+
+    #[cfg(any(test, debug_assertions))]
+    fn debug_assert_cost_invariant(&self) {
+        if let Some(model) = &self.cost_model {
+            let recomputed = self
+                .num_instances
+                .iter()
+                .enumerate()
+                .fold(0u64, |total, (chip, &count)| {
+                    total.saturating_add(model.chip_cost(chip, count))
+                });
+            debug_assert_eq!(self.cur_cells, recomputed, "shard cost accounting drift");
+        }
+    }
+
+    #[cfg(not(any(test, debug_assertions)))]
+    #[inline(always)]
+    fn debug_assert_cost_invariant(&self) {}
+
+    fn record_predicted_shard_cost(&mut self) {
+        self.debug_assert_cost_invariant();
+        tracing::debug!(
+            shard_id = self.shard_id,
+            predicted_cost = self.cur_cells,
+            "finalized adaptive shard cost"
+        );
+        self.predicted_shard_costs.push(self.cur_cells);
     }
 
     fn padded_ecall_count(count: u64) -> u64 {
@@ -527,6 +735,7 @@ impl ShardPlanBuilder {
             "shard plan cannot be finalized multiple times"
         );
         self.max_step_shard = self.max_step_shard.max(self.cur_step_count);
+        self.record_predicted_shard_cost();
         self.cur_step_count = 0;
         self.push_boundary(max_cycle);
         self.finalized = true;
@@ -1272,6 +1481,8 @@ pub(crate) struct PreflightNativeTraceState {
     pub planner_max_cell_per_shard: u64,
     pub planner_target_cell_first_shard: u64,
     pub planner_max_cycle_per_shard: Cycle,
+    pub planner_num_instances: *mut u64,
+    pub planner_num_chips: usize,
 }
 
 #[derive(Clone)]
@@ -1381,6 +1592,10 @@ impl PreflightTracer {
             planner_cycle_limit = planner_cycle_limit.saturating_sub(Self::SUBCYCLES_PER_INSN);
         }
         let max_cell_per_shard = config.max_cell_per_shard();
+        let cost_model = config
+            .step_cell_extractor
+            .as_ref()
+            .and_then(|extractor| extractor.shard_cost_model());
         let mut tracer = PreflightTracer {
             cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             pc: Default::default(),
@@ -1390,9 +1605,10 @@ impl PreflightTracer {
             latest_accesses: LatestAccesses::new(platform),
             next_accesses: FxHashMap::default(),
             register_reads_tracked: 0,
-            planner: Some(ShardPlanBuilder::new(
+            planner: Some(ShardPlanBuilder::new_with_cost_model(
                 max_cell_per_shard,
                 planner_cycle_limit,
+                cost_model,
             )),
             current_shard_start_cycle: <Self as Tracer>::SUBCYCLES_PER_INSN,
             config,
@@ -1426,6 +1642,10 @@ impl PreflightTracer {
     pub(crate) fn native_trace_state(&mut self) -> PreflightNativeTraceState {
         debug_assert!(self.supports_direct_native_trace());
         let planner = self.planner.as_mut().expect("shard planner missing");
+        let planner_num_chips = planner
+            .cost_model
+            .as_ref()
+            .map_or(0, |model| model.chip_count());
         PreflightNativeTraceState {
             latest_cells: self.latest_accesses.cells_mut_ptr(),
             latest_base: self.latest_accesses.base(),
@@ -1442,6 +1662,8 @@ impl PreflightTracer {
             planner_max_cell_per_shard: planner.max_cell_per_shard,
             planner_target_cell_first_shard: planner.target_cell_first_shard,
             planner_max_cycle_per_shard: planner.max_cycle_per_shard,
+            planner_num_instances: planner.num_instances.as_mut_ptr(),
+            planner_num_chips,
         }
     }
 
@@ -1457,9 +1679,20 @@ impl PreflightTracer {
             .unwrap_or(0)
     }
 
+    pub(crate) fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
+        self.planner
+            .as_ref()
+            .and_then(|planner| planner.cost_model.clone())
+    }
+
     #[inline(always)]
     fn observe_current_step(&mut self, ecall_code: Option<Word>) {
         if let Some(planner) = self.planner.as_mut() {
+            if planner.cost_model.is_some() {
+                planner.observe_modeled_step(self.cycle, self.last_kind, ecall_code);
+                self.current_shard_start_cycle = planner.current_shard_start_cycle();
+                return;
+            }
             let step_cells = self
                 .config
                 .step_cell_extractor
@@ -1530,6 +1763,7 @@ impl PreflightTracer {
     pub(crate) fn record_native_shard_split(&mut self) {
         let planner = self.planner.as_mut().expect("shard planner missing");
         let next_shard_cycle = self.cycle;
+        planner.record_predicted_shard_cost();
         planner.push_boundary(next_shard_cycle);
         planner.shard_id += 1;
         planner.current_shard_start_cycle = next_shard_cycle;
@@ -1852,6 +2086,62 @@ impl<T: fmt::Debug> fmt::Debug for Change<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cost_model(specs: Vec<ChipCostSpec>) -> Arc<ShardCostModel> {
+        let mut opcodes = vec![Vec::new(); InsnKind::COUNT];
+        opcodes[InsnKind::ADD as usize] = vec![0];
+        let mut ecalls = BTreeMap::new();
+        ecalls.insert(7, vec![0]);
+        Arc::new(ShardCostModel::new(opcodes, ecalls, specs, 4))
+    }
+
+    #[test]
+    fn shard_cost_model_padding_rotation_and_extension_degree() {
+        let model = cost_model(vec![ChipCostSpec {
+            rotation: 1,
+            trace_cells_per_row: 2,
+            tower_peak_cells_per_row: 3,
+        }]);
+        assert_eq!(model.extension_field_degree(), 4);
+        assert_eq!(model.chip_cost(0, 0), 0);
+        assert_eq!(model.chip_cost(0, 1), 12);
+        assert_eq!(model.chip_cost(0, 2), 24);
+        assert_eq!(model.chip_cost(0, 3), 48);
+        assert_eq!(model.chip_cost(0, 4), 48);
+        assert_eq!(model.chip_cost(0, 5), 96);
+    }
+
+    #[test]
+    fn shard_cost_model_selects_tower_or_main_peak() {
+        let model = cost_model(vec![
+            ChipCostSpec {
+                rotation: 0,
+                trace_cells_per_row: 2,
+                tower_peak_cells_per_row: 9,
+            },
+            ChipCostSpec {
+                rotation: 0,
+                trace_cells_per_row: 2,
+                tower_peak_cells_per_row: 1,
+            },
+        ]);
+        assert_eq!(model.chip_cost(0, 1), 11);
+        assert_eq!(model.chip_cost(1, 1), 6);
+    }
+
+    #[test]
+    fn modeled_native_and_ecall_steps_share_chip_counts() {
+        let model = cost_model(vec![ChipCostSpec {
+            rotation: 0,
+            trace_cells_per_row: 1,
+            tower_peak_cells_per_row: 1,
+        }]);
+        let mut planner = ShardPlanBuilder::new_with_cost_model(100, Cycle::MAX, Some(model));
+        planner.observe_modeled_step(4, InsnKind::ADD, None);
+        planner.observe_modeled_step(8, InsnKind::ECALL, Some(7));
+        assert_eq!(planner.num_instances, vec![2]);
+        assert_eq!(planner.cur_cells(), 10);
+    }
 
     #[derive(Debug)]
     struct OneCellPerStep;
