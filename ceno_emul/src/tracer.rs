@@ -1781,6 +1781,10 @@ impl PreflightTracer {
             .unwrap_or(0)
     }
 
+    #[cfg_attr(
+        not(all(feature = "aot-x86_64", target_arch = "x86_64", target_os = "linux")),
+        allow(dead_code)
+    )]
     pub(crate) fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
         self.planner
             .as_ref()

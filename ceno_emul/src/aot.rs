@@ -134,6 +134,7 @@ const AOT_CTX_PREFLIGHT_STACK_MAX_OFFSET: usize = 352;
 const AOT_CTX_PREFLIGHT_HINTS_MIN_OFFSET: usize = 360;
 const AOT_CTX_PREFLIGHT_HINTS_MAX_OFFSET: usize = 368;
 const AOT_CTX_FALLBACK_STEPS_OFFSET: usize = 376;
+#[cfg(test)]
 const AOT_CTX_PREFLIGHT_BLOCK_CELLS_TABLE_OFFSET: usize = 384;
 const AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET: usize = 392;
 const AOT_CTX_PREFLIGHT_CHIP_CONTRIBUTIONS_OFFSET: usize = 400;
@@ -520,40 +521,28 @@ impl AotProgram {
         let mut preflight_stack_max = std::ptr::null_mut();
         let mut preflight_hints_min = std::ptr::null_mut();
         let mut preflight_hints_max = std::ptr::null_mut();
-        let mut preflight_block_cells = Vec::new();
         let mut preflight_block_cost_descriptors = Vec::new();
         let mut preflight_chip_contributions = Vec::new();
         let mut preflight_cost_model = None;
         if trace_native_steps && TypeId::of::<T>() == TypeId::of::<PreflightTracer>() {
             let preflight_vm = unsafe { &mut *(vm_ptr as *mut VMState<PreflightTracer>) };
             if preflight_vm.tracer().supports_direct_native_trace() {
-                preflight_step_cells = self
-                    .program
-                    .instructions
-                    .iter()
-                    .map(|insn| preflight_vm.tracer().native_step_cells_for_kind(insn.kind))
-                    .collect();
                 if self.trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
-                    preflight_block_cells = self
-                        .blocks
+                    let model = preflight_vm.tracer().shard_cost_model().ok_or_else(|| {
+                        anyhow!("preflight block AOT requires a shard cost model")
+                    })?;
+                    (
+                        preflight_block_cost_descriptors,
+                        preflight_chip_contributions,
+                    ) = build_aot_block_cost_descriptors(&self.program, &self.blocks, &model)?;
+                    preflight_cost_model = Some(model);
+                } else {
+                    preflight_step_cells = self
+                        .program
+                        .instructions
                         .iter()
-                        .map(|block| {
-                            let start = ((block.start_pc - self.program.base_address)
-                                / PC_STEP_SIZE as u32)
-                                as usize;
-                            let end = ((block.end_pc - self.program.base_address)
-                                / PC_STEP_SIZE as u32)
-                                as usize;
-                            preflight_step_cells[start..end].iter().copied().sum()
-                        })
+                        .map(|insn| preflight_vm.tracer().native_step_cells_for_kind(insn.kind))
                         .collect();
-                    preflight_cost_model = preflight_vm.tracer().shard_cost_model();
-                    if let Some(model) = &preflight_cost_model {
-                        (
-                            preflight_block_cost_descriptors,
-                            preflight_chip_contributions,
-                        ) = build_aot_block_cost_descriptors(&self.program, &self.blocks, model)?;
-                    }
                 }
                 (preflight_heap_min, preflight_heap_max) = preflight_vm
                     .tracer_mut()
@@ -593,18 +582,13 @@ impl AotProgram {
         } else {
             std::ptr::null()
         };
-        let preflight_block_cells_table = if trace_mode == AOT_TRACE_MODE_PREFLIGHT_DIRECT
-            && self.trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan
-        {
-            preflight_block_cells.as_ptr()
-        } else {
-            std::ptr::null()
-        };
-        let preflight_block_cost_descriptors_table = if preflight_cost_model.is_some() {
-            preflight_block_cost_descriptors.as_ptr()
-        } else {
-            std::ptr::null()
-        };
+        let preflight_block_cells_table = std::ptr::null();
+        let preflight_block_cost_descriptors_table =
+            if self.trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
+                preflight_block_cost_descriptors.as_ptr()
+            } else {
+                std::ptr::null()
+            };
         let preflight_additive_cost_table = preflight_cost_model
             .as_ref()
             .map(|model| {
@@ -1001,29 +985,18 @@ fn write_assembly(
             && !adaptive_exact_access_plan
             && trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan
         {
-            writeln!(
-                file,
-                "    cmpq $0, {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12)"
-            )?;
-            writeln!(file, "    jne L_dynamic")?;
+            writeln!(file, "    jmp L_dynamic")?;
         }
         if adaptive_exact_access_plan {
-            let no_adaptive_plan_label = format!(".L_no_adaptive_exact_plan_{block_idx}");
-            writeln!(
-                file,
-                "    cmpq $0, {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12)"
-            )?;
-            writeln!(file, "    je {no_adaptive_plan_label}")?;
             emit_preflight_direct_block_budget_guard(&mut file, block)?;
             emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
-            writeln!(file, "{no_adaptive_plan_label}:")?;
         }
         if block_plan.is_some() {
             emit_preflight_direct_block_budget_guard(&mut file, block)?;
             if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
                 emit_preflight_direct_block_memory_fast_path_guard(&mut file, program, block)?;
             }
-            emit_preflight_direct_block_plan_entry(&mut file, block_idx, block)?;
+            emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
             if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
                 emit_preflight_direct_block_access_entry(&mut file, program, block_idx, block)?;
             }
@@ -1034,7 +1007,9 @@ fn write_assembly(
             let step_trace_style =
                 if matches!(block_plan, Some(PreflightBlockPlanKind::RegisterOnly)) {
                     AssemblyTraceStyle::PreflightDirectBlockPlan
-                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess)) {
+                } else if matches!(block_plan, Some(PreflightBlockPlanKind::MemoryExactAccess))
+                    || adaptive_exact_access_plan
+                {
                     AssemblyTraceStyle::PreflightDirectBlockPlanExactAccess
                 } else if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
                     AssemblyTraceStyle::PreflightDirect
@@ -1047,10 +1022,11 @@ fn write_assembly(
         if let Some(prev_pc) = pc.checked_sub(PC_STEP_SIZE as u32) {
             let insn = instruction_at(program, prev_pc)?;
             if block_plan.is_some() {
-                emit_preflight_direct_block_plan_exit(&mut file, block_idx, block)?;
+                emit_preflight_direct_block_plan_exit(&mut file, block)?;
                 emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
             } else if adaptive_exact_access_plan {
                 emit_preflight_adaptive_exact_access_plan_exit(&mut file, block)?;
+                emit_preflight_direct_busy_loop_guard(&mut file, prev_pc)?;
             }
             emit_successor_jump(&mut file, program, &labels, prev_pc, insn)?;
         }
@@ -1170,9 +1146,7 @@ fn emit_after_native_step(
         emit_preflight_direct_step_static(
             &mut file,
             pc,
-            program,
             insn,
-            trace_style == AssemblyTraceStyle::PreflightDirect,
             preflight_memory_bounds_updated,
             if trace_style == AssemblyTraceStyle::PreflightDirectBlockPlan {
                 PreflightAccessMode::BlockAtomic
@@ -1211,9 +1185,7 @@ fn emit_after_native_step(
     emit_preflight_direct_step_static(
         &mut file,
         pc,
-        program,
         insn,
-        true,
         false,
         PreflightAccessMode::Exact,
         true,
@@ -1578,116 +1550,6 @@ fn emit_preflight_direct_block_access_entry(
     Ok(())
 }
 
-fn emit_load_preflight_block_cells(
-    mut file: impl Write,
-    block_idx: usize,
-    label_suffix: &str,
-    dst_reg: &str,
-) -> Result<()> {
-    let zero_label = format!(".L_preflight_block_cells_zero_{block_idx}_{label_suffix}");
-    let done_label = format!(".L_preflight_block_cells_done_{block_idx}_{label_suffix}");
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_BLOCK_CELLS_TABLE_OFFSET}(%r12), {dst_reg}"
-    )?;
-    writeln!(file, "    testq {dst_reg}, {dst_reg}")?;
-    writeln!(file, "    je {zero_label}")?;
-    writeln!(file, "    movq {}({dst_reg}), {dst_reg}", block_idx * 8)?;
-    writeln!(file, "    jmp {done_label}")?;
-    writeln!(file, "{zero_label}:")?;
-    writeln!(file, "    xorq {dst_reg}, {dst_reg}")?;
-    writeln!(file, "{done_label}:")?;
-    Ok(())
-}
-
-fn emit_preflight_direct_block_plan_entry(
-    mut file: impl Write,
-    block_idx: usize,
-    block: &BasicBlock,
-) -> Result<()> {
-    let legacy_label = format!(".L_preflight_block_legacy_cost_{block_idx}");
-    let done_label = format!(".L_preflight_block_cost_entry_done_{block_idx}");
-    writeln!(
-        file,
-        "    cmpq $0, {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12)"
-    )?;
-    writeln!(file, "    je {legacy_label}")?;
-    emit_preflight_adaptive_block_plan_entry(&mut file, block_idx, block)?;
-    writeln!(file, "    jmp {done_label}")?;
-    writeln!(file, "{legacy_label}:")?;
-    emit_preflight_legacy_block_plan_entry(&mut file, block_idx, block)?;
-    writeln!(file, "{done_label}:")?;
-    Ok(())
-}
-
-fn emit_preflight_legacy_block_plan_entry(
-    mut file: impl Write,
-    block_idx: usize,
-    block: &BasicBlock,
-) -> Result<()> {
-    let no_split_label = format!(".L_preflight_block_no_split_{block_idx}");
-    let first_shard_label = format!(".L_preflight_block_first_shard_{block_idx}");
-    let target_done_label = format!(".L_preflight_block_target_done_{block_idx}");
-    let split_label = format!(".L_preflight_block_split_{block_idx}");
-    let block_cycles = block_instruction_count(block) * PC_STEP_SIZE as u64;
-
-    emit_load_preflight_block_cells(&mut file, block_idx, "entry", "%r8")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    cmpq $0, (%rax)")?;
-    writeln!(file, "    je {no_split_label}")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_SHARD_ID_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    cmpq $0, (%rax)")?;
-    writeln!(file, "    je {first_shard_label}")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_MAX_CELL_PER_SHARD_OFFSET}(%r12), %r10"
-    )?;
-    writeln!(file, "    jmp {target_done_label}")?;
-    writeln!(file, "{first_shard_label}:")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_TARGET_CELL_FIRST_SHARD_OFFSET}(%r12), %r10"
-    )?;
-    writeln!(file, "{target_done_label}:")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CELLS_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    movq (%rax), %r9")?;
-    writeln!(file, "    addq %r8, %r9")?;
-    writeln!(file, "    cmpq %r10, %r9")?;
-    writeln!(file, "    ja {split_label}")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    movq (%rax), %r9")?;
-    writeln!(file, "    addq ${block_cycles}, %r9")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_MAX_CYCLE_PER_SHARD_OFFSET}(%r12), %r10"
-    )?;
-    writeln!(file, "    cmpq %r10, %r9")?;
-    writeln!(file, "    jb {no_split_label}")?;
-    writeln!(file, "{split_label}:")?;
-    writeln!(
-        file,
-        "    movl ${AOT_PREFLIGHT_HELPER_SHARD_SPLIT}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
-    )?;
-    writeln!(file, "    movq %r12, %rdi")?;
-    writeln!(file, "    call *%r14")?;
-    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je L_error")?;
-    writeln!(file, "{no_split_label}:")?;
-    Ok(())
-}
-
 fn emit_preflight_adaptive_block_plan_entry(
     mut file: impl Write,
     block_idx: usize,
@@ -1911,26 +1773,9 @@ fn emit_preflight_adaptive_block_plan_entry(
     Ok(())
 }
 
-fn emit_preflight_direct_block_plan_exit(
-    mut file: impl Write,
-    block_idx: usize,
-    block: &BasicBlock,
-) -> Result<()> {
-    let cost_done_label = format!(".L_preflight_block_cost_exit_done_{block_idx}");
+fn emit_preflight_direct_block_plan_exit(mut file: impl Write, block: &BasicBlock) -> Result<()> {
     let block_steps = block_instruction_count(block);
     let block_cycles = block_steps * PC_STEP_SIZE as u64;
-    writeln!(
-        file,
-        "    cmpq $0, {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12)"
-    )?;
-    writeln!(file, "    jne {cost_done_label}")?;
-    emit_load_preflight_block_cells(&mut file, block_idx, "exit", "%r8")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CELLS_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    addq %r8, (%rax)")?;
-    writeln!(file, "{cost_done_label}:")?;
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
@@ -1948,14 +1793,8 @@ fn emit_preflight_adaptive_exact_access_plan_exit(
     mut file: impl Write,
     block: &BasicBlock,
 ) -> Result<()> {
-    let done_label = format!(".L_adaptive_exact_exit_done_{:x}", block.start_pc);
     let block_steps = block_instruction_count(block);
     let block_cycles = block_steps * PC_STEP_SIZE as u64;
-    writeln!(
-        file,
-        "    cmpq $0, {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12)"
-    )?;
-    writeln!(file, "    je {done_label}")?;
     writeln!(
         file,
         "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
@@ -1966,16 +1805,13 @@ fn emit_preflight_adaptive_exact_access_plan_exit(
         "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %rax"
     )?;
     writeln!(file, "    addq ${block_steps}, (%rax)")?;
-    writeln!(file, "{done_label}:")?;
     Ok(())
 }
 
 fn emit_preflight_direct_step_static(
     mut file: impl Write,
     pc: u32,
-    program: &Program,
     insn: Instruction,
-    update_planner: bool,
     preflight_memory_bounds_updated: bool,
     access_mode: PreflightAccessMode,
     check_busy_loop: bool,
@@ -2059,9 +1895,6 @@ fn emit_preflight_direct_step_static(
         file,
         "    incq {AOT_CTX_PREFLIGHT_PENDING_STEPS_OFFSET}(%r12)"
     )?;
-    if update_planner {
-        emit_preflight_direct_planner_step_static(&mut file, program, pc)?;
-    }
     if check_busy_loop {
         emit_preflight_direct_busy_loop_guard(&mut file, pc)?;
     }
@@ -2170,104 +2003,6 @@ fn emit_preflight_direct_memory_bound_known_region(
     writeln!(file, "    leal 1({addr_reg}), %ecx")?;
     writeln!(file, "    movl %ecx, (%rax)")?;
     writeln!(file, "2:")?;
-    Ok(())
-}
-
-fn emit_preflight_direct_planner_step_static(
-    mut file: impl Write,
-    program: &Program,
-    pc: u32,
-) -> Result<()> {
-    let insn_idx = (pc.wrapping_sub(program.base_address) / PC_STEP_SIZE as u32) as usize;
-    let no_step_cells_label = format!(".L_preflight_no_step_cells_{pc:x}");
-    let step_cells_done_label = format!(".L_preflight_step_cells_done_{pc:x}");
-    let no_split_label = format!(".L_preflight_no_split_{pc:x}");
-    let split_done_label = format!(".L_preflight_split_done_{pc:x}");
-    let adaptive_done_label = format!(".L_preflight_adaptive_step_done_{pc:x}");
-
-    // Adaptive native blocks account for their complete opcode mix at block
-    // entry. Their exact-access steps still update cycles and access records,
-    // but must not also apply the legacy scalar planner update here.
-    writeln!(
-        file,
-        "    cmpq $0, {AOT_CTX_PREFLIGHT_BLOCK_COST_DESCRIPTORS_OFFSET}(%r12)"
-    )?;
-    writeln!(file, "    jne {adaptive_done_label}")?;
-
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_STEP_CELLS_TABLE_OFFSET}(%r12), %rcx"
-    )?;
-    writeln!(file, "    testq %rcx, %rcx")?;
-    writeln!(file, "    je {no_step_cells_label}")?;
-    writeln!(file, "    movq {}(%rcx), %rcx", insn_idx * 8)?;
-    writeln!(file, "    jmp {step_cells_done_label}")?;
-    writeln!(file, "{no_step_cells_label}:")?;
-    writeln!(file, "    xorq %rcx, %rcx")?;
-    writeln!(file, "{step_cells_done_label}:")?;
-
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CELLS_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    addq %rcx, (%rax)")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    addq $4, (%rax)")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_STEP_COUNT_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    incq (%rax)")?;
-
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_SHARD_ID_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    cmpq $0, (%rax)")?;
-    writeln!(file, "    jne 1f")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_TARGET_CELL_FIRST_SHARD_OFFSET}(%r12), %rcx"
-    )?;
-    writeln!(file, "    jmp 2f")?;
-    writeln!(file, "1:")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_MAX_CELL_PER_SHARD_OFFSET}(%r12), %rcx"
-    )?;
-    writeln!(file, "2:")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CELLS_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(file, "    cmpq %rcx, (%rax)")?;
-    writeln!(file, "    jae 3f")?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_PLANNER_CUR_CYCLE_OFFSET}(%r12), %rax"
-    )?;
-    writeln!(
-        file,
-        "    movq {AOT_CTX_PREFLIGHT_MAX_CYCLE_PER_SHARD_OFFSET}(%r12), %rcx"
-    )?;
-    writeln!(file, "    cmpq %rcx, (%rax)")?;
-    writeln!(file, "    jb {no_split_label}")?;
-    writeln!(file, "3:")?;
-    writeln!(
-        file,
-        "    movl ${AOT_PREFLIGHT_HELPER_SHARD_SPLIT}, {AOT_CTX_PREFLIGHT_HELPER_KIND_OFFSET}(%r12)"
-    )?;
-    writeln!(file, "    movq %r12, %rdi")?;
-    writeln!(file, "    call *%r14")?;
-    writeln!(file, "    cmpl ${AOT_STATUS_ERROR}, %eax")?;
-    writeln!(file, "    je L_error")?;
-    writeln!(file, "    jmp {split_done_label}")?;
-    writeln!(file, "{no_split_label}:")?;
-    writeln!(file, "{split_done_label}:")?;
-    writeln!(file, "{adaptive_done_label}:")?;
     Ok(())
 }
 
@@ -3879,6 +3614,24 @@ mod tests {
                 0
             }
         }
+
+        fn shard_cost_model(&self) -> Option<Arc<ShardCostModel>> {
+            let mut opcodes = vec![vec![0]; InsnKind::COUNT];
+            opcodes[InsnKind::ECALL as usize].clear();
+            let mut ecalls = BTreeMap::new();
+            ecalls.insert(Platform::ecall_halt(), vec![0]);
+            Some(Arc::new(ShardCostModel::new(
+                opcodes,
+                ecalls,
+                vec![ChipCostSpec {
+                    rotation: 0,
+                    trace_cells_per_row: 1,
+                    tower_peak_cells_per_row: 0,
+                    tower_peak_cells_by_bucket: None,
+                }],
+                1,
+            )))
+        }
     }
 
     #[derive(Debug)]
@@ -3986,6 +3739,19 @@ mod tests {
         let (plan, _) = vm.take_tracer().into_shard_plan();
         assert_eq!(plan.shard_cycle_boundaries(), &[4, 16, 28, 32]);
         assert_eq!(plan.predicted_shard_costs(), &[15, 19, 5]);
+    }
+
+    #[test]
+    fn preflight_block_aot_requires_shard_cost_model() {
+        let program = Arc::new(program(vec![encode_rv32(InsnKind::ADDI, 0, 0, 1, 1)]));
+        let aot =
+            AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
+                .unwrap();
+        let mut vm =
+            VMState::<crate::PreflightTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
+
+        let err = aot.run_to_halt(&mut vm, 10).unwrap_err().to_string();
+        assert!(err.contains("preflight block AOT requires a shard cost model"));
     }
 
     #[test]
@@ -4166,8 +3932,13 @@ mod tests {
         let aot =
             AotProgram::compile_preflight_direct_with_extra_roots(program.clone(), Vec::new())
                 .unwrap();
-        let mut aot_vm =
-            VMState::<crate::PreflightTracer>::new_with_tracer(CENO_PLATFORM.clone(), program);
+        let config = crate::PreflightTracerConfig::new(true, u64::MAX, Cycle::MAX)
+            .with_step_cell_extractor(Arc::new(OneCellPerNativeStep));
+        let mut aot_vm = VMState::<crate::PreflightTracer>::new_with_tracer_config(
+            CENO_PLATFORM.clone(),
+            program,
+            config,
+        );
         aot_vm.init_register_unsafe(20, base);
 
         let err = aot.run_to_halt(&mut aot_vm, 10).unwrap_err().to_string();
